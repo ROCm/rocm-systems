@@ -101,7 +101,7 @@ class TestRas(TestCliBase):
             cmd = f"amd-smi ras --afid --folder {tmp_dir} --json"
             (rc, data, std_err) = self.util.RunCmdSync(cmd)
             self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-            assert data is not None, f"Command '{cmd}' produced no output"
+            self.assertIsNotNone(data, f"Command '{cmd}' produced no output")
             json_data = json.loads(data)
             self.assertIsInstance(json_data, list, f"'{cmd}' did not emit a JSON list")
             for entry in json_data:
