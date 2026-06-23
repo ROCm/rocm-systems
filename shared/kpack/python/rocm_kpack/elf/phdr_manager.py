@@ -27,6 +27,7 @@ from .types import (
     PAGE_SIZE,
     PT_LOAD,
     PT_PHDR,
+    PT_INTERP,
     PF_R,
     round_up_to_page,
     page_align_offset,
@@ -334,10 +335,17 @@ def normalize_phdr_vaddr(surgery: ElfSurgery) -> bool:
     a fresh end-of-file offset at/above the address ceiling, which grows the file
     (only happens for fully zero-paged binaries whose file shrank below it).
 
+    Only applied to executables (those with a PT_INTERP). Shared libraries are
+    always mapped by ld.so, which handles a relocated PHDR correctly, so they are
+    left untouched to avoid needless file growth.
+
     Returns True if the binary was modified.
     """
     ehdr = surgery.ehdr
     e_phoff = ehdr.e_phoff
+
+    if not any(ph.p_type == PT_INTERP for _, ph in surgery.iter_program_headers()):
+        return False
 
     cover_idx = None
     cover = None
