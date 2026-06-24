@@ -265,4 +265,44 @@ __host__ int QueuePairMux::buffer_unregister_all() {
   }
 }
 
+__device__ uint32_t QueuePairMux::get_lkey(uintptr_t addr) {
+  switch (constmem.gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.get_lkey(addr);
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.get_lkey(addr);
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.get_lkey(addr);
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    __builtin_unreachable();
+  }
+}
+
+__device__ uint32_t QueuePairMux::get_rkey(uintptr_t addr) {
+  switch (constmem.gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.get_rkey(addr);
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.get_rkey(addr);
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.get_rkey(addr);
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    __builtin_unreachable();
+  }
+}
+
 }  // namespace rocshmem

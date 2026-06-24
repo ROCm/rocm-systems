@@ -47,6 +47,8 @@ template <> struct QueuePairTraits<QueuePairMLX5> {
    * @brief mlx5 uses big-endian ordering
    */
   static constexpr endian::Order Endianness = endian::Order::Big;
+
+  static constexpr size_t InlineThreshold = sizeof(gda_mlx5_wqe_inline_data::data);
 };
 
 class QueuePairMLX5 : public QueuePairBase<QueuePairMLX5> {
@@ -64,21 +66,25 @@ public:
 public:
   template <OpCode Op,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ void post_wqe_rma(uintptr_t laddr, uintptr_t raddr, size_t size,
+  __device__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                               uintptr_t raddr, uint32_t rkey, size_t size,
                                const ActiveWFInfo& wf_info);
 
   template <OpCode Op,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ void post_wqe_rma_single(uintptr_t laddr, uintptr_t raddr, size_t size);
+  __device__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                      uintptr_t raddr, uint32_t rkey, size_t size);
 
   template <OpCode Op, AMOFetchType Fetch,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint64_t value, uint64_t cond,
-                                                 const ActiveWFInfo& wf_info);
+  __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                           uint64_t value, uint64_t cond,
+                                           const ActiveWFInfo& wf_info);
 
   template <OpCode Op, AMOFetchType Fetch,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint64_t value, uint64_t cond);
+  __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                                  uint64_t value, uint64_t cond);
 
   __device__ void quiet_single();
 
@@ -147,7 +153,8 @@ __device__ void QueuePairMLX5::post_ringdb_unlock(int wqe_count, const gda_mlx5_
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairMLX5::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ void QueuePairMLX5::post_wqe_rma(
-    uintptr_t laddr, uintptr_t raddr, size_t size, const ActiveWFInfo& wf_info) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
+    const ActiveWFInfo& wf_info) {
   uint32_t byte_count = static_cast<uint32_t>(size);
   if (wf_info.is_pe_group_last) {
     // acquire SQ lock and poll until we have enough WQEBB for all lanes using this QP
@@ -159,8 +166,7 @@ __device__ void QueuePairMLX5::post_wqe_rma(
   uint16_t sq_idx  = get_sq_idx(wqe_idx);
 
   // can we inline the data into the WQE?
-  bool send_inline = gda_mlx5_wqe_rma::can_inline<static_cast<uint8_t>(Op)>(byte_count);
-  uint32_t lkey = !send_inline ? get_lkey(laddr) : 0;
+  bool send_inline = can_inline<Op>(size);
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
@@ -179,7 +185,7 @@ __device__ void QueuePairMLX5::post_wqe_rma(
 // precondition: called with all active lanes using different QPs
 template <QueuePairMLX5::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ void QueuePairMLX5::post_wqe_rma_single(
-    uintptr_t laddr, uintptr_t raddr, size_t size) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size) {
   uint32_t byte_count = static_cast<uint32_t>(size);
   // acquire SQ lock and poll until we have enough space for at least one WQEBB
   lock_pollcq<ThreadSafe, CheckCQ>(1);
@@ -189,8 +195,7 @@ __device__ void QueuePairMLX5::post_wqe_rma_single(
   uint16_t sq_idx  = get_sq_idx(wqe_idx);
 
   // can we inline the data into the WQE?
-  bool send_inline = gda_mlx5_wqe_rma::can_inline<static_cast<uint8_t>(Op)>(byte_count);
-  uint32_t lkey = !send_inline ? get_lkey(laddr) : 0;
+  bool send_inline = can_inline<Op>(size);
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
@@ -207,7 +212,8 @@ __device__ void QueuePairMLX5::post_wqe_rma_single(
 template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch,
           bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo(
-    uintptr_t raddr, uint64_t value, uint64_t cond, const ActiveWFInfo& wf_info) {
+    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
+    const ActiveWFInfo& wf_info) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   if (wf_info.is_pe_group_last) {
     // acquire SQ lock and poll until we have enough WQEBB for all lanes using this QP
@@ -255,7 +261,7 @@ __device__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo(
 template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch,
           bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo_single(
-    uintptr_t raddr, uint64_t value, uint64_t cond) {
+    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   // acquire SQ lock and poll until we have enough space for at least one WQEBB
   lock_pollcq<ThreadSafe, CheckCQ>(1);

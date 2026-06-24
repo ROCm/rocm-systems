@@ -47,6 +47,9 @@ template <> struct QueuePairTraits<QueuePairIONIC> {
    * @brief ionic uses big-endian ordering
    */
   static constexpr endian::Order Endianness = endian::Order::Big;
+
+  static constexpr size_t InlineThreshold = sizeof(ionic_v1_pld);
+  static_assert(InlineThreshold == 32, "ionic can send up to 32 bytes inline in a WQE");
 };
 
 class QueuePairIONIC : public QueuePairBase<QueuePairIONIC> {
@@ -64,21 +67,25 @@ public:
 public:
   template <OpCode Op,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ void post_wqe_rma(uintptr_t laddr, uintptr_t raddr, size_t size,
+  __device__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                               uintptr_t raddr, uint32_t rkey, size_t size,
                                const ActiveWFInfo& wf_info);
 
   template <OpCode Op,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ void post_wqe_rma_single(uintptr_t laddr, uintptr_t raddr, size_t size);
+  __device__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                      uintptr_t raddr, uint32_t rkey, size_t size);
 
   template <OpCode Op, AMOFetchType Fetch,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint64_t value, uint64_t cond,
+  __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                           uint64_t value, uint64_t cond,
                                            const ActiveWFInfo& wf_info);
 
   template <OpCode Op, AMOFetchType Fetch,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint64_t value, uint64_t cond);
+  __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                                  uint64_t value, uint64_t cond);
 
   __device__ void quiet_single();
 
@@ -137,9 +144,6 @@ private:
   ionic_device_sq sq;
   ionic_device_cq cq;
 
-  static constexpr size_t inline_threshold = sizeof(ionic_v1_pld);
-  static_assert(inline_threshold == 32, "ionic can send up to 32 bytes inline in a WQE");
-
   enum ionic_v1_cqe_qtf_bits_be : uint32_t {
     IONIC_V1_CQE_COLOR_BE = endian::to_be<uint32_t>(IONIC_V1_CQE_COLOR),
     IONIC_V1_CQE_ERROR_BE = endian::to_be<uint32_t>(IONIC_V1_CQE_ERROR),
@@ -155,7 +159,8 @@ private:
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairIONIC::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ void QueuePairIONIC::post_wqe_rma(
-    uintptr_t laddr, uintptr_t raddr, size_t size, const ActiveWFInfo& wf_info) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
+    const ActiveWFInfo& wf_info) {
   uint32_t num_wqes = 1;
   if (wf_info.scope == ThreadScope::thread) {
     num_wqes = wf_info.num_pe_group_lanes;
@@ -193,10 +198,7 @@ __device__ void QueuePairIONIC::post_wqe_rma(
   wqe->common.length              = endian::to_be<uint32_t>(size);
 
   if (size) {
-    bool send_inline = false;
-    if constexpr (Op == OpCode::RDMA_WRITE) {
-      send_inline = size <= inline_threshold;
-    }
+    bool send_inline = can_inline<Op>(size);
     if (send_inline) {
       wqe_flags |= IONIC_V1_FLAG_INL_BE;
       wqe->base.num_sge_key = 0;
@@ -209,7 +211,7 @@ __device__ void QueuePairIONIC::post_wqe_rma(
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len  = endian::to_be<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = get_lkey(laddr);
+      wqe->common.pld.sgl[0].lkey = lkey;
     }
   }
 
@@ -222,7 +224,7 @@ __device__ void QueuePairIONIC::post_wqe_rma(
 // precondition: called with all active lanes using different QPs
 template <QueuePairIONIC::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ void QueuePairIONIC::post_wqe_rma_single(
-    uintptr_t laddr, uintptr_t raddr, size_t size) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size) {
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
@@ -253,10 +255,7 @@ __device__ void QueuePairIONIC::post_wqe_rma_single(
   wqe->common.length              = endian::to_be<uint32_t>(size);
 
   if (size) {
-    bool send_inline = false;
-    if constexpr (Op == OpCode::RDMA_WRITE) {
-      send_inline = size <= inline_threshold;
-    }
+    bool send_inline = can_inline<Op>(size);
     if (send_inline) {
       wqe_flags |= IONIC_V1_FLAG_INL_BE;
       wqe->base.num_sge_key = 0;
@@ -269,7 +268,7 @@ __device__ void QueuePairIONIC::post_wqe_rma_single(
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len  = endian::to_be<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = get_lkey(laddr);
+      wqe->common.pld.sgl[0].lkey = lkey;
     }
   }
 
@@ -282,7 +281,8 @@ __device__ void QueuePairIONIC::post_wqe_rma_single(
 template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch,
           bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
-    uintptr_t raddr, uint64_t value, uint64_t cond, const ActiveWFInfo& wf_info) {
+    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
+    const ActiveWFInfo& wf_info) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
   uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
@@ -352,7 +352,7 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
 template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch,
           bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
-    uintptr_t raddr, uint64_t value, uint64_t cond) {
+    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);

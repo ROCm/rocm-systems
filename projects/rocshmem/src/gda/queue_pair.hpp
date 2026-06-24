@@ -154,6 +154,7 @@ class ActiveWFInfo {
  * for QueuePairTraits<Provider> that defines the documented members:
  *   - QueuePairTraits<Provider>::OpCode
  *   - QueuePairTraits<Provider>::Endianness
+ *   - QueuePairTraits<Provider>::InlineThreshold
  *
  * Sample specialization code for a QueuePairProvider subclass
  * of QueuePairBase<QueuePairProvider>:
@@ -168,6 +169,8 @@ class ActiveWFInfo {
  *   };
  *
  *   static constexpr endian::Order Endianness = endian::Order::...;
+ *
+ *   static constexpr size_t InlineThreshold = ...;
  * };
  * @endcode
  *
@@ -196,6 +199,14 @@ class ActiveWFInfo {
  * @brief Endianness order of data stored by the hardware for Provider.
  *
  * @qualifier static
+ * @qualifier constexpr
+ */
+
+/*
+ * @var size_t QueuePairTraits<Provider>::InlineThreshold
+ * @brief Maximum number of bytes that can be sent inline in a WQE.
+ *
+ * @qualifer static
  * @qualifier constexpr
  */
 
@@ -459,7 +470,10 @@ __device__ void QueuePairSHMEM<Provider>::put_nbi(
   constexpr OpCode Op = OpCode::RDMA_WRITE;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_rma<Op, RingDB>(laddr, raddr, nelems, wf_info);
+  /* only need lkey when RDMA_WRITE can't be inlined */
+  uint32_t lkey = !Provider::template can_inline<Op>(nelems) ? provider().get_lkey(laddr) : 0;
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_rma<Op, RingDB>(laddr, lkey, raddr, rkey, nelems, wf_info);
 }
 
 template <typename Provider>
@@ -469,7 +483,10 @@ __device__ void QueuePairSHMEM<Provider>::put_nbi_single(
   constexpr OpCode Op = OpCode::RDMA_WRITE;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_rma_single<Op, RingDB>(laddr, raddr, nelems);
+  /* only need lkey when RDMA_WRITE can't be inlined */
+  uint32_t lkey = !Provider::template can_inline<Op>(nelems) ? provider().get_lkey(laddr) : 0;
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_rma_single<Op, RingDB>(laddr, lkey, raddr, rkey, nelems);
 }
 
 template <typename Provider>
@@ -479,7 +496,9 @@ __device__ void QueuePairSHMEM<Provider>::get_nbi(
   constexpr OpCode Op = OpCode::RDMA_READ;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
-  provider().template post_wqe_rma<Op, RingDB>(laddr, raddr, nelems, wf_info);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_rma<Op, RingDB>(laddr, lkey, raddr, rkey, nelems, wf_info);
 }
 
 template <typename Provider>
@@ -489,7 +508,9 @@ __device__ void QueuePairSHMEM<Provider>::get_nbi_single(
   constexpr OpCode Op = OpCode::RDMA_READ;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
-  provider().template post_wqe_rma_single<Op, RingDB>(laddr, raddr, nelems);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_rma_single<Op, RingDB>(laddr, lkey, raddr, rkey, nelems);
 }
 
 #if 0
@@ -501,7 +522,9 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
   constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, 0, wf_info);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0, wf_info);
   quiet(wf_info);
   return *reinterpret_cast<uint64_t*>(laddr);
 }
@@ -514,7 +537,9 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
   constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, 0);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0);
   provider().quiet_single();
   return *reinterpret_cast<uint64_t*>(laddr);
 }
@@ -527,7 +552,9 @@ __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi(
   constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, 0, wf_info);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0, wf_info);
 }
 
 template <typename Provider>
@@ -538,7 +565,9 @@ __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi_single(
   constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, 0);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0);
 }
 
 template <typename Provider>
@@ -549,7 +578,9 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
   constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, 0, wf_info);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0, wf_info);
 }
 
 template <typename Provider>
@@ -559,7 +590,9 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(void *dest, uint
   constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, 0);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0);
 }
 
 template <typename Provider>
@@ -570,7 +603,9 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
   constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, cond, wf_info);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond, wf_info);
   quiet(wf_info);
   return *reinterpret_cast<uint64_t*>(laddr);
 }
@@ -583,7 +618,9 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
   constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, cond);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond);
   quiet_single();
   return *reinterpret_cast<uint64_t*>(laddr);
 }
@@ -596,7 +633,9 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi(
   constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, cond, wf_info);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond, wf_info);
 }
 
 template <typename Provider>
@@ -607,7 +646,9 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_single(
   constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, cond);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond);
 }
 
 template <typename Provider>
@@ -618,7 +659,9 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch(
   constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, cond, wf_info);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond, wf_info);
 }
 
 template <typename Provider>
@@ -629,7 +672,9 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch_single(
   constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, cond);
+  uint32_t lkey = provider().get_lkey(laddr);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond);
 }
 #endif
 
@@ -640,7 +685,8 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
   constexpr OpCode Op = OpCode::ATOMIC_FA;
   constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, value, 0, wf_info);
+  uint32_t rkey = provider().get_rkey(raddr);
+  return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, 0, wf_info);
 }
 
 template <typename Provider>
@@ -650,7 +696,8 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
   constexpr OpCode Op = OpCode::ATOMIC_FA;
   constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, value, 0);
+  uint32_t rkey = provider().get_rkey(raddr);
+  return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, 0);
 }
 
 template <typename Provider>
@@ -660,7 +707,8 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
   constexpr OpCode Op = OpCode::ATOMIC_FA;
   constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, value, 0, wf_info);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, 0, wf_info);
 }
 
 template <typename Provider>
@@ -669,7 +717,8 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(void *dest, uint
   constexpr OpCode Op = OpCode::ATOMIC_FA;
   constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, value, 0);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, 0);
 }
 
 template <typename Provider>
@@ -679,7 +728,8 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
   constexpr OpCode Op = OpCode::ATOMIC_CS;
   constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, value, cond, wf_info);
+  uint32_t rkey = provider().get_rkey(raddr);
+  return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, cond, wf_info);
 }
 
 template <typename Provider>
@@ -689,7 +739,8 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
   constexpr OpCode Op = OpCode::ATOMIC_CS;
   constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, value, cond);
+  uint32_t rkey = provider().get_rkey(raddr);
+  return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, cond);
 }
 
 template <typename Provider>
@@ -699,7 +750,8 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch(
   constexpr OpCode Op = OpCode::ATOMIC_CS;
   constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, value, cond, wf_info);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, cond, wf_info);
 }
 
 template <typename Provider>
@@ -709,7 +761,8 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch_single(
   constexpr OpCode Op = OpCode::ATOMIC_CS;
   constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, value, cond);
+  uint32_t rkey = provider().get_rkey(raddr);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, cond);
 }
 
 template <typename Provider>
@@ -739,6 +792,14 @@ public:
    * @brief Type alias for QueuePairTraits<Provider>.
    */
   using Traits = QueuePairTraits<Provider>;
+
+  /**
+   * @brief Enumeration of the opcodes for Write, Read, Fetch-Add, and Compare-and-Swap.
+   *
+   * A definition must be provided by the QueuePairTraits<Provider> specialization
+   * of each Provider subclass.
+   */
+  using OpCode = typename Traits::OpCode;
 
   /**
    * @brief Constant defining the endianness required by the provider. Used for e.g. lkey and rkey.
@@ -853,7 +914,6 @@ public:
    */
   __host__ int buffer_unregister_all();
 
-protected:
   /**
    * @brief Retrieve LKey for address.
    *
@@ -863,6 +923,38 @@ protected:
    * Endianness of returned LKey value is ProviderEndianness.
    */
   __device__ uint32_t get_lkey(uintptr_t addr);
+
+  /**
+   * @brief Retrieve RKey for address.
+   *
+   * @param[in] addr Address to lookup RKey of.
+   *
+   * @return RKey for addr or std::numeric_limits<uint32_t>::max() if not found.
+   * Endianness of returned RKey value is ProviderEndianness.
+   */
+  __device__ uint32_t get_rkey(uintptr_t addr);
+
+  /*
+   * @brief Query whether data can be inlined into a WQE.
+   *
+   * @param[in] size Size of data carried by the WQE.
+   * @tparam Op OpCode for this WQE.
+   *
+   * @return True if size bytes of data can be inlined into a WQE with OpCode Op, else false.
+   */
+  template <OpCode Op>
+  static __device__ constexpr bool can_inline(size_t size);
+
+  /**
+   * @brief Convert value to ProviderEndianness, byteswapping if necessary.
+   *
+   * @param[in] val Value to convert.
+   * @tparam T Type of val.
+   *
+   * @return endian::from_native<ProviderEndianness, T>(val)
+   */
+  template <typename T>
+  static __host__ __device__ constexpr T to_provider_endianness(T val);
 /**@}*/
 
 
@@ -948,8 +1040,8 @@ __host__ QueuePairBase<Provider>::QueuePairBase(uint32_t qpn, void *base_heap, s
   : base_heap{reinterpret_cast<uintptr_t>(base_heap)},
     heap_size{heap_size},
     qp_num{qpn},
-    lkey{endian::from_native<ProviderEndianness>(lkey)},
-    rkey{endian::from_native<ProviderEndianness>(rkey)},
+    lkey{to_provider_endianness(lkey)},
+    rkey{to_provider_endianness(rkey)},
     pd{pd} {
   int access = IBV_ACCESS_LOCAL_WRITE
              | IBV_ACCESS_REMOTE_WRITE
@@ -1059,7 +1151,7 @@ __host__ QueuePairBase<Provider>& QueuePairBase<Provider>::operator=(QueuePairBa
   heap_size                = std::move(other.heap_size);
   qp_num                   = std::move(other.qp_num);
   lkey                     = std::move(other.lkey);
-  rkey                     = std::move(other.lkey);
+  rkey                     = std::move(other.rkey);
   fetching_atomic_idx      = std::move(other.fetching_atomic_idx);
   num_user_buffers         = std::move(other.num_user_buffers);
   buffer_info              = std::move(other.buffer_info);
@@ -1139,7 +1231,7 @@ QueuePairBase<Provider>::allocate_and_register(size_t count, int access) {
   CHECK_HIP(hipMemset(ptr, 0, size));
   struct ibv_mr* mr = ibv.reg_mr(pd, ptr, size, access, &allocator);
   CHECK_NNULL(mr, "ibv_reg_mr");
-  return {static_cast<T*>(ptr), mr, endian::from_native<ProviderEndianness>(mr->lkey)};
+  return {static_cast<T*>(ptr), mr, to_provider_endianness(mr->lkey)};
 }
 
 template <typename Provider>
@@ -1169,7 +1261,7 @@ __host__ int QueuePairBase<Provider>::buffer_register(void *addr, size_t length)
     if (buffer_info[i].addr == 0) {
       buffer_info[i].addr   = addr_int;
       buffer_info[i].length = length;
-      buffer_info[i].lkey   = endian::from_native<ProviderEndianness>(mr->lkey);
+      buffer_info[i].lkey   = to_provider_endianness(mr->lkey);
       break;
     }
   }
@@ -1230,6 +1322,27 @@ __device__ uint32_t QueuePairBase<Provider>::get_lkey(uintptr_t addr) {
 
   LOGD_ERROR_ABORT("Valid lkey for address %p not found", reinterpret_cast<void*>(addr));
   return std::numeric_limits<uint32_t>::max();
+}
+
+template <typename Provider>
+__device__ uint32_t QueuePairBase<Provider>::get_rkey([[maybe_unused]] uintptr_t addr) {
+  return rkey;
+}
+
+template <typename Provider>
+template <typename QueuePairBase<Provider>::OpCode Op>
+__device__ constexpr bool QueuePairBase<Provider>::can_inline(size_t size) {
+  if constexpr (Op == OpCode::RDMA_WRITE) {
+    return size <= Traits::InlineThreshold;
+  } else {
+    return  false;
+  }
+}
+
+template <typename Provider>
+template <typename T>
+__host__ __device__ constexpr T QueuePairBase<Provider>::to_provider_endianness(T val) {
+  return endian::from_native<ProviderEndianness, T>(val);
 }
 
 template <typename Provider>

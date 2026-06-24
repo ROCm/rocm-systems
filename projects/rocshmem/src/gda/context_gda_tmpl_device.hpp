@@ -864,6 +864,8 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     src = (uint64_t*)&ctrl_msg;
     dst = (uint64_t*)((char*)&tmp_buf[constmem.my_pe] + base_heap_offset);
 
+    static_assert(QueuePair::can_inline<QueuePair::OpCode::RDMA_WRITE>(sizeof(ctrl_msg)),
+                  "alltoallv_get control message must be posted inline");
     qps[dest_pe].put_nbi_single<true>(dst, src, sizeof(uint64_t));
 
     /* Wait for Ctrl Message */
