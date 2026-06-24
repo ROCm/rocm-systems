@@ -861,10 +861,7 @@ hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f,
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
   hipFunction_t func;
   hipError_t hip_error = PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
-  int alu_limited_threads;
-  dim3 clusterDim;
   const amd::device::Info& deviceInfo = device.info();
-  int totalClusterSize;
 
   *clusterSize = 0;
 
@@ -895,7 +892,7 @@ hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f,
 
   // 1 per CU (the result is the number CUs on the smallest Shader Engine of the design)
   // Note that for devices not supporting clustered launches, clusterSize would be set
-  // to zero (but the function does not necessarily return an error)
+  // to one
   *clusterSize = device.info().clusterMaxSize_;
   HIP_RETURN(hipSuccess);
 }
