@@ -1391,6 +1391,8 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   }
   CHECK_STREAM_DETACHED_API(hStream);
 
+  STREAM_CAPTURE(hipDrvLaunchKernelEx, hStream, config, f, kernelParams, extra);
+
   int drvDeviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* drvDevice = g_devices[drvDeviceId]->devices()[0];
   amd::HIPLaunchParams launch_params(config->gridDimX, config->gridDimY, config->gridDimZ,

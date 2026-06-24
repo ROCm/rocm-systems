@@ -594,7 +594,8 @@ class Runtime {
           size_requested(0),
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
-          thunk_bo(nullptr) {}
+          thunk_bo(nullptr),
+          thunk_node_id(-1) {}
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags)
         : region(region_arg),
@@ -602,7 +603,8 @@ class Runtime {
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
-          thunk_bo(nullptr) {}
+          thunk_bo(nullptr),
+          thunk_node_id(-1) {}
 
     struct notifier_t {
       void* ptr;
@@ -617,6 +619,7 @@ class Runtime {
     void* user_ptr;
     std::unique_ptr<std::vector<notifier_t>> notifiers;
     HsaMemoryObjectHandle thunk_bo;
+    HSAuint32 thunk_node_id;
   };
 
   struct AsyncEventsInfo;
@@ -626,7 +629,7 @@ class Runtime {
     void Shutdown();
 
     hsa_signal_t wake;
-    bool exit;
+    std::atomic<bool> exit;
 
     private:
     AsyncEventsInfo* info_;
@@ -985,6 +988,7 @@ class Runtime {
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
+  bool ipc_sock_server_shutdown_in_progress_;
 
   lazy_ptr<AsyncEventsInfo> asyncSignals_;
   lazy_ptr<AsyncEventsInfo> asyncExceptions_;
