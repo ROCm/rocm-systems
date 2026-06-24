@@ -1,0 +1,46 @@
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// Models an OpenBLAS-style library built with OpenMP support: its DT_INIT constructor
+// enters an OpenMP parallel region, which forces libomp's first-touch initialization
+// (and thus OMPT tool discovery) while this constructor is on the stack.
+
+#include <omp.h>
+
+#include <cstdio>
+
+namespace
+{
+__attribute__((constructor)) void
+blas_stub_init()
+{
+    fprintf(stderr, "[blas-stub] DT_INIT: entering omp parallel (triggers OMPT bring-up)\n");
+    fflush(stderr);
+#pragma omp parallel
+    {
+        if(omp_get_thread_num() == 0)
+            fprintf(stderr, "[blas-stub] in parallel, nthreads=%d\n", omp_get_num_threads());
+    }
+    fprintf(stderr, "[blas-stub] DT_INIT done\n");
+    fflush(stderr);
+}
+}  // namespace
