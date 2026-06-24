@@ -244,6 +244,8 @@ struct sdk_external_deps
         pmc::register_gpu_perf_counter_source(agents);
     }
     static void set_pmc_state(State state) { pmc::set_state(state); }
+
+    static void gpu_add_device_metadata() { gpu::add_device_metadata(); }
 };
 
 template <typename Wrapper, typename Externals>
@@ -3319,7 +3321,7 @@ library_sdk<Wrapper, Externals>::tool_init(typename Wrapper::client_finalize_t f
     // buffers, etc. created should be ignored
     if(!is_valid(_data->primary_ctx)) return -1;
 
-    gpu::add_device_metadata();
+    Externals::gpu_add_device_metadata();
 
     if(Externals::get_use_process_sampling())
     {
@@ -3338,7 +3340,9 @@ library_sdk<Wrapper, Externals>::tool_init(typename Wrapper::client_finalize_t f
         const auto filtering_active =
             roctx_client->get_controller()->region_filter_active();
         if(!filtering_active)
+        {
             start();
+        }
         else
         {
             if(_data != nullptr)

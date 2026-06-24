@@ -226,6 +226,8 @@ struct mock_externals
         const std::vector<std::shared_ptr<::rocprofsys::agent>>&)
     {}
     static void set_pmc_state(::rocprofsys::State) {}
+
+    static void gpu_add_device_metadata() {}
 };
 
 // ─── Type aliases ─────────────────────────────────────────────────────────────
