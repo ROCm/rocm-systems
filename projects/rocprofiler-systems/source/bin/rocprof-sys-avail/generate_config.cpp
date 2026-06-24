@@ -9,7 +9,7 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
+#include <spdlog/fmt/fmt.h>
 #include "common/json_config.hpp"
 
 #include <nlohmann/json.hpp>
@@ -61,7 +61,7 @@ ignore_setting(const Tp& _v, const format_options& fmt_opts)
         for(auto& category : _v->get_categories())
         {
             if(category_view.count(category) > 0 ||
-               category_view.count(rocprofsys::join("::", "settings", category)) > 0)
+               category_view.count(fmt::format("settings::{}", category)) > 0)
             {
                 _found = true;
                 break;
@@ -281,7 +281,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         else
         {
             throw std::runtime_error(
-                rocprofsys::join(" ", "Error opening", _type, "output file:", _fname));
+                fmt::format("Error opening {} output file: {}", _type, _fname));
         }
         return _ofs;
     };

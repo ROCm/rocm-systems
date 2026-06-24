@@ -8,7 +8,7 @@
 #include "get_categories.hpp"
 #include "info_type.hpp"
 
-#include "common/join.hpp"
+#include <spdlog/fmt/fmt.h>
 
 #include <timemory/components/metadata.hpp>
 #include <timemory/components/properties.hpp>
@@ -146,14 +146,13 @@ get_availability<Type>::get_info()
         }
         if(itr != ids_set.end())
         {
-            ids_str = rocprofsys::join("", rocprofsys::join("", db, *itr++, de));
+            ids_str = fmt::format("{}{}{}", db, *itr++, de);
         }
         for(; itr != ids_set.end(); ++itr)
         {
             if(!itr->empty())
             {
-                ids_str =
-                    rocprofsys::join(", ", ids_str, rocprofsys::join("", db, *itr, de));
+                ids_str = fmt::format("{}, {}{}{}", ids_str, db, *itr, de);
             }
         }
     }
