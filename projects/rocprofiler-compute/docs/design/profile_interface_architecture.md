@@ -48,6 +48,8 @@ Adding a new storage format should mean adding one implementation behind the
 boundary and extending one selection point — not editing profiling, analysis,
 and utility code.
 
+## Architectural Decisions (AD)
+
 Each decision below is recorded with its rationale and consequences
 
 ### AD-1: Remove the CSV profile backend
@@ -68,7 +70,7 @@ release to profile and analyze those workloads; a new release is not expected to
 analyze data produced by an old, unsupported profiler and also we have a deprecation notice. IF a hard CSV requirement ever returns, the
 boundary makes it cheap to add back as one implementation.
 
-### AD-2: Remove the rocprofv3 backend so rocprofiler-sdk is the singlular backend
+### AD-2: Remove the rocprofv3 backend so rocprofiler-sdk is the lone backend
 
 Counter collection is ultimately performed by the SDK tool in
 both cases, so v3 only adds a redundant script layer plus legacy csv shaped
@@ -76,41 +78,36 @@ analysis handling
 
 Removing v3 deletes a meaningful amount of "fluffy" analysis
 code. This is planned in the backend phase (Phase C) together with the
-inheritance cleanup in AD-6 because it is a backend execution concern rather
+inheritance cleanup in AD-5 because it is a backend execution concern rather
 than a profile-data-storage concern.
 
-### AD-3: `pmc_perf.csv` leaves the analyze read path; it becomes an optional export
+### AD-3: `pmc_perf.csv` is no longer in the analyze read path
 
-Analyze mode no longer reads `pmc_perf.csv` and the reader returns the
-pmc DataFrame built directly from the profile source. `pmc_perf.csv` is produced
-only as an **optional export** (default off, or via flag) for debuggability and
-for internal/agent consumption.
+Analyze mode does not read `pmc_perf.csv` anymore, for example instead of going results_*.csv -> pmc_perf.csv -> pandas df we go straight from profile output -> pandas dataframe in memory, basically the reader returns the
+pmc DataFrame built directly from the profile source. `pmc_perf.csv` becomes a
+**one-way export** (which is written but not read back), so it stays exactly as available
+as it is today for users, developers, and tests, nothing in current behavior or
+the test suite changes and the file still appears on every analyze run.
 
-Currently, EVEREY analyze run materializes `pmc_perf.csv` and then
-read it back, so all profile formats collapsed through a CSV regardless of how
-they were stored which basically defeats the point of supporting varied storage and adding
-large csv pivot cost on big workloads. If we think about it, `pmc_perf.csv` is an intermediate not a
-public contract, so analyze should not depend on it
+Currently, EVERY analyze run materializes `pmc_perf.csv` and then
+reads it back, so all profile formats collapse through a CSV regardless of how
+they were stored which basically defeats the point of supporting varied storage and adds
+large csv pivot cost on big workloads. Any output format reader is forced to also
+produce a CSV just so analyze can read it (e.g. rocpd is `.db` -> `results_*.csv`
+-> `pmc_perf.csv` -> frame). With `read_pmc_frame` any profile output returns a
+frame directly and never round-trips through CSV. `pmc_perf.csv` is an
+intermediate not a public contract, so analyze should not depend on it.
 
 The merged frame depends on the user's **analysis filters**,
-so a one time materialize and reuse does not work. We can resolve this if the reader builds
+so a one time materialize and reuse does not work. The reader builds
 the frame from source **per analysis run** with filters applied in memory and
-the optional `pmc_perf.csv` export is derived from that frame. The detailed
-export option is tracked as a follow-up
+the `pmc_perf.csv` export is derived from that frame.
 
-### AD-4: No pandas in profiling
+Making the export itself optional/opt-in, so users who do not need it do not pay
+the cost of producing it on large workloads, is a deferred follow-up and not part
+of this change.
 
-Profiling code must not depend on pandas or other analysis only
-dependencies whereas analysis code could. The boundary exposes a **writer** used by
-profiling (pandas-free) and a **reader** used by analysis (pandas is fine here), packaged
-together but with different dependency characteristics.
-
-Profiling and analysis have different runtime constraints and leaking
-heavy analysis dependencies into the profile path is not acceptable. What makes this much cleaner is removing the
-csv profile backend (AD-1) because the profile-side CSV
-helper that pulled in analysis style handling goes away
-
-### AD-5: One profiler backend, modeled as a single entity
+### AD-4: One profiler backend, modeled as a single entity
 
 rocprofiler-sdk is the only backend, modeled as a single cohesive
 profiler entity rather than a base class with one subclass. No separate
@@ -120,7 +117,8 @@ With one backend there is nothing to abstract across, so a single
 entity is simpler and if a second collector is
 added later for whatever reason, an interface can be extracted at that point.
 
-### AD-6: Unit tests do not touch disk
+### BOUNDARIES in these ADs to mention:
+#### Unit tests do not touch disk
 
 Disk I/O lives behind a thin, transparent adapter (like 
 header/row write primitives) that is intentionally left untested. Unit tests
@@ -132,11 +130,29 @@ can exhaust CI storage, and depend on system resources. The boundary makes
 disk free testing natural as in the same writer interface that production uses is
 swapped for an in memory fake in tests
 
+#### No pandas in profiling
+
+Already discussed at length and merged to current develop pipline, this boundary has to be respected in this design as well as in profiling code must not depend on pandas or other analysis only
+dependencies. The boundary exposes a **writer** used by
+profiling (pandas-free) and a **reader** used by analysis (pandas is fine here), packaged
+together but with different dependency characteristics.
+
+Profiling and analysis have different runtime constraints and leaking
+heavy analysis dependencies into the profile path is not acceptable. What makes this much cleaner is removing the
+csv profile backend (AD-1) because the profile-side CSV
+helper that pulled in analysis style handling goes away
+
+## Phasing and Acceptance
+
+Phase order: A (remove CSV) -> B (`profiling_data` boundary) -> C (backend
+execution) -> D (`analysis_data` boundary), plus follow-ups. Once Phase A lands,
+B, C, and D have no hard ordering dependency on each other.
+
 ## Phase A: Remove the CSV Profile Backend
 
 CSV removal comes first because it shrinks everything downstream: there is no
-second storage format to hide behind the boundary, and profiling becomes
-pandas free (AD-4). This phase does not introduce the boundary yet it just deletes
+second storage format to hide behind the boundary, and profiling stays
+pandas free. This phase does not introduce the boundary yet it just deletes
 the CSV profile path and the dependencies it dragged in.
 
 ### Before
@@ -160,7 +176,7 @@ flowchart LR
     uprof -->|"if csv"| ucsv
     urocpd -->|"writes"| db
     ucsv -->|"writes"| res
-    abase -->|"joins (format-specific)"| res
+    abase -->|"joins (format specific)"| res
     fio -->|"reads"| res
 ```
 
@@ -168,7 +184,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    subgraph profile["Profile Mode (pandas-free)"]
+    subgraph profile["Profile Mode (pandas free)"]
         uprof["utils_profile.py"]
         urocpd["utils/rocpd_data.py"]
     end
@@ -188,25 +204,16 @@ flowchart LR
 The `if csv` branch, `results_*.csv`, and the pandas-dependent `utils_profile_csv.py`
 are removed. Profile mode no longer chooses a storage format.
 
-## Phase B: The Profiling-Data Boundary
+## Phase B: The Profiling Data Boundary
 
-The boundary owns where PMC profile source data lives and how it is read/written.
-Naming follows the team's established vocabulary ("profiling data" vs "analysis
-data"); the package is `profiling_data/`, and storage formats live under an
-`implementations/` subdirectory. The package name is provisional pending final
-agreement, but it deliberately avoids the generic `interface/` because the folder
-name should describe *what the module is for*, not the pattern it uses.
+The boundary owns where PMC profile source data lives and how it is read/written, and exposes two contracts:
 
-The boundary exposes two contracts with different dependency characteristics
-(AD-4):
-
-- `ProfilingDataWriter.finalize_pass(context)` — records a completed profiling
-  pass. Used by profile mode. Pandas-free.
-- `ProfilingDataReader.read_pmc_frame(workload_dir, filters)` — returns the PMC
-  DataFrame built from source for this analysis run. Used by analyze mode. May
-  use pandas.
-- `ProfilingDataReader.has_profile_data(workload_dir)` — reports whether readable
-  profile data exists, so callers stop probing for specific file names.
+- `ProfilingDataWriter.finalize_pass(context)` which records a completed profiling
+  pass at the end of profile mode (pandas free)
+- `ProfilingDataReader.read_pmc_frame(workload_dir, filters)` which returns the pmc
+  df built from source for its respective analysis run
+- `ProfilingDataReader.has_profile_data(workload_dir)` which reports whether readable
+  profile data exists so callers stop string matching for specific and hardcoded file names.
 
 Callers obtain an implementation through selection functions rather than
 constructing implementations directly:
@@ -215,10 +222,6 @@ constructing implementations directly:
 - `get_writer(format)` returns the correct writer.
 
 This is the only place that maps a configured format to an implementation.
-
-The boundary is justified by upcoming sources (profiler-hub, possibly parquet)
-and by enabling disk-free unit tests; if it ever ends up with a single
-implementer and no test use, it can be collapsed to a direct implementation.
 
 ### Before
 
@@ -233,7 +236,7 @@ flowchart LR
         fio["file_io.py"]
     end
     subgraph disk["On-Disk"]
-        db["ROCPD .db"]
+        db["rocpd .db"]
         pmc["pmc_perf.csv<br/>(materialized + read back)"]
     end
     uprof -->|"writes"| db
@@ -247,7 +250,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    subgraph profile["Profile Mode (pandas-free)"]
+    subgraph profile["Profile Mode (pandas free)"]
         uprof["utils_profile.py<br/>run_prof"]
     end
     subgraph analyze["Analyze Mode"]
@@ -256,14 +259,14 @@ flowchart LR
         fio["file_io.py"]
     end
     subgraph iface["profiling_data/ (boundary)"]
-        writer["ProfilingDataWriter<br/>(pandas-free)"]
+        writer["ProfilingDataWriter<br/>(pandas free)"]
         reader["ProfilingDataReader<br/>(pandas)"]
         sel["get_writer / get_reader"]
         rocpd["implementations/rocpd_data.py"]
     end
     subgraph disk["On-Disk"]
         db["ROCPD .db"]
-        pmcExport["pmc_perf.csv<br/>(optional export)"]
+        pmcExport["pmc_perf.csv<br/>(write only export)"]
     end
 
     uprof -->|"get_writer(format)<br/>.finalize_pass"| writer
@@ -276,26 +279,26 @@ flowchart LR
     reader -->|"implemented by"| rocpd
     rocpd -->|"writes"| db
     rocpd -->|"reads source for frame"| db
-    reader -.->|"optional, per-run, derived from frame"| pmcExport
+    reader -->|"writes per-run (derived from frame, never read back)"| pmcExport
 ```
 
-The reader reads its storage implementation, normalizes source-specific rows into
+The reader reads its storage implementation, normalizes source specific rows into
 the PMC DataFrame, applies the analysis filters in memory, and returns the frame.
 Analyze callers never branch on storage format, construct file paths, or read
 `pmc_perf.csv`.
 
-> The diagrams show only the PMC counter data path, which is all this boundary
+> The diagrams show only the PMC counter data path which is all this boundary
 > moves. A workload directory contains many other files (`roofline.csv`, traces,
 > `sysinfo.csv`, `profiling_config.yaml`, perfmon configs, and derived analyze
-> outputs). They are deliberately left unchanged here; see
+> outputs). They are deliberately left unchanged here you may see
 > [Data Ownership](#data-ownership).
 
 ## Phase C: Backend Execution
 
-Backend execution — command construction, environment setup, attach/detach,
-subprocess execution, and pass finalization — is separate from profile data
+Backend execution which controls command construction, environment setup, attach/detach,
+subprocess execution, and pass finalization is separate from profile data
 storage. This phase removes rocprofv3 (AD-2) and merges the backend into a
-single profiler entity (AD-5).
+single profiler entity.
 
 Today `profiler_base` is a base class with `rocprof_v3_profiler` and
 `rocprofiler_sdk_profiler` as subclasses, and the bulk of execution lives in a
@@ -337,10 +340,6 @@ flowchart LR
     rocpd -->|"writes"| db
 ```
 
-A future "collector" concept (native tool, microscope, SQTT, ATT) may later
-justify extracting an interface from this entity; that is intentionally not
-designed now (AD-5).
-
 ## Phase D: Analyze-Data Boundary
 
 The boundary above covers profile *source* data. Analyze mode also produces its
@@ -352,7 +351,7 @@ location and format knowledge does not spread the way profile-data knowledge did
 
 `analysis_data/` is symmetric with `profiling_data/`: `profiling_data/` owns
 where profile *source* data lives; `analysis_data/` owns where analyze-*derived*
-outputs go. It is a writer/reader for derived outputs, not a storage-format
+outputs go. It is a writer/reader for derived outputs not a storage format
 implementation.
 
 ### Before
@@ -410,7 +409,7 @@ flowchart LR
     cli -->|"get_analyze_writer(fmt)"| ad
     webui -->|"get_analyze_writer(fmt)"| ad
     tui -->|"get_analyze_writer(fmt)"| ad
-    parser -.->|"reads through boundary (gap #1)"| ad
+    parser -.->|"reads through boundary"| ad
     ad -->|"writes / owns names"| top
     ad -->|"writes"| html
     ad -->|"writes"| txt
@@ -426,7 +425,7 @@ intact means classifying each file by owner.
 | --- | --- | --- | --- |
 | Raw profile source data (PMC) | ROCPD `.db`, future parquet | `profiling_data/implementations/` | **Yes** — only the boundary knows the layout and conversion rules |
 | Removed legacy profile data | `results_*.csv` | — (removed, AD-1) | n/a |
-| Optional exported artifact | `pmc_perf.csv` | `ProfilingDataReader` export (AD-3) | **Optional** — derived from the in-memory frame per run; not on the read path; not a public contract |
+| Exported artifact | `pmc_perf.csv` | `ProfilingDataReader` export (AD-3) | **Write-only** — derived from the in-memory frame and written every analyze run; never read back; not a public contract. Making production opt-in is a follow-up |
 | Profile-time non-PMC data | `roofline.csv` (empirical ceilings) | roofline / SoC code | No — not PMC counters |
 | Profile metadata / config | `profiling_config.yaml`, `sysinfo.csv`, `perfmon/pmc_perf_*.yaml` | Profile mode | No — `profiling_config.yaml` is *read* by `get_reader` to select the impl, but is not owned data |
 | Trace data | `*_marker_api_trace.csv`, `torch_trace_*.csv`, PC sampling json | Profile / trace code | No — out of scope |
@@ -449,28 +448,27 @@ intact means classifying each file by owner.
 
 These remain after the boundary lands; they do not block it.
 
-1. YAML-driven table loading still assumes some derived tables come from named
-   CSV files; the read-back side should ask the `analysis_data/` boundary instead
-   (Phase D).
-2. ROCPD analysis currently passes through a CSV-shaped intermediate; reading the
-   retained ROCPD source directly is a follow-up (default-ROCPD work), made
-   simpler by this boundary.
-3. `results_*.csv` is still probed in a few availability checks until AD-1 fully
-   lands; these should move to `has_profile_data()`.
+1. Post-pass profiling work (application replay, the roofline benchmark) runs
+   after the counter passes complete. The writer's finalize step must accommodate
+   this phase, or it is explicitly a backend concern outside the data boundary;
+   to be confirmed in Phase C.
+2. PC-sampling analyze reads JSON produced by profile mode. That is another
+   format that should eventually sit behind a similar boundary (likely a JSON
+   implementation); noted for future scope.
 
 ## Success Criteria
 
 The design is working when:
 
 - Profile mode does not decide or know the storage layout, and does not depend on
-  pandas.
-- Analyze mode can ask for a PMC DataFrame without knowing whether the source is
-  ROCPD, profiler-hub, or parquet, and without reading `pmc_perf.csv`.
-- `pmc_perf.csv` is produced only as an optional export, derived per run.
+  pandas
+- Analyze mode can ask for a pmc DataFrame without knowing what the source is and without reading `pmc_perf.csv`.
+- `pmc_perf.csv` is written as a one-way export derived per run, and analyze no
+  longer reads it back. This saves a lot of csv processing especially on large workloads.
 - Workload availability checks go through `has_profile_data()` rather than probing
-  for specific files.
+  for specific files
 - Storage-format conditionals are isolated to `get_reader` / `get_writer` and the
-  implementations.
+  implementations
 - Adding a new profile source primarily means adding one implementation and
-  extending selection in one place (high locality of change).
-- The boundary can be exercised in unit tests without touching disk.
+  extending selection in one place (high locality of change)
+- The boundary can be exercised in unit tests without touching disk
