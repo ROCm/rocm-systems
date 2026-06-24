@@ -82,6 +82,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * On gfx1151, `$max_mclk` is not automatically populated in sysinfo, so the related bandwidth metrics may be incorrect. Use `amd-smi` to obtain the maximum memory clock and provide it via `--specs-correction`.
 
+* In analyze mode, `--nodes` is not suitable for multi-rank analysis. Use `--path` with the rank-specific path (such as, `--path workload/1`) instead of `--path workload --nodes 1`.
+
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
 
 ### Added

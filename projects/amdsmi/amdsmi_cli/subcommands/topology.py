@@ -149,7 +149,7 @@ class TopologyCommands:
                 if self.logger.is_human_readable_format():
                     header_row[f"GPU BDF_{gpu_bdf}"] = f"{gpu_bdf}".rjust(20)
                 else:
-                    header_row[f"GPU{gpu_id}"] = f"{gpu_bdf}"
+                    header_row[f"gpu_{gpu_id}"] = f"{gpu_bdf}"
                 gpu_bdfs.append(gpu_bdf)  # Store GPU BDF for later reference
 
             # Add the header row
@@ -179,7 +179,7 @@ class TopologyCommands:
                     if self.logger.is_human_readable_format():
                         nic_row[f"GPU{gpu_idx} Status"] = status.ljust(20)
                     else:
-                        nic_row[f"GPU{gpu_idx}_Topo"] = status
+                        nic_row[f"gpu_{gpu_idx}_topo"] = status
                 # Add the NIC row to the table
                 tabular_output.append(nic_row)
 

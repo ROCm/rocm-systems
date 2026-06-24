@@ -1776,6 +1776,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         throttle_help = (
             "Displays throttle accumulators;\n    Only available for MI300 or newer ASICs"
         )
+        partition_help = (
+            "Switch temperature, clock, and usage to partition-scoped\n"
+            "    (XCP/AID/MID) data sources; combine with those flags to scope it;"
+            "\n    Only available for MI300 or newer ASICs"
+        )
 
         # Help text for Arguments only on Hypervisors
         schedule_help = "All scheduling information"
@@ -1944,6 +1949,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                     action="store_true",
                     required=False,
                     help=argparse.SUPPRESS,
+                )
+                metric_parser.add_argument(
+                    "-X", "--partition", action="store_true", required=False, help=partition_help
                 )
 
             # Options to only display to Hypervisors

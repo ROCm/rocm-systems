@@ -8,6 +8,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `--partition` flag to `amd-smi metric` for partition-scoped metrics**.  
+  - The `-X`/`--partition` flag switches the temperature, clock, and usage categories to partition-level data sources; throttle metrics are already partition-aware.
+  - Reuses the existing temperature/clock/usage section schema and adds partition-only AID/XCP/MID entries within it; socket-only fields with no partition equivalent report `N/A`.
+  - When `--partition` is set with `--temperature`: adds MID and per-XCP/XCD temperatures.
+  - When `--partition` is set with `--clock`: sources GFX/VCLK/DCLK/SOCCLK from partition metrics and adds per-AID and per-XCP clock entries with their limits.
+  - When `--partition` is set with `--usage`: reports per-XCP GFX/JPEG/VCN activity.
+
 - **Added `--folder` support to `amd-smi ras --afid`**.
   - `amd-smi ras --afid --folder <DIR>` decodes every `*.cper` in a directory and prints a `file_name | list of afids` table (or a JSON array under `--json`).
   - Records with no AFIDs show `-`; files that cannot be parsed show `decode failed`.
@@ -57,6 +64,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
   - `py-interface/amdsmi_wrapper.py` now loads the shared library in this order: the `AMDSMI_LIB_OVERRIDE` env var (development / ABI-test escape hatch), a `libamd_smi_python.so` bundled next to the wrapper (pip wheel), then the system `libamd_smi.so` via the dynamic linker. A `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable, so import-time tooling (docs, lint) still works without a runtime library.
   - Added a manylinux_2_28 CI workflow that builds PyPI-ready wheels via `-DBUILD_PYTHON_WHEEL=ON`.
+- **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.
+  - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
+  - Human-readable output is unchanged, since it uppercases all keys.
+
+- **Normalized JSON/CSV key casing in the `amd-smi topology` NIC-GPU access table**.
+  - The per-GPU columns are now lowercase (`gpu_<N>` for the BDF header row, `gpu_<N>_topo` for each NIC's status row) in JSON and CSV output, matching the existing `gpu_<N>` keys in the GPU-to-GPU access matrix; they were previously uppercase (`GPU<N>`, `GPU<N>_Topo`).
+  - Human-readable output is unchanged, since it uppercases all keys.
+
 - **Fixed `amd-smi static --clock` csv and human_readable formatting to output frequency 
 levels as strings instead of dictionary objects**.  
 
@@ -71,6 +86,9 @@ levels as strings instead of dictionary objects**.
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
 
 ### Resolved Issues
+
+- **Fixed `amd-smi set --power-cap` rejecting the minimum allowed value**.  
+  - The lower bound is now inclusive, so setting the power cap to the exact minimum of the reported range (e.g. `210` when the range is 210-300W) succeeds instead of failing validation, matching the inclusive range shown in the error message.
 
 - **Corrected invalid AMD SMI status-code names in exception messages and documentation**.  
   - Some `AmdSmiLibraryException` messages and API documentation entries were misspelled; they now use the correct `AMDSMI_STATUS_*` names.
