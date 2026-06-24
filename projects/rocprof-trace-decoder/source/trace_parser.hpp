@@ -345,6 +345,7 @@ public:
 
     bool bIsROCMFormat = false;
     int userdata_state{};
+    int tt_version{0};
 
     CowPtr<std::vector<address_range_t>> active_codeobjs{};
     CachedTable table{};
@@ -527,7 +528,7 @@ public:
 
     static constexpr uint64_t BITMASK = (uint64_t{1} << 48) - 1;
 
-    rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int me, int pipe, int tt_version = 0)
+rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int me, int pipe)
     {
         rocprofiler_thread_trace_decoder_dispatch_t event{};
         event.size = sizeof(rocprofiler_thread_trace_decoder_dispatch_t);
