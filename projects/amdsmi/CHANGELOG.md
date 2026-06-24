@@ -8,10 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added new NIC discovery and information APIs**.
+- **Added NIC processor discovery and information API surface**.  
   - New C APIs: `amdsmi_get_nic_processor_handles()`, `amdsmi_get_nic_device_bdf()`, `amdsmi_get_nic_fw_info()`, `amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.
-  - Added NIC processor enumeration by socket, NIC BDF lookup, NIC firmware information retrieval, and NIC port/vendor statistics queries.
-  - Expanded `amdsmi_get_link_metrics()` documentation to clarify the lightweight link query behavior versus the richer topology query.
+  - `amdsmi_get_nic_processor_handles()` enumerates NIC processors by socket; the BDF, firmware, and port/vendor statistics getters are reserved and currently return `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`.
 
 - **Exposed APU metrics through the CLI and Python interface**.  
   - `amd-smi metric` now surfaces APU-specific data under `--usage`, `--power`, `--clock`, `--temperature`, `--fan`, `--voltage`, and `--throttle` when APU metrics are available.
@@ -68,8 +67,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added the new types to `amdsmi_link_types` as part of support for NICs
 
 ### Changed
-
-- **Fixed `amd-smi static --clock` csv and human_readable formatting to output frequency levels as strings instead of dictionary objects**.  
 
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
