@@ -37,7 +37,6 @@ test_categories:
       - test_metrics_common
       - test_tty
       - test-rocprofiler-compute-tool
-      - test_inject_roctx_loader
       - test_soc_base
       - test-pc-sampling-collector
     exclude:
@@ -97,9 +96,11 @@ test_categories:
       - test_metrics_common
       - test_tty
       - test-rocprofiler-compute-tool
-      - test_inject_roctx_loader
       - test_soc_base
       - test-pc-sampling-collector
+      - test_profile_torch_trace
+      - test_profile_live_attach_detach
+      - test_metric_validation
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -156,9 +157,11 @@ test_categories:
       - test_metrics_common
       - test_tty
       - test-rocprofiler-compute-tool
-      - test_inject_roctx_loader
       - test_soc_base
       - test-pc-sampling-collector
+      - test_profile_torch_trace
+      - test_profile_live_attach_detach
+      - test_metric_validation
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -215,9 +218,11 @@ test_categories:
       - test_metrics_common
       - test_tty
       - test-rocprofiler-compute-tool
-      - test_inject_roctx_loader
       - test_soc_base
       - test-pc-sampling-collector
+      - test_profile_torch_trace
+      - test_profile_live_attach_detach
+      - test_metric_validation
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
