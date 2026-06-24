@@ -114,11 +114,6 @@ function(enable_sanitizer)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_extra}" PARENT_SCOPE)
     endif()
 
-    set(_ubsan_ignorelist "${PROJECT_SOURCE_DIR}/.sanitizer-suppressions/ubsan-ignorelist.txt")
-    if(_is_ubsan_mode AND EXISTS "${_ubsan_ignorelist}" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        add_compile_options("-fsanitize-ignorelist=${_ubsan_ignorelist}")
-    endif()
-
     # clang defaults to static sanitizer linkage; gcc defaults to shared.
     # Force shared on clang only.
     add_link_options(
