@@ -113,3 +113,28 @@ def test_config_dir_requires_value(capsys):
         build_args(["--config-dir"])
     assert exc.value.code == 2
     assert "--config-dir" in capsys.readouterr().err
+
+
+# =============================================================================
+# analyze: PC sampling options
+# =============================================================================
+
+
+def test_pc_sampling_sorting_type_defaults_to_count():
+    assert build_args(["analyze"]).pc_sampling_sorting_type == "count"
+
+
+def test_pc_sampling_rows_defaults_to_ten():
+    assert build_args(["analyze"]).pc_sampling_rows == 10
+
+
+def test_pc_sampling_options_accept_overrides():
+    args = build_args([
+        "analyze",
+        "--pc-sampling-sorting-type",
+        "offset",
+        "--pc-sampling-rows",
+        "25",
+    ])
+    assert args.pc_sampling_sorting_type == "offset"
+    assert args.pc_sampling_rows == 25

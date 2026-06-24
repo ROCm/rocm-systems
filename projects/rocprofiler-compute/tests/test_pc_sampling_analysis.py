@@ -614,6 +614,50 @@ def test_load_per_kernel_offset_sort_is_numeric() -> None:
     assert df["offset"].tolist() == ["0x20", "0x100"]
 
 
+def _three_hotspot_tool_data() -> dict:
+    """Three offsets with sample counts 3, 2, 1 for one kernel."""
+    host_trap = [
+        make_record(5, 0x10, 0, dispatch_id=0),
+        make_record(5, 0x10, 0, dispatch_id=0),
+        make_record(5, 0x10, 0, dispatch_id=0),
+        make_record(5, 0x20, 1, dispatch_id=0),
+        make_record(5, 0x20, 1, dispatch_id=0),
+        make_record(5, 0x30, 2, dispatch_id=0),
+    ]
+    return make_tool_data(
+        host_trap=host_trap,
+        instructions=["a", "b", "c"],
+        comments=["/src/f.cpp:1", "/src/f.cpp:2", "/src/f.cpp:3"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
+    )
+
+
+def test_load_per_kernel_num_rows_keeps_top_hotspots() -> None:
+    """num_rows truncates after sorting, keeping the highest-count rows."""
+    df = load_pc_sampling_data_per_kernel(
+        method="host_trap",
+        tool_data=_three_hotspot_tool_data(),
+        kernel_name="vecCopy",
+        sorting_type="count",
+        num_rows=2,
+    )
+    assert df["count"].tolist() == [3, 2]
+
+
+@pytest.mark.parametrize("num_rows", [None, 0, -1])
+def test_load_per_kernel_num_rows_unset_keeps_all(num_rows: int | None) -> None:
+    """None or a non-positive num_rows keeps every row."""
+    df = load_pc_sampling_data_per_kernel(
+        method="host_trap",
+        tool_data=_three_hotspot_tool_data(),
+        kernel_name="vecCopy",
+        sorting_type="count",
+        num_rows=num_rows,
+    )
+    assert df["count"].tolist() == [3, 2, 1]
+
+
 def make_per_kernel_guard_data(
     instructions: list | None,
     comments: list | None,
@@ -1240,7 +1284,7 @@ def test_load_non_mertrics_table_populates_pc_sampling_from_tool_data(
     tmp_path: Path,
 ) -> None:
     """A ``from_pc_sampling`` table is populated when tool data is provided."""
-    args = argparse.Namespace(pc_sampling_sorting_type="count")
+    args = argparse.Namespace(pc_sampling_sorting_type="count", pc_sampling_rows=10)
     workload = schema.Workload()
     workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
     tool_data = make_tool_data(**sample_tool_data_kwargs())
@@ -1254,7 +1298,7 @@ def test_load_non_mertrics_table_pc_sampling_empty_without_tool_data(
     tmp_path: Path,
 ) -> None:
     """Without tool data the ``from_pc_sampling`` table stays empty (no crash)."""
-    args = argparse.Namespace(pc_sampling_sorting_type="count")
+    args = argparse.Namespace(pc_sampling_sorting_type="count", pc_sampling_rows=10)
     workload = schema.Workload()
     workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
     load_non_mertrics_table(workload, str(tmp_path), args)
