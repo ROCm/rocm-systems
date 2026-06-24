@@ -224,6 +224,8 @@ Open the resulting Perfetto trace as described above; when ``sdma_usage`` is sup
 your system, look for **SDMA usage** / device SDMA utilization tracks in addition to HIP
 memory-copy activity.
 
+.. image:: ../data/rocprof-sys-sdma.png
+   :alt: Visualization of a performance graph in Perfetto with SDMA tracks
 
 Tips for effective profiling
 =============================
