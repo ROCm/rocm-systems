@@ -1415,8 +1415,8 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
 
 void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)),
-                          std::bit_cast<float>(src2.read_scalar(wf)));
+                          std::bit_cast<float>(src2.read_scalar(wf)),
+                          std::bit_cast<float>(ssrc1.read_scalar(wf)));
   sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
