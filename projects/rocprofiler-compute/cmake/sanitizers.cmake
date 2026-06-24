@@ -17,7 +17,10 @@ function(resolve_sanitizer)
     # Empty string is omitted by variable expansion, so add it explicitly.
     set(sanitizer_valid "" ${therock_sanitizer_valid} "UBSAN")
 
-    if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER IN_LIST therock_sanitizer_valid)
+    if(
+        DEFINED THEROCK_SANITIZER
+        AND NOT THEROCK_SANITIZER IN_LIST therock_sanitizer_valid
+    )
         message(
             FATAL_ERROR
             "THEROCK_SANITIZER='${THEROCK_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
@@ -163,7 +166,15 @@ function(enable_sanitizer_python_launcher out_var)
         list(APPEND _sanitizer_env "UBSAN_OPTIONS=print_stacktrace=1")
     endif()
     if(_sanitizer_env)
-        list(PREPEND _launcher "${CMAKE_COMMAND}" -E env ${_sanitizer_env} --)
+        list(
+            PREPEND
+            _launcher
+            "${CMAKE_COMMAND}"
+            -E
+            env
+            ${_sanitizer_env}
+            --
+        )
     endif()
     set(${out_var} "${_launcher}" PARENT_SCOPE)
 endfunction()
