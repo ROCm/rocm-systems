@@ -94,14 +94,14 @@ jobs:
         id: generate_matrix
         working-directory: projects/rocprofiler-compute/.github
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ]; then
-            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.["matrix-ubuntu-nightly"]' -I=0 -o=json)
+          if [ '${{ github.event_name }}' == 'schedule' ]; then
+            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-nightly' -I=0 -o=json)
           else
-            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.["matrix-ubuntu-ci"]' -I=0 -o=json)
+            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-ci' -I=0 -o=json)
           fi
 
           # When dispatched manually, filter to only the selected configurations.
-          if [ '${{ github.event_name }}' = 'workflow_dispatch' ]; then
+          if [ '${{ github.event_name }}' == 'workflow_dispatch' ]; then
             FILTER='.'
             [ '${{ inputs.mi355_ubuntu2204 }}'      != 'true' ] && FILTER+=' | map(select(not (.gpu == "mi355"      and .["os-release"] == "22.04")))'
             [ '${{ inputs.mi355_ubuntu2404 }}'      != 'true' ] && FILTER+=' | map(select(not (.gpu == "mi355"      and .["os-release"] == "24.04")))'
