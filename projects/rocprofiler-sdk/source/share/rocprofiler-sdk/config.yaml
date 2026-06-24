@@ -7850,14 +7850,6 @@ rocprofiler-sdk:
             - gfx1250
           block: TCP
           event: 185
-    - name: TX_VCA_VCA_BUSY
-      description: Cycles VCA block is busy. Perf_windowing not supported for this counter.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1250
-          block: TCP
-          event: 184
     - name: TX_VCD_TD_BUSY
       description: TD is processing or waiting for data. Perf_Windowing not supported for this 
         counter.
