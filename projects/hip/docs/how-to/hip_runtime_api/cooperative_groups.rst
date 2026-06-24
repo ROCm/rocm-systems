@@ -570,8 +570,7 @@ The parameters are described here: :ref:`cg_operations`
 
  The value returned for the first active lane is platform-dependent and may change in future releases. As a reference: 
 
-* On AMD:
-  Currently the "identity" value is returned, according to the operation:
+* AMD - the "identity" value is returned, according to the operation:
   * ``plus``: always 0
   * ``less``:
     * for integer types: the maximum value for the type, i.e. ``std::numeric_limits<T>::max()``
@@ -583,8 +582,7 @@ The parameters are described here: :ref:`cg_operations`
   * ``bit_or``: always 0
   * ``bit_xor``: always 0
 
-* On NVIDIA:
-  * Returns T {} (i.e. 0)
+* NVIDIA - returns T {} (i.e. 0)
 
 **Performance**
 On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive type, DPP instructions will be used, which means the operation would be significantly faster than with other group sizes. The primitive types are:
