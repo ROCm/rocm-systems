@@ -92,8 +92,8 @@ private:
   __device__ void ring_doorbell(uint32_t slot_idx);
   __device__ void poll_cq_until(uint32_t requested_available_slots);
 
-  __device__ static void acquire_lock(uint32_t* lock);
-  __device__ static void release_lock(uint32_t* lock);
+  static __device__ void acquire_lock(uint32_t* lock);
+  static __device__ void release_lock(uint32_t* lock);
 
   template <OpCode Op, bool CheckCQ = true>
   __device__ void write_rma_wqe(uintptr_t laddr, uint32_t lkey,
@@ -103,9 +103,9 @@ private:
   __device__ uint64_t* write_amo_wqe(uintptr_t raddr, uint32_t rkey,
                                      uint64_t value, uint64_t cond);
 
-  __device__ static void* get_hwqe(const bnxt_device_sq& sq, uint32_t idx);
-  __device__ static void fill_psns_for_msntbl(bnxt_device_sq& sq, uint32_t msg_len);
-  __device__ static void incr_tail(bnxt_device_sq& sq, uint8_t cnt);
+  static __device__ void* get_hwqe(const bnxt_device_sq& sq, uint32_t idx);
+  static __device__ void fill_psns_for_msntbl(bnxt_device_sq& sq, uint32_t msg_len);
+  static __device__ void incr_tail(bnxt_device_sq& sq, uint8_t cnt);
 
 #if defined(BUILD_DEBUG_DEVICE)
   __device__ __attribute__((noinline)) void print_cqe_error(uint8_t status);
