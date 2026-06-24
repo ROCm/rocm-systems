@@ -59,9 +59,10 @@ def check_version(local_ver: str, desired_ver: str, operator: str) -> bool:
 
 
 def check_python_version() -> None:
-    """Check that Python version meets minimum requirement for rocprofiler-compute.
+    """Check the baseline Python version required to launch rocprofiler-compute.
 
-    Both profile and analyze modes require Python 3.8+.
+    Profile mode runs on Python 3.8+ (standard library only). Analyze mode has a
+    higher floor enforced separately in check_analyze_python_version().
     """
     min_python = (3, 8)
     # Check which version of python is being used
@@ -71,6 +72,23 @@ def check_python_version() -> None:
             f"is required for rocprofiler-compute. "
             f"The current version is "
             f"{sys.version_info[0]}.{sys.version_info[1]}."
+        )
+        sys.exit(1)
+
+
+def check_analyze_python_version() -> None:
+    """Enforce the analyze-mode Python floor.
+
+    Analyze mode depends on numpy, pandas, dash, and textual, whose current
+    pinned versions require Python 3.9+. Profile mode is unaffected.
+    """
+    min_python = (3, 9)
+    if sys.version_info < min_python:
+        print(
+            f"[ERROR] analyze mode requires Python {min_python[0]}.{min_python[1]} "
+            f"or higher. The current version is "
+            f"{sys.version_info[0]}.{sys.version_info[1]}. "
+            f"Profile mode supports Python 3.8+."
         )
         sys.exit(1)
 
@@ -135,7 +153,7 @@ def verify_deps() -> None:
 def main() -> None:
     """Main function for rocprofiler-compute"""
 
-    # Check Python version requirement applies to both profile and analyze modes
+    # Baseline Python floor for any mode (profile is 3.8+); analyze adds its own
     check_python_version()
 
     rocprof_compute = RocProfCompute()
@@ -145,7 +163,8 @@ def main() -> None:
     if mode == "profile":
         rocprof_compute.run_profiler()
     elif mode == "analyze":
-        # Analyze mode requires external dependencies - verify them
+        # Analyze mode needs a higher Python floor and external dependencies
+        check_analyze_python_version()
         verify_deps()
         rocprof_compute.run_analysis()
     else:

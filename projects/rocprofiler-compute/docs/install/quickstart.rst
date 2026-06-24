@@ -63,7 +63,28 @@ Ensure ROCm is installed and follow the steps:
 
    .. code-block:: shell-session
 
-      python3 --version   # Requires Python 3.8+
+      python3 --version
+
+   The required Python version depends on which mode you use:
+
+   .. list-table:: Python version support
+      :header-rows: 1
+      :widths: 40 60
+
+      * - Component
+        - Python requirement
+      * - Profile mode (standard library only)
+        - 3.8 or newer
+      * - Analyze mode (numpy, pandas, dash, textual)
+        - 3.9 or newer
+      * - Torch-trace profiling
+        - Profile mode floor, plus ROCm roctx bindings built for the
+          active interpreter
+      * - Standalone binary build
+        - exactly 3.11.x (build time only)
+
+   Analyze mode aborts with a clear message if launched on Python older
+   than 3.9.
 
 3. Check the installation dependencies.
 
