@@ -55,7 +55,6 @@ std::unique_ptr<SQTTParser> AnalyseBinary_GFX9_internal(
     bool is_mi350
 )
 {
-    is_mi350 = true;
     stitch.setgfxip(9);
 
     auto generator = gfx9::MITokenGenerator(tokendata, buffersize, 0, 0);
