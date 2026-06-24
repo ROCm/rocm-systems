@@ -77,11 +77,6 @@ Ensure ROCm is installed and follow the steps:
         - 3.8 or newer
       * - Analyze mode (numpy, pandas, dash, textual)
         - 3.9 or newer
-      * - Torch-trace profiling
-        - Profile mode floor, plus ROCm roctx bindings built for the
-          active interpreter
-      * - Standalone binary build
-        - exactly 3.11.x (build time only)
 
    Analyze mode aborts with a clear message if launched on Python older
    than 3.9.
