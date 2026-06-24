@@ -1175,6 +1175,18 @@ jobs:
             echo "::warning::Build: ${ERRORS} error(s), ${WARNINGS} warning(s) — expand step for details"
           fi
 
+      - name: CDash link
+        if: always()
+        shell: bash
+        run: |
+          NAME="${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}"
+          # Apply the same PR name transformation as run-ci.py:
+          # <owner>-<PR_number>/merge-<suffix> → PR_<PR_number>_<owner>-<suffix>
+          NAME=$(echo "${NAME}" | sed 's/\(.*\)-\([0-9]*\)\/merge/PR_\2_\1/')
+          URL="https://my.cdash.org/index.php?project=rocprofiler-systems&filtercount=1&showfilters=1&field1=buildname&compare1=65&value1=${NAME}"
+          printf '### CDash Results\n[View build on CDash](%s)\n' "${URL}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "::notice title=CDash Results::${URL}"
+
       - name: ccache stats
         if: always()
         shell: bash
@@ -1738,6 +1750,16 @@ jobs:
           if [ "$((WARNINGS + ERRORS))" -gt 0 ]; then
             echo "::warning::Build: ${ERRORS} error(s), ${WARNINGS} warning(s) — expand step for details"
           fi
+
+      - name: CDash link
+        if: always()
+        shell: bash
+        run: |
+          NAME="${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}"
+          NAME=$(echo "${NAME}" | sed 's/\(.*\)-\([0-9]*\)\/merge/PR_\2_\1/')
+          URL="https://my.cdash.org/index.php?project=rocprofiler-systems&filtercount=1&showfilters=1&field1=buildname&compare1=65&value1=${NAME}"
+          printf '### CDash Results\n[View build on CDash](%s)\n' "${URL}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "::notice title=CDash Results::${URL}"
 
       - name: ccache stats
         if: always()
