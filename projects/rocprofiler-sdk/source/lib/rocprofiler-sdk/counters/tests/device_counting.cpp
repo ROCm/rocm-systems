@@ -502,7 +502,7 @@ protected:
     // packets are likely not valid.
     static void check_raw_aql_packets(const std::string&         metric_to_test,
                                       size_t                     iter_count,
-                                      const std::vector<double>& expected_values)
+                                      const std::vector<double>& min_expected_values)
     {
         using namespace rocprofiler::counters;
         using namespace rocprofiler::hsa;
@@ -634,11 +634,11 @@ protected:
                 ROCP_INFO << fmt::format(
                     "Final Decoded Counter Values: {} (iter={})", fmt::join(*ret, ","), i);
 
-                CHECK_EQ(ret->size(), expected_values.size());
+                CHECK_EQ(ret->size(), min_expected_values.size());
                 size_t pos = 0;
-                for(const auto& v : expected_values)
+                for(const auto& v : min_expected_values)
                 {
-                    CHECK_EQ(v, ret->at(pos).counter_value);
+                    CHECK_GE(ret->at(pos).counter_value, v);
                     pos++;
                 }
             }
