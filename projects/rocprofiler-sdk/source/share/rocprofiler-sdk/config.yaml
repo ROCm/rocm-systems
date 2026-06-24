@@ -3232,6 +3232,15 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 298
+    - name: SQC_DCACHE_TC_INFLIGHT_LEVEL
+      description: 'Level Counter: number of outstanding data requests to TC {level, No-Masking, nondeterministic,
+        C2}'
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 649
     - name: SQC_DCACHE_BUSY_CYCLES
       description: ' Clock cycles while cache is reporting that it is busy. (No-Masking, nondeterministic,
         unwindowed)'
@@ -3250,6 +3259,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 292
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 661
     - name: SQC_DCACHE_HITS
       description: Number of cache hits. (per-SQ, per-Bank, nondeterministic)
       properties: []
@@ -3500,6 +3513,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 268
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 640
     - name: SQC_ICACHE_HITS
       description: Number of cache hits. (per-SQ, per-Bank, nondeterministic)
       properties: []
@@ -3546,6 +3563,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 280
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 650
     - name: SQC_ICACHE_MISSES
       description: Number of cache misses, includes uncached requests. (per-SQ, per-Bank, 
         nondeterministic)
@@ -3795,6 +3816,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 285
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 655
     - name: SQG_BUSY_CYCLES
       description: Number of clock cycles SQG is reporting that it is busy (per shader engine). 
         SQG_PERF_SEL_BUSY_CYCLES.
@@ -3807,6 +3832,10 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 16
+        - architectures:
+            - gfx1250
+          block: SQG
+          event: 15
     - name: SQG_CYCLES
       description: Number of SQG clock cycles (per shader engine). SQG_PERF_SEL_CYCLES.
       properties: []
@@ -3818,6 +3847,10 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 15
+        - architectures:
+            - gfx1250
+          block: SQG
+          event: 14
     - name: SQG_ITEMS
       description: Sum of work items processed by SQG-tracked waves. Useful for computing average 
         wave occupancy across pipeline stages (per shader engine). SQG_PERF_SEL_ITEMS.
@@ -3830,6 +3863,10 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 24
+        - architectures:
+            - gfx1250
+          block: SQG
+          event: 22
     - name: SQG_MSG
       description: Number of S_SENDMSG instructions issued by waves observed by SQG (per shader 
         engine). SQG_PERF_SEL_MSG.
@@ -3842,6 +3879,10 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 18
+        - architectures:
+            - gfx1250
+          block: SQG
+          event: 17
     - name: SQG_REFCLKS
       description: Number of SQG reference clock cycles (per shader engine). SQG_PERF_SEL_REFCLKS.
       properties: []
@@ -3853,6 +3894,10 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 33
+        - architectures:
+            - gfx1250
+          block: SQG
+          event: 32
     - name: SQG_WAVES
       description: Number of waves dispatched and observed by SQG, summed across all graphics and 
         compute pipeline stages (per shader engine). SQG_PERF_SEL_WAVES.
@@ -3877,6 +3922,10 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 10
+        - architectures:
+            - gfx1250
+          block: SQG
+          event: 9
     - name: SQG_WAVES_RESTORED
       description: Number of waves restored by context-switch (per shader engine). 
         SQG_PERF_SEL_WAVES_RESTORED.
@@ -3889,6 +3938,10 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 12
+        - architectures:
+            - gfx1250
+          block: SQG
+          event: 11
     - name: SQG_WAVES_SAVED
       description: Number of waves saved by context-switch (per shader engine). 
         SQG_PERF_SEL_WAVES_SAVED.
@@ -3901,6 +3954,10 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 13
+        - architectures:
+            - gfx1250
+          block: SQG
+          event: 12
     - name: SQ_ACCUM_PREV
       description: This is a hardware register that can be used for accumulating values for other 
         counters. This is useful in expressions where you want to integrate over time. Only 
@@ -4286,6 +4343,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 137
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 389
     - name: SQ_IFETCH_REQS
       description: Number of instruction fetch requests to SQC cache. {nondeterministic, unwindowed}
       properties: []
@@ -5632,6 +5693,10 @@ rocprofiler-sdk:
             - gfx1201
           block: SQ
           event: 102
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 333
     - name: SQ_INST_CYCLES_VMEM_LOAD
       description: Number of cycles needed to send addr and data for VMEM loads (lds, buffer, image,
         flat, scratch, global) instructions. {emulated, C1}
@@ -5864,6 +5929,15 @@ rocprofiler-sdk:
             - gfx1250
           block: SQ
           event: 228
+    - name: SQ_ITEM_CYCLES_VALU
+      description: Number of item-cycles used to execute VALU operations (similar to 
+        INST_CYCLES_VALU but multiplied by number of active workitems). {emulated, C1}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 132
     - name: SQ_LDS_ADDR_CONFLICT
       description: Number of cycles LDS (local data store) is stalled by address conflicts. This 
         value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -6308,6 +6382,14 @@ rocprofiler-sdk:
             - gfx1201
           block: SQ
           event: 71
+    - name: SQ_WAVES_32
+      description: Count number of wave32s sent to SQs. {emulated, global, C1}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 5
     - name: SQ_WAVES
       description: Count number of waves sent to distributed sequencers (SQs). This value represents
         the number of waves that are sent to each SQ. This only counts new waves sent since the 
@@ -14358,6 +14440,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 275
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 645
     - name: SQC_ICACHE_INPUT_VALID_READYB_sum
       description: ''
       properties: []
@@ -14614,6 +14700,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 65
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 163
     - name: SQ_INSTS_TEX_LOAD_sum
       description: ''
       properties: []
@@ -14721,6 +14811,28 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 109
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 336
+    - name: SQ_INST_CYCLES_TEX
+      description: Number of cycles needed to send addr and data for TEX (buffer, image) 
+        instructions. {emulated}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 337
+    - name: SQ_INST_CYCLES_FLAT
+      description: Number of cycles needed to send addr and data for FLAT (flat, scratch, global) 
+        instructions. {emulated}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 338
     - name: SQ_INST_CYCLES_LDS_sum
       description: ''
       properties: []
