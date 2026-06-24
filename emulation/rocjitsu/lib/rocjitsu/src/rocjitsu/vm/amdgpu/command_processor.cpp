@@ -48,6 +48,17 @@ struct PlannedWorkgroup {
 
 uint32_t nonzero_or_one(uint32_t v) { return v == 0 ? 1 : v; }
 
+/// @brief Return a monotonic timestamp in the guest HSA system-clock domain.
+///
+/// @details The guest KFD advertises a 1 GHz synthetic system clock backed by
+/// `std::chrono::steady_clock`. Dispatch profiling timestamps stored in
+/// `amd_signal_t` use the same HSA system-clock domain, so HIP event timing can
+/// subtract them directly.
+uint64_t hsa_system_timestamp() {
+  auto now = std::chrono::steady_clock::now().time_since_epoch();
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+}
+
 uint32_t checked_ext_dispatch_grid_size(uint32_t cluster_count, uint32_t cluster_size,
                                         uint32_t workgroup_size, const char *axis) {
   if (cluster_count == 0 || cluster_size == 0 || workgroup_size == 0) {
@@ -938,6 +949,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   DispatchEntry dp{};
   dp.dispatch_id = next_dispatch_id_++;
+  dp.profiling_start_timestamp = hsa_system_timestamp();
   dp.queue_id = queue.queue_id;
   dp.process_id = queue.process_id;
   dp.kernel_entry_pc = entry_pc;

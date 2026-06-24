@@ -1,0 +1,907 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "rocjitsu/kmd/linux/guest_kfd.h"
+
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
+
+#include "util/log.h"
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cerrno>
+#include <charconv>
+#include <cstdio>
+#include <dirent.h>
+#include <fcntl.h>
+#include <filesystem>
+#include <optional>
+#include <sstream>
+#include <string_view>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <utility>
+#include <vector>
+
+namespace rocjitsu {
+
+namespace {
+
+namespace fs = std::filesystem;
+
+constexpr const char *kRealTopologyPath = "/sys/devices/virtual/kfd/kfd/topology";
+struct LinuxDirent64 {
+  uint64_t d_ino;
+  int64_t d_off;
+  unsigned short d_reclen;
+  unsigned char d_type;
+  char d_name[1];
+};
+
+std::string read_text_file(const fs::path &path) {
+  const std::string raw_path = path.string();
+  int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, raw_path.c_str(), O_RDONLY | O_CLOEXEC));
+  if (fd < 0)
+    return {};
+
+  std::string out;
+  std::array<char, 4096> buffer{};
+  for (;;) {
+    ssize_t n = static_cast<ssize_t>(syscall(SYS_read, fd, buffer.data(), buffer.size()));
+    if (n == 0)
+      break;
+    if (n < 0) {
+      syscall(SYS_close, fd);
+      return {};
+    }
+    out.append(buffer.data(), static_cast<size_t>(n));
+  }
+  syscall(SYS_close, fd);
+  return out;
+}
+
+void write_text_file(const fs::path &path, const std::string &text) {
+  const std::string raw_path = path.string();
+  int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, raw_path.c_str(),
+                                    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
+  if (fd < 0)
+    return;
+
+  const char *cursor = text.data();
+  size_t remaining = text.size();
+  while (remaining > 0) {
+    ssize_t written = static_cast<ssize_t>(syscall(SYS_write, fd, cursor, remaining));
+    if (written <= 0)
+      break;
+    cursor += written;
+    remaining -= static_cast<size_t>(written);
+  }
+  syscall(SYS_close, fd);
+}
+
+uint32_t read_u32_property(const fs::path &path, std::string_view key, uint32_t fallback) {
+  std::istringstream input(read_text_file(path));
+  std::string name;
+  uint64_t value = 0;
+  while (input >> name >> value) {
+    if (name == key)
+      return static_cast<uint32_t>(value);
+  }
+  return fallback;
+}
+
+std::string set_property(std::string text, std::string_view key, uint64_t value) {
+  std::istringstream input(text);
+  std::ostringstream output;
+  std::string line;
+  bool replaced = false;
+  while (std::getline(input, line)) {
+    if (line.starts_with(key) && line.size() > key.size() && line[key.size()] == ' ') {
+      output << key << " " << value << "\n";
+      replaced = true;
+    } else {
+      output << line << "\n";
+    }
+  }
+  if (!replaced)
+    output << key << " " << value << "\n";
+  return output.str();
+}
+
+bool make_temp_dir(const char *prefix, std::string *out) {
+  char tmpl[128];
+  std::snprintf(tmpl, sizeof(tmpl), "/tmp/%s_XXXXXX", prefix);
+  char *dir = mkdtemp(tmpl);
+  if (!dir)
+    return false;
+  *out = dir;
+  return true;
+}
+
+uint32_t count_numeric_dirs(const fs::path &dir) {
+  uint32_t count = 0;
+  std::error_code ec;
+  for (const auto &entry : fs::directory_iterator(dir, ec)) {
+    if (!entry.is_directory(ec))
+      continue;
+    auto name = entry.path().filename().string();
+    uint32_t ignored = 0;
+    auto [ptr, err] = std::from_chars(name.data(), name.data() + name.size(), ignored);
+    if (err == std::errc{} && ptr == name.data() + name.size())
+      ++count;
+  }
+  return count;
+}
+
+std::optional<uint32_t> read_u32_file(const fs::path &path) {
+  std::istringstream in(read_text_file(path));
+  uint32_t value = 0;
+  if (!(in >> value))
+    return std::nullopt;
+  return value;
+}
+
+void append_unique_gpu_id(std::vector<uint32_t> *ids, uint32_t gpu_id) {
+  if (std::find(ids->begin(), ids->end(), gpu_id) == ids->end())
+    ids->push_back(gpu_id);
+}
+
+uint32_t max_numeric_dir(const fs::path &dir) {
+  uint32_t max_id = 0;
+  std::error_code ec;
+  for (const auto &entry : fs::directory_iterator(dir, ec)) {
+    if (!entry.is_directory(ec))
+      continue;
+    auto name = entry.path().filename().string();
+    uint32_t id = 0;
+    auto [ptr, err] = std::from_chars(name.data(), name.data() + name.size(), id);
+    if (err == std::errc{} && ptr == name.data() + name.size())
+      max_id = std::max(max_id, id);
+  }
+  return max_id;
+}
+
+std::optional<uint32_t> first_real_gpu_id_matching_isa(std::string_view host_isa) {
+  std::optional<uint32_t> target_version = kmd::gfx_target_version_from_name(host_isa);
+  if (!target_version)
+    return std::nullopt;
+
+  fs::path nodes_dir = fs::path(kRealTopologyPath) / "nodes";
+  const uint32_t max_node = max_numeric_dir(nodes_dir);
+  for (uint32_t node_id = 1; node_id <= max_node; ++node_id) {
+    fs::path node_dir = nodes_dir / std::to_string(node_id);
+    const uint32_t gfx_target_version =
+        read_u32_property(node_dir / "properties", "gfx_target_version", 0);
+    if (gfx_target_version != *target_version)
+      continue;
+
+    std::optional<uint32_t> gpu_id = read_u32_file(node_dir / "gpu_id");
+    if (gpu_id && *gpu_id != 0)
+      return gpu_id;
+  }
+  return std::nullopt;
+}
+
+std::string io_link_to_cpu(uint32_t node_from) {
+  std::ostringstream link;
+  link << "type 2\n"
+       << "version_major 0\n"
+       << "version_minor 0\n"
+       << "node_from " << node_from << "\n"
+       << "node_to 0\n"
+       << "weight 20\n"
+       << "min_latency 0\n"
+       << "max_latency 0\n"
+       << "min_bandwidth 0\n"
+       << "max_bandwidth 0\n"
+       << "recommended_transfer_size 0\n"
+       << "num_hops 1\n"
+       << "flags 1\n";
+  return link.str();
+}
+
+std::string io_link_from_cpu(uint32_t node_to) {
+  std::ostringstream link;
+  link << "type 2\n"
+       << "version_major 0\n"
+       << "version_minor 0\n"
+       << "node_from 0\n"
+       << "node_to " << node_to << "\n"
+       << "weight 20\n"
+       << "min_latency 0\n"
+       << "max_latency 0\n"
+       << "min_bandwidth 0\n"
+       << "max_bandwidth 0\n"
+       << "recommended_transfer_size 0\n"
+       << "num_hops 1\n"
+       << "flags 1\n";
+  return link.str();
+}
+
+uint32_t choose_render_minor(uint32_t requested) {
+  constexpr uint32_t kRenderMinorBegin = 128;
+  constexpr uint32_t kRenderMinorEnd = 192;
+  auto available = [](uint32_t minor) {
+    return !fs::exists("/sys/class/drm/renderD" + std::to_string(minor)) &&
+           !fs::exists("/dev/dri/renderD" + std::to_string(minor));
+  };
+
+  if (requested >= kRenderMinorBegin && requested < kRenderMinorEnd && available(requested))
+    return requested;
+  for (uint32_t minor = kRenderMinorBegin; minor < kRenderMinorEnd; ++minor) {
+    if (available(minor))
+      return minor;
+  }
+  return (requested >= kRenderMinorBegin && requested < kRenderMinorEnd) ? requested
+                                                                         : kRenderMinorEnd - 1;
+}
+
+bool raw_lstat(const std::string &path, struct stat *st) {
+  return syscall(SYS_newfstatat, AT_FDCWD, path.c_str(), st, AT_SYMLINK_NOFOLLOW) == 0;
+}
+
+bool raw_copy_file(const std::string &src, const std::string &dst) {
+  int in = static_cast<int>(syscall(SYS_openat, AT_FDCWD, src.c_str(), O_RDONLY | O_CLOEXEC));
+  if (in < 0)
+    return false;
+
+  std::error_code ec;
+  fs::create_directories(fs::path(dst).parent_path(), ec);
+  if (ec) {
+    syscall(SYS_close, in);
+    return false;
+  }
+
+  int out = static_cast<int>(
+      syscall(SYS_openat, AT_FDCWD, dst.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
+  if (out < 0) {
+    syscall(SYS_close, in);
+    return false;
+  }
+
+  std::array<char, 4096> buffer{};
+  for (;;) {
+    ssize_t n = static_cast<ssize_t>(syscall(SYS_read, in, buffer.data(), buffer.size()));
+    if (n == 0)
+      break;
+    if (n < 0) {
+      syscall(SYS_close, out);
+      syscall(SYS_close, in);
+      return false;
+    }
+    char *p = buffer.data();
+    ssize_t remaining = n;
+    while (remaining > 0) {
+      ssize_t written =
+          static_cast<ssize_t>(syscall(SYS_write, out, p, static_cast<size_t>(remaining)));
+      if (written <= 0) {
+        syscall(SYS_close, out);
+        syscall(SYS_close, in);
+        return false;
+      }
+      p += written;
+      remaining -= written;
+    }
+  }
+
+  syscall(SYS_close, out);
+  syscall(SYS_close, in);
+  return true;
+}
+
+} // namespace
+
+TopologyOverlay::~TopologyOverlay() { cleanup(); }
+
+bool TopologyOverlay::copy_tree(const std::string &src, const std::string &dst) {
+  std::error_code ec;
+  fs::create_directories(dst, ec);
+  if (ec)
+    return false;
+
+  int dir = static_cast<int>(
+      syscall(SYS_openat, AT_FDCWD, src.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+  if (dir < 0)
+    return false;
+
+  std::array<char, 32768> entries{};
+  for (;;) {
+    int nread = static_cast<int>(syscall(SYS_getdents64, dir, entries.data(), entries.size()));
+    if (nread == 0)
+      break;
+    if (nread < 0) {
+      syscall(SYS_close, dir);
+      return false;
+    }
+
+    for (int pos = 0; pos < nread;) {
+      auto *entry = reinterpret_cast<LinuxDirent64 *>(entries.data() + pos);
+      std::string name = entry->d_name;
+      pos += entry->d_reclen;
+      if (name == "." || name == "..")
+        continue;
+
+      std::string child_src = src + "/" + name;
+      std::string child_dst = dst + "/" + name;
+      struct stat st {};
+      if (!raw_lstat(child_src, &st))
+        continue;
+
+      if (S_ISDIR(st.st_mode)) {
+        if (!copy_tree(child_src, child_dst)) {
+          syscall(SYS_close, dir);
+          return false;
+        }
+        continue;
+      }
+      if (S_ISLNK(st.st_mode)) {
+        std::array<char, 4096> link_target{};
+        ssize_t n = static_cast<ssize_t>(syscall(SYS_readlinkat, AT_FDCWD, child_src.c_str(),
+                                                 link_target.data(), link_target.size() - 1));
+        if (n > 0) {
+          link_target[static_cast<size_t>(n)] = '\0';
+          fs::create_directories(fs::path(child_dst).parent_path(), ec);
+          fs::create_symlink(link_target.data(), child_dst, ec);
+          ec.clear();
+        }
+        continue;
+      }
+
+      (void)raw_copy_file(child_src, child_dst);
+    }
+  }
+  syscall(SYS_close, dir);
+  return true;
+}
+
+bool TopologyOverlay::copy_guest_node(const Sysfs::GpuInfo &guest) {
+  if (guest_sysfs_.generate(guest).empty())
+    return false;
+  guest_drm_dir_ = guest_sysfs_.drm_path();
+
+  fs::path nodes_dir = fs::path(topology_dir_) / "nodes";
+  guest_node_id_ = max_numeric_dir(nodes_dir) + 1;
+  return copy_tree(fs::path(guest_sysfs_.path()) / "nodes" / "1",
+                   nodes_dir / std::to_string(guest_node_id_));
+}
+
+bool TopologyOverlay::patch_topology_files() {
+  fs::path root = topology_dir_;
+  fs::path nodes_dir = root / "nodes";
+  fs::path cpu_props = nodes_dir / "0" / "properties";
+  fs::path system_props = root / "system_properties";
+  fs::path guest_props = nodes_dir / std::to_string(guest_node_id_) / "properties";
+  fs::path guest_link =
+      nodes_dir / std::to_string(guest_node_id_) / "io_links" / "0" / "properties";
+
+  uint32_t existing_links = read_u32_property(cpu_props, "io_links_count",
+                                              count_numeric_dirs(nodes_dir / "0" / "io_links"));
+  fs::path new_cpu_link = nodes_dir / "0" / "io_links" / std::to_string(existing_links);
+  fs::create_directories(new_cpu_link);
+
+  write_text_file(system_props, set_property(read_text_file(system_props), "num_devices",
+                                             count_numeric_dirs(nodes_dir)));
+  write_text_file(nodes_dir / "0" / "gpu_id", "0\n");
+  write_text_file(cpu_props,
+                  set_property(read_text_file(cpu_props), "io_links_count", existing_links + 1));
+  write_text_file(new_cpu_link / "properties", io_link_from_cpu(guest_node_id_));
+  write_text_file(guest_props, set_property(read_text_file(guest_props), "io_links_count", 1));
+  write_text_file(guest_link, io_link_to_cpu(guest_node_id_));
+  return true;
+}
+
+bool TopologyOverlay::generate(const Sysfs::GpuInfo &guest) {
+  cleanup();
+  if (!make_temp_dir("rocjitsu_guest_topology", &topology_dir_))
+    return false;
+  if (!copy_tree(kRealTopologyPath, topology_dir_)) {
+    cleanup();
+    return false;
+  }
+  if (!copy_guest_node(guest) || !patch_topology_files()) {
+    cleanup();
+    return false;
+  }
+  return true;
+}
+
+void TopologyOverlay::cleanup() {
+  if (!topology_dir_.empty()) {
+    std::error_code ec;
+    fs::remove_all(topology_dir_, ec);
+    topology_dir_.clear();
+  }
+  guest_drm_dir_.clear();
+  guest_node_id_ = 0;
+  guest_sysfs_.cleanup();
+}
+
+void TopologyOverlay::release_after_fork() {
+  topology_dir_.clear();
+  guest_drm_dir_.clear();
+  guest_node_id_ = 0;
+  guest_sysfs_.release_after_fork();
+}
+
+GuestKfd::GuestKfd(config::DbtGuestConfig config) : config_(std::move(config)) {
+  libc_passthrough().resolve();
+  guest_ = gpu_info_from_config(config_.guest_device,
+                                std::max(1u, config_.guest_device.num_shader_engines));
+  guest_.drm_render_minor = choose_render_minor(guest_.drm_render_minor);
+  host_gpu_id_ = config_.host_gpu_id;
+}
+
+GuestKfd::~GuestKfd() {
+  int kfd_fd = real_kfd_fd_.load(std::memory_order_acquire);
+  if (kfd_fd >= 0)
+    libc_passthrough().close(kfd_fd);
+}
+
+void GuestKfd::reset_after_fork() {
+  ready_.store(false, std::memory_order_release);
+  int kfd_fd = real_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
+  if (kfd_fd >= 0)
+    libc_passthrough().close(kfd_fd);
+  overlay_.release_after_fork();
+  synthetic_handles_.clear();
+  next_synthetic_handle_ = kSyntheticHandleBase;
+}
+
+bool GuestKfd::ensure_real_kfd_locked() {
+  if (real_kfd_fd_.load(std::memory_order_acquire) >= 0)
+    return true;
+  int fd = libc_passthrough().openat(AT_FDCWD, "/dev/kfd", O_RDWR | O_CLOEXEC, 0);
+  if (fd < 0)
+    return false;
+  real_kfd_fd_.store(fd, std::memory_order_release);
+  return true;
+}
+
+bool GuestKfd::ensure_ready() {
+  if (ready_.load(std::memory_order_acquire))
+    return true;
+
+  std::lock_guard lock(mutex_);
+  if (ready_.load(std::memory_order_acquire))
+    return true;
+  if (!config_.enabled || !config_.guest_device.present) {
+    errno = EINVAL;
+    return false;
+  }
+  if (!ensure_real_kfd_locked())
+    return false;
+  if (host_gpu_id_ == 0) {
+    std::optional<uint32_t> host_gpu_id = first_real_gpu_id_matching_isa(config_.host_isa);
+    if (!host_gpu_id) {
+      errno = ENODEV;
+      return false;
+    }
+    host_gpu_id_ = *host_gpu_id;
+  }
+  if (!overlay_.generate(guest_)) {
+    errno = ENODEV;
+    return false;
+  }
+  ready_.store(true, std::memory_order_release);
+  return true;
+}
+
+int GuestKfd::open() {
+  if (!ensure_ready())
+    return -1;
+  return fd();
+}
+
+int GuestKfd::close() { return 0; }
+
+int GuestKfd::forward_ioctl(unsigned long request, void *arg) {
+  int kfd_fd = fd();
+  if (kfd_fd < 0) {
+    errno = ENODEV;
+    return -ENODEV;
+  }
+  int ret = libc_passthrough().ioctl(kfd_fd, request, arg);
+  if (ret < 0) {
+    // Driver::ioctl implementations return negative errno values internally,
+    // while the real libc ioctl reports -1 and stores the reason in errno.
+    // Preserve the specific kernel error so GuestKfd callers do not collapse
+    // every forwarded failure into a generic -1.
+    const int saved_errno = errno != 0 ? errno : EIO;
+    errno = saved_errno;
+    return -saved_errno;
+  }
+  return ret;
+}
+
+int GuestKfd::get_process_apertures_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_get_process_apertures_new_args *>(arg);
+  if (!args) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  kfd_ioctl_get_process_apertures_new_args count_args{};
+  int ret = forward_ioctl(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &count_args);
+  if (ret != 0)
+    return ret;
+  const uint32_t host_count = count_args.num_of_nodes;
+
+  if (args->num_of_nodes == 0 || args->kfd_process_device_apertures_ptr == 0) {
+    args->num_of_nodes = count_args.num_of_nodes + 1;
+    return 0;
+  }
+
+  auto *out = reinterpret_cast<kfd_process_device_apertures *>(
+      static_cast<uintptr_t>(args->kfd_process_device_apertures_ptr));
+  const uint32_t requested = args->num_of_nodes;
+  // The caller controls requested capacity, so allocate only enough temporary
+  // space for the host nodes KFD reported. The guest aperture is appended
+  // directly into the caller buffer only when the caller supplied a spare slot.
+  const uint32_t host_capacity = std::min(requested, host_count);
+  std::vector<kfd_process_device_apertures> host(host_capacity);
+  if (!host.empty()) {
+    kfd_ioctl_get_process_apertures_new_args host_args{};
+    host_args.kfd_process_device_apertures_ptr =
+        reinterpret_cast<uint64_t>(reinterpret_cast<uintptr_t>(host.data()));
+    host_args.num_of_nodes = host_capacity;
+    ret = forward_ioctl(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &host_args);
+    if (ret != 0)
+      return ret;
+    const uint32_t host_to_copy = std::min(host_capacity, host_args.num_of_nodes);
+    for (uint32_t i = 0; i < host_to_copy; ++i)
+      out[i] = host[i];
+    if (requested > host_to_copy) {
+      out[host_to_copy] = guest_apertures();
+      args->num_of_nodes = host_to_copy + 1;
+    } else {
+      args->num_of_nodes = host_to_copy;
+    }
+    return 0;
+  }
+  if (requested > 0) {
+    out[0] = guest_apertures();
+    args->num_of_nodes = 1;
+  }
+  return 0;
+}
+
+int GuestKfd::get_clock_counters_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_get_clock_counters_args *>(arg);
+  if (!args) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (args->gpu_id != guest_.gpu_id)
+    return forward_ioctl(AMDKFD_IOC_GET_CLOCK_COUNTERS, arg);
+
+  return LinuxKfd::get_clock_counters_ioctl(arg);
+}
+
+int GuestKfd::acquire_vm_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_acquire_vm_args *>(arg);
+  if (!args) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (args->gpu_id == guest_.gpu_id)
+    return 0;
+  return forward_ioctl(AMDKFD_IOC_ACQUIRE_VM, arg);
+}
+
+int GuestKfd::get_available_memory_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_get_available_memory_args *>(arg);
+  if (!args) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (args->gpu_id == guest_.gpu_id) {
+    args->available = guest_.local_mem_size;
+    return 0;
+  }
+  return forward_ioctl(AMDKFD_IOC_AVAILABLE_MEMORY, arg);
+}
+
+int GuestKfd::set_memory_policy_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_set_memory_policy_args *>(arg);
+  if (!args) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (args->gpu_id == guest_.gpu_id)
+    return 0;
+  return forward_ioctl(AMDKFD_IOC_SET_MEMORY_POLICY, arg);
+}
+
+int GuestKfd::alloc_memory_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+  if (!args) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (args->gpu_id != guest_.gpu_id) {
+    int ret = forward_ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, arg);
+    if (ret == 0)
+      assert(args->handle < kSyntheticHandleBase);
+    return ret;
+  }
+
+  std::lock_guard lock(mutex_);
+  args->handle = next_synthetic_handle_++;
+  synthetic_handles_.insert(args->handle);
+  return 0;
+}
+
+int GuestKfd::free_memory_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_free_memory_of_gpu_args *>(arg);
+  if (!args) {
+    errno = EINVAL;
+    return -1;
+  }
+  {
+    std::lock_guard lock(mutex_);
+    if (synthetic_handles_.erase(args->handle) != 0)
+      return 0;
+  }
+  assert(args->handle < kSyntheticHandleBase);
+  return forward_ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, arg);
+}
+
+template <typename Args>
+int GuestKfd::map_or_unmap_memory_ioctl(Args *args, unsigned long request) {
+  if (!args) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  uint32_t host_gpu_id = 0;
+  {
+    std::lock_guard lock(mutex_);
+    host_gpu_id = host_gpu_id_;
+    if (synthetic_handles_.count(args->handle) != 0) {
+      args->n_success = args->n_devices;
+      return 0;
+    }
+  }
+
+  auto *ids =
+      reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(args->device_ids_array_ptr));
+  if (!ids) {
+    assert(args->handle < kSyntheticHandleBase);
+    return forward_ioctl(request, args);
+  }
+
+  std::vector<uint32_t> host_ids;
+  host_ids.reserve(args->n_devices);
+  bool has_guest = false;
+  for (uint32_t i = 0; i < args->n_devices; ++i) {
+    if (ids[i] == guest_.gpu_id) {
+      has_guest = true;
+      append_unique_gpu_id(&host_ids, host_gpu_id);
+    } else {
+      append_unique_gpu_id(&host_ids, ids[i]);
+    }
+  }
+  if (!has_guest) {
+    assert(args->handle < kSyntheticHandleBase);
+    return forward_ioctl(request, args);
+  }
+  if (host_ids.empty()) {
+    args->n_success = args->n_devices;
+    return 0;
+  }
+
+  assert(args->handle < kSyntheticHandleBase);
+  auto host_args = *args;
+  host_args.device_ids_array_ptr =
+      reinterpret_cast<uint64_t>(reinterpret_cast<uintptr_t>(host_ids.data()));
+  host_args.n_devices = static_cast<uint32_t>(host_ids.size());
+  host_args.n_success = 0;
+  int ret = forward_ioctl(request, &host_args);
+  if (ret != 0)
+    return ret;
+  args->n_success = args->n_devices;
+  return 0;
+}
+
+int GuestKfd::map_memory_ioctl(void *arg) {
+  return map_or_unmap_memory_ioctl(static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg),
+                                   AMDKFD_IOC_MAP_MEMORY_TO_GPU);
+}
+
+int GuestKfd::unmap_memory_ioctl(void *arg) {
+  return map_or_unmap_memory_ioctl(static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg),
+                                   AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU);
+}
+
+int GuestKfd::ioctl(unsigned long request, void *arg) {
+  if (!ensure_ready())
+    return -1;
+
+  switch (canonical_ioctl_request(request)) {
+  case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
+    return get_process_apertures_ioctl(arg);
+  case AMDKFD_IOC_GET_CLOCK_COUNTERS:
+    return get_clock_counters_ioctl(arg);
+  case AMDKFD_IOC_ACQUIRE_VM:
+    return acquire_vm_ioctl(arg);
+  case AMDKFD_IOC_AVAILABLE_MEMORY:
+    return get_available_memory_ioctl(arg);
+  case AMDKFD_IOC_SET_MEMORY_POLICY:
+    return set_memory_policy_ioctl(arg);
+  case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
+    return alloc_memory_ioctl(arg);
+  case AMDKFD_IOC_FREE_MEMORY_OF_GPU:
+    return free_memory_ioctl(arg);
+  case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
+    return map_memory_ioctl(arg);
+  case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
+    return unmap_memory_ioctl(arg);
+  case AMDKFD_IOC_GET_VERSION:
+    return get_version_ioctl(arg);
+  case AMDKFD_IOC_SET_XNACK_MODE:
+  case AMDKFD_IOC_RUNTIME_ENABLE:
+    return forward_ioctl(request, arg);
+  default:
+    if (request_targets_guest(request, arg))
+      return reject_guest_execution_ioctl(request, arg);
+    return forward_ioctl(request, arg);
+  }
+}
+
+void *GuestKfd::mmap(void *addr, size_t length, int prot, int flags, off_t offset) {
+  if (!ensure_ready())
+    return MAP_FAILED;
+  int kfd_fd = fd();
+  if (kfd_fd < 0) {
+    errno = ENODEV;
+    return MAP_FAILED;
+  }
+  uint64_t encoded_gpu =
+      (static_cast<uint64_t>(offset) & ~KFD_MMAP_TYPE_MASK) >> KFD_MMAP_GPU_ID_SHIFT;
+  if ((static_cast<uint64_t>(offset) & KFD_MMAP_TYPE_MASK) == KFD_MMAP_TYPE_DOORBELL &&
+      encoded_gpu == guest_.gpu_id) {
+    errno = ENODEV;
+    return MAP_FAILED;
+  }
+  return libc_passthrough().mmap(addr, length, prot, flags, kfd_fd, offset);
+}
+
+int GuestKfd::munmap(void *, size_t) { return -ENOENT; }
+
+bool GuestKfd::owns_fd(int) const { return false; }
+
+int GuestKfd::fd() const { return real_kfd_fd_.load(std::memory_order_acquire); }
+
+std::string GuestKfd::redirect_sysfs_path(const char *path) const {
+  if (!path)
+    return {};
+
+  if (!ready_.load(std::memory_order_acquire))
+    return {};
+
+  auto redirected = redirect_sysfs_root_path(path, overlay_.topology_path(), {});
+  if (!redirected.empty())
+    return redirected;
+  if (overlay_.guest_drm_path().empty())
+    return {};
+
+  std::string_view sv(path);
+  uint32_t minor = 0;
+  std::string_view suffix;
+  if (parse_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor)
+    return overlay_.guest_drm_path() + "/renderD" + std::to_string(minor) + std::string(suffix);
+  if (parse_sys_dev_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor)
+    return overlay_.guest_drm_path() + "/renderD" + std::to_string(minor) + std::string(suffix);
+
+  constexpr std::string_view kDevDriRenderPrefix = "/dev/dri/renderD";
+  if (sv.starts_with(kDevDriRenderPrefix)) {
+    auto rest = sv.substr(kDevDriRenderPrefix.size());
+    auto slash = rest.find('/');
+    auto number = slash == std::string_view::npos ? rest : rest.substr(0, slash);
+    uint32_t parsed = 0;
+    auto [ptr, err] = std::from_chars(number.data(), number.data() + number.size(), parsed);
+    if (err == std::errc{} && ptr == number.data() + number.size() &&
+        parsed == guest_.drm_render_minor) {
+      auto dev_suffix = slash == std::string_view::npos ? std::string_view{} : rest.substr(slash);
+      return overlay_.guest_drm_path() + "/dev_dri/renderD" + std::to_string(parsed) +
+             std::string(dev_suffix);
+    }
+  }
+
+  return {};
+}
+
+bool GuestKfd::is_doorbell_range(const void *, size_t) const { return false; }
+
+bool GuestKfd::handles_drm_render_minor(uint32_t minor) const {
+  return ready_.load(std::memory_order_acquire) && minor == guest_.drm_render_minor;
+}
+
+const Sysfs::GpuInfo *GuestKfd::gpu_info_for_render_minor(uint32_t minor) const {
+  return handles_drm_render_minor(minor) ? &guest_ : nullptr;
+}
+
+std::string GuestKfd::topology_path() const {
+  return ready_.load(std::memory_order_acquire) ? overlay_.topology_path() : std::string{};
+}
+
+int GuestKfd::reject_guest_execution_ioctl(unsigned long request, void *) const {
+  util::Logger::debug_print("rocjitsu guest gpu: rejecting ", LinuxKfd::ioctl_name(request),
+                            " for guest gpu_id=", guest_.gpu_id);
+  errno = ENODEV;
+  return -1;
+}
+
+bool GuestKfd::request_targets_guest(unsigned long request, void *arg) const {
+  if (!arg)
+    return false;
+  switch (canonical_ioctl_request(request)) {
+  case AMDKFD_IOC_CREATE_QUEUE:
+    return static_cast<kfd_ioctl_create_queue_args *>(arg)->gpu_id == guest_.gpu_id;
+  case AMDKFD_IOC_SET_MEMORY_POLICY:
+    return static_cast<kfd_ioctl_set_memory_policy_args *>(arg)->gpu_id == guest_.gpu_id;
+  case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
+    return static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg)->gpu_id == guest_.gpu_id;
+  case AMDKFD_IOC_IMPORT_DMABUF:
+    return static_cast<kfd_ioctl_import_dmabuf_args *>(arg)->gpu_id == guest_.gpu_id;
+  case AMDKFD_IOC_SMI_EVENTS:
+    return static_cast<kfd_ioctl_smi_events_args *>(arg)->gpuid == guest_.gpu_id;
+  case AMDKFD_IOC_SET_SCRATCH_BACKING_VA:
+    return static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg)->gpu_id == guest_.gpu_id;
+  case AMDKFD_IOC_GET_TILE_CONFIG:
+    return static_cast<kfd_ioctl_get_tile_config_args *>(arg)->gpu_id == guest_.gpu_id;
+  case AMDKFD_IOC_SET_TRAP_HANDLER:
+    return static_cast<kfd_ioctl_set_trap_handler_args *>(arg)->gpu_id == guest_.gpu_id;
+  case AMDKFD_IOC_MAP_MEMORY_TO_GPU: {
+    auto *a = static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg);
+    auto *ids = reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(a->device_ids_array_ptr));
+    return ids && std::find(ids, ids + a->n_devices, guest_.gpu_id) != ids + a->n_devices;
+  }
+  case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU: {
+    auto *a = static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg);
+    auto *ids = reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(a->device_ids_array_ptr));
+    return ids && std::find(ids, ids + a->n_devices, guest_.gpu_id) != ids + a->n_devices;
+  }
+  case AMDKFD_IOC_SVM: {
+    auto *a = static_cast<kfd_ioctl_svm_args *>(arg);
+    for (uint32_t i = 0; i < a->nattr; ++i) {
+      auto &attr = a->attrs[i];
+      if ((attr.type == KFD_IOCTL_SVM_ATTR_PREFERRED_LOC ||
+           attr.type == KFD_IOCTL_SVM_ATTR_PREFETCH_LOC || attr.type == KFD_IOCTL_SVM_ATTR_ACCESS ||
+           attr.type == KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE ||
+           attr.type == KFD_IOCTL_SVM_ATTR_NO_ACCESS) &&
+          attr.value == guest_.gpu_id)
+        return true;
+    }
+    return false;
+  }
+  default:
+    return false;
+  }
+}
+
+kfd_process_device_apertures GuestKfd::guest_apertures() const {
+  uint32_t guest_node_id = 0;
+  {
+    std::lock_guard lock(mutex_);
+    guest_node_id = overlay_.guest_node_id();
+  }
+  const uint64_t ordinal = std::max<uint32_t>(1, guest_node_id);
+  const uint64_t aperture_stride = 0x10000000000ULL;
+  kfd_process_device_apertures apertures{};
+  apertures.lds_base = 0x1000000000000ULL + ordinal * aperture_stride;
+  apertures.lds_limit = apertures.lds_base + 0xFFFFFFFFULL;
+  apertures.scratch_base = 0x2000000000000ULL + ordinal * aperture_stride;
+  apertures.scratch_limit = apertures.scratch_base + 0xFFFFFFFFULL;
+  apertures.gpuvm_base = 0x1000000000ULL;
+  apertures.gpuvm_limit = 0x3FFFFFFFFFFFULL;
+  apertures.gpu_id = guest_.gpu_id;
+  return apertures;
+}
+
+} // namespace rocjitsu

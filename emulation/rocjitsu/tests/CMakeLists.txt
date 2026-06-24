@@ -182,6 +182,39 @@ function(_rj_path_from_installed_test_bin out install_dir file_name)
     set(${out} "${_path}" PARENT_SCOPE)
 endfunction()
 
+function(rj_test_runtime_dir_env out name)
+    string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_" _runtime_name "${name}")
+    set(${out}
+        "ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/${_runtime_name}"
+        PARENT_SCOPE
+    )
+endfunction()
+
+function(rj_installed_test_runtime_dir_env out name)
+    string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_" _runtime_name "${name}")
+    set(${out} "ROCJITSU_RUNTIME_DIR=runtime/${_runtime_name}" PARENT_SCOPE)
+endfunction()
+
+function(rj_environment_has_runtime_dir out)
+    set(_has_runtime_dir FALSE)
+    foreach(_entry IN LISTS ARGN)
+        if(_entry MATCHES "^ROCJITSU_RUNTIME_DIR=")
+            set(_has_runtime_dir TRUE)
+        endif()
+    endforeach()
+    set(${out} "${_has_runtime_dir}" PARENT_SCOPE)
+endfunction()
+
+function(rj_set_default_runtime_dir name)
+    get_property(_env TEST "${name}" PROPERTY ENVIRONMENT)
+    rj_environment_has_runtime_dir(_has_runtime_dir ${_env})
+    if(NOT _has_runtime_dir)
+        rj_test_runtime_dir_env(_runtime_dir_env "${name}")
+        list(APPEND _env "${_runtime_dir_env}")
+        set_tests_properties("${name}" PROPERTIES ENVIRONMENT "${_env}")
+    endif()
+endfunction()
+
 # Register a test for both the build tree and, when RJ_INSTALL_TESTS is ON, the
 # installed CTest tree. COMMAND is the normal build-tree command passed to
 # add_test(). INSTALL_COMMAND is optional and should use paths relative to the
@@ -205,6 +238,15 @@ function(rj_add_test)
     endif()
     if(NOT ARG_COMMAND)
         message(FATAL_ERROR "rj_add_test(${ARG_NAME}) requires COMMAND")
+    endif()
+
+    rj_environment_has_runtime_dir(_has_runtime_dir ${ARG_ENVIRONMENT})
+    if(NOT _has_runtime_dir)
+        # Each launcher test writes the active config into its runtime dir for
+        # the preloaded interposer. Use a per-test default so ctest -j runs
+        # cannot overwrite another test's config or daemon socket.
+        rj_test_runtime_dir_env(_runtime_dir_env "${ARG_NAME}")
+        list(APPEND ARG_ENVIRONMENT "${_runtime_dir_env}")
     endif()
 
     add_test(NAME "${ARG_NAME}" COMMAND ${ARG_COMMAND})
@@ -252,6 +294,17 @@ function(rj_add_test)
             "ROCJITSU_CONFIG_DIR=\${RJ_INSTALLED_CONFIG_DIR}"
             "ROCJITSU_KERNEL_DIR=\${RJ_INSTALLED_KERNEL_DIR}"
         )
+        rj_environment_has_runtime_dir(
+            _install_has_runtime_dir
+            ${ARG_INSTALL_ENVIRONMENT}
+        )
+        if(NOT _install_has_runtime_dir)
+            rj_installed_test_runtime_dir_env(
+                _install_runtime_dir_env
+                "${ARG_NAME}"
+            )
+            list(APPEND _install_env "${_install_runtime_dir_env}")
+        endif()
         list(APPEND _install_env ${ARG_INSTALL_ENVIRONMENT})
         list(APPEND _install_args ENVIRONMENT ${_install_env})
         rj_install_ctest("${ARG_NAME}" ${_install_args})
@@ -281,7 +334,7 @@ add_executable(
     vector_add_test.cpp
     gfx1250_sim_test.cpp
     simdojo_sim_test.cpp
-    simulated_driver_test.cpp
+    simulated_kfd_test.cpp
     decode_smoke_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
@@ -375,6 +428,7 @@ target_link_libraries(
     PRIVATE
         ${RJ_OBJECT_LIBS}
         rocjitsu_kmd
+        rocjitsu_dbt_config
         util
         flatbuffers
         Threads::Threads
@@ -425,7 +479,8 @@ rj_configure_target(scaling_test TEST)
 # --- Interposer tests run through the rocjitsu CLI launcher ---
 # All tests that need the simulated GPU go through:
 #   rocjitsu --config <cfg> -- <test_binary> [args]
-# The CLI handles LD_PRELOAD and config discovery. No RESOURCE_LOCK needed.
+# The CLI handles LD_PRELOAD and config discovery. rj_add_test gives launcher
+# tests isolated runtime directories, so no RESOURCE_LOCK is needed.
 
 set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json")
 set(RJ_CDNA4_KMD_2GPU_CONFIG
@@ -440,10 +495,170 @@ get_filename_component(
 )
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
+function(rj_detect_kfd_gfx_target_versions out_var)
+    set(_versions)
+    foreach(
+        _nodes_dir
+        IN
+        ITEMS
+            "/sys/devices/virtual/kfd/kfd/topology/nodes"
+            "/sys/class/kfd/kfd/topology/nodes"
+    )
+        if(NOT IS_DIRECTORY "${_nodes_dir}")
+            continue()
+        endif()
+
+        file(GLOB _node_dirs LIST_DIRECTORIES true "${_nodes_dir}/*")
+        foreach(_node_dir IN LISTS _node_dirs)
+            if(NOT IS_DIRECTORY "${_node_dir}")
+                continue()
+            endif()
+            if(NOT EXISTS "${_node_dir}/properties")
+                continue()
+            endif()
+
+            # DBT guest configs name a concrete host ISA. Read KFD topology at
+            # configure time so hardware-backed tests are not registered on
+            # hosts where /dev/kfd exists but the required ISA is absent.
+            file(READ "${_node_dir}/properties" _properties)
+            if(_properties MATCHES "(^|[\r\n])gfx_target_version[ \t]+([0-9]+)")
+                list(APPEND _versions "${CMAKE_MATCH_2}")
+            endif()
+        endforeach()
+    endforeach()
+    if(_versions)
+        list(REMOVE_DUPLICATES _versions)
+    endif()
+    set(${out_var} "${_versions}" PARENT_SCOPE)
+endfunction()
+
+rj_detect_kfd_gfx_target_versions(RJ_KFD_GFX_TARGET_VERSIONS)
+set(RJ_HAS_KFD_DEVICE FALSE)
+if(EXISTS "/dev/kfd")
+    set(RJ_HAS_KFD_DEVICE TRUE)
+endif()
+set(RJ_HAS_GFX1201_GPU FALSE)
+if("120001" IN_LIST RJ_KFD_GFX_TARGET_VERSIONS)
+    set(RJ_HAS_GFX1201_GPU TRUE)
+else()
+    find_program(
+        ROCM_AGENT_ENUM
+        rocm_agent_enumerator
+        HINTS "${ROCM_PATH}"
+        PATH_SUFFIXES bin
+    )
+    if(ROCM_AGENT_ENUM)
+        execute_process(
+            COMMAND ${ROCM_AGENT_ENUM}
+            OUTPUT_VARIABLE _agents
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _agent_rc
+        )
+        if(
+            _agent_rc EQUAL 0
+            AND _agents MATCHES "(^|[\r\n; ])gfx1201($|[\r\n; ])"
+        )
+            set(RJ_HAS_GFX1201_GPU TRUE)
+        endif()
+    endif()
+endif()
+
 set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
 )
+
+add_executable(guest_kfd_test guest_kfd_test.cpp)
+target_include_directories(
+    guest_kfd_test
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include ${HSA_INCLUDE_DIR}
+)
+target_link_libraries(guest_kfd_test PRIVATE Threads::Threads GTest::gtest_main)
+rj_configure_target(guest_kfd_test TEST)
+add_dependencies(guest_kfd_test rocjitsu_bin rocjitsu_shared rocjitsu_hooks)
+if(RJ_HAS_GFX1201_GPU)
+    add_test(
+        NAME "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
+        COMMAND
+            ${RJ_CLI} --config
+            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+            $<TARGET_FILE:guest_kfd_test>
+            --gtest_filter=GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME
+            "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
+        COMMAND
+            ${RJ_CLI} --config
+            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+            $<TARGET_FILE:guest_kfd_test>
+            --gtest_filter=GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+        COMMAND
+            ${RJ_CLI} --config
+            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+            $<TARGET_FILE:guest_kfd_test>
+            --gtest_filter=GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(
+        "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
+        "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
+        "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+        PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+    )
+    foreach(
+        _guest_kfd_test
+        IN
+        ITEMS
+            "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
+            "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
+            "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+    )
+        rj_set_default_runtime_dir("${_guest_kfd_test}")
+    endforeach()
+    message(
+        STATUS
+        "GuestKfd DBT guest tests enabled (gfx1201 host GPU detected)"
+    )
+else()
+    message(
+        STATUS
+        "GuestKfd DBT guest tests built but NOT registered with CTest "
+        "(no gfx1201 KFD host GPU)"
+    )
+endif()
+
+add_executable(hsa_hooks_unit_test dbt/hsa_hooks_unit_test.cpp)
+target_compile_definitions(
+    hsa_hooks_unit_test
+    PRIVATE
+        RJ_HOOK_UNIT_CONFIG_PATH="${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json"
+)
+target_include_directories(
+    hsa_hooks_unit_test
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+        ${CMAKE_SOURCE_DIR}/lib/util/include
+        ${GENERATED_DIR}
+)
+target_include_directories(
+    hsa_hooks_unit_test
+    SYSTEM
+    PRIVATE ${HSA_INCLUDE_DIR}
+)
+target_link_libraries(
+    hsa_hooks_unit_test
+    PRIVATE rocjitsu_hooks Threads::Threads GTest::gtest_main
+)
+rj_configure_target(hsa_hooks_unit_test TEST)
+gtest_discover_tests(hsa_hooks_unit_test)
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
@@ -458,6 +673,11 @@ _rj_path_from_installed_test_bin(
     "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
     "${RJ_CDNA4_KMD_CONFIG_NAME}"
 )
+_rj_path_from_installed_test_bin(
+    _rj_installed_dbt_guest_config
+    "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+    "guest_gfx950_on_gfx1201.json"
+)
 
 find_program(
     ROCMINFO_EXECUTABLE
@@ -466,7 +686,7 @@ find_program(
     PATH_SUFFIXES bin
     DOC "Path to the rocminfo executable"
 )
-if(ROCMINFO_EXECUTABLE)
+if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
     add_executable(rocminfo_test rocminfo_test.cpp)
     target_compile_definitions(
         rocminfo_test
@@ -515,7 +735,99 @@ if(ROCMINFO_EXECUTABLE)
             ${_rocminfo_install_environment_arg}
         )
     endforeach()
+
+    add_executable(dbt_guest_rocminfo_test rocminfo_test.cpp)
+    target_compile_definitions(
+        dbt_guest_rocminfo_test
+        PRIVATE
+            ROCMINFO_PATH="${ROCMINFO_EXECUTABLE}"
+            ROCJITSU_BIN="$<TARGET_FILE:rocjitsu_bin>"
+            RJ_CONFIG_PATH="${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json"
+            RJ_INSTALLED_ROCJITSU_BIN="${_rj_installed_rocjitsu_bin}"
+            RJ_INSTALLED_CONFIG_PATH="${_rj_installed_dbt_guest_config}"
+    )
+    target_link_libraries(dbt_guest_rocminfo_test PRIVATE GTest::gtest_main)
+    add_dependencies(
+        dbt_guest_rocminfo_test
+        rocjitsu_bin
+        rocjitsu_shared
+        rocjitsu_hooks
+    )
+
+    if(RJ_HAS_GFX1201_GPU)
+        add_test(
+            NAME "DbtGuestRocminfoTest.ExitsSuccessfully"
+            COMMAND
+                dbt_guest_rocminfo_test
+                --gtest_filter=RocminfoTest.ExitsSuccessfully
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        add_test(
+            NAME "DbtGuestRocminfoTest.InterposerActive"
+            COMMAND
+                dbt_guest_rocminfo_test
+                --gtest_filter=RocminfoTest.InterposerActive
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        add_test(
+            NAME "DbtGuestRocminfoTest.HsaSystemAttributes"
+            COMMAND
+                dbt_guest_rocminfo_test
+                --gtest_filter=RocminfoTest.HsaSystemAttributes
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        add_test(
+            NAME "DbtGuestRocminfoTest.DetectsGpuAgent"
+            COMMAND
+                dbt_guest_rocminfo_test
+                --gtest_filter=RocminfoTest.DetectsGpuAgent
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        add_test(
+            NAME "DbtGuestRocminfoTest.ReportsGfx950"
+            COMMAND
+                dbt_guest_rocminfo_test
+                --gtest_filter=RocminfoTest.ReportsGfx950
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        add_test(
+            NAME "DbtGuestRocminfoTest.ReportsWavefrontSize"
+            COMMAND
+                dbt_guest_rocminfo_test
+                --gtest_filter=RocminfoTest.ReportsWavefrontSize
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        foreach(
+            _dbt_guest_rocminfo_test
+            IN
+            ITEMS
+                "DbtGuestRocminfoTest.ExitsSuccessfully"
+                "DbtGuestRocminfoTest.InterposerActive"
+                "DbtGuestRocminfoTest.HsaSystemAttributes"
+                "DbtGuestRocminfoTest.DetectsGpuAgent"
+                "DbtGuestRocminfoTest.ReportsGfx950"
+                "DbtGuestRocminfoTest.ReportsWavefrontSize"
+        )
+            rj_set_default_runtime_dir("${_dbt_guest_rocminfo_test}")
+        endforeach()
+        message(
+            STATUS
+            "DBT guest rocminfo tests enabled (gfx1201 host GPU detected)"
+        )
+    else()
+        message(
+            STATUS
+            "DBT guest rocminfo tests built but NOT registered with CTest "
+            "(no gfx1201 KFD host GPU)"
+        )
+    endif()
     message(STATUS "rocminfo test enabled (found ${ROCMINFO_EXECUTABLE})")
+elseif(ROCMINFO_EXECUTABLE)
+    message(
+        STATUS
+        "rocminfo test disabled (/dev/kfd not found; rocminfo exits before "
+        "simulated KFD discovery)"
+    )
 else()
     message(STATUS "rocminfo test disabled (rocminfo not found)")
 endif()
@@ -662,7 +974,12 @@ if(HSA_RUNTIME64)
             hsa_hooks_test
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(hsa_hooks_test device_kernels rocjitsu_hooks)
+        add_dependencies(
+            hsa_hooks_test
+            device_kernels
+            rocjitsu_bin
+            rocjitsu_hooks
+        )
         rj_configure_target(hsa_hooks_test TEST)
         if(RJ_INSTALL_TESTS)
             rj_install_test_target(hsa_hooks_test)
@@ -683,7 +1000,9 @@ if(HSA_RUNTIME64)
             rj_add_test(
                 NAME "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
                 COMMAND
-                    hsa_hooks_test
+                    $<TARGET_FILE:rocjitsu_bin> --config
+                    ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+                    $<TARGET_FILE:hsa_hooks_test>
                     --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 60
@@ -888,12 +1207,33 @@ endif()
 
 rj_find_amdcxx(AMDCXX)
 set(RJ_ENABLE_HIP_TESTS ON)
+find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
+set(RJ_HIP_RUNTIME_SUPPORTS_GFX950 FALSE)
+if(HIP_RUNTIME64)
+    # These tests expose a synthetic gfx950 GPU to HIP. Recent HIP runtimes
+    # reject agents whose PCI ID/ISA are not in their device table, even when
+    # ROCR can enumerate the agent. Do not register tests that would fail before
+    # exercising rocjitsu.
+    file(STRINGS "${HIP_RUNTIME64}" _rj_hip_gfx950_strings REGEX "gfx950")
+    if(_rj_hip_gfx950_strings)
+        set(RJ_HIP_RUNTIME_SUPPORTS_GFX950 TRUE)
+    endif()
+endif()
 if(NOT AMDCXX)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (amdclang++ not found)")
 elseif(NOT HSA_RUNTIME64)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (libhsa-runtime64 not found)")
+elseif(NOT HIP_RUNTIME64)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (libamdhip64 not found)")
+elseif(NOT RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(
+        STATUS
+        "HIP tests disabled (libamdhip64 does not advertise gfx950 support)"
+    )
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND RJ_SANITIZER_LINK_OPTIONS)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (GNU host compiler with sanitizers)")
