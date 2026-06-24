@@ -85,7 +85,7 @@ class MIGPUSpecs:
                     |-- design
                         | -- physical_aid (CDNA)
                         | -- logical_partitions_per_die (CDNA)
-                        | -- memory_die (RDNA/navi3)
+                        | -- memory_die (RDNA)
                         | -- memory_levels
         """
 
@@ -377,7 +377,8 @@ class MIGPUSpecs:
         RDNA: Check for the MCD count. *supported products at this time are APUs,
         which do not have MCD concept like dGPUs- force to "1" to signal unified memory.
         """
-        if cls.get_gpu_series(gpu_arch).lower() == "navi3":
+        gpu_series_lower = cls.get_gpu_series(gpu_arch).lower()
+        if gpu_series_lower == "rdna3.5":
             return cls._gpu_design[gpu_model.lower()].get("memory_die", 1)
         else:
             design = cls._gpu_design.get(gpu_model.lower(), {})

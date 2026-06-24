@@ -83,8 +83,6 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
         ("max_mclk", float, "max_mclk"),
         ("max_sclk", float, "max_sclk"),
         ("max_waves_per_cu", int, "max_waves_per_cu"),
-        ("num_hbm_channels", float, "num_hbm_channels"),
-        ("num_xcd", int, "num_xcd"),
         ("wave_size", int, "wave_size"),
     ]
 
@@ -97,8 +95,28 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
             )
         sys_vars_collection[f"ammolite__{var_name}"] = variable_value
 
+    sys_info_dict = sys_info.to_dict()
+
+    # Memory channels: both CDNA (HBM) and RDNA (LPDDR) use num_memory_channels.
+    raw_channels = sys_info_dict.get("num_memory_channels")
+    if raw_channels is not None and not pd.isna(raw_channels):
+        sys_vars_collection["ammolite__num_memory_channels"] = float(raw_channels)
+
+    # num_xcd is CDNA-only; default to 1 for single-die RDNA/APU parts.
+    raw_num_xcd = sys_info_dict.get("num_xcd")
+    if raw_num_xcd is None or pd.isna(raw_num_xcd) or int(raw_num_xcd) == 0:
+        num_xcd_value = 1
+    else:
+        num_xcd_value = int(raw_num_xcd)
+    sys_vars_collection["ammolite__num_xcd"] = num_xcd_value
+
+    # num_gl1c is RDNA-only; emit it only when present in sysinfo.
+    raw_num_gl1c = sys_info_dict.get("num_gl1c")
+    if raw_num_gl1c is not None and not pd.isna(raw_num_gl1c):
+        sys_vars_collection["ammolite__num_gl1c"] = int(raw_num_gl1c)
+
     # Special case for total_l2_chan
-    raw_total_l2_chan = sys_info.to_dict().get("total_l2_chan")
+    raw_total_l2_chan = sys_info_dict.get("total_l2_chan")
     if pd.isna(raw_total_l2_chan) or raw_total_l2_chan == 0:
         console_warning(
             "total_l2_chan is not available in sysinfo.csv, please provide the correct "
