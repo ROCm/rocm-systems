@@ -46,9 +46,9 @@ address the buffer directly.
 Whether a communicator can use symmetric memory is decided once at
 ``ncclCommInitRank`` time. The prerequisites are:
 
-- All local ranks are **CUDA peer-to-peer capable** with each other (on AMD
-  GPUs this means they are on the same host, or are reachable through a
-  Multi-Node NVLink/Infinity Fabric clique).
+- All local ranks are **peer-to-peer capable** with each other (on AMD
+  GPUs this means they are on the same host over PCIe or XGMI,
+  or are reachable through a Multi-Node Infinity Fabric clique).
 - Virtual Memory Management is enabled (``NCCL_CUMEM_ENABLE=1``).
 - Symmetric windows are enabled (``NCCL_WIN_ENABLE=1``, the default).
 - Either GPU-Initiated Networking (GIN) is available, or the communicator is a
