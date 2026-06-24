@@ -681,7 +681,7 @@ Analysis database example
    WARNING Created file: test.db
 
 
-PyTorch Operator Analysis
+PyTorch operator analysis
 =========================
 
 .. warning::
