@@ -45,6 +45,17 @@ def _in_launch() -> bool:
     return getattr(_thread_local, "in_launch", False)
 
 
+def _next_launch_index(marker: str) -> int:
+    """Per-thread occurrence count for marker, matching the torch backend so
+    repeated launches stay distinguishable in the call tree."""
+    counters = getattr(_thread_local, "launch_counters", None)
+    if counters is None:
+        counters = {}
+        _thread_local.launch_counters = counters
+    counters[marker] = counters.get(marker, 0) + 1
+    return counters[marker]
+
+
 def _resolve_triton() -> bool:
     """Bind the triton handles on _STATE. Returns True if triton is importable."""
     if importlib.util.find_spec("triton") is None:
@@ -118,13 +129,13 @@ def _run_with_marker(
     if _in_launch():
         return thunk()
     kernel_name = _extract_kernel_name(self_obj)
+    marker = f"{marker_prefix}.{kernel_name}"
     location = resolve_user_caller_location()
+    index = _next_launch_index(marker)
     _thread_local.in_launch = True
     pushed = False
     try:
-        _push_scope(
-            f"{marker_prefix}.{kernel_name}", f"#1@{location}", backend=_BACKEND_NAME
-        )
+        _push_scope(marker, f"#{index}@{location}", backend=_BACKEND_NAME)
         pushed = True
         return thunk()
     finally:
