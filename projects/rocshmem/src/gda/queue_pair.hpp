@@ -467,7 +467,7 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::put_nbi(
     void *dest, const void *source, size_t nelems, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::RDMA_WRITE;
+  static constexpr OpCode Op = OpCode::RDMA_WRITE;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   /* only need lkey when RDMA_WRITE can't be inlined */
@@ -480,7 +480,7 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::put_nbi_single(
     void *dest, const void *source, size_t nelems) {
-  constexpr OpCode Op = OpCode::RDMA_WRITE;
+  static constexpr OpCode Op = OpCode::RDMA_WRITE;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   /* only need lkey when RDMA_WRITE can't be inlined */
@@ -493,7 +493,7 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::get_nbi(
     void *dest, const void *source, size_t nelems, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::RDMA_READ;
+  static constexpr OpCode Op = OpCode::RDMA_READ;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -505,7 +505,7 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::get_nbi_single(
     void *dest, const void *source, size_t nelems) {
-  constexpr OpCode Op = OpCode::RDMA_READ;
+  static constexpr OpCode Op = OpCode::RDMA_READ;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -518,8 +518,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
     void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -533,8 +533,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
     void *dest, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -548,8 +548,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi(
     uint64_t *fetch, void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -561,8 +561,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi_single(
     uint64_t *fetch, void *dest, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -574,8 +574,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
     void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -586,8 +586,8 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
 template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(void *dest, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -599,8 +599,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
     void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -614,8 +614,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
     void *dest, uint64_t cond, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -629,8 +629,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi(
     uint64_t *fetch, void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -642,8 +642,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_single(
     uint64_t *fetch, void *dest, uint64_t cond, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -655,8 +655,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch(
     void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -668,8 +668,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch_single(
     void *dest, uint64_t cond, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
@@ -682,8 +682,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
     void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
   return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, 0, wf_info);
@@ -693,8 +693,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
     void *dest, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
   return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, 0);
@@ -704,8 +704,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
     void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
   provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, 0, wf_info);
@@ -714,8 +714,8 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
 template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(void *dest, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_FA;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  static constexpr OpCode Op = OpCode::ATOMIC_FA;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
   provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, 0);
@@ -725,8 +725,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
     void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
   return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, cond, wf_info);
@@ -736,8 +736,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
     void *dest, uint64_t cond, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
   return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, cond);
@@ -747,8 +747,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch(
     void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
   provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, cond, wf_info);
@@ -758,8 +758,8 @@ template <typename Provider>
 template <bool RingDB>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch_single(
     void *dest, uint64_t cond, uint64_t value) {
-  constexpr OpCode Op = OpCode::ATOMIC_CS;
-  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  static constexpr OpCode Op = OpCode::ATOMIC_CS;
+  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
   provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, cond);
