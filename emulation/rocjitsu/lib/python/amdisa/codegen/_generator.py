@@ -2646,6 +2646,14 @@ class CodeGenerator:
             L.append('  wf.end();')
             return '\n'.join(L)
 
+        if cls == 'trap':
+            # S_TRAP is an exceptional control-flow terminator for CFG and DBT
+            # purposes, but rocjitsu does not currently model trap-handler
+            # execution in the wavefront simulator. Make dynamic execution fail
+            # explicitly while the generated PROGRAM_TERMINATOR flag carries the
+            # static-control-flow meaning for CFG construction.
+            return '  (void)wf;\n  throw util::UnimplementedInst(mnemonic());'
+
         if cls == 'waitcnt':
             L.append(
                 f'  uint16_t imm = static_cast<uint16_t>({src_ops[0]}.encoding_value_);'
@@ -5477,7 +5485,11 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class == 'cbranch':
                         ctor_body_parts.append('flags_ |= COND_BRANCH;')
-                    if _mem_sem and _mem_sem.semantic_class == 'endpgm':
+                    if _mem_sem and _mem_sem.semantic_class in ('endpgm', 'trap'):
+                        # BasicBlock splitting treats PROGRAM_TERMINATOR as a
+                        # hard stop. S_TRAP needs the same metadata as S_ENDPGM:
+                        # without it, CFG recovery can add a bogus fallthrough
+                        # edge into padding or a following ELF FUNC symbol.
                         ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
                     if _mem_sem and _mem_sem.semantic_class in (
                         'scalar_setpc',

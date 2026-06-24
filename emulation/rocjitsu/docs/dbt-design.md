@@ -89,11 +89,21 @@ s_setpc_b64 or s_swappc_b64 s[pc:pc+1]
 ```
 
 `BasicBlock::build()` performs this static PC recovery before block splitting.
-The recovered destination becomes a normal CFG successor and a block leader, and
-the source block stores an `IndirectCallFixup` describing the `s_getpc`, the
-replaceable address-builder byte range, the branch consumer, and the recovered
-source target. DBT only records patterns whose builder range is large enough to
-be replaced in place by the canonical relocated PC-delta builder.
+Recovered destinations become block leaders before the final `BasicBlock`
+objects are built. Non-returning `s_setpc_b64` targets become ordinary CFG
+successors. Recovered `s_swappc_b64` and direct `s_call_b64` calls are modeled
+separately as `BasicBlock::CallEdge` records when the callee reaches a matching
+`s_setpc_b64` return through the saved return SGPR.
+
+That split is intentional: ordinary successors are context-free direct control
+flow, while call edges carry a callee, a call-site-specific continuation, and the
+return SGPR. Keeping call edges out of the successor list prevents a shared
+helper from gaining every possible return continuation globally; DBT adds the
+temporary call/return edges only inside the kernel scope that owns the call site.
+The source block also stores an `IndirectCallFixup` describing the `s_getpc`,
+the replaceable address-builder byte range, the branch consumer, and the
+recovered source target. DBT only records patterns whose builder range is large
+enough to be replaced in place by the canonical relocated PC-delta builder.
 
 After all reachable blocks have been relocated, `BinaryTranslator` resolves each
 recovered source target through the kernel-local placement map and rewrites the

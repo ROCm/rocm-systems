@@ -46,6 +46,7 @@ enum class ScalarSop2Op {
     case ScalarSop2Op::SubbU32:
       return 5;
     }
+    return std::nullopt;
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
   case ROCJITSU_CODE_ARCH_NUM_ARCHS:

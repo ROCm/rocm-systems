@@ -8,8 +8,8 @@
 #include <span>
 #include <vector>
 
+#include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/code/static_pc_recovery.h"
 
 namespace rocjitsu {
 
@@ -41,16 +41,6 @@ struct BranchFixup {
   uint64_t target_inst_offset = 0;   ///< New .text offset of the branch instruction.
 };
 
-/// @brief Direct scalar call return register recorded while relocating a kernel.
-///
-/// @details AMDGPU direct scalar calls materialize the return PC in an SGPR
-/// pair. Later setpc instructions using that pair are returns to already
-/// relocated call sites rather than unsupported indirect branches.
-struct DirectCallReturn {
-  uint64_t source_call_offset = 0; ///< Source offset of the direct scalar call.
-  uint16_t return_sreg = 0;        ///< Low SGPR containing the call return PC.
-};
-
 /// @brief Physical output layout for one translated kernel.
 ///
 /// @details Blocks are emitted in original .text order. This is intentional: it
@@ -69,7 +59,6 @@ struct KernelTextLayout {
   std::vector<BlockPlacement> blocks;     ///< Kernel-local block placements.
   std::vector<BranchFixup> branch_fixups; ///< Explicit branch patches.
   std::vector<IndirectCallFixup> indirect_call_fixups;
-  std::vector<DirectCallReturn> direct_call_returns;
 };
 
 void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words);
