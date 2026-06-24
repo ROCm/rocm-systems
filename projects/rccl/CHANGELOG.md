@@ -2,37 +2,33 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
-## Unreleased - RCCL 2.30.4 for ROCm 7.14
+## RCCL 2.30.4 for ROCm 7.14.0
 
 ### Added
+* Compatibility with NCCL 2.30.4.
+* Compatibility with NCCL 2.29.7.
+* Compatibility with NCCL 2.28.9.
 * Added proxytrace profiler plugin and core proxy-diagnostics hooks (`RCCL_PROXYTRACE`).
 * Added `ncclBarrierSession` LSA validation for barrier sessions.
-* Enable WarpSpeed auto mode for grow communicators.
 * Added symmetric-memory ReduceScatter kernel (`RailA2A_LsaLD`) on gfx942/gfx950.
 * Added bias (accumulation) AllReduce on gfx1250 (MI450).
 * Added optimized scale-up ReduceScatter, AllGather, and AllToAll kernels.
-* Refactored AllGather algorithm selection; hierarchical AllGather now enabled by default for multi-node.
 * Added rocprofiler coverage for `ncclCommGrow` and `ncclCommGetUniqueId`.
 * P2P batching auto-enabled for gfx950 in combination with non-AINIC NICs.
 * Display HIP/ROCm runtime versions in `NCCL_DEBUG` output.
-* Parallelize communicator destruction across child processes to reduce teardown latency.
-* Symmetric memory kernel tuning.
 * Detect ROCm version via core symlink for multi-architecture installs.
 * Skip DDA IPC initialization for directMode and MNNVL topologies.
 * Load versioned `libamd_smi` SONAME instead of an unversioned symlink.
 * Added Pythonic API bindings under `bindings/nccl4py/` (RCCL fork of NVIDIA `nccl4py` v0.2.0). Provides Python access to RCCL collectives via Cython bindings, an on-disk `cuda.core` HIP shim for ROCm hosts without `cuda-bindings` / `cuda-core`, and RCCL-only collective wrappers (`ncclAllReduceWithBias`, `ncclAllToAllv`).
 * Added RCCL examples to the repository.
+* Added `RCCL host API` pull-in from NCCL 2.30.
 
 ### Changed
-* Compatibility with NCCL 2.30.4.
-* Compatibility with NCCL 2.29.7.
-* Compatibility with NCCL 2.28.9.
+* Enable WarpSpeed auto mode for grow communicators.
+* Refactored AllGather algorithm selection; hierarchical AllGather now enabled by default for multi-node.
 * Swapped legacy `net_ib` with the `net_ib` implementation from NCCL 2.29.
-* Added `RCCL host API` pull-in from NCCL 2.30.
 * Skip per-warp channel LDS copy when `warpComm` is disabled.
 * Harden proxy RPC setup against malformed peer input.
-* Fixed `net_ib_cast`: gate CTS offload path on per-connection state.
-* Fixed acquire-tail polling for gfx950 P2P host staging.
 * The bootstrap AllGather now uses the bidirectional ring (N/2 steps) by default on the socket OOB path. `NCCL_BOOTSTRAP_BIDIR_ALLGATHER` now defaults to `1`; set it to `0` to fall back to the unidirectional ring. The net OOB path (`NCCL_OOB_NET_ENABLE`) and its bidirectional variant (`NCCL_BOOTSTRAP_BIDIR_NET`) remain off by default.
 * `NCCL_PXN_C2C` is kept default-off (`0`); upstream NCCL defaults it to `1` since 2.28. The C2C PXN routing path is NVIDIA-specific and is not currently applicable on AMD hardware.
 
@@ -41,6 +37,10 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Removed kernel COLLTRACE support, including the `COLLTRACE` build option, device-side collective trace buffers, debug kernel variants, and related install/CI wiring. The host latency profiler is unchanged.
 * Removed legacy `ENABLE_PROFILING` device profiling support and the `PROFILE` build option. Use the profiler plugin API instead.
 
+### Optimized
+* Tuned symmetric memory kernels.
+* Parallelized communicator destruction across child processes to reduce teardown latency.
+
 ### Resolved Issues
 * Fixed `ncclCommGrow` channel-count divergence causing incorrect collective routing.
 * Fixed `ncclCommGrow` hang when growing to an 8-rank single-node communicator.
@@ -48,7 +48,9 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed LL128 protocol correctness for gfx1250 (MI450).
 * Fixed XGMI topology mapping for multi-system (NPS) nodes.
 * Fixed gfx950 collective hang caused by a tuner race condition.
+* Fixed `net_ib_cast`: gate CTS offload path on per-connection state.
 * Fixed `net_ib`: avoid flagging a non-fatal Isend CTS no-match as a fatal error.
+* Fixed acquire-tail polling for gfx950 P2P host staging.
 * Fixed LDS overflow in device-linker builds.
 * Fixed symmetric memory correctness issues.
 * Fixed `ncclCommFree` to free symmetric window objects automatically (NCCL 2.29.7 defect).
@@ -152,6 +154,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Profiler plugin needs to be verified.
 
 ### Added
+* Compatibility with NCCL 2.28.3.
 * Added `ncclAllReduceWithBias` API for fused all-reduce with elementwise accumulation-bias operations.
 * Added collective latency profiler tool (`--latency-profiler` in `install.sh`) for per-collective timing analysis.
 * Added dynamic pipelining for reduction collectives via the Simple protocol to improve single-node performance.
@@ -183,7 +186,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Experimental support for traffic shaping using warp specialization (also known as WarpSpeed) is now available for the Ring algorithm.
 * Enabling WarpSpeed in auto mode using RCCL_WARP_SPEED_AUTO optimizes performance and reduces the CU count by 50% on a single node for AllReduce, AllGather from 64MB, and ReduceScatter from 256MB.
 * The following configuration knobs control WarpSpeed behavior for debugging purposes: `RCCL_WARP_SPEED_ENABLE`, `RCCL_UNROLL_FACTOR`, `RCCL_WARP_SPEED_CU_COUNT`, and `RCCL_THREADS_PER_BLOCK`. Note that the effective unroll factor is calculated as 2 raised to the value of `RCCL_UNROLL_FACTOR`.
-* Compatibility with NCCL 2.28.3.
 
 ### Resolved Issues
 * Fixed missing memory fence in the LL protocol for gfx950, which caused collective hangs.
