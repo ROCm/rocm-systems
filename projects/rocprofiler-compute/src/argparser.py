@@ -104,6 +104,18 @@ def block_token_or_alias(s: str) -> str:
         return s
 
 
+def non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}")
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a non-negative integer (0 means all), got {parsed}"
+        )
+    return parsed
+
+
 def print_avail_arch(avail_arch: list[str], args: str) -> str:
     ret_str = f"List all available {args} for analysis on specified arch:"
     for arch in avail_arch:
@@ -797,10 +809,9 @@ Examples:
         metavar="",
         dest="pc_sampling_rows",
         default=10,
-        type=int,
+        type=non_negative_int,
         help="\t\tSpecify the maximum number of rows shown in the PC "
-        "sampling table; use 0 or a negative value to show all rows "
-        "(DEFAULT: 10).",
+        "sampling table; use 0 to show all rows (DEFAULT: 10).",
     )
 
     ## Roofline Command Line Options (analyze: visualization)

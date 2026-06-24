@@ -645,9 +645,9 @@ def test_load_per_kernel_num_rows_keeps_top_hotspots() -> None:
     assert df["count"].tolist() == [3, 2]
 
 
-@pytest.mark.parametrize("num_rows", [None, 0, -1])
+@pytest.mark.parametrize("num_rows", [None, 0])
 def test_load_per_kernel_num_rows_unset_keeps_all(num_rows: int | None) -> None:
-    """None or a non-positive num_rows keeps every row."""
+    """None or 0 num_rows keeps every row."""
     df = load_pc_sampling_data_per_kernel(
         method="host_trap",
         tool_data=_three_hotspot_tool_data(),

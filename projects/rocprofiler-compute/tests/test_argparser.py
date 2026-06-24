@@ -128,6 +128,17 @@ def test_pc_sampling_rows_defaults_to_ten():
     assert build_args(["analyze"]).pc_sampling_rows == 10
 
 
+def test_pc_sampling_rows_zero_allowed():
+    assert build_args(["analyze", "--pc-sampling-rows", "0"]).pc_sampling_rows == 0
+
+
+def test_pc_sampling_rows_rejects_negative(capsys):
+    with pytest.raises(SystemExit) as exc:
+        build_args(["analyze", "--pc-sampling-rows", "-1"])
+    assert exc.value.code == 2
+    assert "non-negative" in capsys.readouterr().err
+
+
 def test_pc_sampling_options_accept_overrides():
     args = build_args([
         "analyze",

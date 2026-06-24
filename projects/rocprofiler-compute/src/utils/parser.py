@@ -415,7 +415,7 @@ def load_pc_sampling_data_per_kernel(
     :param sorting_type: "offset" or "count".
     :param kernel_name: Kernel to filter to, or None for all kernels.
     :param num_rows: Keep only the first *num_rows* rows after sorting; None or
-        a non-positive value keeps every row.
+        0 keeps every row.
     """
     kernel_context = f"kernel '{kernel_name}'" if kernel_name else "all kernels"
     pc_samples = tool_data["buffer_records"][
@@ -474,7 +474,8 @@ def load_pc_sampling_data_per_kernel(
         )
         return pd.DataFrame()
 
-    if num_rows is not None and num_rows > 0:
+    # num_rows of 0 (or None) means show all rows; argparse rejects negatives.
+    if num_rows:
         df_sorted = df_sorted.head(num_rows)
 
     df_sorted["offset"] = df_sorted["offset"].apply(hex)
