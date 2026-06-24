@@ -901,6 +901,15 @@ rocprofiler-sdk:
             - gfx1250
           block: GL2A
           event: 1
+    - name: GL2C_EA_ATOMIC_DRAM
+      description: Number of GL2C/EA atomic requests (either 32-byte, 64-byte, 96-byte or 128-byte) 
+        destined for DRAM (MC).
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 132
     - name: GL2C_EA_RDREQ
       description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte) for all 
         clients.
@@ -912,6 +921,10 @@ rocprofiler-sdk:
             - gfx1201
           block: GL2C
           event: 140
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 117
     - name: GL2C_EA_RDREQ_sum
       description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte). Sum over
         GL2C instances.
@@ -948,6 +961,10 @@ rocprofiler-sdk:
             - gfx1201
           block: GL2C
           event: 148
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 121
     - name: GL2C_EA_RDREQ_128B_sum
       description: Number of 128-byte GL2C/EA read requests. Sum over GL2C instances.
       properties: []
@@ -996,6 +1013,10 @@ rocprofiler-sdk:
             - gfx1201
           block: GL2C
           event: 146
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 119
     - name: GL2C_EA_RDREQ_32B_sum
       description: Number of 32-byte GL2C/EA read requests. Sum over GL2C instances.
       properties: []
@@ -1044,6 +1065,10 @@ rocprofiler-sdk:
             - gfx1201
           block: GL2C
           event: 147
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 120
     - name: GL2C_EA_RDREQ_64B_sum
       description: Number of 64-byte GL2C/EA read requests. Sum over GL2C instances.
       properties: []
@@ -1116,6 +1141,10 @@ rocprofiler-sdk:
             - gfx1201
           block: GL2C
           event: 108
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 105
     - name: GL2C_EA_WRREQ_sum
       description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_EA_WRREQ 
         interface. Sum over GL2C instances.
@@ -1136,6 +1165,10 @@ rocprofiler-sdk:
             - gfx1201
           block: GL2C
           event: 122
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 107
     - name: GL2C_EA_WRREQ_STALL_max
       description: Number of cycles a write request was stalled. Max over GL2C instances.
       properties: []
@@ -1145,6 +1178,26 @@ rocprofiler-sdk:
             - gfx1200
             - gfx1201
           expression: reduce(GL2C_EA_WRREQ_STALL,max)
+    - name: GL2C_EA_WRREQ_LEVEL
+      description: The sum of the number of EA write requests in flight for all clients. This is 
+        primarily meant for measure average EA write latency. Average write latency = 
+        GL2C_PERF_SEL_EA_WRREQ_LEVEL/GL2C_PERF_SEL_EA_WRREQ.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 114
+    - name: GL2C_EA_WR_UNCACHED_32B
+      description: Number of 32-byte write/atomic going over the EA_wrreq interface due to uncached 
+        traffic. Note that CC mtypes can produce uncached requests, and those are included in this. A 
+        64-byte request will be counted as 2; 128-byte as 4; 256-byte as 8.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 192
     - name: GL2C_EA_WRREQ_64B
       description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the 
         TC_EA_wrreq interface.
@@ -1221,6 +1274,10 @@ rocprofiler-sdk:
             - gfx1201
           block: GL2C
           event: 41
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 84
     - name: GL2C_HIT_sum
       description: Number of cache hits. Sum over GL2C instances.
       properties: []
@@ -1377,6 +1434,10 @@ rocprofiler-sdk:
             - gfx1201
           block: GL2C
           event: 42
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 85
     - name: GL2C_MISS_sum
       description: Number of cache misses. Sum over GL2C instances.
       properties: []
@@ -1469,6 +1530,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
             - gfx9
             - gfx900
             - gfx906
@@ -4593,6 +4655,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 62
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 67
     - name: SQ_INSTS_SENDMSG
       description: Total number of Sendmsg (typically an interrupt to the CPU host) instructions 
         issued. This value is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs
@@ -5704,6 +5770,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 90
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 392
     - name: SQ_INST_LEVEL_SMEM
       description: Number of in-flight SMEM instructions (*2 load/store; *2 atomic; *2 memtime; *4 
         wb/inv). Set next counter to ACCUM_PREV and divide by INSTS_SMEM for average latency per 
@@ -7700,6 +7770,54 @@ rocprofiler-sdk:
             - gfx1250
           block: TCP
           event: 201
+    - name: TX_VCA_BUFFER_ATOMIC_WAVEFRONTS
+      description: Buffer atomic vec32 packets processed by VCA.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 195
+    - name: TX_VCA_BUFFER_LOAD_WAVEFRONTS
+      description: Buffer load vec32 packets processed by VCA.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 193
+    - name: TX_VCA_BUFFER_STORE_WAVEFRONTS
+      description: Buffer store vec32 packets processed by VCA.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 194
+    - name: TX_VCA_BUFFER_TOTAL_CYCLES
+      description: Buffer cycles issued to TC.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 196
+    - name: TX_VCA_BUFFER_WAVEFRONTS
+      description: Buffer vec32 packets processed by VCA both rows.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 190
+    - name: TX_VCA_FLAT_ATOMIC_WAVEFRONTS
+      description: Flat atomic vec32 packets processed by VCA.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 215
     - name: TX_VCA_FLAT_LOAD_WAVEFRONTS
       description: Flat load vec32 packets processed by VCA.
       properties: []
@@ -7716,6 +7834,14 @@ rocprofiler-sdk:
             - gfx1250
           block: TCP
           event: 214
+    - name: TX_VCA_FLAT_WAVEFRONTS
+      description: Flat vec32 packets processed by VCA both rows.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 210
     - name: TX_VCA_TOTAL_WAVEFRONTS
       description: Total vec32 packets processed by VCA both rows.
       properties: []
@@ -7756,6 +7882,110 @@ rocprofiler-sdk:
             - gfx1250
           block: TCP
           event: 48
+    - name: TX_VMW_DATA_FIFO_STALL
+      description: TCP stalls VCA req due to data fifo full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 43
+    - name: TX_VMW_GATE_EN1
+      description: TCP interface clocks are turned on. Not Windowed.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 0
+    - name: TX_VMW_GATE_EN2
+      description: TCP core clocks are turned on. Not Windowed.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 1
+    - name: TX_VMW_GL1_PENDING_STALL
+      description: RQ Arbitration stall due to waiting for response from GL1. Not Windowed. Row0 Event
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 54
+    - name: TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET
+      description: Total atomic without return requests to GL1.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 37
+    - name: TX_VMW_GL1_REQ_ATOMIC_WITH_RET
+      description: Total atomic with return requests to GL1.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 36
+    - name: TX_VMW_GL1_VMW_RDRET_STALL
+      description: Write to cache stalled by read return from GL1. Row0 Event
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 52
+    - name: TX_VMW_GL1_VMW_RDRET_STALL_ROW1
+      description: Write to cache stalled by read return from GL1. Row1 event
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 343
+    - name: TX_VMW_LFIFO_STALL
+      description: Memory latency fifo full. Row0 Event
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 49
+    - name: TX_VMW_LFIFO_STALL_ROW1
+      description: Memory latency fifo full. Row1 Event
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 342
+    - name: TX_VMW_MEM_REQ_FIFO_STALL
+      description: Stall due to memory request fifo full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 50
+    - name: TX_VMW_READ_SETCONFLICT_STALL
+      description: Set conflict stall on a read
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 46
+    - name: TX_VMW_REQ
+      description: Total cache line accesses
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 11
     - name: TX_VMW_REQ_READ
       description: Total cache read requests
       properties: []
@@ -7772,6 +8002,102 @@ rocprofiler-sdk:
             - gfx1250
           block: TCP
           event: 18
+    - name: TX_VMW_UTCL0_LFIFO_FULL
+      description: Count of cycles UTCL0 LFIFO is full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 111
+    - name: TX_VMW_UTCL0_MISS_UNDER_MISS
+      description: Count of UTCL0 Miss under Misses or Duplicate Misses
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 110
+    - name: TX_VMW_UTCL0_PERMISSION_MISS
+      description: Count of UTCL0 Permission Misses
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 109
+    - name: TX_VMW_UTCL0_REQUEST
+      description: Count of Requests to UTCL0
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 106
+    - name: TX_VMW_UTCL0_STALL_INFLIGHT_MAX
+      description: Count of cycles UTCL0 is stalled due to Inflight Max
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 112
+    - name: TX_VMW_UTCL0_STALL_LFIFO_NOT_RES
+      description: Count of cycles UTCL0 is stalled due to LFIFO entry not Resident
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 113
+    - name: TX_VMW_UTCL0_STALL_MULTI_MISS
+      description: Count of cycles UTCL0 is stalled due to arbitrated multiple misses
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 117
+    - name: TX_VMW_UTCL0_STALL_THRASHING_STALL
+      description: Count of stalls caused by stall-based thrashing feature in each probe.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 129
+    - name: TX_VMW_UTCL0_STALL_UTCL1_REQ_OUT_OF_CREDITS
+      description: Count of cycles UTCL0 is stalled due to insufficient credits to UTCL1
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 116
+    - name: TX_VMW_UTCL0_TRANSLATION_HIT
+      description: Count of UTCL0 Translation Hits
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 107
+    - name: TX_VMW_UTCL0_TRANSLATION_MISS
+      description: Count of UTCL0 Translation Misses
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 108
+    - name: TX_VMW_UTCL0_UTCL1_INFLIGHT
+      description: Count of inflight UTCL1 requests. Not windowed.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 130
     - name: TX_VMW_VCA_REQ_STATE_READ
       description: Number of state reads (start of a wave instruction)
       properties: []
@@ -7780,6 +8106,30 @@ rocprofiler-sdk:
             - gfx1250
           block: TCP
           event: 5
+    - name: TX_VMW_VCD_DATA_CYCLE_STALL
+      description: Read pipe stall due to TC_TD data interface cycling
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 55
+    - name: TX_VMW_VMW_VCA_REQ_STALL
+      description: TCP stalls VCA req interface.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 41
+    - name: TX_VMW_WRITE_SETCONFLICT_STALL
+      description: Set conflict stall on a write
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 47
     - name: TCA_BUSY
       description: Number of cycles we have a request pending. Not windowable.
       properties: []
@@ -13422,6 +13772,201 @@ rocprofiler-sdk:
             - gfx1151
             - gfx1152
           expression: reduce(GL1C_STARVE,sum)
+    - name: GL2C_ALL_GCR_INV_EVICT
+      description: Number of cache line evictions/invalidations due to gcr request.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 161
+    - name: GL2C_ALL_GCR_WB_WRITEBACK
+      description: Number of cache line writeback due to gcr request.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 165
+    - name: GL2C_ATOMIC_SECTORS
+      description: Total number of 32B data sectors in atomic requests
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 180
+    - name: GL2C_BUBBLE
+      description: Total number of bubble requests sent to the GL2A
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 46
+    - name: GL2C_BYPASS_REQ
+      description: total number of client bypass requests. This is measured at tag block.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 177
+    - name: GL2C_EA_ATOMIC
+      description: Number of transactions going over the EA_wrreq interface that are actually atomic requests for 
+        all clients.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 115
+    - name: GL2C_EA_ATOMIC_LEVEL
+      description: The sum of the number of EA atomics in flight for all clients. This is primarily meant for 
+        measure average EA atomic latency. Average atomic latency =
+        GL2C_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/GL2C_PERF_SEL_EA_WRREQ_ATOMIC.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 116
+    - name: GL2C_EA_RDREQ_LEVEL
+      description: The sum of the number of GL2C/EA read requests in flight for all clients. This is primarily 
+        meant for measure average EA read latency. Average read latency =
+        GL2C_PERF_SEL_EA_RDREQ_LEVEL/GL2C_PERF_SEL_EA_RDREQ.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 129
+    - name: GL2C_EA_RD_UNCACHED_32B
+      description: Number of uncached write/atomic requests issued to main memory.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 123
+    - name: GL2C_IB_REQ
+      description: Number of requests through the IB. This measures the raw request count from graphics clients 
+        going to this GL2C.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 152
+    - name: GL2C_IB_STALL
+      description: Number of cycles the IB output was stalled.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 153
+    - name: GL2C_LATENCY_FIFO_FULL
+      description: Number of cycles the latency fifo was full.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 149
+    - name: GL2C_NC_REQ
+      description: Number of NC mytpe requests of all types. This is measured at output_fifos block.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 77
+    - name: GL2C_NORMAL_EVICT
+      description: Number of evictions due to requests that are not invalidate or probe requests.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 92
+    - name: GL2C_NORMAL_WRITEBACK
+      description: Number of writebacks due to requests that are not writeback requests.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 90
+    - name: GL2C_READ_SECTORS
+      description: total number of 32B data sectors in read requests.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 187
+    - name: GL2C_RW_REQ
+      description: Number of RW mtype requests of all types. This is measured at output_fifos block.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 76
+    - name: GL2C_SRC_FIFO_FULL
+      description: Number of cycles the src fifo was expected to be full as measured at the IB block.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 150
+    - name: GL2C_TAG_STALL
+      description: Number of cycles the normal request pipeline in the tag was stalled for any reason. Normally, 
+        stalls of this nature are measured exactly from one point the pipeline, but that is not the
+        case for this counter. Probes can stall the pipeline at a variety of places, and there is no
+        single point that can reasonably measure the total stalls accurately.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 151
+    - name: GL2C_TOO_MANY_EA_WRREQS_STALL
+      description: Number of cycles the GL2C could not send a EA write request because it already reached its 
+        maximum number of pending EA write requests.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 113
+    - name: GL2C_WRITEBACK
+      description: Number of dirty lines written back to main memory.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 89
+    - name: GL2C_WRITE_32_REQ
+      description: Number of 32 byte write requests, includes re-compressed writes. This is measured at the 
+        output_fifos block.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 98
+    - name: GL2C_WRITE_SECTORS
+      description: total number of 32B data sectors in write requests.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 191
     - name: GL2C_ATOMIC
       description: ''
       properties: []
@@ -13432,6 +13977,10 @@ rocprofiler-sdk:
             - gfx1152
           block: GL2C
           event: 8
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 75
     - name: GL2C_ATOMIC_sum
       description: ''
       properties: []
@@ -13516,6 +14065,10 @@ rocprofiler-sdk:
             - gfx1152
           block: GL2C
           event: 110
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 130
     - name: GL2C_EA_RDREQ_DRAM_sum
       description: ''
       properties: []
@@ -13535,6 +14088,10 @@ rocprofiler-sdk:
             - gfx1152
           block: GL2C
           event: 111
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 131
     - name: GL2C_EA_WRREQ_DRAM_sum
       description: ''
       properties: []
@@ -13554,6 +14111,10 @@ rocprofiler-sdk:
             - gfx1152
           block: GL2C
           event: 6
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 73
     - name: GL2C_READ_128_REQ
       description: ''
       properties: []
@@ -13583,6 +14144,10 @@ rocprofiler-sdk:
             - gfx1152
           block: GL2C
           event: 73
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 94
     - name: GL2C_READ_32_REQ_sum
       description: ''
       properties: []
@@ -13630,6 +14195,10 @@ rocprofiler-sdk:
             - gfx1152
           block: GL2C
           event: 3
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 70
     - name: GL2C_REQ_sum
       description: ''
       properties: []
@@ -13639,6 +14208,14 @@ rocprofiler-sdk:
             - gfx1151
             - gfx1152
           expression: reduce(GL2C_REQ,sum)
+    - name: GL2C_STREAM_REQ
+      description: NUMBER OF Stream Requests.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 80
     - name: GL2C_WRITE
       description: ''
       properties: []
@@ -13649,6 +14226,10 @@ rocprofiler-sdk:
             - gfx1152
           block: GL2C
           event: 7
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 74
     - name: GL2C_WRITE_sum
       description: ''
       properties: []
