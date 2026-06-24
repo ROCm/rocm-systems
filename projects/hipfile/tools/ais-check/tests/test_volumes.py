@@ -60,6 +60,21 @@ def test_collect_skips_pseudo_and_non_block(ais_check, monkeypatch):
     assert rows[0]["capable"] is True
 
 
+def test_collect_skips_network_mount_before_resolution(ais_check, monkeypatch):
+    def _fail_backing(devno):
+        raise AssertionError("backing_storage must not run on a non-block mount")
+
+    def _fail_probe(mp):
+        raise AssertionError("probe_odirect must not run on a non-block mount")
+
+    monkeypatch.setattr(ais_check, "backing_storage", _fail_backing)
+    monkeypatch.setattr(ais_check, "probe_odirect", _fail_probe)
+
+    # NFS export: virtual device (major 0) and a "server:/export" source.
+    nfs = ais_check.Mount("0:42", "/mnt/nfs", "nfs4", "server:/export", "rw")
+    assert ais_check.collect([nfs]) == []
+
+
 def test_collect_unsupported_fs_not_probed(ais_check, monkeypatch):
     monkeypatch.setattr(ais_check, "backing_storage", lambda devno: ("nvme", "nvme0n1"))
 

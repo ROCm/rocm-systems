@@ -451,7 +451,10 @@ def collect(mounts):
     for m in mounts:
         if m.fstype in PSEUDO_FSTYPES:
             continue
-        if not m.source.startswith("/dev/") and ":" not in m.source:
+        # Only consider local block devices. Network filesystems (NFS
+        # "server:/export", CIFS "//server/share", sshfs, ...) are not
+        # block-backed.
+        if not m.source.startswith("/dev/"):
             continue
 
         backing, disk = backing_storage(m.devno)

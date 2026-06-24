@@ -18,7 +18,7 @@ _UNAME = namedtuple("uname_result", "sysname nodename release version machine")
 @pytest.fixture
 def stub_checks(monkeypatch, ais_check):
     """
-    Stub the three component checks plus os.uname so main() runs hermetically.
+    Stub the four component checks plus os.uname so main() runs hermetically.
     Returns a setter that fixes each component's support and the HIP library map.
     """
 
