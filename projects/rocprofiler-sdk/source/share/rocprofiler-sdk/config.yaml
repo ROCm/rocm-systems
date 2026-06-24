@@ -291,6 +291,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: CPC
           event: 0
     - name: CPC_ADC_VALID_CHUNK_NOT_AVAIL
@@ -884,6 +885,22 @@ rocprofiler-sdk:
             - gfx1250
           block: GL1C
           event: 19
+    - name: GL2A_BUSY
+      description: Number of cycles we have a request pending. Not windowable.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2A
+          event: 2
+    - name: GL2A_CYCLE
+      description: Number of cycles. Not windowable.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL2A
+          event: 1
     - name: GL2C_EA_RDREQ
       description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte) for all 
         clients.
@@ -2269,6 +2286,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 46
     - name: SPI_CSN_NUM_THREADGROUPS
@@ -2290,6 +2308,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 47
     - name: SPI_CSN_WAVE
@@ -2311,6 +2330,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 50
     - name: SPI_CSN_WINDOW_VALID
@@ -3187,6 +3207,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 294
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 663
     - name: SQC_DCACHE_INPUT_VALID_READYB
       description: Input stalled by SQC (per-SQ, nondeterministic, unwindowed)
       properties: []
@@ -3230,6 +3254,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 295
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 664
     - name: SQC_DCACHE_MISSES_DUPLICATE
       description: Number of misses that were duplicates (access to a non-resident, miss pending 
         CL). (per-SQ, per-Bank, nondeterministic)
@@ -3273,6 +3301,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 293
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 662
     - name: SQC_DCACHE_REQ_READ_1
       description: Number of constant cache 1 dw read requests. (per-SQ)
       properties: []
@@ -3618,6 +3650,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: SQ
           event: 264
         - architectures:
@@ -3650,6 +3683,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: SQ
           event: 263
         - architectures:
@@ -3670,6 +3704,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: SQ
           event: 262
         - architectures:
@@ -4189,6 +4224,14 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 137
+    - name: SQ_IFETCH_REQS
+      description: Number of instruction fetch requests to SQC cache. {nondeterministic, unwindowed}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 388
     - name: SQ_INSTS
       description: Total number of instructions issued. When used in combination with 
         SQ_ACTIVE_INST_ANY (cycle count for executing instructions) the average latency of 
@@ -4236,6 +4279,14 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 49
+    - name: SQ_INSTS_BRANCH_TAKEN_HIT_IS
+      description: Number of Branch instructions issued which were taken and hit is the IS memory.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 88
     - name: SQ_INSTS_DUAL_VALU_WAVE32
       description: Number of dual VALU (VOPD) instructions issued in wave32 mode. {emulated}
       properties: []
@@ -4335,6 +4386,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 64
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 161
     - name: SQ_INSTS_FLAT_LDS_ONLY
       description: Total number of FLAT instructions issued that read/wrote only from/to LDS 
         (scratch memory). Values are only populated if EARLY_TA_DONE is enabled. This value is 
@@ -4458,6 +4513,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 67
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 162
     - name: SQ_INSTS_MFMA
       description: Total number of MFMA (Matrix-Fused-Multiply-Add) instructions issued. This value 
         is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more 
@@ -4617,6 +4676,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 63
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 68
     - name: SQ_INSTS_SMEM_NORM
       description: Number of SMEM instructions issued normalized to match the level of memory 
         accessed (i.e. scratch, global, etc). This normalized value is designed to give a hint of 
@@ -4650,6 +4713,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 60
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 69
     - name: SQ_INSTS_TEX_LOAD
       description: The number of buffer load, image load, sample, or atomic (with return) texture 
         instructions issued. The value is returned per-SE (aggregate of values in SIMDs in the SE). 
@@ -5165,6 +5232,15 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 36
+    - name: SQ_INSTS_VALU_TRANS32
+      description: Number of 32-bit transcendental VALU instructions issued (the type which can be 
+        co-executed with main-pipe instructions) excluding skipped instructions. {emulated}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 129
     - name: SQ_INSTS_VALU_TRANS_F16
       description: The number of VALU transcendental instructions on float16 data. Transcendental 
         instructions include sin, cos, exp, log, etc. For maximum performance lower precision 
@@ -5490,6 +5566,15 @@ rocprofiler-sdk:
             - gfx1201
           block: SQ
           event: 102
+    - name: SQ_INST_CYCLES_VMEM_LOAD
+      description: Number of cycles needed to send addr and data for VMEM loads (lds, buffer, image, 
+        flat, scratch, global) instructions. {emulated, C1}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 334
     - name: SQ_INST_CYCLES_VMEM_RD
       description: The number of cycles needed to send addr and cmd data for VMEM read instructions.
         This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis with units
@@ -5514,6 +5599,15 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 126
+    - name: SQ_INST_CYCLES_VMEM_STORE
+      description: Number of cycles needed to send addr and data for VMEM stores & atomics (lds, 
+        buffer, image, flat, scratch, global) instructions. {emulated, C1}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 335
     - name: SQ_INST_CYCLES_VMEM_WR
       description: The number of cycles needed to send addr and cmd data for VMEM write 
         instructions. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) 
@@ -5692,6 +5786,14 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 8
+    - name: SQ_ITEMS_VALU
+      description: number of active threads per VALU instruction (0-64).{emulated}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 228
     - name: SQ_LDS_ADDR_CONFLICT
       description: Number of cycles LDS (local data store) is stalled by address conflicts. This 
         value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -5968,6 +6070,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SQ
           event: 35
         - architectures:
@@ -6024,6 +6127,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 109
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 34
     - name: SQ_WAIT_INST_LDS
       description: Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 
         cycles. (per-simd, nondeterministic)
@@ -6780,6 +6887,15 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 103
+    - name: SQ_INSTS_VEC32_LDS_ATOMIC_RTN
+      description: Number of wave32 LDS atomics with return instructions issued. Wave64 may count 1 
+        or 2, depending on what gets issued. {emulated, C1}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 239
     - name: SQ_INSTS_VEC32_LEVEL_LDS
       description: Number of in-flight wave32 LDS (indexed, flat) instructions issued.{level, 
         nondeterministic}
@@ -7575,6 +7691,95 @@ rocprofiler-sdk:
         - architectures:
             - gfx950
           expression: reduce(TA_FLAT_COALESCEABLE_WAVEFRONTS, sum)
+    - name: TX_VCA_ADDR_STALLED_BY_VMW_CYCLES
+      description: Cycles any row addr path stalled by TC. Perf_windowing not supported for this 
+        counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 201
+    - name: TX_VCA_FLAT_LOAD_WAVEFRONTS
+      description: Flat load vec32 packets processed by VCA.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 213
+    - name: TX_VCA_FLAT_STORE_WAVEFRONTS
+      description: Flat store vec32 packets processed by VCA.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 214
+    - name: TX_VCA_TOTAL_WAVEFRONTS
+      description: Total vec32 packets processed by VCA both rows.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 185
+    - name: TX_VCA_VCA_BUSY
+      description: Cycles VCA block is busy. Perf_windowing not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 184
+    - name: TX_VCD_TD_BUSY
+      description: TD is processing or waiting for data. Perf_Windowing not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 314
+    - name: TX_VCD_VMW_DATA_STALL
+      description: TD is stalled waiting for TC data. Perf_Windowing not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 316
+    - name: TX_VMW_ATOMIC_SETCONFLICT_STALL
+      description: Set conflict stall on an atomic
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 48
+    - name: TX_VMW_REQ_READ
+      description: Total cache read requests
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 14
+    - name: TX_VMW_REQ_WRITE
+      description: Total cache write requests
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 18
+    - name: TX_VMW_VCA_REQ_STATE_READ
+      description: Number of state reads (start of a wave instruction)
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 5
     - name: TCA_BUSY
       description: Number of cycles we have a request pending. Not windowable.
       properties: []
@@ -13237,7 +13442,7 @@ rocprofiler-sdk:
             - gfx1152
           expression: reduce(GL2C_ATOMIC,sum)
     - name: GL2C_BUSY
-      description: ''
+      description: Number of cycles we have a request pending. Not windowable.
       properties: []
       definitions:
         - architectures:
@@ -13246,6 +13451,10 @@ rocprofiler-sdk:
             - gfx1152
           block: GL2C
           event: 2
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 69
     - name: GL2C_BUSY_sum
       description: ''
       properties: []
@@ -13275,7 +13484,7 @@ rocprofiler-sdk:
             - gfx1152
           expression: reduce(GL2C_COMPRESSED_READ_96_REQ,sum)
     - name: GL2C_CYCLE
-      description: ''
+      description: Number of cycles. Not windowable.
       properties: []
       definitions:
         - architectures:
@@ -13284,6 +13493,10 @@ rocprofiler-sdk:
             - gfx1152
           block: GL2C
           event: 1
+        - architectures:
+            - gfx1250
+          block: GL2C
+          event: 68
     - name: GL2C_CYCLE_sum
       description: ''
       properties: []
@@ -13652,7 +13865,7 @@ rocprofiler-sdk:
             - gfx1152
           expression: reduce(SQ_BUSY_CYCLES,sum)
     - name: SQ_INSTS_ALL
-      description: ''
+      description: Number of all instructions issued. {emulated, C1}
       properties: []
       definitions:
         - architectures:
@@ -13661,6 +13874,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 48
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 64
     - name: SQ_INSTS_ALL_sum
       description: ''
       properties: []
@@ -13867,7 +14084,7 @@ rocprofiler-sdk:
             - gfx1152
           expression: reduce(SQ_INSTS_VALU_DP,sum)
     - name: SQ_INSTS_VALU_TRANS
-      description: ''
+      description: Number transcendental VALU instructions issued {emulated}
       properties: []
       definitions:
         - architectures:
@@ -13876,6 +14093,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 170
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 135
     - name: SQ_INSTS_VALU_TRANS_sum
       description: ''
       properties: []
