@@ -1,5 +1,8 @@
 ---
 module:
+  Unit_StatCO_ManagedVarConcurrentFirstTouch_InChildProcess:
+    <<: *level_2
+    tags: [module]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Basic:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
