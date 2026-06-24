@@ -806,7 +806,7 @@ Triton kernels can be analyzed similar to PyTorch operators. You can use the
 ``--list-triton-operators`` and ``--triton-operator`` options. Both options read the
 same ``ml_api_trace/consolidated.csv`` and select rows where the ``Backend`` column is
 ``triton``. As a result, Triton kernels are reported independently even if PyTorch
-operators in the same run.
+operators appear in the same run.
 
 List all captured Triton kernels:
 
