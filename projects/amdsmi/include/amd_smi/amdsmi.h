@@ -246,6 +246,15 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
+// Deprecation targets: kept for source/ABI compatibility, slated for removal.
+#define AMDSMI_MAX_VF_COUNT 32               //!< Maximum virtual functions supported
+#define AMDSMI_MAX_DRIVER_NUM 2              //!< Maximum drivers supported
+#define AMDSMI_DFC_FW_NUMBER_OF_ENTRIES 9    //!< DFC firmware entries supported
+#define AMDSMI_MAX_WHITE_LIST_ELEMENTS 16    //!< Max white list elements for device access control
+#define AMDSMI_MAX_BLACK_LIST_ELEMENTS 64    //!< Max black list elements for device access control
+#define AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS 8  //!< Max Trusted Application white list elements
+#define AMDSMI_MAX_ERR_RECORDS 10            //!< Maximum error records that can be stored
+#define AMDSMI_MAX_PROFILE_COUNT 16          //!< Maximum profiles supported
 #define AMDSMI_PF_INDEX (AMDSMI_MAX_VF_COUNT - 1)
 #define AMDSMI_MAX_DRIVER_INFO_RSVD 64
 // Deprecation target: kept for ABI compatibility; prefer AMDSMI_FABRIC_PPOD_ID_SIZE.
