@@ -67,9 +67,6 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
 [[nodiscard]] uint64_t padding_for_residue(uint64_t current_offset, uint64_t target_residue,
                                            uint64_t alignment);
 
-[[nodiscard]] uint64_t preserve_entry_skip_window_offset(const KernelTextLayout &layout,
-                                                         const BasicBlock &block, uint64_t cursor);
-
 [[nodiscard]] std::optional<uint64_t> target_for_source_offset(const KernelTextLayout &layout,
                                                                uint64_t source_offset);
 
