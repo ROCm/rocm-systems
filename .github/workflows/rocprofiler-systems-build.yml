@@ -56,10 +56,15 @@ jobs:
   # (primary jobs only — system-deps are in the job below)
   # 26 matrix entries total: 5 jammy + 5 noble + 4 debian + 12 rhel
   #
+  # run-ci.py is invoked in four discrete steps:
+  #   generate  — writes dashboard_configure/build/test.cmake + CTestCustom.cmake
+  #   configure — ctest_start() + cmake configure + CDash submit
+  #   build     — ctest_start(APPEND) + cmake build + CDash submit
+  #   test      — ctest_start(APPEND) + ctest + CDash submit Done + JUnit
+  #
   # YAML anchors:
-  #   cmake_flags — anchored on the first entry of each distro group
-  #     (_cmake-*); subsequent entries alias the anchor.
-  #   Shared steps — anchored in this job (_step-*) and aliased below.
+  #   cmake_flags: anchored on the first entry of each distro group (_cmake-*).
+  #   Steps shared with system-deps anchored here (_step-*) and aliased below.
   #
   # CMAKE_COMMON_FLAGS holds the common cmake -D flags present in every entry;
   # cmake_flags carries only the per-distro remainder.  USE_CLANG_OMP is
@@ -506,8 +511,12 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
+      ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
       CCACHE_DIR: ${{ github.workspace }}/.ccache
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
       # cmake -D flags shared by every primary entry; distro-specific
       # remainder lives in matrix.cmake_flags.
       CMAKE_COMMON_FLAGS: >-
@@ -631,23 +640,20 @@ jobs:
           source /usr/share/modules/init/$(basename ${SHELL})
           module avail
 
-      - name: Configure, Build, and Test
-        timeout-minutes: 115
+      - name: Generate CI scripts
+        timeout-minutes: 5
         shell: bash
         working-directory: projects/rocprofiler-systems/
-        env:
-          GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-          CMAKE_C_COMPILER_LAUNCHER: ccache
-          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
-          echo "CMake version: $(cmake --version | head -n 1)"
-          echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
-          python3 ./scripts/run-ci.py -B build \
+          echo "CMake: $(cmake --version | head -n 1)"
+          echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
+          python3 ./scripts/run-ci.py --stage generate \
             --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
             --build-jobs $(nproc) \
             --site GitHub \
+            -B build \
             -- \
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
@@ -655,8 +661,25 @@ jobs:
             ${{ matrix.cmake_flags }} \
             -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
             -- \
-            -LE "network|gpu" || \
-            { cat build/Testing/Temporary/LastBuild*.log 2>/dev/null; exit 1; }
+            -LE "network|gpu"
+
+      - name: Configure
+        timeout-minutes: 15
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 ./scripts/run-ci.py --stage configure \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            -B build
+
+      - name: Build
+        timeout-minutes: 80
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 ./scripts/run-ci.py --stage build \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            -B build
 
       - &_step-annotate-build
         name: Annotate build warnings and errors
@@ -685,6 +708,26 @@ jobs:
           URL="https://my.cdash.org/index.php?project=rocprofiler-systems&filtercount=1&showfilters=1&field1=buildname&compare1=65&value1=${NAME}"
           printf '### CDash Results\n[View build on CDash](%s)\n' "${URL}" >> "${GITHUB_STEP_SUMMARY}"
           echo "::notice title=CDash Results::${URL}"
+
+      - name: Test
+        timeout-minutes: 60
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 ./scripts/run-ci.py --stage test \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            -B build
+
+      - &_step-publish-results
+        name: Publish test results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: projects/rocprofiler-systems/build/test-results.xml
+          check_name: "Tests — ${{ matrix.name }}"
+          comment_mode: 'off'
+          check_run: false
+          job_summary: true
 
       - &_step-ccache-stats
         name: ccache stats
@@ -772,15 +815,6 @@ jobs:
           RUNNING_PROCS=$(pgrep trace_processor_shell)
           if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
 
-      - &_step-publish-results
-        name: Publish test results
-        if: always()
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        with:
-          files: projects/rocprofiler-systems/build/test-results.xml
-          check_name: "Tests — ${{ matrix.name }}"
-          comment_mode: off
-
       - &_step-ctest-artifacts
         name: CTest artifacts
         if: failure()
@@ -807,11 +841,6 @@ jobs:
   # System-dependency builds: validate that system-provided libs substitute
   # for the bundled ones (BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF).
   # 8 matrix entries: 2 jammy + 2 noble + 4 rhel (9×2 + 10×2)
-  #
-  # cmake_flags carries only the install prefix, PYTHON_ENVS, and any
-  # RHEL-specific flags.  USE_CLANG_OMP is passed separately from the
-  # matrix so g++ and amdclang++ entries within each distro can share
-  # the same cmake_flags anchor (_cmake-*-sysdeps, _cmake-rhel-sysdeps).
   # ──────────────────────────────────────────────────────────────────────────
   system-deps:
     name: ${{ matrix.name }}
@@ -964,12 +993,15 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
+      ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      # cmake -D flags shared by every system-deps entry; distro-specific
-      # remainder (install prefix, PYTHON_ENVS, RHEL MPI flags) lives in
-      # matrix.cmake_flags.  USE_CLANG_OMP is passed separately so g++ and
-      # amdclang++ entries within the same distro share one cmake_flags anchor.
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      # cmake -D flags shared by every system-deps entry.
+      # USE_CLANG_OMP is passed separately from matrix.use_clang_omp so
+      # g++ and amdclang++ entries share the same cmake_flags anchor.
       CMAKE_COMMON_FLAGS: >-
         -DCMAKE_BUILD_TYPE=Release
         -DROCPROFSYS_BUILD_TESTING=ON
@@ -1060,23 +1092,21 @@ jobs:
 
       - *_step-sanity-check-rocm
 
-      - name: Configure, Build, and Test with system dependencies
-        timeout-minutes: 115
+      - name: Generate CI scripts
+        timeout-minutes: 5
         shell: bash
         working-directory: projects/rocprofiler-systems/
-        env:
-          CMAKE_C_COMPILER_LAUNCHER: ccache
-          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
-          echo "CMake version: $(cmake --version | head -n 1)"
-          echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
+          echo "CMake: $(cmake --version | head -n 1)"
+          echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
           echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF)"
-          python3 ./scripts/run-ci.py -B build \
+          python3 ./scripts/run-ci.py --stage generate \
             --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
             --build-jobs $(nproc) \
             --site GitHub \
+            -B build \
             -- \
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
@@ -1085,12 +1115,40 @@ jobs:
             -DUSE_CLANG_OMP=${{ matrix.use_clang_omp }} \
             -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
             -- \
-            -LE "network|gpu" || \
-            { cat build/Testing/Temporary/LastBuild*.log 2>/dev/null; exit 1; }
+            -LE "network|gpu"
+
+      - name: Configure
+        timeout-minutes: 15
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 ./scripts/run-ci.py --stage configure \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            -B build
+
+      - name: Build
+        timeout-minutes: 80
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 ./scripts/run-ci.py --stage build \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            -B build
 
       - *_step-annotate-build
 
       - *_step-cdash-link
+
+      - name: Test
+        timeout-minutes: 60
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 ./scripts/run-ci.py --stage test \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            -B build
+
+      - *_step-publish-results
 
       - *_step-ccache-stats
 
@@ -1127,8 +1185,6 @@ jobs:
           ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime,python}=1
 
       - *_step-kill-perfetto
-
-      - *_step-publish-results
 
       - *_step-ctest-artifacts
 
