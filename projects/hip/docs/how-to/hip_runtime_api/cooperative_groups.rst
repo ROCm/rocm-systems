@@ -543,7 +543,8 @@ Defined in cooperative_groups/hip_scan.h. Performs an inclusive scan using the o
 The parameters are described here: :ref:`cg_operations`
 
 **Performance**
-On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive type, DPP instructions will be used, which means the operation would be significantly faster than with other group sizes. The primitive types are:
+
+On AMD, when ``group`` is of the same size as the warp size and ``T`` a primitive type, DPP instructions are used, resulting in significantly faster execution than with other group sizes. The primitive types are:
 
 For arithmetic scans (``plus``, ``less`` and ``greater``):
 
@@ -585,7 +586,8 @@ The parameters are described here: :ref:`cg_operations`
 * NVIDIA - returns T {} (i.e. 0)
 
 **Performance**
-On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive type, DPP instructions will be used, which means the operation would be significantly faster than with other group sizes. The primitive types are:
+
+On AMD, when ``group`` is of the same size as the warp size and ``T`` a primitive type, DPP instructions are used, resulting in significantly faster execution than with other group sizes. The primitive types are:
 
 For arithmetic scans (``plus``, ``less`` and ``greater``):
 
