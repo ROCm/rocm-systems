@@ -189,6 +189,7 @@ not the read path.
 flowchart LR
     subgraph profile["Profile Mode (pandas free)"]
         uprof["utils_profile.py"]
+        csvconv["csv-only conversion helpers<br/>v3->v2, kokkos, native<br/>(in utils_profile.py)"]
         urocpd["utils/rocpd_data.py"]
         ucsv["utils_profile_csv.py<br/>(stdlib csv helper)"]
     end
@@ -201,9 +202,10 @@ flowchart LR
         res["results_*.csv"]
     end
     uprof -->|"if rocpd"| urocpd
-    uprof -->|"if csv"| ucsv
+    uprof -->|"if csv"| csvconv
     urocpd -->|"writes"| db
     urocpd -->|"converted to (via csv helper)"| res
+    csvconv -->|"shapes, writes via"| ucsv
     ucsv -->|"writes"| res
     abase -->|"joins (format specific)"| res
     fio -->|"reads"| res
@@ -235,13 +237,18 @@ flowchart LR
     fio -->|"reads"| res
 ```
 
-On the data path the structural change is small as in only the `if csv` branch (and
-the `--format-rocprof-output` flag) go away, so profile mode no longer chooses a
-storage format, while `results_*.csv` and `utils_profile_csv.py` remain (their
-removal — and analyze reading directly from `.db` — is Phase B).
+On the data path the structural change is small: the `if csv` branch, the
+`csv-only conversion helpers` node, and the `--format-rocprof-output` flag go
+away, so profile mode no longer chooses a storage format, while `results_*.csv`
+and `utils_profile_csv.py` remain (their removal and analyze reading directly
+from `.db` is Phase B). That is why the Before and Target diagrams look nearly
+identical: these are *data-flow* diagrams, and both backends already fed the same
+`results_*.csv`, so deleting one backend only drops a single branch.
 
-The diff will likely be larger because removing the format
-choice includes removing the following:
+The diff is much larger than the diagram suggests because most of what is removed
+does not live on the data-flow path: the deleted code is *inside* the boxes
+(helper bodies in `utils_profile.py`), and the bulk is *tests*, which are not part
+of the runtime flow. Removing the format choice includes removing:
 
 - the v3->v2 csv conversion and the kokkos / native-counter csv shaping helpers
   in `utils_profile.py`, plus the now-unused pandas-style helpers pruned from
@@ -249,7 +256,7 @@ choice includes removing the following:
 - the test coverage for all of the above, which is the bulk of it (~2k deletions
   across `test_utils.py`, `test_utils_profile_csv.py`, and the profile tests).
 
-So Phase A is a small *path* change but a large *code* deletion: it collapses two
+So Phase A is a small *path* change but a large *code* deletion where it collapses two
 storage formats into one and removes the dead csv machinery (and its tests) that
 only existed to serve the second format.
 
