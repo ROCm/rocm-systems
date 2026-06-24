@@ -8114,7 +8114,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
-            f'constexpr int kM0EncodingValue = {125 if arch in ("rdna4", "gfx1250") else 124};\n'
+            f'constexpr int kM0EncodingValue = {125 if scalar_null_precedes_m0 else 124};\n'
             '\n'
             + _is_vgpr_only_body
             + '\n\n'
