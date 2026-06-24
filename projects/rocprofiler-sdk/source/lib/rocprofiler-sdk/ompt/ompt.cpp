@@ -24,6 +24,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -1113,26 +1114,6 @@ update_table(ompt_update_func f, std::index_sequence<OpIdx, OpIdxTail...>)
     if constexpr(sizeof...(OpIdxTail) > 0) update_table(f, std::index_sequence<OpIdxTail...>{});
 }
 
-// mirror of update_table()'s per-op test, but folded into a single boolean:
-// is there any registered context that would cause this OMPT operation's
-// callback to be armed? (i.e. does any client actually consume this op).
-template <size_t OpIdx>
-bool any_op_requested(std::integral_constant<size_t, OpIdx>)
-{
-    auto _info = ompt_info<OpIdx>();
-    if(_info.unsupported) return false;
-    return should_enable_callback(
-        _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx);
-}
-
-template <size_t OpIdx, size_t... OpIdxTail>
-bool any_op_requested(std::index_sequence<OpIdx, OpIdxTail...>)
-{
-    if(any_op_requested(std::integral_constant<size_t, OpIdx>{})) return true;
-    if constexpr(sizeof...(OpIdxTail) > 0)
-        return any_op_requested(std::index_sequence<OpIdxTail...>{});
-    return false;
-}
 }  // namespace
 
 template <size_t OpIdx>
@@ -1229,22 +1210,21 @@ update_table(ompt_update_func f)
     update_table(f, std::make_index_sequence<ompt::ompt_domain_info::ompt_last>{});
 }
 
-// Returns true if any registered rocprofiler client (callback or buffered)
-// subscribes to an OMPT operation, i.e. the SDK has a reason to be the OMPT
+// Returns true if any registered rocprofiler client subscribes to the OMPT
+// callback or buffered tracing domain, i.e. the SDK has a reason to be the OMPT
 // tool. Must be called *after* registration::initialize() so that client
 // tool_init callbacks have run and contexts exist. Used by ompt_start_tool()
 // to decide whether to keep the OMPT tool role or hand it off to another tool.
 bool
 ompt_service_requested()
 {
-    // the regular OMPT operations ...
-    if(any_op_requested(std::make_index_sequence<ompt::ompt_domain_info::ompt_last>{})) return true;
-
-    // ... and the callback_functions interface (handled separately by
-    // update_callback(), see ROCPROFILER_OMPT_ID_callback_functions).
-    auto _info = ompt_info<ROCPROFILER_OMPT_ID_callback_functions>();
-    return should_enable_callback(
-        _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx);
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(!itr) continue;
+        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_OMPT)) return true;
+        if(itr->is_tracing(ROCPROFILER_BUFFER_TRACING_OMPT)) return true;
+    }
+    return false;
 }
 
 }  // namespace ompt
