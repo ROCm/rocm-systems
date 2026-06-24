@@ -419,7 +419,7 @@ __host__ int HostInterface::reduce_scatter(rocshmem_team_t team, T* dest,
   MPI_Comm mpi_comm{team_obj->mpi_comm};
 
   if (mpi_comm == MPI_COMM_NULL) {
-    LOGD_WARN("reduce_scatter host variant is only executable on MPI bootstrapping path");
+    LOG_WARN("reduce_scatter host variant is only executable on MPI bootstrapping path");
     return ROCSHMEM_ERROR;
   }
 
