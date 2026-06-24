@@ -88,20 +88,6 @@ def test_install_global_wraps_iterable_input(captured_install):
     assert captured_install == [["torch", "triton"]]
 
 
-def test_install_global_wraps_api_alias_expands(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
-    install_global_wraps("api")
-    assert captured_install == [["torch", "triton"]]
-
-
-def test_install_global_wraps_api_alongside_explicit_name(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
-    install_global_wraps("api,torch")
-    assert captured_install == [["torch", "triton", "torch"]]
-
-
 # ---------------------------------------------------------------------------
 # registry.install_many
 # ---------------------------------------------------------------------------

@@ -17,8 +17,6 @@ from importlib.machinery import PathFinder
 from pathlib import Path
 from typing import Callable, Union
 
-from .constants import API_ALIAS, KNOWN_BACKENDS
-
 
 def _missing_range_push(_label: str) -> None:
     raise RuntimeError(
@@ -194,7 +192,7 @@ def _pop_scope() -> None:
 def install_global_wraps(backends: Union[str, Iterable[str]] = "") -> None:
     """Install ROCTX instrumentation for each backend in backends.
 
-    "api" expands to every known backend. Empty input is a no-op.
+    Empty input is a no-op.
     """
     from .registry import install_many
 
@@ -203,13 +201,6 @@ def install_global_wraps(backends: Union[str, Iterable[str]] = "") -> None:
     else:
         names = [str(n).strip() for n in backends if str(n).strip()]
 
-    expanded: list[str] = []
-    for n in names:
-        if n == API_ALIAS:
-            expanded.extend(KNOWN_BACKENDS)
-        else:
-            expanded.append(n)
-
-    if not expanded:
+    if not names:
         return
-    install_many(expanded)
+    install_many(names)
