@@ -57,25 +57,13 @@ struct scan_context_t
     trace_range_t                          trace               = {};
     std::vector<trace_range_t>*            completed           = {};
 
+    uint64_t chunk_index = 0;
+    uint64_t first_valid_offset = 0;
     int remaining_dispatches = 0;
     int first_flush_count = 2;
-    uint64_t first_valid_offset = 0;
 };
 
-std::atomic<size_t>&
-dummy_iteration_count()
-{
-    static auto _v = std::atomic<size_t>{0};
-    return _v;
-}
-
-std::atomic<size_t>&
-iteration_count_or_dummy(const std::shared_ptr<std::atomic<size_t>>& iteration_count)
-{
-    return (iteration_count != nullptr) ? *iteration_count : dummy_iteration_count();
-}
-
-std::atomic<size_t>&
+std::shared_ptr<std::atomic<size_t>>
 resolve_kernel_entry(agent_state_t& state, const rocprofiler_thread_trace_decoder_pc_t& entry_point)
 {
     auto key         = entry_key_t{entry_point.code_object_id, entry_point.address};
@@ -83,10 +71,10 @@ resolve_kernel_entry(agent_state_t& state, const rocprofiler_thread_trace_decode
 
     if(auto itr = state.kernel_iterations_by_entry.find(key);
        itr != state.kernel_iterations_by_entry.end())
-        return iteration_count_or_dummy(itr->second);
+        return itr->second;
 
     auto ranges_itr = state.kernel_ranges_by_code_object.find(key.code_object_id);
-    if(ranges_itr == state.kernel_ranges_by_code_object.end()) return dummy_iteration_count();
+    if(ranges_itr == state.kernel_ranges_by_code_object.end()) return nullptr;
 
     for(const auto& range : ranges_itr->second)
     {
@@ -98,22 +86,20 @@ resolve_kernel_entry(agent_state_t& state, const rocprofiler_thread_trace_decode
 
         if(auto itr = state.kernel_iterations_by_entry.find(key);
            itr != state.kernel_iterations_by_entry.end())
-            return iteration_count_or_dummy(itr->second);
+            return itr->second;
 
         auto [itr, _] = state.kernel_iterations_by_entry.emplace(
             key, targeted ? std::make_shared<std::atomic<size_t>>(0) : nullptr);
-        return iteration_count_or_dummy(itr->second);
+        return itr->second;
     }
 
-    return dummy_iteration_count();
+    return nullptr;
 }
 
 bool
 is_targeted_iteration(std::atomic<size_t>&              iteration_count,
                       const std::unordered_set<size_t>& kernel_filter_range)
 {
-    if(&iteration_count == &dummy_iteration_count()) return false;
-
     const auto iteration = iteration_count.fetch_add(1, std::memory_order_relaxed) + 1;
     if(kernel_filter_range.empty()) return iteration == 1;
     return kernel_filter_range.count(iteration) != 0;
@@ -122,6 +108,12 @@ is_targeted_iteration(std::atomic<size_t>&              iteration_count,
 void
 handle_dispatch(scan_context_t& context, const rocprofiler_thread_trace_decoder_dispatch_t& dispatch)
 {
+    thread_local uint64_t max_iteration_count = [&]() {
+        uint64_t maxv = 0;
+        for (auto value : *context.kernel_filter_range) maxv = std::max(maxv, value);
+        return maxv;
+    }();
+
     auto& state = *context.state;
 
     // Latch first valid dispatch, taking consecutive kernels into consideration
@@ -131,21 +123,28 @@ handle_dispatch(scan_context_t& context, const rocprofiler_thread_trace_decoder_
               << dispatch.entry_point.address << " at me/pipe " << int(dispatch.me_id) << "/"
               << int(dispatch.pipe_id);
 
-    auto& iteration_count = resolve_kernel_entry(state, dispatch.entry_point);
-    if(is_targeted_iteration(iteration_count, *context.kernel_filter_range))
+    auto iteration_count = resolve_kernel_entry(state, dispatch.entry_point);
+    if(iteration_count && *iteration_count <= max_iteration_count)
     {
-        auto& trace = context.trace;
-        if(!trace.active)
+        // Block so we dont prematurely increment the iteration count
+        while(state.chunk_completed < context.chunk_index && !state.chunk_failed)
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+
+        if(is_targeted_iteration(*iteration_count, *context.kernel_filter_range))
         {
-            trace              = trace_range_t{};
-            trace.active       = true;
-            trace.offset_begin = dispatch.byte_offset;
+            auto& trace = context.trace;
+            if(!trace.active)
+            {
+                trace              = trace_range_t{};
+                trace.active       = true;
+                trace.offset_begin = dispatch.byte_offset;
 
-            ROCP_INFO << "Dispatch cut at byte " << dispatch.byte_offset;
+                ROCP_INFO << "Dispatch cut at byte " << dispatch.byte_offset;
+            }
+
+            trace.remaining_dispatches = std::max<uint64_t>(state.consecutive_kernels, 1);
+            trace.flush_count = 0;
         }
-
-        trace.remaining_dispatches = std::max<uint64_t>(state.consecutive_kernels, 1);
-        trace.flush_count = 0;
     }
 
     auto& trace = context.trace;
@@ -185,7 +184,7 @@ handle_event(scan_context_t& context, const rocprofiler_thread_trace_decoder_eve
 
     if(trace.flush_count == 2)
     {
-        ROCP_INFO << "Cut trace at byte: " << event.byte_offset;
+        ROCP_INFO << "End cut trace at byte: " << event.byte_offset;
         trace.offset_end = event.byte_offset;
         context.completed->emplace_back(std::move(trace));
         trace = {};
@@ -360,9 +359,12 @@ backend_code_object_load(agent_state_t&                                         
     }
 }
 
-void signal_overlapping_requests(scan_context_t& context,
-                                 uint64_t      chunk_index)
+uint64_t
+send_overlapping_requests(scan_context_t& context,
+                          rocprofiler_thread_trace_shader_data_t shader_data,
+                          std::vector<trace_range_t>& ranges)
 {
+    auto chunk_index = shader_data.chunk_index;
     auto& state = *context.state;
 
     // Signal next chunk to continue from an active trace
@@ -373,27 +375,15 @@ void signal_overlapping_requests(scan_context_t& context,
             auto lock = std::unique_lock{state.request_mutex};
             state.chunk_requested.insert(chunk_index);
         }
-        ROCP_INFO << "Requesting chunk: " << chunk_index;
+        ROCP_INFO << "Requesting post-chunk: " << chunk_index;
         while(state.chunk_completed < chunk_index && !state.chunk_failed)
             std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
-    // Try first to unblock next thread
-    if(state.chunk_completed == chunk_index) state.chunk_completed.fetch_add(1);
-}
-
-uint64_t
-send_overlapping_requests(scan_context_t& context,
-                          rocprofiler_thread_trace_shader_data_t shader_data,
-                          std::vector<trace_range_t>& ranges)
-{
-    auto chunk_index = shader_data.chunk_index;
-    auto& state = *context.state;
-
     while(state.chunk_completed < chunk_index && !state.chunk_failed)
         std::this_thread::sleep_for(std::chrono::microseconds(1));
 
-    if(state.chunk_completed == chunk_index) state.chunk_completed.fetch_add(1);
+    state.chunk_completed.fetch_add(1);
 
     if (state.pending_requests == 0 || chunk_index == 0) return 0;
 
@@ -409,7 +399,6 @@ send_overlapping_requests(scan_context_t& context,
     }
     if (requested)
     {
-        ROCP_INFO << "Request ack: " << chunk_index;
         state.pending_requests--;
         offset = context.first_valid_offset ? context.first_valid_offset : shader_data.data_size;
         for (auto& range : ranges)
@@ -459,12 +448,8 @@ backend_shader_data(agent_state_t&                           state,
 {
     if((shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0 ||
        (shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL) != 0)
-    {
         ROCP_WARNING << "SQTT Buffer full at chunk " << shader_data.chunk_index;
-    }
 
-    // TODO: Reconstruct cross-buffer read_offset data instead of only scanning the contiguous
-    // unread suffix. This keeps the scanner from consuming already-read bytes for now.
     auto* scan_data = static_cast<const uint8_t*>(shader_data.data) + shader_data.read_offset;
     auto  scan_size = shader_data.data_size - shader_data.read_offset;
 
@@ -476,6 +461,7 @@ backend_shader_data(agent_state_t&                           state,
     context.state                = &state;
     context.kernel_filter_range  = &kernel_filter_range;
     context.completed            = &completed;
+    context.chunk_index          = shader_data.chunk_index;
 
     {
         auto status = rocprof_trace_decoder_quick_scan(state.decoder,
@@ -496,7 +482,7 @@ backend_shader_data(agent_state_t&                           state,
         }
     }
 
-    signal_overlapping_requests(context, shader_data.chunk_index);
+    uint64_t overlap_offset = send_overlapping_requests(context, shader_data, completed);
 
     uint64_t avg_trace_length = 0;
     for (auto& trace : completed) avg_trace_length += trace.offset_end - trace.offset_begin;
@@ -508,8 +494,6 @@ backend_shader_data(agent_state_t&                           state,
 
     // Thread local to prevent repeated allocations in critical section
     thread_local auto standalone = std::vector<uint8_t>{};
-
-    uint64_t overlap_offset = send_overlapping_requests(context, shader_data, completed);
 
     for (auto it = completed.begin(); it != completed.end(); it++)
     {
@@ -557,11 +541,14 @@ backend_shader_data(agent_state_t&                           state,
 
     if (!context.trace.active) return;
 
+    ROCP_INFO << "Cutting at: " << context.trace.offset_begin << " w/ size " << scan_size;
+
+    // Handle traces where we reached the end of chunk
     bool status  = build_standalone(state.decoder,
                                 shader_data.chunk_index,
                                 scan_data,
                                 scan_size,
-                                offset_begin,
+                                context.trace.offset_begin,
                                 scan_size,
                                 standalone);
     if (!status)
@@ -570,12 +557,16 @@ backend_shader_data(agent_state_t&                           state,
                                     "chunk {} range {}..{}",
                                     state.id.handle,
                                     shader_data.chunk_index,
-                                    offset_begin,
+                                    context.trace.offset_begin,
                                     scan_size);
         return;
     }
+
     auto fetched = fetch_overlapping_requests(context, shader_data.chunk_index);
     auto size = standalone.size();
+
+    ROCP_INFO << "Joining: " << size << " with fetched: " << fetched.size();
+
     standalone.resize(size + fetched.size());
     std::memcpy(standalone.data() + size, fetched.data(), fetched.size());
 
