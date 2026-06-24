@@ -312,7 +312,7 @@ Gets metrics and performance information about the specified GPU.
 ~$ amd-smi metric --help
 usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
                       [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-m] [-u] [-p] [-c] [-t]
-                      [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [--cpu-power-metrics]
+                      [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [-X] [--cpu-power-metrics]
                       [--cpu-prochot] [--cpu-freq-metrics] [--cpu-c0-res]
                       [--cpu-lclk-dpm-level NBIOID] [--cpu-pwr-svi-telemetry-rails]
                       [--cpu-io-bandwidth IO_BW LINKID_NAME]
@@ -345,6 +345,9 @@ Metric arguments:
   -x, --xgmi-err               XGMI error information since last read
   -E, --energy                 Amount of energy consumed
   -v, --violation              Displays throttle accumulators;
+                                   Only available for MI300 or newer ASICs
+  -X, --partition              Switch temperature, clock, and usage to partition-scoped
+                                   (XCP/AID/MID) data sources; combine with those flags to scope it;
                                    Only available for MI300 or newer ASICs
 
 Watch Arguments:
@@ -569,6 +572,36 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+#### Interpreting hops and weight
+
+The following descriptions apply to AMD Instinct GPUs up to and including MI355X.
+
+**Hops (`-o, --hops`)** — The hops table reports an *abstracted topology step count*, not
+the number of physical xGMI links between devices. The possible values are:
+
+| Hops | Meaning |
+|------|---------|
+| 1 | The two GPUs are reachable over xGMI, regardless of the number of physical xGMI links on the route. |
+| 2 | The two GPUs communicate over PCIe within the same CPU NUMA node. |
+| 3 | The two GPUs communicate over PCIe across different CPU NUMA nodes. |
+| 4 | Fallback when the inter-CPU io_link weight cannot be read. |
+
+Two GPUs on the same xGMI fabric always report `1`, even when data physically crosses
+multiple xGMI links. To determine the literal number of physical xGMI links between two
+devices, read the value from the `amdgpu` driver:
+
+```bash
+cat /sys/class/drm/card*/device/xgmi_num_hops
+```
+
+**Weight (`-w, --weight`)** — The weight table reports a qualitative cost metric derived
+from the KFD io_link `weight` property (lower = closer/faster), analogous to the NUMA
+distances reported by `numactl`. Each physical xGMI hop contributes 15 to the weight
+(for example, a single-hop xGMI connection has weight 15). PCIe routes are summed across
+segments (GPU→CPU + CPU→CPU + CPU→GPU); each GPU-to-CPU segment is typically 20, while
+the CPU-to-CPU segment uses the actual io_link weight, or a fallback of 10 if that weight
+cannot be read.
+
 (cmd-set)=
 ### amd-smi set
 
@@ -689,13 +722,16 @@ Reset options for specified devices.
 
 ```{warning}
 
-   * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
-     GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
+* On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
+  GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
 
-   * Any process with an open `/dev/kfd` handle will be terminated when a GPU reset occurs,
-     even if that process is not using the GPU being reset. GPU isolation techniques using the
-     environment variables `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` do not
-     prevent this.
+* Any process with an open `/dev/kfd` handle will be terminated when a GPU reset occurs,
+  even if that process is not using the GPU being reset. GPU isolation techniques using the
+  environment variables `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` do not
+  prevent this.
+
+See [GPU reset behavior on XGMI systems](/conceptual/gpu-reset-behavior.md) for
+more information.
 ```
 
 ```shell-session

@@ -127,6 +127,10 @@ RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_nc
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclSignal, ncclSignal, ncclSignal_fn, peer, sigIdx, ctx, flags, comm, stream)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclWaitSignal, ncclWaitSignal, ncclWaitSignal_fn, nDesc, signalDescs, comm, stream)
 #endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 7
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommGetUniqueId, ncclCommGetUniqueId, ncclCommGetUniqueId_fn, comm, uniqueId)
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommGrow, ncclCommGrow, ncclCommGrow_fn, comm, nRanks, uniqueId, rank, newcomm, config)
+#endif
 
 #else
 #    error                                                                                         \
