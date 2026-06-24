@@ -24,7 +24,7 @@ The command processor consists of two sub-components:
   kernels) passes them to the :ref:`workgroup processors <desc-spi>` for
   scheduling.
 
-Before scheduling work to the accelerator, the command processor can
+Before scheduling work to the GPU, the command processor can
 first acquire a memory fence to ensure system consistency
 (:hsa-runtime-pdf:`Section 2.6.4 <91>`). After the work is complete, the
 command processor can apply a memory-release fence. Depending on the CDNA architecture-based AMD Instinct GPUs, either of these operations *might* initiate a cache

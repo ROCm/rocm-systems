@@ -249,7 +249,7 @@ transaction breakdown table:
 
 .. note::
 
-   On CDNA4 architecture-based MI350 Series accelerators, the per-destination bandwidth metrics in
+   On CDNA4 architecture-based MI350 Series GPUs, the per-destination bandwidth metrics in
    the table above ("Read/Write/Atomic Bandwidth - HBM, - Infinity Fabric™, and
    - PCIe") are measured at the L2-Fabric interface and attribute traffic to a
    destination by request type, not by where the request was ultimately serviced. A

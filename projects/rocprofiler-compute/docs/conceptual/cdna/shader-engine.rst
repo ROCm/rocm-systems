@@ -301,7 +301,7 @@ As workgroups complete execution and resources become available, the
 workgroup manager will schedule new workgroups onto compute units. The workgroup
 manager's metrics therefore are focused on reporting the following:
 
-*  Utilizations of various parts of the accelerator that the workgroup
+*  Utilizations of various parts of the GPU that the workgroup
    manager interacts with (and the workgroup manager itself)
 
 *  How many workgroups were dispatched, their size, and how many
