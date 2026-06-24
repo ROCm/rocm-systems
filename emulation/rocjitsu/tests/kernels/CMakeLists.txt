@@ -89,6 +89,13 @@ rj_add_triton_asm_fixture(triton_cdna3_matmul_buffer_async_1024 gfx942)
 rj_add_triton_asm_fixture(triton_cdna3_flash_attention_no_async_1024 gfx942)
 rj_add_triton_asm_fixture(triton_cdna3_flash_attention_buffer_async_1024 gfx942)
 
+# Second build of vector_add for gfx90a, used by the DBI hardware-gated
+# smoke test (tests/dbi/hsa_dbi_smoke_test.cpp). Outputs vector_add_gfx90a.o
+# so it coexists with the gfx950 build above. (A single multi-target fat
+# binary would be cleaner but the Executable loader has a pre-existing
+# single-bundle assumption — see executable.cpp::load_hip_fatbin.)
+rj_add_device_kernel(vector_add gfx90a OUTPUT_NAME vector_add_gfx90a)
+
 # Umbrella target for all device kernels.
 add_custom_target(
     device_kernels
@@ -98,6 +105,7 @@ add_custom_target(
         kernel_matmul_mfma_16x16
         kernel_matmul_tiled
         kernel_vector_add
+        kernel_vector_add_gfx90a
         kernel_dynamic_copy_loop
         kernel_triton_cdna4_matmul_dynamic_32x32x64
         kernel_triton_cdna4_matmul_buffer_async_1024

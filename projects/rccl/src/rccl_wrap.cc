@@ -828,7 +828,7 @@ void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
   static int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
   if (maxNthreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, maxNthreads);
   defaultBuffSizes[NCCL_PROTO_LL]     = NCCL_LL_LINES_PER_THREAD*maxNthreads[NCCL_PROTO_LL]*NCCL_STEPS*sizeof(union ncclLLFifoLine);
-  defaultBuffSizes[NCCL_PROTO_LL128]  = NCCL_LL128_ELEMS_PER_THREAD*maxNthreads[NCCL_PROTO_LL128]*NCCL_STEPS*sizeof(uint64_t);
+  defaultBuffSizes[NCCL_PROTO_LL128]  = rcclLL128ElemsPerThreadFromArch(comm->archName)*maxNthreads[NCCL_PROTO_LL128]*NCCL_STEPS*sizeof(uint64_t);
   defaultBuffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); /* 4MiB */
 }
 
@@ -909,9 +909,9 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, const char* archName)
   if (info->protocol == NCCL_PROTO_LL128) {
 #if defined(ENABLE_LL128)
     if (info->acc)
-      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950"));
+      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx1250"));
     else
-      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx90a"));
+      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx90a") || IsArchMatch(archName, "gfx1250"));
 #else
     supported = false;
 #endif

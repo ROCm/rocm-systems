@@ -101,13 +101,9 @@ static ncclResult_t IbCastPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched, bool useWriteOp) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
-  int nreqs = slots[0].nreqs;
+  int nreqs = comm->useCtsOffload ? 1 : slots[0].nreqs;
   uint64_t nowNs = 0;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
-
-  if (comm->useCtsOffload) {
-    nreqs = 1;
-  }
 
   TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs);
 
