@@ -199,21 +199,6 @@ typedef enum {
 #define MAX_NUMBER_OF_AFIDS_PER_RECORD 12  //!< Maximum AFIDs per CPER record
 
 /**
- * @brief Maximum size definitions AMDSMI
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-#define AMDSMI_MAX_VF_COUNT 32               //!< Maximum virtual functions supported
-#define AMDSMI_MAX_DRIVER_NUM 2              //!< Maximum drivers supported
-#define AMDSMI_DFC_FW_NUMBER_OF_ENTRIES 9    //!< DFC firmware entries supported
-#define AMDSMI_MAX_WHITE_LIST_ELEMENTS 16    //!< Max white list elements for device access control
-#define AMDSMI_MAX_BLACK_LIST_ELEMENTS 64    //!< Max black list elements for device access control
-#define AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS 8  //!< Max Trusted Application white list elements
-#define AMDSMI_MAX_ERR_RECORDS 10            //!< Maximum error records that can be stored
-#define AMDSMI_MAX_PROFILE_COUNT 16          //!< Maximum profiles supported
-#define AMDSMI_FABRIC_PPOD_ID_SIZE 16  //!< Physical PoD Identifier size in bytes (128-bit UUID)
-
-/**
  * @brief Introduced in gpu metrics v1.9+
  *
  * @cond @tag{gpu_bm_linux} @endcond
@@ -263,6 +248,7 @@ typedef enum {
  */
 #define AMDSMI_PF_INDEX (AMDSMI_MAX_VF_COUNT - 1)
 #define AMDSMI_MAX_DRIVER_INFO_RSVD 64
+#define AMDSMI_MAX_UUID_ELEMENTS 16  //!< Max UUID elements supported
 
 /**
  * @brief GPU Capability info
@@ -1481,9 +1467,13 @@ typedef struct {
   uint8_t is_iolink_bi_directional;  //!< 1 = true, 0 = false, UINT8_MAX = Not defined
 } amdsmi_p2p_capability_t;
 
-//! Guaranteed maximum possible number of supported frequencies
-//! @cond @tag{gpu_bm_linux} @tag{host} @endcond
-#define AMDSMI_MAX_NUM_FREQUENCIES 33
+/**
+ * @brief Maximum size definitions
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+#define AMDSMI_MAX_NUM_FREQUENCIES \
+  33  //!< Guaranteed maximum possible number of supported frequencies
 
 //! Maximum possible value for fan speed for legacy hwmon GPUs.
 //! For GPUs with the gpu_od sysfs interface, use
@@ -3015,7 +3005,7 @@ typedef struct {
 typedef struct {
   char name[AMDSMI_MAX_STRING_LENGTH];
   char version[AMDSMI_MAX_STRING_LENGTH];
-} amdsmi_nic_fw_entry_t;
+} amdsmi_nic_fw_t;
 
 /**
  * @brief NIC firmware information collection
@@ -3024,7 +3014,7 @@ typedef struct {
  */
 typedef struct {
   uint32_t num_fw;
-  amdsmi_nic_fw_entry_t fw[AMDSMI_MAX_NIC_FW];
+  amdsmi_nic_fw_t fw[AMDSMI_MAX_NIC_FW];
 } amdsmi_nic_fw_info_t;
 
 /**
@@ -5561,15 +5551,16 @@ amdsmi_status_t amdsmi_clean_gpu_local_data(amdsmi_processor_handle processor_ha
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef enum {
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE = 0,            //!< UALOE telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH = 1,           //!< Switch telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO = 2,           //!< Crypto telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC = 3,              //!< PFC telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4,          //!< Network Port telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5,    //!< Derived UALOE telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6,  //!< Derived Network Port telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7,              //!< Maximum number of categories
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID = 0xFFFFFFFF  //!< Unknown telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN = 0xFFFFFFFF,  //!< Unknown telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE = 0,             //!< UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH = 1,            //!< Switch telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO = 2,            //!< Crypto telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC = 3,               //!< PFC telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4,           //!< Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5,     //!< Derived UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6,   //!< Derived Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7,               //!< Maximum number of categories
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID = 0xFFFFFFFF   //!< Unknown telemetry
 } amdsmi_fabric_telemetry_category_t;
 
 /**
@@ -5614,6 +5605,7 @@ typedef struct {
  */
 #define AMDSMI_FABRIC_LABEL_MAX_LENGTH \
   32  //!< Maximum length of the textual label (must be null terminated)
+#define AMDSMI_FABRIC_PPOD_ID_SIZE 16  //!< Physical PoD Identifier size in bytes (128-bit UUID)
 
 typedef struct {
   char text[AMDSMI_FABRIC_LABEL_MAX_LENGTH];  //!< Textual label content
@@ -5710,7 +5702,7 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
  *
  *  @ingroup tagFabric
  *
- *  @platform{gpu_bm_linux} @platform{host}
+ *  @platform{gpu_bm_linux}
  *
  *  @details Given a telemetry item ID @p telem_id,
  *  this function returns a pointer to a string containing the human-readable name
@@ -5722,9 +5714,10 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
  *
  *  @param[in] telem_name The telemetry item name
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return const char* | Pointer to string containing the telemetry item name,
+ *  or UNKNOWN if the category or telemetry ID is not recognized
  */
-amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** telem_name);
+const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
 
 /**
  *  @brief Free Fabric telemetry storage
@@ -5752,7 +5745,7 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
 typedef enum {
   AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE =
       32,  //!< Active accelerators bitmap size (32 x 32-bit words = 1024 bits)
-  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 8  //!< Maximum local GPUs in fabric
+  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16  //!< Maximum local GPUs in fabric
 } amdsmi_fabric_size_constants_t;
 
 /**
@@ -5762,7 +5755,7 @@ typedef enum {
  */
 typedef enum {
   AMDSMI_FABRIC_TYPE_UALOE,
-  AMDSMI_FABRIC_TYPE_UALINK,
+  AMDSMI_FABRIC_TYPE_UALLINK,
   AMDSMI_FABRIC_TYPE_UNKNOWN
 } amdsmi_fabric_type_t;
 
@@ -5801,10 +5794,11 @@ typedef struct {
   amdsmi_fabric_type_t fabric_type;  //!< UALOE or UALLINK
   uint32_t bandwidth;                //!< Station bandwidth share in Mb/s
   uint32_t latency;  //!< Latency in nanoseconds (depends on switch presence and type)
-  uint8_t ppod_id[AMDSMI_FABRIC_PPOD_ID_SIZE];  //!< Physical PoD Identifier (128-bit UUID)
-  uint32_t ppod_size;                           //!< Physical PoD size
-  uint32_t vpod_id;                             //!< Virtual PoD Identifier
-  uint32_t vpod_size;                           //!< Virtual PoD size
+  uint8_t ppod_id[AMDSMI_FABRIC_PPOD_ID_SIZE];  //!< Physical PoD Identifier (16 bytes)
+
+  uint32_t ppod_size;  //!< Physical PoD size
+  uint32_t vpod_id;    //!< Virtual PoD Identifier
+  uint32_t vpod_size;  //!< Virtual PoD size
   uint32_t vpod_active_accelerators
       [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< 1024-bit list (32 x 32-bit words): bit
                                                         //!< N set = accelerator ID N is active
@@ -5826,9 +5820,9 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  amdsmi_bdf_t bdf;               //!< BDF (Bus, Device, Function) of the Fabric device
-  amdsmi_fabric_info_ver_t info;  //!< Fabric information structure (version 1)
-  uint32_t reserved[15];          //!< Reserved for future use
+  amdsmi_bdf_t bdf;                      //!< BDF (Bus, Device, Function) of the Fabric device
+  amdsmi_fabric_info_ver_t fabric_info;  //!< Fabric information structure (version 1)
+  uint32_t reserved[15];                 //!< Reserved for future use
 } amdsmi_fabric_info_t;
 
 /**

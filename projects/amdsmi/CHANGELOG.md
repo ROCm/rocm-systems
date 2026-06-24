@@ -71,24 +71,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi static --clock` csv and human_readable formatting to output frequency levels as strings instead of dictionary objects**.  
 
-- **Changed `amdsmi_fabric_telem_id_to_string()` signature** *(ABI breaking)*.
-  - Return type changed from `const char*` to `amdsmi_status_t` to align with all other AMD SMI APIs.
-  - Added `const char** telem_name` output parameter to receive the string.
-  - Old: `const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id)`
-  - New: `amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** telem_name)`
-
-- **Renamed `amdsmi_nic_fw_t` to `amdsmi_nic_fw_entry_t`** *(source ABI breaking, binary compatible)*.
-  - The typedef and all usages in `amdsmi_nic_fw_info_t` updated accordingly. Struct layout is unchanged.
-
-- **Renamed `AMDSMI_FABRIC_TYPE_UALLINK` to `AMDSMI_FABRIC_TYPE_UALINK`** *(source ABI breaking, binary compatible)*.
-  - Corrects spelling. The enum ordinal value is unchanged.
-
-- **Renamed struct field `fabric_info` to `info` in `amdsmi_fabric_info_t`** *(source ABI breaking, binary compatible)*.
-  - The field type and offset within the struct are unchanged.
-
-- **Renamed `ppod_id` array bound macro from `AMDSMI_MAX_UUID_ELEMENTS` to `AMDSMI_FABRIC_PPOD_ID_SIZE`** *(ABI compatible)*.
-  - Both macros expand to `16`. No struct layout change.
-
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
   - Human-readable output is unchanged, since it uppercases all keys.
@@ -107,9 +89,6 @@ levels as strings instead of dictionary objects**.
   - The label now correctly reflects that it shows the ionic kernel driver version.
 
 ### Removed
-
-- **Removed `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` from `amdsmi_fabric_telemetry_category_t`** *(ABI breaking)*.
-  - The sentinel value `0xFFFFFFFF` has been removed from the enum.
 
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
 
