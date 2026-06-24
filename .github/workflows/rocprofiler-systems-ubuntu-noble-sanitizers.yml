@@ -222,7 +222,32 @@ jobs:
             -DROCPROFSYS_BUILD_NUMBER=1 \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -- \
-            -R "${TEST_REGEX}"
+            -R "${TEST_REGEX}" || \
+            { cat build/Testing/Temporary/LastBuild*.log 2>/dev/null; exit 1; }
+
+      - name: Annotate build warnings and errors
+        if: always()
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          shopt -s nullglob
+          logs=(build/Testing/Temporary/LastBuild*.log)
+          [ ${#logs[@]} -eq 0 ] && exit 0
+          WARNINGS=$(grep -h ' warning:' "${logs[@]}" 2>/dev/null | wc -l)
+          ERRORS=$(grep -h ' error:' "${logs[@]}" 2>/dev/null | wc -l)
+          if [ "$((WARNINGS + ERRORS))" -gt 0 ]; then
+            echo "::warning::Build: ${ERRORS} error(s), ${WARNINGS} warning(s) — expand step for details"
+          fi
+
+      - name: CDash link
+        if: always()
+        shell: bash
+        run: |
+          NAME="${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer"
+          NAME=$(echo "${NAME}" | sed 's/\(.*\)-\([0-9]*\)\/merge/PR_\2_\1/')
+          URL="https://my.cdash.org/index.php?project=rocprofiler-systems&filtercount=1&showfilters=1&field1=buildname&compare1=65&value1=${NAME}"
+          printf '### CDash Results\n[View build on CDash](%s)\n' "${URL}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "::notice title=CDash Results::${URL}"
 
       - name: ccache stats
         if: always()
@@ -283,6 +308,14 @@ jobs:
           else
             echo "✓ No buffered storage files found in /tmp"
           fi
+
+      - name: Publish test results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: projects/rocprofiler-systems/build/test-results.xml
+          check_name: "Tests — ${{ matrix.sanitizer-type }} sanitizer"
+          comment_mode: always
 
       - name: Test Clean Up
         timeout-minutes: 10
