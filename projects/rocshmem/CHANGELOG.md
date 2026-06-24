@@ -18,13 +18,13 @@
 * Added Python bindings coverage for team APIs
 * Added support for GPU initiated operations using the SDMA engines
 * Added ASAN build support
-* Added O(1) IPC availability check using pattern detection
 
 ### Changed
 * Changed default `ROCSHMEM_DEBUG_LEVEL` from `WARN` to `ERROR`
 * Performance optimizations:
    * Separated put/get memcpy primitives to apply correct cache coherence semantics and fences
    * Use constmem for backend variables and provider muxing
+   * Updated O(1) IPC availability check using pattern detection
 
 ## rocSHMEM 3.4.0 for ROCm 7.13
 ### Added
