@@ -2996,7 +2996,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              "dispatch tracing service configure");
         }
 
-        auto no_intercept_agents = std::vector<tool::att_no_intercept::agent_config_t>{};
+        if(att_no_intercept)
+            tool::att_no_intercept::configure(callbacks.att_shader_data,
+                                              tool::get_config().kernel_filter_range);
 
         for(auto& [id, agent] : tool_metadata->agents_map)
         {
@@ -3009,12 +3011,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                 agent_params.push_back(counter);
             if(att_no_intercept)
             {
-                no_intercept_agents.emplace_back(tool::att_no_intercept::agent_config_t{
-                    id,
-                    static_cast<uint64_t>(agent.gpu_index),
-                    (agent.name != nullptr) ? std::string{agent.name} : std::string{},
-                    std::move(agent_params),
-                    tool::get_config().att_consecutive_kernels});
+                auto trace_config = tool::att_no_intercept::configure_agent(
+                    id, tool::get_config().att_consecutive_kernels);
+                ROCPROFILER_CALL(rocprofiler_configure_device_thread_trace_service(
+                                     trace_config.context,
+                                     id,
+                                     agent_params.data(),
+                                     agent_params.size(),
+                                     tool::att_no_intercept::shader_data_callback,
+                                     trace_config.userdata),
+                                 "thread trace service configure");
             }
             else if(!handle_consecutive_kernels && !handle_marker_trace)
             {
@@ -3039,13 +3045,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                       user),
                     "thread trace service configure");
             }
-        }
-
-        if(att_no_intercept)
-        {
-            tool::att_no_intercept::configure(std::move(no_intercept_agents),
-                                              callbacks.att_shader_data,
-                                              tool::get_config().kernel_filter_range);
         }
 
         // Any agent not removed by above loop was not in the agents_map list

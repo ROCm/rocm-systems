@@ -37,8 +37,6 @@ typedef uint64_t rocprof_trace_decoder_handle_t;
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
-#include <optional>
-#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -71,44 +69,21 @@ struct entry_key_hash_t
 
 struct code_object_record_t
 {
-    uint64_t code_object_id = 0;
-    int64_t  load_delta     = 0;
-    uint64_t load_base      = 0;
-    uint64_t load_size      = 0;
+    int64_t load_delta = 0;
 
-    std::unordered_map<std::string, uint64_t> symbol_sizes_by_name  = {};
-    std::unordered_map<uint64_t, uint64_t>    symbol_sizes_by_vaddr = {};
-};
-
-struct kernel_symbol_record_t
-{
-    rocprofiler_kernel_id_t kernel_id                     = 0;
-    uint64_t                code_object_id                = 0;
-    std::string             kernel_name                   = {};
-    uint64_t                kernel_address                = 0;
-    int64_t                 kernel_code_entry_byte_offset = 0;
-    bool                    targeted                      = false;
+    std::unordered_map<uint64_t, uint64_t> symbol_sizes_by_vaddr = {};
 };
 
 struct kernel_symbol_range_t
 {
-    rocprofiler_kernel_id_t kernel_id      = 0;
-    uint64_t                code_object_id = 0;
-    uint64_t                begin          = 0;
-    uint64_t                end            = 0;
-    bool                    targeted       = false;
-};
-
-struct kernel_entry_t
-{
-    rocprofiler_kernel_id_t              kernel_id       = 0;
-    std::shared_ptr<std::atomic<size_t>> iteration_count = {};
+    uint64_t begin    = 0;
+    uint64_t end      = 0;
+    bool     targeted = false;
 };
 
 struct trace_range_t
 {
     bool                    active               = false;
-    rocprofiler_kernel_id_t kernel_id            = 0;
     uint64_t                offset_begin         = 0;
     uint64_t                offset_end           = 0;
     uint64_t                remaining_dispatches = 0;
@@ -120,10 +95,7 @@ struct trace_range_t
 struct agent_state_t
 {
     rocprofiler_agent_id_t                            id                  = {};
-    uint64_t                                          gpu_index           = 0;
-    std::string                                       name                = {};
     rocprofiler_context_id_t                          context             = {};
-    std::vector<rocprofiler_thread_trace_parameter_t> parameters          = {};
     rocprofiler_user_data_t                           userdata            = {};
     rocprof_trace_decoder_handle_t                    decoder             = {};
     uint64_t                                          consecutive_kernels = 0;
@@ -132,7 +104,8 @@ struct agent_state_t
     bool              started   = false;
     bool              finalized = false;
 
-    std::unordered_map<entry_key_t, kernel_entry_t, entry_key_hash_t> kernels_by_entry = {};
+    std::unordered_map<entry_key_t, std::shared_ptr<std::atomic<size_t>>, entry_key_hash_t>
+        kernel_iterations_by_entry = {};
     std::unordered_map<uint64_t, std::vector<kernel_symbol_range_t>>
         kernel_ranges_by_code_object                                  = {};
     std::unordered_map<uint64_t, code_object_record_t> code_objects = {};
