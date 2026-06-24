@@ -695,7 +695,7 @@ PyTorch Operator Analysis
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
 
-Listing All Operators
+List all operators
 ---------------------
 
 Display all PyTorch operators captured during profiling:
