@@ -568,6 +568,8 @@ Command Modifiers:
 
 #### Interpreting hops and weight
 
+The following descriptions apply to AMD Instinct GPUs up to and including MI355X.
+
 **Hops (`-o, --hops`)** — The hops table reports an *abstracted topology step count*, not
 the number of physical xGMI links between devices. The possible values are:
 
