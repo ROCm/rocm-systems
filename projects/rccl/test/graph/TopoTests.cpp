@@ -59,7 +59,7 @@ protected:
   }
 
   // v2.30 attaches XGMI links to the DEV node ncclTopoAddXGMI() looks up at
-  // NCCL_TOPO_ID(systemId, busId), so build DEV nodes (keyed on dev.gcn) directly.
+  // NCCL_TOPO_ID(systemId, busId), so build DEV nodes (and set dev.gcn) directly.
   struct ncclTopoNode* addGpu(int systemId, const char* busId, const char* gcn,
                               int /*rank*/, int dev) {
     int64_t bus = 0;
