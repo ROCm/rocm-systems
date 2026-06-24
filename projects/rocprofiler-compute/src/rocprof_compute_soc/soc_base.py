@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import functools
-import math
 import os
 import shutil
 import sys
@@ -766,112 +765,52 @@ class OmniSoC_Base:
 
         console_debug(f"Collecting following counters: {', '.join(counters)} ")
 
-        output_files, file_count, accu_file_count = (
-            self._allocate_perfmon_counter_files(counters)
-        )
+        output_files, file_count, _ = self._allocate_perfmon_counter_files(counters)
 
         console_debug("profiling", f"perfmon_coalesce file_count {file_count}")
 
-        # TODO: rewrite the above logic for spatial_multiplexing later
-        if self.get_args().spatial_multiplexing:
-            # TODO: more error checking
-            if len(self.get_args().spatial_multiplexing) != 3:
-                console_error(
-                    "profiling",
-                    "multiplexing need provide node_idx node_count and gpu_count",
-                )
+        # Output to files
+        for f in output_files:
+            pmc_filename = workload_perfmon_dir / f"pmc_perf_{f.name}.yaml"
+            counter_def_filename = workload_perfmon_dir / f"counter_def_{f.name}.yaml"
 
-            node_idx, node_count, gpu_count = map(
-                int, self.get_args().spatial_multiplexing
-            )
+            pmc = []
+            counter_def: dict[str, Any] = {}
 
-            old_group_num = file_count + accu_file_count
-            new_bucket_count = node_count * gpu_count
-            groups_per_bucket = math.ceil(
-                old_group_num / new_bucket_count
-            )  # It equals to file num per node
-            max_groups_per_node = groups_per_bucket * gpu_count
+            for ctr in [
+                ctr for block_name in f.blocks for ctr in f.blocks[block_name].elements
+            ]:
+                pmc.append(ctr)
+                # Add TCC channel counters definitions
+                if is_tcc_channel_counter(ctr):
+                    counter_name = ctr.split("[")[0]
+                    idx = int(ctr.split("[")[1].split("]")[0])
+                    xcd_idx = idx // int(self._mspec.l2_banks)
+                    channel_idx = idx % int(self._mspec.l2_banks)
+                    expression = (
+                        f"select({counter_name},"
+                        f"[DIMENSION_XCC=[{xcd_idx}], "
+                        f"DIMENSION_INSTANCE=[{channel_idx}]])"
+                    )
+                    description = (
+                        f"{counter_name} on {xcd_idx}th XCC and {channel_idx}th channel"
+                    )
+                    counter_def = add_counter_extra_config_input_yaml(
+                        counter_def,
+                        ctr,
+                        description,
+                        expression,
+                        [self.__arch],
+                    )
 
-            group_start = node_idx * max_groups_per_node
-            group_end = min((node_idx + 1) * max_groups_per_node, old_group_num)
+            # Write counters to file
+            with open(pmc_filename, "w", encoding="utf-8") as fd:
+                fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
 
-            console_debug(
-                "profiling",
-                f"spatial_multiplexing node_idx {node_idx}, node_count {node_count}, "
-                f"gpu_count: {gpu_count},\n"
-                f"old_group_num {old_group_num}, new_bucket_count {new_bucket_count}, "
-                f"groups_per_bucket {groups_per_bucket},\n"
-                f"max_groups_per_node {max_groups_per_node}, "
-                f"group_start {group_start}, group_end {group_end}",
-            )
-
-            for f_idx in range(groups_per_bucket):
-                file_name = (
-                    Path(workload_perfmon_dir)
-                    / f"pmc_perf_node_{node_idx}_{f_idx}.yaml"
-                )
-
-                pmc = []
-                for g_idx in range(
-                    group_start + f_idx * gpu_count,
-                    min(group_end, group_start + (f_idx + 1) * gpu_count),
-                ):
-                    gpu_idx = g_idx % gpu_count
-                    for block_name in output_files[g_idx].blocks.keys():
-                        for ctr in output_files[g_idx].blocks[block_name].elements:
-                            pmc.append(f"{ctr}:device={gpu_idx}")
-
-                # Write counters to file
-                with open(file_name, "w", encoding="utf-8") as fd:
-                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
-        else:
-            # Output to files
-            for f in output_files:
-                pmc_filename = workload_perfmon_dir / f"pmc_perf_{f.name}.yaml"
-                counter_def_filename = (
-                    workload_perfmon_dir / f"counter_def_{f.name}.yaml"
-                )
-
-                pmc = []
-                counter_def: dict[str, Any] = {}
-
-                for ctr in [
-                    ctr
-                    for block_name in f.blocks
-                    for ctr in f.blocks[block_name].elements
-                ]:
-                    pmc.append(ctr)
-                    # Add TCC channel counters definitions
-                    if is_tcc_channel_counter(ctr):
-                        counter_name = ctr.split("[")[0]
-                        idx = int(ctr.split("[")[1].split("]")[0])
-                        xcd_idx = idx // int(self._mspec.l2_banks)
-                        channel_idx = idx % int(self._mspec.l2_banks)
-                        expression = (
-                            f"select({counter_name},"
-                            f"[DIMENSION_XCC=[{xcd_idx}], "
-                            f"DIMENSION_INSTANCE=[{channel_idx}]])"
-                        )
-                        description = (
-                            f"{counter_name} on {xcd_idx}th XCC and "
-                            f"{channel_idx}th channel"
-                        )
-                        counter_def = add_counter_extra_config_input_yaml(
-                            counter_def,
-                            ctr,
-                            description,
-                            expression,
-                            [self.__arch],
-                        )
-
-                # Write counters to file
-                with open(pmc_filename, "w", encoding="utf-8") as fd:
-                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
-
-                # Write counter definitions to file
-                if counter_def:
-                    with open(counter_def_filename, "w", encoding="utf-8") as fp:
-                        fp.write(yaml.dump(counter_def, sort_keys=False))
+            # Write counter definitions to file
+            if counter_def:
+                with open(counter_def_filename, "w", encoding="utf-8") as fp:
+                    fp.write(yaml.dump(counter_def, sort_keys=False))
 
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
