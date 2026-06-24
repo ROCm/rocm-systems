@@ -22,8 +22,6 @@
 
 #pragma once
 
-#include <elf.h>
-
 #include <cctype>
 #include <cstdint>
 #include <cstring>
@@ -46,6 +44,50 @@ namespace rocprof_trace_decoder
 {
 namespace codeobj
 {
+namespace detail
+{
+constexpr unsigned EiClass = 4;
+constexpr unsigned ElfClass64 = 2;
+constexpr char ElfMagic[] = "\177ELF";
+constexpr size_t ElfMagicSize = 4;
+constexpr uint16_t ShnUndef = 0;
+
+struct Elf64Ehdr
+{
+    unsigned char e_ident[16];
+    uint16_t e_type;
+    uint16_t e_machine;
+    uint32_t e_version;
+    uint64_t e_entry;
+    uint64_t e_phoff;
+    uint64_t e_shoff;
+    uint32_t e_flags;
+    uint16_t e_ehsize;
+    uint16_t e_phentsize;
+    uint16_t e_phnum;
+    uint16_t e_shentsize;
+    uint16_t e_shnum;
+    uint16_t e_shstrndx;
+};
+
+struct Elf64Shdr
+{
+    uint32_t sh_name;
+    uint32_t sh_type;
+    uint64_t sh_flags;
+    uint64_t sh_addr;
+    uint64_t sh_offset;
+    uint64_t sh_size;
+    uint32_t sh_link;
+    uint32_t sh_info;
+    uint64_t sh_addralign;
+    uint64_t sh_entsize;
+};
+
+static_assert(sizeof(Elf64Ehdr) == 64, "Unexpected Elf64Ehdr layout");
+static_assert(sizeof(Elf64Shdr) == 64, "Unexpected Elf64Shdr layout");
+} // namespace detail
+
 // ─── Declarations ───────────────────────────────────────────────────────────
 
 enum class FuncmapEntryKind
@@ -359,21 +401,23 @@ inline std::optional<std::string_view> extract_elf_section(
         return std::nullopt;
     };
 
-    if (elf_data == nullptr || elf_size < sizeof(Elf64_Ehdr)) return reject("ELF buffer too small for an Elf64_Ehdr");
+    if (elf_data == nullptr || elf_size < sizeof(detail::Elf64Ehdr))
+        return reject("ELF buffer too small for an Elf64_Ehdr");
 
-    if (std::memcmp(elf_data, ELFMAG, SELFMAG) != 0) return reject("not an ELF image (bad ELFMAG)");
+    if (std::memcmp(elf_data, detail::ElfMagic, detail::ElfMagicSize) != 0)
+        return reject("not an ELF image (bad ELFMAG)");
 
-    Elf64_Ehdr ehdr;
+    detail::Elf64Ehdr ehdr;
     std::memcpy(&ehdr, elf_data, sizeof(ehdr));
 
-    if (ehdr.e_ident[EI_CLASS] != ELFCLASS64) return reject("not ELF64 (EI_CLASS)");
-    if (ehdr.e_shentsize != sizeof(Elf64_Shdr))
+    if (ehdr.e_ident[detail::EiClass] != detail::ElfClass64) return reject("not ELF64 (EI_CLASS)");
+    if (ehdr.e_shentsize != sizeof(detail::Elf64Shdr))
         return reject("unexpected e_shentsize (" + std::to_string(ehdr.e_shentsize) + ')');
     if (ehdr.e_shoff == 0 || ehdr.e_shoff > elf_size) return reject("e_shoff out of range");
-    if (ehdr.e_shstrndx == SHN_UNDEF) return reject("no section name string table (SHN_UNDEF)");
+    if (ehdr.e_shstrndx == detail::ShnUndef) return reject("no section name string table (SHN_UNDEF)");
 
-    uint64_t shdr_table_bytes = uint64_t(ehdr.e_shnum) * sizeof(Elf64_Shdr);
-    if (shdr_table_bytes / sizeof(Elf64_Shdr) != uint64_t(ehdr.e_shnum))
+    uint64_t shdr_table_bytes = uint64_t(ehdr.e_shnum) * sizeof(detail::Elf64Shdr);
+    if (shdr_table_bytes / sizeof(detail::Elf64Shdr) != uint64_t(ehdr.e_shnum))
         return reject("section header table size overflow");
     // Use subtraction to avoid wrap; e_shoff <= elf_size from the prior check.
     if (shdr_table_bytes > uint64_t(elf_size) - ehdr.e_shoff)
@@ -383,12 +427,12 @@ inline std::optional<std::string_view> extract_elf_section(
 
     auto read_shdr = [&](unsigned idx)
     {
-        Elf64_Shdr s;
-        std::memcpy(&s, elf_data + ehdr.e_shoff + idx * sizeof(Elf64_Shdr), sizeof(Elf64_Shdr));
+        detail::Elf64Shdr s;
+        std::memcpy(&s, elf_data + ehdr.e_shoff + idx * sizeof(detail::Elf64Shdr), sizeof(detail::Elf64Shdr));
         return s;
     };
 
-    Elf64_Shdr shstr = read_shdr(ehdr.e_shstrndx);
+    detail::Elf64Shdr shstr = read_shdr(ehdr.e_shstrndx);
     if (shstr.sh_offset > elf_size || shstr.sh_size > uint64_t(elf_size) - shstr.sh_offset)
         return reject("section name string table out of range");
 
@@ -405,7 +449,7 @@ inline std::optional<std::string_view> extract_elf_section(
 
     for (unsigned i = 0; i < ehdr.e_shnum; ++i)
     {
-        Elf64_Shdr s = read_shdr(i);
+        detail::Elf64Shdr s = read_shdr(i);
         if (name_of(s.sh_name) != section_name) continue;
 
         if (s.sh_size == 0)

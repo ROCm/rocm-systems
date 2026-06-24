@@ -76,6 +76,12 @@ TEST(WaitCounterTest, IncrementKmcnt) {
   EXPECT_EQ(c.lgkmcnt, 1); // KMCNT also increments LGKMCNT
 }
 
+TEST(WaitCounterTest, IncrementTensorcnt) {
+  WaitCounters c;
+  c.increment(WaitCounterType::TENSORCNT);
+  EXPECT_EQ(c.tensorcnt, 1);
+}
+
 TEST(WaitCounterTest, DecrementDscnt) {
   WaitCounters c;
   c.increment(WaitCounterType::DSCNT);
@@ -142,6 +148,14 @@ TEST(WaitTargetTest, DscntNotSatisfied) {
   WaitCounters counters;
   counters.dscnt = 1;
   counters.lgkmcnt = 1;
+  EXPECT_FALSE(target.satisfied(counters));
+}
+
+TEST(WaitTargetTest, TensorcntNotSatisfied) {
+  WaitTarget target;
+  target.tensorcnt = 0;
+  WaitCounters counters;
+  counters.tensorcnt = 1;
   EXPECT_FALSE(target.satisfied(counters));
 }
 

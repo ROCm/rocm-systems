@@ -1,11 +1,13 @@
 /*************************************************************************
- * Copyright (c) 2016-2020, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "utils.h"
 #include "core.h"
+#include "os.h"
 
 #include "nvmlwrap.h"
 
@@ -16,15 +18,17 @@
 // Get current Compute Capability
 int ncclCudaCompCap() {
   int cudaDev;
-  if (cudaGetDevice(&cudaDev) != cudaSuccess) return 0;
+  if (!CUDASUCCESS(cudaGetDevice(&cudaDev))) return 0;
   int ccMajor, ccMinor;
-  if (cudaDeviceGetAttribute(&ccMajor, cudaDevAttrComputeCapabilityMajor, cudaDev) != cudaSuccess) return 0;
-  if (cudaDeviceGetAttribute(&ccMinor, cudaDevAttrComputeCapabilityMinor, cudaDev) != cudaSuccess) return 0;
+  if (!CUDASUCCESS(cudaDeviceGetAttribute(&ccMajor, cudaDevAttrComputeCapabilityMajor, cudaDev))) return 0;
+  if (!CUDASUCCESS(cudaDeviceGetAttribute(&ccMinor, cudaDevAttrComputeCapabilityMinor, cudaDev))) return 0;
   return ccMajor*10+ccMinor;
 }
 
 ncclResult_t int64ToBusId(int64_t id, char* busId) {
-  sprintf(busId, "%04lx:%02lx:%02lx.%01lx", (id) >> 20, (id & 0xff000) >> 12, (id & 0xff0) >> 4, (id & 0xf));
+  sprintf(busId, "%04lx:%02lx:%02lx.%01lx",
+          (unsigned long)((id) >> 20), (unsigned long)((id & 0xff000) >> 12),
+          (unsigned long)((id & 0xff0) >> 4), (unsigned long)(id & 0xf));
   return ncclSuccess;
 }
 
@@ -42,6 +46,18 @@ ncclResult_t busIdToInt64(const char* busId, int64_t* id) {
   }
   hexStr[hexOffset] = '\0';
   *id = strtol(hexStr, NULL, 16);
+  return ncclSuccess;
+}
+
+// Get an int64 from a PCI path. For example, sys/class/pci0000:00/0000:00:02.0/0000:02:00.0/ will return 0x000002000.
+ncclResult_t pciPathToInt64(char* path, int64_t* id) {
+  char* str = path+strlen(path)-1;
+  // Remove trailing "/"
+  if (*str == '/') str--;
+  // Find next /
+  while (*str != '/') str--;
+  str++;
+  NCCLCHECK(busIdToInt64(str, id));
   return ncclSuccess;
 }
 
@@ -76,7 +92,39 @@ static uint64_t hostHashValue = 0;
  *
  * This string can be overridden by using the NCCL_HOSTID env var.
  */
+#if defined(NCCL_OS_LINUX)
+
 #define HOSTID_FILE "/proc/sys/kernel/random/boot_id"
+
+#elif defined(NCCL_OS_WINDOWS)
+
+/* Get Windows MachineGuid - similar to boot_id on Linux */
+static bool getWindowsMachineGuid(char* guid, size_t len) {
+  HKEY hKey;
+  LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+                               "SOFTWARE\\Microsoft\\Cryptography",
+                               0,
+                               KEY_READ,
+                               &hKey);
+  if (result != ERROR_SUCCESS) {
+    return false;
+  }
+  DWORD dataSize = (DWORD)len;
+  DWORD dataType;
+  result = RegQueryValueExA(hKey,
+                            "MachineGuid",
+                            NULL,
+                            &dataType,
+                            (LPBYTE)guid,
+                            &dataSize);
+  RegCloseKey(hKey);
+  if (result != ERROR_SUCCESS || dataType != REG_SZ) {
+    return false;
+  }
+  return true;
+}
+#endif
+
 static void getHostHashOnce() {
   char hostHash[1024];
   const char *hostId;
@@ -90,6 +138,7 @@ static void getHostHashOnce() {
     strncpy(hostHash, hostId, sizeof(hostHash)-1);
     hostHash[sizeof(hostHash)-1] = '\0';
   } else {
+#if defined(NCCL_OS_LINUX)
     FILE *file = fopen(HOSTID_FILE, "r");
     if (file != NULL) {
       char *p;
@@ -99,6 +148,12 @@ static void getHostHashOnce() {
       }
       fclose(file);
     }
+#elif defined(NCCL_OS_WINDOWS)
+    char machineGuid[256];
+    if (getWindowsMachineGuid(machineGuid, sizeof(machineGuid))) {
+      strncpy(hostHash+offset, machineGuid, sizeof(hostHash)-offset-1);
+    }
+#endif
   }
 
   // Make sure the string is terminated
@@ -114,21 +169,29 @@ uint64_t getHostHash(void) {
   return hostHashValue;
 }
 
+uint64_t hashCombine(uint64_t baseHash, uint64_t value) {
+  uint64_t hacc[2] = {1, 1};
+  eatHash(hacc, &baseHash);
+  eatHash(hacc, &value);
+  return digestHash(hacc);
+}
+
 /* Generate a hash of the unique identifying string for this process
  * that will be unique for both bare-metal and container instances
- * Equivalent of a hash of;
- *
- * $$ $(readlink /proc/self/ns/pid)
+ * Linux: hash of $$ $(readlink /proc/self/ns/pid) (pid + PID namespace)
+ * Windows: hash of PID only (no namespaces; PID is unique system-wide)
  */
 uint64_t getPidHash(void) {
   char pname[1024];
   // Start off with our pid ($$)
-  sprintf(pname, "%ld", (long) getpid());
+  sprintf(pname, "%ld", (long) ncclOsGetPid());
   int plen = strlen(pname);
+#if defined(NCCL_OS_LINUX)
   int len = readlink("/proc/self/ns/pid", pname+plen, sizeof(pname)-1-plen);
   if (len < 0) len = 0;
-
-  pname[plen+len]='\0';
+  plen += len;
+#endif
+  pname[plen]='\0';
   TRACE(NCCL_INIT,"unique PID '%s'", pname);
 
   return getHash(pname, strlen(pname));
@@ -193,7 +256,7 @@ bool matchIfList(const char* string, int port, struct netIf* ifList, int listSiz
   return false;
 }
 
-__thread struct ncclThreadSignal ncclThreadSignalLocalInstance = ncclThreadSignalStaticInitializer();
+thread_local struct ncclThreadSignal ncclThreadSignalLocalInstance;
 
 void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, size_t align) {
   // `me->hunks` points to the top of the stack non-empty hunks. Hunks above
@@ -334,4 +397,202 @@ void get_aligned_ptr_and_size(const void *ptr, const size_t bufsize, void **alig
   size_t local_offset = (size_t)((uintptr_t)ptr - aligned_ptr_local);
   *aligned_size = (bufsize + local_offset + page_size - 1) & ~(page_size - 1);
   *aligned_ptr = (void *)aligned_ptr_local;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Hash function for pointer types (shared by address map implementations)
+// Uses shadowpool's algorithm
+uint64_t ncclHashPointer(int hbits, void* key) {
+  uintptr_t h = reinterpret_cast<uintptr_t>(key);
+  h ^= h>>32;
+  h *= 0x9e3779b97f4a7c13;
+  return (uint64_t)h >> (64-hbits);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Intrusive address map implementation (untyped core functions)
+
+static inline uintptr_t readKey(void* object, int keySize, int keyFieldOffset) {
+  void* keyPtr = (char*)object + keyFieldOffset;
+  uintptr_t result = 0;
+  memcpy(&result, keyPtr, keySize);
+  return result;
+}
+
+static inline void* readNextPtr(void* object, int nextFieldOffset) {
+  void* nextPtr = (char*)object + nextFieldOffset;
+  void* result = nullptr;
+  memcpy(&result, nextPtr, sizeof(void*));
+  return result;
+}
+
+static inline void writeNextPtr(void* object, int nextFieldOffset, void* value) {
+  void* nextPtr = (char*)object + nextFieldOffset;
+  memcpy(nextPtr, &value, sizeof(void*));
+}
+
+ncclResult_t ncclIntruAddressMapInsert_untyped(
+    struct ncclIntruAddressMap_untyped* map,
+    int keySize, int keyFieldOffset, int nextFieldOffset,
+    uintptr_t key, void* object) {
+  if (map == nullptr) {
+    WARN("Intrusive address map pointer is NULL");
+    return ncclInvalidUsage;
+  }
+  if (object == nullptr) {
+    WARN("Object pointer is NULL");
+    return ncclInvalidUsage;
+  }
+  if (keySize <= 0 || keySize > (int)sizeof(uintptr_t)) {
+    WARN("Invalid key size %d (must be 0 < keySize <= %zu)", keySize, sizeof(uintptr_t));
+    return ncclInvalidUsage;
+  }
+
+  if (map->hbits == 0) {
+    map->hbits = 4;
+    map->table = (void**)calloc((size_t)1<<map->hbits, sizeof(void*));
+    if (map->table == nullptr) {
+      map->hbits = 0; // Reset on failure
+      WARN("Intrusive address map initialization failed: calloc(%zu entries) returned null", (size_t)1<<map->hbits);
+      return ncclSystemError;
+    }
+  }
+
+  int hbits = map->hbits;
+
+  if (map->count+1 > 2<<hbits) {
+    int oldHbits = hbits;
+    int oldSize = 1<<oldHbits;
+    int newHbits = hbits + 1;
+    int newSize = 1<<newHbits;
+
+    void** newTable = (void**)malloc(newSize * sizeof(void*));
+    if (newTable == nullptr) {
+      WARN("Intrusive address map resize failed: malloc(%d entries) returned null", newSize);
+      return ncclSystemError;
+    }
+
+    for (int i = 0; i < newSize; i++) {
+      newTable[i] = nullptr;
+    }
+
+    for (int i = 0; i < oldSize; i++) {
+      void* obj = map->table[i];
+
+      while (obj) {
+        void* next = readNextPtr(obj, nextFieldOffset);
+        uintptr_t objKey = readKey(obj, keySize, keyFieldOffset);
+        uint64_t b = ncclHashPointer(newHbits, (void*)objKey);
+        writeNextPtr(obj, nextFieldOffset, newTable[b]);
+        newTable[b] = obj;
+        obj = next;
+      }
+    }
+
+    free(map->table);
+    map->table = newTable;
+    map->hbits = newHbits;
+  }
+
+  uint64_t b = ncclHashPointer(map->hbits, (void*)key);
+  void* currentNext = readNextPtr(object, nextFieldOffset);
+
+  if (currentNext != nullptr) {
+    INFO(NCCL_INIT, "Intrusive map: inserting object %p with non-NULL next pointer %p (key=0x%lx). "
+         "Object may already be in another list or this is intentional reuse.",
+         object, currentNext, (unsigned long)key);
+  }
+
+  writeNextPtr(object, nextFieldOffset, map->table[b]);
+  map->table[b] = object;
+  map->count += 1;
+
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIntruAddressMapFind_untyped(
+    struct ncclIntruAddressMap_untyped* map,
+    int keySize, int keyFieldOffset, int nextFieldOffset,
+    uintptr_t key, void** object) {
+  if (map == nullptr) {
+    WARN("Intrusive address map pointer is NULL");
+    return ncclInvalidUsage;
+  }
+  if (object == nullptr) {
+    WARN("Output object pointer is NULL");
+    return ncclInvalidUsage;
+  }
+  if (keySize <= 0 || keySize > (int)sizeof(uintptr_t)) {
+    WARN("Invalid key size %d (must be 0 < keySize <= %zu)", keySize, sizeof(uintptr_t));
+    return ncclInvalidUsage;
+  }
+
+  *object = nullptr;
+
+  if (map->hbits == 0) {
+    return ncclSuccess;
+  }
+
+  uint64_t b = ncclHashPointer(map->hbits, (void*)key);
+  void* obj = map->table[b];
+
+  while (obj) {
+    uintptr_t objKey = readKey(obj, keySize, keyFieldOffset);
+    if (objKey == key) {
+      *object = obj;
+      return ncclSuccess;
+    }
+    obj = readNextPtr(obj, nextFieldOffset);
+  }
+
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIntruAddressMapRemove_untyped(
+    struct ncclIntruAddressMap_untyped* map,
+    int keySize, int keyFieldOffset, int nextFieldOffset,
+    uintptr_t key) {
+  if (map == nullptr) {
+    WARN("Intrusive address map pointer is NULL");
+    return ncclInvalidUsage;
+  }
+  if (keySize <= 0 || keySize > (int)sizeof(uintptr_t)) {
+    WARN("Invalid key size %d (must be 0 < keySize <= %zu)", keySize, sizeof(uintptr_t));
+    return ncclInvalidUsage;
+  }
+
+  if (map->hbits == 0) {
+    return ncclSuccess;
+  }
+
+  uint64_t b = ncclHashPointer(map->hbits, (void*)key);
+  void* prev = nullptr;
+  void* obj = map->table[b];
+
+  while (obj) {
+    uintptr_t objKey = readKey(obj, keySize, keyFieldOffset);
+    if (objKey == key) {
+      void* next = readNextPtr(obj, nextFieldOffset);
+
+      if (prev == nullptr) {
+        map->table[b] = next;
+      } else {
+        writeNextPtr(prev, nextFieldOffset, next);
+      }
+      writeNextPtr(obj, nextFieldOffset, nullptr);
+      map->count -= 1;
+
+      if (map->count == 0) {
+        free(map->table);
+        map->table = nullptr;
+        map->hbits = 0;
+      }
+
+      return ncclSuccess;
+    }
+    prev = obj;
+    obj = readNextPtr(obj, nextFieldOffset);
+  }
+
+  return ncclSuccess;
 }

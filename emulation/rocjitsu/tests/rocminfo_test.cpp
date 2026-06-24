@@ -3,10 +3,7 @@
 
 /// @file rocminfo_test.cpp
 /// @brief Verifies that rocminfo runs successfully against the simulated GPU
-///        via the LD_PRELOAD KMD interposer and reports expected topology.
-///
-/// Requires LD_PRELOAD=librocjitsu_kmd.so, RJ_CONFIG env var,
-/// and the rocminfo binary installed (typically at /opt/rocm/bin/rocminfo).
+///        via the rocjitsu CLI launcher and reports expected topology.
 
 #include <gtest/gtest.h>
 
@@ -17,7 +14,6 @@
 
 namespace {
 
-/// Run a command and capture its combined stdout+stderr and exit code.
 struct ProcessResult {
   std::string output;
   int exit_code;
@@ -42,16 +38,11 @@ ProcessResult run_command(const std::string &cmd) {
   return result;
 }
 
-/// Path to rocminfo, injected via CMake compile definition ROCMINFO_PATH.
-const char *rocminfo_path() { return ROCMINFO_PATH; }
-
-/// Lazily-initialised singleton so rocminfo is only invoked once.
 const ProcessResult &rocminfo_output() {
-  static const ProcessResult result = run_command(rocminfo_path());
+  static const ProcessResult result = run_command(std::string(ROCJITSU_BIN) + " --config " +
+                                                  RJ_CONFIG_PATH + " -- " + ROCMINFO_PATH);
   return result;
 }
-
-// ---------------------------------------------------------------------------
 
 TEST(RocminfoTest, ExitsSuccessfully) {
   EXPECT_EQ(rocminfo_output().exit_code, 0)
@@ -60,11 +51,8 @@ TEST(RocminfoTest, ExitsSuccessfully) {
 }
 
 TEST(RocminfoTest, InterposerActive) {
-  // The interposer is active if rocminfo sees a GPU agent. The simulated
-  // GPU reports as gfx950, which only appears when the interposer is
-  // providing the KFD topology.
   EXPECT_NE(rocminfo_output().output.find("gfx950"), std::string::npos)
-      << "LD_PRELOAD interposer does not appear to be active (no gfx950 agent).\nOutput:\n"
+      << "Interposer does not appear to be active (no gfx950 agent).\nOutput:\n"
       << rocminfo_output().output;
 }
 

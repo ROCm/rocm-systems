@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
+#include "common/env_vars.hpp"
+#include "common/units.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -47,10 +49,8 @@
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
@@ -323,7 +323,8 @@ cache_sampling_data(std::int64_t                               _tid,
     }
 
     auto _overflow_event =
-        get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT").value_or("");
+        get_setting_value<std::string>(std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
+            .value_or("");
 
     if(!_overflow_event.empty())
     {
@@ -845,10 +846,10 @@ configure(bool _setup, std::int64_t _tid)
             struct perf_event_attr _pe;
             memset(&_pe, 0, sizeof(_pe));
 
-            auto _freq = get_sampling_overflow_freq();
-            auto _overflow_event =
-                get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT")
-                    .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
+            auto _freq           = get_sampling_overflow_freq();
+            auto _overflow_event = get_setting_value<std::string>(
+                                       std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
+                                       .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
 
             perf::config_overflow_sampling(_pe, _overflow_event, _freq);
 
@@ -933,7 +934,8 @@ configure(bool _setup, std::int64_t _tid)
             {
                 auto _freq = get_sampling_overflow_freq();
                 auto _overflow_event =
-                    get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT")
+                    get_setting_value<std::string>(
+                        std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
                         .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
                 LOG_INFO("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
                          "{} events...",
@@ -1431,7 +1433,8 @@ post_process_perfetto(std::int64_t                               _tid,
     if(!_thread_info) return;
 
     auto _overflow_event =
-        get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT").value_or("");
+        get_setting_value<std::string>(std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
+            .value_or("");
 
     if(!_overflow_event.empty() && !_overflow_data.empty())
     {

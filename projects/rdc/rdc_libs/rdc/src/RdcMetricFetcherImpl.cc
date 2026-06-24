@@ -245,6 +245,109 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
   }
 }
 
+void RdcMetricFetcherImpl::get_ecc_deferred(uint32_t gpu_index, rdc_field_t field_id,
+                                            rdc_field_value* value) {
+  if (!value) return;
+
+  amdsmi_processor_handle processor_handle = nullptr;
+  amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
+  assert(err == AMDSMI_STATUS_SUCCESS);
+
+  auto field_to_block_de = [](rdc_field_t field) -> amdsmi_gpu_block_t {
+    switch (field) {
+      case RDC_FI_ECC_SDMA_DE:
+        return AMDSMI_GPU_BLOCK_SDMA;
+      case RDC_FI_ECC_GFX_DE:
+        return AMDSMI_GPU_BLOCK_GFX;
+      case RDC_FI_ECC_MMHUB_DE:
+        return AMDSMI_GPU_BLOCK_MMHUB;
+      case RDC_FI_ECC_ATHUB_DE:
+        return AMDSMI_GPU_BLOCK_ATHUB;
+      case RDC_FI_ECC_PCIE_BIF_DE:
+        return AMDSMI_GPU_BLOCK_PCIE_BIF;
+      case RDC_FI_ECC_HDP_DE:
+        return AMDSMI_GPU_BLOCK_HDP;
+      case RDC_FI_ECC_XGMI_WAFL_DE:
+        return AMDSMI_GPU_BLOCK_XGMI_WAFL;
+      case RDC_FI_ECC_DF_DE:
+        return AMDSMI_GPU_BLOCK_DF;
+      case RDC_FI_ECC_SMN_DE:
+        return AMDSMI_GPU_BLOCK_SMN;
+      case RDC_FI_ECC_SEM_DE:
+        return AMDSMI_GPU_BLOCK_SEM;
+      case RDC_FI_ECC_MP0_DE:
+        return AMDSMI_GPU_BLOCK_MP0;
+      case RDC_FI_ECC_MP1_DE:
+        return AMDSMI_GPU_BLOCK_MP1;
+      case RDC_FI_ECC_FUSE_DE:
+        return AMDSMI_GPU_BLOCK_FUSE;
+      case RDC_FI_ECC_UMC_DE:
+        return AMDSMI_GPU_BLOCK_UMC;
+      case RDC_FI_ECC_MCA_DE:
+        return AMDSMI_GPU_BLOCK_MCA;
+      case RDC_FI_ECC_VCN_DE:
+        return AMDSMI_GPU_BLOCK_VCN;
+      case RDC_FI_ECC_JPEG_DE:
+        return AMDSMI_GPU_BLOCK_JPEG;
+      case RDC_FI_ECC_IH_DE:
+        return AMDSMI_GPU_BLOCK_IH;
+      case RDC_FI_ECC_MPIO_DE:
+        return AMDSMI_GPU_BLOCK_MPIO;
+      default:
+        return AMDSMI_GPU_BLOCK_INVALID;
+    }
+  };
+
+  auto gpu_block = field_to_block_de(field_id);
+  if (gpu_block == AMDSMI_GPU_BLOCK_INVALID) {
+    value->status = AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    return;
+  }
+
+  amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
+  err = amdsmi_get_gpu_ecc_status(processor_handle, gpu_block, &err_state);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;
+    return;
+  }
+
+  amdsmi_error_count_t ec;
+  err = amdsmi_get_gpu_ecc_count(processor_handle, gpu_block, &ec);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;
+    return;
+  }
+
+  value->status = AMDSMI_STATUS_SUCCESS;
+  value->type = INTEGER;
+  value->value.l_int = ec.deferred_count;
+}
+
+void RdcMetricFetcherImpl::get_ecc_deferred_total(uint32_t gpu_index, rdc_field_value* value) {
+  if (!value) return;
+
+  amdsmi_processor_handle processor_handle = nullptr;
+  amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
+
+  uint64_t deferred_count = 0;
+  for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+    amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
+    err =
+        amdsmi_get_gpu_ecc_status(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &err_state);
+    if (err != AMDSMI_STATUS_SUCCESS) continue;
+
+    amdsmi_error_count_t ec;
+    err = amdsmi_get_gpu_ecc_count(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &ec);
+    if (err == AMDSMI_STATUS_SUCCESS) {
+      deferred_count += ec.deferred_count;
+    }
+  }
+
+  value->status = AMDSMI_STATUS_SUCCESS;
+  value->type = INTEGER;
+  value->value.l_int = deferred_count;
+}
+
 bool RdcMetricFetcherImpl::async_get_pcie_throughput(uint32_t gpu_index, rdc_field_t field_id,
                                                      rdc_field_value* value) {
   if (!value) {
@@ -528,6 +631,10 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         {RDC_FI_GFX_ACTIVITY_ACC, gpu_metrics.gfx_activity_acc},
         {RDC_FI_MEM_ACTIVITY_ACC, gpu_metrics.mem_activity_acc},
         {RDC_FI_ACCUMULATION_COUNTER, gpu_metrics.accumulation_counter},
+        {RDC_FI_GPU_GFX_BUSY_INST,
+         static_cast<uint64_t>(gpu_metrics.xcp_stats[0].gfx_busy_inst[0])},
+        {RDC_FI_GPU_VCN_BUSY_INST, static_cast<uint64_t>(gpu_metrics.xcp_stats[0].vcn_busy[0])},
+        {RDC_FI_GPU_JPEG_BUSY_INST, static_cast<uint64_t>(gpu_metrics.xcp_stats[0].jpeg_busy[0])},
     };
 
     // In gpu_metrics,the max value means not supported
@@ -597,6 +704,82 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
       if (value->status == AMDSMI_STATUS_SUCCESS) {
         value->value.l_int = value->value.l_int * vram_info.vram_max_bandwidth / 100;
+      }
+      break;
+    }
+    case RDC_FI_GPU_MEMORY_FREE: {
+      uint64_t total = 0, used = 0;
+      value->status = amdsmi_get_gpu_memory_total(processor_handle, AMDSMI_MEM_TYPE_VRAM, &total);
+      if (value->status != AMDSMI_STATUS_SUCCESS) break;
+      value->status = amdsmi_get_gpu_memory_usage(processor_handle, AMDSMI_MEM_TYPE_VRAM, &used);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(total - used);
+      }
+      break;
+    }
+    case RDC_FI_GPU_VIS_VRAM_TOTAL:
+    case RDC_FI_GPU_VIS_VRAM_USED:
+    case RDC_FI_GPU_VIS_VRAM_FREE: {
+      uint64_t total = 0, used = 0;
+      value->status =
+          amdsmi_get_gpu_memory_total(processor_handle, AMDSMI_MEM_TYPE_VIS_VRAM, &total);
+      if (value->status != AMDSMI_STATUS_SUCCESS) break;
+      value->status =
+          amdsmi_get_gpu_memory_usage(processor_handle, AMDSMI_MEM_TYPE_VIS_VRAM, &used);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        if (field_id == RDC_FI_GPU_VIS_VRAM_TOTAL)
+          value->value.l_int = static_cast<int64_t>(total);
+        else if (field_id == RDC_FI_GPU_VIS_VRAM_USED)
+          value->value.l_int = static_cast<int64_t>(used);
+        else
+          value->value.l_int = static_cast<int64_t>(total - used);
+      }
+      break;
+    }
+    case RDC_FI_GPU_GTT_TOTAL:
+    case RDC_FI_GPU_GTT_USED:
+    case RDC_FI_GPU_GTT_FREE: {
+      uint64_t total = 0, used = 0;
+      value->status = amdsmi_get_gpu_memory_total(processor_handle, AMDSMI_MEM_TYPE_GTT, &total);
+      if (value->status != AMDSMI_STATUS_SUCCESS) break;
+      value->status = amdsmi_get_gpu_memory_usage(processor_handle, AMDSMI_MEM_TYPE_GTT, &used);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        if (field_id == RDC_FI_GPU_GTT_TOTAL)
+          value->value.l_int = static_cast<int64_t>(total);
+        else if (field_id == RDC_FI_GPU_GTT_USED)
+          value->value.l_int = static_cast<int64_t>(used);
+        else
+          value->value.l_int = static_cast<int64_t>(total - used);
+      }
+      break;
+    }
+    case RDC_FI_PCIE_SPEED:
+    case RDC_FI_PCIE_MAX_SPEED:
+    case RDC_FI_PCIE_REPLAY_ROLLOVER:
+    case RDC_FI_PCIE_BANDWIDTH_BIDIR: {
+      amdsmi_pcie_info_t pcie_info = {};
+      value->status = amdsmi_get_pcie_info(processor_handle, &pcie_info);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        uint64_t raw = 0;
+        if (field_id == RDC_FI_PCIE_SPEED)
+          raw = pcie_info.pcie_metric.pcie_speed;
+        else if (field_id == RDC_FI_PCIE_MAX_SPEED)
+          raw = pcie_info.pcie_static.max_pcie_speed;
+        else if (field_id == RDC_FI_PCIE_REPLAY_ROLLOVER)
+          raw = pcie_info.pcie_metric.pcie_replay_roll_over_count;
+        else
+          raw = pcie_info.pcie_metric.pcie_bandwidth;
+        // Max value means not supported
+        if (raw == std::numeric_limits<uint32_t>::max() ||
+            raw == std::numeric_limits<uint64_t>::max()) {
+          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        } else {
+          value->value.l_int = static_cast<int64_t>(raw);
+        }
       }
       break;
     }
@@ -687,6 +870,20 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       RDC_LOG(RDC_ERROR, "AMDSMI: cannot get POWER_USAGE");
       return RDC_ST_NO_DATA;
     }
+    case RDC_FI_GPU_ENERGY: {
+      uint64_t energy_accumulator = 0;
+      float counter_resolution = 0;
+      uint64_t timestamp = 0;
+      value->status = amdsmi_get_energy_count(processor_handle, &energy_accumulator,
+                                              &counter_resolution, &timestamp);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        // counter_resolution is in micro Joules per counter tick
+        value->value.l_int =
+            static_cast<int64_t>(static_cast<double>(energy_accumulator) * counter_resolution);
+      }
+      break;
+    }
     case RDC_FI_GPU_CLOCK:
     case RDC_FI_MEM_CLOCK: {
       amdsmi_clk_type_t clk_type = AMDSMI_CLK_TYPE_SYS;
@@ -698,6 +895,33 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
         value->value.l_int = f.frequency[f.current];
+      }
+      break;
+    }
+    case RDC_FI_GPU_CLOCK_MIN:
+    case RDC_FI_GPU_CLOCK_MAX: {
+      amdsmi_clk_info_t clk_info = {};
+      value->status = amdsmi_get_clock_info(processor_handle, AMDSMI_CLK_TYPE_SYS, &clk_info);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        if (field_id == RDC_FI_GPU_CLOCK_MIN)
+          value->value.l_int = static_cast<int64_t>(clk_info.min_clk) * 1000000;
+        else
+          value->value.l_int = static_cast<int64_t>(clk_info.max_clk) * 1000000;
+      }
+      break;
+    }
+    case RDC_FI_SOC_CLOCK:
+    case RDC_FI_VCLK0:
+    case RDC_FI_DCLK0: {
+      amdsmi_clk_type_t clk_type = AMDSMI_CLK_TYPE_SOC;
+      if (field_id == RDC_FI_VCLK0) clk_type = AMDSMI_CLK_TYPE_VCLK0;
+      if (field_id == RDC_FI_DCLK0) clk_type = AMDSMI_CLK_TYPE_DCLK0;
+      amdsmi_clk_info_t clk_info = {};
+      value->status = amdsmi_get_clock_info(processor_handle, clk_type, &clk_info);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(clk_info.clk) * 1000000;
       }
       break;
     }
@@ -721,11 +945,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_TEMP:
-    case RDC_FI_MEMORY_TEMP: {
+    case RDC_FI_MEMORY_TEMP:
+    case RDC_FI_GPU_JUNCTION_TEMP: {
       int64_t i64 = 0;
       amdsmi_temperature_type_t sensor_type = AMDSMI_TEMPERATURE_TYPE_EDGE;
       if (field_id == RDC_FI_MEMORY_TEMP) {
         sensor_type = AMDSMI_TEMPERATURE_TYPE_VRAM;
+      } else if (field_id == RDC_FI_GPU_JUNCTION_TEMP) {
+        sensor_type = AMDSMI_TEMPERATURE_TYPE_JUNCTION;
       }
       value->status =
           amdsmi_get_temp_metric(processor_handle, sensor_type, AMDSMI_TEMP_CURRENT, &i64);
@@ -861,6 +1088,30 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_ECC_MPIO_UE:
       get_ecc(gpu_index, field_id, value);
       break;
+    case RDC_FI_ECC_SDMA_DE:
+    case RDC_FI_ECC_GFX_DE:
+    case RDC_FI_ECC_MMHUB_DE:
+    case RDC_FI_ECC_ATHUB_DE:
+    case RDC_FI_ECC_PCIE_BIF_DE:
+    case RDC_FI_ECC_HDP_DE:
+    case RDC_FI_ECC_XGMI_WAFL_DE:
+    case RDC_FI_ECC_DF_DE:
+    case RDC_FI_ECC_SMN_DE:
+    case RDC_FI_ECC_SEM_DE:
+    case RDC_FI_ECC_MP0_DE:
+    case RDC_FI_ECC_MP1_DE:
+    case RDC_FI_ECC_FUSE_DE:
+    case RDC_FI_ECC_UMC_DE:
+    case RDC_FI_ECC_MCA_DE:
+    case RDC_FI_ECC_VCN_DE:
+    case RDC_FI_ECC_JPEG_DE:
+    case RDC_FI_ECC_IH_DE:
+    case RDC_FI_ECC_MPIO_DE:
+      get_ecc_deferred(gpu_index, field_id, value);
+      break;
+    case RDC_FI_ECC_DEFERRED_TOTAL:
+      get_ecc_deferred_total(gpu_index, value);
+      break;
     case RDC_FI_PCIE_TX:
     case RDC_FI_PCIE_RX:
       async_fetching = async_get_pcie_throughput(gpu_index, field_id, value);
@@ -915,6 +1166,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY:
     case RDC_FI_PCIE_NAK_RCVD_COUNT_ACC:
     case RDC_FI_PCIE_NAK_SENT_COUNT_ACC:
+    case RDC_FI_GFX_ACTIVITY_ACC:
+    case RDC_FI_MEM_ACTIVITY_ACC:
+    case RDC_FI_ACCUMULATION_COUNTER:
+    case RDC_FI_GPU_GFX_BUSY_INST:
+    case RDC_FI_GPU_VCN_BUSY_INST:
+    case RDC_FI_GPU_JPEG_BUSY_INST:
       read_gpu_metrics_uint64_t();
       break;
     case RDC_HEALTH_XGMI_ERROR: {
@@ -984,16 +1241,114 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_HEALTH_POWER_THROTTLE_TIME:
-    case RDC_HEALTH_THERMAL_THROTTLE_TIME: {
+    case RDC_HEALTH_THERMAL_THROTTLE_TIME:
+    case RDC_HEALTH_VIOLATION_COUNTER:
+    case RDC_HEALTH_PROCHOT_RESIDENCY_ACC:
+    case RDC_HEALTH_PROCHOT_RESIDENCY_PCT:
+    case RDC_HEALTH_PPT_RESIDENCY_PCT:
+    case RDC_HEALTH_SOCKET_THRM_ACC:
+    case RDC_HEALTH_SOCKET_THRM_PCT:
+    case RDC_HEALTH_VR_THRM_ACC:
+    case RDC_HEALTH_VR_THRM_PCT:
+    case RDC_HEALTH_HBM_THRM_ACC:
+    case RDC_HEALTH_HBM_THRM_PCT:
+    case RDC_HEALTH_GFX_CLK_LMT_PWR_ACC:
+    case RDC_HEALTH_GFX_CLK_LMT_PWR_PCT:
+    case RDC_HEALTH_GFX_CLK_LMT_THM_ACC:
+    case RDC_HEALTH_GFX_CLK_LMT_THM_PCT:
+    case RDC_HEALTH_LOW_UTIL_ACC:
+    case RDC_HEALTH_LOW_UTIL_PCT:
+    case RDC_HEALTH_GFX_CLK_LMT_TOTAL_ACC:
+    case RDC_HEALTH_GFX_CLK_LMT_TOTAL_PCT: {
       amdsmi_violation_status_t violation_status;
       ret = amdsmi_get_violation_status(processor_handle, &violation_status);
       value->status = Smi2RdcError(ret);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        if (RDC_HEALTH_POWER_THROTTLE_TIME == field_id)
-          value->value.l_int = static_cast<int64_t>(violation_status.acc_ppt_pwr);
-        if (RDC_HEALTH_THERMAL_THROTTLE_TIME == field_id)
-          value->value.l_int = static_cast<int64_t>(violation_status.acc_socket_thrm);
+        switch (field_id) {
+          case RDC_HEALTH_POWER_THROTTLE_TIME:
+            value->value.l_int = static_cast<int64_t>(violation_status.acc_ppt_pwr);
+            break;
+          case RDC_HEALTH_THERMAL_THROTTLE_TIME:
+          case RDC_HEALTH_SOCKET_THRM_ACC:  // alias — same underlying acc_socket_thrm counter
+            value->value.l_int = static_cast<int64_t>(violation_status.acc_socket_thrm);
+            break;
+          case RDC_HEALTH_VIOLATION_COUNTER:
+            value->value.l_int = static_cast<int64_t>(violation_status.acc_counter);
+            break;
+          case RDC_HEALTH_PROCHOT_RESIDENCY_ACC:
+            value->value.l_int = static_cast<int64_t>(violation_status.acc_prochot_thrm);
+            break;
+          case RDC_HEALTH_PROCHOT_RESIDENCY_PCT:
+            value->value.l_int = static_cast<int64_t>(violation_status.per_prochot_thrm);
+            break;
+          case RDC_HEALTH_PPT_RESIDENCY_PCT:
+            value->value.l_int = static_cast<int64_t>(violation_status.per_ppt_pwr);
+            break;
+          case RDC_HEALTH_SOCKET_THRM_PCT:
+            value->value.l_int = static_cast<int64_t>(violation_status.per_socket_thrm);
+            break;
+          case RDC_HEALTH_VR_THRM_ACC:
+            value->value.l_int = static_cast<int64_t>(violation_status.acc_vr_thrm);
+            break;
+          case RDC_HEALTH_VR_THRM_PCT:
+            value->value.l_int = static_cast<int64_t>(violation_status.per_vr_thrm);
+            break;
+          case RDC_HEALTH_HBM_THRM_ACC:
+            value->value.l_int = static_cast<int64_t>(violation_status.acc_hbm_thrm);
+            break;
+          case RDC_HEALTH_HBM_THRM_PCT:
+            value->value.l_int = static_cast<int64_t>(violation_status.per_hbm_thrm);
+            break;
+          case RDC_HEALTH_GFX_CLK_LMT_PWR_ACC:
+          case RDC_HEALTH_GFX_CLK_LMT_PWR_PCT:
+          case RDC_HEALTH_GFX_CLK_LMT_THM_ACC:
+          case RDC_HEALTH_GFX_CLK_LMT_THM_PCT:
+          case RDC_HEALTH_LOW_UTIL_ACC:
+          case RDC_HEALTH_LOW_UTIL_PCT:
+          case RDC_HEALTH_GFX_CLK_LMT_TOTAL_ACC:
+          case RDC_HEALTH_GFX_CLK_LMT_TOTAL_PCT: {
+            // Driver 1.8 XCP/XCC fields — max uint64 means not supported
+            const auto not_sup = std::numeric_limits<uint64_t>::max();
+            uint64_t raw = not_sup;
+            switch (field_id) {
+              case RDC_HEALTH_GFX_CLK_LMT_PWR_ACC:
+                raw = violation_status.acc_gfx_clk_below_host_limit_pwr[0][0];
+                break;
+              case RDC_HEALTH_GFX_CLK_LMT_PWR_PCT:
+                raw = violation_status.per_gfx_clk_below_host_limit_pwr[0][0];
+                break;
+              case RDC_HEALTH_GFX_CLK_LMT_THM_ACC:
+                raw = violation_status.acc_gfx_clk_below_host_limit_thm[0][0];
+                break;
+              case RDC_HEALTH_GFX_CLK_LMT_THM_PCT:
+                raw = violation_status.per_gfx_clk_below_host_limit_thm[0][0];
+                break;
+              case RDC_HEALTH_LOW_UTIL_ACC:
+                raw = violation_status.acc_low_utilization[0][0];
+                break;
+              case RDC_HEALTH_LOW_UTIL_PCT:
+                raw = violation_status.per_low_utilization[0][0];
+                break;
+              case RDC_HEALTH_GFX_CLK_LMT_TOTAL_ACC:
+                raw = violation_status.acc_gfx_clk_below_host_limit_total[0][0];
+                break;
+              case RDC_HEALTH_GFX_CLK_LMT_TOTAL_PCT:
+                raw = violation_status.per_gfx_clk_below_host_limit_total[0][0];
+                break;
+              default:
+                break;
+            }
+            if (raw == not_sup) {
+              value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+            } else {
+              value->value.l_int = static_cast<int64_t>(raw);
+            }
+            break;
+          }
+          default:
+            break;
+        }
       }
       break;
     }

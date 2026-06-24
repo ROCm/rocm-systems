@@ -69,8 +69,6 @@
 .set SQ_WAVE_TRAP_CTRL_WAVE_END_SHIFT              , 8
 .set SQ_WAVE_TRAP_CTRL_TRAP_AFTER_INST             , 9
 
-// The PC is dword (32bit) aligned, so the 2 LSBs are always zero.
-.set SQ_WAVE_PC_LO_ADDRESS_MASK                    , 0xFFFFFFFC
 .if .amdgcn.gfx_generation_minor == 0
   .set SQ_WAVE_PC_HI_ADDRESS_MASK                  , 0xFFFF
 .else
@@ -79,10 +77,10 @@
 .set SQ_WAVE_PC_HI_TRAP_ID_BFE                     , (SQ_WAVE_PC_HI_TRAP_ID_SHIFT | (SQ_WAVE_PC_HI_TRAP_ID_SIZE << 16))
 .set SQ_WAVE_PC_HI_TRAP_ID_SHIFT                   , 28
 .set SQ_WAVE_PC_HI_TRAP_ID_SIZE                    , 4
+.set SQ_WAVE_PC_HI_TRAP_ID_MASK                    , (((1 << SQ_WAVE_PC_HI_TRAP_ID_SIZE) - 1) << SQ_WAVE_PC_HI_TRAP_ID_SHIFT)
 
-.set SQ_WAVE_STATE_PRIV_HALT_BFE                   , (SQ_WAVE_STATE_PRIV_HALT_SHIFT | (1 << 16))
+.set SQ_WAVE_STATE_PRIV_SCC_SHIFT                  , 9
 .set SQ_WAVE_STATE_PRIV_HALT_SHIFT                 , 14
-.set SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT     , 2
 
 .set TRAP_ID_ABORT                                 , 2
 .set TRAP_ID_DEBUGTRAP                             , 3
@@ -93,6 +91,7 @@
 .set TTMP6_SAVED_STATUS_HALT_MASK                  , (1 << TTMP6_SAVED_STATUS_HALT_SHIFT)
 .set TTMP6_SAVED_STATUS_HALT_SHIFT                 , 29
 .set TTMP6_WAVE_STOPPED_SHIFT                      , 30
+.set TTMP6_SCC_SHIFT                               , 31
 .if .amdgcn.gfx_generation_minor == 0
   .set TTMP6_SAVED_TRAP_ID_BFE                     , (TTMP6_SAVED_TRAP_ID_SHIFT | (TTMP6_SAVED_TRAP_ID_SIZE << 16))
   .set TTMP6_SAVED_TRAP_ID_MASK                    , (((1 << TTMP6_SAVED_TRAP_ID_SIZE) - 1) << TTMP6_SAVED_TRAP_ID_SHIFT)
@@ -117,14 +116,17 @@
   .set TTMP11_FXPTR_SHIFT                          , 14
   .set TTMP11_REPLAY_W64H_SHIFT                    , 21
   .set TTMP11_FIRST_REPLAY_SHIFT                   , 22
+
+  .set SQ_WAVE_MODE_MSB_SHIFT                      , 12
+  .set SQ_WAVE_MODE_MSB_SIZE                       , 8
+  .set TTMP11_WAVE_MODE_MSB_MASK                   , ((1 << SQ_WAVE_MODE_MSB_SIZE) - 1)
 .endif
 
 .if .amdgcn.gfx_generation_minor == 0
   .set TTMP_PC_HI_SHIFT                            , 7
 .endif
-.set TTMP13_HT_FLAG_BIT_SHIFT                      , 22           // TTMP13 bit for host-trap
-.set TTMP13_STOCH_FLAG_BIT_SHIFT                   , 23           // TTMP13 bit for stochastic
-.set TTMP13_BUF_ID_BIT_POSITION                    , 31           // TTMP13 bit position for buffer ID
+
+.set TTMP1_BUF_ID_BIT_POSITION                    , 25           // TTMP1 bit position for buffer ID
 
 .set TTMP8_DISPATCH_ID_MASK                        , 0X1FFFFFF
 // Per-sample data layout within the device buffer. Each sample is 64 bytes.
@@ -135,7 +137,7 @@
 .set SAMPLE_OFF_EXEC_LOHI                          , 0x08         // saved EXEC low/high
 .set SAMPLE_OFF_WGID_XY                            , 0x10         // WG id X / Y
 .set SAMPLE_OFF_WGID_Z                             , 0x18         // WG id Z (32-bit)
-.set SAMPLE_OFF_BITFIELD                           , 0x1C         // wave_in_wg[5:0] | reserved_wg[7:6] | chiplet[10:8] | reserved[31:11]
+.set SAMPLE_OFF_WAVE_IN_GROUP_CHIPLET              , 0x1C         // wave_in_wg[5:0] | reserved_wg[7:6] | chiplet[10:8] | reserved[31:11]
 .set SAMPLE_OFF_TIMESTAMP                          , 0x30         // 64 bit realtime counter
 .set SAMPLE_OFF_HW_ID                              , 0x20         // Combined HW_ID (HW_ID1 + HW_ID2)
 .set SAMPLE_OFF_SNAPSHOT_DATA                      , 0x24         // Performance snapshot data
@@ -144,10 +146,9 @@
 .set SAMPLE_OFF_WATERMARK_FIELD                    , 0x14         // Offset to watermark field in pcs_sampling_data_t
 .set SAMPLE_OFF_BUF_SIZE                           , 0x8          // Offset to buf_size in pcs_sampling_data_t
 .set SAMPLE_OFF_DONE_SIG0                          , 0x18         // Offset for done_sig0 (hsa_signal_t handle for buffer 0)
-.set SAMPLE_OFF_DONE_SIG1                          , 0x28         // Offset for done_sig1 (hsa_signal_t handle for buffer 1)
 .set SAMPLE_OFF_SIGNAL_VALUE                       , 0x8          // Offset within signal structure to value field
-.set SAMPLE_OFF_EVENT_MAILBOX0                     , 0x10         // Offset for event mailbox pointer for buffer 0
-.set SAMPLE_OFF_EVENT_MAILBOX1                     , 0x20         // Offset for event mailbox pointer for buffer 1
+.set SAMPLE_OFF_SIGNAL_EVENT_ID                    , 0x18         // Offset within signal structure to event_id field
+.set SAMPLE_OFF_EVENT_MAILBOX_PTR                  , 0x10         // Offset for event mailbox pointer for current PC sampling buffer
 
 .set WAVE_ID_MASK                                  , 0x1f         // Mask to extract Wave ID from TTMP register.
 .set WAVE_ID_WG_BIT_POSITION                       , 25           // Wave ID is stored in bits [29:25] of ttmp8, so we need to shift it right by 25 bits.
@@ -169,271 +170,39 @@
   .set TTMP11_XNACK_MASK_HI_MASK                   , (((1 << TTMP11_XNACK_MASK_HI_SIZE) - 1) << TTMP11_XNACK_MASK_HI_SHIFT)
 .endif
 
-//////////////////////////////////////////////////////////////////
-// GENERATION-SPECIFIC MACROS FOR REGISTER USAGE
-//////////////////////////////////////////////////////////////////
+// ABI between first and second level trap handler:
+//
+//   gfx12
+//     { ttmp1, ttmp0 } = TrapID[3:0], SCHED_MODE[1:0], zeros, PC[47:0]
+//     ttmp11 = 0[7:0], DebugEnabled[0], 0[15:0], NoScratch[0], 0[5:0]
+//   gfx12.5
+//     { ttmp1, ttmp0 } = TrapID[3:0], 0[2:0], PC[56:0]
+//     ttmp11 = 0[7:0], DebugEnabled[0], SQ_WAVE_XNACK_STATE_PRIV[18],
+//              SQ_WAVE_XNACK_STATE_PRIV[16], SQ_WAVE_XNACK_STATE_PRIV[6:0], 0[13:0]
+//
+//     ttmp12 = SQ_WAVE_STATE_PRIV (Private wave state register value).
+//     ttmp14 = TMA[31:0] - TMA_LO (Trap Memory Argument Low - base address for trap handler data, low 32 bits).
+//     ttmp15 = TTMA[63:32] - TMA_HI (Trap Memory Argument High - base address for trap handler data, high 32 bits).
+//
+// Restricted register list:
+//   gfx12:
+//     ttmp[0:1] - Must be preserved for RFE
+//     ttmp[7:9] - Contain workgroup information, must be preserved
+//     ttmp12    - Contains SQ_WAVE_STATE_PRIV, SCC and SLEEP_WAKEUP bits must be preserved
+//     ttmp[14:15] - Contain TMA address, must be preserved
+//
+//   gfx12.5:
+//     ttmp[0:1] - Must be preserved for RFE
+//     ttmp6    -  Contains workgroup info if clusters enabled, only bits [31:28] can be modified
+//     ttmp[7:9] - Contain workgroup information, must be preserved
+//     ttmp11      - Only bits [13:0] and [31:28] can be modified, bits [27:14] contain XNACK/debugger state
+//     ttmp12    - Contains SQ_WAVE_STATE_PRIV, SCC and SLEEP_WAKEUP bits must be preserved
+//     ttmp[14:15] - Contain TMA address, must be preserved
+//
+// Safe to use as scratch:
+//   gfx12: ttmp[2:6], ttmp10, ttmp13
+//   gfx12.5: ttmp[2:5], ttmp10, ttmp13 (bits [21:0] used for XNACK/MODE), exec_hi, ttmp13
 
-// These macros abstract register usage differences between GFX12.0 and GFX12.5
-// GFX12.5 uses vcc_hi as scratch, GFX12.0 uses ttmp6
-
-.macro V_READLANE_B32 vsrc, lane
-  .if .amdgcn.gfx_generation_minor >= 5
-      v_readlane_b32    vcc_hi, \vsrc, \lane
-  .else
-      v_readlane_b32    ttmp6, \vsrc, \lane
-  .endif
-.endm
-
-.macro S_MUL_I32  sdst, src1
-  .if .amdgcn.gfx_generation_minor >= 5
-      s_mul_i32    \sdst, vcc_hi, \src1
-  .else
-      s_mul_i32    \sdst, ttmp6, \src1
-  .endif
-.endm
-
-.macro S_MUL_HI_U32 sdst, src1
-  .if .amdgcn.gfx_generation_minor >= 5
-      s_mul_hi_u32    \sdst, vcc_hi, \src1
-  .else
-      s_mul_hi_u32    \sdst, ttmp6, \src1
-  .endif
-.endm
-
-.macro S_BFE_U32 src0, src1
-  .if .amdgcn.gfx_generation_minor >= 5
-      s_bfe_u32     vcc_hi,  \src0, \src1
-  .else
-      s_bfe_u32     ttmp6,  \src0, \src1
-  .endif
-.endm
-
-.macro V_WRITELANE_B32 vdst, lane
-  .if .amdgcn.gfx_generation_minor >= 5
-      v_writelane_b32    \vdst, vcc_hi, \lane
-  .else
-      v_writelane_b32    \vdst, ttmp6, \lane
-  .endif
-.endm
-
-.macro S_GETREG_B32  hw_reg_name
-  .if .amdgcn.gfx_generation_minor >= 5
-      s_getreg_b32   vcc_hi, hwreg(\hw_reg_name)
-  .else
-      s_getreg_b32   ttmp6, hwreg(\hw_reg_name)
-  .endif
-.endm
-
-.macro S_ADD_U32  sdst, src0
-  .if .amdgcn.gfx_generation_minor >= 5
-      s_add_u32    \sdst, \src0, vcc_hi
-  .else
-      s_add_u32    \sdst, \src0, ttmp6
-  .endif
-.endm
-
-.macro S_LSHR_B32 arg1,arg2
-  .if .amdgcn.gfx_generation_minor >= 5
-      s_lshr_b32    vcc_hi, \arg1, \arg2
-  .else
-      s_lshr_b32    ttmp6, \arg1, \arg2
-  .endif
-.endm
-
-.macro S_MULK_I32 arg1
-  .if .amdgcn.gfx_generation_minor >= 5
-      s_mulk_i32    vcc_hi,\arg1
-  .else
-      s_mulk_i32    ttmp6,\arg1
-  .endif
-.endm
-
-// Macro to save XNACK_MASK register state at trap entry (GFX12.5 only)
-// Required to preserve XNACK state across trap handler execution
-.macro SAVE_XNACK_MASK
-  .if .amdgcn.gfx_generation_minor == 5
-      s_getreg_b32  ttmp4, hwreg(HW_REG_XNACK_MASK)         // Read full 32-bit XNACK_MASK (ttmp4 is available)
-      // Save bits [13:0] to ttmp11[13:0]
-      s_and_b32     ttmp5, ttmp4, TTMP11_XNACK_MASK_LO_MASK // ttmp5 is available
-      s_andn2_b32   ttmp11, ttmp11, TTMP11_XNACK_MASK_LO_MASK
-      s_or_b32      ttmp11, ttmp11, ttmp5
-      // Save bits [17:14] to ttmp11[31:28]
-      s_bfe_u32     ttmp5, ttmp4, (14 | (4 << 16))          // Extract bits [17:14]
-      s_lshl_b32    ttmp5, ttmp5, TTMP11_XNACK_MASK_HI_SHIFT
-      s_andn2_b32   ttmp11, ttmp11, TTMP11_XNACK_MASK_HI_MASK
-      s_or_b32      ttmp11, ttmp11, ttmp5
-      // Save remaining bits [31:18] to ttmp13[13:0]
-      s_bfe_u32     vcc_hi, ttmp4, (18 | (14 << 16))       // Extract bits ttmp4[31:18]
-      s_andn2_b32   ttmp13, ttmp13, 0x3FFF                 // Clear ttmp13 [13:0] of ttmp13
-      s_or_b32      ttmp13, ttmp13, vcc_hi
-  .endif
-.endm
-// Macro to restore XNACK_MASK after VMEM operations (GFX12.5 only)
-.macro RESTORE_XNACK_MASK
-  .if .amdgcn.gfx_generation_minor == 5
-      // Reconstruct XNACK_MASK from stored pieces
-      s_and_b32     ttmp2, ttmp11, TTMP11_XNACK_MASK_LO_MASK    // Get bits [13:0] (ttmp2 safe at exit)
-      s_bfe_u32     ttmp4, ttmp11, (TTMP11_XNACK_MASK_HI_SHIFT | (4 << 16))  // Get bits [31:28] from ttmp11
-      s_lshl_b32    ttmp4, ttmp4, 14                        // Shift to position [17:14]
-      s_or_b32      ttmp2, ttmp2, ttmp4                     // Combine bits [17:0]
-      s_bfe_u32     vcc_hi, ttmp13, (0 | (14 << 16))        // Extract remaining XNACK_MASK bits from ttmp13[13:0]
-      s_lshl_b32    ttmp4, vcc_hi, 18                       // Shift vcc_hi to position [31:18]
-      s_or_b32      ttmp2, ttmp2, ttmp4                     // Final 32-bit XNACK_MASK
-      s_setreg_b32  hwreg(HW_REG_XNACK_MASK), ttmp2         // Restore XNACK_MASK
-  .endif
-.endm
-
-// Macro to save MSB bits from MODE[19:12] before using v[0:3] in trap handler (GFX12.5 only)
-// The MODE register contains VGPR bank selection bits that must be preserved.
-// Saves DST[13:12], SRC0[15:14], SRC1[17:16], SRC2[19:18] VGPR_MSB fields
-// Storage: ttmp13[21:14] (these bits are free and don't conflict with flags in bits 22,23,31)
-.macro SAVE_MODE_VGPR_MSBS
-  .if .amdgcn.gfx_generation_minor == 5
-      s_getreg_b32  vcc_hi, hwreg(HW_REG_MODE, 12, 8)       // Read MODE[19:12] (VGPR MSB bits of MODE register)
-      s_and_b32     vcc_hi, vcc_hi, 0xFF                     // Mask to get only 8 bits
-      s_lshl_b32    vcc_hi, vcc_hi, 14                       // Shift vcc_hi to position [21:14]
-      s_and_b32     ttmp13, ttmp13, 0xFFC03FFF               // Clear bits [21:14] of ttmp13
-      s_or_b32      ttmp13, ttmp13, vcc_hi                   // Store 8 VGPR MSB bits to ttmp13[21:14]
-      s_mov_b32     vcc_hi, 0                                // Clear vcc_hi to prepare for MODE register reset
-      s_setreg_b32  hwreg(HW_REG_MODE, 12, 8), vcc_hi        // Reset MODE[19:12]
-  .endif
-.endm
-
-// Macro to restore VGPR bits [19:12] of MODE register before returning to user shader (GFX12.5 only)
-.macro RESTORE_MODE_VGPR_MSBS
-  .if .amdgcn.gfx_generation_minor == 5
-      s_bfe_u32     vcc_hi, ttmp13, (14 | (8 << 16))  // Get 8 MSB bits from ttmp13[21:14]
-      s_setreg_b32  hwreg(HW_REG_MODE, 12, 8), vcc_hi // Restore MODE[19:12] (VGPR MSB bits of MODE register)
-  .endif
-.endm
-
-  // Macro to store the Correlation ID (Dispatch ID and Doorbell ID) into the current sample slot
-  //
-  // Assumes the following registers are set before it is called:
-  //   v[0:1]:Must contain the 64-bit base address of the target sample slot
-  //   ttmp8 :Must contain the dispatch ID in bits [24:0]
-  //   exec  :Must be set to 0x1 to ensure operations apply only to lane 0
-  //
-  // Clobbers the following registers:
-  //   v[2:3]:Used for [dispatch_id, doorbell_id]
-  //   s_scratch:Used to stash the doorbell ID value.
-.macro STORE_CORRELATION_ID s_scratch
-  v_mov_b32         v2, 0
-  v_mov_b32         v3, 0
-  s_sendmsg_rtn_b32 \s_scratch, sendmsg(MSG_RTN_GET_DOORBELL)
-  s_wait_kmcnt      0
-  s_and_b32         \s_scratch, \s_scratch, DOORBELL_ID_MASK
-  v_writelane_b32   v3, \s_scratch, 0
-  s_and_b32         \s_scratch, ttmp8, TTMP8_DISPATCH_ID_MASK
-  v_writelane_b32   v2, \s_scratch, 0
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_CORRELATION, scope:SCOPE_SYS
-.endm
-
-  // Macro to store the HW_ID registers into the current sample slot
-  //
-  // Assumes the following registers are set before it is called:
-  //   v[0:1]: Must contain the 64-bit base address of the target sample slot.
-  //   exec  : Must be set to 0x1 to ensure operations apply only to lane 0.
-  //
-  // Clobbers the following registers:
-  //   v[2:3]: Used to stash the data for the global store.
-  //  s_scratch1: Used to stash HW_ID1 and HW_ID2 values.
-  //  NOTE: GFX12.5+ version uses exec_lo as temporary holder to avoid needing s_scratch2
-  //        This preserves exec_hi completely (for XNACK_MASK storage)
-.macro STORE_HW_ID s_scratch1
-  // Current ROCr API determines single dword for HW_ID, while this information is scattered across two
-  // dword registers HW_ID1 and HW_ID2 on GFX10+ architectures.
-  // Thus, we combine values from HW_ID1 and HW_ID2 into a single dword HW_ID with the following layout:
-  // WAVE_ID[4:0]
-  // QUEUE_ID[8:5]
-  // RESERVED [9]
-  // WGP_ID[13:10]
-  // SIMD_ID[15:14]
-  // SA_ID[16]
-  // ME_ID[17]
-  // SE_ID[19:18]
-  // PIPE_ID[21:20]
-  // RESERVED [22]
-  // WG_ID[27:23]
-  // VM_ID[31:28]
-
-  // Note: We don't show DP_RATE and STATE_ID that are useless for compute kernels
-  // Also, we reduced SE_ID to 2 bits as there's only a maximum of 4 SEs on existing gfx12.0 parts
-  // Finally, ME_ID is reduced to 1 bit as wavefronts are dispatched from either ME0 or ME1 in gfx12.
-  // Bits 9 and 22 are reserved for a future use.
-  v_mov_b32         v2, 0
-  v_mov_b32         v3, 0
-  s_getreg_b32      \s_scratch1, hwreg(HW_REG_HW_ID1)
-  v_and_b32         v2, \s_scratch1, 0x1feffcff               // Mask to extract fields from HW_ID1 (WAVE_ID, WGP_ID, SA_ID, SE_ID on GFX12.0)
-  v_and_b32         v3, \s_scratch1, 0x00000300               // Mask to extract SIMD_ID[9:8]
-  v_lshl_or_b32     v2, v3, 6, v2                             // Shift SIMD_ID to bits [15:14]
-  s_getreg_b32      \s_scratch1, hwreg(HW_REG_HW_ID2)         // Get HW_ID2
-  v_and_b32         v3, \s_scratch1, 0x0f000000               // Mask to extract WAVE_ID[27:24]
-  v_lshl_or_b32     v2, v3, 4, v2                             // Shift WAVE_ID to bits [4:0]
-  v_and_b32         v3, \s_scratch1, 0x001f0000               // Mask to extract WG_ID[20:16]
-  v_lshl_or_b32     v2, v3, 7, v2                             // Shift WG_ID to bits [27:23]
-  v_and_b32         v3, \s_scratch1, 0x00000100               // Mask to extract ME_ID[8]
-  v_lshl_or_b32     v2, v3, 9, v2                             // Shift ME_ID to bit [17]
-  v_and_b32         v3, \s_scratch1, 0x00000030               // Mask to extract PIPE_ID[5:4]
-  v_lshl_or_b32     v2, v3, 16, v2                            // Shift PIPE_ID to bits [21:20]
-  v_and_b32         v3, \s_scratch1, 0x0000000f               // Mask to extract QUEUE_ID[3:0]
-  v_lshl_or_b32     v2, v3, 5, v2                             // Shift QUEUE_ID to bits [8:5]
-
-.if .amdgcn.gfx_generation_minor >= 5
-  // For gfx12.5+, get SE_ID and chiplet from MSG_RTN_GET_SE_AID_ID.
-  // Regspec MSG_RTN_GET_SE_AID_ID (0x87) returns:
-  //   data[3:0]   = SE_ID (4 bits)
-  //   data[19:16] = Virtual_XCC_ID (4 bits)
-  //
-  // Use exec_lo as temporary holder to avoid needing second scratch register
-  // This keeps exec_hi completely preserved with XNACK_MASK[31:18]
-  // EXEC_LO starts at 0x1 and is restored to 0x1 after each use
-  
-  s_sendmsg_rtn_b32 \s_scratch1, sendmsg(MSG_RTN_GET_SE_AID_ID)
-  v_and_b32         v2, 0xFFC3FFFF, v2                        // Clear SE_ID bits [21:18] in v2 while waiting
-  s_wait_kmcnt      0
-  
-  s_mov_b32         exec_lo, \s_scratch1
-  
-  // Extract and position SE_ID bits
-  s_bfe_u32         \s_scratch1, exec_lo, (0 | (2 << 16))     // Extract lower 2 bits from the SE_ID[3:0] from exec_lo
-  s_lshl_b32        \s_scratch1, \s_scratch1, 18              // Shift to bit position 18
-  s_mov_b32         exec_lo, 0x1                              // Restore exec_lo to 0x1
-  v_or_b32          v2, \s_scratch1, v2                       // OR the new SE_ID bits into v2
-
-  // Construct and store chiplet_and_wave_id bitfield
-  // Bitfield layout: wave_in_wg[5:0] | reserved_wg[7:6] | chiplet[10:8] | reserved[31:11]
-  s_sendmsg_rtn_b32 \s_scratch1, sendmsg(MSG_RTN_GET_SE_AID_ID)
-  
-  // Extract wave_in_wg while waiting for sendmsg
-  s_bfe_u32         exec_lo, ttmp8, (WAVE_ID_WG_BIT_POSITION | (5 << 16)) // Extract 5 bits of wave_in_wg from ttmp8[29:25]
-  s_and_b32         exec_lo, exec_lo, 0x3F                    // Mask to bits [5:0]
-  
-  s_wait_kmcnt      0
-  
-  // Extract and position chiplet (Virtual_XCC_ID)
-  s_bfe_u32         \s_scratch1, \s_scratch1, (16 | (3 << 16)) // Extract lower 3 bits from Virtual_XCC_ID[19:16]
-  s_lshl_b32        \s_scratch1, \s_scratch1, 8                // Shift to bit position [10:8]
-  
-  // Combine chiplet and wave_in_wg
-  s_or_b32          \s_scratch1, \s_scratch1, exec_lo          // Combine chiplet[10:8] with wave_in_wg[5:0]
-  
-  v_writelane_b32   v3, \s_scratch1, 0                         // Store bitfield in v3
-  s_mov_b32         exec_lo, 0x1                               // Restore exec_lo to 0x1
-  global_store_b32  v[0:1], v3, off, offset:SAMPLE_OFF_BITFIELD, scope:SCOPE_SYS
-.endif
-
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_HW_ID, scope:SCOPE_SYS
-.endm
-
-// ABI (Application Binary Interface) between first and second-level trap handler:
-//   ttmp0: PC_LO[31:0] (Program Counter Low)
-//   ttmp1: TrapID[3:0], SCHED_MODE[1:0], 0[9:0], PC_HI[15:0] (Program Counter High)
-//   ttmp11: ?[7:0], DebugEnabled[0], PRESERVED[15:0], ?[6:0]
-//   ttmp12: SQ_WAVE_STATE_PRIV (Private wave state register value).
-//   ttmp14: TMA[31:0] - TMA_LO (Trap Memory Argument Low - base address for trap handler data, low 32 bits).
-//   ttmp15: TTMA[63:32] - TMA_HI (Trap Memory Argument High - base address for trap handler data, high 32 bits).
-//   For PC Sampling, this points to pcs_hosttrap_data_ or pcs_stochastic_data_
  trap_entry:
  .if .amdgcn.gfx_generation_minor == 0
     // Save SCHED_MODE from ttmp1[27:26] into ttmp11[27:26]. We will restore it on exit
@@ -441,10 +210,18 @@
     s_and_b32           ttmp2,  ttmp1, TTMP1_SCHED_MODE_MASK
     s_or_b32            ttmp11, ttmp11, ttmp2
   .endif
-  s_mov_b32           ttmp3, 0
+  s_mov_b32           ttmp3, 0                               // Clear ttmp3 as it will contain the exception code
 
+  // Move SQ_WAVE_STATE_PRIV.SCC bit from ttmp12[9] to ttmp6[31].
+  // This frees ttmp12 as a scratch register.
+  s_bfe_u32         ttmp2, ttmp12, (SQ_WAVE_STATE_PRIV_SCC_SHIFT | (1 << 16))
+  s_lshl_b32        ttmp2, ttmp2, TTMP6_SCC_SHIFT
+  s_bitset0_b32     ttmp6, TTMP6_SCC_SHIFT
+  s_or_b32          ttmp6, ttmp6, ttmp2
+
+  // To avoid more overhead on the critical sample processing path, we decided to give a priority
+  // to host-trap and perf_snapshot trap over the s_trap and halt.
 .check_hosttrap:
-
   // ttmp[14:15] points to TMA.
   // Scratch registers: ttmp[2:3], ttmp[4:5], ttmp10, ttmp13
   s_getreg_b32      ttmp2, hwreg(HW_REG_EXCP_FLAG_PRIV)     // On gfx12, EXCP_FLAG_PRIV.b7
@@ -453,25 +230,17 @@
 
   // It's a Host Trap event.
   s_load_b64        ttmp[14:15], ttmp[14:15], 0x0, scope:SCOPE_CU  // ttmp[14:15]=*host_trap_buffers
-  s_bitset1_b32     ttmp13, TTMP13_HT_FLAG_BIT_SHIFT         // set bit 22 in TTMP13
-
-  // Clear the Host Trap flag in the hardware register to acknowledge the event
-  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_HT_SHIFT,1), 0
   s_wait_kmcnt      0                                       // Ensure previous load is complete.
   s_branch          .profile_trap_handlers
 
 .check_stochastic:
-  s_getreg_b32      ttmp2, hwreg(HW_REG_EXCP_FLAG_PRIV)     // EXCP_FLAG_PRIV.b10=stochastic_sample_trap
+  // ttmp2 already contains HW_REG_EXCP_FLAG_PRIV from .check_hosttrap
   s_bitcmp1_b32     ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT // Test Performance Snapshot bit.
 
-  s_cbranch_scc0    .handle_sw_trap                         // If not Stochastic, continue to check trap ID
+  s_cbranch_scc0    .handle_sw_trap                       // If not Stochastic, continue to check trap ID
 
   s_load_b64        ttmp[14:15], ttmp[14:15], 0x8, scope:SCOPE_CU  // ttmp[14:15]=*stoch_trap_buf
   s_wait_kmcnt      0
-
-  s_bitset1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT_SHIFT      // set bit 21 in TTMP13
-
-  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT,1), 0 // Clear the perf_snapshot flag
   s_branch          .profile_trap_handlers
 
 .handle_sw_trap:
@@ -586,23 +355,23 @@
   s_or_b32          ttmp3, ttmp2, ttmp3
 
 .if .amdgcn.gfx_generation_minor == 0
-  // Save trap id and halt status in ttmp6.
+  // Save trap id and halt status in ttmp6
   s_andn2_b32       ttmp6, ttmp6, (TTMP6_SAVED_TRAP_ID_MASK | TTMP6_SAVED_STATUS_HALT_MASK)
   s_bfe_u32         ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
   s_min_u32         ttmp2, ttmp2, 0xF
   s_lshl_b32        ttmp2, ttmp2, TTMP6_SAVED_TRAP_ID_SHIFT
   s_or_b32          ttmp6, ttmp6, ttmp2
-  s_bfe_u32         ttmp2, ttmp12, SQ_WAVE_STATE_PRIV_HALT_BFE
+  s_getreg_b32      ttmp2, hwreg(HW_REG_WAVE_STATE_PRIV, SQ_WAVE_STATE_PRIV_HALT_SHIFT, 1)
   s_lshl_b32        ttmp2, ttmp2, TTMP6_SAVED_STATUS_HALT_SHIFT
   s_or_b32          ttmp6, ttmp6, ttmp2
 .elseif .amdgcn.gfx_generation_minor == 5
-  // Save halt status in ttmp6
+  // Save halt status in ttmp6.
   s_andn2_b32       ttmp6, ttmp6, TTMP6_SAVED_STATUS_HALT_MASK
-  s_bfe_u32         ttmp2, ttmp12, SQ_WAVE_STATE_PRIV_HALT_BFE
+  s_getreg_b32      ttmp2, hwreg(HW_REG_WAVE_STATE_PRIV, SQ_WAVE_STATE_PRIV_HALT_SHIFT, 1)
   s_lshl_b32        ttmp2, ttmp2, TTMP6_SAVED_STATUS_HALT_SHIFT
   s_or_b32          ttmp6, ttmp6, ttmp2
 
-  // Save the trap id in ttmp11
+  // Save the trap id in ttmp11.
   s_andn2_b32       ttmp11, ttmp11, TTMP11_SAVED_TRAP_ID_MASK
   s_bfe_u32         ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
   s_min_u32         ttmp2, ttmp2, 0xF
@@ -644,9 +413,9 @@
 .endif
 
 .halt_wave:
-  // Halt the wavefront upon restoring STATUS below.
+  // Halt the wavefront.
   s_bitset1_b32     ttmp6, TTMP6_WAVE_STOPPED_SHIFT
-  s_bitset1_b32     ttmp12, SQ_WAVE_STATE_PRIV_HALT_SHIFT
+  s_setreg_imm32_b32 hwreg(HW_REG_STATE_PRIV, SQ_WAVE_STATE_PRIV_HALT_SHIFT, 1), 1
 
   // Initialize TTMP registers
   s_bitcmp1_b32     ttmp8, TTMP8_DEBUG_FLAG_SHIFT
@@ -658,63 +427,76 @@
   s_branch          .exit_trap
 
 .profile_trap_handlers:
-  // Register state at the start of profile_trap_handlers:
+.if .amdgcn.gfx_generation_minor >= 5
+  // Do the setup for gfx1250+
+  // NOTE: When in PRIV=1, scheduling happens as if SCHED_MODE[1:0] was 0 (normal mode)
+  // so no need to save/restore SCHED_MODE bits.
+
+  // save xnack_mask in ttmp12
+  s_getreg_b32 ttmp12,  hwreg(HW_REG_XNACK_MASK)
+
+.if .amdgcn.gfx_generation_minor == 5
+  // MI450, save MODE.MSB to ttmp11[7:0], and clear MODE.MSB
+  s_getreg_b32 ttmp2, hwreg(HW_REG_WAVE_MODE, SQ_WAVE_MODE_MSB_SHIFT, SQ_WAVE_MODE_MSB_SIZE)
+  s_andn2_b32 ttmp11, ttmp11, TTMP11_WAVE_MODE_MSB_MASK
+  s_or_b32 ttmp11, ttmp11, ttmp2
+
+  s_mov_b32 ttmp2, 0
+  s_setreg_b32 hwreg(HW_REG_WAVE_MODE, SQ_WAVE_MODE_MSB_SHIFT, SQ_WAVE_MODE_MSB_SIZE), ttmp2
+.endif
+
+.else
+  // GFX12.0 -> save ttmp11 (contains SCHED_MODE[1:0] at bits [27:26]) into ttmp12
+  // before overwriting ttmp11 with exec_hi. ttmp12 is free since SCC moved to ttmp6[31].
+  s_mov_b32 ttmp12, ttmp11
+  s_mov_b32 ttmp11, exec_hi
+.endif
+
+  // TTMP assignments for profiler
   //
-  // ttmp0:  PC_LO[31:0] - Contains program counter low bits
-  // ttmp1: For gfx_generation_minor >= 5 (57-bit PC)
-  //        PC_HI[24:0] - Contains program counter high bits
-  //        Otherwise PC_HI[15:0] - Contains program counter high bits (47-bit PC)
-  // ttmp2: Available - Can be freely used
-  // ttmp3: Contains exception flags set earlier
-  // ttmp4:  Available - Can be freely used
-  // ttmp5:  Available - Can be freely used
-  // ttmp6: For gfx_generation_minor >= 5
-  //          Contains workgroup info if clusters are enabled. Not safe to use as scratch
-  //        Else - Initially contains flags  - trap ID and halt status
-  //               Reused after saving
-  // ttmp7:  Contains WGID_Y in high 16 bits, WGID_Z in low 16 bits
-  // ttmp8: For gfx_generation_minor >= 5
-  //          Contains dispatch ID in bits [24:0] and debug flag. Not safe to use as scratch
-  //        Else - Contains dispatch ID in bits [24:0] and debug flag
-  //               Reused after saving
-  // ttmp9:  Contains WGID_X
-  // ttmp10: Available - Used next to save exec_lo
-  //         For gfx12.0, ttmp10 holds persistent state used by the debugger,
-  //         so PC sampling should not be used simultaneously with the debugger.
-  // ttmp11: For gfx_generation_minor >= 5
-  //          Contains debug/XNACK flags. Bits [13:0] and [31:28] are usable.
-  //         Else - Contains debug flags - Used next to save exec_hi
-  // ttmp12: Contains SQ_WAVE_STATE_PRIV
-  // ttmp13: Contains flag bits for sampling type - HT_FLAG_BIT or STOCH_FLAG_BIT
-  //         - TTMP13_HT_FLAG_BIT_SHIFT (bit 22) for host trap
-  //         - TTMP13_STOCH_FLAG_BIT_SHIFT (bit 23) for stochastic sampling
-  //         - TTMP13_BUF_ID_BIT_POSITION (bit 31) for buffer selection
-  //         For gfx12.5:
-  //         - Bits [13:0] used to save XNACK_MASK[31:18]
-  //         - Bits [21:14] used to save MODE VGPR MSBs
-  // ttmp14: Contains TMA_LO - base address for trap handler data, low 32 bits
-  // ttmp15: Contains TMA_HI - base address for trap handler data, high 32 bits
+  // ttmp0 = PC[31:2], 0, 0
+  // ttmp1 =
+  //  gfx12.0: 
+  //    ttmp1[31:26] = 0 (free to use),
+  //    ttmp1[25]    = buff_id bit for PC sampling
+  //    ttmp1[24:16] = 0 (free to use)
+  //    ttmp1[15: 0] = PC[47:32]
+  //  gfx12.5:
+  //    ttmp1[31:26] = 0 (free to use)
+  //    ttmp1[25]    = buff_id for PC sampling
+  //    ttmp1[24: 0] = PC[56:32]
+  // ttmp6 =
+  //      gfx12.0: STATE_PRIV.SCC, 30b0 (free to use)
+  //   >= gfx12.5: STATE_PRIV.SCC, 3b0 (free to use), cluster coordination
+  // ttmp7 = WGP Y/Z
+  // ttmp8 = 0 (unusable), yz valid, wave_in_wg, dispatch_idx
+  // ttmp9 = WGP X
+  // ttmp10 = EXEC_LO
+  // ttmp11 =
+  //   gfx12.0: EXEC_HI
+  //   gfx12.5:
+  //     ttmp11[22:14] = XNACK_STATE_PRIV[18, 16, 6:0]
+  //     ttmp11[7:0]   = MODE.MSB[7:0]
+  // ttmp12 = 
+  //      gfx12.0: 4b0 (free to use), SCHED_MODE[1:0], 26b0 (free to use)
+  //   >= gfx12.5: XNACK_MASK
+  // ttmp14 = TMA_LO-ish
+  // ttmp15 = TMA_HI-ish
   //
   // v[0:3] contain user shader data that must be preserved/restored
   // exec: Contains user's execution mask
+  //       gfx12.0: both exec_lo and exec_hi must be preserved
+  //    >= gfx12.5: only exec_lo is preserved
+  // ttmp[2:5] and ttmp13 free to use as scratch registers 
 
   s_mov_b32         ttmp10, exec_lo                         // Save exec_lo to ttmp10
-.if .amdgcn.gfx_generation_minor >= 5
-  s_mov_b32 exec_hi, 0x0                                    // wave32 mode: exec_hi unused by hardware, safe as scratch
-  SAVE_XNACK_MASK
-  SAVE_MODE_VGPR_MSBS                                       // Save 8 VGPR bits of MODE[19:12] to ttmp13[7:0]
- .else
-  s_mov_b32 ttmp11, exec_hi
-  s_mov_b32 exec_hi, 0x0
-.endif
 
-  s_mov_b32 exec_lo, 0x1                                    // turn on lane 0 only
+  s_mov_b64 exec, 0x1                                       // turn on lane 0 only
 
   v_readlane_b32    ttmp2, v0, 0                            // Save out lane 0's first VGPR
   v_readlane_b32    ttmp3, v1, 0                            // Save out lane 0's second VGPR
+
   // At this point, ttmp[4:5],v[0:1] are free.
-  // For amdgcn.gfx_generation_minor >= 5, ttmp6[27:0] contains workgroup cluster info (protected).
-  // Only ttmp6[31:28] can be modified for halt status storage.
   // Atomically get current sample slot index and select buffer
   // pcs_sampling_data_t.buf_write_val (uint64_t) stores:
   //   Bit 63: current_buffer_id (0 or 1)
@@ -727,7 +509,7 @@
   global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_SYS th:TH_ATOMIC_RETURN
   s_wait_loadcnt    0                                       // Wait for atomic operation to complete and return value
 
-  // At this point, ttmp[4:5] is free. ttmp6 is free if amdgcn.gfx_generation_minor < 5
+  // At this point, ttmp[4:5] is free. ttmp13 is free
   // v[0:1] (lane 0) now holds the previous value of buf_write_val.
   // This previous value gives the slot index for the current sample.
 
@@ -735,18 +517,18 @@
   s_lshr_b32        ttmp4, ttmp4, 31                        // ttmp4 = previous_buffer_id (0 or 1, from bit 63 of original uint64_t)
                                                             // This ttmp4 is used to select which buffer's metadata (size, watermark, signal) to use.
                                                             // It's also used to calculate the base address of the sample buffer.
-.if .amdgcn.gfx_generation_minor < 5
-  s_mov_b32         ttmp6, ttmp4                            // GFX12.0: Save buffer_id to ttmp6 (scratch) before ttmp4 is reused
-.endif
-  s_bitset0_b32     ttmp13, TTMP13_BUF_ID_BIT_POSITION       // Clear our local buffer full flag for now
-  s_cmp_eq_u32      ttmp4, 0                                // store off buf_to_use
-  s_cbranch_scc1    .skip_bufbit_set                        // into bit31 of ttmp13
-  s_bitset1_b32     ttmp13, TTMP13_BUF_ID_BIT_POSITION
+  s_bitset0_b32     ttmp1, TTMP1_BUF_ID_BIT_POSITION        // Clear our local buffer full flag for now
+  s_cmp_eq_u32      ttmp4, 0                                // Check the value of the buf_to_use, and update ttmp1's buffer_id accordingly
+  s_cbranch_scc1    .skip_bufbit_set                        // buffer_id (buf_to_use) remains zero
+  s_bitset1_b32     ttmp1, TTMP1_BUF_ID_BIT_POSITION        // buffer_id (buf_to_use) is 1.
 
 .skip_bufbit_set:
-  // ttmp[2:3]=v[0:1]-backup, ttmp[4:5]=free
-  // ttmp[10:11]=EXEC backup. ttmp[14:15]=tma
-  // v[0:1].lane0=local_entry, v[2:3]=original, EXEC=0x1
+  // ttmp[2:3]=v[0:1]-backup,
+  // ttmp[4:5]=free
+  // ttmp[14:15]=tma
+  // ttmp13 free
+  // v[0:1].lane0=local_entry,
+  // v[2:3]=original, EXEC=0x1
 
   v_bfe_u32         v1, v1, 0, SAMPLE_INDEX_WIDTH           // v[0:1] = new local_entry
                                                             // removes bit 31 from v1, returning v1 & 0x7FFFFFFF.
@@ -760,40 +542,58 @@
   s_wait_kmcnt      0                                       // Wait for buf_size load.
 
   s_cmp_ge_u32      ttmp4, ttmp5                            // if local_entry >= buf_size
-  s_cbranch_scc1    .lost_sample                            // If index >= buf_size, buffer is full, sample is lost.
-                                                            // This also sets TTMP13_BUF_ID_BIT_POSITION implicitly by branching.
+  s_cbranch_scc0    .process_sample                         // If index >= buf_size, buffer is full, sample is lost (.lost_sample path is hit).
+                                                            // Otherwise, process sample (jump to .process_sample path).
 
+.lost_sample:
+  // Handle cases where sample cannot be stored (buffer full, overflow, etc.)
+  // v[0:1] contains local_entry without bit v1[63],
+  // v[2:3] is original user-data
+  // ttmp1[25] = buffer_id
+  // ttmp[2:3] = original v[0:1]
+  // ttmp[4:5] = free
+  // ttmp[10:11] holds original shader's data
+  // ttmp13 is free
+  // ttmp[14:15]=tma
+  // EXEC=0x1
+
+  // Before restoring other vector registers, we need to ensure the perf_snapshot sampling lock
+  // has been released in case this stochastic sample is lost. Otherwise, we might never release a
+  // perf_snapshot sampling lock, causing no other waves to be sampled by perf_snapshot.
+
+  // Testing if the trap is caused by perf_snapshot (stochastic sampling HW).
+  s_getreg_b32      ttmp13, hwreg(HW_REG_EXCP_FLAG_PRIV)                // On gfx12, EXCP_FLAG_PRIV.b7
+  s_bitcmp1_b32     ttmp13, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT  // Test perf_snapshot (stochastic) bit.
+  s_cbranch_scc0    .lost_sample_restore                                // If not, skip lock release
+  s_getreg_b32      ttmp13, hwreg(HW_REG_PERF_SNAPSHOT_PC_HI)           // Otherwise, read PC_HI register to release snapshot lock
+  s_branch .lost_sample_restore                                         // and branch to restore original user shader state
+
+.process_sample:
   // Register state before calculating the sample buffer address:
-  // ttmp2 = backup of original shader's v0
-  // ttmp3 = backup of original shader's v1
+  // ttmp1[25] = buffer_id
+  // ttmp[2:3] = backup of original shader's v[0:1]
   // ttmp4 = sample_index_for_current_sample (from v0)
+  //         Free to use, unless we override v0
   // ttmp5 = buf_size
-  // For GFX12.0: ttmp6 = buffer_id (0 or 1)
-  // For GFX12.5: ttmp6 contains protected workgroup info, buffer_id stored in ttmp13.b31
-  // ttmp[10:11] = original shader's [exec_lo, exec_hi]
+  // ttmp13 free
   // ttmp[14:15] = base_address_of_pcs_sampling_data_t (TMA)
-  // ttmp13.b31 = buffer_id (0 or 1, same as ttmp6 for GFX12.0)
   // v[0:1].lane0 = sample index value from atomic
   // v[2:3] = original user shader's v[2:3] values
-  // exec = backup of user shader's v[0:1]
-  s_mov_b64         exec, ttmp[2:3]                          // stash into EXEC to free up ttmp[2:3]
+
+  // backup ttmp[2:3] to (exec_lo, ttmp4)
+  s_mov_b32 exec_lo, ttmp2
+  s_mov_b32 ttmp4, ttmp3
 
   // Calculate the base address of the selected sample buffer (buffer0 or buffer1).
   // The buffers are located after the pcs_sampling_data_t struct header (0x40 bytes).
   // Formula: TMA + 0x40 + (buffer_id * buf_size * 64_bytes_per_sample)
-.if .amdgcn.gfx_generation_minor >= 5
-  s_mov_b32         vcc_hi, 0                                // Initialize vcc_hi to 0
-   // Get buffer_id (0 or 1) from ttmp13 bit 31 into a scratch register.
-  s_bfe_u32         vcc_hi, ttmp13, (TTMP13_BUF_ID_BIT_POSITION | (1 << 16)) // vcc_hi = buffer_id
+  // Get buffer_id (0 or 1) from ttmp1[25] into a scratch register.
+  s_bfe_u32         ttmp13, ttmp1, (TTMP1_BUF_ID_BIT_POSITION | (1 << 16)) // ttmp13 = buffer_id
 
   // Calculate the byte offset for the selected buffer: buf_size * buffer_id
   // Result is a 64-bit value in ttmp[2:3].
-  s_mul_i32         ttmp2, ttmp5, vcc_hi                   // vcc_hi = buf_size * buffer_id (low 32 bits)
-  s_mul_hi_u32      ttmp3, ttmp5, vcc_hi                   // vcc_hi = buf_size * buffer_id (high 32 bits)
-.else
-  s_mul_i32         ttmp2, ttmp5, ttmp6                    // low 32 bits
-  s_mul_hi_u32      ttmp3, ttmp5, ttmp6                    // high 32 bits
-.endif
+  s_mul_i32         ttmp2, ttmp5, ttmp13                   // ttmp2 = buf_size * buffer_id (low 32 bits)
+  s_mul_hi_u32      ttmp3, ttmp5, ttmp13                   // ttmp3 = buf_size * buffer_id (high 32 bits)
 
   // Multiply by 64 bytes per sample slot (shift left by 6 bits)
   // This converts from units of samples to units of bytes
@@ -804,63 +604,55 @@
   s_addc_u32        ttmp3, ttmp3, 0                           // ttmp3 = total_offset_hi = buf_size * buffer_id * 64 + SAMPLE_OFF_BYTES_PER_SAMPLE + carry
   // Calculate the final buffer base address: TMA + total_offset.
   // Store the result in ttmp[4:5], which are free.
-  s_add_u32         ttmp4, ttmp14, ttmp2                    // ttmp4 = TMA_base_lo + total_offset_lo. This is low part of &bufferX
-  s_addc_u32        ttmp5, ttmp15, ttmp3                    // ttmp5 = TMA_base_hi + total_offset_hi + carry. This is high part of &bufferX
-                                                            // ttmp[4:5] now correctly points to the base of the selected sample buffer array
-  // At this point: exec_lo=0x1, exec_hi=0 or XNACK_MASK[31:18]
-  // GFX12.5: exec_lo contains backup of user v0, exec_hi contains XNACK_MASK[31:18]
-  // GFX12.0: exec contains backup of user v[0:1] (from ttmp[2:3])
-  s_bitcmp1_b32     ttmp13, TTMP13_HT_FLAG_BIT_SHIFT        // if ttmp13.b22==1, this is hosttrap
-  s_cbranch_scc1    .fill_sample_ht
-  s_bitcmp1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT_SHIFT
-  s_cbranch_scc1    .fill_sample_stoch
+  s_add_u32         ttmp2, ttmp14, ttmp2                    // ttmp2 = TMA_base_lo + total_offset_lo. This is low part of &bufferX
+  s_addc_u32        ttmp3, ttmp15, ttmp3                    // ttmp3 = TMA_base_hi + total_offset_hi + carry. This is high part of &bufferX
+                                                            // ttmp[2:3] now correctly points to the base of the selected sample buffer array
 
-  s_mov_b64         ttmp[2:3], exec                         // Restore user v[0:1] backup to ttmp[2:3]
-  v_readlane_b32    ttmp4, v2, 0                            // Backup user v[2:3] to ttmp[4:5] for restore.
-  v_readlane_b32    ttmp5, v3, 0                            // ttmp[4:5] now holds original user v[2:3] values
-  s_branch          .restore_vector_before_exit_trap
-
-.fill_sample_ht:
+.fill_sample_common:
+  // This is a common path for filling fields shared by host-trap and stochastic PC sampling:
+  // timestamp, exec, workgroup information, HW_ID, and correlation ID.
+  //
   // At this point, v[0:1] is local_entry (but v1 is 0)
   // v[2:3] is original user-data
-  // ttmp[2:3] is free
-  // ttmp[4:5] holds &buffer
-  // ttmp6 holds buf_to_use
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // [ttmp14:15]=‘tma', ttmp13.b31 = buf_to_use
-  // EXEC holds holds backup of original shader's v[0:1]
-  V_READLANE_B32    v0, 0                                   // v[0] = local_entry (from v[0])
-  S_MUL_I32         ttmp2, SAMPLE_OFF_BYTES_PER_SAMPLE      // ttmp2 = local_entry * SAMPLE_OFF_BYTES_PER_SAMPLE
-  S_MUL_HI_U32      ttmp3, SAMPLE_OFF_BYTES_PER_SAMPLE      // ttmp3 = local_entry * SAMPLE_OFF_BYTES_PER_SAMPLE (high part)
-  s_add_u32         ttmp2, ttmp2, ttmp4                     // ttmp2 = &bufferX[local_entry] (low part)
-  s_addc_u32        ttmp3, ttmp3, ttmp5                     // ttmp[2:3]=&bufferX[local_entry]
-  v_readlane_b32    ttmp4, v2, 0x0                          // ttmp[4:5] now holds backup of
-  v_readlane_b32    ttmp5, v3, 0x0                          // user-data from v[2:3]
-  v_writelane_b32   v0, ttmp2, 0x0                          // v[0] = &buffer[local_entry]
-  v_writelane_b32   v1, ttmp3, 0x0                          // v[0:1]=&buffer[local_entry]
+  // ttmp[2:3] holds &buffer
+  // exec_lo holds the backup of the v0
+  // ttmp4 holds the backup of the v1
+  // ttmp5 is free
+  // ttmp13 is free
+  // ttmp[10:11] contains user shader backup
+  // [ttmp14:15]=‘tma', ttmp1[25] = buf_to_use
+  v_readlane_b32    ttmp13, v0, 0                              // v[0] = local_entry (from v[0])
+  s_mul_i32         ttmp5, ttmp13, SAMPLE_OFF_BYTES_PER_SAMPLE  // ttmp5 = local_entry * SAMPLE_OFF_BYTES_PER_SAMPLE
+  s_mul_hi_u32      ttmp13, ttmp13, SAMPLE_OFF_BYTES_PER_SAMPLE // ttmp13 = local_entry * SAMPLE_OFF_BYTES_PER_SAMPLE (high part)
+  s_add_u32         ttmp2, ttmp2, ttmp5                      //
+  s_addc_u32        ttmp3, ttmp3, ttmp13                     // ttmp[2:3] = &bufferX[local_entry]
+  v_writelane_b32   v0, ttmp2, 0x0                           //
+  v_writelane_b32   v1, ttmp3, 0x0                           // v[0:1] = &buffer[local_entry]
 
   s_sendmsg_rtn_b64 ttmp[2:3], sendmsg(MSG_RTN_GET_REALTIME)// Get the current timestamp
   s_wait_kmcnt      0                                       // Wait for timestamp
 
+  v_readlane_b32    ttmp5, v2, 0x0                           // ttmp5 and ttmp13 now holds backup of
+  v_readlane_b32    ttmp13, v3, 0x0                          // user-data from v[2:3]
+
   // v[0:1] = &buffer[local_entry]
-  // v[2:3] = free
-  // ttmp[2:3] holds the thing we want to store
-  // ttmp[4:5] holds backup of original shaders v[2:3]
-  // ttmp6     ttmp6 is free if amdgcn.gfx_generation_minor < 5
-  // ttmp[10:11] holds original shaders [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
-  // EXEC holds backup of original shaders v[0:1]
+  // v[2:3] free
+  // ttmp[2:3] holds sample timestamp we want to store
+  // exec_lo holds the backup of the v0
+  // ttmp4 holds backup of v1
+  // ttmp5 holds the backup of v2
+  // ttmp13 holds the backup of v3
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
 
   v_writelane_b32   v2, ttmp2, 0                            // bring output data to v[2:3]
   v_writelane_b32   v3, ttmp3, 0                            // v[2:3] = timestamp
 
-  // ttmp[2:3] now free after moving to v[2:3]
-  s_mov_b64         ttmp[2:3], exec                         // Save user v[0:1] backup from exec to ttmp[2:3] (exec will be modified)
-.if .amdgcn.gfx_generation_minor >= 5
-  s_mov_b32         exec_lo, 1                              // Set exec_lo to 1 (exec_hi unused/preserved)
-.else
+  // ttmp[2:3] now free after moving to v[2:3], so return ttmp[2:5] = v[0:3]
+  s_mov_b32         ttmp2, exec_lo
+  s_mov_b32         ttmp3, ttmp4
+  s_mov_b32         ttmp4, ttmp5
+  s_mov_b32         ttmp5, ttmp13
   s_mov_b64         exec, 1                                 // Set exec to lane 0 for vector stores
-.endif
 
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_TIMESTAMP, scope:SCOPE_SYS // store out timestamp
 
@@ -868,18 +660,13 @@
   // v[2:3] = free
   // ttmp[2:3] holds backup of original shader's v[0:1]
   // ttmp[4:5] holds backup of original shader's v[2:3]
-  // ttmp6     ttmp6 is free if amdgcn.gfx_generation_minor < 5
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=‘tma', ttmp13.b31 = buf_to_use
+  // ttmp[10:11] holds backups from user shader
+  // ttmp13 is free
+  // ttmp[14:15]=‘tma', ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
-  s_and_b32         ttmp1, ttmp1, SQ_WAVE_PC_HI_ADDRESS_MASK // Clear out extra data from PC_HI
-  v_writelane_b32   v2, ttmp0, 0                             // v[2] = PC_LO
-  v_writelane_b32   v3, ttmp1, 0                             // v[3] = PC_HI
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_PC_HOST, scope:SCOPE_SYS  // store out PC
-
+  // Save exec for the sample. exec_lo is inside ttmp10, while exec_hi in ttmp11 for gfx120*
   v_writelane_b32   v2, ttmp10, 0                            // v[2] = exec_lo
-
 .if .amdgcn.gfx_generation_minor >= 5
   v_mov_b32         v3, 0                                    // exec_hi is not used in wave32
 .else
@@ -889,59 +676,95 @@
 
   // Store Workgroup ID X and Y at offset SAMPLE_OFF_WGID_XY (0x10).
   // ttmp9 = WGID_X (from first-level handler).
-  // ttmp7 contains WGID_Y in high 16 bits.
+  // ttmp7 contains WGID_Y in low 16 bits.
   v_writelane_b32   v2, ttmp9, 0                             // wg_id_x
-  S_BFE_U32         ttmp7, (16<<16)                          // extract bits 31:16, wg_id_y
-  V_WRITELANE_B32   v3,0                                     // wg_id_y
+  s_bfe_u32         ttmp13, ttmp7, (0 | 16<<16)              // extract bits tttmp7[15:0] representing wg_id_y
+  v_writelane_b32   v3, ttmp13, 0                            // wg_id_y
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_XY, scope:SCOPE_SYS  // store wg_id_x and wg_id_y
 
   // Store Workgroup ID Z at offset 0x18 (32-bit).
   // ttmp7 contains WGID_Z in high 16 bits [31:16].
-.if .amdgcn.gfx_generation_minor >= 5
-  s_bfe_u32         vcc_hi, ttmp7, (16 | (16 << 16))         // Extract WGID_Z[15:0] from ttmp7[31:16]
-  v_writelane_b32   v2, vcc_hi, 0                            // Store WGID_Z in v2
-.else
-  s_bfe_u32         ttmp6, ttmp7, (16 | (16 << 16))          // Extract WGID_Z[15:0] from ttmp7[31:16]
-  v_writelane_b32   v2, ttmp6, 0                             // Store WGID_Z in v2
-.endif
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WGID_Z, scope:SCOPE_SYS
-
-  // Note: Bitfield word (wave_in_wg and chiplet) is now stored by STORE_HW_ID macro below
-  // for gfx12.5+, which extracts both from the MSG_RTN_GET_SE_AID_ID response.
-  // For gfx12.0, only wave_in_wg is stored here:
-.if .amdgcn.gfx_generation_minor < 5
-  // Construct bitfield word at offset 0x1C for gfx12.0:
-  // Bits [5:0]   = wave_in_wg (5 bits from ttmp8[29:25])
-  // Bits [31:6]  = reserved = 0
-  s_bfe_u32         ttmp6, ttmp8, (WAVE_ID_WG_BIT_POSITION | (5 << 16)) // Extract 5 bits (use ttmp6, not vcc_hi which has user data)
-  s_and_b32         ttmp6, ttmp6, 0x3F                       // Mask to bits [5:0]
-  v_writelane_b32   v2, ttmp6, 0                             // Store bitfield in v2
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_BITFIELD, scope:SCOPE_SYS
-.endif
+  s_bfe_u32         ttmp13, ttmp7, (16 | (16 << 16))         // Extract WGID_Z[15:0] from ttmp7[31:16]
+  v_writelane_b32   v2, ttmp13, 0                            // Store WGID_Z in v2
+  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WGID_Z, scope:SCOPE_SYS  // store wg_id_z
 
   // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
   // ttmp[2:3] holds backup of original shader's v[0:1]
   // ttmp[4:5] holds backup of original shader's v[2:3]
-  // ttmp6     ttmp6 is free if amdgcn.gfx_generation_minor < 5
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[10:11] holds original shader's information (save/restore)
+  // ttmp13 is free
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
+  // Store HW_ID values spanned across multiple registers
+  // Current ROCr API determines single dword for HW_ID, while this information is scattered across:
+  //    gfx12.0: two dword registers HW_ID1 and HW_ID2 on GFX10+ architectures.
+  // >= gfx12.5: three registers HW_ID1, HW_ID2, and AID_ID
+  // Thus, we combine values from multiple registers listed abot into a single dword HW_ID with
+  // the following layout:
+  // WAVE_ID[4:0]
+  // QUEUE_ID[8:5]
+  // RESERVED [9]
+  // WGP_ID[13:10]
+  // SIMD_ID[15:14]
+  // SA_ID[16]
+  // ME_ID[17]
+  // SE_ID[19:18]
+  // PIPE_ID[21:20]
+  // RESERVED [22]
+  // WG_ID[27:23]
+  // VM_ID[31:28]
+
+  // Note: We don't show DP_RATE and STATE_ID that are useless for compute kernels
+  // Also, we reduced SE_ID to 2 bits as there's only a maximum of 4 SEs on existing gfx12.0 parts
+  // Finally, ME_ID is reduced to 1 bit as wavefronts are dispatched from either ME0 or ME1 in gfx12.
+  // Bits 9 and 22 are reserved for a future use.
+  v_mov_b32         v2, 0
+  v_mov_b32         v3, 0
+  s_getreg_b32      ttmp13, hwreg(HW_REG_HW_ID1)
+  v_and_b32         v2, ttmp13, 0x1feffcff               // Mask to extract fields from HW_ID1 (WAVE_ID, WGP_ID, SA_ID, SE_ID on GFX12.0)
+  v_and_b32         v3, ttmp13, 0x00000300               // Mask to extract SIMD_ID[9:8]
+  v_lshl_or_b32     v2, v3, 6, v2                        // Shift SIMD_ID to bits [15:14]
+  s_getreg_b32      ttmp13, hwreg(HW_REG_HW_ID2)         // Get HW_ID2
+  v_and_b32         v3, ttmp13, 0x0f000000               // Mask to extract WAVE_ID[27:24]
+  v_lshl_or_b32     v2, v3, 4, v2                        // Shift WAVE_ID to bits [4:0]
+  v_and_b32         v3, ttmp13, 0x001f0000               // Mask to extract WG_ID[20:16]
+  v_lshl_or_b32     v2, v3, 7, v2                        // Shift WG_ID to bits [27:23]
+  v_and_b32         v3, ttmp13, 0x00000100               // Mask to extract ME_ID[8]
+  v_lshl_or_b32     v2, v3, 9, v2                        // Shift ME_ID to bit [17]
+  v_and_b32         v3, ttmp13, 0x00000030               // Mask to extract PIPE_ID[5:4]
+  v_lshl_or_b32     v2, v3, 16, v2                       // Shift PIPE_ID to bits [21:20]
+  v_and_b32         v3, ttmp13, 0x0000000f               // Mask to extract QUEUE_ID[3:0]
+  v_lshl_or_b32     v2, v3, 5, v2                        // Shift QUEUE_ID to bits [8:5]
+
 .if .amdgcn.gfx_generation_minor >= 5
-  STORE_HW_ID vcc_hi                                        // Uses exec_lo internally as temp holder (preserves exec_hi)
-.else
-  STORE_HW_ID ttmp6
+  // SE_ID resides in MSG_RTN_GET_SE_AID_ID[3:0].
+  
+  s_sendmsg_rtn_b32 ttmp13, sendmsg(MSG_RTN_GET_SE_AID_ID)
+  v_and_b32         v2, 0xFFF3FFFF, v2                        // Clear SE_ID bits [19:18] in v2 while waiting
+  s_wait_kmcnt      0
+
+  // Cache the full SE_AID_ID in v3 to avoid a second message later (for XCC_ID extraction)
+  v_writelane_b32   v3, ttmp13, 0
+
+  // Extract and position SE_ID bits
+  s_bfe_u32         ttmp13, ttmp13, (0 | (2 << 16))      // Extract lower 2 bits from the SE_ID[3:0] from ttmp13
+  s_lshl_b32        ttmp13, ttmp13, 18                   // Shift to bit position 18
+  v_or_b32          v2, ttmp13, v2                       // OR the new SE_ID bits into v2
+
 .endif
+  // Store HW_ID information
+  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_HW_ID, scope:SCOPE_SYS
 
   // The following is still true
   // v[0:1] = &buffer[local_entry]
-  // v[2:3] = free
+  // v2 = free, v3 = cached SE_AID_ID (gfx12.5+), free (gfx12.0)
   // ttmp[2:3] holds backup of original shader's v[0:1]
   // ttmp[4:5] holds backup of original shader's v[2:3]
-  // ttmp6 = free
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[10:11] holds original shader's information (save/restore)
+  // ttmp13 is free
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
   // Store wave_in_group and chiplet information in the following format:
@@ -949,205 +772,128 @@
   // bits [10:8]  = chiplet (zero on gfx12.0)
   // Bits [7:6] and [31:11] = reserved and must be zero
 
-  s_bfe_u32         ttmp6, ttmp8, (WAVE_ID_WG_BIT_POSITION | (5 << 16)) // Extract 5 bits
-  v_writelane_b32   v2, ttmp6, 0                            // Store wave_in_group in v2
+  s_bfe_u32         ttmp13, ttmp8, (WAVE_ID_WG_BIT_POSITION | (5 << 16)) // Extract 5 bits (use ttmp13)
+  v_writelane_b32   v2, ttmp13, 0                             // Store wave_in_group in v2
 
-  // Write wave_in_group and chiplet (0 on gfx12.0)
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_BITFIELD, scope:SCOPE_SYS
+.if .amdgcn.gfx_generation_minor >= 5
+  // Chiplet (XCC_ID) resides in MSG_RTN_GET_SE_AID_ID[19:16].
+  // NOTE: on gfx12.0 there are no chiplets
 
-  // The following is still true as we get ready to jump to correlation ID check
-  // v[0:1] = &buffer[local_entry]
-  // v[2:3] = free
-  // ttmp[2:3] holds backup of original shader’s v[0:1]
-  // ttmp[4:5] holds backup of original shader’s v[2:3]
-  // ttmp6 = free on gfx12.0, but reserved on gfx12.5
-  // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // ttmp[14:15=‘tma’, ttmp13.b31 = buf_to_use
-  // EXEC is 0x1
+  // Reuse SE_AID_ID value cached in v3 to avoid redundant message traffic
+  v_readlane_b32    ttmp13, v3, 0
+
+  s_bfe_u32         ttmp13, ttmp13, (16 | (3 << 16)) // Extract lower 3 bits from Virtual_XCC_ID[19:16]
+  s_lshl_b32        ttmp13, ttmp13, 8                // Shift to bit position [10:8]
+  v_or_b32          v2, ttmp13, v2                   // move chiplet into the v2 already containing wave_in_group
+.endif
+
+  // Write wave_in_group and chiplet
+  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WAVE_IN_GROUP_CHIPLET, scope:SCOPE_SYS
+
   // The following is still true
   // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
   // ttmp[2:3] holds backup of original shader's v[0:1]
   // ttmp[4:5] holds backup of original shader's v[2:3]
-  // ttmp6     ttmp6 is free if amdgcn.gfx_generation_minor < 5
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[10:11] holds original shader's information (save/restore)
+  // ttmp13 is free
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
-.if .amdgcn.gfx_generation_minor >= 5
-    STORE_CORRELATION_ID  vcc_hi
-.else
-    STORE_CORRELATION_ID  ttmp6
-.endif
+  // Store the correlation ID contained of dispatch_id (ttmp8[24:0]) + doorbell_id
+  s_and_b32         ttmp13, ttmp8, TTMP8_DISPATCH_ID_MASK
+  v_writelane_b32   v2, ttmp13, 0
+  s_sendmsg_rtn_b32 ttmp13, sendmsg(MSG_RTN_GET_DOORBELL)
+  s_wait_kmcnt      0
+  s_and_b32         ttmp13, ttmp13, DOORBELL_ID_MASK
+  v_writelane_b32   v3, ttmp13, 0
+  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_CORRELATION, scope:SCOPE_SYS
 
-  // Ensure all stores have completed before returning and incrementing written_val
-  s_wait_storecnt   0
-
-  // Still true after returning back from correlation ID check
-  // v[0:1] = &buffer[local_entry] (needed for upcoming atomic operation)
+  // The following is still true
+  // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
   // ttmp[2:3] holds backup of original shader's v[0:1]
   // ttmp[4:5] holds backup of original shader's v[2:3]
-  // For gfx_generation_minor == 0:
-  //   ttmp6 holds buf_to_use
-  // For gfx_generation_minor == 5 (GFX12.5):
-  //   ttmp4 holds buf_to_use, ttmp6 contains workgroup info and must not be modified
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[10:11] holds original shader's information (save/restore)
+  // ttmp13 is free
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
-  s_branch          .ret_from_fill_sample
 
-.fill_sample_stoch:
-  // v0 contains local_entry, v1 is free
-  // v[2:3] is original user-data
-  // ttmp[2:3] is free
-  // ttmp[4:5] holds &buffer
-  // ttmp6 buffer_id (0 or 1) for GFX12.0, workgroup info for GFX12.5+
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // [ttmp14:15]=TMA base address, ttmp13.b31 = buf_to_use
-  // EXEC  holds backup of original shader's v[0:1]
-  // Calculate address of sample slot: &buffer[local_entry * 64]
-  V_READLANE_B32    v0, 0x0                                   // Extract local_entry from v[0] lane 0
-  S_MUL_I32         ttmp2, SAMPLE_OFF_BYTES_PER_SAMPLE        // ttmp2 = local_entry * 64 (low 32 bits)
-  S_MUL_HI_U32      ttmp3, SAMPLE_OFF_BYTES_PER_SAMPLE        // ttmp3 = local_entry * 64 (high 32 bits)
-  s_add_u32         ttmp2, ttmp2, ttmp4                       // Add buffer base address (low)
-  s_addc_u32        ttmp3, ttmp3, ttmp5                       // Add buffer base address (high) + carry
+  // Check perf_snapshot bit to determine if a trap caused by stochastic sampling.
+  s_getreg_b32      ttmp13, hwreg(HW_REG_EXCP_FLAG_PRIV)     // On gfx12, EXCP_FLAG_PRIV.b7
+  s_bitcmp1_b32     ttmp13, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT // Test Performance Snapshot bit.
+  s_cbranch_scc1    .fill_sample_stoch  // jump if a trap is caused by the perf_snapshot block
 
-  // Backup original user data from v[2:3] before overwriting
-  v_readlane_b32    ttmp4, v2, 0x0                            // Save user v[2] to ttmp4
-  v_readlane_b32    ttmp5, v3, 0x0                            // Save user v[3] to ttmp5
-
-  // Store calculated sample address in v[0:1] for subsequent global stores
-  v_writelane_b32   v0, ttmp2, 0x0                            // v[0] = sample address (low)
-  v_writelane_b32   v1, ttmp3, 0x0                            // v[1] = sample address (high)
-  s_sendmsg_rtn_b64 ttmp[2:3], sendmsg(MSG_RTN_GET_REALTIME)  // Request realtime clock
-  s_wait_kmcnt      0                                         // Wait for timestamp
-
-  // v[0:1] = &buffer[local_entry] (sample slot address)
+.fill_sample_ht:
+  // The following is still true
+  // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
-  // ttmp[2:3] = 64-bit timestamp value
-  // ttmp[4:5] = holds backup of original shader's v[2:3]
-  // ttmp6 =  free for GFX12.0, workgroup info for GFX12.5+
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15] = TMA base address, ttmp13.b31 = buffer_id
-  // EXEC holds backup of original shader's v[0:1]
+  // ttmp[2:3] holds backup of original shader's v[0:1]
+  // ttmp[4:5] holds backup of original shader's v[2:3]
+  // ttmp[10:11] holds original shader's information (save/restore)
+  // ttmp13 is free
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
+  // EXEC is 0x1
 
-  v_writelane_b32   v2, ttmp2, 0                              // v[2] = timestamp (low)
-  v_writelane_b32   v3, ttmp3, 0                              // v[3] = timestamp (high)
+  v_writelane_b32   v2, ttmp0, 0                             // v[2] = PC_LO
+  v_writelane_b32   v3, ttmp1, 0                             // v[3] = PC_HI
+  v_and_b32         v3, v3, SQ_WAVE_PC_HI_ADDRESS_MASK       // clear out PC_HI's MSBs scratch bits
+  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_PC_HOST, scope:SCOPE_SYS  // store out PC
 
-  // ttmp[2:3] now free after moving to v[2:3]
-  s_mov_b64         ttmp[2:3], exec                           // Save user v[0:1] backup from exec to ttmp[2:3]
-.if .amdgcn.gfx_generation_minor >= 5
-  s_mov_b32         exec_lo, 1
-.else
-  s_mov_b64         exec, 1                                   // Enable only lane 0 for vector ops
-.endif
-
- // Store timestamp at offset 0x30 (SAMPLE_OFF_TIMESTAMP) within sample slot
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_TIMESTAMP, scope:SCOPE_SYS  // store out timestamp
+  // Ensure all stores have completed before returning and incrementing written_val
+  s_wait_storecnt   0
 
   // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
   // ttmp[2:3] holds backup of original shader's v[0:1]
   // ttmp[4:5] holds backup of original shader's v[2:3]
-  // ttmp6     ttmp6 is free if amdgcn.gfx_generation_minor < 5
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15] = TMA base address, ttmp13.b31 = buffer_id
-  // EXEC is 0x1 (lane 0 only)
+  // ttmp[10:11] holds original shader's information (save/restore)
+  // ttmp13 is free
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
+  // EXEC is 0x1
+  s_branch          .ret_from_fill_sample
 
-  v_writelane_b32   v2, ttmp10, 0                            // v[2] = exec_lo
-.if .amdgcn.gfx_generation_minor >= 5
-  v_mov_b32         v3, 0                                    // GFX12.5+ uses wave32, exec_hi = 0
-.else
-  v_writelane_b32   v3, ttmp11, 0                            // GFX12.0 uses wave64, store exec_hi
-.endif
-  // Store exec state at offset 0x08 (SAMPLE_OFF_EXEC_LOHI)
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_EXEC_LOHI, scope:SCOPE_SYS
-
-  // ttmp9 contains WGID_X, ttmp7 contains WGID_Y in upper 16 bits
-  v_writelane_b32   v2, ttmp9, 0                             // wg_id_x
-  S_BFE_U32         ttmp7, (0 | (16 << 16))                  // extract bits [15:0] = wg_id_y
-  V_WRITELANE_B32   v3, 0                                    // wg_id_y
-  // Store at offset 0x10 (SAMPLE_OFF_WGID_XY)
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_XY, scope:SCOPE_SYS
-
-  // STORE WORKGROUP ID Z at offset 0x18 (32-bit)
-  // ttmp7 contains WGID_Z in high 16 bits [31:16]
-.if .amdgcn.gfx_generation_minor >= 5
-  s_bfe_u32         vcc_hi, ttmp7, (16 | (16 << 16))         // Extract WGID_Z[15:0] from ttmp7[31:16]
-  v_writelane_b32   v2, vcc_hi, 0                            // Store WGID_Z in v2
-.else
-  s_bfe_u32         ttmp6, ttmp7, (16 | (16 << 16))          // Extract WGID_Z[15:0] from ttmp7[31:16]
-  v_writelane_b32   v2, ttmp6, 0                             // Store WGID_Z in v2
-.endif
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WGID_Z, scope:SCOPE_SYS
-
-  // Note: Bitfield word (wave_in_wg and chiplet) is now stored by STORE_HW_ID macro below
-  // for gfx12.5+, which extracts both from the MSG_RTN_GET_SE_AID_ID response.
-  // For gfx12.0, only wave_in_wg is stored here:
-.if .amdgcn.gfx_generation_minor < 5
-  // Construct bitfield word at offset 0x1C for gfx12.0:
-  // Bits [5:0]   = wave_in_wg (5 bits from ttmp8[29:25])
-  // Bits [31:6]  = reserved = 0
-  s_bfe_u32         ttmp6, ttmp8, (WAVE_ID_WG_BIT_POSITION | (5 << 16)) // Extract 5 bits (use ttmp6, not vcc_hi which has user data)
-  s_and_b32         ttmp6, ttmp6, 0x3F                       // Mask to bits [5:0]
-  v_writelane_b32   v2, ttmp6, 0                             // Store bitfield in v2
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_BITFIELD, scope:SCOPE_SYS
-.endif
-
-.if .amdgcn.gfx_generation_minor >= 5
-  STORE_HW_ID vcc_hi                                        // Uses exec_lo internally as temp holder (preserves exec_hi)
-.else
-  STORE_HW_ID ttmp6
-.endif
+.fill_sample_stoch:
+  // v[0:1] = &buffer[local_entry]
+  // v[2:3] = free
+  // ttmp[2:3] holds backup of original shader's v[0:1]
+  // ttmp[4:5] holds backup of original shader's v[2:3]
+  // ttmp[10:11] holds original shader's information (save/restore)
+  // ttmp13 is free
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
+  // EXEC is 0x1
 
   // Read performance SNAPSHOT registers and store at offset 0x28 (SAMPLE_OFF_SNAPSHOT_DATA + 4)
-  S_GETREG_B32      HW_REG_PERF_SNAPSHOT_DATA1              // Read snapshot data register 1
-  V_WRITELANE_B32   v2, 0x0                                 // stash DATA1 in v2
-  S_GETREG_B32      HW_REG_PERF_SNAPSHOT_DATA2              // Read snapshot data register 2
-  V_WRITELANE_B32   v3, 0x0                                 // stash DATA2 in v3
+  s_getreg_b32      ttmp13, hwreg(HW_REG_PERF_SNAPSHOT_DATA1)       // Read snapshot data register 1
+  v_writelane_b32   v2, ttmp13, 0x0                                 // stash DATA1 in v2
+  s_getreg_b32      ttmp13, hwreg(HW_REG_PERF_SNAPSHOT_DATA2)       // Read snapshot data register 2
+  v_writelane_b32   v3, ttmp13, 0x0                                 // stash DATA2 in v3
   // Store snapshot DATA1 and DATA2 at offset SAMPLE_OFF_SNAPSHOT_DATA + 4
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_SNAPSHOT_DATA + 4, scope:SCOPE_SYS
 
 .if .amdgcn.gfx_generation_minor >= 5
+  // On gfx1250+, the PC_HI must be read last to release the perf_snapshot lock.
   // Store main snapshot data at offset 0x24 (SAMPLE_OFF_SNAPSHOT_DATA)
-  S_GETREG_B32      HW_REG_PERF_SNAPSHOT_DATA
-  V_WRITELANE_B32   v2, 0
+  s_getreg_b32      ttmp13, hwreg(HW_REG_PERF_SNAPSHOT_DATA)
+  v_writelane_b32   v2, ttmp13, 0
   global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_SNAPSHOT_DATA, scope:SCOPE_SYS  // store perf snapshot DATA
 .endif
 
   // For stochastic sampling, use PC from snapshot registers (actual sampled instruction)
   // Trap PC points to trap handler entry, not the interrupted instruction
-  S_GETREG_B32      HW_REG_PERF_SNAPSHOT_PC_LO              // Read performance snapshot PC_LO register
-  V_WRITELANE_B32   v2, 0x0                                 // stash PC_LO in v2
-  S_GETREG_B32      HW_REG_PERF_SNAPSHOT_PC_HI              // Read performance snapshot PC_HI register
-  V_WRITELANE_B32   v3, 0x0                                 // stash PC_HI in v3
-
-.if .amdgcn.gfx_generation_minor == 0
-  // Store PERF_SNAPSHOT_DATA at offset 0x24
-  // We access PERF_SNAPSHOT_DATA last on gfx12.0 as it contains valid bit indicating if the
-  // sample is valid and being read by the sampled wave.
-  s_getreg_b32      ttmp6, hwreg(HW_REG_PERF_SNAPSHOT_DATA)
-  v_writelane_b32   v2, ttmp6, 0
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_SNAPSHOT_DATA, scope:SCOPE_SYS  // store perf snapshot DATA
-.endif
+  s_getreg_b32      ttmp13, hwreg(HW_REG_PERF_SNAPSHOT_PC_LO)       // Read performance snapshot PC_LO register
+  v_writelane_b32   v2, ttmp13, 0x0                                 // stash PC_LO in v2
+  s_getreg_b32      ttmp13, hwreg(HW_REG_PERF_SNAPSHOT_PC_HI)       // Read performance snapshot PC_HI register
+  v_writelane_b32   v3, ttmp13, 0x0                                 // stash PC_HI in v3
   // Store at offset 0x00 (SAMPLE_OFF_PC_HOST)
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_PC_HOST, scope:SCOPE_SYS
 
-  // The following is still true as we get ready to jump to correlation ID check
-  // v[0:1] = &buffer[local_entry]
-  // v[2:3] = free
-  // ttmp[2:3] holds backup of original shader's v[0:1]
-  // ttmp[4:5] holds backup of original shader's v[2:3]
-  // ttmp6     ttmp6 is free if amdgcn.gfx_generation_minor < 5
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 tells us buf_to_use
-  // EXEC is 0x1
-
-.if .amdgcn.gfx_generation_minor >= 5
-  STORE_CORRELATION_ID  vcc_hi
-.else
-  STORE_CORRELATION_ID  ttmp6
+.if .amdgcn.gfx_generation_minor == 0
+  // As the perf_snapshot lock doesn't exist on GFX120*, we need to read DATA last as it contains the VALID bit.
+  // Store main snapshot data at offset 0x24 (SAMPLE_OFF_SNAPSHOT_DATA)
+  s_getreg_b32      ttmp13, hwreg(HW_REG_PERF_SNAPSHOT_DATA)
+  v_writelane_b32   v2, ttmp13, 0
+  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_SNAPSHOT_DATA, scope:SCOPE_SYS  // store perf snapshot DATA
 .endif
 
   // Ensure all stores have completed before returning and incrementing written_val
@@ -1158,20 +904,20 @@
   // signaling the host when watermark is reached.
 
 .ret_from_fill_sample:
-  // v[0:1] = free
+  // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
-  // ttmp[2:3] = holds backup of original shader's v[0:1]
-  // ttmp[4:5] = holds backup of original shader's v[2:3]
-  // ttmp6 = free for GFX12.0, protected workgroup info for GFX12.5+
-  // ttmp[10:11] = holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15] = TMA base address, ttmp13.b31 = buffer_id (0 or 1)
-  // EXEC = 0x1
+  // ttmp[2:3] holds backup of original shader's v[0:1]
+  // ttmp[4:5] holds backup of original shader's v[2:3]
+  // ttmp[10:11] holds original shader's information (save/restore)
+  // ttmp13 is free
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
+  // EXEC is 0x1
 
   // Calculate offset to buf_written_val for current buffer
   // buf_written_val0 at offset 0x10, buf_written_val1 at offset 0x20
-  S_LSHR_B32        ttmp13, TTMP13_BUF_ID_BIT_POSITION      // Extract buffer_id from bit 31 into scratch register
-  S_MULK_I32        SAMPLE_OFF_BUF_WRITTEN_VAL              // Multiply buffer_id by 16 (0x10) to get offset
-  S_ADD_U32         ttmp14, ttmp14                          // Add offset to TMA base (low)
+  s_bfe_u32         ttmp13, ttmp1, (TTMP1_BUF_ID_BIT_POSITION | 1 << 16) // Extract buffer_id from ttmp1[25] into scratch register
+  s_mulk_i32        ttmp13, SAMPLE_OFF_BUF_WRITTEN_VAL              // Multiply buffer_id by 16 (0x10) to get offset
+  s_add_u32         ttmp14, ttmp14, ttmp13                          // Add offset to TMA base (low)
   s_addc_u32        ttmp15, ttmp15, 0                       // Add carry to TMA base (high)
 
   // ttmp[14:15] now points to buf_written_valX - SAMPLE_OFF_BUF_WRITTEN_VAL
@@ -1186,51 +932,46 @@
   s_wait_loadcnt    0
 
   // Check Watermark and Signal Host
-  // v0 = done, v1 = free, v[2:3] = free
+  // v0 = done (previous buff_written_val index), v1 = free, v[2:3] = free
   // ttmp[2:3] holds backup of original shader's v[0:1]
   // ttmp[4:5] holds backup of original shader's v[2:3]
-  // ttmp6     ttmp6 is free if amdgcn.gfx_generation_minor < 5
   // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15] = address of buf_written_valX (after offset addition)
+  // ttmp13 is free
+  // ttmp[14:15] = TMA + buffer_id * SAMPLE_OFF_BUF_WRITTEN_VAL
   // EXEC=0x1
 
-  s_mov_b64         exec, ttmp[4:5]                         // stash user's v[2:3] in EXEC
+  s_mov_b32         exec_lo, ttmp4  // backup v2 to exec_lo
+  s_mov_b32         ttmp13, ttmp5   // backup v3 to ttmp13
+
   s_load_b32        ttmp5, ttmp[14:15], SAMPLE_OFF_WATERMARK_FIELD, scope:SCOPE_CU            // load watermark threshold into ttmp5
   v_readlane_b32    ttmp4, v0, 0                            // Get previous written count
+  s_add_u32         ttmp4, ttmp4, 1                         // Find current sample count (previous + 1)
   s_wait_kmcnt      0                                       // wait for watermark to load
 
-  // Check if we should signal the host
-  s_cmp_lg_u32      ttmp4, ttmp5                            // Compare previous_count with watermark
-  s_add_u32         ttmp4, ttmp4, 1                         // Calculate current count (previous + 1)
-  s_cmp_lt_u32      ttmp4, ttmp5                            // if (current_sample_count < watermark), don't signal
+  // Check if we should signal the host (only trap handler instances that observes ttmp4 == tmp5 signals host)
+  s_cmp_lg_u32      ttmp4, ttmp5                            // Compare buff_written_val with watermark (fails if ttmp4 == ttmp5)
 
   // Restore user data and execution state
-  s_mov_b64         ttmp[4:5], exec                         // restore user's v[2:3]
-.if .amdgcn.gfx_generation_minor >= 5
-  s_mov_b32         exec_lo, 1
-.else
+  s_mov_b32         ttmp4, exec_lo                          // restore v2 to ttmp4
+  s_mov_b32         ttmp5, ttmp13                           // restore v3 to ttmp5 
   s_mov_b64         exec, 1                                 // Set exec to lane 0 only
-.endif
-  s_cbranch_scc1    .restore_vector_before_exit_trap        // Skip signaling if below watermark
+
+  s_cbranch_scc1    .restore_vector_before_exit_trap        // Skip signaling if below/above watermark (ttmp4 != ttmp5 succeeds)
 
   // Host signalling part when whatermark is reached
 .send_signal:
   // v[0:3] = free, ttmp[2:5] = backups of original v[0:3]
-  // ttmp[10:11] holds original shaders [exec_lo,exec_hi]
+  // ttmp[10:11] holds original shaders data
   // ttmp[14:15]=buf_written_valX-0x10, EXEC=0x1
+  // ttmp13 is free
+  // EXEC=0x1
   // write done-signal and optional interrupt
 
   // Watermark reached or exceeded. Signal the host.
   // Load the hsa_signal_t handle for the current buffer.
   // done_sig0 is at offset 0x18. done_sig1 is at 0x28.
   // addr = ttmp[14:15] + 0x18 + (buffer_id * 0x10).
-  // ttmp0 still holds buffer_id * 0x10.
   s_load_b64        ttmp[14:15], ttmp[14:15], SAMPLE_OFF_DONE_SIG0, scope:SCOPE_CU // load done_sig into ttmp[14:15]
-.if .amdgcn.gfx_generation_minor >= 5
-  s_mov_b32         exec_lo, 1
-.else
-  s_mov_b64         exec, 1                                 // Set exec to lane 0 only
-.endif
   s_wait_kmcnt      0                                       // Wait for done signal to load
 
   // Zero out the signal value to notify host
@@ -1239,37 +980,31 @@
   v_writelane_b32   v2, ttmp14, 0                           // v[2] = done signal address (low part)
   v_writelane_b32   v3, ttmp15, 0                           // Put signal address into v[2:3]
 
-  // Write to signal value field (offset 0x8 within signal structure)
+  // Write to signal value field (offset 0x8 within signal structure); namely amd_signal_t.value=v[0:1]
   global_store_b64  v[2:3], v[0:1], off, offset:SAMPLE_OFF_SIGNAL_VALUE, scope:SCOPE_SYS
 
   // Load event ID and mailbox pointer for interrupt generation
-.if .amdgcn.gfx_generation_minor >= 5
-  s_load_b32        vcc_hi, ttmp[14:15], SAMPLE_OFF_DONE_SIG0, scope:SCOPE_CU // load event_id into vcc_hi
-.else
-  s_load_b32        ttmp6, ttmp[14:15], SAMPLE_OFF_DONE_SIG0, scope:SCOPE_CU  // load event_id into ttmp6
-.endif
-  s_load_b64        ttmp[14:15], ttmp[14:15], SAMPLE_OFF_EVENT_MAILBOX0, scope:SCOPE_CU     // load event mailbox ptr into 14:15
+  s_load_b32        ttmp13, ttmp[14:15], SAMPLE_OFF_SIGNAL_EVENT_ID, scope:SCOPE_CU // load event_id into ttmp13
+  s_load_b64        ttmp[14:15], ttmp[14:15], SAMPLE_OFF_EVENT_MAILBOX_PTR, scope:SCOPE_CU     // load event mailbox ptr into 14:15
   s_wait_kmcnt      0
 
   // Check if interrupt should be sent (null mailbox or zero event_id means no interrupt)
   s_cmp_eq_u64      ttmp[14:15], 0                          // null mailbox means no interrupt
   s_cbranch_scc1    .restore_vector_before_exit_trap
 
-.if .amdgcn.gfx_generation_minor >= 5
-  s_cmp_eq_u32      vcc_hi, 0                               // event_id zero means no interrupt
-.else
-  s_cmp_eq_u32      ttmp6, 0                                // event_id zero means no interrupt
-.endif
+  s_cmp_eq_u32      ttmp13, 0                               // event_id zero means no interrupt
   s_cbranch_scc1    .restore_vector_before_exit_trap
+
   v_writelane_b32   v2, ttmp14, 0                           // v[2] = mailbox address (low part)
   v_writelane_b32   v3, ttmp15, 0                           // v[3] = mailbox address (high part)
 
-  s_wait_storecnt   0                                       // Ensure mailbox address is ready before sending interrupt
-  V_WRITELANE_B32   v0, 0x0                                 // v[0] = 0 (event ID low part)
+  s_wait_storecnt   0                                       // wait for signal value 0 to be written to amd_signal_t.value
+
+  v_writelane_b32   v0, ttmp13, 0x0                         // v[0] = 0 (event ID low part)
   global_store_b32  v[2:3], v0, off, offset:0x0, scope:SCOPE_SYS // Send event ID to the mailbox
   s_wait_storecnt   0
   s_mov_b32         ttmp14, m0                              // Backup m0 (event ID low part) to ttmp14
-  v_readlane_b32    ttmp15, v0, 0                           // Read event ID low part from v[0] into ttmp15
+  v_readlane_b32    ttmp15, v0, 0                           // Read event ID low part from v0 into ttmp15
   s_mov_b32         m0, ttmp15                              // Set m0 to event ID (low part)
   s_sendmsg         sendmsg(MSG_INTERRUPT)                  // send interrupt message to host
   s_wait_kmcnt      0                                       // Wait for interrupt to complete
@@ -1279,48 +1014,75 @@
   // v[2:3] = free
   // ttmp[2:3] holds backup of original shader's v[0:1]
   // ttmp[4:5] holds backup of original shader's v[2:3]
-  // ttmp6 = free
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=somewhere in tma region, EXEC is junk
+  // ttmp[10:11] holds original shader data
+  // ttmp13 is free
+  // ttmp[14:15] is free
+  // EXEC=1
 
 .restore_vector_before_exit_trap:
-  // Restore all vector registers to original user shader state
-  // ttmp[2:5] contain backups of original user v[0:3]
+  // v[0:3] = free
+  // ttmp[2:5] = backup of the user's v[0:3]
+  // ttmp[10:11] users data to backup
+  // ttmp13 is free
+  // ttmp[14:15] = TMA + buffer_id * SAMPLE_OFF_BUF_WRITTEN_VAL (or free if we come from above .send_signal path)
+
+  // Restore original v[2:3] from ttmp[4:5]
   v_writelane_b32   v2, ttmp4, 0                            // restore v[2:3] to user data
   v_writelane_b32   v3, ttmp5, 0                            // v[2:3] = original user data
-  v_writelane_b32   v0, ttmp2, 0                            // restore v[0:1] to user data
-  v_writelane_b32   v1, ttmp3, 0                            // v[0:1] = original user data
-
-  // Handle cases where sample cannot be stored (buffer full, overflow, etc.)
-.lost_sample:
-  // v0 contains local_entry, v1 is free
-  // v[2:3] is original user-data
-  // ttmp[2:3] [local_entry, buf_size]
-  // ttmp[4:5] = free
-  // ttmp6=buffer_id for GFX12.0, workgroup info for GFX12.5+
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp13.b31 = buffer_id
-  // ttmp[14:15]=tma
-  // EXEC=0x1
-  // Restore vector registers before exiting
-
-  s_bitcmp1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT_SHIFT     // Check if stochastic sampling
-
-  s_cbranch_scc0    .lost_sample_restore                    // If not, skip lock release
-  S_GETREG_B32      HW_REG_PERF_SNAPSHOT_PC_HI              //  Read PC_HI register to release snapshot lock
 
 .lost_sample_restore:
+  // v[0:1] contains local_entry when branched from .lost_sample; otherwise free.
+  // v[2:3] is original user-data
+  // ttmp1[25] = buffer_id
+  // ttmp[2:3] = original v[0:1]
+  // ttmp[4:5] = free
+  // ttmp[10:11] holds original shader's data (EXEC mask)
+  // ttmp13 is free
+  // ttmp[14:15]=tma
+  // EXEC=0x1
+
+  // restore v[0:1] from ttmp[2:3]
   v_writelane_b32   v0, ttmp2, 0                            // restore v[0:1] to user data
   v_writelane_b32   v1, ttmp3, 0                            // v[0:1] = original user data
+
+  // zero out ttmp1[25] holding buff_id
+  s_bitset0_b32     ttmp1, TTMP1_BUF_ID_BIT_POSITION
+
 .if .amdgcn.gfx_generation_minor >= 5
-  RESTORE_MODE_VGPR_MSBS                                    // Restore 8 VGPR MSB bits from ttmp13[7:0] to MODE[19:12]
-  RESTORE_XNACK_MASK                                        // Restore 32 bits of XNACK_MASK stored in ttmp11 and ttmp13
-  s_mov_b32         exec_lo, ttmp10                         // restore exec mask
-  s_mov_b32         exec_hi, 0
-  s_mov_b32         vcc_hi,0                                // vcc_hi is not used in wave32
-.else
-  s_mov_b64         exec, ttmp[10:11]
+.if  .amdgcn.gfx_generation_minor == 5
+  // Restore MODE.MSB
+  s_setreg_b32 hwreg(HW_REG_WAVE_MODE, SQ_WAVE_MODE_MSB_SHIFT, SQ_WAVE_MODE_MSB_SIZE), ttmp11
 .endif
+  // Restore XNACK_MASK
+  s_setreg_b32 hwreg(HW_REG_XNACK_MASK), ttmp12
+
+  // Restore exec_lo
+  s_mov_b32         exec_lo, ttmp10                         // restore exec mask low bits
+.else
+  // Restore exec on gfx12.0
+  s_mov_b64         exec, ttmp[10:11]
+  // Restore ttmp11 from ttmp12 (SCHED_MODE[1:0] at bits [27:26], saved before exec_hi overwrite)
+  s_mov_b32         ttmp11, ttmp12
+.endif
+
+.exit_pcs_trap:
+  // As we don't support host-trap and stochastic at the same time, no need for additional check.
+  // Thus, proceed with clearing both bits.
+  // Clear the Host Trap flag in the hardware register to acknowledge the event
+  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_HT_SHIFT,1), 0
+  // Clear the perf_snapshot flag
+  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT,1), 0
+
+  // v[0:3] original user data
+  // ttmp[0:1]
+  //      gfx12.0: 0..., SCHED_MOD[1:0], 0..., original PC
+  //   >= gfx12.5: original PC (no trap_id)
+  // ttmp[2:5] free
+  // ttmp10 is free (ttmp11 is free on gfx12.5)
+  // ttmp12 is free
+  // ttmp13 is free
+  // ttmp[14:15] is free
+  // EXEC=original user shader exec mask
 
 .exit_trap:
 
@@ -1345,7 +1107,15 @@
   s_cbranch_scc1 .fixup_done
 
 .fixup_start:
-  s_and_b32         ttmp1, ttmp1, 0xfffffff                 // Zero out trap_id[3:0] from ttmp1
+  // Zero out trap_id[3:0] and scratch bits (if any) from ttmp1.
+  // Two cases worth noting:
+  // 1. perf_snapshot stochastic trap SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT
+  //    and `s_trap NON_ZERO_TRAP_ID` occured simultaneously.
+  //    In that case, we'll process a stochastic trap, remove the TRAP_ID here,
+  //    and execute s_rfe. As the PC inside ttmp[1:0] is not advanced, the `s_trap NON_ZERO_TRAP_ID`
+  //    will be re-executed and properly processed in the trap handler reentry.
+  // 2. host-trap occured - trap_id is zero for host-trap, so the following would clean only scratch bits.
+  s_and_b32         ttmp1, ttmp1, SQ_WAVE_PC_HI_ADDRESS_MASK
   s_load_b64        ttmp[14:15], ttmp[0:1], 0, scope:SCOPE_CU // Load the 2 instruction DW we are returning to
   s_wait_kmcnt      0
   s_load_b64        ttmp[2:3], ttmp[0:1], 8, scope:SCOPE_CU // Load the next 2 instruction DW, just in case
@@ -1514,9 +1284,15 @@
   // Restore SQ_WAVE_STATUS.
   s_and_b64         exec, exec, exec                        // Restore STATUS.EXECZ, not writable by s_setreg_b32
   s_and_b64         vcc, vcc, vcc                           // Restore STATUS.VCCZ, not writable by s_setreg_b32
-  s_setreg_b32      hwreg(HW_REG_STATE_PRIV, 0, SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT), ttmp12
-  s_lshr_b32        ttmp12, ttmp12, (SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT + 1)
-  s_setreg_b32      hwreg(HW_REG_STATE_PRIV, SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT + 1, 32 - SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT - 1), ttmp12
+
+  // Restore SQ_WAVE_STATE_PRIV: only SCC (bit 9), as the trap handler
+  // does not modify other SQ_WAVE_STATE_PRIV bits.
+  // SCC was saved in ttmp6[31] at trap entry.
+  s_lshr_b32        ttmp3, ttmp6, TTMP6_SCC_SHIFT
+  s_setreg_b32      hwreg(HW_REG_STATE_PRIV, SQ_WAVE_STATE_PRIV_SCC_SHIFT, 1), ttmp3
+
+  // Zero out bit 31 in a persistent ttmp6 register before s_rfe.
+  s_bitset0_b32     ttmp6, TTMP6_SCC_SHIFT
 
 .if .amdgcn.gfx_generation_minor == 0
   s_setreg_b32      hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), ttmp2

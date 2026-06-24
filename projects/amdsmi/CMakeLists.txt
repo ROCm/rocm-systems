@@ -111,7 +111,13 @@ include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
-option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
+else()
+    option(ENABLE_ESMI_LIB "Build ESMI Library" OFF)
+endif()
+
 option(BUILD_EXAMPLES "Build examples" OFF)
 
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
@@ -254,7 +260,7 @@ set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
     # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-5.1.1")
+    set(current_esmi_tag "esmi_pkg_ver-5.2.1.1")
 
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule

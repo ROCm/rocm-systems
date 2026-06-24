@@ -101,7 +101,9 @@ class FirmwareCommands:
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        if self.helpers.is_brcm_nic_initialized() and (args.brcm_nic or brcm_nic):
+        if self.helpers.is_brcm_nic_initialized() and (
+            getattr(args, "brcm_nic", False) or brcm_nic
+        ):
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
             self.firmware_nic(args, multiple_devices, nic, fw_list)

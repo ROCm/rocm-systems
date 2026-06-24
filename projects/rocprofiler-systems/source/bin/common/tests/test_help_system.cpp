@@ -37,6 +37,10 @@ Options:
     --trace-file                   Set the trace output file (min: 1, dtype: filepath)
     --trace-buffer-size            Set buffer size in KB (min: 1, dtype: KB)
 
+    [OUTPUT FORMAT OPTIONS]  Unified selection of output format(s)
+
+    --output-format                Select output format(s) (min: 1, dtype: [format...])
+
     [PRESET OPTIONS]   Load a profiling preset
 
     --preset                       Load a preset configuration (max: 1, dtype: string)
@@ -200,6 +204,18 @@ TEST_F(help_system_test, topic_filter_sampling_extracts_timer_options)
     EXPECT_NE(output.find("--sample-realtime"), std::string::npos);
 }
 
+TEST_F(help_system_test, topic_filter_output_extracts_format_option)
+{
+    std::ostringstream oss;
+    bool result = print_help_for_topic(synthetic_help, "output", "run", oss);
+    auto output = oss.str();
+
+    EXPECT_TRUE(result);
+    EXPECT_NE(output.find("--output-format"), std::string::npos);
+    EXPECT_EQ(output.find("--preset"), std::string::npos);
+    EXPECT_EQ(output.find("--trace-file"), std::string::npos);
+}
+
 TEST_F(help_system_test, topic_filter_returns_false_for_unknown_topic)
 {
     std::ostringstream oss;
@@ -316,4 +332,53 @@ TEST_F(help_system_test, topic_filter_ansi_tracing_section)
     EXPECT_NE(output.find("--trace-file"), std::string::npos);
     // Should not include debug section
     EXPECT_EQ(output.find("--monochrome"), std::string::npos);
+}
+
+// ============================================================================
+// "See also" relations audit
+// ----------------------------------------------------------------------------
+// get_related_topics_map() references topics by name. Every referenced
+// topic MUST exist either in get_help_topic_map() (group topics) or in
+// get_domain_help_map() (domain topics). A typo would silently make
+// --help=<topic> in the footer dead-end with "Unknown topic" — the same
+// failure mode as the shipped --freq/--cputime/--realtime stale entries.
+// ============================================================================
+
+TEST_F(help_system_test, see_also_references_valid_topics_only)
+{
+    const auto& relations  = get_related_topics_map();
+    const auto& group_map  = get_help_topic_map();
+    const auto& domain_map = get_domain_help_map();
+
+    auto is_valid_topic = [&](std::string_view name) {
+        return group_map.count(std::string{ name }) > 0 ||
+               domain_map.count(std::string{ name }) > 0;
+    };
+
+    for(const auto& [topic, related] : relations)
+    {
+        EXPECT_TRUE(is_valid_topic(topic))
+            << "Source topic '" << topic
+            << "' in get_related_topics_map() is not a known topic";
+        for(const auto& target : related)
+            EXPECT_TRUE(is_valid_topic(target))
+                << "Related topic '" << target << "' (under '" << topic
+                << "') is not a known topic";
+    }
+}
+
+TEST_F(help_system_test, see_also_footer_emits_for_known_topic)
+{
+    std::ostringstream oss;
+    print_see_also("tracing", oss);
+    auto out = oss.str();
+    EXPECT_NE(out.find("See also"), std::string::npos);
+    EXPECT_NE(out.find("--help=rocm"), std::string::npos);
+}
+
+TEST_F(help_system_test, see_also_footer_silent_for_unknown_topic)
+{
+    std::ostringstream oss;
+    print_see_also("nonexistent-topic", oss);
+    EXPECT_TRUE(oss.str().empty());
 }

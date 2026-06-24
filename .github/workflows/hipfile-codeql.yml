@@ -1,0 +1,85 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+name: hipfile-codeql
+run-name: Run CodeQL C/C++ analysis on hipFile
+
+# CodeQL's C/C++ extractor works by tracing the real compiler invocations, so
+# init -> build -> analyze must all run in the SAME environment. We therefore
+# run the whole job inside the prebuilt hipFile CI image (job-level container),
+# rather than the host-runner + `docker exec` pattern used by hipfile-clang-tidy
+# (the tracer's environment would not reach a compiler launched in a separate
+# `docker exec` process).
+#
+# Python and GitHub Actions are already covered repo-wide by codeql.yml; this
+# workflow exists to close the C/C++ gap, which needs an observed build.
+
+env:
+  # A single arch is enough: CodeQL traces the host compilation (done once
+  # regardless of arch count); extra gfx targets only recompile device code,
+  # which the C/C++ extractor does not analyze.
+  AIS_HIP_ARCHITECTURES: gfx942
+
+on:
+  workflow_call:
+    inputs:
+      ci_image:
+        description: "Full CI image name & tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  # required to pull the CI image from GHCR
+  packages: read
+  # required to upload analysis results
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (c-cpp)
+    runs-on: [ubuntu-24.04]
+    timeout-minutes: 45
+    container:
+      image: ${{ inputs.ci_image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            projects/hipfile
+
+      - name: Configure Git safe directory
+        shell: bash
+        run: git config --global --add safe.directory '*'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-extended,security-and-quality
+
+      - name: Configure and build hipFile
+        # Plain build (no clang-tidy): we only want CodeQL to observe the
+        # compiler. Debug build type keeps optimizations off so the extracted
+        # database is closer to the source.
+        shell: bash
+        run: |
+          cmake \
+            -B /tmp/build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=amdclang++ \
+            -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+            -DCMAKE_HIP_PLATFORM=amd \
+            projects/hipfile
+          cmake --build /tmp/build --parallel
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          category: "/hipfile/language:c-cpp"

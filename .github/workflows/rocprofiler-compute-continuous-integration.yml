@@ -94,7 +94,7 @@ jobs:
     permissions:
       packages: read
     container:
-      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-${{ matrix.system.arch }}
+      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-multiarch
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
@@ -108,6 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'schedule' && 'rocprofiler-compute-develop' || github.ref }}
           sparse-checkout: |
             projects/rocprofiler-compute
             shared/ctest
@@ -117,15 +118,12 @@ jobs:
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
-            EXCLUDED_TESTS=""
             ADD_COVERAGE="--coverage"
           else
             MODE=Continuous
-            EXCLUDED_TESTS="test_profile_live_attach_detach"
             ADD_COVERAGE=""
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
-          echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
           echo "add_coverage=${ADD_COVERAGE}" >> $GITHUB_OUTPUT
 
           if [ '${{ matrix.system.os-release }}' = '24.04' ]; then
@@ -145,17 +143,21 @@ jobs:
           apt-get update
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
-          apt install -y amd-smi-lib libdw-dev hip-dev
+          apt install -y amd-smi-lib libdw-dev hip-dev pkg-config
           echo "✅ amdgpu and ROCm dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
         run: |
           set -e
           TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
+
+      - name: Output TheRock Manifest
+        run: |
+          cat ${{ env.ROCM_PATH }}/share/therock/therock_manifest.json
 
       - name: Install Python Requirements
         working-directory: projects/rocprofiler-compute
@@ -197,7 +199,8 @@ jobs:
             -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
             -- \
-            -E "${{ steps.setup_env.outputs.excluded_tests }}"
+            -L full \
+            -LE full_rocprofiler_compute_ci_exclude
 
       - name: Output Logs
         if: steps.test.outcome == 'failure'
