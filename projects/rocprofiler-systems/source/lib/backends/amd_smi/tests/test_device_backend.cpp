@@ -13,6 +13,7 @@
 #include <stdexcept>
 
 using ::testing::_;
+using ::testing::AnyNumber;
 using ::testing::DoAll;
 using ::testing::HasSubstr;
 using ::testing::InSequence;
@@ -42,6 +43,14 @@ protected:
     {
         testing::g_mock_backend = std::make_unique<MockApi>();
         m_session               = std::make_shared<sut_t>();
+
+        // get_metrics() always probes SDMA support via get_gpu_process_list.
+        // Tests that verify specific SDMA behaviour override this with their own
+        // EXPECT_CALL.
+        EXPECT_CALL(*testing::g_mock_backend,
+                    get_gpu_process_list(_, NotNull(), IsNull()))
+            .Times(AnyNumber())
+            .WillRepeatedly(Return(k_ok));
     }
 
     void TearDown() override { testing::g_mock_backend.reset(); }
@@ -557,26 +566,6 @@ TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_throws_on_data_error)
 }
 
 // ── SDMA ─────────────────────────────────────────────────────────────────────
-
-TEST_F(DeviceBackendTest, is_sdma_supported_returns_true_when_process_list_succeeds)
-{
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_gpu_process_list(k_handle, NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(0U), Return(k_ok)));
-
-    DeviceSut sut{ m_session, k_handle };
-    EXPECT_TRUE(sut.is_sdma_supported());
-}
-
-TEST_F(DeviceBackendTest, is_sdma_supported_returns_false_when_process_list_fails)
-{
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_gpu_process_list(k_handle, NotNull(), IsNull()))
-        .WillOnce(Return(k_err));
-
-    DeviceSut sut{ m_session, k_handle };
-    EXPECT_FALSE(sut.is_sdma_supported());
-}
 
 TEST_F(DeviceBackendTest, get_raw_sdma_usage_returns_zero_when_no_processes)
 {

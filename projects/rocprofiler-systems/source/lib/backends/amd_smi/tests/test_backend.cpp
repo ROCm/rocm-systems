@@ -372,7 +372,8 @@ TEST_F(BackendTest, try_get_gpu_process_list_returns_true_on_success)
     EXPECT_CALL(*testing::g_mock_backend,
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<1>(0U), Return(k_ok)));
-    EXPECT_TRUE(m_session.try_get_gpu_process_list(k_handle, &count, nullptr));
+    EXPECT_TRUE(m_session.try_get_gpu_process_list(
+        k_handle, &count, static_cast<sut_t::proc_info_t*>(nullptr)));
 }
 
 TEST_F(BackendTest, try_get_gpu_process_list_returns_false_on_failure)
@@ -381,7 +382,8 @@ TEST_F(BackendTest, try_get_gpu_process_list_returns_false_on_failure)
     EXPECT_CALL(*testing::g_mock_backend,
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(Return(k_err));
-    EXPECT_FALSE(m_session.try_get_gpu_process_list(k_handle, &count, nullptr));
+    EXPECT_FALSE(m_session.try_get_gpu_process_list(
+        k_handle, &count, static_cast<sut_t::proc_info_t*>(nullptr)));
 }
 
 TEST_F(BackendTest, get_gpu_process_list_calls_backend_method)

@@ -61,7 +61,7 @@ protected:
     template <typename MockPtr>
     static void SetupSDMAExpectations(MockPtr& mock)
     {
-        EXPECT_CALL(*mock, is_sdma_supported())
+        EXPECT_CALL(*mock, probe_sdma_gpu_support())
             .Times(AnyNumber())
             .WillRepeatedly(Return(true));
 
@@ -110,7 +110,7 @@ protected:
             .Times(AtLeast(1))
             .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-        EXPECT_CALL(*mock_backend, is_sdma_supported())
+        EXPECT_CALL(*mock_backend, probe_sdma_gpu_support())
             .Times(AnyNumber())
             .WillRepeatedly(Return(false));
 
@@ -1493,9 +1493,6 @@ TEST_F(DeviceTest, get_metrics_info_failure)
         .Times(AtLeast(1))
         .WillRepeatedly(Return(4096000000ULL));
 
-    EXPECT_CALL(*mock_backend, is_sdma_supported())
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(false));
     EXPECT_CALL(*mock_backend, get_raw_sdma_usage())
         .Times(AnyNumber())
         .WillRepeatedly(Return(0));
@@ -1521,9 +1518,6 @@ TEST_F(DeviceTest, get_metrics_info_failure_during_init)
         .Times(AtLeast(1))
         .WillRepeatedly(Return(4096000000ULL));
 
-    EXPECT_CALL(*mock_backend, is_sdma_supported())
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(false));
     EXPECT_CALL(*mock_backend, get_raw_sdma_usage())
         .Times(AnyNumber())
         .WillRepeatedly(Return(0));
@@ -1814,10 +1808,6 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
 TEST_F(DeviceTest, sdma_delta_computation)
 {
     SetupAllMetricsSupported();
-
-    EXPECT_CALL(*mock_backend, is_sdma_supported())
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(true));
 
     EXPECT_CALL(*mock_backend, get_raw_sdma_usage())
         .WillOnce(Return(5000000ULL))

@@ -45,7 +45,10 @@ struct wrapper
 #endif
 
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-    using proc_info_t = amdsmi_proc_info_t;
+    using proc_info_t                    = amdsmi_proc_info_t;
+    static constexpr bool sdma_supported = true;
+#else
+    static constexpr bool sdma_supported = false;
 #endif
 
     // ── Status constants ──────────────────────────────────────────────────────

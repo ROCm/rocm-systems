@@ -22,6 +22,16 @@ namespace rocprofsys::backends::amd_smi
  * so a mismatch produces a clear error at the template boundary rather than deep
  * inside the template body.
  */
+// SDMA process-list methods — only required when the wrapper declares sdma_supported.
+template <typename T>
+concept sdma_wrapper_contract = requires { typename T::proc_info_t; } &&
+                                requires(T t, typename T::processor_handle ph,
+                                         std::uint32_t* cp, typename T::proc_info_t* pp) {
+                                    {
+                                        t.get_gpu_process_list(ph, cp, pp)
+                                    } -> std::convertible_to<typename T::status_t>;
+                                };
+
 template <typename T>
 concept wrapper_policy =
     // ── Required type aliases ─────────────────────────────────────────────────
@@ -33,6 +43,7 @@ concept wrapper_policy =
         typename T::gpu_metrics_t;
         typename T::asic_info_t;
         typename T::memory_type_t;
+        { T::sdma_supported } -> std::convertible_to<bool>;
     } &&
     // ── Constants, status helpers, lifecycle, enumeration, per-device calls ───
     requires(T t, typename T::status_t s, typename T::version_t* vp, std::uint32_t* cp,
@@ -53,16 +64,9 @@ concept wrapper_policy =
         { t.get_metrics_info(ph, gmp) } -> std::convertible_to<typename T::status_t>;
         { t.get_gpu_asic_info(ph, aip) } -> std::convertible_to<typename T::status_t>;
         { t.get_memory_usage(ph, mt, u64p) } -> std::convertible_to<typename T::status_t>;
-    }
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-    && requires { typename T::proc_info_t; } &&
-    requires(T t, typename T::processor_handle ph, std::uint32_t* cp,
-             typename T::proc_info_t* pp) {
-        {
-            t.get_gpu_process_list(ph, cp, pp)
-        } -> std::convertible_to<typename T::status_t>;
-    }
-#endif
+    } &&
+    // ── SDMA methods — only required when sdma_supported == true ─────────────
+    (!T::sdma_supported || sdma_wrapper_contract<T>)
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     &&
     requires {
@@ -107,6 +111,9 @@ template <wrapper_policy Wrapper>
 class backend
 {
 public:
+    // ── Constexpr feature flags — forwarded from Wrapper ─────────────────────
+    static constexpr bool sdma_supported = Wrapper::sdma_supported;
+
     // ── Type aliases — forwarded from Wrapper ─────────────────────────────────
     using status_t         = typename Wrapper::status_t;
     using version_t        = typename Wrapper::version_t;
@@ -116,15 +123,15 @@ public:
     using asic_info_t      = typename Wrapper::asic_info_t;
     using memory_type_t    = typename Wrapper::memory_type_t;
 
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    using proc_info_t = typename Wrapper::proc_info_t;
+#endif
+
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     using nic_asic_info_t         = typename Wrapper::nic_asic_info_t;
     using nic_port_info_t         = typename Wrapper::nic_port_info_t;
     using nic_rdma_devices_info_t = typename Wrapper::nic_rdma_devices_info_t;
     using nic_stat_t              = typename Wrapper::nic_stat_t;
-#endif
-
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-    using proc_info_t = typename Wrapper::proc_info_t;
 #endif
 
     // ── Status constants — forwarded ──────────────────────────────────────────
@@ -197,22 +204,29 @@ public:
                      "amdsmi_get_gpu_memory_usage");
     }
 
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     // Returns false without throwing when the process list is unavailable (capability
-    // probe).
+    // probe). Body is only active when sdma_supported.
     [[nodiscard]] bool try_get_gpu_process_list(processor_handle h, std::uint32_t* count,
-                                                proc_info_t* list) const noexcept
+                                                auto* list) const noexcept
     {
-        return m_amdsmi.get_gpu_process_list(h, count, list) == STATUS_SUCCESS;
+        if constexpr(sdma_supported)
+        {
+            return m_amdsmi.get_gpu_process_list(h, count, list) == STATUS_SUCCESS;
+        }
+        else
+        {
+            return false;
+        }
     }
 
-    void get_gpu_process_list(processor_handle h, std::uint32_t* count,
-                              proc_info_t* list) const
+    void get_gpu_process_list(processor_handle h, std::uint32_t* count, auto* list) const
     {
-        check_status(m_amdsmi.get_gpu_process_list(h, count, list),
-                     "amdsmi_get_gpu_process_list");
+        if constexpr(sdma_supported)
+        {
+            check_status(m_amdsmi.get_gpu_process_list(h, count, list),
+                         "amdsmi_get_gpu_process_list");
+        }
     }
-#endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     void get_nic_asic_info(processor_handle h, nic_asic_info_t* out) const

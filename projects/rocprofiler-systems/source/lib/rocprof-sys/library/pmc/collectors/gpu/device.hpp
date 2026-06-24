@@ -25,7 +25,8 @@ concept gpu_backend_contract = requires(const Backend backend) {
     { backend.get_hotspot_temperature() } -> std::same_as<std::int64_t>;
     { backend.get_edge_temperature() } -> std::same_as<std::int64_t>;
     { backend.get_raw_sdma_usage() } -> std::same_as<std::uint64_t>;
-    { backend.is_sdma_supported() } -> std::same_as<bool>;
+    { backend.probe_sdma_gpu_support() } -> std::same_as<bool>;
+    { Backend::sdma_supported } -> std::convertible_to<bool>;
 };
 
 template <gpu_backend_contract Backend>
@@ -309,17 +310,12 @@ private:
         m_supported_metrics.bits.mem_clock =
             is_metric_supported(raw.mem_clock_mhz, METRIC_VALUE_NOT_SUPPORTED_16);
 
-        initialize_sdma_support();
+        m_supported_metrics.bits.sdma_usage = m_backend->probe_sdma_gpu_support() ? 1 : 0;
 
         LOG_DEBUG("Device [{}] supported metrics: {}", m_index,
                   format_supported_metrics(m_supported_metrics));
 
         return m_supported_metrics.value != 0;
-    }
-
-    void initialize_sdma_support()
-    {
-        m_supported_metrics.bits.sdma_usage = m_backend->is_sdma_supported() ? 1 : 0;
     }
 
     void collect_sdma_metrics([[maybe_unused]] const enabled_metrics& enabled_cfg,

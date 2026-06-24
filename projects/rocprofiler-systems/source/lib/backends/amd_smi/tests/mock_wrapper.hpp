@@ -200,6 +200,7 @@ struct mock_backend
 
     static constexpr processor_type_t NIC_PROCESSOR_TYPE = 5;
 
+    static constexpr bool          sdma_supported = true;
     static constexpr status_t      STATUS_SUCCESS = 0;
     static constexpr memory_type_t MEM_TYPE_VRAM  = 0;
 

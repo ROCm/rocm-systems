@@ -25,6 +25,17 @@ using gpu::MAX_NUM_XGMI_LINKS;
 using gpu::metrics;
 using gpu::populate_if_supported;
 
+// SDMA process-list methods — only required when the wrapper declares sdma_supported.
+template <typename T>
+concept sdma_session_contract = requires { typename T::proc_info_t; } &&
+                                requires(T sess, typename T::processor_handle ph,
+                                         std::uint32_t* cp, typename T::proc_info_t* pp) {
+                                    {
+                                        sess.try_get_gpu_process_list(ph, cp, pp)
+                                    } -> std::convertible_to<bool>;
+                                    { sess.get_gpu_process_list(ph, cp, pp) };
+                                };
+
 /**
  * @brief Concept that a Backend session type passed to device must satisfy.
  *
@@ -40,6 +51,7 @@ concept backend_session_contract =
         typename T::asic_info_t;
         typename T::gpu_metrics_t;
         typename T::memory_type_t;
+        { T::sdma_supported } -> std::convertible_to<bool>;
     } &&
     // ── Per-device GPU calls (always required) ────────────────────────────────
     requires(T sess, typename T::processor_handle ph, typename T::asic_info_t* aip,
@@ -48,15 +60,9 @@ concept backend_session_contract =
         { sess.get_gpu_asic_info(ph, aip) };
         { sess.get_metrics_info(ph) } -> std::convertible_to<typename T::gpu_metrics_t>;
         { sess.get_memory_usage(ph, mt, u64p) };
-    }
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-    && requires { typename T::proc_info_t; } &&
-    requires(T sess, typename T::processor_handle ph, std::uint32_t* cp,
-             typename T::proc_info_t* pp) {
-        { sess.try_get_gpu_process_list(ph, cp, pp) } -> std::convertible_to<bool>;
-        { sess.get_gpu_process_list(ph, cp, pp) };
-    }
-#endif
+    } &&
+    // ── SDMA methods — only required when sdma_supported == true ─────────────
+    (!T::sdma_supported || sdma_session_contract<T>)
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     &&
     requires {
@@ -93,6 +99,8 @@ template <backend_session_contract Backend>
 class device
 {
 public:
+    static constexpr bool sdma_supported = Backend::sdma_supported;
+
     device(std::shared_ptr<Backend> session, Backend::processor_handle handle)
     : m_session{ std::move(session) }
     , m_handle{ handle }
@@ -129,33 +137,43 @@ public:
         return usage;
     }
 
-    [[nodiscard]] std::uint64_t get_raw_sdma_usage() const
+    // One-time GPU-level SDMA capability probe (available = library has the API,
+    // supported = this GPU actually provides data).  Always returns false when
+    // sdma_supported == false so callers need no #ifdef.
+    [[nodiscard]] bool probe_sdma_gpu_support() const noexcept
     {
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-        std::uint32_t count = 0;
-        if(!m_session->try_get_gpu_process_list(m_handle, &count, nullptr) || count == 0)
-            return 0;
-
-        std::vector<typename Backend::proc_info_t> procs(count);
-        m_session->get_gpu_process_list(m_handle, &count, procs.data());
-
-        std::uint64_t cumulative = 0;
-        for(const auto& proc : procs)
-            cumulative += proc.sdma_usage;
-        return cumulative;
-#else
-        return 0;
-#endif
+        if constexpr(sdma_supported)
+        {
+            std::uint32_t count = 0;
+            return m_session->try_get_gpu_process_list(
+                m_handle, &count, static_cast<typename Backend::proc_info_t*>(nullptr));
+        }
+        return false;
     }
 
-    [[nodiscard]] bool is_sdma_supported() const noexcept
+    [[nodiscard]] std::uint64_t get_raw_sdma_usage() const
     {
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-        std::uint32_t count = 0;
-        return m_session->try_get_gpu_process_list(m_handle, &count, nullptr);
-#else
-        return false;
-#endif
+        if constexpr(Backend::sdma_supported)
+        {
+            std::uint32_t count = 0;
+            if(!m_session->try_get_gpu_process_list(
+                   m_handle, &count,
+                   static_cast<typename Backend::proc_info_t*>(nullptr)) ||
+               count == 0)
+                return 0;
+
+            std::vector<typename Backend::proc_info_t> procs(count);
+            m_session->get_gpu_process_list(m_handle, &count, procs.data());
+
+            std::uint64_t cumulative = 0;
+            for(const auto& proc : procs)
+                cumulative += proc.sdma_usage;
+            return cumulative;
+        }
+        else
+        {
+            return 0;
+        }
     }
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
