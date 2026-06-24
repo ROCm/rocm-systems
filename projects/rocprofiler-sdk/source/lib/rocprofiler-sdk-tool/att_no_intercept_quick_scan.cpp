@@ -30,14 +30,14 @@
 
 #include <fmt/core.h>
 
-#include <thread>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <cstdint>
+#include <iterator>
 #include <memory>
-#include <optional>
-#include <string>
-#include <unordered_map>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -62,46 +62,59 @@ struct scan_context_t
     uint64_t first_valid_offset = 0;
 };
 
-std::optional<kernel_entry_t>
+std::atomic<size_t>&
+dummy_iteration_count()
+{
+    static auto _v = std::atomic<size_t>{0};
+    return _v;
+}
+
+std::atomic<size_t>&
+iteration_count_or_dummy(const std::shared_ptr<std::atomic<size_t>>& iteration_count)
+{
+    return (iteration_count != nullptr) ? *iteration_count : dummy_iteration_count();
+}
+
+std::atomic<size_t>&
 resolve_kernel_entry(agent_state_t& state, const rocprofiler_thread_trace_decoder_pc_t& entry_point)
 {
     auto key         = entry_key_t{entry_point.code_object_id, entry_point.address};
     auto shared_lock = std::shared_lock{state.mutex};
 
-    if(auto itr = state.kernels_by_entry.find(key); itr != state.kernels_by_entry.end())
-        return itr->second;
+    if(auto itr = state.kernel_iterations_by_entry.find(key);
+       itr != state.kernel_iterations_by_entry.end())
+        return iteration_count_or_dummy(itr->second);
 
     auto ranges_itr = state.kernel_ranges_by_code_object.find(key.code_object_id);
-    if(ranges_itr == state.kernel_ranges_by_code_object.end()) return std::nullopt;
+    if(ranges_itr == state.kernel_ranges_by_code_object.end()) return dummy_iteration_count();
 
     for(const auto& range : ranges_itr->second)
     {
         if(key.address < range.begin || key.address >= range.end) continue;
 
-        auto range_copy = range;
+        auto targeted = range.targeted;
         shared_lock.unlock();
         auto unique_lock = std::unique_lock{state.mutex};
 
-        if(auto itr = state.kernels_by_entry.find(key); itr != state.kernels_by_entry.end())
-            return itr->second;
+        if(auto itr = state.kernel_iterations_by_entry.find(key);
+           itr != state.kernel_iterations_by_entry.end())
+            return iteration_count_or_dummy(itr->second);
 
-        auto [itr, _] = state.kernels_by_entry.emplace(
-            key,
-            kernel_entry_t{
-                range_copy.kernel_id,
-                range_copy.targeted ? std::make_shared<std::atomic<size_t>>(0) : nullptr});
-        return itr->second;
+        auto [itr, _] = state.kernel_iterations_by_entry.emplace(
+            key, targeted ? std::make_shared<std::atomic<size_t>>(0) : nullptr);
+        return iteration_count_or_dummy(itr->second);
     }
 
-    return std::nullopt;
+    return dummy_iteration_count();
 }
 
 bool
-is_targeted_entry(const kernel_entry_t& entry, const std::unordered_set<size_t>& kernel_filter_range)
+is_targeted_iteration(std::atomic<size_t>&              iteration_count,
+                      const std::unordered_set<size_t>& kernel_filter_range)
 {
-    if(entry.iteration_count == nullptr) return false;
+    if(&iteration_count == &dummy_iteration_count()) return false;
 
-    const auto iteration = entry.iteration_count->fetch_add(1, std::memory_order_relaxed) + 1;
+    const auto iteration = iteration_count.fetch_add(1, std::memory_order_relaxed) + 1;
     if(kernel_filter_range.empty()) return iteration == 1;
     return kernel_filter_range.count(iteration) != 0;
 }
@@ -118,12 +131,8 @@ handle_dispatch(scan_context_t& context, const rocprofiler_thread_trace_decoder_
               << dispatch.entry_point.address << " at me/pipe " << int(dispatch.me_id) << "/"
               << int(dispatch.pipe_id);
 
-    auto kernel_entry = resolve_kernel_entry(state, dispatch.entry_point);
-    if(!kernel_entry)
-    {
-        ROCP_TRACE << "Unknown dispatch found.";
-    }
-    else if(is_targeted_entry(*kernel_entry, *context.kernel_filter_range))
+    auto& iteration_count = resolve_kernel_entry(state, dispatch.entry_point);
+    if(is_targeted_iteration(iteration_count, *context.kernel_filter_range))
     {
         auto& trace = context.trace;
         if(!trace.active)
@@ -132,11 +141,9 @@ handle_dispatch(scan_context_t& context, const rocprofiler_thread_trace_decoder_
             trace.active       = true;
             trace.offset_begin = dispatch.byte_offset;
 
-            ROCP_INFO << "Dispatch cut at : " << kernel_entry->kernel_id << " byte "
-                      << dispatch.byte_offset;
+            ROCP_INFO << "Dispatch cut at byte " << dispatch.byte_offset;
         }
 
-        trace.kernel_id = kernel_entry->kernel_id;
         trace.remaining_dispatches = std::max<uint64_t>(state.consecutive_kernels, 1);
         trace.flush_count = 0;
     }
@@ -283,27 +290,16 @@ record_code_object_symbols(agent_state_t& state,
 {
     if(code_object_data == nullptr || code_object_size == 0) return;
 
-    auto sizes_by_name  = std::unordered_map<std::string, uint64_t>{};
-    auto sizes_by_vaddr = std::unordered_map<uint64_t, uint64_t>{};
+    auto  lock        = std::unique_lock{state.mutex};
+    auto& code_object = state.code_objects[code_object_id];
 
     rocprof_trace_decoder::codeobj::elf_inline::for_each_func_symbol(
         static_cast<const char*>(code_object_data),
         code_object_size,
-        [&](std::string name, uint64_t vaddr, uint64_t size) {
+        [&](auto&&, uint64_t vaddr, uint64_t size) {
             if(size == 0) return;
-            if(!name.empty()) sizes_by_name.emplace(std::move(name), size);
-            if(vaddr != 0) sizes_by_vaddr.emplace(vaddr, size);
+            if(vaddr != 0) code_object.symbol_sizes_by_vaddr[vaddr] = size;
         });
-
-    if(sizes_by_name.empty() && sizes_by_vaddr.empty()) return;
-
-    auto  lock                 = std::unique_lock{state.mutex};
-    auto& code_object          = state.code_objects[code_object_id];
-    code_object.code_object_id = code_object_id;
-    for(auto& [name, size] : sizes_by_name)
-        code_object.symbol_sizes_by_name[std::move(name)] = size;
-    for(auto [vaddr, size] : sizes_by_vaddr)
-        code_object.symbol_sizes_by_vaddr[vaddr] = size;
 }
 }  // namespace
 
