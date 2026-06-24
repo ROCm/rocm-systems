@@ -192,9 +192,9 @@ def find_smi_library():
     try:
         import rocm_sdk
         rocm_sdk_libamd_smi_path = rocm_sdk.find_libraries("amd_smi")
-        if rocm_sdk_libamd_smi_path and len(rocm_sdk_libamd_smi_path) > 0:
+        if rocm_sdk_libamd_smi_path:
             possible_locations.append(rocm_sdk_libamd_smi_path[0])
-    except ModuleNotFoundError:  # If rocm_sdk is not installed or library is not found, skip
+    except (ModuleNotFoundError, FileNotFoundError):  # If rocm_sdk is not installed or library is not found, skip
         pass
     # 2.
     rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
@@ -5017,13 +5017,14 @@ __all__ = \
     'amdsmi_board_info_t', 'amdsmi_cache_property_type_t',
     'amdsmi_card_form_factor_t', 'amdsmi_clean_gpu_local_data',
     'amdsmi_clk_info_t', 'amdsmi_clk_limit_type_t',
-    'amdsmi_clk_type_t', 'amdsmi_compute_partition_type_t',
-    'amdsmi_container_types_t', 'amdsmi_counter_command_t',
-    'amdsmi_counter_value_t', 'amdsmi_cper_guid_t',
-    'amdsmi_cper_hdr_t', 'amdsmi_cper_notify_type_t',
-    'amdsmi_cper_sev_t', 'amdsmi_cper_timestamp_t',
-    'amdsmi_cper_valid_bits_t', 'amdsmi_cpu_apb_disable',
-    'amdsmi_cpu_apb_enable', 'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
+    'amdsmi_clk_type_t', 'amdsmi_compute_partition_mem_alloc_mode_t',
+    'amdsmi_compute_partition_type_t', 'amdsmi_container_types_t',
+    'amdsmi_counter_command_t', 'amdsmi_counter_value_t',
+    'amdsmi_cper_guid_t', 'amdsmi_cper_hdr_t',
+    'amdsmi_cper_notify_type_t', 'amdsmi_cper_sev_t',
+    'amdsmi_cper_timestamp_t', 'amdsmi_cper_valid_bits_t',
+    'amdsmi_cpu_apb_disable', 'amdsmi_cpu_apb_enable',
+    'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
     'amdsmi_cpusocket_handle', 'amdsmi_ddr_bw_metrics_t',
     'amdsmi_dev_perf_level_t', 'amdsmi_dimm_power_t',
     'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
