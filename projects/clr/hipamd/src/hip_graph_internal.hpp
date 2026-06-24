@@ -1324,6 +1324,7 @@ class GraphKernelNode : public GraphNode {
   int globalWorkSizeX_remainder_;
   int globalWorkSizeY_remainder_;
   int globalWorkSizeZ_remainder_;
+  dim3 clusterDim_;                    //!< Cluster dimensions for cluster launch
   hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
 
  protected:
@@ -1335,6 +1336,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeX_remainder_ = rhs.globalWorkSizeX_remainder_;
     globalWorkSizeY_remainder_ = rhs.globalWorkSizeY_remainder_;
     globalWorkSizeZ_remainder_ = rhs.globalWorkSizeZ_remainder_;
+    clusterDim_ = rhs.clusterDim_;
     hipError_t status = copyParams(&rhs.kernelParams_);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to allocate memory to copy params");
@@ -1544,7 +1546,8 @@ class GraphKernelNode : public GraphNode {
                   int coopKernel = 0,
                   int globalWorkSizeX_remainder = 0,
                   int globalWorkSizeY_remainder = 0,
-                  int globalWorkSizeZ_remainder = 0)
+                  int globalWorkSizeZ_remainder = 0,
+                  dim3 clusterDim = {1, 1, 1})
       : GraphNode(hipGraphNodeTypeKernel, "bold", "octagon", "KERNEL") {
     kernelEvents_ = {0};
     if (pEvents != nullptr) {
@@ -1560,6 +1563,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeX_remainder_ = globalWorkSizeX_remainder;
     globalWorkSizeY_remainder_ = globalWorkSizeY_remainder;
     globalWorkSizeZ_remainder_ = globalWorkSizeZ_remainder;
+    clusterDim_ = clusterDim;
   }
 
   ~GraphKernelNode() { freeParams(); }
@@ -1631,7 +1635,8 @@ class GraphKernelNode : public GraphNode {
                                        kernelParams_.gridDim.z, kernelParams_.blockDim.x,
                                        kernelParams_.blockDim.y, kernelParams_.blockDim.z,
                                        kernelParams_.sharedMemBytes, *device, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_, 1, 1, 1);
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
 
     if (!launch_params.IsValidConfig()) {
       return hipErrorInvalidConfiguration;
@@ -1718,6 +1723,24 @@ class GraphKernelNode : public GraphNode {
         return hipErrorInvalidValue;
       }
       kernelAttr_.priority = params->priority;
+    } else if (attr == hipLaunchAttributeClusterDimension) {
+      dim3 clusterDim = {params->clusterDim.x, params->clusterDim.y, params->clusterDim.z};
+      if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
+        return hipErrorInvalidConfiguration;
+      }
+      const amd::Device* device = g_devices[dev_id_]->devices()[0];
+      amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
+                                         kernelParams_.gridDim.z, kernelParams_.blockDim.x,
+                                         kernelParams_.blockDim.y, kernelParams_.blockDim.z,
+                                         kernelParams_.sharedMemBytes, *device,
+                                         globalWorkSizeX_remainder_, globalWorkSizeY_remainder_,
+                                         globalWorkSizeZ_remainder_, clusterDim.x, clusterDim.y,
+                                         clusterDim.z);
+      if (!launch_params.IsValidConfig()) {
+        return hipErrorInvalidConfiguration;
+      }
+      clusterDim_ = clusterDim;
+      return hipSuccess;
     }
 
     kernelAttrInUse_ = attr;
@@ -1725,7 +1748,10 @@ class GraphKernelNode : public GraphNode {
   }
   hipError_t GetAttrParams(hipKernelNodeAttrID attr, hipKernelNodeAttrValue* params) {
     // Get kernel attr params
-    if (kernelAttrInUse_ != 0 && kernelAttrInUse_ != attr) return hipErrorInvalidValue;
+    if (attr != hipLaunchAttributeClusterDimension &&
+        kernelAttrInUse_ != 0 && kernelAttrInUse_ != attr) {
+      return hipErrorInvalidValue;
+    }
     if (attr == hipKernelNodeAttributeAccessPolicyWindow) {
       params->accessPolicyWindow.base_ptr = kernelAttr_.accessPolicyWindow.base_ptr;
       params->accessPolicyWindow.hitProp = kernelAttr_.accessPolicyWindow.hitProp;
@@ -1736,15 +1762,20 @@ class GraphKernelNode : public GraphNode {
       params->cooperative = kernelAttr_.cooperative;
     } else if (attr == hipLaunchAttributePriority) {
       params->priority = kernelAttr_.priority;
+    } else if (attr == hipLaunchAttributeClusterDimension) {
+      params->clusterDim.x = clusterDim_.x;
+      params->clusterDim.y = clusterDim_.y;
+      params->clusterDim.z = clusterDim_.z;
     }
     return hipSuccess;
   }
   hipError_t CopyAttr(const GraphKernelNode* srcNode) {
-    if (kernelAttrInUse_ == 0 && srcNode->kernelAttrInUse_ == 0) {
-      return hipSuccess;
-    }
     if (kernelAttrInUse_ != 0 && srcNode->kernelAttrInUse_ != kernelAttrInUse_) {
       return hipErrorInvalidContext;
+    }
+    clusterDim_ = srcNode->clusterDim_;
+    if (kernelAttrInUse_ == 0 && srcNode->kernelAttrInUse_ == 0) {
+      return hipSuccess;
     }
     kernelAttrInUse_ = srcNode->kernelAttrInUse_;
     switch (srcNode->kernelAttrInUse_) {
@@ -1771,7 +1802,13 @@ class GraphKernelNode : public GraphNode {
   hipError_t SetParams(GraphNode* node) override {
     dev_id_ = ihipGetDevice();
     const GraphKernelNode* kernelNode = static_cast<GraphKernelNode const*>(node);
-    return SetParams(&kernelNode->kernelParams_);
+    dim3 oldClusterDim = clusterDim_;
+    clusterDim_ = kernelNode->clusterDim_;
+    hipError_t status = SetParams(&kernelNode->kernelParams_);
+    if (status != hipSuccess) {
+      clusterDim_ = oldClusterDim;
+    }
+    return status;
   }
 
   hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams,
@@ -1782,14 +1819,15 @@ class GraphKernelNode : public GraphNode {
                                        pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                        pNodeParams->blockDim.y, pNodeParams->blockDim.z,
                                        pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_, 1, 1, 1);
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
 
     if (!launch_params.IsValidConfig()) {
       HIP_RETURN(hipErrorInvalidConfiguration);
     }
 
     hipError_t status = ihipLaunchKernel_validate(func, launch_params, pNodeParams->kernelParams,
-                                                  pNodeParams->extra, devId, 0);
+                                                  pNodeParams->extra, devId, coopKernel_);
     if (status != hipSuccess) {
       return status;
     }
