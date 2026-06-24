@@ -1868,8 +1868,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       return false;
     } else {
       if (hsa_events.size() <= unique_evts) {
-          hsa_events.resize(unique_evts + 10);
-          event_age.resize(unique_evts + 10);
+        hsa_events.resize(unique_evts + 10);
+        event_age.resize(unique_evts + 10);
       }
       // Restore this event's last-known KFD age, keyed by the event itself
       // rather than by the compacted slot index. The async list is reordered in
@@ -1880,8 +1880,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       const uint64_t default_age =
           runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
       auto age_it = event_age_map.find(hsa_event);
-      event_age[unique_evts] =
-          (age_it != event_age_map.end()) ? age_it->second : default_age;
+      event_age[unique_evts] = (age_it != event_age_map.end()) ? age_it->second : default_age;
       hsa_events[unique_evts] = hsa_event;
       unique_evts++;
       return true;
