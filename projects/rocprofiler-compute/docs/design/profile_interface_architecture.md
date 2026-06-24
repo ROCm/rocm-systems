@@ -54,10 +54,12 @@ Each decision below is recorded with its rationale and consequences
 
 ### AD-1: Remove the CSV profile backend
 
-The CSV profile backend (`results_*.csv` output and the
-profile-side CSV code path) is removed and rocpd becomes the canonical profile
-source. Backward compatibility for ROCm versions older than 7.0 (which come before
-rocpd support) is _intentionally_ not carried forward in profile mode.
+The CSV profile *output format* (the alternate csv profile path and the
+profile-side code that chose it) is removed and rocpd becomes the canonical
+profile source. The `results_*.csv` intermediate that the rocpd path still emits
+is removed later with the reader boundary (AD-3), not here. Backward compatibility
+for ROCm versions older than 7.0 (which come before rocpd support) is
+_intentionally_ not carried forward in profile mode.
 
 Keeping csv forces two parallel storage implementations with
 different dependencies, requires "not supported in CSV" warnings to be sprinkled
@@ -138,9 +140,11 @@ profiling (pandas-free) and a **reader** used by analysis (pandas is fine here),
 together but with different dependency characteristics.
 
 Profiling and analysis have different runtime constraints and leaking
-heavy analysis dependencies into the profile path is not acceptable. What makes this much cleaner is removing the
-csv profile backend (AD-1) because the profile-side CSV
-helper that pulled in analysis style handling goes away
+heavy analysis dependencies into the profile path is not acceptable. Removing the
+csv profile backend (AD-1) makes this cleaner by deleting the profile-side
+v3->v2 csv conversion handling; profiling is already pandas free, since the
+remaining csv I/O uses the stdlib `utils_profile_csv.py` helper rather than
+pandas.
 
 ## Phasing and Acceptance
 
@@ -152,29 +156,54 @@ B, C, and D have no hard ordering dependency on each other.
 
 CSV removal comes first because it shrinks everything downstream: there is no
 second storage format to hide behind the boundary, and profiling stays
-pandas free. This phase does not introduce the boundary yet it just deletes
-the CSV profile path and the dependencies it dragged in.
+pandas free. This phase does not introduce the boundary yet it just deletes the
+CSV profile *output format* and the code it dragged in; rocpd becomes the sole
+profile output format.
+
+Removed in this phase:
+
+- the `if csv` branch in `utils_profile.py` and the csv-only conversion helpers
+  it relied on (`process_rocprofv3_output`, `v3_counter_csv_to_v2_csv`,
+  `convert_native_counter_collection_csv`, `process_kokkos_trace_output`),
+- the `--format-rocprof-output` flag and the rocpd->csv fallback, so profile mode
+  no longer chooses a storage format.
+
+Intentionally **kept** in this phase (they move in Phase B):
+
+- `results_*.csv`. The rocpd path still converts each `.db` into `results_*.csv`,
+  and analyze still reads `results_*.csv`. Removing it requires analyze to read
+  the frame directly from `.db`, which is the reader contract introduced in
+  Phase B (AD-3).
+- `utils_profile_csv.py`. It is the stdlib (pandas-free) csv helper used by the
+  rocpd path (`results_*.csv`, counter-collection csv), `sysinfo.csv`, and
+  marker-trace augmentation. It is not pandas-dependent; it is what keeps these
+  writes pandas free. It shrinks and goes away as those csv intermediates are
+  eliminated in later phases.
+
+Phase A is a deliberately smaller scope change: it deletes the format choice,
+not the read path.
 
 ### Before
 
 ```mermaid
 flowchart LR
-    subgraph profile["Profile Mode"]
+    subgraph profile["Profile Mode (pandas free)"]
         uprof["utils_profile.py"]
         urocpd["utils/rocpd_data.py"]
-        ucsv["utils_profile_csv.py<br/>(pandas)"]
+        ucsv["utils_profile_csv.py<br/>(stdlib csv helper)"]
     end
     subgraph analyze["Analyze Mode"]
         abase["analysis_base.py"]
         fio["file_io.py"]
     end
     subgraph disk["On-Disk"]
-        db["ROCPD .db"]
+        db["ROCPD .db (transient)"]
         res["results_*.csv"]
     end
     uprof -->|"if rocpd"| urocpd
     uprof -->|"if csv"| ucsv
     urocpd -->|"writes"| db
+    urocpd -->|"converted to (via csv helper)"| res
     ucsv -->|"writes"| res
     abase -->|"joins (format specific)"| res
     fio -->|"reads"| res
@@ -187,22 +216,29 @@ flowchart LR
     subgraph profile["Profile Mode (pandas free)"]
         uprof["utils_profile.py"]
         urocpd["utils/rocpd_data.py"]
+        ucsv["utils_profile_csv.py<br/>(stdlib csv helper)"]
     end
     subgraph analyze["Analyze Mode"]
         abase["analysis_base.py"]
         fio["file_io.py"]
     end
     subgraph disk["On-Disk"]
-        db["ROCPD .db"]
+        db["ROCPD .db (transient)"]
+        res["results_*.csv"]
     end
     uprof -->|"writes via"| urocpd
     urocpd -->|"writes"| db
-    abase -->|"reads"| db
-    fio -->|"reads"| db
+    urocpd -->|"converted to (via csv helper)"| res
+    uprof -->|"writes via"| ucsv
+    ucsv -->|"writes"| res
+    abase -->|"reads"| res
+    fio -->|"reads"| res
 ```
 
-The `if csv` branch, `results_*.csv`, and the pandas-dependent `utils_profile_csv.py`
-are removed. Profile mode no longer chooses a storage format.
+The only thing removed on the path is the `if csv` branch (and the
+`--format-rocprof-output` flag): profile mode no longer chooses a storage format.
+`results_*.csv` and `utils_profile_csv.py` remain; their removal — and analyze
+reading directly from `.db` — is Phase B.
 
 ## Phase B: The Profiling Data Boundary
 
@@ -424,7 +460,7 @@ intact means classifying each file by owner.
 | Class | Examples | Owner | Behind the profiling-data boundary? |
 | --- | --- | --- | --- |
 | Raw profile source data (PMC) | ROCPD `.db`, future parquet | `profiling_data/implementations/` | **Yes** — only the boundary knows the layout and conversion rules |
-| Removed legacy profile data | `results_*.csv` | — (removed, AD-1) | n/a |
+| Removed legacy profile data | `results_*.csv` | — (removed in Phase B, AD-3) | n/a |
 | Exported artifact | `pmc_perf.csv` | `ProfilingDataReader` export (AD-3) | **Write-only** — derived from the in-memory frame and written every analyze run; never read back; not a public contract. Making production opt-in is a follow-up |
 | Profile-time non-PMC data | `roofline.csv` (empirical ceilings) | roofline / SoC code | No — not PMC counters |
 | Profile metadata / config | `profiling_config.yaml`, `sysinfo.csv`, `perfmon/pmc_perf_*.yaml` | Profile mode | No — `profiling_config.yaml` is *read* by `get_reader` to select the impl, but is not owned data |
