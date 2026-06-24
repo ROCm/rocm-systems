@@ -10,6 +10,12 @@ on:
       package_version:
         type: string
         required: true
+      amdgpu_families:
+        type: string
+        default: "gfx1151"
+      test_runs_on:
+        type: string
+        default: "windows-gfx1151-gpu-rocm"
 
 permissions:
   contents: read
@@ -30,9 +36,7 @@ jobs:
       BUILD_DIR: B:\build
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
-      # TODO(geomin12): Add matrix of families
-      # To get a fast signal of windows building for TheRock, adding gfx1151
-      AMDGPU_FAMILIES: "gfx1151"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -158,6 +162,6 @@ jobs:
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
-      amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
-      test_runs_on: "windows-gfx1151-gpu-rocm"
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "windows"
