@@ -443,8 +443,8 @@ discover_llvm_libdir_for_ompt()
     const auto llvm_host_triple = strip(std::string{ ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE });
     if(!llvm_host_triple.empty())
     {
-      push_unique(rocm_dir + "/lib/llvm/lib/" + llvm_host_triple);
-      push_unique("/opt/rocm/lib/llvm/lib/" + llvm_host_triple);
+        push_unique(rocm_dir + "/lib/llvm/lib/" + llvm_host_triple);
+        push_unique("/opt/rocm/lib/llvm/lib/" + llvm_host_triple);
     }
 
     push_unique("/opt/rocm/llvm/lib");
