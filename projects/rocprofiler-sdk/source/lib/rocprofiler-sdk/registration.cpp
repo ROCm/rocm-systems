@@ -1280,7 +1280,8 @@ rocprofiler_set_api_table(const char* name,
         {
             auto non_queue_interposition_contexts = rocprofiler::context::get_registered_contexts(
                 [](const rocprofiler::context::context* ctx) {
-                    return (ctx->dispatch_counter_collection != nullptr ||
+                    return (ctx->device_thread_trace ||
+                            ctx->dispatch_counter_collection != nullptr ||
                             ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr);
                 });
 
