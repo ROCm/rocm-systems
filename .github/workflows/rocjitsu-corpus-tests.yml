@@ -97,14 +97,13 @@ jobs:
       - name: Build rocjitsu
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
-          KERNEL_RELOCATION=RelocatedKernel
           ROCMINFO=RocminfoTest
           ROCBLAS_GEMM=RocblasGemmTest
           RCCL_DAEMON=RcclDaemonTest
           ROCBLAS_GEMMS=RocblasGemmTest
           ROCBLAS_GEMM_FUZZ=RocblasGemmFuzz
           ROCBLAS_GEMM_CDNA3=RocblasGemmCdna3
-          EXCLUDED_TESTS="${KERNEL_RELOCATION}|${ROCMINFO}|${ROCBLAS_GEMM}|${RCCL_DAEMON}|${ROCBLAS_GEMMS}|${ROCBLAS_GEMM_FUZZ}|${ROCBLAS_GEMM_CDNA3}"
+          EXCLUDED_TESTS="${ROCMINFO}|${ROCBLAS_GEMM}|${RCCL_DAEMON}|${ROCBLAS_GEMMS}|${ROCBLAS_GEMM_FUZZ}|${ROCBLAS_GEMM_CDNA3}"
           echo "CXXFLAGS=-Wno-error=unknown-warning-option -Wno-error=nested-anon-types" >> "${GITHUB_ENV}"
           ROCM_PATH=`rocm-sdk path --root` \
           cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
