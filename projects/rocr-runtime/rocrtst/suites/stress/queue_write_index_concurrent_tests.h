@@ -90,6 +90,10 @@ class QueueWriteIndexConcurrentTest : public TestBase {
   // concurrently.
   void QueueLoadStoreWriteIndexAtomic(void);
 
+  // @Brief: Verifies that signal CAS operations do not cause spurious wake-ups
+  // when they fail, ensuring efficient wait/wake behavior.
+  void TestCasNoSpuriousWakeup(void);
+
  private:
   void QueueAddWriteIndexAtomic(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
   void QueueCasWriteIndexAtomic(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);

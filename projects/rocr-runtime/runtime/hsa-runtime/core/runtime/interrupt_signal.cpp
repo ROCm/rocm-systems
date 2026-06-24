@@ -340,7 +340,9 @@ hsa_signal_value_t InterruptSignal::CasRelaxed(hsa_signal_value_t expected,
   hsa_signal_value_t ret = hsa_signal_value_t(
       atomic::Cas(&signal_.value, int64_t(value), int64_t(expected),
                   std::memory_order_relaxed));
-  SetEvent();
+  // Only wake waiters if CAS succeeded (signal value actually changed)
+  if (ret == expected)
+    SetEvent();
   return ret;
 }
 
@@ -349,7 +351,9 @@ hsa_signal_value_t InterruptSignal::CasAcquire(hsa_signal_value_t expected,
   hsa_signal_value_t ret = hsa_signal_value_t(
       atomic::Cas(&signal_.value, int64_t(value), int64_t(expected),
                   std::memory_order_acquire));
-  SetEvent();
+  // Only wake waiters if CAS succeeded (signal value actually changed)
+  if (ret == expected)
+    SetEvent();
   return ret;
 }
 
@@ -358,7 +362,9 @@ hsa_signal_value_t InterruptSignal::CasRelease(hsa_signal_value_t expected,
   hsa_signal_value_t ret = hsa_signal_value_t(
       atomic::Cas(&signal_.value, int64_t(value), int64_t(expected),
                   std::memory_order_release));
-  SetEvent();
+  // Only wake waiters if CAS succeeded (signal value actually changed)
+ if (ret == expected)
+    SetEvent();
   return ret;
 }
 
@@ -367,7 +373,9 @@ hsa_signal_value_t InterruptSignal::CasAcqRel(hsa_signal_value_t expected,
   hsa_signal_value_t ret = hsa_signal_value_t(
       atomic::Cas(&signal_.value, int64_t(value), int64_t(expected),
                   std::memory_order_acq_rel));
-  SetEvent();
+  // Only wake waiters if CAS succeeded (signal value actually changed)
+  if (ret == expected)
+    SetEvent();
   return ret;
 }
   /// @brief Notify driver of signal value change if necessary.
