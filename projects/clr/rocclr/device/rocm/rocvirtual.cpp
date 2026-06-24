@@ -1097,6 +1097,14 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
   gpu_queue_ = queue;
   cached_read_dispatch_id_ = 0;
+  // The cached queue-progress state belongs to the previously assigned HW queue. When the HW
+  // queue changes (released back to / reacquired from the shared dynamic-queue pool), that state
+  // is stale: the recorded completion signal may have been recycled/destroyed and the write
+  // indices refer to a different queue. Reset to the "empty queue" sentinel so IsQueueIdle() does
+  // not dereference a stale completion-signal handle.
+  last_write_index_ = kInvalidQueueIndex;
+  last_packet_with_signal_index_ = kInvalidQueueIndex;
+  last_completion_signal_.handle = 0;
   metadata_preloader_.SetQueueBase(metadata_ring_buffer,
                                    roc_device_.MetadataVersionHeader());
 }
@@ -1571,9 +1579,16 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         }
         if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
              IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
-            kernelNames != nullptr && i < kernelNames->size() && isKernelDispatch) {
+            kernelNames != nullptr && i < kernelNames->size() &&
+            (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH || pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC)) {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
-                  (*kernelNames)[i]->c_str(), dev().index());
+                  (*kernelNames)[i] != nullptr ? (*kernelNames)[i]->c_str() : "<null>",
+                  dev().index());
+          if (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
+            logAqlDispatchPacketExtended(gpu_queue_, hdr,
+                reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(slot),
+                Hsa::queue_load_read_index_scacquire(gpu_queue_), slotIdx, " Graph");
+          } else {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
                   "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
                   "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
@@ -1595,6 +1610,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
                   slot->kernel_object, slot->kernarg_address,
                   slot->completion_signal, slot->reserved2,
                   Hsa::queue_load_read_index_scacquire(gpu_queue_), slotIdx);
+          }
         } else if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
                     IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
                    (pktType == HSA_PACKET_TYPE_BARRIER_AND ||

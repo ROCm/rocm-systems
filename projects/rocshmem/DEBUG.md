@@ -1,7 +1,7 @@
 Hacking and Debugging RocSHMEM
 ==============================
 
-This documentation is mostly for core RocSHMEM developpers and contributors. Power users may still find it useful.
+This documentation is mostly for core RocSHMEM developers and contributors. Power users may still find it useful.
 
 How to debug parallel programs
 ------------------------------

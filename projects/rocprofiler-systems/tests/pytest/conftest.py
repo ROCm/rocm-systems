@@ -233,6 +233,14 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
+        "amdsmi_min_version(version): mark test as requiring minimum AMD-SMI version",
+    )
+    config.addinivalue_line(
+        "markers",
+        "amdgpu_min_version(version): mark test as requiring minimum amdgpu driver version",
+    )
+    config.addinivalue_line(
+        "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
     # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
@@ -295,6 +303,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "no_docker",
         "shmem",
         "nic",
+        "ainic",
     ]
 
     # Informational markers, only used for test labeling
@@ -575,6 +584,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = nic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
+        if "ainic" in item.keywords:
+            _msg = ainic_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "kfd" in item.keywords or "unified_memory" in item.keywords:
             _msg = kfd_unavailable_reason(rocprof_config)
             if _msg is not None:
@@ -605,6 +618,34 @@ def pytest_collection_modifyitems(config, items) -> None:
                     item.add_marker(
                         pytest.mark.skip(
                             reason=f"oshrun version {'.'.join(map(str, system_version))} < required {req_version}"
+                        )
+                    )
+        if "amdsmi_min_version" in item.keywords:
+            req_version = item.get_closest_marker("amdsmi_min_version").args[0]
+            system_version = rocprof_config.capabilities.amdsmi_version
+            if system_version is None:
+                item.add_marker(pytest.mark.skip(reason="AMD-SMI version not found"))
+            else:
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
+                if system_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"AMD-SMI {'.'.join(map(str, system_version))} < required {req_version}"
+                        )
+                    )
+        if "amdgpu_min_version" in item.keywords:
+            req_version = item.get_closest_marker("amdgpu_min_version").args[0]
+            system_version = rocprof_config.capabilities.amdgpu_version
+            if system_version is None:
+                item.add_marker(pytest.mark.skip(reason="amdgpu version not found"))
+            else:
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0", "0"])[:3])
+                if system_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"amdgpu {'.'.join(map(str, system_version))} < required {req_version}"
                         )
                     )
         if "run_if_gpu_category" in item.keywords:
@@ -767,10 +808,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    caps = rocprof_config.capabilities
-    if caps.perf_event_paranoid <= 3 or caps.cap_sys_admin or caps.cap_perfmon:
+    if rocprof_config.capabilities.perf_events_usable:
         return None
-    return "Requires either perf_event_paranoid <= 3, CAP_SYS_ADMIN, or CAP_PERFMON to be available"
+    return "Requires either perf_event_paranoid <= 2 or CAP_SYS_ADMIN to be available"
 
 
 def gpu_unavailable_reason() -> Optional[str]:
@@ -800,9 +840,19 @@ def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]
 
 def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     caps = rocprof_config.capabilities
-    if caps.papi_nic_events is not None and caps.perf_event_paranoid <= 2:
+    if caps.papi_nic_events is not None and caps.perf_events_usable:
         return None
-    return "Requires PAPI network events and perf_event_paranoid <= 2 to be available"
+    return "Requires PAPI network events and perf_event_paranoid <= 2 (or CAP_SYS_ADMIN) to be available"
+
+
+def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    """Check if AI NIC tracking is available.
+
+    Requires ``amd-smi static`` to report at least one NETDEV entry.
+    """
+    if not rocprof_config.capabilities.ai_nic_devices:
+        return "No AI NIC devices found (amd-smi static reports no NETDEV entries)"
+    return None
 
 
 def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
@@ -1225,6 +1275,8 @@ def _ctest_generate_tests(
         "no_docker",
         "oshrun_min_version",
         "rocm_min_version",
+        "amdsmi_min_version",
+        "amdgpu_min_version",
         "run_if_gpu_category",
         "preserve",
         # For CTests
@@ -1459,6 +1511,18 @@ def _generate_rocprofsys_config_header() -> list[str]:
     else:
         oshrun_version_str = "Not found"
 
+    if cap.amdsmi_version is not None:
+        amdsmi_version_str = f"{cap.amdsmi_version[0]}.{cap.amdsmi_version[1]}"
+    else:
+        amdsmi_version_str = "Not found"
+
+    if cap.amdgpu_version is not None:
+        amdgpu_version_str = (
+            f"{cap.amdgpu_version[0]}.{cap.amdgpu_version[1]}.{cap.amdgpu_version[2]}"
+        )
+    else:
+        amdgpu_version_str = "Not found"
+
     # Rocprofiler SDK version
     rocprofiler_sdk_version_str = (
         f"{cap.rocprofiler_sdk_version[0]}.{cap.rocprofiler_sdk_version[1]}.{cap.rocprofiler_sdk_version[2]}"
@@ -1481,6 +1545,8 @@ def _generate_rocprofsys_config_header() -> list[str]:
         "=" * 70,
         _row("ROCm version:", rocm_version),
         _row("ROCprof-SDK version:", rocprofiler_sdk_version_str),
+        _row("AMD-SMI version:", amdsmi_version_str),
+        _row("amdgpu version:", amdgpu_version_str),
         _row("ROCm path:", rocprof_config.rocm_path),
         _row("Is installed:", rocprof_config.is_installed),
         _row("Output dir:", rocprof_config.test_output_dir),
@@ -1510,16 +1576,17 @@ def _generate_rocprofsys_config_header() -> list[str]:
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
         _row("CAP_PERFMON:", cap.cap_perfmon),
+        _row("Perf events usable:", cap.perf_events_usable),
         _row("Ptrace scope:", cap.ptrace_scope),
         _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
         _row("PAPI available:", cap.papi_availability),
+        _row("AI NIC devices:", cap.ai_nic_devices),
         _row("Default NIC:", cap.default_nic),
         *(
             lambda evts: (
-                [_subrow("PAPI NIC events:", evts[0])]
-                + [_subrow("", e) for e in evts[1:]]
+                [_row("PAPI NIC events:", evts[0])] + [_row("", e) for e in evts[1:]]
                 if evts
-                else [_subrow("PAPI NIC events:", "None")]
+                else [_row("PAPI NIC events:", "None")]
             )
         )(cap.papi_nic_events.split() if cap.papi_nic_events else []),
         "-" * 70,

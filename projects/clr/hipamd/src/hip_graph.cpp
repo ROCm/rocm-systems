@@ -72,30 +72,33 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
                                   hip::GraphNode* const* pDependencies, size_t numDependencies,
                                   const hipKernelNodeParams* pNodeParams,
                                   const ihipExtKernelEvents* pNodeEvents = nullptr,
-                                  bool capture = true, int coopKernel = 0, int devId = 0,
+                                  bool capture = true, int coopKernel = 0, int devId = -1,
                                   int globalWorkSizeX_remainder = 0,
                                   int globalWorkSizeY_remainder = 0,
-                                  int globalWorkSizeZ_remainder = 0) {
+                                  int globalWorkSizeZ_remainder = 0,
+                                  dim3 clusterDim = {1, 1, 1}) {
   if (!hip::Graph::isGraphValid(graph)) {
     return hipErrorInvalidValue;
   }
 
-  hipFunction_t func = hip::GraphKernelNode::getFunc(*pNodeParams, ihipGetDevice());
+  int deviceId = (devId >= 0) ? devId : ihipGetDevice();
+  hipFunction_t func = hip::GraphKernelNode::getFunc(*pNodeParams, deviceId);
   if (!func) {
     return hipErrorInvalidDeviceFunction;
   }
 
-  const amd::Device* device = g_devices[ihipGetDevice()]->devices()[0];
+  const amd::Device* device = g_devices[deviceId]->devices()[0];
   amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
                                      pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                      pNodeParams->blockDim.y, pNodeParams->blockDim.z,
                                      pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder,
-                                     globalWorkSizeY_remainder, globalWorkSizeZ_remainder, 1, 1, 1);
+                                     globalWorkSizeY_remainder, globalWorkSizeZ_remainder,
+                                     clusterDim.x, clusterDim.y, clusterDim.z);
   if (!launch_params.IsValidConfig()) {
     return hipErrorInvalidConfiguration;
   }
   hipError_t status = ihipLaunchKernel_validate(func, launch_params, pNodeParams->kernelParams,
-                                                pNodeParams->extra, ihipGetDevice(), 0);
+                                                pNodeParams->extra, deviceId, coopKernel);
   if (hipSuccess != status) {
     return status;
   }
@@ -114,8 +117,8 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
 
   *pGraphNode =
       new hip::GraphKernelNode(pNodeParams, pNodeEvents, coopKernel, globalWorkSizeX_remainder,
-                               globalWorkSizeY_remainder, globalWorkSizeZ_remainder);
-  status = ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies, capture, devId);
+                               globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim);
+  status = ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies, capture, deviceId);
   return status;
 }
 
@@ -360,6 +363,72 @@ hipError_t capturehipModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f, u
   hipError_t status = ihipGraphAddKernelNode(
       &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
       s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, 0, s->DeviceId());
+  if (status != hipSuccess) {
+    return status;
+  }
+  s->SetLastCapturedNode(pGraphNode);
+  return hipSuccess;
+}
+
+hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CONFIG*& config,
+                                       hipFunction_t& f, void**& kernelParams, void**& extra) {
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+          "[hipGraph] Current capture node DrvLaunchKernelEx on stream : %p", stream);
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  if (f == nullptr) {
+    return hipErrorInvalidResourceHandle;
+  }
+  if (config == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  dim3 clusterDim = {1, 1, 1};
+  int coopKernel = 0;
+
+  for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
+    const hipLaunchAttribute& attr = config->attrs[attr_idx];
+    switch (attr.id) {
+      case hipLaunchAttributeCooperative:
+        if (attr.value.cooperative != 0) {
+          coopKernel = amd::NDRangeKernelCommand::CooperativeGroups;
+        }
+        break;
+      case hipLaunchAttributeClusterDimension:
+        clusterDim.x = attr.value.clusterDim.x;
+        clusterDim.y = attr.value.clusterDim.y;
+        clusterDim.z = attr.value.clusterDim.z;
+        if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
+          return hipErrorInvalidConfiguration;
+        }
+        break;
+      case hipLaunchAttributeExtDynDataPrefetch:
+        if (attr.value.dynDataPrefetch == nullptr) {
+          return hipErrorInvalidValue;
+        }
+        s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        return hipErrorStreamCaptureUnsupported;
+      default:
+        LogPrintfError("Attribute %u not supported", attr.id);
+        return hipErrorInvalidValue;
+    }
+  }
+
+  hipKernelNodeParams nodeParams;
+  nodeParams.func = f;
+  nodeParams.blockDim = {config->blockDimX, config->blockDimY, config->blockDimZ};
+  nodeParams.gridDim = {config->gridDimX, config->gridDimY, config->gridDimZ};
+  nodeParams.sharedMemBytes = config->sharedMemBytes;
+  nodeParams.kernelParams = kernelParams;
+  nodeParams.extra = coopKernel ? nullptr : extra;
+
+  hip::GraphNode* pGraphNode;
+  hipError_t status = ihipGraphAddKernelNode(
+      &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+      s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, coopKernel, s->DeviceId(),
+      0, 0, 0, clusterDim);
   if (status != hipSuccess) {
     return status;
   }
@@ -1768,7 +1837,8 @@ hipError_t hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, hipKernelNodeAtt
     HIP_RETURN(hipErrorInvalidValue);
   }
   if (attr != hipKernelNodeAttributeAccessPolicyWindow &&
-      attr != hipKernelNodeAttributeCooperative && attr != hipLaunchAttributePriority) {
+      attr != hipKernelNodeAttributeCooperative && attr != hipLaunchAttributePriority &&
+      attr != hipLaunchAttributeClusterDimension) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1786,7 +1856,8 @@ hipError_t hipGraphKernelNodeGetAttribute(hipGraphNode_t hNode, hipKernelNodeAtt
     HIP_RETURN(hipErrorInvalidValue);
   }
   if (attr != hipKernelNodeAttributeAccessPolicyWindow &&
-      attr != hipKernelNodeAttributeCooperative && attr != hipLaunchAttributePriority) {
+      attr != hipKernelNodeAttributeCooperative && attr != hipLaunchAttributePriority &&
+      attr != hipLaunchAttributeClusterDimension) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
