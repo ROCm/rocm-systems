@@ -24,11 +24,11 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added `RCCL host API` pull-in from NCCL 2.30.
 
 ### Changed
-* Enable WarpSpeed auto mode for grow communicators.
+* Enabled WarpSpeed auto mode for grow communicators.
 * Refactored AllGather algorithm selection; hierarchical AllGather now enabled by default for multi-node.
 * Swapped legacy `net_ib` with the `net_ib` implementation from NCCL 2.29.
 * Skip per-warp channel LDS copy when `warpComm` is disabled.
-* Harden proxy RPC setup against malformed peer input.
+* Hardened proxy RPC setup against malformed peer input.
 * The bootstrap AllGather now uses the bidirectional ring (N/2 steps) by default on the socket OOB path. `NCCL_BOOTSTRAP_BIDIR_ALLGATHER` now defaults to `1`; set it to `0` to fall back to the unidirectional ring. The net OOB path (`NCCL_OOB_NET_ENABLE`) and its bidirectional variant (`NCCL_BOOTSTRAP_BIDIR_NET`) remain off by default.
 * `NCCL_PXN_C2C` is kept default-off (`0`); upstream NCCL defaults it to `1` since 2.28. The C2C PXN routing path is NVIDIA-specific and is not currently applicable on AMD hardware.
 
@@ -41,7 +41,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Tuned symmetric memory kernels.
 * Parallelized communicator destruction across child processes to reduce teardown latency.
 
-### Resolved Issues
+### Resolved issues
 * Fixed `ncclCommGrow` channel-count divergence causing incorrect collective routing.
 * Fixed `ncclCommGrow` hang when growing to an 8-rank single-node communicator.
 * Fixed symmetric LDS under-reservation in legacy (non-device-linker) builds.
