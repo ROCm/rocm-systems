@@ -42,7 +42,7 @@
 
 namespace rocprofsys
 {
-namespace component
+namespace utility
 {
 
 struct entry_key
@@ -69,27 +69,68 @@ struct pending_cache_entry
     std::string args     = {};
 };
 
-inline thread_local std::map<entry_key, std::vector<pending_cache_entry>>
-    map_name_to_args;
-
 // A type qualifies as a trace-cache argument "name" slot when it is string-like
 template <typename Tp>
 concept trace_cache_arg_name = std::convertible_to<std::decay_t<Tp>, std::string_view>;
 
-// Base holding the category-independent trace-cache helpers
-struct category_region_base
+struct wall_clock_source
 {
-    static void cache_region(std::uint64_t thread_id, const std::string& name,
-                             std::uint64_t start_ts, std::uint64_t end_ts,
-                             const std::string& category,
-                             const std::string& args_str = {})
+    timestamp_t now() const
+    {
+        return static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+    }
+};
+
+struct trace_cache_region_sink
+{
+    void store_region(std::uint64_t thread_id, const char* name, std::uint64_t start_ts,
+                      std::uint64_t end_ts, const char* category,
+                      const char* args_str) const
     {
         constexpr size_t      NO_CORRELATION_ID = 0;
         constexpr const char* CALLSTACK         = "{}";
         rocprofsys::trace_cache::get_buffer_storage().store(
-            rocprofsys::trace_cache::region_sample{
-                thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
-                end_ts, CALLSTACK, args_str.c_str(), category.c_str() });
+            rocprofsys::trace_cache::region_sample{ thread_id, name, NO_CORRELATION_ID,
+                                                    NO_CORRELATION_ID, start_ts, end_ts,
+                                                    CALLSTACK, args_str, category });
+    }
+};
+
+struct thread_metadata_source
+{
+    // Reads the current thread's system_value and registers its metadata
+    std::uint64_t resolve_current_thread() const
+    {
+        std::uint64_t thread_id = 0;
+
+        const auto& extended_info =
+            rocprofsys::thread_info::get(std::this_thread::get_id());
+        if(extended_info.has_value() && extended_info->index_data.has_value())
+        {
+            constexpr size_t UNKNOWN_TIME = 0;
+            thread_id                     = extended_info->index_data->system_value;
+            rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
+                { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+        }
+        return thread_id;
+    }
+};
+
+struct real_region_policy
+{
+    using clock_type           = wall_clock_source;
+    using region_sink_type     = trace_cache_region_sink;
+    using thread_metadata_type = thread_metadata_source;
+};
+
+// Category-independent trace-cache helpers
+template <typename Policy = real_region_policy>
+struct category_region
+{
+    static category_region& instance()
+    {
+        thread_local category_region inst;
+        return inst;
     }
 
     template <typename Tp>
@@ -223,15 +264,15 @@ struct category_region_base
     }
 
     // Index the next appended record should use, i.e. the count of records already
-    // present. Reads only the final record's idx field instead of scanning everything.
+    // present
     static std::uint32_t next_arg_index(const std::string& args_str)
     {
         if(args_str.empty()) return 0;
 
         constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
 
-        // With fewer than 5 delimiters the last record is the first one and starts at
-        // offset 0.
+        // Less than 5 delimiters means last record is the first one and starts at offset
+        // 0
         std::size_t record_start = 0;
         std::size_t search_end   = std::string::npos;
         for(int i = 0; i < 5; ++i)
@@ -254,7 +295,7 @@ struct category_region_base
     }
 
     // Serializes gotcha audit arguments into the trace-cache format. Names are
-    // synthesized as "arg{N}-{demangled-type}" to mirror add_perfetto_annotation
+    // synthesized as "arg{N}-{demangled-type}"
     template <typename... Args>
     static std::string serialize_annotation_args(Args&&... args)
     {
@@ -283,17 +324,22 @@ struct category_region_base
         return args_str;
     }
 
-    static void cache_start(const char* name, std::string_view category,
-                            std::string args_str = {})
+    // Pending per-thread entry stacks, keyed on {name, category}
+    std::map<entry_key, std::vector<pending_cache_entry>>& pending_entries()
     {
-        const auto start_ts =
-            static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+        return map_name_to_args;
+    }
+
+    void cache_start(const char* name, std::string_view category,
+                     std::string args_str = {})
+    {
+        const auto start_ts = clock_.now();
         map_name_to_args[entry_key{ name, std::string{ category } }].push_back(
             pending_cache_entry{ start_ts, std::move(args_str) });
     }
 
-    static void append_cache_args(const char* name, std::string_view category,
-                                  std::string args_str)
+    void append_cache_args(const char* name, std::string_view category,
+                           std::string args_str)
     {
         if(args_str.empty()) return;
 
@@ -314,7 +360,7 @@ struct category_region_base
         }
     }
 
-    static void cache_stop(const char* name, std::string_view category)
+    void cache_stop(const char* name, std::string_view category)
     {
         entry_key key{ name, std::string{ category } };
         auto      x = map_name_to_args.find(key);
@@ -324,19 +370,8 @@ struct category_region_base
             x->second.pop_back();
             if(x->second.empty()) map_name_to_args.erase(x);
 
-            const auto end_ts =
-                static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-            std::uint64_t thread_id = 0;
-
-            const auto& extended_info =
-                rocprofsys::thread_info::get(std::this_thread::get_id());
-            if(extended_info.has_value() && extended_info->index_data.has_value())
-            {
-                constexpr size_t UNKNOWN_TIME = 0;
-                thread_id                     = extended_info->index_data->system_value;
-                rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                    { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
-            }
+            const auto          end_ts    = clock_.now();
+            const std::uint64_t thread_id = thread_meta_.resolve_current_thread();
 
             cache_region(thread_id, name, entry.start_ts, end_ts, std::string{ category },
                          entry.args);
@@ -348,21 +383,10 @@ struct category_region_base
     /// (e.g., main entry point) are written to the trace cache. Every pending frame
     /// in each per-key stack is emitted, so recursive/self-nested regions that were
     /// never popped still produce one region per outstanding push.
-    static void flush_pending_cached_entries()
+    void flush_pending_cached_entries()
     {
-        const auto end_ts =
-            static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-        std::uint64_t thread_id = 0;
-
-        const auto& extended_info =
-            rocprofsys::thread_info::get(std::this_thread::get_id());
-        if(extended_info.has_value() && extended_info->index_data.has_value())
-        {
-            constexpr size_t UNKNOWN_TIME = 0;
-            thread_id                     = extended_info->index_data->system_value;
-            rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
-        }
+        const auto          end_ts    = clock_.now();
+        const std::uint64_t thread_id = thread_meta_.resolve_current_thread();
 
         for(const auto& [key, entry_stack] : map_name_to_args)
         {
@@ -374,9 +398,23 @@ struct category_region_base
         }
         map_name_to_args.clear();
     }
+
+private:
+    void cache_region(std::uint64_t thread_id, const std::string& name,
+                      std::uint64_t start_ts, std::uint64_t end_ts,
+                      const std::string& category, const std::string& args_str = {})
+    {
+        sink_.store_region(thread_id, name.c_str(), start_ts, end_ts, category.c_str(),
+                           args_str.c_str());
+    }
+
+    typename Policy::clock_type                           clock_{};
+    typename Policy::region_sink_type                     sink_{};
+    typename Policy::thread_metadata_type                 thread_meta_{};
+    std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args{};
 };
 
-}  // namespace component
+}  // namespace utility
 }  // namespace rocprofsys
 
 namespace tim
@@ -429,11 +467,12 @@ get_thread_status()
 // timemory component which calls rocprof-sys functions
 // (used in gotcha wrappers)
 template <typename CategoryT>
-struct category_region
-: category_region_base
-, comp::base<category_region<CategoryT>, void>
+struct category_region : comp::base<category_region<CategoryT>, void>
 {
     using gotcha_data_t = tim::component::gotcha_data;
+
+    // Category-independent trace-cache helpers
+    using region_cache = utility::category_region<>;
 
     static constexpr auto category_name = trait::name<CategoryT>::value;
 
@@ -512,11 +551,10 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
 
     // Gotcha starts pass the region name followed by ("arg-name", value) pairs.
     // Serialize those pairs into the trace-cache wire format
-    // (Perfetto annotations are handled separately)
-    constexpr bool _has_cache_args = has_trace_cache_arg_pairs_v<Args...>;
+    constexpr bool _has_cache_args = region_cache::has_trace_cache_arg_pairs_v<Args...>;
     if constexpr(_has_cache_args)
     {
-        cache_args = serialize_name_value_pairs(args...);
+        cache_args = region_cache::serialize_name_value_pairs(args...);
     }
 
     constexpr bool _ct_use_timemory =
@@ -567,7 +605,8 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
         }
     }
 
-    cache_start(name.data(), category_name, std::move(cache_args));
+    region_cache::instance().cache_start(name.data(), category_name,
+                                         std::move(cache_args));
 }
 
 // Starts a region and attaches the pre-serialized args to it in a single push.
@@ -594,8 +633,8 @@ category_region<CategoryT>::append_cache_args(std::string_view name,
 
     auto _hash = tim::add_hash_id(name);
     name       = tim::get_hash_identifier_fast(_hash);
-    category_region_base::append_cache_args(name.data(), category_name,
-                                            std::move(serialized_args));
+    region_cache::instance().append_cache_args(name.data(), category_name,
+                                               std::move(serialized_args));
 }
 
 template <typename CategoryT>
@@ -663,7 +702,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
             }
         }
 
-        cache_stop(name.data(), category_name);
+        region_cache::instance().cache_stop(name.data(), category_name);
     }
     else
     {
@@ -727,7 +766,8 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(), serialize_annotation_args(_args...));
+        append_cache_args(_data.tool_id.c_str(),
+                          region_cache::serialize_annotation_args(_args...));
     }
 }
 
@@ -739,7 +779,8 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
 {
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(), serialize_return_arg(_args...));
+        append_cache_args(_data.tool_id.c_str(),
+                          region_cache::serialize_return_arg(_args...));
     }
 
     stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
@@ -769,7 +810,8 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_name.data(), serialize_annotation_args(_args...));
+        append_cache_args(_name.data(),
+                          region_cache::serialize_annotation_args(_args...));
     }
 }
 
@@ -781,7 +823,7 @@ category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
 {
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_name.data(), serialize_return_arg(_args...));
+        append_cache_args(_name.data(), region_cache::serialize_return_arg(_args...));
     }
 
     stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {

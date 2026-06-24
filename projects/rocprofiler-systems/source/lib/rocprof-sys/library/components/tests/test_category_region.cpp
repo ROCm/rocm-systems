@@ -10,7 +10,9 @@
 #include "core/common_types.hpp"
 
 #include <cstdint>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <tuple>
@@ -22,90 +24,92 @@ using rocprofsys::argument_info;
 using rocprofsys::function_args_t;
 using rocprofsys::process_arguments_string;
 
-using base = rocprofsys::component::category_region_base;
-using rocprofsys::component::entry_key;
-using rocprofsys::component::map_name_to_args;
-using rocprofsys::component::pending_cache_entry;
+using region_cache = rocprofsys::utility::category_region<>;
+using rocprofsys::utility::entry_key;
+using rocprofsys::utility::pending_cache_entry;
 
-// The trace-cache helpers now live as static members of category_region_base. These thin
-// forwarding shims keep the unqualified test bodies (and the <category_t> call syntax for
-// the cache lifecycle helpers) unchanged.
+auto& map_name_to_args = region_cache::instance().pending_entries();
+
+// ---------------------------------------------------------------------------------------
+// test shims
+// ---------------------------------------------------------------------------------------
+
 template <typename Tp>
 std::string
 get_serialized_arg_type()
 {
-    return base::get_serialized_arg_type<Tp>();
+    return region_cache::get_serialized_arg_type<Tp>();
 }
 
 template <typename Tp>
 std::string
 get_serialized_arg_value(Tp&& value)
 {
-    return base::get_serialized_arg_value(std::forward<Tp>(value));
+    return region_cache::get_serialized_arg_value(std::forward<Tp>(value));
 }
 
 template <typename... Args>
 void
 append_serialized_arg(Args&&... args)
 {
-    base::append_serialized_arg(std::forward<Args>(args)...);
+    region_cache::append_serialized_arg(std::forward<Args>(args)...);
 }
 
 template <typename... Args>
 inline constexpr bool has_trace_cache_arg_pairs_v =
-    base::has_trace_cache_arg_pairs_v<Args...>;
+    region_cache::has_trace_cache_arg_pairs_v<Args...>;
 
 template <typename... Args>
 std::string
 serialize_name_value_pairs(Args&&... args)
 {
-    return base::serialize_name_value_pairs(std::forward<Args>(args)...);
+    return region_cache::serialize_name_value_pairs(std::forward<Args>(args)...);
 }
 
 inline std::uint32_t
 renumber_serialized_args(std::string& args_str, std::uint32_t next_idx)
 {
-    return base::renumber_serialized_args(args_str, next_idx);
+    return region_cache::renumber_serialized_args(args_str, next_idx);
 }
 
 inline std::uint32_t
 next_arg_index(const std::string& args_str)
 {
-    return base::next_arg_index(args_str);
+    return region_cache::next_arg_index(args_str);
 }
 
 template <typename... Args>
 std::string
 serialize_annotation_args(Args&&... args)
 {
-    return base::serialize_annotation_args(std::forward<Args>(args)...);
+    return region_cache::serialize_annotation_args(std::forward<Args>(args)...);
 }
 
 template <typename T>
 std::string
 serialize_return_arg(T&& value)
 {
-    return base::serialize_return_arg(std::forward<T>(value));
+    return region_cache::serialize_return_arg(std::forward<T>(value));
 }
 
 template <typename CategoryT, typename... Args>
 void
 cache_start(const char* name, Args&&... args)
 {
-    base::cache_start(name, rocprofsys::trait::name<CategoryT>::value,
-                      std::forward<Args>(args)...);
+    region_cache::instance().cache_start(name, rocprofsys::trait::name<CategoryT>::value,
+                                         std::forward<Args>(args)...);
 }
 
 template <typename CategoryT>
 void
 append_cache_args(const char* name, std::string args_str)
 {
-    base::append_cache_args(name, rocprofsys::trait::name<CategoryT>::value,
-                            std::move(args_str));
+    region_cache::instance().append_cache_args(
+        name, rocprofsys::trait::name<CategoryT>::value, std::move(args_str));
 }
 
 // Round-trip the serialized wire string back into structured records so assertions
-// do not depend on the exact delimiter layout.
+// do not depend on the exact delimiter layout
 function_args_t
 parse(const std::string& serialized)
 {
@@ -252,6 +256,10 @@ TEST(category_region_serialization, renumber_serialized_args_empty)
     EXPECT_TRUE(empty.empty());
 }
 
+// ---------------------------------------------------------------------------------------
+// next_arg_index
+// ---------------------------------------------------------------------------------------
+
 TEST(category_region_serialization, next_arg_index)
 {
     // empty -> 0
@@ -306,7 +314,7 @@ TEST(category_region_serialization, serialize_return_arg)
 }
 
 // ---------------------------------------------------------------------------------------
-// entry_key ordering (used as the std::map key for the pending-entry stacks)
+// entry_key ordering
 // ---------------------------------------------------------------------------------------
 
 TEST(category_region_cache, entry_key_ordering)
@@ -330,7 +338,7 @@ TEST(category_region_cache, entry_key_ordering)
 }
 
 // ---------------------------------------------------------------------------------------
-// cache_start (pushes a pending entry onto the per-thread stack)
+// cache_start
 // ---------------------------------------------------------------------------------------
 
 TEST(category_region_cache, cache_start_pushes_pending_entry)
@@ -366,7 +374,7 @@ TEST(category_region_cache, cache_start_pushes_pending_entry)
 }
 
 // ---------------------------------------------------------------------------------------
-// append_cache_args (free function operating on the per-thread pending-entry stack)
+// append_cache_args
 // ---------------------------------------------------------------------------------------
 
 TEST(category_region_cache, append_cache_args_adopts_first_batch_without_renumbering)
@@ -444,22 +452,16 @@ TEST(category_region_cache, append_cache_args_noop_without_open_entry)
     map_name_to_args.clear();
 }
 
-// ---------------------------------------------------------------------------------------
-// category parameter on the cache lifecycle helpers (category_region_base static
-// members). After hoisting the helpers into the non-template base, the category is
-// threaded through as an explicit argument rather than baked into the template, so the
-// per-thread map must key on {name, category} and keep same-named regions in different
-// categories distinct.
-// ---------------------------------------------------------------------------------------
-
 TEST(category_region_cache, cache_start_keys_on_name_and_category)
 {
     const char* name = "shared_region";
 
     map_name_to_args.clear();
     // identical region name pushed under two different categories
-    base::cache_start(name, "cat_a", serialize_name_value_pairs("a", 1));
-    base::cache_start(name, "cat_b", serialize_name_value_pairs("b", 2));
+    region_cache::instance().cache_start(name, "cat_a",
+                                         serialize_name_value_pairs("a", 1));
+    region_cache::instance().cache_start(name, "cat_b",
+                                         serialize_name_value_pairs("b", 2));
 
     const entry_key key_a{ name, "cat_a" };
     const entry_key key_b{ name, "cat_b" };
@@ -489,11 +491,13 @@ TEST(category_region_cache, append_cache_args_is_scoped_to_category)
 
     map_name_to_args.clear();
     // only cat_a has an open entry
-    base::cache_start(name, "cat_a", serialize_name_value_pairs("a", 1));
+    region_cache::instance().cache_start(name, "cat_a",
+                                         serialize_name_value_pairs("a", 1));
 
     // appending under the same name but a different category must not touch cat_a and
     // must not fabricate an entry for cat_b
-    base::append_cache_args(name, "cat_b", serialize_name_value_pairs("b", 2));
+    region_cache::instance().append_cache_args(name, "cat_b",
+                                               serialize_name_value_pairs("b", 2));
 
     const entry_key key_a{ name, "cat_a" };
     const entry_key key_b{ name, "cat_b" };
@@ -504,7 +508,8 @@ TEST(category_region_cache, append_cache_args_is_scoped_to_category)
     EXPECT_EQ(parse(itr_a->second.back().args).size(), 1u);
 
     // appending under the matching category extends that category's open entry
-    base::append_cache_args(name, "cat_a", serialize_name_value_pairs("b", 2, "c", 3));
+    region_cache::instance().append_cache_args(
+        name, "cat_a", serialize_name_value_pairs("b", 2, "c", 3));
     const auto& entry = map_name_to_args[key_a].back();
     EXPECT_EQ(parse(entry.args).size(), 3u);
 
@@ -518,4 +523,353 @@ TEST(category_region_cache, append_cache_args_is_scoped_to_category)
     EXPECT_EQ(args[2].arg_name, "c");
 
     map_name_to_args.clear();
+}
+
+// =======================================================================================
+// Policy-injected dependency tests
+// =======================================================================================
+
+struct gmock_clock
+{
+    MOCK_METHOD(rocprofsys::utility::timestamp_t, now, (), (const));
+};
+
+struct gmock_region_sink
+{
+    MOCK_METHOD(void, store_region,
+                (std::uint64_t thread_id, std::string name, std::uint64_t start_ts,
+                 std::uint64_t end_ts, std::string category, std::string args),
+                (const));
+};
+
+struct gmock_thread_metadata
+{
+    MOCK_METHOD(std::uint64_t, resolve_current_thread, (), (const));
+};
+
+namespace test_globals
+{
+std::unique_ptr<gmock_clock>           g_clock_gmock;
+std::unique_ptr<gmock_region_sink>     g_region_sink_gmock;
+std::unique_ptr<gmock_thread_metadata> g_thread_meta_gmock;
+}  // namespace test_globals
+
+namespace
+{
+struct mock_clock_source
+{
+    rocprofsys::utility::timestamp_t now() const
+    {
+        return test_globals::g_clock_gmock->now();
+    }
+};
+
+struct mock_region_sink
+{
+    void store_region(std::uint64_t thread_id, const char* name, std::uint64_t start_ts,
+                      std::uint64_t end_ts, const char* category, const char* args) const
+    {
+        test_globals::g_region_sink_gmock->store_region(thread_id, name, start_ts, end_ts,
+                                                        category, args);
+    }
+};
+
+struct mock_thread_metadata_source
+{
+    std::uint64_t resolve_current_thread() const
+    {
+        return test_globals::g_thread_meta_gmock->resolve_current_thread();
+    }
+};
+
+struct mock_region_policy
+{
+    using clock_type           = mock_clock_source;
+    using region_sink_type     = mock_region_sink;
+    using thread_metadata_type = mock_thread_metadata_source;
+};
+
+using mocked_region_cache_t = rocprofsys::utility::category_region<mock_region_policy>;
+}  // namespace
+
+class category_region_policy_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        test_globals::g_clock_gmock       = std::make_unique<gmock_clock>();
+        test_globals::g_region_sink_gmock = std::make_unique<gmock_region_sink>();
+        test_globals::g_thread_meta_gmock = std::make_unique<gmock_thread_metadata>();
+    }
+
+    void TearDown() override
+    {
+        test_globals::g_clock_gmock.reset();
+        test_globals::g_region_sink_gmock.reset();
+        test_globals::g_thread_meta_gmock.reset();
+    }
+};
+
+// ---------------------------------------------------------------------------------------
+// policy-injected: cache_start
+// ---------------------------------------------------------------------------------------
+
+TEST_F(category_region_policy_test, cache_start_records_injected_clock_without_emitting)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now()).Times(1).WillOnce(Return(1234u));
+    // a push must not resolve the thread or emit a region
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
+        .Times(0);
+
+    region.cache_start("region", "cat", serialize_name_value_pairs("a", 1));
+
+    const entry_key key{ "region", "cat" };
+    auto            itr = region.pending_entries().find(key);
+    ASSERT_TRUE(itr != region.pending_entries().end());
+    ASSERT_EQ(itr->second.size(), 1u);
+    EXPECT_EQ(itr->second.back().start_ts, 1234u);
+}
+
+// ---------------------------------------------------------------------------------------
+// policy-injected: cache_stop
+// ---------------------------------------------------------------------------------------
+
+TEST_F(category_region_policy_test, cache_stop_emits_region_through_injected_seams)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    // start consumes the first now() (start_ts), stop consumes the second (end_ts)
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(100u))
+        .WillOnce(Return(500u));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .Times(1)
+        .WillOnce(Return(42u));
+    EXPECT_CALL(
+        *test_globals::g_region_sink_gmock,
+        store_region(42u, std::string{ "region" }, 100u, 500u, std::string{ "cat" }, _))
+        .Times(1);
+
+    region.cache_start("region", "cat", serialize_name_value_pairs("a", 1));
+    region.cache_stop("region", "cat");
+
+    // the pending entry is consumed by the stop
+    EXPECT_TRUE(region.pending_entries().empty());
+}
+
+TEST_F(category_region_policy_test, cache_stop_without_open_entry_touches_no_seams)
+{
+    using ::testing::_;
+
+    mocked_region_cache_t region;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now()).Times(0);
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
+        .Times(0);
+
+    region.cache_stop("missing", "cat");
+}
+
+TEST_F(category_region_policy_test, cache_stop_pops_only_the_innermost_frame)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    // two pushes on the same key (outer start_ts 100, inner start_ts 200); a single stop
+    // closes the inner frame (end_ts 300) and must leave the outer frame open.
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(100u))   // outer start
+        .WillOnce(Return(200u))   // inner start
+        .WillOnce(Return(300u));  // stop end_ts
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .Times(1)
+        .WillOnce(Return(9u));
+    // the popped (innermost) frame is the one emitted: its start_ts 200, not the outer
+    // 100
+    EXPECT_CALL(
+        *test_globals::g_region_sink_gmock,
+        store_region(9u, std::string{ "region" }, 200u, 300u, std::string{ "cat" }, _))
+        .Times(1);
+
+    region.cache_start("region", "cat", serialize_name_value_pairs("outer", 1));
+    region.cache_start("region", "cat", serialize_name_value_pairs("inner", 2));
+    region.cache_stop("region", "cat");
+
+    // the outer frame remains open with its original timestamp
+    const entry_key key{ "region", "cat" };
+    auto            itr = region.pending_entries().find(key);
+    ASSERT_TRUE(itr != region.pending_entries().end());
+    ASSERT_EQ(itr->second.size(), 1u);
+    EXPECT_EQ(itr->second.back().start_ts, 100u);
+}
+
+TEST_F(category_region_policy_test, cache_stop_emits_zero_thread_id_when_unresolved)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(10u))
+        .WillOnce(Return(20u));
+    // no thread info available -> resolve returns 0, which flows through to the sink
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .Times(1)
+        .WillOnce(Return(0u));
+    EXPECT_CALL(
+        *test_globals::g_region_sink_gmock,
+        store_region(0u, std::string{ "region" }, 10u, 20u, std::string{ "cat" }, _))
+        .Times(1);
+
+    region.cache_start("region", "cat");
+    region.cache_stop("region", "cat");
+}
+
+TEST_F(category_region_policy_test, cache_stop_forwards_serialized_args_to_sink)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    const auto args = serialize_name_value_pairs("a", 1, "b", 2);
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(10u))
+        .WillOnce(Return(20u));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .Times(1)
+        .WillOnce(Return(3u));
+    // the args serialized at start flow verbatim into the sink at stop
+    EXPECT_CALL(
+        *test_globals::g_region_sink_gmock,
+        store_region(3u, std::string{ "region" }, 10u, 20u, std::string{ "cat" }, args))
+        .Times(1);
+
+    region.cache_start("region", "cat", args);
+    region.cache_stop("region", "cat");
+}
+
+// ---------------------------------------------------------------------------------------
+// policy-injected: append_cache_args
+// ---------------------------------------------------------------------------------------
+
+TEST_F(category_region_policy_test, append_cache_args_touches_no_seams)
+{
+    using ::testing::_;
+
+    mocked_region_cache_t region;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now()).Times(0);
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
+        .Times(0);
+
+    const entry_key key{ "region", "cat" };
+    region.pending_entries()[key].push_back(pending_cache_entry{ 0, {} });
+    region.append_cache_args("region", "cat", serialize_name_value_pairs("a", 1));
+
+    EXPECT_EQ(parse(region.pending_entries()[key].back().args).size(), 1u);
+}
+
+// ---------------------------------------------------------------------------------------
+// policy-injected: flush_pending_cached_entries
+// ---------------------------------------------------------------------------------------
+
+TEST_F(category_region_policy_test, flush_emits_every_pending_entry_then_clears)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    // two starts (start_ts 10 and 20) then a single flush end_ts (999)
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(10u))
+        .WillOnce(Return(20u))
+        .WillOnce(Return(999u));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .Times(1)
+        .WillOnce(Return(7u));
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(7u, std::string{ "r1" }, 10u, 999u, std::string{ "cat" }, _))
+        .Times(1);
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(7u, std::string{ "r2" }, 20u, 999u, std::string{ "cat" }, _))
+        .Times(1);
+
+    region.cache_start("r1", "cat");
+    region.cache_start("r2", "cat");
+    region.flush_pending_cached_entries();
+
+    EXPECT_TRUE(region.pending_entries().empty());
+}
+
+TEST_F(category_region_policy_test, flush_emits_one_region_per_outstanding_frame)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    // three nested pushes on one key that are never popped (start_ts 1, 2, 3); flush
+    // emits one region per outstanding frame, all sharing the single flush end_ts (100).
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(1u))
+        .WillOnce(Return(2u))
+        .WillOnce(Return(3u))
+        .WillOnce(Return(100u));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .Times(1)
+        .WillOnce(Return(5u));
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(5u, std::string{ "rec" }, 1u, 100u, std::string{ "cat" }, _))
+        .Times(1);
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(5u, std::string{ "rec" }, 2u, 100u, std::string{ "cat" }, _))
+        .Times(1);
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(5u, std::string{ "rec" }, 3u, 100u, std::string{ "cat" }, _))
+        .Times(1);
+
+    region.cache_start("rec", "cat");
+    region.cache_start("rec", "cat");
+    region.cache_start("rec", "cat");
+    region.flush_pending_cached_entries();
+
+    EXPECT_TRUE(region.pending_entries().empty());
+}
+
+TEST_F(category_region_policy_test, flush_on_empty_map_emits_nothing)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    // flush unconditionally samples the clock and resolves the thread, but with no
+    // pending entries it must not emit any region.
+    EXPECT_CALL(*test_globals::g_clock_gmock, now()).Times(1).WillOnce(Return(50u));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .Times(1)
+        .WillOnce(Return(1u));
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
+        .Times(0);
+
+    region.flush_pending_cached_entries();
+
+    EXPECT_TRUE(region.pending_entries().empty());
 }
