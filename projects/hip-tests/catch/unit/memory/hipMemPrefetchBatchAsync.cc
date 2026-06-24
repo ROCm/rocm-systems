@@ -539,11 +539,12 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities) {
   // Do not use LinearAlloc with GENERATE
   auto alloc_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipMallocManaged);
   void* memory{};
-  if (alloc_type == LinearAllocs::malloc) {
-    HIP_CHECK(hipMalloc(&memory, kTestBufferBytes));
-  } else {
-    HIP_CHECK(hipMallocManaged(&memory, kTestBufferBytes));
-  }
+if (alloc_type == LinearAllocs::malloc) {
+  memory = std::malloc(kTestBufferBytes);
+  REQUIRE(memory != nullptr);
+} else {
+  HIP_CHECK(hipMallocManaged(&memory, kTestBufferBytes));
+}
 
   std::array<void*, 1> managed_ptrs = {memory};
   std::array<size_t, 1> buffer_sizes = {kTestBufferBytes};
@@ -568,6 +569,9 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities) {
     REQUIRE(result == hipSuccess);
   }
 
+if (alloc_type == LinearAllocs::malloc) {
+  std::free(memory);
+} else {
   HIP_CHECK(hipFree(memory));
 }
 
