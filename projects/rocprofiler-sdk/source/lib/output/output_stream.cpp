@@ -43,6 +43,24 @@ namespace
 {
 const auto stdout_names = std::unordered_set<std::string_view>{"stdout", "STDOUT"};
 const auto stderr_names = std::unordered_set<std::string_view>{"stderr", "STDERR"};
+
+// True if `pid` appears in `str` as a whole number -- i.e. its digits are not part of a
+// longer digit run (so pid 23 does NOT match "out_1234", but DOES match "out_23" or the
+// "23" left by a %pid% expansion). Used to avoid double-suffixing a name that already
+// embeds this process's pid, without false-matching coincidental digit substrings.
+bool
+contains_pid_token(const std::string& str, const std::string& pid)
+{
+    auto is_digit = [](char c) { return c >= '0' && c <= '9'; };
+    for(auto pos = str.find(pid); pos != std::string::npos; pos = str.find(pid, pos + 1))
+    {
+        bool digit_before = pos > 0 && is_digit(str[pos - 1]);
+        auto end          = pos + pid.size();
+        bool digit_after  = end < str.size() && is_digit(str[end]);
+        if(!digit_before && !digit_after) return true;
+    }
+    return false;
+}
 }  // namespace
 
 std::string
@@ -68,7 +86,7 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
     auto _pid           = std::to_string(getpid());
     auto _root_pid      = common::get_env_optional("ROCPROF_OUTPUT_ROOT_PID");
     bool _is_descendant = _root_pid.has_value() && *_root_pid != _pid;
-    if(_is_descendant && output_prefix.find(_pid) == std::string::npos)
+    if(_is_descendant && !contains_pid_token(output_prefix, _pid))
     {
         output_prefix += fmt::format("_{}", _pid);
     }
