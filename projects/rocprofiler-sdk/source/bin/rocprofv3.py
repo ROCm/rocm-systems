@@ -680,6 +680,25 @@ For attachment profiling of running processes:
         action="append",
     )
 
+    add_parser_bool_argument(
+        counter_collection_options,
+        "--kernel-replay",
+        help=(
+            "Collect counters via in-process kernel replay (snapshot/restore device memory between "
+            "passes and re-launch the same dispatch) instead of re-running the whole application. "
+            "Each dispatch is replayed --kernel-replay-passes times; all passes share the same "
+            "Dispatch_Id and add a Replay_Pass column to the counter CSV. (experimental)"
+        ),
+    )
+
+    counter_collection_options.add_argument(
+        "--kernel-replay-passes",
+        help="Number of kernel-replay passes per dispatch (requires --kernel-replay). Default: 1",
+        default=None,
+        type=int,
+        metavar="N",
+    )
+
     spm_options = parser.add_argument_group("Streaming Performance Monitor(SPM) options")
 
     add_parser_bool_argument(
@@ -2041,6 +2060,23 @@ def run(app_args, args, **kwargs):
 
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
+
+    if getattr(args, "kernel_replay", None) and not args.pmc:
+        fatal_error("--kernel-replay requires --pmc (it routes counter collection through replay)")
+
+    if getattr(args, "kernel_replay", None):
+        # Route counter collection through the in-process kernel-replay service (consumed by the
+        # tool, config.hpp: ROCPROF_KERNEL_REPLAY) and tell the SDK how many passes to run
+        # (consumed in hsa/queue.cpp: ROCPROFILER_KERNEL_REPLAY_PASSES).
+        update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
+        passes = getattr(args, "kernel_replay_passes", None)
+        if passes is None:
+            passes = 1
+        if passes < 1:
+            fatal_error("--kernel-replay-passes must be >= 1")
+        update_env("ROCPROFILER_KERNEL_REPLAY_PASSES", passes, overwrite=True)
+    elif getattr(args, "kernel_replay_passes", None) is not None:
+        fatal_error("--kernel-replay-passes requires --kernel-replay")
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)

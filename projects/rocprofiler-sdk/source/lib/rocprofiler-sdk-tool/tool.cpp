@@ -74,6 +74,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/internal_threading.h>
+#include <rocprofiler-sdk/kernel_replay.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/ompt/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -1803,6 +1804,19 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     counter_record.stream_id     = get_stream_id(&dispatch_data);
     counter_record.dispatch_data = dispatch_data;
     counter_record.thread_id     = user_data.value;
+
+    // Kernel-replay prototype: passes of a replayed dispatch all share the same dispatch_id and
+    // arrive sequentially as each pass completes, so the Nth invocation for a dispatch_id is pass N.
+    // Only track when replay is enabled to avoid unbounded map growth on normal runs.
+    if(tool::get_config().kernel_replay)
+    {
+        static std::mutex                            replay_pass_mutex;
+        static std::unordered_map<uint64_t, uint64_t> replay_pass_counts;
+        auto _dispatch_id = dispatch_data.dispatch_info.dispatch_id;
+        auto _lock        = std::lock_guard<std::mutex>{replay_pass_mutex};
+        counter_record.replay_pass = replay_pass_counts[_dispatch_id]++;
+    }
+
     auto serialized_records      = std::vector<tool::tool_counter_value_t>{};
     serialized_records.reserve(record_count);
 
@@ -2952,13 +2966,29 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().counter_collection)
     {
         create_pause_resume_ctx(counter_collection_ctx, "agent counter collection");
-        ROCPROFILER_CALL(
-            rocprofiler_configure_callback_dispatch_counting_service(counter_collection_ctx,
+        if(tool::get_config().kernel_replay)
+        {
+            // Prototype: drive counters through the in-process kernel-replay service. Mutually
+            // exclusive with the dispatch counting service. Pass count comes from
+            // ROCPROFILER_KERNEL_REPLAY_PASSES (read by the SDK queue replay loop).
+            ROCPROFILER_CALL(
+                rocprofiler_configure_kernel_replay_counting_service(counter_collection_ctx,
                                                                      callbacks.counter_dispatch,
                                                                      nullptr,
                                                                      callbacks.counter_record,
                                                                      nullptr),
-            "Could not setup counting service");
+                "Could not setup kernel-replay counting service");
+        }
+        else
+        {
+            ROCPROFILER_CALL(
+                rocprofiler_configure_callback_dispatch_counting_service(counter_collection_ctx,
+                                                                         callbacks.counter_dispatch,
+                                                                         nullptr,
+                                                                         callbacks.counter_record,
+                                                                         nullptr),
+                "Could not setup counting service");
+        }
 
         if(!defer_counter_start) start_context(counter_collection_ctx, "counter collection");
     }

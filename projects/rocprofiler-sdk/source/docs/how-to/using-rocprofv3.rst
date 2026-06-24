@@ -1025,6 +1025,31 @@ In multi-pass counter collection, each pass generates its output in a separate `
 
    - Each pass runs the application from start to finish.
 
+Kernel replay counter collection
++++++++++++++++++++++++++++++++++
+
+Multi-pass counter collection (described above) re-runs the *entire application* once per counter group. Kernel replay is an alternative that, instead, re-executes each individual GPU dispatch multiple times within a **single** application run, saving and restoring device memory between passes so every pass observes identical inputs. This is useful when you want repeated counter samples per dispatch (or, in the future, multiple counter groups) without paying the cost of a full application re-run.
+
+Enable it with ``--kernel-replay`` (requires ``--pmc``) and choose the number of passes with ``--kernel-replay-passes``:
+
+.. code-block:: shell
+
+   rocprofv3 --pmc SQ_WAVES SQ_INSTS_VALU --kernel-replay --kernel-replay-passes 3 -- <application_path>
+
+With ``--kernel-replay-passes N`` every dispatch is replayed ``N`` times, producing ``N`` counter rows per dispatch. All passes of a given dispatch share the same ``Dispatch_Id``; they are distinguished by an additional ``Replay_Pass`` column (0-based) that is added to ``counter_collection.csv`` only when kernel replay is active.
+
+.. note::
+
+   - Kernel replay is **experimental**.
+
+   - ``--kernel-replay`` requires ``--pmc``; ``--kernel-replay-passes`` requires ``--kernel-replay``.
+
+   - The counter set must fit in a single hardware pass (kernel replay does not split counter groups). Combine with multi-pass ``--pmc`` groups is not supported.
+
+   - Only directly-allocated device memory (``hipMalloc`` / ``hsa_amd_memory_pool_allocate``) is snapshotted and restored between passes. Unified or managed memory is out of scope.
+
+   - Replay overhead scales with the total tracked device-memory footprint (snapshot/restore cost), not with the dispatch size.
+
 .. _extra-counters:
 
 Extra counters

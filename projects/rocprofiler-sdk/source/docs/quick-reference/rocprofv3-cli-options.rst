@@ -176,9 +176,17 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Collects traces of KFD events dropped by the KFD device driver.</td>
                 </tr>
                 <tr>
-                    <th>Counter collection</th>
+                    <th rowspan="3">Counter collection</th>
                     <td>--pmc [PMC …]</td>
                     <td>Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple --pmc flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#counter-collection-using-command-line">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--kernel-replay [BOOL]</td>
+                    <td>(experimental) Collect counters via in-process kernel replay (snapshot/restore device memory between passes and re-launch the same dispatch) instead of re-running the whole application. Requires --pmc. Adds a Replay_Pass column to counter_collection.csv. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#kernel-counter-collection">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--kernel-replay-passes N</td>
+                    <td>(experimental) Number of kernel-replay passes per dispatch. Requires --kernel-replay. Default: 1.</td>
                 </tr>
                 <tr>
                     <th rowspan="4">Post-processing tracing</th>
