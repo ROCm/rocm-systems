@@ -235,10 +235,23 @@ flowchart LR
     fio -->|"reads"| res
 ```
 
-The only thing removed on the path is the `if csv` branch (and the
-`--format-rocprof-output` flag): profile mode no longer chooses a storage format.
-`results_*.csv` and `utils_profile_csv.py` remain; their removal — and analyze
-reading directly from `.db` — is Phase B.
+On the data path the structural change is small as in only the `if csv` branch (and
+the `--format-rocprof-output` flag) go away, so profile mode no longer chooses a
+storage format, while `results_*.csv` and `utils_profile_csv.py` remain (their
+removal — and analyze reading directly from `.db` — is Phase B).
+
+The diff will likely be larger because removing the format
+choice includes removing the following:
+
+- the v3->v2 csv conversion and the kokkos / native-counter csv shaping helpers
+  in `utils_profile.py`, plus the now-unused pandas-style helpers pruned from
+  `utils_profile_csv.py` (~800 deletions of profile-side code),
+- the test coverage for all of the above, which is the bulk of it (~2k deletions
+  across `test_utils.py`, `test_utils_profile_csv.py`, and the profile tests).
+
+So Phase A is a small *path* change but a large *code* deletion: it collapses two
+storage formats into one and removes the dead csv machinery (and its tests) that
+only existed to serve the second format.
 
 ## Phase B: The Profiling Data Boundary
 
