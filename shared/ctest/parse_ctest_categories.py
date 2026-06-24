@@ -166,7 +166,7 @@ def generate_cmake(categories):
                 lines, test_labels, labels_str, f"Category: {category} - test_labels"
             )
 
-        # Emit a per-category label for exclude and any *_exclude list.
+        # Emit a per-category label for any *exclude list.
         for key, value in config.items():
             if key.endswith("exclude") and isinstance(value, list) and value:
                 _emit_label_block(
