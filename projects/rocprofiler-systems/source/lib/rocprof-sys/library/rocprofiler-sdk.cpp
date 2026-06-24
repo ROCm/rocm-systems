@@ -2507,6 +2507,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // Control context for marker-based region filtering and pause/resume (always-on)
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->control_ctx));
 
+    if(!rocprofiler_sdk::spm::configure_runtime(_data, _spm_request))
+    {
+        return -1;
+    }
+
     auto external_corr_id_request_kinds =
         std::array<rocprofiler_external_correlation_id_request_kind_t, 3>{
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,

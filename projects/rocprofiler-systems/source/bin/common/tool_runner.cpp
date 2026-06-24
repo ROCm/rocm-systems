@@ -106,31 +106,6 @@ lookup_env_value(const std::vector<std::string>& envs, std::string_view key)
     return std::nullopt;
 }
 
-[[nodiscard]] bool
-spm_runtime_requested(const std::vector<std::string>& envs)
-{
-    if(auto events = lookup_env_value(envs, env_vars::ROCM_SPM_EVENTS);
-       events && !events->empty())
-        return true;
-
-    if(auto enabled = lookup_env_value(envs, env_vars::ROCM_SPM_ENABLED);
-       enabled && env_vars::is_truthy(*enabled))
-        return true;
-
-    return false;
-}
-
-void
-validate_spm_runtime_request(const std::vector<std::string>& envs)
-{
-    if(!spm_runtime_requested(envs)) return;
-
-    // Launcher-side guard: reject SPM requests before exec. The injected library
-    // keeps a matching validation backstop for direct-load paths.
-    throw std::runtime_error("SPM counter collection is configured, but Systems Profiler "
-                             "SPM runtime collection is not implemented in this build");
-}
-
 // All string_view fields point at static-storage data (string literals from the
 // make_*_config factories). Do not assign from temporaries.
 struct tool_config
@@ -509,7 +484,6 @@ tool_runner::apply_post_parse(parser_t& parser)
 
     rocprofsys::common_utils::run_post_parse_validation(config.tool_name, domain_state,
                                                         data.out.verbose);
-    validate_spm_runtime_request(data.env.current);
 
     return std::nullopt;
 }
@@ -573,7 +547,6 @@ try
     if(config.enable_launcher) prepare_command(argv[0]);
 
     prepare_environment();
-    validate_spm_runtime_request(data.env.current);
 
     if(data.out.command.empty())
     {

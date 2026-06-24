@@ -118,9 +118,9 @@ TEST(spm_beta_validation, rejects_unsupported_sample_interval_unit)
     EXPECT_FALSE(validate_beta_request(request, {}, {}));
 }
 
-TEST(spm_beta_validation, rejects_requested_spm_until_runtime_collection_lands)
+TEST(spm_beta_validation, accepts_valid_requested_spm_request)
 {
     const auto request = make_valid_requested_spm_request();
 
-    EXPECT_FALSE(validate_beta_request(request, {}, {}));
+    EXPECT_TRUE(validate_beta_request(request, {}, {}));
 }

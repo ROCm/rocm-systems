@@ -5,10 +5,14 @@
 #include "common/environment.hpp"
 #include "common/rocm_spm.hpp"
 #include "core/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk/fwd.hpp"
 
 #include "logger/debug.hpp"
 
+#include <rocprofiler-sdk/experimental/spm.h>
+
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <string_view>
 
@@ -20,16 +24,53 @@ namespace spm
 {
 namespace
 {
-constexpr auto beta_env_name  = "ROCPROFILER_SPM_BETA_ENABLED";
-constexpr auto beta_env_value = "1";
-
-constexpr bool runtime_collection_available = false;
+constexpr auto beta_env_name          = "ROCPROFILER_SPM_BETA_ENABLED";
+constexpr auto beta_env_value         = "1";
+constexpr auto invalid_context_handle = 0UL;
 
 bool
 has_non_space_value(std::string_view value)
 {
     return std::any_of(value.begin(), value.end(),
                        [](unsigned char itr) { return std::isspace(itr) == 0; });
+}
+
+void
+warn_once(std::atomic<bool>& warned, std::string_view message) noexcept
+{
+    if(!warned.exchange(true)) LOG_WARNING("{}", message);
+}
+
+std::string_view
+status_name(rocprofiler_status_t status)
+{
+    return rocprofiler_get_status_string(status);
+}
+
+void
+spm_dispatch_callback(
+    const rocprofiler_spm_dispatch_counting_service_data_t* /*dispatch_data*/,
+    rocprofiler_counter_config_id_t* config, rocprofiler_user_data_t* user_data,
+    void* /*callback_data_args*/) noexcept
+{
+    if(config) *config = {};
+    if(user_data) *user_data = {};
+
+    static auto warned = std::atomic<bool>{ false };
+    warn_once(warned, "SPM dispatch service is configured, but per-agent SPM "
+                      "counter configuration selection is not implemented yet");
+}
+
+void
+spm_record_callback(
+    const rocprofiler_spm_dispatch_counting_service_data_t* /*dispatch_data*/,
+    const rocprofiler_spm_counter_record_t** /*records*/, size_t /*record_count*/,
+    rocprofiler_spm_record_flag_t /*flags*/, rocprofiler_user_data_t /*userdata*/,
+    void* /*record_callback_args*/) noexcept
+{
+    static auto warned = std::atomic<bool>{ false };
+    warn_once(warned, "SPM records were received, but SPM record translation is "
+                      "not implemented yet");
 }
 }  // namespace
 
@@ -100,13 +141,6 @@ validate_beta_request(const beta_request&             request,
         return false;
     }
 
-    if(!runtime_collection_available)
-    {
-        LOG_WARNING("SPM counter collection was requested, but Systems Profiler SPM "
-                    "runtime collection is not implemented in this build");
-        return false;
-    }
-
     return true;
 }
 
@@ -117,6 +151,41 @@ prepare_beta_environment(const beta_request& request)
 
     ::rocprofsys::common::environment<>::set_env(beta_env_name, beta_env_value, 1);
     LOG_WARNING("ROCm SPM counter collection is enabled as a beta feature");
+}
+
+bool
+configure_runtime(client_data* data, const beta_request& request)
+{
+    if(!request.requested()) return true;
+    if(data == nullptr)
+    {
+        LOG_WARNING("SPM runtime collection requested but client data is unavailable");
+        return false;
+    }
+
+    if(data->spm_ctx.handle == invalid_context_handle)
+    {
+        auto status = rocprofiler_create_context(&data->spm_ctx);
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            LOG_WARNING("Failed to create SPM context: {} ({})", static_cast<int>(status),
+                        status_name(status));
+            return false;
+        }
+    }
+
+    auto status = rocprofiler_spm_configure_callback_dispatch_service(
+        data->spm_ctx, spm_dispatch_callback, data, spm_record_callback, data);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        LOG_WARNING("Failed to configure SPM callback dispatch service: {} ({})",
+                    static_cast<int>(status), status_name(status));
+        return false;
+    }
+
+    LOG_DEBUG("Configured SPM callback dispatch service on spm_ctx={}",
+              data->spm_ctx.handle);
+    return true;
 }
 }  // namespace spm
 }  // namespace rocprofiler_sdk

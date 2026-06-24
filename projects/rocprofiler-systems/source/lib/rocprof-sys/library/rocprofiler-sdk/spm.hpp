@@ -11,6 +11,8 @@ namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
+struct client_data;
+
 namespace spm
 {
 /// Captures the SPM beta settings resolved from Systems configuration.
@@ -44,6 +46,10 @@ validate_beta_request(const beta_request&             request,
 /// Sets the SDK beta opt-in environment variable for validated SPM requests.
 void
 prepare_beta_environment(const beta_request& request);
+
+/// Configure the SDK SPM runtime service on the dedicated Systems SPM context.
+[[nodiscard]] bool
+configure_runtime(client_data* data, const beta_request& request);
 }  // namespace spm
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
