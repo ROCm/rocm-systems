@@ -74,6 +74,7 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       hs.gpu_id = gpu_id;
       hs.topology_path_len = static_cast<uint32_t>(topo_len);
       hs.drm_path_len = static_cast<uint32_t>(drm_len);
+      rj_vm_gpu_info(vm, &hs.gpu_info);
 
       resp.payload_bytes = sizeof(hs) + hs.topology_path_len + hs.drm_path_len;
       rpc_send_exact(client_fd, &resp, sizeof(resp));
@@ -280,10 +281,14 @@ static std::string find_interposer_lib() {
   self[n] = '\0';
   auto bin_dir = std::filesystem::path(self).parent_path();
   // Installed layout: <prefix>/bin/rocjitsu → <prefix>/lib/librocjitsu.so
-  // Build layout: build/tools/rocjitsu/rocjitsu → build/librocjitsu.so
+  //                   or <prefix>/bin/rocjitsu → <prefix>/lib64/librocjitsu.so
+  // Build layout: build/tools/rocjitsu/rocjitsu → build/lib/.../librocjitsu.so
+  //               or build/tools/rocjitsu/rocjitsu → build/lib64/.../librocjitsu.so
   for (auto &candidate : {
            bin_dir / ".." / "lib" / "librocjitsu.so",
-           bin_dir / ".." / ".." / "librocjitsu.so",
+           bin_dir / ".." / "lib64" / "librocjitsu.so",
+           bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "kmd" / "linux" /
+               "librocjitsu.so",
        }) {
     if (std::filesystem::exists(candidate))
       return std::filesystem::canonical(candidate).string();

@@ -112,6 +112,9 @@ Lists GPU information.
 ```{note}
 `amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
 The `oam_id` field identifies the physical board slot in multi-GPU OAM chassis.
+The `ID` shown for `--gpu` (0, 1, 2, …) is an enumeration index assigned in discovery
+order, not the device-type value returned by `amdsmi_get_gpu_id()`; `--gpu` also accepts a
+BDF or UUID to select a specific card.
 ```
 
 ```shell-session
@@ -309,7 +312,7 @@ Gets metrics and performance information about the specified GPU.
 ~$ amd-smi metric --help
 usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
                       [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-m] [-u] [-p] [-c] [-t]
-                      [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [--cpu-power-metrics]
+                      [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [-X] [--cpu-power-metrics]
                       [--cpu-prochot] [--cpu-freq-metrics] [--cpu-c0-res]
                       [--cpu-lclk-dpm-level NBIOID] [--cpu-pwr-svi-telemetry-rails]
                       [--cpu-io-bandwidth IO_BW LINKID_NAME]
@@ -342,6 +345,9 @@ Metric arguments:
   -x, --xgmi-err               XGMI error information since last read
   -E, --energy                 Amount of energy consumed
   -v, --violation              Displays throttle accumulators;
+                                   Only available for MI300 or newer ASICs
+  -X, --partition              Switch temperature, clock, and usage to partition-scoped
+                                   (XCP/AID/MID) data sources; combine with those flags to scope it;
                                    Only available for MI300 or newer ASICs
 
 Watch Arguments:

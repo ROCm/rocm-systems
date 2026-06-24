@@ -20,6 +20,7 @@
 #include "param.h"
 #include "group.h"
 #include "p2p.h"  // For CU_MEM_HANDLE_TYPE_FABRIC alias used by ncclCommMemResume
+#include "compiler.h"
 #include <string.h>
 #include <stdlib.h>
 #include <mutex>
@@ -50,7 +51,7 @@ ncclResult_t ncclMemManagerInit(struct ncclComm* comm) {
   mgr->cpuBackupUsage = 0;
   mgr->commCudaDev = comm->cudaDev;
 
-  __atomic_store_n(&mgr->initialized, 1, __ATOMIC_RELEASE);
+  COMPILER_ATOMIC_STORE(&mgr->initialized, 1, std::memory_order_release);
 
   comm->memManager = mgr;
 
@@ -66,7 +67,7 @@ ncclResult_t ncclMemManagerDestroy(struct ncclComm* comm) {
 
   ncclMemManager* mgr = comm->memManager;
 
-  if (!__atomic_load_n(&mgr->initialized, __ATOMIC_ACQUIRE)) {
+  if (!COMPILER_ATOMIC_LOAD(&mgr->initialized, std::memory_order_acquire)) {
     comm->memManager = nullptr;
     return ncclSuccess;
   }
@@ -83,7 +84,7 @@ ncclResult_t ncclMemManagerDestroy(struct ncclComm* comm) {
 
   // refCount == 0, at this point proxy threads should be joined
   INFO(NCCL_ALLOC, "MemManager: Destroying (refCount=0)");
-  __atomic_store_n(&mgr->initialized, 0, __ATOMIC_RELEASE);
+  COMPILER_ATOMIC_STORE(&mgr->initialized, 0, std::memory_order_release);
 
   ncclDynMemEntry* entry = mgr->entries;
   while (entry != nullptr) {
@@ -148,7 +149,7 @@ static ncclResult_t ncclMemTrackInternal(
 ) {
   if (ncclParamMemManagerDisable()) return ncclSuccess;
   if (manager == nullptr || ptr == nullptr) return ncclInternalError;
-  if (!__atomic_load_n(&manager->initialized, __ATOMIC_ACQUIRE)) {
+  if (!COMPILER_ATOMIC_LOAD(&manager->initialized, std::memory_order_acquire)) {
     WARN("MemManager: Cannot track allocation ptr=%p, manager not initialized", ptr);
     return ncclInternalError;
   }
@@ -156,11 +157,11 @@ static ncclResult_t ncclMemTrackInternal(
   // Persistent memory: atomic update only
   if (memType == ncclMemPersist) {
     if (isImportedFromPeer) {
-      (void)__atomic_add_fetch(&manager->totalPersistImported, size, __ATOMIC_RELAXED);
+      (void)COMPILER_ATOMIC_ADD_FETCH(&manager->totalPersistImported, size, std::memory_order_relaxed);
       TRACE(NCCL_ALLOC, "MemManager: Track Persistent Import ptr=%p size=%zu from rank=%d",
             ptr, size, ownerRank);
     } else {
-      (void)__atomic_add_fetch(&manager->totalPersist, size, __ATOMIC_RELAXED);
+      (void)COMPILER_ATOMIC_ADD_FETCH(&manager->totalPersist, size, std::memory_order_relaxed);
       TRACE(NCCL_ALLOC, "MemManager: Track Persistent ptr=%p size=%zu dev=%d",
             ptr, size, manager->commCudaDev);
     }
@@ -212,17 +213,17 @@ static ncclResult_t ncclMemTrackInternal(
   // Update statistics
   if (isImportedFromPeer) {
     if (memType == ncclMemScratch) {
-      (void)__atomic_add_fetch(&manager->totalScratchImported, size, __ATOMIC_RELAXED);
+      (void)COMPILER_ATOMIC_ADD_FETCH(&manager->totalScratchImported, size, std::memory_order_relaxed);
     } else if (memType == ncclMemOffload) {
-      (void)__atomic_add_fetch(&manager->totalOffloadImported, size, __ATOMIC_RELAXED);
+      (void)COMPILER_ATOMIC_ADD_FETCH(&manager->totalOffloadImported, size, std::memory_order_relaxed);
     }
     TRACE(NCCL_ALLOC, "MemManager: Track imported ptr=%p size=%zu type=%d from rank=%d entries=%d",
           ptr, size, memType, ownerRank, manager->numEntries);
   } else {
     if (memType == ncclMemScratch) {
-      (void)__atomic_add_fetch(&manager->totalScratch, size, __ATOMIC_RELAXED);
+      (void)COMPILER_ATOMIC_ADD_FETCH(&manager->totalScratch, size, std::memory_order_relaxed);
     } else if (memType == ncclMemOffload) {
-      (void)__atomic_add_fetch(&manager->totalOffload, size, __ATOMIC_RELAXED);
+      (void)COMPILER_ATOMIC_ADD_FETCH(&manager->totalOffload, size, std::memory_order_relaxed);
     }
     TRACE(NCCL_ALLOC, "MemManager: Track ptr=%p size=%zu type=%d dev=%d entries=%d",
           ptr, size, memType, manager->commCudaDev, manager->numEntries);
@@ -266,14 +267,14 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
   if (manager == nullptr || ptr == nullptr) return ncclInternalError;
 
   // Atomic check to avoid locking destroyed mutex
-  if (!__atomic_load_n(&manager->initialized, __ATOMIC_ACQUIRE)) {
+  if (!COMPILER_ATOMIC_LOAD(&manager->initialized, std::memory_order_acquire)) {
     WARN("MemManager: Cannot untrack allocation ptr=%p, manager not initialized", ptr);
     return ncclInternalError;
   }
 
   // Variables to save values before releasing lock
   size_t entrySize = 0;
-  int numEntries = 0; // May be unused if TRACE compiled out (silenced via (void) below)
+  int numEntries COMPILER_ATTRIBUTE_UNUSED = 0;  // May be unused if TRACE compiled out
   bool isImportedFromPeer = false;
   ncclMemType_t memType = ncclMemScratch;
 
@@ -338,15 +339,15 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
     // Entry found in linked list
     if (isImportedFromPeer) {
       if (memType == ncclMemScratch) {
-        (void)__atomic_sub_fetch(&manager->totalScratchImported, entrySize, __ATOMIC_RELAXED);
+        (void)COMPILER_ATOMIC_SUB_FETCH(&manager->totalScratchImported, entrySize, std::memory_order_relaxed);
       } else if (memType == ncclMemOffload) {
-        (void)__atomic_sub_fetch(&manager->totalOffloadImported, entrySize, __ATOMIC_RELAXED);
+        (void)COMPILER_ATOMIC_SUB_FETCH(&manager->totalOffloadImported, entrySize, std::memory_order_relaxed);
       }
     } else {
       if (memType == ncclMemScratch) {
-        (void)__atomic_sub_fetch(&manager->totalScratch, entrySize, __ATOMIC_RELAXED);
+        (void)COMPILER_ATOMIC_SUB_FETCH(&manager->totalScratch, entrySize, std::memory_order_relaxed);
       } else if (memType == ncclMemOffload) {
-        (void)__atomic_sub_fetch(&manager->totalOffload, entrySize, __ATOMIC_RELAXED);
+        (void)COMPILER_ATOMIC_SUB_FETCH(&manager->totalOffload, entrySize, std::memory_order_relaxed);
       }
     }
 
@@ -355,7 +356,7 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
     (void)numEntries; // suppress unused-variable warning when TRACE expands to no-op in Release
   } else {
     // Entry not found in linked list - must be persistent memory
-    (void)__atomic_sub_fetch(&manager->totalPersist, size, __ATOMIC_RELAXED);
+    (void)COMPILER_ATOMIC_SUB_FETCH(&manager->totalPersist, size, std::memory_order_relaxed);
     TRACE(NCCL_ALLOC, "MemManager: Untrack Persistent ptr=%p size=%zu", ptr, size);
   }
 
@@ -369,7 +370,7 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
 ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* manager, void* ptr, int peerRank) {
   if (ncclParamMemManagerDisable()) return ncclSuccess;
   if (manager == nullptr || ptr == nullptr) return ncclInternalError;
-  if (!__atomic_load_n(&manager->initialized, __ATOMIC_ACQUIRE)) {
+  if (!COMPILER_ATOMIC_LOAD(&manager->initialized, std::memory_order_acquire)) {
     WARN("MemManager: Cannot mark export for ptr=%p, manager not initialized", ptr);
     return ncclInternalError;
   }
@@ -1166,16 +1167,16 @@ ncclResult_t ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint
   ncclMemManager* manager = comm->memManager;
   switch (stat) {
     case ncclStatGpuMemTotal:
-      *value = __atomic_load_n(&manager->totalPersist, __ATOMIC_RELAXED) +
-               __atomic_load_n(&manager->totalScratch, __ATOMIC_RELAXED) +
-               __atomic_load_n(&manager->totalOffload, __ATOMIC_RELAXED);
+      *value = COMPILER_ATOMIC_LOAD(&manager->totalPersist, std::memory_order_relaxed) +
+               COMPILER_ATOMIC_LOAD(&manager->totalScratch, std::memory_order_relaxed) +
+               COMPILER_ATOMIC_LOAD(&manager->totalOffload, std::memory_order_relaxed);
       return ncclSuccess;
     case ncclStatGpuMemPersist:
-      *value = __atomic_load_n(&manager->totalPersist, __ATOMIC_RELAXED);
+      *value = COMPILER_ATOMIC_LOAD(&manager->totalPersist, std::memory_order_relaxed);
       return ncclSuccess;
     case ncclStatGpuMemSuspend:
-      *value = __atomic_load_n(&manager->totalScratch, __ATOMIC_RELAXED) +
-               __atomic_load_n(&manager->totalOffload, __ATOMIC_RELAXED);
+      *value = COMPILER_ATOMIC_LOAD(&manager->totalScratch, std::memory_order_relaxed) +
+               COMPILER_ATOMIC_LOAD(&manager->totalOffload, std::memory_order_relaxed);
       return ncclSuccess;
     case ncclStatGpuMemSuspended:
       // Boolean: 0=active, 1=suspended

@@ -181,7 +181,7 @@ public:
         event.me_id = me & 1;
         event.pipe_id = pipe;
         event.flags = 0;
-        event.payload = payload;
+        event.payload.raw = payload;
         if (per_pipe) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE;
         if (bop) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP;
         callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &event, 1, cbdata);

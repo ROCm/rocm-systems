@@ -419,6 +419,119 @@ class TestKpackRefMarker:
         assert marker_data["kernel_name"] == "bin/my-binary_v2.exe"
 
 
+class TestDebugInfoSectionOrdering:
+    """Regression tests for the ELF section reordering fix.
+
+    libtest_multi_wrapper_with_debug.so is compiled with -g, so the ELF
+    contains non-allocatable .debug_* sections alongside the HIP fat binary
+    sections.  When kpack adds .rocm_kpack_ref (SHF_ALLOC) it must appear
+    before .debug_* in both the section header table and in file offsets.
+
+    Tools like dh_dwz (DWARF debuginfo compressor used in Debian packaging)
+    abort with "Allocatable section after non-allocatable ones" if an ALLOC
+    section follows a non-ALLOC section in the SHT.  The fix:
+      1. Reorders the SHT so all ALLOC sections precede non-ALLOC ones.
+      2. Splices the .rocm_kpack_ref content before the first non-ALLOC
+         file offset so the physical layout matches the SHT order.
+    """
+
+    _BINARY = "bundled_binaries/linux/cov5/libtest_multi_wrapper_with_debug.so"
+
+    @pytest.fixture
+    def debug_binary(self, test_assets_dir: Path) -> Path:
+        path = test_assets_dir / self._BINARY
+        if not path.exists():
+            pytest.skip(
+                f"{self._BINARY} not found — run "
+                "test_generation/build_test_bundles.py with ROCm on Linux"
+            )
+        return path
+
+    def test_binary_has_debug_sections(self, debug_binary: Path):
+        """Confirm the test asset actually contains .debug_* sections."""
+        result = subprocess.run(
+            ["readelf", "-S", str(debug_binary)], capture_output=True, text=True
+        )
+        assert result.returncode == 0
+        assert ".debug_info" in result.stdout, (
+            "Expected .debug_info in debug binary — was it compiled without -g?"
+        )
+
+    def test_alloc_sections_precede_non_alloc_after_transform(
+        self, debug_binary: Path, tmp_path: Path
+    ):
+        """After kpack transform, all SHF_ALLOC sections must precede non-ALLOC.
+
+        Verifies the section header reordering fix: .rocm_kpack_ref (ALLOC)
+        must appear before .debug_* (non-ALLOC) in the SHT.  If not, dh_dwz
+        aborts during Debian package builds.
+        """
+        output = tmp_path / "libtest_multi_wrapper_with_debug_kpacked.so"
+
+        kpack_offload_binary(
+            input_path=debug_binary,
+            output_path=output,
+            kpack_search_paths=["../.kpack/blas_lib_@GFXARCH@.kpack"],
+            kernel_name="lib/libtest_multi_wrapper_with_debug.so",
+        )
+
+        assert output.exists()
+
+        # Precise check via ElfSurgery: walk sections in SHT order and verify
+        # no ALLOC section appears after a non-ALLOC section with file content.
+        surgery = ElfSurgery.load(output)
+        SHT_NULL = 0
+        SHT_NOBITS = 8
+
+        seen_non_alloc_with_content = False
+        for section in surgery.iter_sections():
+            shdr = section.header
+            if shdr.sh_type == SHT_NULL:
+                continue
+            has_content = shdr.sh_type != SHT_NOBITS and shdr.sh_size > 0
+            if not shdr.is_alloc and has_content:
+                seen_non_alloc_with_content = True
+            if shdr.is_alloc and seen_non_alloc_with_content:
+                pytest.fail(
+                    f"SHF_ALLOC section '{section.name}' appears after non-ALLOC "
+                    "sections in the section header table. dh_dwz will abort with "
+                    "'Allocatable section after non-allocatable ones'."
+                )
+
+    def test_rocm_kpack_ref_file_offset_before_debug(
+        self, debug_binary: Path, tmp_path: Path
+    ):
+        """The .rocm_kpack_ref content must be at a lower file offset than .debug_info.
+
+        The ELF section-reordering fix also splices the .rocm_kpack_ref content
+        before the first non-ALLOC section in the file.  This ensures both the
+        SHT order and physical file layout are correct.
+        """
+        output = tmp_path / "libtest_debug_offset_check.so"
+
+        kpack_offload_binary(
+            input_path=debug_binary,
+            output_path=output,
+            kpack_search_paths=["../.kpack/blas_lib_@GFXARCH@.kpack"],
+            kernel_name="lib/libtest_multi_wrapper_with_debug.so",
+        )
+
+        surgery = ElfSurgery.load(output)
+        SHT_NOBITS = 8
+
+        kpack_ref = surgery.find_section(".rocm_kpack_ref")
+        assert kpack_ref is not None, ".rocm_kpack_ref section must exist after transform"
+
+        debug_info = surgery.find_section(".debug_info")
+        assert debug_info is not None, ".debug_info must exist in debug binary"
+
+        assert kpack_ref.header.sh_offset < debug_info.header.sh_offset, (
+            f".rocm_kpack_ref file offset (0x{kpack_ref.header.sh_offset:x}) "
+            f"must be less than .debug_info offset (0x{debug_info.header.sh_offset:x}). "
+            "The splice fix must insert the ALLOC section before non-ALLOC content."
+        )
+
+
 class TestNotFatBinaryError:
     """Tests for NotFatBinaryError handling."""
 
