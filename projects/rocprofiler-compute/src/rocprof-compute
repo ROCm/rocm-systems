@@ -77,11 +77,7 @@ def check_python_version() -> None:
 
 
 def check_analyze_python_version() -> None:
-    """Enforce the analyze-mode Python floor.
-
-    Analyze mode depends on numpy, pandas, dash, and textual, whose current
-    pinned versions require Python 3.9+. Profile mode is unaffected.
-    """
+    """Enforce the analyze-mode Python floor (its dependencies require 3.9+)."""
     min_python = (3, 9)
     if sys.version_info < min_python:
         print(
