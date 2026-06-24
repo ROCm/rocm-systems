@@ -47,6 +47,8 @@ template <> struct QueuePairTraits<QueuePairBNXT> {
    * @brief bnxt uses little-endian ordering
    */
   static constexpr endian::Order Endianness = endian::Order::Little;
+
+  static constexpr size_t InlineThreshold = sizeof(struct bnxt_re_sge);
 };
 
 class QueuePairBNXT : public QueuePairBase<QueuePairBNXT> {
@@ -64,21 +66,25 @@ public:
 public:
   template <OpCode Op,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ void post_wqe_rma(uintptr_t laddr, uintptr_t raddr, size_t size,
+  __device__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                               uintptr_t raddr, uint32_t rkey, size_t size,
                                const ActiveWFInfo& wf_info);
 
   template <OpCode Op,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ void post_wqe_rma_single(uintptr_t laddr, uintptr_t raddr, size_t size);
+  __device__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                      uintptr_t raddr, uint32_t rkey, size_t size);
 
   template <OpCode Op, AMOFetchType Fetch,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint64_t value, uint64_t cond,
-                                                 const ActiveWFInfo& wf_info);
+  __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                           uint64_t value, uint64_t cond,
+                                           const ActiveWFInfo& wf_info);
 
   template <OpCode Op, AMOFetchType Fetch,
             bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
-  __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint64_t value, uint64_t cond);
+  __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                                  uint64_t value, uint64_t cond);
 
   __device__ void quiet_single();
 
@@ -90,10 +96,12 @@ private:
   __device__ static void release_lock(uint32_t* lock);
 
   template <OpCode Op, bool CheckCQ = true>
-  __device__ void write_rma_wqe(uintptr_t laddr, uintptr_t raddr, size_t size);
+  __device__ void write_rma_wqe(uintptr_t laddr, uint32_t lkey,
+                                uintptr_t raddr, uint32_t rkey, size_t size);
 
   template <OpCode Op, AMOFetchType Fetch, bool CheckCQ = true>
-  __device__ uint64_t* write_amo_wqe(uintptr_t raddr, uint64_t value, uint64_t cond);
+  __device__ uint64_t* write_amo_wqe(uintptr_t raddr, uint32_t rkey,
+                                     uint64_t value, uint64_t cond);
 
   __device__ static void* get_hwqe(const bnxt_device_sq& sq, uint32_t idx);
   __device__ static void fill_psns_for_msntbl(bnxt_device_sq& sq, uint32_t msg_len);
@@ -111,7 +119,8 @@ private:
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairBNXT::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ void QueuePairBNXT::post_wqe_rma(
-    uintptr_t laddr, uintptr_t raddr, size_t size, const ActiveWFInfo& wf_info) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
+    const ActiveWFInfo& wf_info) {
   if constexpr (ThreadSafe) {
     if (wf_info.is_pe_group_first) {
       acquire_lock(&sq.lock);
@@ -124,7 +133,7 @@ __device__ void QueuePairBNXT::post_wqe_rma(
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
       /* Write WQE to SQ */
-      write_rma_wqe<Op, CheckCQ>(laddr, raddr, size);
+      write_rma_wqe<Op, CheckCQ>(laddr, lkey, raddr, rkey, size);
 
       /* Ring Doorbell */
       if constexpr (RingDB) {
@@ -146,7 +155,7 @@ __device__ void QueuePairBNXT::post_wqe_rma(
 // precondition: called with all active lanes using different QPs
 template <QueuePairBNXT::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ void QueuePairBNXT::post_wqe_rma_single(
-    uintptr_t laddr, uintptr_t raddr, size_t size) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size) {
   if constexpr (ThreadSafe) {
     acquire_lock(&sq.lock);
   } else if constexpr (!CheckCQ) {
@@ -155,7 +164,7 @@ __device__ void QueuePairBNXT::post_wqe_rma_single(
   }
 
   /* Write WQE to SQ */
-  write_rma_wqe<Op, CheckCQ>(laddr, raddr, size);
+  write_rma_wqe<Op, CheckCQ>(laddr, lkey, raddr, rkey, size);
 
   /* Ring Doorbell */
   if constexpr (RingDB) {
@@ -174,7 +183,8 @@ __device__ void QueuePairBNXT::post_wqe_rma_single(
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch,
           bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
-    uintptr_t raddr, uint64_t value, uint64_t cond, const ActiveWFInfo& wf_info) {
+    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
+    const ActiveWFInfo& wf_info) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   uint64_t* atomic_laddr = nullptr;
 
@@ -190,7 +200,7 @@ __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
       /* Write WQE to SQ */
-      atomic_laddr = write_amo_wqe<Op, Fetch, CheckCQ>(raddr, value, cond);
+      atomic_laddr = write_amo_wqe<Op, Fetch, CheckCQ>(raddr, rkey, value, cond);
 
       /* Ring Doorbell */
       if constexpr (RingDB) {
@@ -218,7 +228,7 @@ __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch,
           bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
-    uintptr_t raddr, uint64_t value, uint64_t cond) {
+    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   uint64_t* atomic_laddr = nullptr;
 
@@ -230,7 +240,7 @@ __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
   }
 
   /* Write WQE to SQ */
-  atomic_laddr = write_amo_wqe<Op, Fetch, CheckCQ>(raddr, value, cond);
+  atomic_laddr = write_amo_wqe<Op, Fetch, CheckCQ>(raddr, rkey, value, cond);
 
   /* Ring Doorbell */
   if constexpr (RingDB) {
@@ -251,7 +261,8 @@ __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
 }
 
 template <QueuePairBNXT::OpCode Op, bool CheckCQ>
-__device__ void QueuePairBNXT::write_rma_wqe(uintptr_t laddr, uintptr_t raddr, size_t size) {
+__device__ void QueuePairBNXT::write_rma_wqe(
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size) {
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_rdma rdma;
   struct bnxt_re_sge sge;
@@ -262,11 +273,7 @@ __device__ void QueuePairBNXT::write_rma_wqe(uintptr_t laddr, uintptr_t raddr, s
   uint32_t wqe_type;
   uint32_t hdr_flags;
 
-  bool inline_msg = false;
-  if constexpr (Op == OpCode::RDMA_WRITE) {
-    constexpr size_t inline_threshold = sizeof(struct bnxt_re_sge);
-    inline_msg = size <= inline_threshold;
-  }
+  bool inline_msg = can_inline<Op>(size);
 
   if constexpr (CheckCQ) {
     poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
@@ -299,7 +306,7 @@ __device__ void QueuePairBNXT::write_rma_wqe(uintptr_t laddr, uintptr_t raddr, s
   if (!inline_msg) {
     /* Populate SG Segment */
     sge.pa     = laddr;
-    sge.lkey   = get_lkey(laddr);
+    sge.lkey   = lkey;
     sge.length = size;
   }
 
@@ -321,7 +328,8 @@ __device__ void QueuePairBNXT::write_rma_wqe(uintptr_t laddr, uintptr_t raddr, s
 }
 
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool CheckCQ>
-__device__ uint64_t* QueuePairBNXT::write_amo_wqe(uintptr_t raddr, uint64_t value, uint64_t cond) {
+__device__ uint64_t* QueuePairBNXT::write_amo_wqe(
+    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   constexpr size_t size = sizeof(uint64_t);
 
