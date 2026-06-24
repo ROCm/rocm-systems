@@ -791,7 +791,7 @@ operators. Operator hierarchies are ``/``-separated (e.g.
        --torch-operator "*relu,*conv*,*linear" --path ./workload
 
 
-Triton Operator Analysis
+Triton operator analysis
 ========================
 
 .. warning::
