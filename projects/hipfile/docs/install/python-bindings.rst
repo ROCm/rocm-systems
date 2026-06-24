@@ -16,13 +16,14 @@ Prerequisites
 
 The Python bindings require the following software:
 
-- Python 3 with the ``venv`` module
+- Python >= 3.10 with the ``venv`` module
 - Cython (installed into your virtual environment)
 - scikit-build-core (used as the build backend)
 - python-build (the ``build`` front-end, or ``pip`` for editable installs)
 - CMake (version 3.21 or later)
 - A C compiler (for building the Cython-generated C extension)
 - hipFile C library (``libhipfile.so``): built or installed before the Python bindings
+- hipFile C development header (``hipfile.h``)
 - HIP development headers (``hip/hip_runtime_api.h``)
 
 .. note::
@@ -73,9 +74,10 @@ headers, the hipFile shared library, and the HIP runtime headers. By default, it
 searches:
 
 - The sibling ``../include`` directory (relative to the ``python/`` directory)
-  for ``hipfile.h``
-- The sibling ``../build/src/amd_detail`` directory for ``libhipfile.so``
-- ``/opt/rocm/include`` and ``/opt/rocm/lib`` as fallback locations
+  is searched for ``hipfile.h``, with ``/opt/rocm/include`` as a fallback
+  location
+- The sibling ``../build/src/amd_detail`` directory is searched for
+  ``libhipfile.so``, with ``/opt/rocm/lib`` as a fallback location
 
 If these default paths do not match your environment, use the override variables
 described in :ref:`python-cmake-overrides`.
@@ -86,7 +88,7 @@ Install an editable package
 For development, you can install the Python package in editable mode. An
 editable install lets you modify the Python source code and see changes
 immediately without rebuilding or reinstalling the package. Changes to the
-Cython source code (``_hipfile.pyx``) still require a rebuild.
+Cython source code still require a rebuild.
 
 .. code:: shell
 
@@ -115,7 +117,7 @@ front-end. Use the ``-Ccmake.define.<KEY>=<VALUE>`` syntax with
    * - ``HIPFILE_LIBRARY``
      - Path to ``libhipfile.so``. Defaults to ``../build/src/amd_detail`` or ``/opt/rocm/lib``.
    * - ``HIP_INCLUDE_DIR``
-     - Path to the directory containing ``hip/hip_runtime_api.h``. Defaults to ``/opt/rocm/include`` or ``/opt/rocm/hip/include``.
+     - Path to the directory containing ``hip/hip_runtime_api.h``. Defaults to ``/opt/rocm/include``.
 
 For example, to specify a custom hipFile install location when building the
 wheel:
@@ -124,7 +126,7 @@ wheel:
 
    python -m build --wheel \
      -Ccmake.define.HIPFILE_INCLUDE_DIR=/path/to/hipfile/include \
-     -Ccmake.define.HIPFILE_LIBRARY=/path/to/lib/libhipfile.so \
+     -Ccmake.define.HIPFILE_LIBRARY=/path/to/lib \
      -Ccmake.define.HIP_INCLUDE_DIR=/opt/rocm/include
 
 Or with ``pip install``:
@@ -133,7 +135,7 @@ Or with ``pip install``:
 
    pip install -e . \
      -Ccmake.define.HIPFILE_INCLUDE_DIR=/path/to/hipfile/include \
-     -Ccmake.define.HIPFILE_LIBRARY=/path/to/lib/libhipfile.so
+     -Ccmake.define.HIPFILE_LIBRARY=/path/to/lib
 
 .. warning::
 

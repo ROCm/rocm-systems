@@ -115,7 +115,7 @@ exist for sanitizers, clang-tidy, and documentation generation. Inspect
      - Adds LLVM coverage instrumentation for Clang builds.
    * - ``BUILD_TESTING``
      - ``ON`` unless you pass ``-DBUILD_TESTING=OFF``
-     - Controls whether CTest registers the hipFile unit and system tests.
+     - Controls whether the hipFile test binaries are built.
    * - ``CMAKE_BUILD_TYPE``
      - ``RelWithDebInfo``
      - CMake build flavor. Other common values are ``Debug``, ``Release``,
