@@ -51,7 +51,7 @@ For using analysis options for PC sampling the configuration needed are:
 **Sample output:**
 
 ``source_line`` shows ``N/A`` because the example binary was built without
-``-g`` (See :ref:`pc-sampling-note` at the end of this page).
+``-g`` (See the :ref:`note <pc-sampling-note>` at the end of this page).
 
 Selecting a single kernel with ``host_trap`` PC sampling:
 
@@ -132,6 +132,7 @@ Sorting a single kernel by sample ``count`` instead of ``offset``:
    ╘═════════╧═══════════════╧═════════════════════════════════════════════════════╧══════════════════╧══════════╧═════════╧════════════════╧═════════════════╧═════════════════════════════════════════════════════════════════════════════════════╧══════════════════════════════════════╛
 
 .. _pc-sampling-note:
+
 .. note::
 
   * PC sampling now only shows assembly instructions collected in our record of pc samples and not all instructions of compiled code are represented.
