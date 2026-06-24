@@ -92,8 +92,8 @@ private:
   __device__ void ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe);
   __device__ void poll_cq_until(uint16_t requested_available_slots);
 
-  __device__ static void acquire_lock(uint32_t* lock);
-  __device__ static void release_lock(uint32_t* lock);
+  static __device__ void acquire_lock(uint32_t* lock);
+  static __device__ void release_lock(uint32_t* lock);
 
   __device__ inline uint16_t get_wqe_idx(uint8_t lane_id) {
     return static_cast<uint16_t>(sq.post + lane_id);
