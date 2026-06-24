@@ -63,6 +63,12 @@
 #include <rocprofiler-register/rocprofiler-register.h>
 #endif
 
+#if defined(SANITIZER_AMDGPU)
+// ASan runtime: drains the allocator quarantine. Forward-declared to avoid
+// depending on the sanitizer interface headers.
+extern "C" void __sanitizer_purge_allocator(void);
+#endif
+
 #include "core/common/shared.h"
 #include "core/inc/amd_core_dump.hpp"
 #include "core/inc/amd_cpu_agent.h"
@@ -157,6 +163,14 @@ hsa_status_t Runtime::Release() {
         callback.first(&system_shutdown_event, callback.second);
       }
     }
+
+#if defined(SANITIZER_AMDGPU)
+    // Drain the sanitizer quarantine before Unload() frees and unmaps device
+    // memory. Otherwise device allocations still quarantined here become
+    // dangling chunks in the sanitizer's process-global device allocator.
+    __sanitizer_purge_allocator();
+#endif
+
     // Release all registered memory, then unload backends
     runtime_singleton_->Unload();
   }
