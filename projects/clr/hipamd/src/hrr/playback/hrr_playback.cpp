@@ -982,8 +982,10 @@ int main(int argc, char** argv) {
     printf("[HRR]   GPU graph time  : %.1f ms\n", ctx.total_graph_ms);
     printf("[HRR]   GPU total time  : %.1f ms\n", ctx.total_kernel_ms + ctx.total_graph_ms);
   }
-  printf("[HRR]   D2H checks     : %zu pass, %zu fail, %zu skipped\n",
-         ctx.d2h_pass.load(), ctx.d2h_fail.load(),
+  printf("[HRR]   D2H checks     : %zu pass (%zu exact, %zu within tol), %zu fail, %zu skipped\n",
+         ctx.d2h_pass.load(),
+         ctx.d2h_pass.load() - ctx.d2h_pass_tol.load(), ctx.d2h_pass_tol.load(),
+         ctx.d2h_fail.load(),
          ctx.d2h_attempted.load() - ctx.d2h_pass.load() - ctx.d2h_fail.load());
 
   bool ok = (ctx.d2h_fail == 0);

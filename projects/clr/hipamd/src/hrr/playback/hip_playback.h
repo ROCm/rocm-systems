@@ -137,6 +137,11 @@ struct PlaybackContext {
     double              total_kernel_ms  = 0.0;  // guarded by map_mutex when ctx.timing
     double              total_graph_ms   = 0.0;  // guarded by map_mutex when ctx.timing
     std::atomic<size_t> d2h_pass{0};
+    // Subset of d2h_pass that were NOT byte-exact but matched within numeric
+    // tolerance (benign floating-point nondeterminism from non-associative GPU
+    // reductions). Tracked separately so the summary can distinguish exact
+    // replay fidelity from "numerically equivalent".
+    std::atomic<size_t> d2h_pass_tol{0};
     std::atomic<size_t> d2h_fail{0};
     // Incremented for every D2H event that had a captured blob hash (i.e., validation
     // was expected). Includes pass + fail + skipped (missing ptr / missing blob).
