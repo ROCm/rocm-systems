@@ -79,6 +79,7 @@
 #include <fmt/format.h>
 
 #include <dlfcn.h>
+#include <elf.h>
 #include <link.h>
 #include <unistd.h>
 #include <atomic>
@@ -317,10 +318,12 @@ get_forced_configures()
     return _v;
 }
 
-std::vector<std::string>
+std::vector<std::pair<std::string, uintptr_t>>
 get_link_map()
 {
-    auto  chain  = std::vector<std::string>{};
+    // each entry pairs the library's path with its load bias (link_map::l_addr), so callers
+    // can compute a symbol's runtime address as (l_addr + st_value) without dlopen/dlsym
+    auto  chain  = std::vector<std::pair<std::string, uintptr_t>>{};
     void* handle = dlopen(nullptr, RTLD_LAZY | RTLD_NOLOAD);
 
     if(handle)
@@ -332,13 +335,40 @@ get_link_map()
         {
             if(next_link->l_name != nullptr && !std::string_view{next_link->l_name}.empty())
             {
-                chain.emplace_back(next_link->l_name);
+                chain.emplace_back(next_link->l_name, static_cast<uintptr_t>(next_link->l_addr));
             }
             next_link = next_link->l_next;
         }
     }
 
     return chain;
+}
+
+// Resolve the runtime address of an exported function WITHOUT dlopen/dlsym.
+// dlopen(RTLD_NOLOAD) on an already-mapped-but-not-yet-initialized library re-runs its
+// pending DT_INIT; when that init calls into libomp during OMPT bring-up it self-deadlocks
+// on libomp's non-recursive __kmp_initz_lock. Computing (load_bias + st_value) from the
+// already-parsed ELF symbol table touches no loader state. Returns nullptr (caller skips the
+// library, never falling back to dlopen) when the symbol is absent, undefined here, or not a
+// plain function definition (e.g. STT_GNU_IFUNC), for which the arithmetic would be invalid.
+template <typename FuncT>
+FuncT
+resolve_symbol_no_dlopen(const common::elf_utils::ElfInfo& _elf,
+                         uintptr_t                         _load_bias,
+                         std::string_view                  _symname)
+{
+    for(const auto& sym : _elf.dynamic_symbol_entries)
+    {
+        if(sym.name != _symname) continue;
+        if(sym.section_index == SHN_UNDEF) continue;  // undefined import, not a definition here
+        if(sym.type != STT_FUNC) return nullptr;      // refuse IFUNC/exotic symbol types
+        if(sym.value == 0) continue;
+        auto  _addr      = _load_bias + static_cast<uintptr_t>(sym.value);
+        FuncT _fn        = nullptr;
+        *(void**) (&_fn) = reinterpret_cast<void*>(_addr);  // NOLINT(performance-no-int-to-ptr)
+        return _fn;
+    }
+    return nullptr;
 }
 
 struct client_library
@@ -599,38 +629,25 @@ find_clients()
     // libraries
     if(_default_configure)
     {
-        for(const auto& itr : get_link_map())
+        for(const auto& [itr, load_bias] : get_link_map())
         {
             ROCP_INFO << "searching " << itr << " for 'rocprofiler_configure' symbol...";
 
-            if(fs::exists(itr) && resolved_exists(itr))
-            {
-                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
-                if(!elfinfo.has_symbol([](std::string_view symname) {
-                       return (symname == "rocprofiler_configure");
-                   }))
-                {
-                    ROCP_TRACE << fmt::format(
-                        "Shared library '{}' did not contain the 'rocprofiler_configure' symbol "
-                        "(search method: ELF parsing) required by rocprofiler-sdk for tools",
-                        itr);
-                    continue;
-                }
-            }
-            else
+            if(!(fs::exists(itr) && resolved_exists(itr)))
             {
                 ROCP_INFO << fmt::format(
                     "Shared library '{}' either does not exist or is a broken symbolic link", itr);
                 continue;
             }
 
-            ROCP_INFO << "dlopening " << itr << " for 'rocprofiler_configure' symbol...";
-
-            void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
-            ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
-
-            auto* _sym        = rocprofiler_configure_dlsym(handle);
-            auto* _attach_sym = rocprofiler_configure_attach_dlsym(handle);
+            // resolve the configure symbols via the ELF symbol table + load bias instead of
+            // dlopen/dlsym; dlopen here can re-run a pending DT_INIT and deadlock libomp during
+            // OMPT bring-up (see resolve_symbol_no_dlopen)
+            auto  elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
+            auto* _sym    = resolve_symbol_no_dlopen<decltype(::rocprofiler_configure)*>(
+                elfinfo, load_bias, "rocprofiler_configure");
+            auto* _attach_sym = resolve_symbol_no_dlopen<decltype(::rocprofiler_configure_attach)*>(
+                elfinfo, load_bias, "rocprofiler_configure_attach");
 
             // symbol not found
             if(!_sym)
@@ -659,7 +676,7 @@ find_clients()
             if(_sym == &rocprofiler_configure && data.size() == 1)
             {
                 data.front()->name                    = itr;
-                data.front()->dlhandle                = handle;
+                data.front()->dlhandle                = nullptr;
                 data.front()->internal_client_id.name = "default";
             }
             else if(is_unique_configure_func(_sym))
