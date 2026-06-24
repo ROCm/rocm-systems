@@ -22,11 +22,16 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Changed
 
-- **Bumped version from 1.3.0 to 1.3.1**. This has no impact on RDC users.
-- **Removed RVS integration**. [RVS](https://github.com/ROCm/ROCmValidationSuite) is now built independently of RDC and TheRock, so its integration has been disabled.
+- Bumped gRPC from 1.67.1 to 1.78.1. See [ROCm/TheRock#4172](https://github.com/ROCm/TheRock/pull/4172).
+
+### Removed
+
+- Removed RVS integration. [RVS](https://github.com/ROCm/ROCmValidationSuite) is built independently of RDC and TheRock, so its integration has been disabled.
   - `BUILD_RVS` now defaults to `OFF` (#7116).
-  - The `Failed to insert module: N3amd3rdc10RdcRVSLibE` error no longer occurs.
-- **Bumped gRPC from 1.67.1 to 1.78.1**. See [ROCm/TheRock#4172](https://github.com/ROCm/TheRock/pull/4172).
+
+### Resolved Issues
+
+- The `Failed to insert module: N3amd3rdc10RdcRVSLibE` error no longer occurs.
 
 ## RDC 1.3.0 for ROCm 7.13.0
 
