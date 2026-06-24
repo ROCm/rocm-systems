@@ -15,8 +15,7 @@ together into a higher-level organizational unit called a shader engine (SE):
    :width: 800
 
 The number of CUs on a SE varies from chip to chip (For example, see
-:hip-training-pdf:`20`). In addition, newer GPUs such as the AMD
-Instinct™ MI250x have 8 SEs per GPU.
+:hip-training-pdf:`20`).
 
 For the purposes of ROCm Compute Profiler, resources that are shared between
 multiple CUs on a single SE as part of the SE's metrics are considered.

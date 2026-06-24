@@ -9,7 +9,7 @@ Workgroup processor (WGP)
 =========================
 
 Within each shader engine, Workgroup Processors (WGPs) pair two Compute Units (CUs) that share resources and execute dispatched waves after the Workgroup Manager (SPI) hands off work.
-On RDNA3 architecture-based GPUs/APUs (including discrete Ryzen APU 3x and RDNA3.5 / gfx115x integrations), compute kernels are typically tracked with wave32-oriented waves; the gfx115x WGP panels cover occupancy, dispatch, instruction mix, and local caches at that WGP/CU-pair granularity.
+On RDNA3.5 architecture-based GPUs/APUs, compute kernels are typically tracked with wave32-oriented waves; the gfx115x WGP panels cover occupancy, dispatch, instruction mix, and local caches at that WGP/CU-pair granularity.
 
 The sections below list RDNA3.5 (gfx115x) metric descriptions.
 

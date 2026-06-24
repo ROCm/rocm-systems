@@ -32,7 +32,7 @@ peak rates here as approximations. The ``VALU FLOPs`` row in this panel scales a
 Dual-issue VALU (VOPD)
 ----------------------
 
-RDNA3 and RDNA3.5 add a dual-issue path to the VALU. A pair of independent
+RDNA3.5 add a dual-issue path to the VALU. A pair of independent
 VALU operations can be encoded into a single instruction and issued together in
 the same cycle. The RDNA ISA refers to this encoding as Vector Operation - Dual (VOPD). Hardware
 accepts the pairing only when register, opcode, and operand constraints are

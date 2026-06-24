@@ -8,7 +8,7 @@
 RDNA3
 ********
 
-ROCm Compute Profiler makes available an extensive list of metrics to better understand achieved application performance on RDNA3.5 architecture-based AMD Ryzen™ APUs like AMD Ryzen AI Max / Ryzen AI Max+ 300 Series (gfx115x).
+ROCm Compute Profiler makes available an extensive list of metrics to better understand achieved application performance on RDNA3.5 architecture-based AMD Ryzen™ APUs like AMD Ryzen AI Max / Ryzen AI Max+ Series (gfx115x).
 
 To best use the profiling data, it's important to understand the role of various hardware blocks of AMD RDNA3 architecture. Refer to the following top-level block diagram to understand the hardware blocks of RDNA3 architecture.
 

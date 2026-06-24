@@ -32,7 +32,7 @@ vector-lane) potentially operating on distinct data. The VALU of a CDNA-CDNA4 ar
    memory; each work-item supplies its own memory address and supplies
    or receives unique data.
 
-*  CDNA-CDNA2 architecture-based GPUs (such as the MI100 and :ref:`MI2XX <mixxx-note>`), contain
+*  CDNA-CDNA4 architecture-based GPUs (such as the MI100 and :ref:`MI2XX <mixxx-note>`), contain
    additional
    :amd-lab-note:`Matrix Fused Multiply-Add (MFMA) <amd-lab-notes-matrix-cores-readme>`
    units.
