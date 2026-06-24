@@ -554,8 +554,8 @@ public:
         if (tt_version == 1) event.lds_size = event.lds_size * 10 / 4;
         if (tt_version >= 5)
         {
-            event.lds_size *= 2;
             event.vgprs *= 2;
+            event.lds_size *= 2;
         }
 
         event.flags = ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_NONE;
