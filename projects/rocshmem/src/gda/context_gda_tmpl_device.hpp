@@ -580,8 +580,8 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
  * multiple workgroups share the same team pSync/pWrk/dest buffers.
  */
 template <typename T, ROCSHMEM_OP Op>
-__device__ int GDAContext::reduce_scatter(rocshmem_team_t team, T *dest,
-                                          const T *source, int nreduce) {
+__device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                             const T *source, int nreduce) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int PE_size   = team_obj->tinfo_wrt_world->size;

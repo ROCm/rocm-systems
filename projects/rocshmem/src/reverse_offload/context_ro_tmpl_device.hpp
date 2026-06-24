@@ -308,8 +308,8 @@ __device__ void ROContext::amo_xor(void *dst, T value, int pe) {
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int ROContext::reduce_scatter(rocshmem_team_t team, T *dest,
-                                         const T *source, int nreduce) {
+__device__ int ROContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                            const T *source, int nreduce) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
     return ROCSHMEM_SUCCESS;

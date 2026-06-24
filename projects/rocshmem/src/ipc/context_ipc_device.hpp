@@ -141,8 +141,8 @@ class IPCContext : public Context {
   __device__ int reduce(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce_scatter(rocshmem_team_t team, T *dest, const T *source,
-                                int nreduce);
+  __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
+                                   int nreduce);
 
   template <typename T>
   __device__ void broadcast(rocshmem_team_t team, T *dest, const T *source,

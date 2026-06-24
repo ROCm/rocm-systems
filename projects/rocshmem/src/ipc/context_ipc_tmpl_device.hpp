@@ -423,8 +423,8 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
  * pSync/pWrk/dest buffers.
  */
 template <typename T, ROCSHMEM_OP Op>
-__device__ int IPCContext::reduce_scatter(rocshmem_team_t team, T *dest,
-                                          const T *source, int nreduce) {
+__device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                             const T *source, int nreduce) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int PE_size   = team_obj->tinfo_wrt_world->size;

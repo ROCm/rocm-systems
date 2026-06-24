@@ -649,7 +649,7 @@ __device__ int rocshmem_reduce_scatter_wg(rocshmem_ctx_t ctx,
   LOGD_API("device::reduce_scatter_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nreduce=%d",
     ctx.ctx_opaque, team, dest, source, nreduce);
 
-  return get_internal_ctx(ctx)->reduce_scatter<T, Op>(team, dest, source, nreduce);
+  return get_internal_ctx(ctx)->reduce_scatter_wg<T, Op>(team, dest, source, nreduce);
 }
 
 template <typename T>
