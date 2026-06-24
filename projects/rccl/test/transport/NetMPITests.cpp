@@ -350,22 +350,82 @@ public:
 
         // Pair each rank with the same local rank on a partner node so every transfer
         // crosses the network (real NET path), regardless of how many ranks run per node.
-        // Nodes are paired (0,1), (2,3), ... via an XOR so the pairing is symmetric
-        // (if A's peer is B then B's peer is A), which is required for matched send/recv.
-        const int num_nodes      = detectNodeCount();
-        const int ranks_per_node = (num_nodes > 0) ? (config.world_size / num_nodes) : config.world_size;
-        const int node_id        = (ranks_per_node > 0) ? (config.world_rank / ranks_per_node) : 0;
-        const int local_rank     = (ranks_per_node > 0) ? (config.world_rank % ranks_per_node)
-                                                         : config.world_rank;
-        const int partner_node   = node_id ^ 1;
-        int       peer_rank      = partner_node * ranks_per_node + local_rank;
+        // This requires symmetric 1:1 matches, so we additionally require an even number of
+        // nodes and a uniform ranks-per-node layout.
+        MPI_Comm node_comm = MPI_COMM_NULL;
+        ASSERT_MPI_SUCCESS(MPI_Comm_split_type(MPI_COMM_WORLD,
+                                              MPI_COMM_TYPE_SHARED,
+                                              /*key=*/config.world_rank,
+                                              MPI_INFO_NULL,
+                                              &node_comm));
 
-        // Odd node count leaves the top node without an XOR partner; fall back to the
-        // first node so the rank still has a valid cross-node peer to talk to.
-        if(peer_rank >= config.world_size)
+        int local_rank = 0;
+        int local_size = 0;
+        ASSERT_MPI_SUCCESS(MPI_Comm_rank(node_comm, &local_rank));
+        ASSERT_MPI_SUCCESS(MPI_Comm_size(node_comm, &local_size));
+
+        // Create a communicator of node leaders (local_rank==0) to assign stable node IDs.
+        MPI_Comm leader_comm = MPI_COMM_NULL;
+        ASSERT_MPI_SUCCESS(MPI_Comm_split(MPI_COMM_WORLD,
+                                          (local_rank == 0) ? 0 : MPI_UNDEFINED,
+                                          /*key=*/config.world_rank,
+                                          &leader_comm));
+
+        int node_id   = 0;
+        int num_nodes = 1;
+        if(local_rank == 0)
         {
-            peer_rank = local_rank;
+            ASSERT_MPI_SUCCESS(MPI_Comm_rank(leader_comm, &node_id));
+            ASSERT_MPI_SUCCESS(MPI_Comm_size(leader_comm, &num_nodes));
         }
+        ASSERT_MPI_SUCCESS(MPI_Bcast(&node_id, 1, MPI_INT, /*root=*/0, node_comm));
+        ASSERT_MPI_SUCCESS(MPI_Bcast(&num_nodes, 1, MPI_INT, /*root=*/0, node_comm));
+
+        int min_ranks_per_node = 0;
+        int max_ranks_per_node = 0;
+        ASSERT_MPI_SUCCESS(
+            MPI_Allreduce(&local_size, &min_ranks_per_node, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+        ASSERT_MPI_SUCCESS(
+            MPI_Allreduce(&local_size, &max_ranks_per_node, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD));
+
+        if((num_nodes % 2) != 0 || min_ranks_per_node != max_ranks_per_node)
+        {
+            if(config.world_rank == 0)
+            {
+                TEST_WARN(
+                    "Skipping: MultipleBufferSizesTest requires an even number of nodes and a uniform ranks-per-node layout (nodes=%d, min_ranks_per_node=%d, max_ranks_per_node=%d)",
+                    num_nodes,
+                    min_ranks_per_node,
+                    max_ranks_per_node);
+            }
+            MPI_Comm_free(&node_comm);
+            if(leader_comm != MPI_COMM_NULL)
+                MPI_Comm_free(&leader_comm);
+            GTEST_SKIP() << "MultipleBufferSizesTest requires even node count and uniform ranks-per-node";
+        }
+
+        const int partner_node = node_id ^ 1;
+
+        // Find the world rank on partner_node with the same local_rank.
+        int loc[2] = {node_id, local_rank};
+        std::vector<int> all_locs(2 * config.world_size, -1);
+        ASSERT_MPI_SUCCESS(
+            MPI_Allgather(loc, 2, MPI_INT, all_locs.data(), 2, MPI_INT, MPI_COMM_WORLD));
+
+        int peer_rank = -1;
+        for(int r = 0; r < config.world_size; ++r)
+        {
+            if(all_locs[2 * r] == partner_node && all_locs[2 * r + 1] == local_rank)
+            {
+                peer_rank = r;
+                break;
+            }
+        }
+        ASSERT_MPI_TRUE(peer_rank >= 0);
+
+        MPI_Comm_free(&node_comm);
+        if(leader_comm != MPI_COMM_NULL)
+            MPI_Comm_free(&leader_comm);
 
         hipStream_t stream = getActiveStream();
         ASSERT_NE(stream, nullptr) << "Rank " << config.world_rank << ": Stream is null";
@@ -514,7 +574,8 @@ TEST_F(NetTransportMPITest, NetLocalRegisterBufferTest)
 TEST_F(NetTransportMPITest, MultipleBufferSizesTest)
 {
     // NET transport tests require at least 2 ranks spread across at least 2 nodes so that
-    // communication crosses the network. Any ranks-per-node layout is supported.
+    // communication crosses the network. MultipleBufferSizesTest additionally requires an even
+    // number of nodes and a uniform ranks-per-node layout for symmetric 1:1 peer pairing.
     if(!validateTestPrerequisites(kMinRanksForNET,
                                   kNoProcessLimit,
                                   kNoPowerOfTwoRequired,
