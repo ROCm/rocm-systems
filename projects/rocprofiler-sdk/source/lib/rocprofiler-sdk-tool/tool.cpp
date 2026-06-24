@@ -362,13 +362,6 @@ is_targeted_kernel(uint64_t                                        _kern_id,
     return false;
 }
 
-bool
-att_no_intercept_kernel_target_filter(rocprofiler_kernel_id_t kernel_id)
-{
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-    return is_targeted_kernel(kernel_id, kernel_iteration);
-}
-
 auto&
 get_client_ctx()
 {
@@ -1081,7 +1074,6 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             ROCP_WARNING_IF(!success)
                 << "duplicate kernel symbol data for kernel_id=" << sym_data->kernel_id;
 
-            // add the kernel to the kernel_targets if
             if(success)
             {
                 // if kernel name is provided by user then by default all kernels in the
@@ -1094,19 +1086,17 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
                 std::string_view include_regex(kernel_filter_include);
                 std::string_view exclude_regex(kernel_filter_exclude);
-                if(rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
-                                                            include_regex))
-                {
-                    if(kernel_filter_exclude.empty() ||
-                       !rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
-                                                                 exclude_regex))
-                        add_kernel_target(sym_data->kernel_id, kernel_filter_range);
-                }
-            }
+                const auto is_targeted =
+                    rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
+                                                             include_regex) &&
+                    (kernel_filter_exclude.empty() ||
+                     !rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
+                                                               exclude_regex));
+                if(is_targeted) add_kernel_target(sym_data->kernel_id, kernel_filter_range);
 
-            if(success && tool::get_config().advanced_thread_trace &&
-               tool::get_config().att_no_intercept)
-                tool::att_no_intercept::kernel_symbol_load(*sym_data);
+                if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+                    tool::att_no_intercept::kernel_symbol_load(*sym_data, is_targeted);
+            }
         }
     }
 
@@ -2937,7 +2927,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              "dispatch tracing service configure");
         }
 
-        auto no_intercept_agents = std::vector<tool::att_no_intercept::agent_config>{};
+        auto no_intercept_agents = std::vector<tool::att_no_intercept::agent_config_t>{};
 
         for(auto& [id, agent] : tool_metadata->agents_map)
         {
@@ -2950,7 +2940,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                 agent_params.push_back(counter);
             if(att_no_intercept)
             {
-                no_intercept_agents.emplace_back(tool::att_no_intercept::agent_config{
+                no_intercept_agents.emplace_back(tool::att_no_intercept::agent_config_t{
                     id,
                     static_cast<uint64_t>(agent.gpu_index),
                     (agent.name != nullptr) ? std::string{agent.name} : std::string{},
@@ -2986,7 +2976,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         {
             tool::att_no_intercept::configure(std::move(no_intercept_agents),
                                               callbacks.att_shader_data,
-                                              att_no_intercept_kernel_target_filter);
+                                              tool::get_config().kernel_filter_range);
         }
 
         // Any agent not removed by above loop was not in the agents_map list
