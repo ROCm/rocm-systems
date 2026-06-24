@@ -33,7 +33,7 @@ subtree_to_project_map = {
     "shared/amdgpu-windows-interop": "runtimes",
 }
 # Below is the comprehensive list which the rock-ci runs for bump PRs. TODO - fetch this list programmatically using TheRock's build_tools/github_actions/fetch_test_configurations.py
-therock_projects_to_test = "aqlprofile, hip-tests, hipblas, hipblaslt, hipcub, hipfft, hiprand, hipsolver, hipsparse, hipsparselt, miopen, miopenprovider, rocblas, rocfft, rocgdb, rocprim, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocrand, rocroller, rocrtst, rocsolver, rocsparse, rocthrust, rocwmma"
+therock_projects_to_test = "aqlprofile, hip-tests, hipblas, hipblaslt, hipcub, hipfft, hiprand, hipsolver, hipsparse, hipsparselt, miopen, miopenprovider, rocblas, rocfft, rocgdb-cpu, rocgdb-gpu, rocprim, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocrand, rocroller, rocrtst, rocsolver, rocsparse, rocthrust, rocwmma"
 project_map = {
     "core": {
         "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF"],
@@ -53,7 +53,7 @@ project_map = {
             "-DTHEROCK_ENABLE_ALL=OFF",
             "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
         ],
-        "projects_to_test": "rocr-debug-agent, rocgdb",
+        "projects_to_test": "rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
     },
     # debug agent changes don't have to exercise ROCgdb.
     "debug_tools-debug-agent": {
@@ -86,11 +86,11 @@ project_map = {
     "runtimes": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
         #TODO - Enable miopen, miopenprovider and rocwmma once they start passing in ci-nightly
-        "projects_to_test": "hip-tests, hipblas, hipblaslt, hipcub, hipfft, hiprand, hipsolver, hipsparse, hipsparselt, rocblas, rocfft, rocgdb, rocprim, rocprofiler-sdk, rocr-debug-agent, rocrand, rocroller, rocrtst, rocsolver, rocsparse, rocthrust",
+        "projects_to_test": "hip-tests, hipblas, hipblaslt, hipcub, hipfft, hiprand, hipsolver, hipsparse, hipsparselt, rocblas, rocfft, rocgdb-cpu, rocgdb-gpu, rocprim, rocprofiler-sdk, rocr-debug-agent, rocrand, rocroller, rocrtst, rocsolver, rocsparse, rocthrust",
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
     },
     # Same test coverage as TheRock submodule-bump PRs (rocm-systems scope).
     # Nightly (schedule) uses this entry explicitly for alignment with runtimes coverage.
