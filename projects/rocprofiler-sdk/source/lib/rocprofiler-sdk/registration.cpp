@@ -916,11 +916,7 @@ initialize()
 
     ROCP_INFO << "rocprofiler initialize called...";
 
-    if(get_init_status() != 0)
-    {
-        ROCP_INFO << "rocprofiler initialize ignored...";
-        return;
-    }
+    if(get_init_status() == 1) return;
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
