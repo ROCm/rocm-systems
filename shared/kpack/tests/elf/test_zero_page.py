@@ -289,6 +289,14 @@ class TestFullPipelineAlignment:
             and phdr.p_offset <= e_phoff < phdr.p_offset + phdr.p_filesz
         ]
         assert covering, "no PT_LOAD covers the program header table"
+        # The pipeline must have relocated the PHDR table into a dedicated
+        # trailing PT_LOAD that begins at e_phoff (otherwise this test would
+        # pass trivially on a non-relocated PIE whose first PT_LOAD already has
+        # p_vaddr == p_offset == 0, exercising nothing).
+        assert any(phdr.p_offset == e_phoff for phdr in covering), (
+            f"expected a dedicated PHDR PT_LOAD starting at e_phoff=0x{e_phoff:x}; "
+            "the table was not relocated as expected"
+        )
         for phdr in covering:
             assert phdr.p_vaddr == phdr.p_offset, (
                 "PHDR-covering PT_LOAD must have p_vaddr == p_offset for "
