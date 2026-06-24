@@ -118,15 +118,12 @@ jobs:
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
-            EXCLUDED_TESTS=""
             ADD_COVERAGE="--coverage"
           else
             MODE=Continuous
-            EXCLUDED_TESTS="test_profile_live_attach_detach"
             ADD_COVERAGE=""
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
-          echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
           echo "add_coverage=${ADD_COVERAGE}" >> $GITHUB_OUTPUT
 
           if [ '${{ matrix.system.os-release }}' = '24.04' ]; then
@@ -202,7 +199,8 @@ jobs:
             -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
             -- \
-            -E "${{ steps.setup_env.outputs.excluded_tests }}"
+            -L full \
+            -LE full_rocprofiler_compute_ci_exclude
 
       - name: Output Logs
         if: steps.test.outcome == 'failure'

@@ -1540,6 +1540,14 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_amd_vmem_alloc_handle_t* handle;
     } hsa_amd_vmem_import_fabric_handle;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    struct
+    {
+        hsa_agent_t                  agent;
+        hsa_amd_queue_create_desc_t* descs;
+        uint32_t                     num_descs;
+    } hsa_amd_queue_create;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

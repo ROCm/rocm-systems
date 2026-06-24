@@ -8,13 +8,13 @@
 Workgroup processor (WGP)
 =========================
 
-Within each shader engine, **Workgroup Processors (WGPs)** pair two **Compute Units (CUs)** that share resources and execute dispatched waves after the SPI workgroup manager hands off work.
-On RDNA3-class GPUs (including discrete Ryzen APU 3x and RDNA3.5 / gfx115x integrations), compute kernels are typically tracked with wave32-oriented waves; the gfx115x **WGP** panels cover occupancy, dispatch, instruction mix, and local caches at that WGP/CU-pair granularity.
+Within each shader engine, Workgroup Processors (WGPs) pair two Compute Units (CUs) that share resources and execute dispatched waves after the Workgroup Manager (SPI) hands off work.
+On RDNA3.5 architecture-based GPUs/APUs, compute kernels are typically tracked with wave32-oriented waves; the gfx115x WGP panels cover occupancy, dispatch, instruction mix, and local caches at that WGP/CU-pair granularity.
 
 The sections below list RDNA3.5 (gfx115x) metric descriptions.
 
 .. Note::
-   AMD Instinct (CDNA) GPUs use a different execution hierarchy and panel grouping.
+   The CDNA architecture-based AMD Instinct GPUs use a different execution hierarchy and panel grouping.
    For Instinct-only pipeline metrics (for example, VALU / VMEM / MFMA-style tables), see :doc:`../cdna/cdna-performance-model`-without assuming RDNA WGPs or CUs map directly to those layouts.
 
 Roofline
@@ -25,7 +25,7 @@ Roofline performance rates
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-roofline-performance-rates-gfx115x
@@ -36,7 +36,7 @@ Roofline plot points
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-roofline-plot-points-gfx115x
@@ -50,7 +50,7 @@ WGP utilization
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-wgp-utilization-gfx115x
@@ -61,7 +61,7 @@ Wavefront launch stats
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-wavefront-launch-stats-gfx115x
@@ -72,7 +72,7 @@ Wave dispatch
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-wave-dispatch-gfx115x
@@ -83,7 +83,7 @@ Wave life
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-wave-life-gfx115x
@@ -94,7 +94,7 @@ Wave instruction mix
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-wave-instruction-mix-gfx115x
@@ -105,7 +105,7 @@ VMEM instruction mix
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-vmem-instruction-mix-gfx115x
@@ -116,7 +116,7 @@ LDS instruction mix
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-lds-instruction-mix-gfx115x
@@ -127,7 +127,7 @@ Wait state analysis
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-wait-state-analysis-gfx115x
@@ -138,7 +138,7 @@ WGP instruction cache
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-wgp-instruction-cache-gfx115x
@@ -149,7 +149,7 @@ WGP scalar data cache
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-wgp-scalar-data-cache-gfx115x

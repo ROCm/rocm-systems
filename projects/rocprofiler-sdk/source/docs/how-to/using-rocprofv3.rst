@@ -26,6 +26,97 @@ Before tracing or profiling your HIP application using ``rocprofv3``, build it u
    cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
    cmake --build <build-directory> --target all --parallel <N>
 
+.. _gpu-performance-level:
+
+Setting GPU performance level for PMC profiling
+---------------------------------------------
+
+On RDNA3 (Navi3x) and RDNA4 (Navi4x) GPUs, the ``AUTO`` performance mode disables PMC profiling in some GPU hardware blocks:
+the perfmon clock is gated off, which prevents performance counters from functioning. Setting the performance level to
+``STABLE_STD`` turns the perfmon clock back on and enables PMC profiling on all GPU hardware blocks.
+
+This is a hardware feature enablement requirement. Without it, PMC profiling on these GPUs produces no meaningful counter
+data in some GPU hardware blocks.
+
+There are two ways to configure the GPU performance level:
+
+**Option 1: Using the** ``power_dpm_force_performance_level`` **sysfs entry**
+
+Set the performance level to ``profile_standard`` via the sysfs interface. Replace ``<N>`` with
+the card index (for example, ``0`` for ``card0``):
+
+.. code-block:: bash
+
+   sudo chmod 777 /sys/class/drm/card<N>/device/power_dpm_force_performance_level
+   sudo sh -c 'echo profile_standard > /sys/class/drm/card<N>/device/power_dpm_force_performance_level'
+
+To verify the setting:
+
+.. code-block:: bash
+
+   cat /sys/class/drm/card<N>/device/power_dpm_force_performance_level
+
+To restore the default behavior after PMC profiling:
+
+.. code-block:: bash
+
+   sudo sh -c 'echo auto > /sys/class/drm/card<N>/device/power_dpm_force_performance_level'
+
+**Option 2: Using** ``amd-smi``
+
+Alternatively, use the ``amd-smi`` tool installed with ROCm to query and set the performance level.
+
+One advantage of using ``amd-smi`` is that it can be used to query and set the performance level on multiple
+GPUs in a single command. For example, to set the performance level to ``STABLE_STD`` on all GPUs in the
+system, use:
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi set --perf-level STABLE_STD
+   GPU: 0
+       PERFLEVEL: Successfully set performance level STABLE_STD
+   GPU: 1
+       PERFLEVEL: Successfully set performance level STABLE_STD
+
+The following examples show how to query and set the performance level for a specific GPU. Replace ``<N>``
+with the card index:
+
+To check the current performance level:
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi metric --gpu <N> --perf-level
+   GPU: <N>
+       PERF_LEVEL: AMDSMI_DEV_PERF_LEVEL_AUTO
+
+To set the performance level to ``STABLE_STD`` (the ``amd-smi`` name for ``profile_standard``):
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi set --gpu <N> --perf-level STABLE_STD
+   GPU: <N>
+       PERFLEVEL: Successfully set performance level STABLE_STD
+
+To verify the change:
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi metric --gpu <N> --perf-level
+   GPU: <N>
+       PERF_LEVEL: AMDSMI_DEV_PERF_LEVEL_STABLE_STD
+
+To restore the default performance level after PMC profiling:
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi set --gpu <N> --perf-level AUTO
+   GPU: <N>
+       PERFLEVEL: Successfully set performance level AUTO
+
+   $ sudo /opt/rocm/bin/amd-smi metric --gpu <N> --perf-level
+   GPU: <N>
+       PERF_LEVEL: AMDSMI_DEV_PERF_LEVEL_AUTO
+
 .. _application-tracing:
 
 Application tracing
