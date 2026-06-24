@@ -31,6 +31,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -103,7 +104,6 @@ add_range_locked(agent_state_t&            state,
                  uint64_t                code_object_id,
                  uint64_t                begin,
                  uint64_t                size,
-                 rocprofiler_kernel_id_t kernel_id,
                  bool                    targeted)
 {
     if(begin == 0) return;
@@ -115,71 +115,52 @@ add_range_locked(agent_state_t&            state,
     else
         end = begin + 1;
     state.kernel_ranges_by_code_object[code_object_id].emplace_back(
-        kernel_symbol_range_t{kernel_id, code_object_id, begin, end, targeted});
+        kernel_symbol_range_t{begin, end, targeted});
 }
 
 void
 add_exact_locked(agent_state_t&            state,
                  uint64_t                code_object_id,
                  uint64_t                address,
-                 rocprofiler_kernel_id_t kernel_id,
                  bool                    targeted)
 {
     if(address == 0) return;
-    state.kernels_by_entry[entry_key_t{code_object_id, address}] =
-        kernel_entry_t{kernel_id,
-                       targeted ? std::make_shared<std::atomic<size_t>>(0) : nullptr};
+    state.kernel_iterations_by_entry[entry_key_t{code_object_id, address}] =
+        targeted ? std::make_shared<std::atomic<size_t>>(0) : nullptr;
 }
 
 uint64_t
-get_symbol_size_locked(const code_object_record_t& code_object, const kernel_symbol_record_t& symbol)
+get_symbol_size_locked(const code_object_record_t& code_object, uint64_t kernel_address)
 {
-    if(auto elf_vaddr = subtract_signed_delta(symbol.kernel_address, code_object.load_delta))
+    if(auto elf_vaddr = subtract_signed_delta(kernel_address, code_object.load_delta))
     {
         if(auto itr = code_object.symbol_sizes_by_vaddr.find(*elf_vaddr);
            itr != code_object.symbol_sizes_by_vaddr.end())
             return itr->second;
     }
 
-    if(auto itr = code_object.symbol_sizes_by_name.find(symbol.kernel_name);
-       itr != code_object.symbol_sizes_by_name.end())
-        return itr->second;
-
     return 0;
 }
 
 void
-register_kernel_symbol_locked(agent_state_t& state, const kernel_symbol_record_t& symbol)
+register_kernel_symbol_locked(agent_state_t& state, const kernel_symbol_t& symbol, bool targeted)
 {
     auto code_object_itr = state.code_objects.find(symbol.code_object_id);
     auto symbol_size     = uint64_t{0};
     if(code_object_itr != state.code_objects.end())
-        symbol_size = get_symbol_size_locked(code_object_itr->second, symbol);
+        symbol_size = get_symbol_size_locked(code_object_itr->second, symbol.kernel_address.handle);
 
-    add_exact_locked(state, 0, symbol.kernel_address, symbol.kernel_id, symbol.targeted);
-    add_range_locked(
-        state, 0, symbol.kernel_address, symbol_size, symbol.kernel_id, symbol.targeted);
+    add_exact_locked(state, 0, symbol.kernel_address.handle, targeted);
+    add_range_locked(state, 0, symbol.kernel_address.handle, symbol_size, targeted);
 
     if(code_object_itr == state.code_objects.end()) return;
 
     const auto& code_object = code_object_itr->second;
-    if(auto elf_vaddr = subtract_signed_delta(symbol.kernel_address, code_object.load_delta))
+    if(auto elf_vaddr = subtract_signed_delta(symbol.kernel_address.handle, code_object.load_delta))
     {
-        add_exact_locked(
-            state, symbol.code_object_id, *elf_vaddr, symbol.kernel_id, symbol.targeted);
-        add_range_locked(
-            state, symbol.code_object_id, *elf_vaddr, symbol_size, symbol.kernel_id, symbol.targeted);
+        add_exact_locked(state, symbol.code_object_id, *elf_vaddr, targeted);
+        add_range_locked(state, symbol.code_object_id, *elf_vaddr, symbol_size, targeted);
     }
-}
-
-void
-shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
-                     rocprofiler_user_data_t                userdata)
-{
-    auto* state = static_cast<agent_state_t*>(userdata.ptr);
-    if(state == nullptr || shader_data_forwarder() == nullptr) return;
-
-    backend_shader_data(*state, shader_data, shader_data_forwarder(), kernel_filter_range());
 }
 
 void
@@ -189,7 +170,7 @@ start_agent_context(agent_state_t& state)
     if(state.started || state.finalized) return;
     
     state.started = true;
-    ROCP_INFO << fmt::format("starting ATT no-intercept context for agent {}", state.name);
+    ROCP_INFO << fmt::format("starting ATT no-intercept context for agent {}", state.id.handle);
     check_status(rocprofiler_start_context(state.context), "ATT no-intercept context start");
 }
 
@@ -221,9 +202,7 @@ is_supported()
 }
 
 void
-configure(std::vector<agent_config_t> agents,
-          shader_data_forwarder_t   forwarder,
-          std::unordered_set<size_t> filter_range)
+configure(shader_data_forwarder_t forwarder, std::unordered_set<size_t> filter_range)
 {
     ROCP_FATAL_IF(!backend_supported())
         << "--att-no-intercept was requested, but this rocprofv3 build was configured with "
@@ -236,37 +215,37 @@ configure(std::vector<agent_config_t> agents,
     auto lock               = std::unique_lock{manager_mutex};
     shader_data_forwarder() = forwarder;
     kernel_filter_range()   = std::move(filter_range);
+}
 
-    for(auto& agent : agents)
-    {
-        if(agent_states()->count(agent.id.handle) != 0) continue;
+agent_trace_config_t
+configure_agent(rocprofiler_agent_id_t id, uint64_t consecutive_kernels)
+{
+    auto lock = std::unique_lock{manager_mutex};
+    if(auto itr = agent_states()->find(id.handle); itr != agent_states()->end())
+        return agent_trace_config_t{itr->second->context, itr->second->userdata};
 
-        auto state                 = std::make_shared<agent_state_t>();
-        state->id                  = agent.id;
-        state->gpu_index           = agent.gpu_index;
-        state->name                = std::move(agent.name);
-        state->parameters          = std::move(agent.parameters);
-        state->consecutive_kernels = agent.consecutive_kernels;
-        state->userdata.ptr        = state.get();
+    auto state                 = std::make_shared<agent_state_t>();
+    state->id                  = id;
+    state->consecutive_kernels = consecutive_kernels;
+    state->userdata.ptr        = state.get();
 
-        check_status(rocprofiler_create_context(&state->context),
-                     "ATT no-intercept context creation");
+    check_status(rocprofiler_create_context(&state->context), "ATT no-intercept context creation");
+    backend_create(*state);
 
-        backend_create(*state);
-        check_status(rocprofiler_configure_device_thread_trace_service(state->context,
-                                                                       state->id,
-                                                                       state->parameters.data(),
-                                                                       state->parameters.size(),
-                                                                       shader_data_callback,
-                                                                       state->userdata),
-                     "ATT no-intercept thread-trace service configure");
+    auto trace_config = agent_trace_config_t{state->context, state->userdata};
+    agent_states()->emplace(id.handle, std::move(state));
+    ROCP_INFO << fmt::format("configured ATT no-intercept context for agent {}", id.handle);
+    return trace_config;
+}
 
-        auto* state_ptr = state.get();
-        agent_states()->emplace(agent.id.handle, std::move(state));
-        ROCP_INFO << fmt::format("configured ATT no-intercept context for agent {} ({})",
-                                 state_ptr->id.handle,
-                                 state_ptr->name);
-    }
+void
+shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
+                     rocprofiler_user_data_t                userdata)
+{
+    auto* state = static_cast<agent_state_t*>(userdata.ptr);
+    if(state == nullptr || shader_data_forwarder() == nullptr) return;
+
+    backend_shader_data(*state, shader_data, shader_data_forwarder(), kernel_filter_range());
 }
 
 void
@@ -284,8 +263,7 @@ code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& dat
 
     {
         auto lock                                = std::unique_lock{state->mutex};
-        state->code_objects[data.code_object_id] = code_object_record_t{
-            data.code_object_id, data.load_delta, data.load_base, data.load_size};
+        state->code_objects[data.code_object_id] = code_object_record_t{data.load_delta};
     }
 
     backend_code_object_load(*state, data);
@@ -294,17 +272,8 @@ code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& dat
 }
 
 void
-kernel_symbol_load(
-    const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& data,
-    bool is_targeted)
+kernel_symbol_load(const kernel_symbol_t& data, bool is_targeted)
 {
-    auto symbol = kernel_symbol_record_t{data.kernel_id,
-                                data.code_object_id,
-                                (data.kernel_name != nullptr) ? data.kernel_name : "",
-                                data.kernel_address.handle,
-                                data.kernel_code_entry_byte_offset,
-                                is_targeted};
-
     std::shared_ptr<agent_state_t> state  = nullptr;
     {
         auto lock = std::unique_lock{manager_mutex};
@@ -321,7 +290,7 @@ kernel_symbol_load(
     }
 
     auto lock = std::unique_lock{state->mutex};
-    register_kernel_symbol_locked(*state, symbol);
+    register_kernel_symbol_locked(*state, data, is_targeted);
 }
 
 void
