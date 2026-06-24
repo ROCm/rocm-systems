@@ -808,7 +808,7 @@ same ``ml_api_trace/consolidated.csv`` and select rows where the ``Backend`` col
 ``triton``. As a result, Triton kernels are reported independently even if PyTorch
 operators appear in the same run.
 
-List all captured Triton kernels:
+List all captured Triton kernels
 
 .. code-block:: shell-session
 
