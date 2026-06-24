@@ -184,9 +184,12 @@ class DefaultCommands:
                 socket_power_limit = self.helpers.convert_SI_unit(
                     socket_power_limit, AMDSMIHelpers.SI_Unit.MICRO
                 )
-                power_usage = {"current_power": current_power, "power_limit": socket_power_limit}
             except amdsmi_exception.AmdSmiLibraryException:
+                socket_power_limit = "N/A"
+            if current_power == "N/A" and socket_power_limit == "N/A":
                 power_usage = "N/A"
+            else:
+                power_usage = {"current_power": current_power, "power_limit": socket_power_limit}
             gpu_info_dict.update({"power_usage": power_usage})
 
             # memory usage - Use APU-aware memory selection

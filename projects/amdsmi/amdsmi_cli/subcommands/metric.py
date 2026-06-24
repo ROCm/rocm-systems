@@ -325,6 +325,13 @@ class MetricCommands:
 
         # Detect APU system
         show_apu = bool(gpu_metric.get("is_apu", False))
+        if show_apu:
+            # APUs lack these discrete-GPU sensors, so their sections are omitted.
+            logging.debug(
+                "APU detected for gpu %s; omitting pcie, ecc_blocks, "
+                "voltage_curve, overdrive, xgmi_err, and energy sections",
+                gpu_id,
+            )
 
         # Workaround for XCP (partition) metrics not providing num_partition in v1.9+/v1.1+
         # Provides original formatting for earlier metric versions
@@ -1952,13 +1959,6 @@ class MetricCommands:
                         if value != "N/A":
                             voltage_dict[key] = self.helpers.unit_format(self.logger, value, unit)
 
-                    # APU time filter alpha value (unit: us)
-                    apu_time_filter = gpu_metric.get("apu_metrics.time_filter_alphavalue", "N/A")
-                    if apu_time_filter != "N/A":
-                        voltage_dict["apu_time_filter_alphavalue"] = self.helpers.unit_format(
-                            self.logger, apu_time_filter, "us"
-                        )
-
                 values_dict["voltage"] = voltage_dict
         if "energy" in current_platform_args:
             if args.energy and not show_apu:
@@ -2317,14 +2317,19 @@ class MetricCommands:
 
                 values_dict["throttle"] = throttle_status
 
-        # On APU systems, show only APU fields in APU-relevant sections
+        # On APU systems, drop only the N/A standard sensors from APU-relevant
+        # sections; a standard field that reports a real value is preserved.
         if show_apu:
             apu_only_sections = {"usage", "power", "clock", "temperature", "voltage", "throttle"}
             for section_key in list(values_dict.keys()):
                 section_val = values_dict[section_key]
                 if isinstance(section_val, dict):
                     if section_key in apu_only_sections:
-                        non_apu_keys = [k for k in section_val if not k.startswith("apu_")]
+                        non_apu_keys = [
+                            k
+                            for k in section_val
+                            if not k.startswith("apu_") and section_val[k] == "N/A"
+                        ]
                         for k in non_apu_keys:
                             del section_val[k]
                     if not section_val:

@@ -258,7 +258,16 @@ class TestAmdSmiApuMetrics(unittest.TestCase):
             for k in amdsmi.amdsmi_interface._NA_amdsmi_get_gpu_metrics_info()
             if k.startswith("apu_metrics.")
         }
+        # The live is_apu=True path must expose the same apu_metrics.* keys.
+        live_keys = {
+            k
+            for k in amdsmi.amdsmi_interface._populate_apu_metrics(
+                amdsmi.amdsmi_wrapper.struct_amdsmi_apu_metrics_t()
+            )
+            if k.startswith("apu_metrics.")
+        }
         self.assertEqual(na_dict_keys, na_full_keys)
+        self.assertEqual(na_dict_keys, live_keys)
 
 
 class TestAmdSmiPython(unittest.TestCase):

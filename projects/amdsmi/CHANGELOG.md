@@ -11,6 +11,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Exposed APU metrics through the CLI and Python interface**.  
   - `amd-smi metric` now surfaces APU-specific data under `--usage`, `--power`, `--clock`, `--temperature`, `--fan`, `--voltage`, and `--throttle` when APU metrics are available.
   - `amd-smi monitor` provides APU temperature and clock fallbacks when standard dGPU sensors report N/A.
+  - On APU systems the `--pcie`, `--ecc-blocks`, `--voltage-curve`, `--overdrive`, `--xgmi-err`, and `--energy` sections are not applicable and are omitted.
 
 - **Added `--partition` flag to `amd-smi metric` for partition-scoped metrics**.  
   - The `-X`/`--partition` flag switches the temperature, clock, and usage categories to partition-level data sources; throttle metrics are already partition-aware.

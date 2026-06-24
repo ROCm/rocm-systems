@@ -949,19 +949,19 @@ def _populate_apu_metrics(apu):
         ),
         # --- activities (already %) ---
         "apu_metrics.average_gfx_activity": _validate_if_max_uint(
-            apu.average_gfx_activity, MaxUIntegerTypes.UINT16_T
+            apu.average_gfx_activity, MaxUIntegerTypes.UINT16_T, isActivity=True
         ),
         "apu_metrics.average_mm_activity": _validate_if_max_uint(
-            apu.average_mm_activity, MaxUIntegerTypes.UINT16_T
+            apu.average_mm_activity, MaxUIntegerTypes.UINT16_T, isActivity=True
         ),
         "apu_metrics.average_vcn_activity": _validate_if_max_uint(
-            apu.average_vcn_activity, MaxUIntegerTypes.UINT16_T
+            apu.average_vcn_activity, MaxUIntegerTypes.UINT16_T, isActivity=True
         ),
         "apu_metrics.average_ipu_activity": _validate_if_max_uint(
-            list(apu.average_ipu_activity), MaxUIntegerTypes.UINT16_T
+            list(apu.average_ipu_activity), MaxUIntegerTypes.UINT16_T, isActivity=True
         ),
         "apu_metrics.average_core_c0_activity": _validate_if_max_uint(
-            list(apu.average_core_c0_activity), MaxUIntegerTypes.UINT16_T
+            list(apu.average_core_c0_activity), MaxUIntegerTypes.UINT16_T, isActivity=True
         ),
         "apu_metrics.average_dram_reads": _validate_if_max_uint(
             apu.average_dram_reads, MaxUIntegerTypes.UINT16_T
