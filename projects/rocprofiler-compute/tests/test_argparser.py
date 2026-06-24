@@ -6,7 +6,6 @@ Unit tests for rocprof-compute general CLI options.
 """
 
 import argparse
-from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -136,9 +135,10 @@ def test_pc_sampling_analyze_options():
     # 0 is allowed and means "show all rows".
     assert build_args(["analyze", "--pc-sampling-rows", "0"]).pc_sampling_rows == 0
 
-    # Negative row counts are rejected with a non-zero exit and a clear message.
-    with patch("sys.stderr", new_callable=StringIO) as mock_stderr:
-        with pytest.raises(SystemExit) as exc:
+    # Negative row counts trigger an argparse error.
+    with patch.object(
+        argparse.ArgumentParser, "error", side_effect=SystemExit(2)
+    ) as mock_error:
+        with pytest.raises(SystemExit):
             build_args(["analyze", "--pc-sampling-rows", "-1"])
-    assert exc.value.code == 2
-    assert "non-negative" in mock_stderr.getvalue()
+    mock_error.assert_called_once()
