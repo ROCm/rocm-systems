@@ -550,7 +550,7 @@ public:
         event.vgprs = (rsrc1 & 0x3F) * 8 + 8;
         event.user_sgprs = (rsrc2 >> 1) & 0x1F;
 
-        if (tt_version == 0) event.sgprs = ((rsrc1 >> 7) & 0x7) * 16 + 16;
+        if (tt_version <= 1) event.sgprs = ((rsrc1 >> 7) & 0x7) * 16 + 16;
         if (tt_version == 1) event.lds_size *= 10;
         if (tt_version >= 2) event.lds_size *= 2;
         if (tt_version >= 5) event.vgprs *= 2;
