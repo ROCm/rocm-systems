@@ -210,8 +210,8 @@ jobs:
           shopt -s nullglob
           logs=(build/Testing/Temporary/LastBuild*.log)
           [ ${#logs[@]} -eq 0 ] && exit 0
-          WARNINGS=$(grep -h ' warning:' "${logs[@]}" 2>/dev/null | wc -l)
-          ERRORS=$(grep -h ' error:' "${logs[@]}" 2>/dev/null | wc -l)
+          WARNINGS=$(grep -h ' warning:' "${logs[@]}" 2>/dev/null | wc -l || true)
+          ERRORS=$(grep -h ' error:' "${logs[@]}" 2>/dev/null | wc -l || true)
           if [ "$((WARNINGS + ERRORS))" -gt 0 ]; then
             echo "::warning::Build: ${ERRORS} error(s), ${WARNINGS} warning(s) — expand step for details"
           fi
@@ -247,7 +247,7 @@ jobs:
         with:
           files: projects/rocprofiler-systems/build/test-results.xml
           check_name: "Tests — Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.gpu }}"
-          comment_mode: always
+          comment_mode: off
 
       - name: Output test logs on failure
         if: failure() && steps.run_ci.outcome == 'failure'
