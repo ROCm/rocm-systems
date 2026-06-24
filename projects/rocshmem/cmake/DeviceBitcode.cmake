@@ -79,6 +79,30 @@ endif()
 
 set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architectures for device bitcode (semicolon-separated)")
 
+# BITCODE_GPU_ARCHS_FULL: full arch strings with feature suffixes (e.g.
+# gfx950:sramecc+:xnack-), used by CMakeDeviceBitcodeTester to pass the correct
+# -mattr flags to llc. llc embeds these in the HSACO amdhsa.target metadata
+# string, which HIP validates when loading the module — a mismatch causes error 209.
+#
+# When GPU_TARGETS is set, the user-supplied strings already carry any feature
+# suffixes, so we use them directly (no build-time GPU query needed). When
+# auto-detecting local GPUs, rocm_local_targets strips features, so the full
+# strings are unavailable without querying the hardware — in that case we fall
+# back to bare arch names. Users building for multiple architectures or for a
+# different machine than the build host should always set GPU_TARGETS explicitly
+# with the required feature suffixes, e.g.:
+#   -DGPU_TARGETS="gfx942:sramecc+:xnack-;gfx950:sramecc+:xnack-"
+if(GPU_TARGETS)
+  set(_BITCODE_FULL_LIST ${_GPU_TARGETS_LIST})
+else()
+  set(_BITCODE_FULL_LIST ${_BITCODE_DEFAULT_ARCHS})
+endif()
+set(BITCODE_GPU_ARCHS_FULL "${_BITCODE_FULL_LIST}" CACHE STRING
+  "Full GPU arch strings with feature suffixes for device bitcode (e.g. gfx950:sramecc+:xnack-)")
+
+message(STATUS "Device bitcode GPU archs (base):  ${BITCODE_GPU_ARCHS}")
+message(STATUS "Device bitcode GPU archs (full):  ${BITCODE_GPU_ARCHS_FULL}")
+
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and llc.
 set(BITCODE_COMPILE_FLAGS_BASE
