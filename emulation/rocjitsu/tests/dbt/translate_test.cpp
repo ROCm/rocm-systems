@@ -141,6 +141,7 @@ using TestKernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
 constexpr size_t kKernelDescriptorSize = sizeof(TestKernelDescriptor);
 constexpr size_t kKernelDescriptorEntryOffset =
     offsetof(TestKernelDescriptor, kernel_code_entry_byte_offset);
+constexpr uint64_t kKernargPreloadSkipBytes = 256;
 
 void write_kernel_descriptor_entry_offset(void *descriptor, int64_t entry_offset) {
   auto *bytes = static_cast<uint8_t *>(descriptor);
@@ -1402,11 +1403,18 @@ TEST(BinaryTranslator, LocalCaveIgnoresUnreachableTextTail) {
          "after the large unreachable .text tail";
 }
 
-TEST(BinaryTranslator, PreservesKernargPreloadEntrySkipWindow) {
+TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   auto image = make_large_amdgpu_elf_with_waitcnt_entry();
   AmdGpuCodeObject source_layout(image.data(), image.size());
   ASSERT_TRUE(source_layout.is_valid());
   ASSERT_FALSE(source_layout.text_sections().empty());
+  const auto *source_rodata = find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+
+  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
 
   const auto *source_text = source_layout.text_sections()[0];
   auto *source_words = reinterpret_cast<uint32_t *>(image.data() + source_text->sectionOffset());
@@ -1426,15 +1434,115 @@ TEST(BinaryTranslator, PreservesKernargPreloadEntrySkipWindow) {
   ASSERT_FALSE(translated.text_sections().empty());
 
   const auto *text = translated.text_sections()[0];
-  ASSERT_GT(text->size(), 256u);
+  ASSERT_GT(text->size(), kKernargPreloadSkipBytes);
   const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
-  EXPECT_EQ(target_words[0], build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA3))
-      << "the compatibility prologue must still branch over the 256-byte preload skip window";
+  EXPECT_EQ(target_words[0], build_s_branch(64, ROCJITSU_CODE_ARCH_CDNA3))
+      << "old firmware enters the synthesized compatibility stub, which branches to the "
+         "translated compatibility source entry";
   for (size_t i = 1; i < 64; ++i)
     EXPECT_EQ(target_words[i], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3))
-        << "preload skip window padding word " << i << " must remain executable padding";
-  EXPECT_EQ(target_words[64], 0xBF810000u)
-      << "compatible firmware starts at descriptor entry + 256 when kernargs are preloaded";
+        << "the synthesized launch window must keep the compatible firmware entry exactly 256 "
+           "bytes after the descriptor entry";
+  EXPECT_EQ(target_words[64], build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3))
+      << "compatible firmware enters at descriptor entry + 256 and branches to the translated "
+         "preloaded-kernarg source entry";
+  EXPECT_EQ(target_words[65], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3))
+      << "the original compatibility source block is translated in the compact body";
+  EXPECT_EQ(target_words[66], 0xBF810000u)
+      << "the original compatible-firmware source entry is translated in the compact body";
+
+  const auto *target_rodata = find_section(translated, ".rodata");
+  ASSERT_NE(target_rodata, nullptr);
+  ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  const auto *target_kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      translated.image_data() + target_rodata->sectionOffset());
+  EXPECT_EQ(target_kd->kernel_code_entry_byte_offset, source_kd->kernel_code_entry_byte_offset)
+      << "the descriptor is redirected to the synthesized compatibility entry; compatible "
+         "firmware still reaches the synthesized +256 entry by adding the ABI skip";
+}
+
+TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPrologue) {
+  constexpr uint64_t kSourceEntryBytes = 512;
+  constexpr size_t kSourceEntryWord = kSourceEntryBytes / sizeof(uint32_t);
+  constexpr size_t kSourcePreloadEntryWord =
+      (kSourceEntryBytes + kKernargPreloadSkipBytes) / sizeof(uint32_t);
+  constexpr uint16_t kScalarOperandTtmpBase = 108;
+  constexpr uint16_t kTtmpRdna4GridX = 9;
+
+  std::vector<uint32_t> words(kSourcePreloadEntryWord + 1,
+                              build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words[0] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  words[kSourceEntryWord] = build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4);
+  words[kSourcePreloadEntryWord] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  enable_workgroup_id_x_sgpr(image);
+
+  AmdGpuCodeObject source_layout(image.data(), image.size());
+  ASSERT_TRUE(source_layout.is_valid());
+  ASSERT_FALSE(source_layout.text_sections().empty());
+  const auto *source_text = source_layout.text_sections()[0];
+  const auto *source_rodata = find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+
+  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  source_kd->kernel_code_entry_byte_offset =
+      static_cast<int64_t>(source_text->vaddr() + kSourceEntryBytes) -
+      static_cast<int64_t>(source_rodata->vaddr());
+
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(co);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *text = translated.text_sections()[0];
+  ASSERT_GT(text->size(), kKernargPreloadSkipBytes + 3 * sizeof(uint32_t));
+  const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
+
+  const uint32_t workgroup_id_x_prologue =
+      build_s_mov_b32(0, kScalarOperandTtmpBase + kTtmpRdna4GridX, ROCJITSU_CODE_ARCH_RDNA4);
+  const uint32_t prologue_delay = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto expect_launch_stub = [&](size_t word_index, int16_t branch_offset) {
+    EXPECT_EQ(target_words[word_index], workgroup_id_x_prologue)
+        << "the synthesized kernarg-preload launch stub must materialize descriptor ABI SGPRs "
+           "before branching into the relocated body";
+    EXPECT_EQ(target_words[word_index + 1], prologue_delay)
+        << "the synthesized launch stub must preserve scalar producer/consumer hazards";
+    EXPECT_EQ(target_words[word_index + 2], build_s_branch(branch_offset, ROCJITSU_CODE_ARCH_RDNA4))
+        << "the synthesized launch stub branches only after the descriptor ABI prologue";
+  };
+  expect_launch_stub(0, 64);
+  expect_launch_stub(kKernargPreloadSkipBytes / sizeof(uint32_t), 1);
+
+  EXPECT_EQ(target_words[67], build_s_branch(0, ROCJITSU_CODE_ARCH_RDNA4))
+      << "the original compatibility source entry is translated in the compact body";
+  EXPECT_EQ(target_words[68], build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4))
+      << "the original preloaded-kernarg source entry is translated in the compact body";
+
+  const auto *target_rodata = find_section(translated, ".rodata");
+  ASSERT_NE(target_rodata, nullptr);
+  ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  const auto *target_kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      translated.image_data() + target_rodata->sectionOffset());
+  const int64_t target_entry_text_offset = static_cast<int64_t>(target_rodata->vaddr()) +
+                                           target_kd->kernel_code_entry_byte_offset -
+                                           static_cast<int64_t>(text->vaddr());
+  EXPECT_EQ(target_entry_text_offset, 0)
+      << "the descriptor must be redirected from the moved source entry to the synthesized "
+         "compatibility launch stub";
+  EXPECT_NE(target_kd->kernel_code_entry_byte_offset, source_kd->kernel_code_entry_byte_offset)
+      << "the source descriptor entry is deliberately nonzero, so this assertion proves the "
+         "descriptor was repointed rather than passing because both entries were zero";
 }
 
 TEST(InstructionBuilder, PatchPcrelBranchOffsetInRange) {

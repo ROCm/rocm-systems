@@ -221,6 +221,15 @@ template <typename MachineInst> inline uint32_t vop3_opsel(const MachineInst &in
     return 0;
 }
 
+template <typename T>
+inline T apply_vop3_b32_src_mod(T value, uint32_t abs, uint32_t neg, uint32_t src_idx) {
+  if (abs & (1u << src_idx))
+    value &= T(0x7fffffffu);
+  if (neg & (1u << src_idx))
+    value ^= T(0x80000000u);
+  return value;
+}
+
 template <typename Inst> inline bool vop3_fp8_decode_e5m3(const Inst &inst) {
   if constexpr (requires { typename Inst::IsaType; }) {
     if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::gfx1250::Isa> &&
@@ -1195,12 +1204,10 @@ template <typename Inst> [[nodiscard]] bool try_execute_cndmask_vop2_simd(Inst &
 
 /// v_cndmask_b32 VOP3 form: dst[lane] = (sel[lane]) ? src1 : src0, where `sel`
 /// is the 64-bit value read from the SGPR-pair `src2` (instead of the fixed VCC
-/// used by the VOP2 form). The scalar body applies no modifiers (the result is
-/// a bit-exact integer select on whichever operand the selector picks), so the
-/// VOP3 modifier fields are intentionally not consulted here — bit-identical to
-/// the scalar body regardless of abs/neg/omod/clamp encoding. `src2` is an
-/// SGPR/inline operand, not a VGPR, so it does not participate in the
-/// simd_capable gate; src0/src1/vdst do.
+/// used by the VOP2 form). VOP3 source modifiers are bitwise sign modifiers for
+/// this B32 select: abs clears bit 31 and neg flips bit 31 before selection.
+/// `src2` is an SGPR/inline operand, not a VGPR, so it does not participate in
+/// the simd_capable gate; src0/src1/vdst do.
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cndmask_vop3_simd(Inst &inst, Wavefront &wf) {
@@ -1222,8 +1229,10 @@ template <typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = simd_load_or<T>(r0, base, a_bcast);
-    const auto b = simd_load_or<T>(r1, base, b_bcast);
+    const auto a = apply_vop3_b32_src_mod(simd_load_or<T>(r0, base, a_bcast), inst.inst_.abs,
+                                          inst.inst_.neg, 0);
+    const auto b = apply_vop3_b32_src_mod(simd_load_or<T>(r1, base, b_bcast), inst.inst_.abs,
+                                          inst.inst_.neg, 1);
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
     alignas(util::native<T>) uint32_t selbuf[W];
     for (std::size_t i = 0; i < W; ++i)
@@ -1574,12 +1583,13 @@ template <typename T, typename Inst, typename BinOp>
 /// inside `bin_op` and narrow back, but do NOT apply the VOP3 abs/neg/omod/clamp
 /// modifiers (there is no fp16 binary modifier glue, unlike the f32 path). The
 /// generated scalar body DOES apply them around the f16<->f32 round trip, so bail
-/// to scalar whenever any modifier field is set; the (common) unmodified case
-/// still takes the integer fast path.
+/// to scalar whenever any modifier field is set. VOP3 true16 op_sel needs packed
+/// source/destination-half merging, so it also stays on the scalar path. The
+/// common unmodified low-half case still takes the integer fast path.
 template <typename T, typename Inst, typename BinOp>
 [[nodiscard]] bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
   if (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
-      inst.inst_.clamp != 0u)
+      inst.inst_.clamp != 0u || vop3_opsel(inst.inst_) != 0u)
     return false;
   return try_execute_binary_vop3_simd<T>(inst, wf, bin_op);
 }
@@ -1764,10 +1774,11 @@ template <typename Inst, typename CmpOp>
   return false;
 }
 
-/// VOP3 f16 VOPC compare SIMD fast path. The scalar body widens each f16 src
-/// to f32 (`util::f16_to_f32`) and only then applies abs/neg (std::fabs / unary
-/// minus on the f32). The vector path matches that order exactly: read
-/// src0/src1 as raw uint32 lanes (low 16 = f16 bits), widen via
+/// VOP3 f16 VOPC compare SIMD fast path. The scalar body selects the source
+/// half with VOP3 true16 op_sel, widens each f16 src to f32
+/// (`util::f16_to_f32`), and only then applies abs/neg (std::fabs / unary minus
+/// on the f32). The vector path matches that order exactly: read src0/src1 as
+/// raw uint32 lanes, select the requested half, widen via
 /// `util::f16_to_f32_simd`, then apply the f32 modifier helper, then call the
 /// compare functor on f32 operands. The compare functor is the same as the f32
 /// VOP3 VOPC one (it takes already-widened, already-modified `native<float>`).
@@ -1780,6 +1791,7 @@ template <typename Inst, typename CmpOp>
   using T = uint32_t;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
+  const uint32_t opsel = vop3_opsel(inst.inst_);
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
@@ -1794,10 +1806,14 @@ template <typename Inst, typename CmpOp>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = apply_vop3_src_mod_f32<0>(
-        util::f16_to_f32_simd(simd_load_or<T>(r0, base, a_bcast)), abs, neg);
-    const auto b = apply_vop3_src_mod_f32<1>(
-        util::f16_to_f32_simd(simd_load_or<T>(r1, base, b_bcast)), abs, neg);
+    auto a_raw = simd_load_or<T>(r0, base, a_bcast);
+    auto b_raw = simd_load_or<T>(r1, base, b_bcast);
+    if (opsel & 0x1u)
+      a_raw = a_raw >> 16;
+    if (opsel & 0x2u)
+      b_raw = b_raw >> 16;
+    const auto a = apply_vop3_src_mod_f32<0>(util::f16_to_f32_simd(a_raw), abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(util::f16_to_f32_simd(b_raw), abs, neg);
     const auto m = cmp_op(a, b);
     uint64_t cmp_bits = 0;
     for (std::size_t i = 0; i < W; ++i)
@@ -1963,6 +1979,8 @@ template <typename Inst, typename UnOp>
 [[nodiscard]] inline bool try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
+  if (vop3_opsel(inst.inst_) != 0u)
+    return false;
   using T = uint32_t;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
@@ -2092,6 +2110,8 @@ template <typename Inst, typename FmaOp>
                                                              FmaOp tern_op) {
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  if (vop3_opsel(inst.inst_) != 0u)
     return false;
   using T = uint32_t;
   const uint32_t abs = inst.inst_.abs;
@@ -2234,6 +2254,8 @@ template <typename Inst, typename FmaOp>
                                                           FmaOp tern_op) {
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.vdst.simd_capable())
+    return false;
+  if (vop3_opsel(inst.inst_) != 0u)
     return false;
   using T = uint32_t;
   const uint32_t abs = inst.inst_.abs;
@@ -2732,9 +2754,9 @@ template <typename Inst> [[nodiscard]] bool try_execute_lshl_add_u64_simd(Inst &
 
 /// VOP3 wide 32x32->64 multiply-add fast path (v_mad_u64_u32 / v_mad_i64_i32).
 /// src0/src1 are 32-bit multiplicands (read as narrow lanes), src2 is the 64-bit
-/// addend, dst is 64-bit. `mad_op(s0, s1, c)` receives the two narrow operands
-/// and the 64-bit addend and does the (signedness-aware) widen, 64-bit multiply
-/// (low 64), and add — matching the scalar `(wide)s0 * (wide)s1 + s2`.
+/// addend, dst is 64-bit, and sdst is the per-lane overflow/carryout mask.
+/// `mad_op(s0, s1, c)` receives the two narrow operands and the 64-bit addend
+/// and returns both the low 64-bit result and carry/overflow mask.
 template <typename Inst, typename MadOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_mad_wide64_vop3_simd(Inst &inst, Wavefront &wf,
@@ -2745,6 +2767,7 @@ template <typename Inst, typename MadOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
+  uint64_t carry_out = 0;
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
   const ConstVgprStoragePair64 rs2 = simd_src_reg64(inst.src2, wf);
@@ -2762,8 +2785,15 @@ template <typename Inst, typename MadOp>
     const auto a = simd_load_narrow_or<uint32_t>(r0, base, a_bcast);
     const auto b = simd_load_narrow_or<uint32_t>(r1, base, b_bcast);
     const auto c = simd_load64_or<uint64_t>(rs2, base, c_bcast);
-    write_simd64_at<uint64_t>(rd64, inst.vdst, wf, base, mad_op(a, b, c), chunk);
+    const auto r = mad_op(a, b, c);
+    write_simd64_at<uint64_t>(rd64, inst.vdst, wf, base, r.value, chunk);
+    uint64_t carry_bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (r.carry[i])
+        carry_bits |= (1ULL << i);
+    carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
+  write_wave_mask_scalar(inst.sdst, wf, carry_out);
   return true;
 }
 template <typename Inst, typename MadOp>
@@ -2878,6 +2908,11 @@ inline util::native<float> fma_mix_mul_add(util::native<float> a, util::native<f
   return a * b + c;
 }
 
+inline bool fma_mix_src_is_float_inline(uint32_t src_selector) {
+  // Standard AMDGPU floating inline constants in the shared OPR_SRC encoding.
+  return src_selector >= 240u && src_selector <= 248u;
+}
+
 /// VOP3P fma_mix / mad_mix SIMD fast path. Six ops share one body because all
 /// six differ only in (a) the f16-vs-f32 widening shape per source and (b) the
 /// f16-lo/f16-hi/f32 narrowing shape on the destination. The generated scalar
@@ -2889,8 +2924,9 @@ inline util::native<float> fma_mix_mul_add(util::native<float> a, util::native<f
 /// `op_sel_hi_2` (src2): when the bit is 0 the source is read as f32; when
 /// 1 the source is read as a 32-bit word and the low or high f16 half
 /// (selected by the matching `op_sel` bit) is widened via f16_to_f32_simd.
-/// Per-source sign-flip is gated by `neg` (xor of bit 31). VOP3P does not
-/// carry abs or omod. Result-clamp saturates to [0, 1] via stdx::where.
+/// Per-source abs is gated by the field named `neg_hi` in the shared VOP3P
+/// layout for this mix-family encoding, and per-source sign-flip is gated by
+/// `neg` (xor of bit 31). Result-clamp saturates to [0, 1] via stdx::where.
 ///
 /// All modifier fields are uniform across the wave so the per-source mode
 /// branches live outside the chunk loop and feed into the same `a*b+c`
@@ -2916,6 +2952,7 @@ template <FmaMixDst DstMode, typename Inst>
   const uint32_t op_sel = inst.inst_.op_sel;
   const uint32_t op_sel_hi = inst.inst_.op_sel_hi;
   const uint32_t op_sel_hi_2 = inst.inst_.op_sel_hi_2;
+  const uint32_t abs = inst.inst_.neg_hi;
   const uint32_t neg = inst.inst_.neg;
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -2926,26 +2963,34 @@ template <FmaMixDst DstMode, typename Inst>
   const F kZero(0.0f);
   const F kOne(1.0f);
   const U kSignBit(0x80000000u);
+  const U kAbsMask(~0x80000000u);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    auto load_src = [&](auto &op, uint32_t sel_hi_bit, uint32_t sel_bit, uint32_t neg_bit) -> F {
+    auto load_src = [&](auto &op, uint32_t src_selector, uint32_t sel_hi_bit, uint32_t sel_bit,
+                        uint32_t abs_bit, uint32_t neg_bit) -> F {
       F v;
       if (sel_hi_bit) {
         U raw = read_simd<uint32_t>(op, wf, base);
-        U halves = sel_bit ? (raw >> 16) : (raw & 0xFFFFu);
+        U halves = fma_mix_src_is_float_inline(src_selector)
+                       ? util::f32_to_f16_simd(std::bit_cast<F>(raw))
+                       : (sel_bit ? (raw >> 16) : (raw & 0xFFFFu));
         v = util::f16_to_f32_simd(halves);
       } else {
         v = read_simd<float>(op, wf, base);
       }
+      if (abs_bit)
+        v = std::bit_cast<F>(std::bit_cast<U>(v) & kAbsMask);
       if (neg_bit)
         v = std::bit_cast<F>(std::bit_cast<U>(v) ^ kSignBit);
       return v;
     };
-    F a = load_src(inst.src0, op_sel_hi & 1u, op_sel & 1u, neg & 1u);
-    F b = load_src(inst.src1, (op_sel_hi >> 1) & 1u, (op_sel >> 1) & 1u, (neg >> 1) & 1u);
-    F c = load_src(inst.src2, op_sel_hi_2, (op_sel >> 2) & 1u, (neg >> 2) & 1u);
+    F a = load_src(inst.src0, inst.inst_.src0, op_sel_hi & 1u, op_sel & 1u, abs & 1u, neg & 1u);
+    F b = load_src(inst.src1, inst.inst_.src1, (op_sel_hi >> 1) & 1u, (op_sel >> 1) & 1u,
+                   (abs >> 1) & 1u, (neg >> 1) & 1u);
+    F c = load_src(inst.src2, inst.inst_.src2, op_sel_hi_2, (op_sel >> 2) & 1u, (abs >> 2) & 1u,
+                   (neg >> 2) & 1u);
     F r = fma_mix_mul_add(a, b, c);
     if (clamp) {
       util::stdx::where(r < kZero, r) = kZero;
@@ -3970,7 +4015,8 @@ template <bool Vop3, typename Inst>
 
 /// VOP3 wide 32x32->64 multiply-add counterpart (v_mad_u64_u32 / v_mad_i64_i32).
 /// The functor takes `(narrow32<uint32_t> s0, narrow32<uint32_t> s1,
-/// native<uint64_t> c)`; variadic so its commas pass through.
+/// native<uint64_t> c)` and returns `SimdCarry<native<uint64_t>, mask>`;
+/// variadic so its commas pass through.
 #define ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_mad_wide64_vop3_simd(inst, wf, __VA_ARGS__))                 \
   return

@@ -61,7 +61,7 @@
 #define SLICE_SIZE (1UL * 1024UL * 1024UL)
 #endif
 
-#define TOTAL_SIZE ((size_t)NUM_STREAMS * (size_t)SLICE_SIZE)
+#define TOTAL_SIZE (static_cast<size_t>(NUM_STREAMS) * SLICE_SIZE)
 
 static_assert((SLICE_SIZE % BLOCK_ALIGN) == 0, "SLICE_SIZE must be a multiple of BLOCK_ALIGN");
 
@@ -118,13 +118,13 @@ main(int argc, char *argv[])
     for (int i = 0; i < NUM_STREAMS; ++i) {
         slice_state &s = slices[i];
         s.io_size      = SLICE_SIZE;
-        s.file_offset  = (hoff_t)i * (hoff_t)SLICE_SIZE;
+        s.file_offset  = static_cast<hoff_t>(i) * static_cast<hoff_t>(SLICE_SIZE);
         s.buf_offset   = 0;
 
         hip_err = hipMalloc(&s.devbuf, SLICE_SIZE);
         if (hipSuccess != hip_err) {
-            fprintf(stderr, "Could not allocate %zu bytes on GPU %d for slice %d (%d)\n", (size_t)SLICE_SIZE,
-                    gpu_id, i, hip_err);
+            fprintf(stderr, "Could not allocate %zu bytes on GPU %d for slice %d (%d)\n", SLICE_SIZE, gpu_id,
+                    i, hip_err);
             goto cleanup_slices;
         }
 
@@ -197,14 +197,12 @@ main(int argc, char *argv[])
             goto close_wfile;
         }
 
-        if (s.bytes_read != (ssize_t)SLICE_SIZE) {
-            fprintf(stderr, "Async read short on slice %d: %zd of %zu\n", i, s.bytes_read,
-                    (size_t)SLICE_SIZE);
+        if (s.bytes_read != static_cast<ssize_t>(SLICE_SIZE)) {
+            fprintf(stderr, "Async read short on slice %d: %zd of %zu\n", i, s.bytes_read, SLICE_SIZE);
             goto close_wfile;
         }
-        if (s.bytes_written != (ssize_t)SLICE_SIZE) {
-            fprintf(stderr, "Async write short on slice %d: %zd of %zu\n", i, s.bytes_written,
-                    (size_t)SLICE_SIZE);
+        if (s.bytes_written != SLICE_SIZE) {
+            fprintf(stderr, "Async write short on slice %d: %zd of %zu\n", i, s.bytes_written, SLICE_SIZE);
             goto close_wfile;
         }
     }
@@ -236,7 +234,7 @@ main(int argc, char *argv[])
             goto cleanup_slices;
 
         printf("OK  %s == %s  (%zu bytes across %d streams, hash 0x%016" PRIx64 ")\n", read_path, write_path,
-               (size_t)TOTAL_SIZE, NUM_STREAMS, hash);
+               TOTAL_SIZE, NUM_STREAMS, hash);
     }
 
     exit_status = EXIT_SUCCESS;
