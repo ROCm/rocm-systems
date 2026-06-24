@@ -17,7 +17,6 @@
 #include <timemory/utility/console.hpp>
 #include <timemory/utility/filepath.hpp>
 
-#include "common/join.hpp"
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
@@ -205,9 +204,9 @@ prepare_environment_for_run(std::vector<std::string>& _env)
     if(launcher.empty())
     {
         update_env(_env, "LD_PRELOAD",
-                   rocprofsys::join(":", LIBPTHREAD_SO,
-                                    path::realpath(path::get_internal_libpath(
-                                        "librocprof-sys-dl.so"))),
+                   fmt::format("{}:{}", LIBPTHREAD_SO,
+                               path::realpath(path::get_internal_libpath(
+                                   "librocprof-sys-dl.so"))),
                    true);
         update_env(_env, env_vars::SCRIPT_DIR, path::get_internal_script_path());
         update_env(_env, env_vars::ROOT, path::get_rocprofsys_root());
@@ -229,7 +228,7 @@ void
 add_default_env(std::vector<std::string>& _environ, std::string_view _env_var,
                 Tp&& _env_val)
 {
-    auto       _key = rocprofsys::join("", _env_var, "=");
+    auto       _key = fmt::format("{}=", _env_var);
     const auto exists =
         std::any_of(_environ.begin(), _environ.end(), [&_key](const std::string& entry) {
             return std::string_view{ entry }.find(_key) == 0;
@@ -791,7 +790,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             _write_config(_ofs, _causal_envs_tmp.at(i));
             auto _cfg_name = (_config_file.empty())
                                  ? fname.str()
-                                 : rocprofsys::join(':', _config_file, fname.str());
+                                 : fmt::format("{}:{}", _config_file, fname.str());
             auto _cfg = std::map<std::string_view, std::string>{ { env_vars::CONFIG_FILE,
                                                                    _cfg_name } };
             _causal_envs.emplace_back(_cfg);

@@ -10,7 +10,7 @@
 #include "rocprofiler-systems/user.h"
 
 #include "common/environment.hpp"
-#include "common/join.hpp"
+#include <spdlog/fmt/fmt.h>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
 // Provides inline tim::get_env<bool>/<std::string> specialization definitions before
@@ -164,7 +164,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
 
     auto _python_path = rocprofsys::get_env(rocprofsys::env_vars::PATH, std::string{});
     auto _libpath     = std::string{ "librocprof-sys-dl.so" };
-    if(!_python_path.empty()) _libpath = rocprofsys::join("/", _python_path, _libpath);
+    if(!_python_path.empty()) _libpath = fmt::format("{}/{}", _python_path, _libpath);
     // permit env override if default path fails/is wrong
     _libpath = rocprofsys::get_env(rocprofsys::env_vars::DL_LIBRARY, _libpath);
     // this is necessary when building with -static-libstdc++
@@ -172,7 +172,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
     if(!dlopen(_libpath.c_str(), RTLD_NOW | RTLD_GLOBAL))
     {
         auto _msg =
-            rocprofsys::join("", "dlopen(\"", _libpath, "\", RTLD_NOW | RTLD_GLOBAL)");
+            fmt::format(R"(dlopen("{}", RTLD_NOW | RTLD_GLOBAL))", _libpath);
         perror(_msg.c_str());
         fprintf(stderr, "[rocprofsys][dl][pid=%i] %s :: %s\n", getpid(), _msg.c_str(),
                 dlerror());
@@ -393,15 +393,15 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         if(_config.include_filename)
         {
             if(_config.full_filepath)
-                _funcname.append(rocprofsys::join("", '[', std::move(_fullpath)));
+                _funcname.append(fmt::format("[{}", _fullpath));
             else
-                _funcname.append(rocprofsys::join("", '[', std::move(_filename)));
+                _funcname.append(fmt::format("[{}", _filename));
         }
         // append the line number
         if(_config.include_line && _config.include_filename)
-            _funcname.append(rocprofsys::join("", ':', get_frame_lineno(frame), ']'));
+            _funcname.append(fmt::format(":{}]", get_frame_lineno(frame)));
         else if(_config.include_line)
-            _funcname.append(rocprofsys::join("", ':', get_frame_lineno(frame)));
+            _funcname.append(fmt::format(":{}", get_frame_lineno(frame)));
         else if(_config.include_filename)
             _funcname += "]";
         return _funcname;
@@ -816,8 +816,8 @@ generate(py::module& _pymod)
             ar->finishNode();
             ar->finishNode();
         }
-        _name = rocprofsys::join(
-            '.', std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"), "json");
+        _name = fmt::format("{}.json",
+                            std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"));
         std::ofstream ofs{};
         if(tim::filepath::open(ofs, _name))
         {
@@ -827,8 +827,7 @@ generate(py::module& _pymod)
         }
         else
         {
-            throw std::runtime_error(
-                rocprofsys::join("", "Error opening coverage output file: ", _name));
+            throw std::runtime_error("Error opening coverage output file: " + _name);
         }
     };
 

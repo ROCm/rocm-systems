@@ -18,7 +18,7 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
-#include "common/join.hpp"
+#include <spdlog/fmt/fmt.h>
 #include "common/setup.hpp"
 #include "dl/dl.hpp"
 #include "rocprofiler-systems/categories.h"
@@ -215,7 +215,7 @@ struct ROCPROFSYS_INTERNAL_API indirect
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
         }
 
-        auto _search_paths = common::join(':', common::path::dirname(_omnilib),
+        auto _search_paths = fmt::format("{}:{}", common::path::dirname(_omnilib),
                                           common::path::dirname(_dllib));
         common::setup_environ(_rocprofsys_dl_verbose, _search_paths, _omnilib, _dllib);
 
@@ -613,14 +613,14 @@ extern "C"
         {
             ROCPROFSYS_DL_LOG(
                 2, "%s(%s) ignored :: already initialized and finalized\n", __FUNCTION__,
-                ::rocprofsys::join(::rocprofsys::QuoteStrings{}, ", ", a, b, c).c_str());
+                fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
             return;
         }
         else if(dl::get_inited() && dl::get_active())
         {
             ROCPROFSYS_DL_LOG(
                 2, "%s(%s) ignored :: already initialized and active\n", __FUNCTION__,
-                ::rocprofsys::join(::rocprofsys::QuoteStrings{}, ", ", a, b, c).c_str());
+                fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
             return;
         }
 
@@ -1240,7 +1240,7 @@ rocprofsys_postinit(std::string _exe)
         case InstrumentMode::ProcessCreate:
         {
             if(_exe.empty())
-                _exe = tim::filepath::readlink(join('/', "/proc", getpid(), "exe"));
+                _exe = tim::filepath::readlink(fmt::format("/proc/{}/exe", getpid()));
 
             rocprofsys_init_tooling();
             if(_exe.empty())

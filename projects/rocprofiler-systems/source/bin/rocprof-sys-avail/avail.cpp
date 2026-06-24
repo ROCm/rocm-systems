@@ -6,7 +6,7 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
+#include <spdlog/fmt/fmt.h>
 #include "component_categories.hpp"
 #include "defines.hpp"
 #include "enumerated_list.hpp"
@@ -146,7 +146,7 @@ main(int argc, char** argv)
             }
             for(const auto& category : setting.second->get_categories())
             {
-                _category_options.emplace(rocprofsys::join("::", "settings", category));
+                _category_options.emplace(fmt::format("settings::{}", category));
             }
         }
     }
@@ -375,7 +375,7 @@ main(int argc, char** argv)
                         if(!is_selected(itr.key)) continue;
                         if(_show && !is_selected(itr.value)) continue;
                         _msg << "| " << std::setw(std::get<0>(_w) + 2)
-                             << rocprofsys::join("", "`", itr.key, "`");
+                             << fmt::format("`{}`", itr.key);
                         if(_show)
                             _msg << " | " << std::setw(std::get<1>(_w)) << itr.value;
                         _msg << " | " << std::setw(std::get<2>(_w)) << itr.description
@@ -1016,7 +1016,7 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             str_set_t _categories{};
             for(const auto& category : sitr->second->get_categories())
             {
-                _categories.emplace(rocprofsys::join("::", "settings", category));
+                _categories.emplace(fmt::format("settings::{}", category));
             }
             bool _found = false;
             for(const auto& category : _categories)

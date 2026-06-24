@@ -11,7 +11,7 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
+#include <spdlog/fmt/fmt.h>
 #include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
@@ -190,7 +190,7 @@ get_library_search_paths_impl()
         {
             for(const auto& ditr : rocprofsys::delimit(itr, ":"))
             {
-                _emplace_if_exists(rocprofsys::join('/', ditr, "lib"));
+                _emplace_if_exists(fmt::format("{}/lib", ditr));
             }
         }
     }
@@ -416,7 +416,7 @@ get_internal_libs_data_impl()
         for(const auto* litr :
             { "librocprof-sys-dl.so", "librocprof-sys-user.so", "librocprof-sys-rt.so" })
         {
-            auto _libpath = rocprofsys::join('/', _rocprofsys_base_path, itr, litr);
+            auto _libpath = fmt::format("{}/{}/{}", _rocprofsys_base_path, itr, litr);
             if(filepath::exists(_libpath))
             {
                 _libs.emplace_back(filepath::realpath(_libpath, nullptr, false));
@@ -528,7 +528,7 @@ find_library(std::string_view _lib_v)
 
     for(const auto& itr : get_library_search_paths())
     {
-        auto _path = rocprofsys::join('/', itr, _lib_v);
+        auto _path = fmt::format("{}/{}", itr, _lib_v);
         if(filepath::exists(_path)) return std::optional<std::string>{ _path };
     }
 
@@ -545,7 +545,7 @@ find_libraries(std::string_view _lib_v)
 
     for(const auto& itr : get_library_search_paths())
     {
-        auto _path = rocprofsys::join('/', itr, _lib_v);
+        auto _path = fmt::format("{}/{}", itr, _lib_v);
         if(filepath::exists(_path)) _libs.emplace_back(_path);
     }
 
