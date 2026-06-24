@@ -34,10 +34,12 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <iostream>
@@ -50,29 +52,29 @@ namespace att_no_intercept
 {
 namespace
 {
-struct scan_context
+struct scan_context_t
 {
-    agent_state_t*              state                = nullptr;
-    kernel_target_filter_t      kernel_target_filter = nullptr;
-    trace_range_t               trace                = {};
-    std::vector<trace_range_t>* completed            = {};
+    agent_state_t*                         state               = nullptr;
+    const std::unordered_set<size_t>*      kernel_filter_range = nullptr;
+    trace_range_t                          trace               = {};
+    std::vector<trace_range_t>*            completed           = {};
 
     int remaining_dispatches = 0;
     int first_flush_count = 2;
     uint64_t first_valid_offset = 0;
 };
 
-std::optional<rocprofiler_kernel_id_t>
-resolve_kernel_id(agent_state_t& state, const rocprofiler_thread_trace_decoder_pc_t& entry_point)
+std::optional<kernel_entry_t>
+resolve_kernel_entry(agent_state_t& state, const rocprofiler_thread_trace_decoder_pc_t& entry_point)
 {
     auto shared_lock = std::shared_lock{state.mutex};
 
-    auto find_exact = [&state](entry_key key) -> std::optional<rocprofiler_kernel_id_t> {
+    auto find_exact = [&state](entry_key_t key) -> std::optional<kernel_entry_t> {
         if(auto itr = state.kernels_by_entry.find(key); itr != state.kernels_by_entry.end())
             return itr->second;
         return std::nullopt;
     };
-    auto find_range = [&](entry_key key) -> std::optional<rocprofiler_kernel_id_t> {
+    auto find_range = [&](entry_key_t key) -> std::optional<kernel_entry_t> {
         auto ranges_itr = state.kernel_ranges_by_code_object.find(key.code_object_id);
         if(ranges_itr == state.kernel_ranges_by_code_object.end()) return std::nullopt;
 
@@ -84,24 +86,41 @@ resolve_kernel_id(agent_state_t& state, const rocprofiler_thread_trace_decoder_p
                 shared_lock.unlock();
                 auto unique_lock = std::unique_lock{state.mutex};
 
-                state.kernels_by_entry[key] = range_copy.kernel_id;
-                return range_copy.kernel_id;
+                if(auto itr = state.kernels_by_entry.find(key); itr != state.kernels_by_entry.end())
+                    return itr->second;
+
+                auto [itr, _] = state.kernels_by_entry.emplace(
+                    key,
+                    kernel_entry_t{
+                        range_copy.kernel_id,
+                        range_copy.targeted ? std::make_shared<std::atomic<size_t>>(0) : nullptr});
+                return itr->second;
             }
         }
 
         return std::nullopt;
     };
 
-    auto key = entry_key{entry_point.code_object_id, entry_point.address};
-    if(auto kernel_id = find_exact(key)) return kernel_id;
+    auto key = entry_key_t{entry_point.code_object_id, entry_point.address};
+    if(auto entry = find_exact(key)) return entry;
 
-    if(auto kernel_id = find_range(key)) return kernel_id;
+    if(auto entry = find_range(key)) return entry;
 
     return std::nullopt;
 }
 
+bool
+is_targeted_entry(const kernel_entry_t& entry, const std::unordered_set<size_t>& kernel_filter_range)
+{
+    if(entry.iteration_count == nullptr) return false;
+
+    const auto iteration = entry.iteration_count->fetch_add(1, std::memory_order_relaxed) + 1;
+    if(kernel_filter_range.empty()) return iteration == 1;
+    return kernel_filter_range.count(iteration) != 0;
+}
+
 void
-handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_dispatch_t& dispatch)
+handle_dispatch(scan_context_t& context, const rocprofiler_thread_trace_decoder_dispatch_t& dispatch)
 {
     auto& state = *context.state;
 
@@ -112,12 +131,12 @@ handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_di
               << dispatch.entry_point.address << " at me/pipe " << int(dispatch.me_id) << "/"
               << int(dispatch.pipe_id);
 
-    auto kernel_id = resolve_kernel_id(state, dispatch.entry_point);
-    if(!kernel_id)
+    auto kernel_entry = resolve_kernel_entry(state, dispatch.entry_point);
+    if(!kernel_entry)
     {
         ROCP_TRACE << "Unknown dispatch found.";
     }
-    else if((context.kernel_target_filter == nullptr || context.kernel_target_filter(*kernel_id)))
+    else if(is_targeted_entry(*kernel_entry, *context.kernel_filter_range))
     {
         auto& trace = context.trace;
         if(!trace.active)
@@ -126,10 +145,11 @@ handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_di
             trace.active       = true;
             trace.offset_begin = dispatch.byte_offset;
 
-            ROCP_INFO << "Dispatch cut at : " << *kernel_id << " byte " << dispatch.byte_offset;
+            ROCP_INFO << "Dispatch cut at : " << kernel_entry->kernel_id << " byte "
+                      << dispatch.byte_offset;
         }
 
-        trace.kernel_id = *kernel_id;
+        trace.kernel_id = kernel_entry->kernel_id;
         trace.remaining_dispatches = std::max<uint64_t>(state.consecutive_kernels, 1);
         trace.flush_count = 0;
     }
@@ -144,7 +164,7 @@ handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_di
 }
 
 void
-handle_event(scan_context& context, const rocprofiler_thread_trace_decoder_event_t& event)
+handle_event(scan_context_t& context, const rocprofiler_thread_trace_decoder_event_t& event)
 {
     // Latch first valid offset
     if (--context.first_flush_count == 0) context.first_valid_offset = event.byte_offset;
@@ -184,7 +204,7 @@ quick_scan_callback(rocprofiler_thread_trace_decoder_record_type_t record_type_i
                     uint64_t                                       num_records,
                     void*                                          userdata)
 {
-    auto* context = static_cast<scan_context*>(userdata);
+    auto* context = static_cast<scan_context_t*>(userdata);
     if(context == nullptr || context->state == nullptr || records == nullptr)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -357,7 +377,7 @@ backend_code_object_load(agent_state_t&                                         
     }
 }
 
-void signal_overlapping_requests(scan_context& context,
+void signal_overlapping_requests(scan_context_t& context,
                                  uint64_t      chunk_index)
 {
     auto& state = *context.state;
@@ -380,7 +400,9 @@ void signal_overlapping_requests(scan_context& context,
 }
 
 uint64_t
-send_overlapping_requests(scan_context& context, rocprofiler_thread_trace_shader_data_t shader_data, std::vector<trace_range_t>& ranges)
+send_overlapping_requests(scan_context_t& context,
+                          rocprofiler_thread_trace_shader_data_t shader_data,
+                          std::vector<trace_range_t>& ranges)
 {
     auto chunk_index = shader_data.chunk_index;
     auto& state = *context.state;
@@ -425,7 +447,7 @@ send_overlapping_requests(scan_context& context, rocprofiler_thread_trace_shader
 }
 
 std::vector<uint8_t>
-fetch_overlapping_requests(scan_context& context, uint64_t chunk_index)
+fetch_overlapping_requests(scan_context_t& context, uint64_t chunk_index)
 {
     auto& state = *context.state;
     auto& chunk_data = state.chunk_data;
@@ -450,7 +472,7 @@ void
 backend_shader_data(agent_state_t&                           state,
                     rocprofiler_thread_trace_shader_data_t shader_data,
                     shader_data_forwarder_t                shader_data_forwarder,
-                    kernel_target_filter_t                 kernel_target_filter)
+                    const std::unordered_set<size_t>&      kernel_filter_range)
 {
     if((shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0 ||
        (shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL) != 0)
@@ -467,9 +489,9 @@ backend_shader_data(agent_state_t&                           state,
     thread_local std::vector<trace_range_t> completed{};
     completed.clear();
 
-    auto context                 = scan_context{};
+    auto context                 = scan_context_t{};
     context.state                = &state;
-    context.kernel_target_filter = kernel_target_filter;
+    context.kernel_filter_range  = &kernel_filter_range;
     context.completed            = &completed;
 
     {
