@@ -302,7 +302,7 @@ Use the following command to view the available domains:
      ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``,
      ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, and
      ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1``, an XNACK-capable
-     GPU, and ROCm 7.13 or later (ROCProfiler-SDK version 1.2.2 or above).
+     GPU, and ROCm 7.13 or later. For standalone `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ installations, requires ROCprofiler-SDK 1.2.2 or later.
 
 For example, the following is a valid configuration:
 
@@ -355,8 +355,7 @@ unified-memory view is expected to be fault-only: page-fault totals and trigger
 breakdowns can populate, migration counters remain zero, and the Perfetto
 migration-throughput track is not shown.
 
-Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and ROCm 7.13 or later
-(ROCProfiler-SDK 1.2.2 or above). The KFD tracing domains
+Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and ROCm 7.13 or later. For standalone `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ installations, requires ROCprofiler-SDK 1.2.2 or later. The KFD tracing domains
 (``kfd_page_fault``, ``kfd_page_migrate``) are enabled automatically when this
 setting is on -- you do not need to add ``kfd_events`` to
 ``ROCPROFSYS_ROCM_DOMAINS`` separately.
