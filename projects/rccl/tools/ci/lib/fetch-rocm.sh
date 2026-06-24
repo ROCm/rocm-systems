@@ -10,6 +10,7 @@
 #   ROCM_AMDGPU_FAMILY        Artifact family (default: gfx950-dcgpu)
 #   ROCM_PATH_OVERRIDE        Use this existing ROCm tree; skips the download
 #   THEROCK_TARBALL_BASE_URL  Override the per-channel base URL
+#   ROCM_REF_TOKEN            If set, register a reference for GC (see rocm-ref.sh)
 #   RCCL_DEVICE_API_WORKDIR / WORKDIR   Workspace root (for .ci-out output)
 
 set -euxo pipefail
@@ -93,6 +94,8 @@ if [[ -z "${ROCM_RELEASE:-}" ]]; then
 fi
 
 ROCM_PATH="${CACHE_DIR}/rocm/rocm-${ROCM_RELEASE}"
+refs_dir="${ROCM_PATH}.refs"
+ref_token="${ROCM_REF_TOKEN:-}"
 tarball="therock-dist-linux-${rocm_family}-${ROCM_RELEASE}.tar.gz"
 url="${base_url}/${tarball}"
 
@@ -124,14 +127,24 @@ do_fetch() {
     "${ROCM_RELEASE}" "${rocm_family}" "${rocm_channel}" > "${ROCM_PATH}/.stamp"
 }
 
-# Download on cache miss only. A per-version lock serializes parallel jobs so
-# they can't download/extract into the same path at once; the inner re-check
-# lets the loser reuse what the winner produced.
-if cache_hit; then
+# Register before the cache decision so another run's GC can't delete the tree
+# between our check and our use.
+acquire_ref() {
+  [[ -n "${ref_token}" ]] || return 0
+  mkdir -p "${refs_dir}"
+  : > "${refs_dir}/${ref_token}"
+  echo "==> Registered ROCm reference ${ref_token} (channel=${rocm_channel})"
+}
+
+# A per-version lock serializes parallel jobs; the inner re-check lets the loser
+# reuse the winner's tree. With a ref token we always lock (even on a cache hit)
+# so registration is ordered against GC.
+if cache_hit && [[ -z "${ref_token}" ]]; then
   echo "==> Reusing cached ROCm ${ROCM_RELEASE} at ${ROCM_PATH}"
 else
   exec {lock_fd}>"${CACHE_DIR}/downloads/.lock-${rocm_family}-${rocm_channel}-${ROCM_RELEASE}"
   flock "${lock_fd}"
+  acquire_ref
   if cache_hit; then
     echo "==> Reusing cached ROCm ${ROCM_RELEASE} at ${ROCM_PATH}"
   else

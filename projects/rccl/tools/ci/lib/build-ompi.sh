@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Build a GPU-aware OpenMPI (--with-rocm) against ROCM_PATH and cache it on the
-# shared NFS path. Rebuilt only when missing or when ROCm changed. Writes
+# shared NFS path. The install is reusable regardless of which ROCm built it, so
+# it is rebuilt only when missing (mpirun + libmpi.so present => skip). Writes
 # .ci-out/ompi.env (MPI_HOME) for the later RCCL / rccl-tests / run stages.
 #
 # Environment:
-#   ROCM_PATH              ROCm tree to build against (REQUIRED)
+#   ROCM_PATH              ROCm tree to build against (REQUIRED only on a rebuild)
 #   RCCL_DEVICE_API_CACHE  Persistent cache root (default: /apps/rccl-ci)
 #   MPI_HOME_OVERRIDE      Use this existing install; skips the build.
 #                          Ambient MPI_HOME is never trusted.
@@ -18,12 +19,6 @@ set -euxo pipefail
 OMPI_MAJOR_MINOR="${OMPI_MAJOR_MINOR:-5.0}"
 OMPI_VERSION="${OMPI_VERSION:-5.0.9}"
 build_jobs="${RCCL_BUILD_JOBS:-$(nproc)}"
-
-: "${ROCM_PATH:?build-ompi.sh: ROCM_PATH must be set (run fetch-rocm.sh first)}"
-if [[ ! -x "${ROCM_PATH}/bin/hipcc" ]]; then
-  echo "ERROR: ROCM_PATH=${ROCM_PATH} has no bin/hipcc" >&2
-  exit 1
-fi
 
 WORKDIR="${RCCL_DEVICE_API_WORKDIR:-${WORKDIR:-}}"
 if [[ -z "${WORKDIR}" ]]; then
@@ -55,18 +50,18 @@ fi
 
 OMPI_INSTALL_DIR="${CACHE_DIR}/ompi/install/${OMPI_VERSION}"
 
-# Rebuild if the install is missing or the ROCm it was built against changed.
-rocm_fingerprint="$(cat "${ROCM_PATH}/.stamp" 2>/dev/null || echo "${ROCM_PATH}")"
-desired_stamp="ompi=${OMPI_VERSION}
-with_rocm:
-${rocm_fingerprint}"
-
+# Reusable regardless of which ROCm built it; just check the runtime bits exist.
 ompi_cached() {
-  [[ -f "${OMPI_INSTALL_DIR}/lib/libmpi.so" ]] \
-    && [[ "$(cat "${OMPI_INSTALL_DIR}/.stamp" 2>/dev/null || true)" == "${desired_stamp}" ]]
+  [[ -x "${OMPI_INSTALL_DIR}/bin/mpirun" ]] \
+    && [[ -f "${OMPI_INSTALL_DIR}/lib/libmpi.so" ]]
 }
 
 do_build_ompi() {
+  : "${ROCM_PATH:?build-ompi.sh: ROCM_PATH must be set to build OpenMPI (run fetch-rocm.sh first)}"
+  if [[ ! -x "${ROCM_PATH}/bin/hipcc" ]]; then
+    echo "ERROR: ROCM_PATH=${ROCM_PATH} has no bin/hipcc" >&2
+    exit 1
+  fi
   echo "==> Building OpenMPI ${OMPI_VERSION} into ${OMPI_INSTALL_DIR} (--with-rocm=${ROCM_PATH})"
   rm -rf "${OMPI_INSTALL_DIR}"
   mkdir -p "${OMPI_INSTALL_DIR}"
@@ -87,7 +82,8 @@ do_build_ompi() {
     make install
   )
   rm -rf "${ompi_src}"
-  printf '%s\n' "${desired_stamp}" > "${OMPI_INSTALL_DIR}/.stamp"
+  printf 'ompi=%s\nbuilt_with_rocm=%s\n' \
+    "${OMPI_VERSION}" "${ROCM_PATH}" > "${OMPI_INSTALL_DIR}/.stamp"
 }
 
 # Build on cache miss only. A per-version lock serializes parallel jobs so they

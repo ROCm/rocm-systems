@@ -138,6 +138,9 @@ jobs:
         id: fetch
         env:
           RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+          # Reference the shared nightly build so cleanup-rocm-nightly only GCs it
+          # once the last run is done.
+          ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
@@ -189,3 +192,24 @@ jobs:
       rocm_release: ${{ needs.provision-rocm-nightly.outputs.rocm_release }}
       rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
+
+  # Release this run's nightly reference (always, even on failure) and GC the
+  # build if no other run holds one.
+  cleanup-rocm-nightly:
+    name: Cleanup ROCm (nightly)
+    needs: [provision-rocm-nightly, gin-nightly, device-api-nightly]
+    if: always()
+    runs-on: ruby-linux-slurm-scale-runner
+    env:
+      ROCM_RELEASE: ${{ needs.provision-rocm-nightly.outputs.rocm_release }}
+      ROCM_RELEASE_CHANNEL: nightly
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Release ROCm reference and GC if unused
+        env:
+          ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/rocm-ref.sh" release-gc
