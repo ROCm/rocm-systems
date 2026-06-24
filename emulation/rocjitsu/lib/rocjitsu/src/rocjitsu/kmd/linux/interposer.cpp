@@ -181,6 +181,7 @@ public:
     rj_vm_ = nullptr;
     remote_ = nullptr;
     remote_kfd_fd_.store(-1, std::memory_order_relaxed);
+    remote_open_refs_.store(0, std::memory_order_relaxed);
     new (&init_mutex_) std::mutex();
     new (&fd_mutex_) std::mutex();
     new (&remote_mutex_) std::mutex();
@@ -219,10 +220,35 @@ public:
     return remote_ ? std::string(remote_->drm_path()) : std::string{};
   }
 
+  /// @brief True when a daemon-mode (remote) KFD connection is open.
+  bool is_remote_mode() const { return remote_open_refs_.load(std::memory_order_acquire) > 0; }
+
+  /// @brief Add one open reference for a remote (daemon-mode) KFD fd.
+  /// @details Each live remote KFD fd (the primary plus every dup) holds one
+  /// reference; the RPC connection is torn down only when the last reference is
+  /// dropped. Mirrors SimulatedDriver's local open refcount for the daemon path.
+  void retain_remote_open() { remote_open_refs_.fetch_add(1, std::memory_order_acq_rel); }
+
+  /// @brief Drop one remote open reference, tearing down the connection on the
+  /// last release.
+  /// @details On the final release this sends RPC_CLOSE to the daemon (via
+  /// RemoteDriver::close()) so the daemon frees this client's process state,
+  /// rather than leaking it until socket disconnect at process exit.
+  void release_remote_open() {
+    int prev = remote_open_refs_.fetch_sub(1, std::memory_order_acq_rel);
+    assert(prev > 0 && "remote open refcount underflow");
+    if (prev == 1)
+      teardown_remote();
+  }
+
   RemoteDriver *get_or_create_remote() {
     std::lock_guard lock(remote_mutex_);
-    if (remote_ && remote_kfd_fd_.load(std::memory_order_acquire) >= 0)
+    if (remote_ && remote_kfd_fd_.load(std::memory_order_acquire) >= 0) {
+      // Re-open of an already-connected daemon: each open holds one reference,
+      // mirroring SimulatedDriver::open() retaining the local process.
+      retain_remote_open();
       return remote_;
+    }
     int sock = connect_to_daemon();
     if (sock < 0)
       return nullptr;
@@ -232,6 +258,8 @@ public:
     if (fd < 0)
       return nullptr;
     remote_kfd_fd_.store(fd, std::memory_order_release);
+    // The primary remote KFD fd holds the first open reference.
+    remote_open_refs_.store(1, std::memory_order_release);
     return remote_;
   }
 
@@ -269,12 +297,15 @@ public:
       std::lock_guard lock(fd_mutex_);
       newly_tracked = kfd_dup_fds_.insert(fd).second;
     }
-    // Each live KFD fd (primary + every dup) holds one local-mode open
-    // reference, so the process is torn down only when the last fd closes.
-    // No-op in remote mode (no local process to retain).
-    if (newly_tracked)
-      if (auto *d = driver())
-        d->retain_local_open();
+    if (!newly_tracked)
+      return;
+    // Each live KFD fd (primary + every dup) holds one open reference, so the
+    // process/connection is torn down only when the last fd closes. Retain on
+    // whichever backend is active (local SimulatedDriver or remote daemon RPC).
+    if (auto *d = driver())
+      d->retain_local_open();
+    else if (is_remote_mode())
+      retain_remote_open();
   }
 
   void untrack_dup(int fd) {
@@ -285,9 +316,12 @@ public:
       std::lock_guard lock(fd_mutex_);
       was_tracked = kfd_dup_fds_.erase(fd) != 0;
     }
-    if (was_tracked)
-      if (auto *d = driver())
-        d->close();
+    if (!was_tracked)
+      return;
+    if (auto *d = driver())
+      d->close();
+    else if (is_remote_mode())
+      release_remote_open();
   }
 
   void clear_dups() {
@@ -297,35 +331,24 @@ public:
       released = kfd_dup_fds_.size();
       kfd_dup_fds_.clear();
     }
-    // Drop the references the cleared dups were holding. Used on remote
-    // teardown (driver() is null → no-op) and when a fresh open() rebinds the
-    // local process; in the latter case the just-opened reference is preserved
-    // because clear_dups runs before any new dups are tracked.
+    // Drop the references the cleared dups were holding. Used when a fresh
+    // open() rebinds the local process; the just-opened reference is preserved
+    // because clear_dups runs before any new dups are tracked. Remote teardown
+    // releases its own references explicitly and never routes through here.
     if (auto *d = driver())
       for (size_t i = 0; i < released; ++i)
         d->close();
   }
 
-  int close_remote() {
+  /// @brief Tear down the remote (daemon) connection: send RPC_CLOSE, close the
+  /// synthetic primary fd, and drop daemon-redirect topology paths.
+  /// @details Invoked on the last remote open reference release. Any remaining
+  /// dup-tracked fds refer to the now-closed synthetic fd; clear the set so
+  /// their subsequent close()/ioctl calls fall through to the real syscall
+  /// instead of being misrouted to a dead RPC connection.
+  void teardown_remote() {
     std::lock_guard lock(remote_mutex_);
     if (!remote_)
-      return 0;
-    int rc = remote_->close();
-    delete remote_;
-    remote_ = nullptr;
-    int fd = remote_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
-    if (fd >= 0) {
-      int close_rc = static_cast<int>(InterposerContext::real.close(fd));
-      if (rc == 0)
-        rc = close_rc;
-    }
-    clear_dups();
-    return rc;
-  }
-
-  void try_close_remote() {
-    std::unique_lock lock(remote_mutex_, std::try_to_lock);
-    if (!lock.owns_lock() || !remote_)
       return;
     remote_->close();
     delete remote_;
@@ -333,20 +356,8 @@ public:
     int fd = remote_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
     if (fd >= 0)
       InterposerContext::real.close(fd);
-    clear_dups();
-  }
-
-  int close_remote_fd_only() {
-    // Closes only the primary remote KFD fd. Dup-tracked fds may still be open
-    // in the process, so dup tracking is left intact here and cleared only when
-    // the remote connection is actually torn down (close_remote/
-    // try_close_remote). Wiping it here would drop tracking for live fds and
-    // misroute their subsequent ioctl/close calls.
-    int fd = remote_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
-    int rc = 0;
-    if (fd >= 0)
-      rc = static_cast<int>(InterposerContext::real.close(fd));
-    return rc;
+    std::lock_guard fd_lock(fd_mutex_);
+    kfd_dup_fds_.clear();
   }
 
   void track_sysfs(int fd, const std::string &path) {
@@ -494,6 +505,11 @@ private:
   rj_vm_t *rj_vm_ = nullptr;
   RemoteDriver *remote_ = nullptr;
   std::atomic<int> remote_kfd_fd_{-1};
+  /// @brief Open-reference count for the remote (daemon-mode) KFD connection.
+  /// @details The primary remote fd and every dup of it each hold one
+  /// reference; the RPC connection is torn down only when the last reference is
+  /// released. Mirrors SimulatedDriver's local open refcount for daemon mode.
+  std::atomic<int> remote_open_refs_{0};
 
   std::mutex init_mutex_;
   std::mutex fd_mutex_;
@@ -735,8 +751,14 @@ int openat64(int dirfd, const char *path, int flags, ...) {
 
 int close(int fd) {
   assert(InterposerContext::real.ready());
-  if (InterposerContext::ctx.remote_lookup(fd))
-    return InterposerContext::ctx.close_remote_fd_only();
+  if (InterposerContext::ctx.remote_lookup(fd)) {
+    // Closing the primary remote KFD fd drops one open reference; the synthetic
+    // fd and RPC connection are torn down only when the last reference is
+    // released (teardown_remote), mirroring local-mode primary close which also
+    // defers teardown to the last reference.
+    InterposerContext::ctx.release_remote_open();
+    return 0;
+  }
   InterposerContext::ctx.untrack_sysfs(fd);
   if (InterposerContext::ctx.untrack_drm(fd)) {
     InterposerContext::real.close(fd);
@@ -905,11 +927,12 @@ int ioctl(int fd, unsigned long request, ...) {
     if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
       return remote->ioctl(request, arg);
   }
-  // Late-ioctl safety net: a KFD fd may receive AMDKFD ioctls after it has lost
-  // tracking (e.g. a close/dup race in daemon mode). Forward only AMDKFD-typed
-  // ('K') ioctls, and only on fds not already classified as DRM, so unrelated
-  // DRM fds are never misrouted to the remote KFD driver.
-  if (_IOC_TYPE(request) == AMDKFD_IOCTL_BASE && !InterposerContext::ctx.is_drm(fd)) {
+  // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd
+  // whose primary remote handle changed underneath it (e.g. a close/dup race in
+  // daemon mode). Forward only AMDKFD-typed ioctls, and only on fds we already
+  // track as KFD (primary or dup), so an arbitrary unrelated fd carrying a
+  // type-'K' ioctl is never misrouted to the remote KFD driver.
+  if (_IOC_TYPE(request) == AMDKFD_IOCTL_BASE && InterposerContext::ctx.is_kfd_tracked(fd)) {
     if (auto *remote = InterposerContext::ctx.remote())
       return remote->ioctl(request, arg);
   }
