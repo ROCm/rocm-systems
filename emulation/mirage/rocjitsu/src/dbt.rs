@@ -7,12 +7,12 @@
 //! to the host GPU's architecture (the *target*).
 //!
 //! The translation happens at code-object load time inside ROCR: the
-//! runtime loads rocjitsu's HSA tools hook library
-//! ([`HOOKS_LIB_NAME`]) through the `HSA_TOOLS_LIB` environment
-//! variable, and the hook invokes the rocjitsu DBT pipeline before ROCR
-//! sees a guest code object. The env contract the hook reads is:
+//! runtime loads the rocjitsu library ([`HOOKS_LIB_NAME`]) through the
+//! `HSA_TOOLS_LIB` environment variable, and its HSA tools hook invokes
+//! the rocjitsu DBT pipeline before ROCR sees a guest code object. The
+//! env contract the hook reads is:
 //!
-//! * `HSA_TOOLS_LIB` — path to `librocjitsu_hooks.so` (mirage injects
+//! * `HSA_TOOLS_LIB` — path to `librocjitsu.so` (mirage injects
 //!   this; ROCR `dlopen`s it during `hsa_init()`).
 //! * `RJ_DBT_TARGET_ISA` — **required** host GPU ISA the code is
 //!   translated *to*, e.g. `gfx1201`.
@@ -47,10 +47,11 @@ use mirage_core::topology::TopologyDef;
 /// in [`mirage_core::emulator::EmulatorDef::emulator`]).
 pub const NAME: &str = "rocjitsu-dbt";
 
-/// The rocjitsu HSA tools hook library. ROCR loads it through
-/// `HSA_TOOLS_LIB` and it runs the DBT translation at code-object load
-/// time. Built by the rocjitsu CMake target `rocjitsu_hooks`.
-pub const HOOKS_LIB_NAME: &str = "librocjitsu_hooks.so";
+/// The rocjitsu library ROCR loads through `HSA_TOOLS_LIB`; its HSA
+/// tools hook runs the DBT translation at code-object load time. The
+/// single combined `librocjitsu.so` (built by the rocjitsu CMake target
+/// `rocjitsu_shared`) carries the hook symbols.
+pub const HOOKS_LIB_NAME: &str = crate::LIB_NAME;
 
 /// Emulator option naming the host ISA to translate *to*. Overrides the
 /// physically-detected GPU. Value is a gfx name the hook accepts (see
@@ -358,19 +359,19 @@ fn string_option(def: &EmulatorDef, name: &str) -> Option<String> {
 }
 
 /// Search policy mirage uses to locate the rocjitsu HSA tools hook
-/// library. Anchored on `librocjitsu_hooks.so`; mirrors the KMD
-/// interposer's discovery (an in-tree monorepo build, then generic
-/// ROCm/system fallbacks).
+/// library. Anchored on `librocjitsu.so`; mirrors the KMD interposer's
+/// discovery (an in-tree monorepo build, then generic ROCm/system
+/// fallbacks).
 fn hooks_lib_search() -> LibSearch<'static> {
     LibSearch {
         file_env: &["ROCJITSU_HOOKS_LIB"],
         dir_env: &[],
         home_env: &[],
         lib_name: HOOKS_LIB_NAME,
-        // rocjitsu's in-tree hooks build output, relative to the mirage
+        // rocjitsu's in-tree build output, relative to the mirage
         // binary, so a monorepo build finds a fresh build without extra
         // configuration.
-        binary_relative_dirs: &["../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/hooks"],
+        binary_relative_dirs: &["../../../rocjitsu/build"],
         system_fallbacks: true,
     }
 }

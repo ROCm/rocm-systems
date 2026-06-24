@@ -51,7 +51,7 @@ else
 fi
 
 # 2b. Expand the devel package. rocm[devel] ships its contents (headers,
-#     libs incl. librocjitsu_kmd.so) compressed; `rocm-sdk init` unpacks
+#     libs incl. librocjitsu.so) compressed; `rocm-sdk init` unpacks
 #     them into site-packages/_rocm_sdk_devel. Safe to re-run.
 if [[ -x "$VENV/bin/rocm-sdk" ]]; then
   log "expanding ROCm devel contents (rocm-sdk init)"

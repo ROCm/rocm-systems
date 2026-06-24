@@ -7,7 +7,7 @@
 //! The mirage per-node host starts one of these on the node it serves.
 //! It:
 //!
-//! 1. Loads `librocjitsu_kmd.so` (which exports the full `rj_vm_*` API)
+//! 1. Loads `librocjitsu.so` (which exports the full `rj_vm_*` API)
 //!    and creates a VM in [`RjVmMode::Daemon`] mode from the synthesised
 //!    `SimulationConfig`. In daemon mode every GPU allocation is backed
 //!    by a `memfd` so it can be shared with the workload process.

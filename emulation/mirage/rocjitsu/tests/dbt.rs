@@ -84,7 +84,7 @@ fn injection_emits_hsa_tools_env_contract() {
 
     // Stand in for the real hook library so discovery succeeds without a
     // built rocjitsu; `ROCJITSU_HOOKS_LIB` is an explicit file override.
-    let fake_hook = tmp.path().join("librocjitsu_hooks.so");
+    let fake_hook = tmp.path().join("librocjitsu.so");
     std::fs::write(&fake_hook, b"\x7fELF stub").unwrap();
     // Pin both ISAs explicitly so the contract is deterministic and
     // independent of whatever GPU (if any) this host has.
@@ -138,7 +138,7 @@ fn injection_fails_without_a_target_isa() {
     let tmp = tempfile::tempdir().unwrap();
     mirage_core::paths::set_test_root(tmp.path());
 
-    let fake_hook = tmp.path().join("librocjitsu_hooks.so");
+    let fake_hook = tmp.path().join("librocjitsu.so");
     std::fs::write(&fake_hook, b"\x7fELF stub").unwrap();
     // SAFETY: serialised by `test_env_lock`.
     unsafe {
@@ -173,7 +173,7 @@ fn target_isa_option_drives_injection() {
     let tmp = tempfile::tempdir().unwrap();
     mirage_core::paths::set_test_root(tmp.path());
 
-    let fake_hook = tmp.path().join("librocjitsu_hooks.so");
+    let fake_hook = tmp.path().join("librocjitsu.so");
     std::fs::write(&fake_hook, b"\x7fELF stub").unwrap();
     // SAFETY: serialised by `test_env_lock`.
     unsafe {

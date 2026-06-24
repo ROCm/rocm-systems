@@ -11,9 +11,10 @@
 //! a ROCm wheel / system install and is never present when mirage is
 //! built, so we cannot link it at build time. Instead we `dlopen` it
 //! (via [`libloading`]) and resolve the handful of `rj_vm_*` symbols we
-//! need. The single self-contained `librocjitsu_kmd.so` exports the full
-//! VM API in addition to the LD_PRELOAD interposer, so loading that one
-//! library is enough to both interpose a workload *and* host the daemon.
+//! need. The single self-contained `librocjitsu.so` exports the full
+//! VM API in addition to the LD_PRELOAD interposer and the HSA tools
+//! hooks, so loading that one library is enough to interpose a workload,
+//! host the daemon, *and* translate code objects.
 //!
 //! # Safety
 //!
