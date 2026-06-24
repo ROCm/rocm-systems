@@ -41,6 +41,11 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef __linux__
+// Required for accept4() and SOCK_CLOEXEC
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "core/util/os.h"
 #include "core/util/utils.h"
 

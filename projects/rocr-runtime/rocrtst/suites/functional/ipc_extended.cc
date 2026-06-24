@@ -33,7 +33,7 @@ enum SyncPhase {
   PHASE_DETACH_1_DONE = 3,
   PHASE_FREE_1_DONE = 4,
   PHASE_EXPORT_2_READY = 5,
-  PHASE_ATTACH_2_DONE = 6,
+  PHASE_DETACH_2_DONE = 6,
   PHASE_TEST_COMPLETE = 7,
   PHASE_ERROR = -1
 };
@@ -229,7 +229,7 @@ void IPCServerRestartTest::ParentProcessImpl() {
   shared_->phase = PHASE_EXPORT_2_READY;
 
   // Wait for child to attach to buffer 2
-  ASSERT_TRUE(WaitForPhase(shared_, PHASE_ATTACH_2_DONE));
+  ASSERT_TRUE(WaitForPhase(shared_, PHASE_DETACH_2_DONE));
   PROCESS_LOG("Parent: Child attached to buffer 2\n");
 
   // Cleanup
@@ -284,7 +284,7 @@ void IPCServerRestartTest::ChildProcessImpl() {
   err = hsa_amd_ipc_memory_detach(ipc_ptr2);
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  shared_->phase = PHASE_ATTACH_2_DONE;
+  shared_->phase = PHASE_DETACH_2_DONE;
 
   // Wait for test completion
   ASSERT_TRUE(WaitForPhase(shared_, PHASE_TEST_COMPLETE));
@@ -466,7 +466,7 @@ void IPCFreeBeforeDetachTest::ParentProcessImpl() {
   shared_->phase = PHASE_EXPORT_2_READY;
 
   // Wait for child to validate
-  ASSERT_TRUE(WaitForPhase(shared_, PHASE_ATTACH_2_DONE));
+  ASSERT_TRUE(WaitForPhase(shared_, PHASE_DETACH_2_DONE));
 
   err = hsa_amd_memory_pool_free(gpuBuf2);
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err);
@@ -515,7 +515,7 @@ void IPCFreeBeforeDetachTest::ChildProcessImpl() {
   err = hsa_amd_ipc_memory_detach(ipc_ptr2);
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  shared_->phase = PHASE_ATTACH_2_DONE;
+  shared_->phase = PHASE_DETACH_2_DONE;
 
   ASSERT_TRUE(WaitForPhase(shared_, PHASE_TEST_COMPLETE));
   PROCESS_LOG("Child: Free-before-detach test PASSED\n");
