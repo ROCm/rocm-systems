@@ -108,24 +108,46 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 bool
 thread_trace_parameter_pack::are_params_valid() const
 {
-    // Guard against the most common misconfigurations before touching HSA
-    // state so we can fail early with a descriptive message.
+    // Guard against the most common misconfigurations before touching HSA state
+    // so we can fail early with a descriptive message. These checks validate
+    // caller-supplied (user) input, so a failure must NOT be fatal: report a
+    // clear error and return false so the caller receives
+    // ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT and can reject the input
+    // cleanly. Using a fatal log here (e.g. under ROCPROFILER_CI) aborts the
+    // process on a mere bad parameter.
     if(shader_cb_fn == nullptr)
     {
-        ROCP_CI_LOG(WARNING) << "Callback cannot be null!";
+        ROCP_ERROR << "Thread trace shader callback cannot be null";
         return false;
     }
 
-    if(shader_engine_mask == 0) return false;
+    if(shader_engine_mask == 0)
+    {
+        ROCP_ERROR << "Invalid thread trace shader engine mask: 0 (must be non-zero)";
+        return false;
+    }
 
     if(buffer_size < MIN_BUFFER_SIZE)
     {
-        ROCP_CI_LOG(WARNING) << "Invalid buffer size: " << buffer_size;
+        ROCP_ERROR << "Invalid thread trace buffer size: " << buffer_size << " (minimum is "
+                   << MIN_BUFFER_SIZE << " bytes / 1 MB)";
         return false;
     }
 
-    if(target_cu > 0xF) return false;
-    if(simd_select > 0xF) return false;  // Only 16 CUs and 4 SIMDs
+    // Only 16 CUs (0x0-0xF) and 4 SIMDs (0x0-0xF) are addressable.
+    if(target_cu > 0xF)
+    {
+        ROCP_ERROR << "Invalid thread trace target CU: " << static_cast<uint32_t>(target_cu)
+                   << " (valid range is 0-15 / 0x0-0xF)";
+        return false;
+    }
+
+    if(simd_select > 0xF)
+    {
+        ROCP_ERROR << "Invalid thread trace SIMD select mask: " << static_cast<uint32_t>(simd_select)
+                   << " (valid range is 0x0-0xF)";
+        return false;
+    }
 
     return true;
 }
