@@ -5713,8 +5713,6 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
  *
  *  @param[in] telem_id The telemetry item ID for which the name is requested
  *
- *  @param[in] telem_name The telemetry item name
- *
  *  @return const char* | Pointer to string containing the telemetry item name,
  *  or UNKNOWN if the category or telemetry ID is not recognized
  */
