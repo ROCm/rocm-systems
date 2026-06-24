@@ -1431,8 +1431,11 @@ namespace elf {
     bool GElfImage::initAsBuffer(const void* buffer, size_t size)
     {
       if (size == 0) {
-        out << "Error: buffer size must be specified" << std::endl;
-        return false;
+        size = ElfSize(buffer, 0);
+        if (size == 0) {
+          out << "Error: failed to determine buffer size" << std::endl;
+          return false;
+        }
       }
       if ((e = elf_memory(reinterpret_cast<char*>(const_cast<void*>(buffer)), size
 #ifdef AMD_LIBELF
@@ -1773,18 +1776,27 @@ namespace elf {
 
     uint64_t ElfSize(const void* emi, size_t buffer_size)
     {
-      const Elf64_Ehdr *ehdr = (const Elf64_Ehdr*) emi;
-      if (ehdr == NULL || EV_CURRENT != ehdr->e_version || buffer_size == 0) {
+      if (emi == NULL) {
         return 0;
       }
 
-      if (ehdr->e_shoff >= buffer_size) {
+      const bool bounded = buffer_size != 0;
+      if (bounded && buffer_size < sizeof(Elf64_Ehdr)) {
+        return 0;
+      }
+
+      const Elf64_Ehdr *ehdr = (const Elf64_Ehdr*) emi;
+      if (EV_CURRENT != ehdr->e_version) {
+        return 0;
+      }
+
+      if (bounded && ehdr->e_shoff >= buffer_size) {
         return 0;
       }
 
       uint64_t shdr_table_size =
           static_cast<uint64_t>(ehdr->e_shentsize) * static_cast<uint64_t>(ehdr->e_shnum);
-      if (shdr_table_size > buffer_size - ehdr->e_shoff) {
+      if (bounded && shdr_table_size > buffer_size - ehdr->e_shoff) {
         return 0;
       }
 
@@ -1798,17 +1810,16 @@ namespace elf {
         if (max_offset < cur_offset) {
           max_offset = cur_offset;
           total_size = max_offset;
+          if (bounded && cur_offset >= buffer_size) {
+            return 0;
+          }
           if (SHT_NOBITS != shdr[i].sh_type) {
-            if (shdr[i].sh_size > buffer_size - cur_offset) {
+            if (bounded && shdr[i].sh_size > buffer_size - cur_offset) {
               return 0;
             }
             total_size += static_cast<uint64_t>(shdr[i].sh_size);
           }
         }
-      }
-
-      if (total_size > buffer_size) {
-        return 0;
       }
 
       return total_size;
