@@ -319,6 +319,12 @@ class GDAContext : public Context {
   __device__ void alltoall_linear_thread_puts(rocshmem_team_t team, T *dest,
                                               const T *source, int nelems);
 
+  __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
+                                          const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
+    void *dst, const void *src, int nelems);
+
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
       int64_t *pSync, ActiveWFInfo &wf_info);
 
