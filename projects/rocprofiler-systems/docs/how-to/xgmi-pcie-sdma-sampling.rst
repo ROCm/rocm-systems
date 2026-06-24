@@ -93,14 +93,14 @@ These samples help correlate sustained ``hipMemcpy``-style traffic and other SDM
 transfers with engine load in Perfetto or ROCpd output.
 
 For a small workload that exercises H2D, D2D, and D2H copies for benchmarking and
-profiling, see `sdma_test on GitHub`_ and the `sdma_test README on GitHub`_ (build steps,
+profiling, see `sdma-test on GitHub`_ and the `sdma-test README on GitHub`_ (build steps,
 flags, and ``rocprof-sys-run`` invocations).
 
-.. _`sdma_test on GitHub`:
-   https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples/sdma_test
+.. _`sdma-test on GitHub`:
+   https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples/sdma-test
 
-.. _`sdma_test README on GitHub`:
-   https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/examples/sdma_test/README.md
+.. _`sdma-test README on GitHub`:
+   https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/examples/sdma-test/README.md
 
 .. note::
 
@@ -185,14 +185,14 @@ The visualization will show:
 
 .. _sdma-test-example:
 
-Using the sdma_test example for testing
+Using the sdma-test example for testing
 =========================================
 
-The `sdma_test on GitHub`_ tree contains the example that drives Host-to-Device,
+The `sdma-test on GitHub`_ tree contains the example that drives Host-to-Device,
 Device-to-Device, and Device-to-Host async copies so you can observe SDMA utilization
 alongside HIP memory-copy tracing. Build instructions, CLI flags (transfer size,
 iterations, infinite mode), and additional environment options are documented in the
-`sdma_test README on GitHub`_.
+`sdma-test README on GitHub`_.
 
 1. Source the ROCm Systems Profiler environment:
 
@@ -220,11 +220,11 @@ Alternatively, if you are using modules, use:
   ROCPROFSYS_AMD_SMI_METRICS = busy,temp,power,mem_usage,sdma_usage
   ROCPROFSYS_ROCM_DOMAINS    = hip_runtime_api,memory_copy
 
-3. Build ``sdma_test`` (see the `sdma_test README on GitHub`_), then profile it, for example:
+3. Build ``sdma-test`` (see the `sdma-test README on GitHub`_), then profile it, for example:
 
 .. code-block:: shell
 
-   rocprof-sys-run -- ./sdma_test -s 512 -n 5
+   rocprof-sys-run -- ./sdma-test -s 512 -n 5
 
 Open the resulting Perfetto trace as described above; when ``sdma_usage`` is supported on
 your system, look for **SDMA usage** / device SDMA utilization tracks in addition to HIP
