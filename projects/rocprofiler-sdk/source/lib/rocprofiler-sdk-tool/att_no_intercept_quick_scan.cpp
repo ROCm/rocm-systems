@@ -376,8 +376,6 @@ send_overlapping_requests(scan_context_t& context,
             state.chunk_requested.insert(chunk_index);
         }
         ROCP_INFO << "Requesting post-chunk: " << chunk_index;
-        while(state.chunk_completed < chunk_index && !state.chunk_failed)
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
     while(state.chunk_completed < chunk_index && !state.chunk_failed)
