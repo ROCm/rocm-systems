@@ -8006,6 +8006,46 @@ rocprofiler-sdk:
             - gfx1250
           block: TCP
           event: 36
+    - name: TX_VMW_GL1_REQ_READ
+      description: Total read requests to GL1.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 32
+    - name: TX_VMW_GL1_REQ_READ_128B
+      description: Total read requests to GL1 with 128B size.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 33
+    - name: TX_VMW_GL1_REQ_READ_64B
+      description: Total read requests to GL1 with 64B size.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 34
+    - name: TX_VMW_GL1_REQ_WRITE
+      description: Total write requests to GL1.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 35
+    - name: TX_VMW_GL1_VMW_BACK_PRESSURE
+      description: TCP has request to send to GL1 but it is out of credits. Not Windowed.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 51
     - name: TX_VMW_GL1_VMW_RDRET_STALL
       description: Write to cache stalled by read return from GL1. Row0 Event
       properties: []
@@ -8062,6 +8102,14 @@ rocprofiler-sdk:
             - gfx1250
           block: TCP
           event: 11
+    - name: TX_VMW_REQ_MISS
+      description: Total cache requests that missed
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 21
     - name: TX_VMW_REQ_READ
       description: Total cache read requests
       properties: []
@@ -8198,6 +8246,15 @@ rocprofiler-sdk:
             - gfx1250
           block: TCP
           event: 41
+    - name: TX_VMW_VMW_LATENCY
+      description: Total TCP instruction latency (from first clock of instruction entering to first 
+        clock of instruction leaving), divide by TA_TCP_STATE_READ to average instruction latency.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 40
     - name: TX_VMW_WRITE_SETCONFLICT_STALL
       description: Set conflict stall on a write
       properties: []
