@@ -29,9 +29,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <unordered_set>
-#include <vector>
 
 namespace rocprofiler
 {
@@ -39,13 +37,13 @@ namespace tool
 {
 namespace att_no_intercept
 {
-struct agent_config_t
+using kernel_symbol_t =
+    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+
+struct agent_trace_config_t
 {
-    rocprofiler_agent_id_t                            id                  = {};
-    uint64_t                                          gpu_index           = 0;
-    std::string                                       name                = {};
-    std::vector<rocprofiler_thread_trace_parameter_t> parameters          = {};
-    uint64_t                                          consecutive_kernels = 0;
+    rocprofiler_context_id_t context  = {};
+    rocprofiler_user_data_t  userdata = {};
 };
 
 using shader_data_forwarder_t = void (*)(rocprofiler_thread_trace_shader_data_t,
@@ -55,17 +53,21 @@ bool
 is_supported();
 
 void
-configure(std::vector<agent_config_t> agents,
-          shader_data_forwarder_t   shader_data_forwarder,
+configure(shader_data_forwarder_t shader_data_forwarder,
           std::unordered_set<size_t> kernel_filter_range);
+
+agent_trace_config_t
+configure_agent(rocprofiler_agent_id_t id, uint64_t consecutive_kernels);
+
+void
+shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
+                     rocprofiler_user_data_t                userdata);
 
 void
 code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& data);
 
 void
-kernel_symbol_load(
-    const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& data,
-    bool is_targeted);
+kernel_symbol_load(const kernel_symbol_t& data, bool is_targeted);
 
 void
 finalize();
