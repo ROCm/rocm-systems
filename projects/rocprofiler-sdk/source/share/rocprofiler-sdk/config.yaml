@@ -1190,8 +1190,8 @@ rocprofiler-sdk:
           event: 114
     - name: GL2C_EA_WR_UNCACHED_32B
       description: Number of 32-byte write/atomic going over the EA_wrreq interface due to uncached 
-        traffic. Note that CC mtypes can produce uncached requests, and those are included in this. A 
-        64-byte request will be counted as 2; 128-byte as 4; 256-byte as 8.
+        traffic. Note that CC mtypes can produce uncached requests, and those are included in this. 
+        A 64-byte request will be counted as 2; 128-byte as 4; 256-byte as 8.
       properties: []
       definitions:
         - architectures:
@@ -5633,7 +5633,7 @@ rocprofiler-sdk:
           block: SQ
           event: 102
     - name: SQ_INST_CYCLES_VMEM_LOAD
-      description: Number of cycles needed to send addr and data for VMEM loads (lds, buffer, image, 
+      description: Number of cycles needed to send addr and data for VMEM loads (lds, buffer, image,
         flat, scratch, global) instructions. {emulated, C1}
       properties: []
       definitions:
@@ -7859,7 +7859,8 @@ rocprofiler-sdk:
           block: TCP
           event: 184
     - name: TX_VCD_TD_BUSY
-      description: TD is processing or waiting for data. Perf_Windowing not supported for this counter.
+      description: TD is processing or waiting for data. Perf_Windowing not supported for this 
+        counter.
       properties: []
       definitions:
         - architectures:
@@ -7907,7 +7908,8 @@ rocprofiler-sdk:
           block: TCP
           event: 1
     - name: TX_VMW_GL1_PENDING_STALL
-      description: RQ Arbitration stall due to waiting for response from GL1. Not Windowed. Row0 Event
+      description: RQ Arbitration stall due to waiting for response from GL1. Not Windowed. Row0 
+        Event
       properties: []
       definitions:
         - architectures:
@@ -13813,8 +13815,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 177
     - name: GL2C_EA_ATOMIC
-      description: Number of transactions going over the EA_wrreq interface that are actually atomic requests for 
-        all clients.
+      description: Number of transactions going over the EA_wrreq interface that are actually atomic
+        requests for all clients.
       properties: []
       definitions:
         - architectures:
@@ -13822,8 +13824,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 115
     - name: GL2C_EA_ATOMIC_LEVEL
-      description: The sum of the number of EA atomics in flight for all clients. This is primarily meant for 
-        measure average EA atomic latency. Average atomic latency =
+      description: The sum of the number of EA atomics in flight for all clients. This is primarily 
+        meant for measure average EA atomic latency. Average atomic latency = 
         GL2C_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/GL2C_PERF_SEL_EA_WRREQ_ATOMIC.
       properties: []
       definitions:
@@ -13832,8 +13834,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 116
     - name: GL2C_EA_RDREQ_LEVEL
-      description: The sum of the number of GL2C/EA read requests in flight for all clients. This is primarily 
-        meant for measure average EA read latency. Average read latency =
+      description: The sum of the number of GL2C/EA read requests in flight for all clients. This is
+        primarily meant for measure average EA read latency. Average read latency = 
         GL2C_PERF_SEL_EA_RDREQ_LEVEL/GL2C_PERF_SEL_EA_RDREQ.
       properties: []
       definitions:
@@ -13850,8 +13852,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 123
     - name: GL2C_IB_REQ
-      description: Number of requests through the IB. This measures the raw request count from graphics clients 
-        going to this GL2C.
+      description: Number of requests through the IB. This measures the raw request count from 
+        graphics clients going to this GL2C.
       properties: []
       definitions:
         - architectures:
@@ -13915,7 +13917,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 76
     - name: GL2C_SRC_FIFO_FULL
-      description: Number of cycles the src fifo was expected to be full as measured at the IB block.
+      description: Number of cycles the src fifo was expected to be full as measured at the IB 
+        block.
       properties: []
       definitions:
         - architectures:
@@ -13923,10 +13926,11 @@ rocprofiler-sdk:
           block: GL2C
           event: 150
     - name: GL2C_TAG_STALL
-      description: Number of cycles the normal request pipeline in the tag was stalled for any reason. Normally, 
-        stalls of this nature are measured exactly from one point the pipeline, but that is not the
-        case for this counter. Probes can stall the pipeline at a variety of places, and there is no
-        single point that can reasonably measure the total stalls accurately.
+      description: Number of cycles the normal request pipeline in the tag was stalled for any 
+        reason. Normally, stalls of this nature are measured exactly from one point the pipeline, 
+        but that is not the case for this counter. Probes can stall the pipeline at a variety of 
+        places, and there is no single point that can reasonably measure the total stalls 
+        accurately.
       properties: []
       definitions:
         - architectures:
@@ -13934,8 +13938,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 151
     - name: GL2C_TOO_MANY_EA_WRREQS_STALL
-      description: Number of cycles the GL2C could not send a EA write request because it already reached its 
-        maximum number of pending EA write requests.
+      description: Number of cycles the GL2C could not send a EA write request because it already 
+        reached its maximum number of pending EA write requests.
       properties: []
       definitions:
         - architectures:
@@ -13951,8 +13955,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 89
     - name: GL2C_WRITE_32_REQ
-      description: Number of 32 byte write requests, includes re-compressed writes. This is measured at the 
-        output_fifos block.
+      description: Number of 32 byte write requests, includes re-compressed writes. This is measured
+        at the output_fifos block.
       properties: []
       definitions:
         - architectures:
