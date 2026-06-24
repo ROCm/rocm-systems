@@ -44,9 +44,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation") {
   config.blockDim = {1024};
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
 
-  if (props.clusterLaunch) {
-    INFO("Max potential cluster size is: " << clusterSize);
-  } else {
+  if (!props.clusterLaunch) {
     HIP_SKIP_TEST("cluster launches are not supported on this device");
   }
 
