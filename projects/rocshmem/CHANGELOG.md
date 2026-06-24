@@ -26,7 +26,6 @@
    * Separated put/get memcpy primitives to apply correct cache coherence semantics and fences
    * Use constmem for backend variables and provider muxing
 
-  
 ## rocSHMEM 3.4.0 for ROCm 7.13
 ### Added
 * Added new APIs:
