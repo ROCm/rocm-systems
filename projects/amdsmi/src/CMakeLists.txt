@@ -216,11 +216,7 @@ set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
         if(TARGET ${AMD_SMI})
-            add_custom_command(
-                TARGET ${AMD_SMI}
-                POST_BUILD
-                COMMAND ${CMAKE_STRIP} lib${AMD_SMI}.so.${SO_VERSION_STRING}
-            )
+            add_custom_command(TARGET ${AMD_SMI} POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${AMD_SMI}>)
         endif()
     endif()
 endif()
@@ -276,6 +272,11 @@ if(BUILD_PYTHON_WHEEL)
         PRIVATE "LINKER:--version-script=${VERSION_SCRIPT}" "LINKER:-Bsymbolic-functions"
     )
     set_property(TARGET ${AMD_SMI}_python APPEND PROPERTY LINK_DEPENDS "${VERSION_SCRIPT}")
+    ## Strip the wheel-shipped library in Release so the published wheel does
+    ## not carry DWARF debug symbols (mirrors the system-library strip above).
+    if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+        add_custom_command(TARGET ${AMD_SMI}_python POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${AMD_SMI}_python>)
+    endif()
 endif()
 ## Add the install directives for the runtime library.
 set(_INSTALL_TARGETS ${AMD_SMI} amdsminic)

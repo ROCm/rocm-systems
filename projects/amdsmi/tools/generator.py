@@ -22,6 +22,7 @@ import argparse
 import tempfile
 import shutil
 import platform
+import re
 from subprocess import run, PIPE
 from pathlib import Path
 from ctypeslib.clang2py import main as clangToPy
@@ -158,6 +159,25 @@ def main():
 
     library_name = os.path.basename(library)
 
+    # SONAME major must match src/CMakeLists.txt SOVERSION, which is itself
+    # AMDSMI_LIB_VERSION_MAJOR in include/amd_smi/amdsmi.h. Parse it from the
+    # header we are already processing rather than hardcoding it, so a major
+    # bump cannot silently desync the loader's system-library SONAME.
+    soname_major = ""
+    try:
+        _m = re.search(
+            r"#define\s+AMDSMI_LIB_VERSION_MAJOR\s+(\d+)",
+            Path(input_file).read_text(encoding="utf-8"),
+        )
+        if _m:
+            soname_major = _m.group(1)
+    except OSError:
+        pass
+    if not soname_major:
+        raise SystemExit(
+            "generator.py: could not parse AMDSMI_LIB_VERSION_MAJOR from " + str(input_file)
+        )
+
     clang_include_dir = run(
         ["clang", "--print-resource-dir"], stdout=PIPE, stderr=PIPE, encoding="utf-8"
     ).stdout.strip()
@@ -207,7 +227,7 @@ _libraries = {{}}
 
 
 # Versioned SONAME the system package ships; matches src/CMakeLists.txt SOVERSION.
-_AMDSMI_LIB_SONAME = "{library_name}.26"
+_AMDSMI_LIB_SONAME = "{library_name}.{soname_major}"
 
 # Whether the loader may fall back to the system SONAME after the bundled
 # wheel-library check. The committed wrapper and the system rpm/deb keep this

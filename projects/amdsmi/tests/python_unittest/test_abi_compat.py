@@ -35,11 +35,15 @@
 # and ctypes.CDLL is monkey-patched to a FakeCDLL that simulates the
 # library surface.
 
+import ast
 import ctypes
 import importlib
+import importlib.util
 import os
-import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -70,7 +74,7 @@ def _find_py_interface():
 PY_INTERFACE = _find_py_interface()
 
 
-class FakeCDLL(object):
+class FakeCDLL:
     """Stand-in for a real ctypes.CDLL bound to libamd_smi.so.
 
     Exposes only the curated `available_symbols` set; everything else
@@ -95,7 +99,7 @@ class FakeCDLL(object):
             # Return a callable that mimics a ctypes function pointer
             # well enough that the wrapper's `restype = ...` /
             # `argtypes = [...]` assignments don't blow up.
-            class _FakeFn(object):
+            class _FakeFn:
                 __slots__ = ("restype", "argtypes")
 
                 def __init__(self):
@@ -123,32 +127,32 @@ STABLE_SYMBOLS = {
 
 
 def _scan_unguarded_bindings():
-    """Return the set of amdsmi_* names bound at wrapper module-import time
-    without a try/except guard around the assignment.
+    """Return amdsmi_* names bound at wrapper module top level, outside any
+    try/except.
 
-    These are the bindings that REQUIRE the symbol to exist in the loaded
-    .so (otherwise `import amdsmi_wrapper` itself raises). Every name in
-    this set must therefore be a member of STABLE_SYMBOLS, or older-.so
-    users cannot import the wrapper at all.
+    These bindings REQUIRE the symbol to exist in the loaded .so (otherwise
+    ``import amdsmi_wrapper`` itself raises), so every name here must be in
+    STABLE_SYMBOLS or older-.so users cannot import the wrapper at all.
+
+    Parsed with ``ast`` rather than a line regex so reflowing the generated
+    wrapper cannot change the result: only assignments that sit directly in
+    the module body are inspected; anything nested in an ``ast.Try`` (i.e.
+    guarded) is excluded by construction.
     """
-    text = (PY_INTERFACE / "amdsmi_wrapper.py").read_text()
-    pat = re.compile(
-        r"^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*_libraries\[['\"]libamd_smi\.so['\"]\]"
-        r"\.(amdsmi_[A-Za-z0-9_]+)"
-    )
+    tree = ast.parse((PY_INTERFACE / "amdsmi_wrapper.py").read_text())
     unguarded = set()
-    depth = 0
-    for line in text.splitlines():
-        stripped = line.lstrip()
-        if stripped.startswith("try:"):
-            depth += 1
+    for stmt in tree.body:
+        if not isinstance(stmt, ast.Assign):
             continue
-        if stripped.startswith("except"):
-            depth = max(0, depth - 1)
-            continue
-        m = pat.match(stripped)
-        if m and depth == 0:
-            unguarded.add(m.group(1))
+        value = stmt.value
+        if (
+            isinstance(value, ast.Attribute)
+            and value.attr.startswith("amdsmi_")
+            and isinstance(value.value, ast.Subscript)
+            and isinstance(value.value.value, ast.Name)
+            and value.value.value.id == "_libraries"
+        ):
+            unguarded.add(value.attr)
     return unguarded
 
 
@@ -160,7 +164,7 @@ def _import_fresh_wrapper():
     return importlib.import_module("amdsmi_wrapper")
 
 
-class _Patch(object):
+class _Patch:
     """Tiny context manager: patch ctypes.CDLL to a FakeCDLL factory."""
 
     def __init__(self, available):
@@ -182,10 +186,7 @@ class AbiCompatTest(unittest.TestCase):
 
     def setUp(self):
         # Snapshot env so we never leak AMDSMI_LIB_OVERRIDE into other tests.
-        self._saved_env = {
-            k: os.environ.get(k)
-            for k in ("AMDSMI_LIB_OVERRIDE", "AMDSMI_DEBUG_LOAD", "ROCM_HOME", "ROCM_PATH")
-        }
+        self._saved_env = {k: os.environ.get(k) for k in ("AMDSMI_LIB_OVERRIDE",)}
         os.environ["AMDSMI_LIB_OVERRIDE"] = "/tmp/amdsmi-fake-libamd_smi.so"
 
     def tearDown(self):
@@ -273,6 +274,99 @@ class AbiCompatTest(unittest.TestCase):
         # (no truthy claim of arbitrary symbol presence).
         with self.assertRaises(AttributeError):
             getattr(sentinel, "definitely_not_an_amdsmi_function")
+
+
+WRAPPER_SRC = PY_INTERFACE / "amdsmi_wrapper.py"
+DISABLE_SYSTEM_FALLBACK_TOOL = REPO_ROOT / "tools" / "disable_system_fallback.py"
+
+
+def _import_wrapper_from(dir_path, module_name):
+    """Import a copied amdsmi_wrapper.py from dir_path under a unique name."""
+    wrapper = Path(dir_path) / "amdsmi_wrapper.py"
+    sys.modules.pop(module_name, None)
+    spec = importlib.util.spec_from_file_location(module_name, wrapper)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class WheelLoaderContractTest(unittest.TestCase):
+    """The pip-wheel loader contract: prefer the bundled libamd_smi_python.so
+    (case 2), and refuse to fall back to a system library when the bundle is
+    missing -- the property that stops a wheel from silently loading an
+    unrelated system libamd_smi.so (e.g. PyTorch's)."""
+
+    def setUp(self):
+        self._saved_override = os.environ.pop("AMDSMI_LIB_OVERRIDE", None)
+        self._tmp = Path(tempfile.mkdtemp(prefix="amdsmi-loader-"))
+        if WRAPPER_SRC.is_file():
+            shutil.copy(WRAPPER_SRC, self._tmp / "amdsmi_wrapper.py")
+        self._modname = "amdsmi_wrapper_contract_%d" % id(self)
+
+    def tearDown(self):
+        if self._saved_override is not None:
+            os.environ["AMDSMI_LIB_OVERRIDE"] = self._saved_override
+        sys.modules.pop(self._modname, None)
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_bundled_python_so_is_preferred(self):
+        bundled = self._tmp / "libamd_smi_python.so"
+        bundled.write_bytes(b"")  # presence is all the loader checks
+        attempted = []
+        orig = ctypes.CDLL
+
+        def _record(path, mode=0):
+            attempted.append(str(path))
+            return FakeCDLL(path, mode, STABLE_SYMBOLS)
+
+        ctypes.CDLL = _record
+        try:
+            mod = _import_wrapper_from(self._tmp, self._modname)
+        finally:
+            ctypes.CDLL = orig
+        self.assertEqual(mod._loaded_lib_path, str(bundled))
+        self.assertTrue(attempted, "loader never called ctypes.CDLL")
+        self.assertEqual(attempted[0], str(bundled), "bundled .so was not the first load attempt")
+
+    @unittest.skipUnless(
+        WRAPPER_SRC.is_file() and DISABLE_SYSTEM_FALLBACK_TOOL.is_file(),
+        "wrapper or disable_system_fallback.py not found (installed layout)",
+    )
+    def test_wheel_refuses_system_fallback_when_bundle_missing(self):
+        wrapper = self._tmp / "amdsmi_wrapper.py"
+        subprocess.check_call([sys.executable, str(DISABLE_SYSTEM_FALLBACK_TOOL), str(wrapper)])
+        mod = _import_wrapper_from(self._tmp, self._modname)
+        self.assertFalse(mod._AMDSMI_ALLOW_SYSTEM_FALLBACK)
+        # No bundled .so beside the wrapper and no override: the loader must
+        # raise rather than load a system libamd_smi.so.
+        with self.assertRaises(OSError) as ctx:
+            mod._load_library()
+        self.assertIn("refusing to fall back", str(ctx.exception))
+
+
+class DisableSystemFallbackToolTest(unittest.TestCase):
+    """tools/disable_system_fallback.py flips the loader flag exactly once."""
+
+    @unittest.skipUnless(
+        WRAPPER_SRC.is_file() and DISABLE_SYSTEM_FALLBACK_TOOL.is_file(),
+        "wrapper or disable_system_fallback.py not found (installed layout)",
+    )
+    def test_flag_flipped_and_double_run_guarded(self):
+        tmp = Path(tempfile.mkdtemp(prefix="amdsmi-disable-"))
+        try:
+            wrapper = tmp / "amdsmi_wrapper.py"
+            shutil.copy(WRAPPER_SRC, wrapper)
+            self.assertIn("_AMDSMI_ALLOW_SYSTEM_FALLBACK = True", wrapper.read_text())
+            subprocess.check_call([sys.executable, str(DISABLE_SYSTEM_FALLBACK_TOOL), str(wrapper)])
+            patched = wrapper.read_text()
+            self.assertIn("_AMDSMI_ALLOW_SYSTEM_FALLBACK = False", patched)
+            self.assertNotIn("_AMDSMI_ALLOW_SYSTEM_FALLBACK = True", patched)
+            # Anchor is gone now -> a second run must fail (count != 1).
+            rc = subprocess.call([sys.executable, str(DISABLE_SYSTEM_FALLBACK_TOOL), str(wrapper)])
+            self.assertNotEqual(rc, 0)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

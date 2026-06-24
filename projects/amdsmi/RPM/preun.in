@@ -33,11 +33,13 @@ rm_rocm_tests_dir(){
 }
 
 
-return_logrotateToOrigConfig() {
-  # Reverse the logrotate cadence override applied during install:
-  # drop our drop-in, return logrotate to cron.daily only when the user
-  # has no daily entry of their own (no-clobber), and restore the systemd
-  # timer from the backup we saved.
+rm_logrotateConfig() {
+  # Drop our /etc/logrotate.d/amd_smi.conf snippet. We no longer mutate
+  # the system logrotate.timer or move cron.daily/logrotate to
+  # cron.hourly, so there is nothing else to restore here.
+  # Older packages (pre-cleanup) may have left a backup behind --
+  # restore it on a best-effort basis so a subsequent upgrade does not
+  # leave the user stuck with our hourly override.
   local logrotateConfFile=/etc/logrotate.d/amd_smi.conf
   if [ -f "$logrotateConfFile" ]; then
     rm -f "$logrotateConfFile"
@@ -60,5 +62,5 @@ if [ "$1" -le 1 ]; then
     rm_leftovers
     rm_logFolder
     rm_rocm_tests_dir
-    return_logrotateToOrigConfig
+    rm_logrotateConfig
 fi

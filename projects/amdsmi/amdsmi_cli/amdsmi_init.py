@@ -125,6 +125,9 @@ def amdsmi_cli_init():
         logging.debug("amdgpu driver's initstate is live")
     if cpu_init_disabled:
         logging.debug("CPU/ESMI init disabled via AMDSMI_DISABLE_CPU_INIT")
+    # amdsmi_get_cpu_handles has shipped in every supported libamd_smi.so
+    # (ROCm 5.6+), so the previous hasattr() guard here was always true; it
+    # was removed because the regenerated wrapper binds the symbol directly.
     elif check_amd_hsmp_driver():
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
         logging.debug("hsmp driver's initstate is live")

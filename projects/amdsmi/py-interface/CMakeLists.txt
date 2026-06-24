@@ -176,9 +176,9 @@ endif()
 # fail with "No module named 'amdsmi'".
 #
 # /usr/bin/python3 is the python that /opt/rocm/bin/amd-smi resolves to
-# via its `#!/usr/bin/env python3` shebang at runtime, so its purelib is
-# the only correct destination for the system DEB/RPM. We query it
-# directly with sysconfig.get_paths()['purelib'].
+# via its `#!/usr/bin/env python3` shebang at runtime, so its site-packages
+# is the only correct destination for the system DEB/RPM. We query it
+# directly with the script below.
 #
 # IMPORTANT: do NOT use sysconfig.get_paths()['purelib'] -- on
 # Debian/Ubuntu the sysconfig "purelib" is /usr/lib/python3.X/site-packages
@@ -194,7 +194,8 @@ endif()
 set(_amdsmi_sitelib_query
     [[
 import site, sys
-candidates = [p for p in site.getsitepackages() if not p.startswith("/usr/local")]
+sitepkgs = site.getsitepackages()
+candidates = [p for p in sitepkgs if not p.startswith("/usr/local")]
 order = [
     lambda p: p == "/usr/lib/python3/dist-packages",
     lambda p: p.endswith("/dist-packages"),
@@ -204,26 +205,47 @@ for pred in order:
     for p in candidates:
         if pred(p):
             print(p); sys.exit(0)
+# No /usr candidate matched (unusual container / venv layout). Fall back to
+# the first directory site.getsitepackages() reported: unlike sysconfig
+# purelib, every getsitepackages() entry is guaranteed to be on sys.path, so
+# `import amdsmi` still resolves even if it lands under /usr/local.
+if sitepkgs:
+    print(sitepkgs[0]); sys.exit(0)
 import sysconfig
 print(sysconfig.get_paths()["purelib"])
 ]]
 )
-if(EXISTS "/usr/bin/python3")
-    execute_process(
-        COMMAND /usr/bin/python3 -c "${_amdsmi_sitelib_query}"
-        OUTPUT_VARIABLE AMDSMI_SYSTEM_PYTHON_SITELIB
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _amdsmi_sitelib_rc
-    )
-    if(NOT _amdsmi_sitelib_rc EQUAL 0 OR AMDSMI_SYSTEM_PYTHON_SITELIB STREQUAL "")
-        message(
-            WARNING
-            "Could not query /usr/bin/python3 site-packages; falling back to Python3_SITELIB=${Python3_SITELIB}"
+# Packagers may override the destination explicitly; the empty default
+# means "auto-detect from /usr/bin/python3 below".
+set(AMDSMI_SYSTEM_PYTHON_SITELIB
+    ""
+    CACHE PATH
+    "Install destination for the amdsmi Python module (system site-packages). Empty = auto-detect from /usr/bin/python3."
+)
+if(NOT AMDSMI_SYSTEM_PYTHON_SITELIB)
+    if(EXISTS "/usr/bin/python3")
+        execute_process(
+            COMMAND /usr/bin/python3 -c "${_amdsmi_sitelib_query}"
+            OUTPUT_VARIABLE _amdsmi_detected_sitelib
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _amdsmi_sitelib_rc
         )
-        set(AMDSMI_SYSTEM_PYTHON_SITELIB "${Python3_SITELIB}")
+        if(NOT _amdsmi_sitelib_rc EQUAL 0 OR _amdsmi_detected_sitelib STREQUAL "")
+            message(
+                WARNING
+                "Could not query /usr/bin/python3 site-packages; falling back to Python3_SITELIB=${Python3_SITELIB}"
+            )
+            set(_amdsmi_detected_sitelib "${Python3_SITELIB}")
+        endif()
+    else()
+        set(_amdsmi_detected_sitelib "${Python3_SITELIB}")
     endif()
-else()
-    set(AMDSMI_SYSTEM_PYTHON_SITELIB "${Python3_SITELIB}")
+    set(AMDSMI_SYSTEM_PYTHON_SITELIB
+        "${_amdsmi_detected_sitelib}"
+        CACHE PATH
+        "Install destination for the amdsmi Python module (system site-packages). Empty = auto-detect from /usr/bin/python3."
+        FORCE
+    )
 endif()
 message(STATUS "amdsmi python module install path: ${AMDSMI_SYSTEM_PYTHON_SITELIB}")
 

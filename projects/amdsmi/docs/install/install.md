@@ -193,20 +193,20 @@ from your ROCm instance.
 Multiple ROCm installations may cause `amd-smi` failures.
 Installing multiple versions of ROCm on the same system can result in the `amd-smi` CLI not functioning correctly.
 
-Starting with ROCm 7.13, the `amd-smi-lib` rpm/deb package no longer
+Starting with ROCm 7.14, the `amd-smi-lib` rpm/deb package no longer
 runs `pip install` during postinst — it installs the `amdsmi` Python package directly into the system
 Python's `site-packages` as part of the package payload. Removing the
-package removes those files; only a legacy (pre-7.13) pip-registered
+package removes those files; only a legacy (pre-7.14) pip-registered
 install needs to be uninstalled manually.
 
 1. Remove previous AMD SMI installations.
 
    ```shell
-   # Legacy: pre-7.13 system packages and any user pip install
+   # Legacy: pre-7.14 system packages and any user pip install
    python3 -m pip list | grep amd
    python3 -m pip uninstall amdsmi
 
-   # Modern: 7.13+ system package, remove it with your package manager
+   # Modern: 7.14+ system package, remove it with your package manager
    sudo apt remove amd-smi-lib   # or: sudo dnf remove amd-smi-lib
    ```
 

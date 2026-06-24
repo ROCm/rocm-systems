@@ -283,6 +283,10 @@ jobs:
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
 
+      - name: ABI Compat Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/abi_compat_output.txt || echo "No ABI compat results"
+
       - name: Example DRM Test Results
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example results"

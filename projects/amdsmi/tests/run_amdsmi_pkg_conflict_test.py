@@ -57,14 +57,18 @@ def soname(lib_path: Path) -> str:
 
 
 def find_system_lib() -> Path:
-    candidates = [c for c in Path("/opt/rocm/lib").glob("libamd_smi.so.*") if not c.is_symlink()]
+    candidates = sorted(
+        c for c in Path("/opt/rocm/lib").glob("libamd_smi.so.*") if not c.is_symlink()
+    )
     if not candidates:
         sys.exit("System libamd_smi.so not found under /opt/rocm/lib; install the rpm/deb first.")
     return candidates[0]
 
 
 def find_wheel_lib(repo_root: Path) -> Path:
-    candidates = [c for c in repo_root.glob("**/libamd_smi_python.so.*") if not c.is_symlink()]
+    candidates = sorted(
+        c for c in repo_root.glob("**/libamd_smi_python.so.*") if not c.is_symlink()
+    )
     if not candidates:
         sys.exit(
             "libamd_smi_python.so not found under the build tree; "
