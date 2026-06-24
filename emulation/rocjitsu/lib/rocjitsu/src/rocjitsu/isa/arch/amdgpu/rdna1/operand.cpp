@@ -1159,6 +1159,12 @@ uint32_t vgpr_index(OperandType opr_type, int ev) {
   return static_cast<uint32_t>(ev - 256);
 }
 
+uint64_t read_immediate64(OperandType opr_type, int ev) {
+  if (opr_type == OperandType::OPR_SIMM32)
+    return static_cast<uint64_t>(static_cast<uint32_t>(ev));
+  return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));
+}
+
 } // namespace
 
 // Isa::-scoped SIMD traits — see rocjitsu/isa/isa_operand_simd_inl.h
@@ -1213,6 +1219,8 @@ uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   }
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
+  if (size_bits_ == 16)
+    return amdgpu::resolve_src_scalar16(wf, ev, kM0EncodingValue);
   return amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
 }
 
@@ -1243,7 +1251,7 @@ uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const 
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
-    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));
+    return read_immediate64(opr_type_, ev);
   return amdgpu::resolve_src_scalar64(wf, ev, kM0EncodingValue);
 }
 
@@ -1262,7 +1270,7 @@ uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
-    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(encoding_value_)));
+    return read_immediate64(opr_type_, encoding_value_);
   return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);
 }
 

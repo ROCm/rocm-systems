@@ -111,12 +111,44 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
   if (ev == 250)
     return 0u; // NULL
   if (ev == 251)
-    return wf.vcc() == 0 ? 1u : 0u; // VCCZ
-  if (ev == 252)
-    return wf.exec() == 0 ? 1u : 0u; // EXECZ
+    return (wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL))) == 0
+               ? 1u
+               : 0u; // VCCZ
+  if (ev == 252) {
+    uint64_t active = wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL);
+    return (wf.exec() & active) == 0 ? 1u : 0u; // EXECZ
+  }
   if (ev == 253)
     return wf.read_scc() ? 1u : 0u; // SCC
   throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));
+}
+
+// 16-bit reads of the inline float constants use the half-precision bit
+// patterns rather than the single-precision ones; every other encoding value
+// resolves identically to the 32-bit path.
+inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev) {
+  switch (ev) {
+  case 240:
+    return 0x3800u; // 0.5h
+  case 241:
+    return 0xB800u; // -0.5h
+  case 242:
+    return 0x3C00u; // 1.0h
+  case 243:
+    return 0xBC00u; // -1.0h
+  case 244:
+    return 0x4000u; // 2.0h
+  case 245:
+    return 0xC000u; // -2.0h
+  case 246:
+    return 0x4400u; // 4.0h
+  case 247:
+    return 0xC400u; // -4.0h
+  case 248:
+    return 0x3118u; // f16 1/(2*pi)
+  default:
+    return resolve_src_scalar(wf, ev, m0_ev);
+  }
 }
 
 // Must stay in sync with resolve_src_scalar above -- returns true for exactly
