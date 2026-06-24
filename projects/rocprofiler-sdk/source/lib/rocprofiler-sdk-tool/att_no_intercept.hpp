@@ -37,8 +37,7 @@ namespace tool
 {
 namespace att_no_intercept
 {
-using kernel_symbol_t =
-    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+using kernel_symbol_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
 struct agent_trace_config_t
 {

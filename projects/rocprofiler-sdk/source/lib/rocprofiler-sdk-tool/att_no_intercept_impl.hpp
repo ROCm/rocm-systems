@@ -62,8 +62,7 @@ struct entry_key_hash_t
 {
     size_t operator()(const entry_key_t& key) const
     {
-        return static_cast<size_t>((key.address >> 2) ^ (key.code_object_id << 24) ^
-                                   (key.code_object_id >> 40));
+        return static_cast<size_t>((key.address << 5) ^ key.code_object_id);
     }
 };
 
@@ -84,11 +83,11 @@ struct kernel_symbol_range_t
 struct trace_range_t
 {
     bool                    active               = false;
+    uint8_t                 me_id                = 0;
+    uint8_t                 pipe_id              = 0;
     uint64_t                offset_begin         = 0;
     uint64_t                offset_end           = 0;
     uint64_t                remaining_dispatches = 0;
-    uint8_t                 me_id                = 0;
-    uint8_t                 pipe_id              = 0;
     uint64_t                flush_count          = 0;
 };
 
@@ -106,9 +105,8 @@ struct agent_state_t
 
     std::unordered_map<entry_key_t, std::shared_ptr<std::atomic<size_t>>, entry_key_hash_t>
         kernel_iterations_by_entry = {};
-    std::unordered_map<uint64_t, std::vector<kernel_symbol_range_t>>
-        kernel_ranges_by_code_object                                  = {};
-    std::unordered_map<uint64_t, code_object_record_t> code_objects = {};
+    std::unordered_map<uint64_t, std::vector<kernel_symbol_range_t>> kernel_ranges_by_code_object{};
+    std::unordered_map<uint64_t, code_object_record_t> code_objects{};
 
     std::atomic<bool>     chunk_failed{false};
     std::atomic<uint64_t> chunk_completed{0};
