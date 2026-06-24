@@ -198,7 +198,7 @@ if(HIP_PLATFORM MATCHES "amd")
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_custom_target(addKernel.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
                     --no-gpu-bundle-output
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
@@ -206,7 +206,7 @@ if(HIP_PLATFORM MATCHES "amd")
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
     add_custom_target(addKernel-bundle.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
