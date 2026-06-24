@@ -37,6 +37,7 @@
 #include "nccl_gin.h"
 
 extern ncclGin_t IbCastGinIbProxy;
+extern ncclGin_t ncclGinIbProxy;
 
 namespace RCCLGinTests
 {
@@ -52,7 +53,9 @@ inline ncclGin_t* GetGinPlugin()
     if (envNet == nullptr) return nullptr;
 
     if (strcasecmp(envNet, "IB-CAST") == 0) return &IbCastGinIbProxy;
-    // if (strcasecmp(envNet, "IB") == 0) return &ncclGinIbProxy;
+    // Plain-IB proxy carries the multi-segment DMA-BUF path (AIRUNTIME-2351);
+    // NCCL_NET=IB routes the GinMPI suite at it.
+    if (strcasecmp(envNet, "IB") == 0) return &ncclGinIbProxy;
 
     return nullptr;
 }
