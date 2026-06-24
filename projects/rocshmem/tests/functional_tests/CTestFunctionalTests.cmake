@@ -153,6 +153,17 @@ set(TEST_tile_broadcast_wg 134)
 set(TEST_tile_allgather 135)
 set(TEST_tile_allgather_wave 136)
 set(TEST_tile_allgather_wg 137)
+set(TEST_host_wait_until 138)
+set(TEST_host_test 139)
+set(TEST_host_wait_until_all 140)
+set(TEST_host_wait_until_any 141)
+set(TEST_host_wait_until_some 142)
+set(TEST_host_wait_until_all_vector 143)
+set(TEST_host_wait_until_any_vector 144)
+set(TEST_host_wait_until_some_vector 145)
+set(TEST_host_wait_until_all_status 146)
+set(TEST_host_wait_until_any_status 147)
+set(TEST_host_wait_until_some_status 148)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -1310,6 +1321,32 @@ function(add_host_tests)
         add_rocshmem_functional_test(NAME host_amo_all_pes RANKS 4 WORKGROUPS 1 THREADS 1
             ENV_VARS "ROCSHMEM_TEST_UUID=1")
         add_rocshmem_functional_test(NAME host_amo_self    RANKS 4 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+    end_test_group()
+
+    # P2P sync tests: wait_until / test variants (AIROCSHMEM-419)
+    begin_test_group(CATEGORY "HOST;P2P" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME host_wait_until            RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_test                  RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_all        RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_any        RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_some       RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_all_vector RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_any_vector RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_some_vector RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_all_status RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_any_status RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_some_status RANKS 2 WORKGROUPS 1 THREADS 1
             ENV_VARS "ROCSHMEM_TEST_UUID=1")
     end_test_group()
 endfunction()
