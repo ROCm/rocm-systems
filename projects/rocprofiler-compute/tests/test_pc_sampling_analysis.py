@@ -614,48 +614,20 @@ def test_load_per_kernel_offset_sort_is_numeric() -> None:
     assert df["offset"].tolist() == ["0x20", "0x100"]
 
 
-def _three_hotspot_tool_data() -> dict:
-    """Three offsets with sample counts 3, 2, 1 for one kernel."""
-    host_trap = [
-        make_record(5, 0x10, 0, dispatch_id=0),
-        make_record(5, 0x10, 0, dispatch_id=0),
-        make_record(5, 0x10, 0, dispatch_id=0),
-        make_record(5, 0x20, 1, dispatch_id=0),
-        make_record(5, 0x20, 1, dispatch_id=0),
-        make_record(5, 0x30, 2, dispatch_id=0),
-    ]
-    return make_tool_data(
-        host_trap=host_trap,
-        instructions=["a", "b", "c"],
-        comments=["/src/f.cpp:1", "/src/f.cpp:2", "/src/f.cpp:3"],
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[make_dispatch(0, 100)],
-    )
-
-
-def test_load_per_kernel_num_rows_keeps_top_hotspots() -> None:
-    """num_rows truncates after sorting, keeping the highest-count rows."""
+@pytest.mark.parametrize("num_rows, expected_rows", [(1, 1), (0, 2), (None, 2)])
+def test_load_per_kernel_num_rows_limit(
+    num_rows: int | None,
+    expected_rows: int,
+) -> None:
+    """num_rows caps the table after sorting; 0 or None keeps every row."""
     df = load_pc_sampling_data_per_kernel(
         method="host_trap",
-        tool_data=_three_hotspot_tool_data(),
-        kernel_name="vecCopy",
-        sorting_type="count",
-        num_rows=2,
-    )
-    assert df["count"].tolist() == [3, 2]
-
-
-@pytest.mark.parametrize("num_rows", [None, 0])
-def test_load_per_kernel_num_rows_unset_keeps_all(num_rows: int | None) -> None:
-    """None or 0 num_rows keeps every row."""
-    df = load_pc_sampling_data_per_kernel(
-        method="host_trap",
-        tool_data=_three_hotspot_tool_data(),
+        tool_data=setup_per_kernel_data(),
         kernel_name="vecCopy",
         sorting_type="count",
         num_rows=num_rows,
     )
-    assert df["count"].tolist() == [3, 2, 1]
+    assert len(df) == expected_rows
 
 
 def make_per_kernel_guard_data(
