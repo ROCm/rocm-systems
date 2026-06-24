@@ -508,7 +508,7 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
     amdgpu_bo_import_result res;
     auto ret = vamdgpu_bo_import(

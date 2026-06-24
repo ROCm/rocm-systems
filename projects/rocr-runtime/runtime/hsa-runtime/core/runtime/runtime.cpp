@@ -4022,11 +4022,11 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   if (memHandle->imported && memHandle->is_fabric_handle) {
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareType::FABRIC_HANDLE,
-        &memHandle->driver_handle.fabric_handle);
+        &memHandle->driver_handle);
   } else {
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareType::DMABUF_FD,
-        &memHandle->driver_handle.dmabuf_fd);
+        &memHandle->driver_handle);
   }
   if (status != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(status, "Failed to import memory");
@@ -4056,7 +4056,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 #endif
     auto agentOwner = mappedHandle->mem_handle->agentOwner();
     int mmap_fd = -1;
-    /* Do not check the return value of GetDeviceFd. We do not need mmap_fd so it is valid for mmap_fd to be -1*/
+    /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it is valid for mmap_fd to be -1*/
     agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd);
 
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
@@ -4153,6 +4153,11 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0 && region != nullptr)
     agentOwner()->driver().DestroyMemoryHandle(&driver_handle);
+
+  if (driver_handle.dmabuf_fd >= 0) {
+    os::DmaBufClose(driver_handle.dmabuf_fd);
+    driver_handle.dmabuf_fd = -1;
+  }
 }
 
 
@@ -4161,6 +4166,32 @@ hsa_status_t
 Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
                                    const hsa_amd_memory_access_desc_t *desc,
                                    const size_t desc_cnt) {
+  MemoryHandle *memHandle = mappedHandle.mem_handle;
+
+  /*
+   * For locally-created shareable handles CreateShareableHandle leaves dmabuf_fd as -1 to avoid
+   * holding an fd open for the lifetime of the handle. Export it lazily here so the target agents
+   * can import the memory below, then close it again before returning.
+   */
+  bool created_dmabuf_fd = false;
+  if (!memHandle->imported && memHandle->driver_handle.dmabuf_fd == -1) {
+    Agent *ownerAgent = memHandle->agentOwner();
+    int dmabuf_fd = -1;
+    hsa_status_t status = ownerAgent->driver().ExportMemoryHandle(
+        *ownerAgent, memHandle->driver_handle, ShareType::DMABUF_FD, 0, &dmabuf_fd);
+    if (status != HSA_STATUS_SUCCESS)
+      return status;
+    memHandle->driver_handle.dmabuf_fd = dmabuf_fd;
+    created_dmabuf_fd = true;
+  }
+
+  MAKE_SCOPE_GUARD([&]() {
+    if (created_dmabuf_fd) {
+      os::DmaBufClose(memHandle->driver_handle.dmabuf_fd);
+      memHandle->driver_handle.dmabuf_fd = -1;
+    }
+  });
+
   for (int i = 0; i < desc_cnt; i++) {
     Agent *targetAgent = Agent::Convert(desc[i].agent_handle);
 
