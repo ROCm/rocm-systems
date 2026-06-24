@@ -56,11 +56,14 @@ jobs:
   # (primary jobs only — system-deps are in the job below)
   # 26 matrix entries total: 5 jammy + 5 noble + 4 debian + 12 rhel
   #
-  # YAML anchors used throughout:
-  #   cmake_flags: the cmake -D block is anchored on the first entry of each
-  #     distro group and aliased on subsequent entries (_cmake-*).
-  #   Steps shared with system-deps are anchored here (_step-*) and
-  #     aliased in the system-deps job below.
+  # YAML anchors:
+  #   cmake_flags — anchored on the first entry of each distro group
+  #     (_cmake-*); subsequent entries alias the anchor.
+  #   Shared steps — anchored in this job (_step-*) and aliased below.
+  #
+  # CMAKE_COMMON_FLAGS holds the common cmake -D flags present in every entry;
+  # cmake_flags carries only the per-distro remainder.  USE_CLANG_OMP is
+  # absent from RHEL (which never passes it) so it stays per-distro.
   # ──────────────────────────────────────────────────────────────────────────
   build:
     name: ${{ matrix.name }}
@@ -81,29 +84,16 @@ jobs:
             cc: gcc
             cdash_suffix: ubuntu-jammy-g++-rocm-6.3-python-internal-dyninst-hidden-viz
             cmake_flags: &_cmake-jammy >-
-              -DCMAKE_BUILD_TYPE=Release
               -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=ON
-              -DROCPROFSYS_BUILD_ELFUTILS=ON
-              -DROCPROFSYS_BUILD_LIBIBERTY=ON
               -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
               "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11"
               -DROCPROFSYS_STRIP_LIBRARIES=OFF
-              -DROCPROFSYS_MAX_THREADS=64
               "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
               -DUSE_CLANG_OMP=OFF
             python_envs_glob: "py3.{8,9,10,11}"
             install_prefix: /opt/rocprofiler-systems-dev
             install_cleanup: "rm -fr /opt/rocprofiler-systems-dev/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
             apt_install_compiler: true
             sanity_check_rocm: true
             test_env_modules: true
@@ -120,10 +110,6 @@ jobs:
             install_prefix: /opt/rocprofiler-systems-dev
             install_cleanup: "rm -fr /opt/rocprofiler-systems-dev/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
             apt_install_compiler: true
             sanity_check_rocm: true
             test_env_modules: true
@@ -140,10 +126,6 @@ jobs:
             install_prefix: /opt/rocprofiler-systems-dev
             install_cleanup: "rm -fr /opt/rocprofiler-systems-dev/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
             apt_install_compiler: true
             sanity_check_rocm: true
             test_env_modules: true
@@ -160,10 +142,6 @@ jobs:
             install_prefix: /opt/rocprofiler-systems-dev
             install_cleanup: "rm -fr /opt/rocprofiler-systems-dev/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
             apt_install_compiler: true
             sanity_check_rocm: true
             test_env_modules: true
@@ -180,10 +158,6 @@ jobs:
             install_prefix: /opt/rocprofiler-systems-dev
             install_cleanup: "rm -fr /opt/rocprofiler-systems-dev/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
             apt_install_compiler: true
             sanity_check_rocm: true
             test_env_modules: true
@@ -197,32 +171,16 @@ jobs:
             cc: gcc
             cdash_suffix: ubuntu-noble-g++-python-internal-dyninst
             cmake_flags: &_cmake-noble >-
-              -DCMAKE_BUILD_TYPE=Release
               -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=ON
-              -DROCPROFSYS_BUILD_ELFUTILS=ON
-              -DROCPROFSYS_BUILD_LIBIBERTY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
               "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13"
-              -DROCPROFSYS_MAX_THREADS=64
               "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;lulesh"
-              -DROCPROFSYS_BUILD_NUMBER=1
               -DCMAKE_PREFIX_PATH=/opt/rocm
               -DUSE_CLANG_OMP=OFF
             python_envs_glob: "py3.{8,9,10,11,12,13}"
             install_prefix: /opt/rocprofiler-systems
             install_cleanup: "rm -fr /opt/rocprofiler-systems/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
-            apt_install_compiler: false
             sanity_check_rocm: true
-            test_env_modules: false
             ccache_key_distro: ubuntu-noble
 
           - name: "Ubuntu 24.04 • g++ • ROCm 6.4"
@@ -236,13 +194,7 @@ jobs:
             install_prefix: /opt/rocprofiler-systems
             install_cleanup: "rm -fr /opt/rocprofiler-systems/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
-            apt_install_compiler: false
             sanity_check_rocm: true
-            test_env_modules: false
             ccache_key_distro: ubuntu-noble
 
           - name: "Ubuntu 24.04 • g++ • ROCm 7.0"
@@ -256,13 +208,7 @@ jobs:
             install_prefix: /opt/rocprofiler-systems
             install_cleanup: "rm -fr /opt/rocprofiler-systems/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
-            apt_install_compiler: false
             sanity_check_rocm: true
-            test_env_modules: false
             ccache_key_distro: ubuntu-noble
 
           - name: "Ubuntu 24.04 • g++ • ROCm 7.1"
@@ -276,13 +222,7 @@ jobs:
             install_prefix: /opt/rocprofiler-systems
             install_cleanup: "rm -fr /opt/rocprofiler-systems/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
-            apt_install_compiler: false
             sanity_check_rocm: true
-            test_env_modules: false
             ccache_key_distro: ubuntu-noble
 
           - name: "Ubuntu 24.04 • g++ • ROCm 7.2"
@@ -296,13 +236,7 @@ jobs:
             install_prefix: /opt/rocprofiler-systems
             install_cleanup: "rm -fr /opt/rocprofiler-systems/"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
-            apt_install_compiler: false
             sanity_check_rocm: true
-            test_env_modules: false
             ccache_key_distro: ubuntu-noble
 
           # ── Debian 12 ────────────────────────────────────────────────────
@@ -313,33 +247,16 @@ jobs:
             cc: gcc
             cdash_suffix: debian-12-g++
             cmake_flags: &_cmake-debian >-
-              -DCMAKE_BUILD_TYPE=Release
               -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=ON
-              -DROCPROFSYS_BUILD_ELFUTILS=ON
-              -DROCPROFSYS_BUILD_LIBIBERTY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
-              "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13"
-              -DROCPROFSYS_MAX_THREADS=64
               -DROCPROFSYS_USE_OMPT=OFF
+              "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13"
               "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network"
-              -DROCPROFSYS_BUILD_NUMBER=1
               -DCMAKE_PREFIX_PATH=/opt/rocm
               -DUSE_CLANG_OMP=OFF
             python_envs_glob: "py3.{8,9,10,11,12,13}"
             install_prefix: /opt/rocprofiler-systems
             install_cleanup: "rm -rf /opt/rocprofiler-systems"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: debian
 
           - name: "Debian 12 • g++ • ROCm 7.0"
@@ -353,13 +270,6 @@ jobs:
             install_prefix: /opt/rocprofiler-systems
             install_cleanup: "rm -rf /opt/rocprofiler-systems"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: debian
 
           - name: "Debian 12 • g++ • ROCm 7.1"
@@ -373,13 +283,6 @@ jobs:
             install_prefix: /opt/rocprofiler-systems
             install_cleanup: "rm -rf /opt/rocprofiler-systems"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: debian
 
           - name: "Debian 12 • g++ • ROCm 7.2"
@@ -393,13 +296,6 @@ jobs:
             install_prefix: /opt/rocprofiler-systems
             install_cleanup: "rm -rf /opt/rocprofiler-systems"
             cpack_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: debian
 
           # ── RHEL (all primary entries share the same cmake_flags) ─────────
@@ -411,21 +307,12 @@ jobs:
             cc: gcc
             cdash_suffix: rhel-8.10-g++-python-mpip-rocm-6.3
             cmake_flags: &_cmake-rhel-primary >-
-              -DCMAKE_BUILD_TYPE=Release
               -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
-              -DROCPROFSYS_BUILD_TESTING=ON
               -DROCPROFSYS_USE_MPI=OFF
               -DROCPROFSYS_USE_OMPT=OFF
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
               -DROCPROFSYS_BUILD_BOOST=ON
-              -DROCPROFSYS_BUILD_TBB=ON
-              -DROCPROFSYS_BUILD_ELFUTILS=ON
-              -DROCPROFSYS_BUILD_LIBIBERTY=ON
               -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
-              -DROCPROFSYS_MAX_THREADS=64
               -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
               "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11"
               "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload"
             python_envs_glob: "py3.{8,9,10,11}"
@@ -435,11 +322,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "8"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           - name: "RHEL 8.10 • g++ • ROCm 6.4"
@@ -456,11 +338,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "8"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           - name: "RHEL 8.10 • g++ • ROCm 7.0"
@@ -477,11 +354,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "8"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           - name: "RHEL 8.10 • g++ • ROCm 7.1"
@@ -498,11 +370,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "8"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           - name: "RHEL 8.10 • g++ • ROCm 7.2"
@@ -519,11 +386,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "8"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           # RHEL 9 ───────────────────────────────────────────────────────────
@@ -541,11 +403,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "9"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           - name: "RHEL 9 • g++ • ROCm 6.4"
@@ -562,11 +419,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "9"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           - name: "RHEL 9 • g++ • ROCm 7.0"
@@ -583,11 +435,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "9"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           - name: "RHEL 9 • g++ • ROCm 7.1"
@@ -604,11 +451,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "9"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           - name: "RHEL 9 • g++ • ROCm 7.2"
@@ -625,11 +467,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "9"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           # RHEL 10 (excludes ROCm 6.3, 6.4, 7.0) ──────────────────────────
@@ -647,11 +484,6 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "10"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
           - name: "RHEL 10 • g++ • ROCm 7.2"
@@ -668,20 +500,27 @@ jobs:
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "10"
-            use_setup_env: true
-            kill_perfetto: true
-            apt_install_compiler: false
-            sanity_check_rocm: false
-            test_env_modules: false
             ccache_key_distro: redhat
 
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
-      ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
       CCACHE_DIR: ${{ github.workspace }}/.ccache
+      # cmake -D flags shared by every primary entry; distro-specific
+      # remainder lives in matrix.cmake_flags.
+      CMAKE_COMMON_FLAGS: >-
+        -DCMAKE_BUILD_TYPE=Release
+        -DROCPROFSYS_BUILD_TESTING=ON
+        -DROCPROFSYS_BUILD_EXAMPLES=ON
+        -DROCPROFSYS_USE_PYTHON=ON
+        -DROCPROFSYS_BUILD_DYNINST=ON
+        -DROCPROFSYS_BUILD_TBB=ON
+        -DROCPROFSYS_BUILD_ELFUTILS=ON
+        -DROCPROFSYS_BUILD_LIBIBERTY=ON
+        -DROCPROFSYS_MAX_THREADS=64
+        -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
 
     steps:
       # Step anchors: steps shared identically with the system-deps job are
@@ -812,8 +651,8 @@ jobs:
             -- \
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            ${{ env.CMAKE_COMMON_FLAGS }} \
             ${{ matrix.cmake_flags }} \
-            -DROCPROFSYS_BUILD_EXAMPLES=ON \
             -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
             -- \
             -LE "network|gpu" || \
@@ -890,7 +729,7 @@ jobs:
           ./rocprofiler-systems-*.sh --prefix=${{ matrix.cpack_prefix }} --exclude-subdir --skip-license
 
       - name: Test Install with Modulefile
-        if: ${{ !matrix.use_setup_env }}
+        if: ${{ !matrix.is_rhel }}
         timeout-minutes: 15
         shell: bash
         working-directory: projects/rocprofiler-systems/
@@ -903,7 +742,7 @@ jobs:
           ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
 
       - name: Test Install with setup-env.sh
-        if: ${{ matrix.use_setup_env }}
+        if: ${{ matrix.is_rhel }}
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/
@@ -924,7 +763,7 @@ jobs:
 
       - &_step-kill-perfetto
         name: Kill Perfetto
-        if: ${{ matrix.kill_perfetto && (success() || failure()) }}
+        if: ${{ matrix.is_rhel && (success() || failure()) }}
         continue-on-error: true
         shell: bash
         working-directory: projects/rocprofiler-systems/
@@ -968,6 +807,11 @@ jobs:
   # System-dependency builds: validate that system-provided libs substitute
   # for the bundled ones (BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF).
   # 8 matrix entries: 2 jammy + 2 noble + 4 rhel (9×2 + 10×2)
+  #
+  # cmake_flags carries only the install prefix, PYTHON_ENVS, and any
+  # RHEL-specific flags.  USE_CLANG_OMP is passed separately from the
+  # matrix so g++ and amdclang++ entries within each distro can share
+  # the same cmake_flags anchor (_cmake-*-sysdeps, _cmake-rhel-sysdeps).
   # ──────────────────────────────────────────────────────────────────────────
   system-deps:
     name: ${{ matrix.name }}
@@ -988,28 +832,11 @@ jobs:
             cc: gcc
             use_clang_omp: "OFF"
             cdash_suffix: ubuntu-jammy-system-deps-g++
-            cmake_flags: >-
-              -DCMAKE_BUILD_TYPE=Release
+            cmake_flags: &_cmake-jammy-sysdeps >-
               -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=OFF
-              -DROCPROFSYS_BUILD_ELFUTILS=OFF
-              -DROCPROFSYS_BUILD_LIBIBERTY=OFF
-              -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
               "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11"
-              -DROCPROFSYS_STRIP_LIBRARIES=OFF
-              -DROCPROFSYS_MAX_THREADS=64
-              "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
-              -DUSE_CLANG_OMP=OFF
             python_envs_glob: "py3.{8,9,10,11}"
             install_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
             sanity_check_rocm: true
             ccache_key_distro: ubuntu-jammy-system-deps
             system_deps_apt: >-
@@ -1023,28 +850,9 @@ jobs:
             cc: amdclang
             use_clang_omp: "ON"
             cdash_suffix: ubuntu-jammy-system-deps-amdclang++
-            cmake_flags: >-
-              -DCMAKE_BUILD_TYPE=Release
-              -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=OFF
-              -DROCPROFSYS_BUILD_ELFUTILS=OFF
-              -DROCPROFSYS_BUILD_LIBIBERTY=OFF
-              -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
-              "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11"
-              -DROCPROFSYS_STRIP_LIBRARIES=OFF
-              -DROCPROFSYS_MAX_THREADS=64
-              "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
-              -DUSE_CLANG_OMP=ON
+            cmake_flags: *_cmake-jammy-sysdeps
             python_envs_glob: "py3.{8,9,10,11}"
             install_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
             sanity_check_rocm: true
             ccache_key_distro: ubuntu-jammy-system-deps
             system_deps_apt: >-
@@ -1059,29 +867,11 @@ jobs:
             cc: gcc
             use_clang_omp: "OFF"
             cdash_suffix: ubuntu-noble-system-deps-g++
-            cmake_flags: >-
-              -DCMAKE_BUILD_TYPE=Release
+            cmake_flags: &_cmake-noble-sysdeps >-
               -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=OFF
-              -DROCPROFSYS_BUILD_ELFUTILS=OFF
-              -DROCPROFSYS_BUILD_LIBIBERTY=OFF
-              -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
               "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13"
-              -DROCPROFSYS_STRIP_LIBRARIES=OFF
-              -DROCPROFSYS_MAX_THREADS=64
-              "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
-              -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
-              -DUSE_CLANG_OMP=OFF
             python_envs_glob: "py3.{8,9,10,11,12,13}"
             install_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
             sanity_check_rocm: true
             ccache_key_distro: ubuntu-noble-system-deps
             system_deps_apt: >-
@@ -1095,29 +885,9 @@ jobs:
             cc: amdclang
             use_clang_omp: "ON"
             cdash_suffix: ubuntu-noble-system-deps-amdclang++
-            cmake_flags: >-
-              -DCMAKE_BUILD_TYPE=Release
-              -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=OFF
-              -DROCPROFSYS_BUILD_ELFUTILS=OFF
-              -DROCPROFSYS_BUILD_LIBIBERTY=OFF
-              -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
-              "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13"
-              -DROCPROFSYS_STRIP_LIBRARIES=OFF
-              -DROCPROFSYS_MAX_THREADS=64
-              "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
-              -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
-              -DUSE_CLANG_OMP=ON
+            cmake_flags: *_cmake-noble-sysdeps
             python_envs_glob: "py3.{8,9,10,11,12,13}"
             install_prefix: /opt/rocprofiler-systems
-            container_opts: ""
-            is_rhel: false
-            use_setup_env: false
-            kill_perfetto: false
             sanity_check_rocm: true
             ccache_key_distro: ubuntu-noble-system-deps
             system_deps_apt: >-
@@ -1132,32 +902,16 @@ jobs:
             cc: gcc
             use_clang_omp: "OFF"
             cdash_suffix: rhel-9-system-deps-g++
-            cmake_flags: >-
-              -DCMAKE_BUILD_TYPE=Release
+            cmake_flags: &_cmake-rhel-sysdeps >-
               -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
               -DROCPROFSYS_USE_MPI_HEADERS=ON
               -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=OFF
-              -DROCPROFSYS_BUILD_ELFUTILS=OFF
-              -DROCPROFSYS_BUILD_LIBIBERTY=OFF
-              -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
               "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13"
-              -DROCPROFSYS_STRIP_LIBRARIES=OFF
-              -DROCPROFSYS_MAX_THREADS=64
-              "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
-              -DUSE_CLANG_OMP=OFF
             python_envs_glob: "py3.{8,9,10,11,12,13}"
             install_prefix: /opt/rocprofiler-systems
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "9"
-            use_setup_env: true
-            kill_perfetto: true
-            sanity_check_rocm: false
             ccache_key_distro: redhat-system-deps
 
           - name: "RHEL 9 • amdclang++ • system deps"
@@ -1167,32 +921,12 @@ jobs:
             cc: amdclang
             use_clang_omp: "ON"
             cdash_suffix: rhel-9-system-deps-amdclang++
-            cmake_flags: >-
-              -DCMAKE_BUILD_TYPE=Release
-              -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_USE_MPI_HEADERS=ON
-              -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=OFF
-              -DROCPROFSYS_BUILD_ELFUTILS=OFF
-              -DROCPROFSYS_BUILD_LIBIBERTY=OFF
-              -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
-              "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13"
-              -DROCPROFSYS_STRIP_LIBRARIES=OFF
-              -DROCPROFSYS_MAX_THREADS=64
-              "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
-              -DUSE_CLANG_OMP=ON
+            cmake_flags: *_cmake-rhel-sysdeps
             python_envs_glob: "py3.{8,9,10,11,12,13}"
             install_prefix: /opt/rocprofiler-systems
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "9"
-            use_setup_env: true
-            kill_perfetto: true
-            sanity_check_rocm: false
             ccache_key_distro: redhat-system-deps
 
           # ── RHEL 10 system-deps ───────────────────────────────────────────
@@ -1203,32 +937,12 @@ jobs:
             cc: gcc
             use_clang_omp: "OFF"
             cdash_suffix: rhel-10-system-deps-g++
-            cmake_flags: >-
-              -DCMAKE_BUILD_TYPE=Release
-              -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_USE_MPI_HEADERS=ON
-              -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=OFF
-              -DROCPROFSYS_BUILD_ELFUTILS=OFF
-              -DROCPROFSYS_BUILD_LIBIBERTY=OFF
-              -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
-              "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13"
-              -DROCPROFSYS_STRIP_LIBRARIES=OFF
-              -DROCPROFSYS_MAX_THREADS=64
-              "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
-              -DUSE_CLANG_OMP=OFF
+            cmake_flags: *_cmake-rhel-sysdeps
             python_envs_glob: "py3.{8,9,10,11,12,13}"
             install_prefix: /opt/rocprofiler-systems
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "10"
-            use_setup_env: true
-            kill_perfetto: true
-            sanity_check_rocm: false
             ccache_key_distro: redhat-system-deps
 
           - name: "RHEL 10 • amdclang++ • system deps"
@@ -1238,41 +952,38 @@ jobs:
             cc: amdclang
             use_clang_omp: "ON"
             cdash_suffix: rhel-10-system-deps-amdclang++
-            cmake_flags: >-
-              -DCMAKE_BUILD_TYPE=Release
-              -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
-              -DROCPROFSYS_BUILD_TESTING=ON
-              -DROCPROFSYS_USE_PYTHON=ON
-              -DROCPROFSYS_USE_MPI_HEADERS=ON
-              -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
-              -DROCPROFSYS_BUILD_DYNINST=ON
-              -DROCPROFSYS_BUILD_TBB=OFF
-              -DROCPROFSYS_BUILD_ELFUTILS=OFF
-              -DROCPROFSYS_BUILD_LIBIBERTY=OFF
-              -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
-              -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
-              "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13"
-              -DROCPROFSYS_STRIP_LIBRARIES=OFF
-              -DROCPROFSYS_MAX_THREADS=64
-              "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
-              -DUSE_CLANG_OMP=ON
+            cmake_flags: *_cmake-rhel-sysdeps
             python_envs_glob: "py3.{8,9,10,11,12,13}"
             install_prefix: /opt/rocprofiler-systems
             container_opts: "--shm-size=512m"
             is_rhel: true
             os_major: "10"
-            use_setup_env: true
-            kill_perfetto: true
-            sanity_check_rocm: false
             ccache_key_distro: redhat-system-deps
 
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
-      ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
       CCACHE_DIR: ${{ github.workspace }}/.ccache
+      # cmake -D flags shared by every system-deps entry; distro-specific
+      # remainder (install prefix, PYTHON_ENVS, RHEL MPI flags) lives in
+      # matrix.cmake_flags.  USE_CLANG_OMP is passed separately so g++ and
+      # amdclang++ entries within the same distro share one cmake_flags anchor.
+      CMAKE_COMMON_FLAGS: >-
+        -DCMAKE_BUILD_TYPE=Release
+        -DROCPROFSYS_BUILD_TESTING=ON
+        -DROCPROFSYS_BUILD_EXAMPLES=ON
+        -DROCPROFSYS_USE_PYTHON=ON
+        -DROCPROFSYS_BUILD_DYNINST=ON
+        -DROCPROFSYS_BUILD_TBB=OFF
+        -DROCPROFSYS_BUILD_ELFUTILS=OFF
+        -DROCPROFSYS_BUILD_LIBIBERTY=OFF
+        -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
+        -DROCPROFSYS_STRIP_LIBRARIES=OFF
+        -DROCPROFSYS_MAX_THREADS=64
+        -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+        "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network"
 
     steps:
       - *_step-checkout
@@ -1369,8 +1080,9 @@ jobs:
             -- \
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            ${{ env.CMAKE_COMMON_FLAGS }} \
             ${{ matrix.cmake_flags }} \
-            -DROCPROFSYS_BUILD_EXAMPLES=ON \
+            -DUSE_CLANG_OMP=${{ matrix.use_clang_omp }} \
             -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
             -- \
             -LE "network|gpu" || \
@@ -1390,7 +1102,7 @@ jobs:
           cmake --install build --prefix ${{ matrix.install_prefix }}
 
       - name: Test Install with Modulefile
-        if: ${{ !matrix.use_setup_env }}
+        if: ${{ !matrix.is_rhel }}
         timeout-minutes: 15
         shell: bash
         working-directory: projects/rocprofiler-systems/
@@ -1403,7 +1115,7 @@ jobs:
           ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
 
       - name: Test Install with setup-env.sh
-        if: ${{ matrix.use_setup_env }}
+        if: ${{ matrix.is_rhel }}
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/
