@@ -128,3 +128,17 @@ Disambiguation: violation status (MI300+, time %) ≠ throttle_status (older gen
 
 Retired / reserved VRAM pages — "bad pages" and "retired pages" are the **same set**, same struct `amdsmi_retired_page_record_t` (amdsmi.h:1945-1958), via `amdsmi_get_gpu_bad_page_info()` / `amdsmi_get_gpu_memory_reserved_pages()`. State is the `amdsmi_memory_page_status_t` enum: **PENDING** (flagged, awaiting retirement window) → **RESERVED** (retired, unavailable) or **UNRESERVABLE** (failed). amd-smi reports address/size/status only — the **error class (CE vs UE) driving retirement is not captured or exposed** here; CE/UE counts live separately in `amdsmi_get_gpu_ecc_count()` (see docs/conceptual/ras.md).
 Disambiguation: bad pages ≡ retired pages (one set, status enum distinguishes pending/reserved/unreservable); error class is NOT part of it — use ECC count for CE/UE.
+
+### released vs unreleased symbol (ABI baseline)
+
+A symbol's ABI is **frozen** only once it ships in a released package tag
+(`git tag 'amdsmi_pkg_ver-*'`, e.g. the last shipped is the highest `sort -V`), **not**
+when it lands on `develop`. "Unreleased / this-cycle" = a symbol **absent** at the last
+`amdsmi_pkg_ver-*` tag (header path inside the tag is `include/amd_smi/amdsmi.h`, no
+`projects/amdsmi/` prefix) → renaming/removing it is **not** a real ABI break.
+The CI ABI check (`tests/abi_check/abi_check.py`) diffs against `origin/develop`, so it
+labels intra-cycle churn as `ABI BREAKAGE` even when nothing shipped. Three distinct
+version schemes coexist: lib `AMDSMI_LIB_VERSION_*` (amdsmi.h), the package tag (real
+freeze point), and the ROCm/TheRock bundle (CHANGELOG.md top section).
+Disambiguation: "released" = present at last package tag (frozen ABI); base branch
+`develop` ≠ a release; lib version ≠ package tag ≠ ROCm/TheRock version.
