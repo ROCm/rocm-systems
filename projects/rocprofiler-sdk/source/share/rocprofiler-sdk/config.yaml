@@ -8248,7 +8248,8 @@ rocprofiler-sdk:
           event: 41
     - name: TX_VMW_VMW_LATENCY
       description: Total TCP instruction latency (from first clock of instruction entering to first 
-        clock of instruction leaving), divide by TX_VMW_VCA_REQ_STATE_READ to average instruction latency.
+        clock of instruction leaving), divide by TX_VMW_VCA_REQ_STATE_READ to average instruction 
+        latency.
       properties: []
       definitions:
         - architectures:
