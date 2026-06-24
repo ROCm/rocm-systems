@@ -27,6 +27,19 @@ using nccl_dda_ipc_detail::DdaIpcBarrierState;
 using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_ipc_detail::kDdaNranks;
 
+// Host-side helper. Returns ncclSuccess if ptr is in a symmetric window,
+// ncclInvalidArgument if not.
+ncclResult_t makeSymPtr(struct ncclComm* comm, void* ptr, ncclSymPtr<char>& out) {
+  struct ncclDevrWindow* win = nullptr;
+  NCCLCHECK(ncclDevrFindWindow(comm, ptr, &win));
+  if (win == nullptr)
+    return ncclInvalidArgument;
+
+  out.window = win->vidmem;
+  out.offset = (uint8_t*)ptr - (uint8_t*)win->userPtr;
+  return ncclSuccess;
+}
+
 template <typename T>
 static ncclResult_t ncclAllToAllDdaIpcTyped(
     const void* sendbuff,
@@ -62,6 +75,23 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(
   void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
+  if (comm->symmetricSupport) {
+      std::cout<<"symmetricSupport "<<comm->rank<<" count "<<count<<"\n";
+    ncclSymPtr<char> recvPtr, sendPtr;
+    makeSymPtr(comm, recvbuff, recvPtr);
+    makeSymPtr(comm, (void *)sendbuff, sendPtr);
+  meta::comms::ddaAllToAllIpc<T, kDdaNranks, false>
+      <<<grid, block, 0, stream>>>(
+          d_ipcbuffs,
+          recvPtr,
+          count,
+          sendPtr,
+          comm->rank,
+          barrierHost);
+
+  }
+  else {
+      std::cout<<"non symmetricSupport "<<comm->rank<<" count "<<count<<"\n";
   meta::comms::ddaAllToAllIpc<T, kDdaNranks, false>
       <<<grid, block, 0, stream>>>(
           d_ipcbuffs,
@@ -70,6 +100,7 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(
           static_cast<const T*>(sendbuff),
           comm->rank,
           barrierHost);
+  }
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;

@@ -12,6 +12,7 @@
 
 #include "ipc_gpu_barrier.h"
 #include "algorithms/CollCommon.h"
+#include "nccl_device/ptr.h"
 
 namespace meta::comms {
 
@@ -56,6 +57,73 @@ __launch_bounds__(512)
       int destIdx = idx + r * idxEnd;
       *reinterpret_cast<uint4*>(&recvbuff[destIdx]) =
           reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
+    }
+  }
+
+  // barrier to ensure remote ranks won't free their buffers until I'm done
+  barrier.syncOnSameBlockIdx<
+      true /* hasPreviousMemAccess */,
+      false /* hasSubsequentMemAccess */>();
+}
+
+template <typename T, int NRANKS, bool hasAcc>
+#if defined(USE_ROCM)
+__launch_bounds__(512)
+#endif
+    __global__ void ddaAllToAllIpc(
+        T* const* __restrict__ ipcbuffs,
+        ncclSymPtr<T> recvbuff,
+        size_t count,
+        const ncclSymPtr<T> sendbuff,
+        int selfRank,
+        IpcGpuBarrier barrier) {
+  // use uint4 to do 16-byte loads to maximize memory efficiency
+  // We assume that count % countPerThread == 0. This assumption is enforced
+  // before kernel launch
+  // TODO: we should be able to deal with left over as well
+  const size_t countPerRank = count;
+  constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
+  const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
+
+  const auto idxStart = gtIdx * countPerThread;
+  const auto idxEnd = countPerRank;
+  const size_t copyCount = count * NRANKS;
+  const auto idxStride = gridDim.x * blockDim.x * countPerThread;
+
+  barrier.syncOnSameBlockIdx<
+      true /* hasPreviousMemAccess */,
+      true /* hasSubsequentMemAccess */>();
+
+#if 0
+  for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+#pragma unroll NRANKS
+    for (int r = 0; r < NRANKS; ++r) {
+      int srcRank = r;
+      int srcIdx = idx + selfRank * idxEnd;
+      int destIdx = idx + r * idxEnd;
+      *reinterpret_cast<uint4*>(&recvbuff[destIdx]) =
+          reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
+    }
+  }
+#endif
+
+  using Pack = uint4;
+  bool inPlace = (sendbuff == recvbuff);
+
+  for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+#pragma unroll NRANKS
+    for (int r = 0; r < NRANKS; ++r) {
+      size_t peer = (selfRank + r) % NRANKS;
+      if (peer == selfRank && inPlace) continue;
+
+      ncclSymPtr<char> srcSlice = sendbuff  + peer * countPerRank;
+      ncclSymPtr<char> dstSlice = recvbuff + selfRank * countPerRank;
+
+      char*       dst = dstSlice.lsaPtr(peer);
+      char const* src = srcSlice.localPtr();
+
+      *(reinterpret_cast<Pack*>(dst + idx)) =
+      *(reinterpret_cast<const Pack*>(src + idx));
     }
   }
 

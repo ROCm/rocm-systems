@@ -29,7 +29,7 @@ static __device__ void scatter(
   using Pack = uint4;
   const size_t nEltsPack = nElts/PackSize;
 
-  char const* src = input.localPtr();
+  //char const* src = input.localPtr();
 
   for (int i = t; i < nEltsPack; i += tn) {
     #pragma unroll 8
@@ -37,11 +37,11 @@ static __device__ void scatter(
       int peer = (rank + r) % nRanks;
       if (peer == rank && inPlace) continue;
 
-      //ncclSymPtr<char> srcSlice = input  + (size_t)peer * nElts;
+      ncclSymPtr<char> srcSlice = input  + (size_t)peer * nElts;
       ncclSymPtr<char> dstSlice = output;
 
       char*       dst = dstSlice.lsaPtr(peer);
-      //char const* src = srcSlice.localPtr();
+      char const* src = srcSlice.localPtr();
 
       (reinterpret_cast<Pack*>(dst)) [i] =
       (reinterpret_cast<Pack*>(const_cast<char*>(src))) [i];
@@ -56,8 +56,10 @@ __device__ __forceinline__ void ncclSymkRun_AlltoAll_ST(ncclSymkDevWorkArgs cons
   };
   int const& rank = handler.comm.rank;
 
-  bar.arrive(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
+  //bar.arrive(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
+	/*
   bool waitNeeded = true;
   handler.forEachWork<char>(
     [&] __device__ (int block, int nBlocks, size_t nElts, size_t nAllElts,
@@ -69,5 +71,6 @@ __device__ __forceinline__ void ncclSymkRun_AlltoAll_ST(ncclSymkDevWorkArgs cons
         scatter(handler, tn, t, nBlocks, waitNeeded, bar, input, output + rank*nElts, nElts);
       }
     );
+  */
   bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
 }
