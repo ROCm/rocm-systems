@@ -169,7 +169,7 @@ class ROContext : public Context {
                                   void *dest, const void* source, int nelement, int PE_root);
 
   template <typename T>
-  __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
   template <typename T>

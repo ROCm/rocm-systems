@@ -741,9 +741,25 @@ __device__ void GDAContext::broadcast_wg(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall(rocshmem_team_t team, T *dst,
+__device__ void GDAContext::internal_broadcast(T *dst, const T *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync) {  // NOLINT(runtime/int)
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+  if (constmem.num_pes < 4) { //TODO: optimized for IPC
+    internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
+      pe_size, wf_info);
+  } else {
+    internal_get_broadcast(dst, src, nelems, pe_root, wf_info);
+  }
+
+  // Synchronize on completion of broadcast
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+}
+
+template <typename T>
+__device__ void GDAContext::alltoall_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  alltoall_linear_thread_puts(team, dst, src, nelems);
+  alltoall_linear_thread_puts_wg(team, dst, src, nelems);
 }
 
 template <typename T>
@@ -903,7 +919,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
+__device__ void GDAContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
                                             const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
@@ -934,7 +950,7 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
+__device__ void GDAContext::alltoall_linear_thread_puts_wg(rocshmem_team_t team,
     T *dst, const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
