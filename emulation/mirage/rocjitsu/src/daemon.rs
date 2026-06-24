@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
 use mirage_core::emulator::EmulatorDaemon;
-use rocjitsu_sys::{Lib, RjVm, RjVmCmd, RjVmMap, RjVmMode, RjVmUnmap};
+use rocjitsu_sys::{Lib, RjVm, RjVmCmd, RjVmGpuInfo, RjVmMap, RjVmMode, RjVmUnmap};
 
 /// RPC opcodes (must match `enum RpcOpcode` in `rpc.h`).
 const RPC_HANDSHAKE: u16 = 0;
@@ -50,10 +50,16 @@ const RPC_MUNMAP: u16 = 4;
 const RPC_IOCTL: u16 = 5;
 
 /// RPC protocol version (`kRpcProtocolVersion` in `rpc.h`).
-const RPC_PROTOCOL_VERSION: u32 = 2;
+const RPC_PROTOCOL_VERSION: u32 = 3;
 
 /// Size of the fixed RPC header in bytes.
 const RPC_HEADER_LEN: usize = 16;
+
+/// Size of the fixed `RpcHandshakeResponse` payload: four `u32` fields
+/// (version, gpu_id, topology_path_len, drm_path_len) followed by the
+/// 312-byte `RpcGpuInfo`. Must equal `sizeof(RpcHandshakeResponse)`
+/// (== 328, asserted in `rpc.h`).
+const RPC_HANDSHAKE_RESPONSE_LEN: usize = 16 + std::mem::size_of::<RjVmGpuInfo>();
 
 /// Upper bound on an ioctl payload, mirroring the C daemon's guard
 /// against a malicious or corrupt client.
@@ -353,14 +359,20 @@ fn handle_client(fd: RawFd, shared: &Shared) {
                     let drm = unsafe { lib.vm_drm_path(vm) }
                         .map(|c| c.to_bytes().to_vec())
                         .unwrap_or_default();
-                    let payload = 16 + topo.len() + drm.len();
+                    // Device metadata for the client's libdrm/DRM
+                    // emulation. A zeroed payload (present == 0) is a
+                    // valid fallback for libraries without the symbol.
+                    let gpu_info = unsafe { lib.vm_gpu_info(vm) }.unwrap_or_default();
+                    let payload = RPC_HANDSHAKE_RESPONSE_LEN + topo.len() + drm.len();
                     let mut msg = Vec::with_capacity(RPC_HEADER_LEN + payload);
                     msg.extend_from_slice(&build_header(0, request_id, payload as u32, 0));
-                    // RpcHandshakeResponse: version, gpu_id, topo_len, drm_len.
+                    // RpcHandshakeResponse: version, gpu_id, topo_len,
+                    // drm_len, gpu_info, then the topo/drm path strings.
                     msg.extend_from_slice(&RPC_PROTOCOL_VERSION.to_ne_bytes());
                     msg.extend_from_slice(&gpu_id.to_ne_bytes());
                     msg.extend_from_slice(&(topo.len() as u32).to_ne_bytes());
                     msg.extend_from_slice(&(drm.len() as u32).to_ne_bytes());
+                    msg.extend_from_slice(gpu_info.as_bytes());
                     msg.extend_from_slice(&topo);
                     msg.extend_from_slice(&drm);
                     send_exact(fd, &msg)
