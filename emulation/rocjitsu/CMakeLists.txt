@@ -257,6 +257,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 # Tests and scaling tools.
 if(BUILD_TESTING)
+    set(_rj_enable_build_tests TRUE)
+    if(DEFINED RJ_ENABLE_BUILD_TESTS)
+        set(_rj_enable_build_tests ${RJ_ENABLE_BUILD_TESTS})
+    endif()
+
+    set(_rj_enable_runtime_tests TRUE)
+    if(DEFINED RJ_ENABLE_RUNTIME_TESTS)
+        set(_rj_enable_runtime_tests ${RJ_ENABLE_RUNTIME_TESTS})
+    endif()
+
     add_subdirectory(tests)
 endif()
 
