@@ -101,6 +101,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Fixed a pre-main `rocprof-sys-run` `SIGSEGV` in `rocprofiler_configure()` when
   profiling OpenMPI GPU-aware MPI workloads.
 
+### Removed
+
+- Removed the `-p` / `--pid` option from `rocprof-sys-instrument` for attaching to
+  an already running process. Use the `rocprof-sys-attach` executable instead, which
+  attaches to and profiles running processes via the rocprofiler-sdk rocattach API.
+
 ### Known issues
 
 - A push/pop trace count imbalance can occur for workloads that instrument runtime
