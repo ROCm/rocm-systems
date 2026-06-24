@@ -809,7 +809,7 @@ same ``ml_api_trace/consolidated.csv`` and select rows where the ``Backend`` col
 operators appear in the same run.
 
 List all captured Triton kernels
-
+---------------------------------
 .. code-block:: shell-session
 
    $ rocprof-compute analyze --experimental --list-triton-operators --path ./workload
