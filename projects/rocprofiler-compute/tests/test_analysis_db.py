@@ -430,7 +430,7 @@ def test_calc_dataframe_expressions_empty_returns_assignable_series():
 # =============================================================================
 
 
-def test_calc_metrics_data_empty_filter_preserves_schema_and_warns():
+def test_calc_metrics_data_empty_filter_preserves_schema():
     """With no metric tables, the output frames keep their columns."""
     workload_path = "/fake/workload"
     arch_config = schema.ArchConfig()
