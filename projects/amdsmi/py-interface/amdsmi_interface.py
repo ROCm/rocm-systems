@@ -6616,7 +6616,7 @@ _FABRIC_ACCEL_STATE_NAMES = {
 }
 
 
-def amdsmi_get_fabric_telemetry(
+def amdsmi_get_fabric_telemetry_data(
     processor_handle: processor_handle_t, category_mask: int
 ) -> List[Dict[str, Any]]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
