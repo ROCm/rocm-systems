@@ -1,36 +1,6 @@
 # HIP Record & Replay (HRR) — In-Tree Dispatch Table Design
 
-## Summary of Changes from Original Out-of-Tree HRR
-
-The original HRR system (`hip_hrr.cpp` + out-of-tree proxy DLL / LD_PRELOAD interposer) has
-been replaced by an in-tree capture layer built directly into `amdhip64`. Key changes:
-
-| Area                           | Before                                    | After                                              |
-|--------------------------------|-------------------------------------------|----------------------------------------------------|
-| **API coverage**               | ~20 hand-maintained APIs                  | Every HIP API (~529 total, fully generated)        |
-| **Platform support**           | Separate Windows DLL + Linux LD_PRELOAD   | Single in-tree code path                           |
-| **Capture enable**             | Hard-coded at build time                  | `HIP_HRR_CAPTURE_OUTPUT=<dir>` env var             |
-| **Kernel arg introspection**   | ~360 lines of ELF + msgpack parsing       | `kernel->signature()` — zero added lines           |
-| **Kernel arg pointer detect**  | `value_kind` string matching              | `desc.type_ == T_POINTER`                          |
-| **Handle IDs**                 | Sequential `uint32_t` per type            | Raw pointer cast to `uint64_t`                     |
-| **Stream capture**             | Not captured                              | Full stream create/destroy + event record           |
-| **Graph capture**              | Not captured                              | Full `hipStreamBeginCapture` → `hipGraphLaunch`    |
-| **Fat-binary launch path**     | Not captured                              | Compiler dispatch table slot + TLS (args included) |
-| **Capture shim generation**    | Manual updates per new API                | `gen_hrr_api_args.py` auto-generates all shims     |
-| **D2H data validation**        | None                                      | Blob compare on every D2H memcpy                   |
-| **Pinned host mem (register)** | Not captured                              | `hipHostRegister` blob snapshot + playback restore |
-| **Multi-threaded replay**      | No                                        | `--multi-thread`: one CPU thread per captured thread (default: single-threaded) |
-| **Kernel filter + warm-up**    | No                                        | `--kernel-filter STR` with silent warm-up pass     |
-| **Timing**                     | No                                        | `--timing`: wall time + GPU kernel time + GPU graph time |
-| **GPU error surfacing**        | No                                        | `--sync-after-launch`: device sync after every launch |
-| **MT-safe replay context**     | No                                        | `shared_mutex` reads, atomic stats counters        |
-| **Archive info (no GPU)**      | Separate `hrr-info` tool                  | `hrr-playback --info [--events]`                   |
-| **Playback tools**             | `hrr-replay` + `hrr-info`                 | Single `hrr-playback` (`--info` flag)         |
-| **Playback built**             | Separate CMake tree                       | Part of main `amdhip` CMake build                  |
-| **Code-object layout**         | `hipamd/src'                              | All under `hipamd/src/hrr/`                        |
-| **Copyright**                  | Ad-hoc                                    | SPDX `MIT` on every file + generated output        |
-
-### Quick Start
+## Quick Start
 
 ```bash
 # Capture
@@ -134,12 +104,13 @@ Run from `hipamd/src/hrr/`: `python gen_hrr_api_args.py`
 
 ### Build
 ```bash
-# Capture DLL
-cmake --build C:/MIGraphX/amdhip --config Release -j 6 --target amdhip64
+# Configure the CLR/HIP build tree once (Ninja, single-config)
+cmake -S projects/clr -B build -GNinja -DCLR_BUILD_HIP=ON -DHIP_PLATFORM=amd \
+      -DCMAKE_BUILD_TYPE=Release
 
-# Playback tool (same tree)
-cmake --build C:/MIGraphX/amdhip --config Release --target hrr-playback
-# Output: hipamd/src/hrr/playback/Release/hrr-playback.exe
+# Build the capture runtime + playback tool (same tree)
+ninja -C build amdhip64 hrr-playback
+# Output: build/hipamd/lib/libamdhip64.so*  and  build/.../hrr/playback/hrr-playback
 ```
 
 ### Usage
@@ -209,15 +180,15 @@ hipamd/src/hrr/
 test/ (separate tree, not part of this PR)
   hip_raw_trace.cpp               — multi-threaded integration test workload
                                     (threadFunc ×4 + graphFunc + pinnedFunc + hostRegisterFunc)
-                                    capture: HIP_HRR_CAPTURE_OUTPUT=out.hrr hip_raw_trace.exe
+                                    capture: HIP_HRR_CAPTURE_OUTPUT=out.hrr ./hip_raw_trace
                                     replay:  hrr-playback out.hrr
 ```
 
 ## Core Mechanism
 
 At init time the capture layer snapshots `g_real_table` from `GetHipDispatchTable()`,
-builds `g_cap_table` as a copy with the 12 manual shims overridden, then installs it
-atomically. All shims call through `g_real_table` — never back into the dispatch table —
+builds `g_cap_table` as a copy with the manual shims (`MANUAL_CAPTURE_APIS`) overridden,
+then installs it atomically. All shims call through `g_real_table` — never back into the dispatch table —
 preventing re-entrancy. Uninstall restores the snapshot.
 
 ### `<<<>>>` Launch Path — Compiler Dispatch Table
@@ -246,7 +217,7 @@ A single Python script produces three files from `hip_api_trace.hpp`:
 
 Script location: `hipamd/src/hrr/gen_hrr_api_args.py`
 
-Run from `hipamd/src/hrr/`: `C:/Users/gandryey/AppData/Local/Programs/Python/Python312/python.exe gen_hrr_api_args.py`
+Run from `hipamd/src/hrr/`: `python3 gen_hrr_api_args.py`
 
 The generator classifies each API:
 - **`MANUAL_CAPTURE_APIS`** (27): kernel launches ×4, memcpy H2D+D2H ×8, module load ×3, `__hipRegisterFatBinary`, `hipHostRegister/Unregister`, `hipMemcpy3D` variants ×4, array creation ×2, VMM, stream/memory attribute APIs, `hipMemcpyWithStream`
@@ -266,7 +237,9 @@ HRR_VERSION = 3
 
 ```
 <output_dir>/
-  manifest.json      { version, capture_mode, event_count, blob_count }
+  manifest.json      { version, capture_mode, complete, event_count, blob_count }
+                     (version here is the manifest schema = 1, distinct from the
+                      events.bin HRR_VERSION = 3)
   events.bin         8-byte hrr_file_header, then repeated records
   blobs/<2hex>/      FNV-1a-128 content-addressed raw buffers (.blob ext)
   code_objects/      .hsaco ELFs keyed by hash
@@ -451,7 +424,12 @@ thread's HIP last-error, so `hip::tls.last_command_error_/last_error_` are saved
 and restored around the scan. At replay, `replay_kernel_launch` copies the
 struct bytes and overwrites each recorded offset with `translate_ptr(rec)`
 before launch, so embedded pointers resolve to live allocations exactly like
-top-level pointer args. Old archives (no `value_kind == 3`) parse unchanged.
+top-level pointer args. As a defensive measure it **also re-scans every word**
+of the struct (not just the recorded offsets) and translates any additional word
+that resolves to a known allocation — catching pointers the capture-time
+heuristic missed (e.g. a conditionally-populated field that was null at capture).
+Set `HIP_HRR_REPLAY_NO_RESCAN=1` to disable the rescan and `HIP_HRR_PTR_RELAX=1`
+to relax the guard for debugging. Old archives (no `value_kind == 3`) parse unchanged.
 
 This detector is a value-based heuristic with three deliberate properties:
 
@@ -459,10 +437,13 @@ This detector is a value-based heuristic with three deliberate properties:
   is a locked allocation-tree walk; issuing one per candidate word of every
   by-value arg of every launch (millions on an LLM workload) slows capture and
   distorts the timing/ordering HRR records. `scan_embedded_ptr_offsets` therefore
-  caches a per-word verdict (POINTER/SCALAR) keyed by `(kernel, arg-index, size,
-  offset)` (thread-local, lock-free). A verdict is cached **only from an actual
-  probe** (word value ≥ `0x10000`); a null/small word is skipped *without*
-  caching. This is essential: a conditionally-populated pointer field — e.g. the
+  caches a per-word verdict keyed by `(kernel, arg-index, size, offset)`
+  (thread-local, lock-free). Each entry stores the verdict (POINTER/SCALAR) **and
+  the probed word value**, and is **re-probed whenever the word's value changes**,
+  so a slot that held a scalar on one launch and a live pointer on the next is not
+  frozen as a scalar. A verdict is cached **only from an actual probe** (word value
+  ≥ `0x10000`); a null/small word is skipped *without* caching. This is essential:
+  a conditionally-populated pointer field — e.g. the
   multi-block reduction scratch/semaphore pointers in ATen's `ReduceOp` struct,
   which are null on single-block launches — must stay re-checkable, so it is
   detected on the first launch where it is actually non-null rather than frozen
@@ -476,21 +457,30 @@ This detector is a value-based heuristic with three deliberate properties:
   inside a packed struct (`#pragma pack` `{char; void*}`) is still found. Most
   ABIs 8-byte-align pointer members, but packed structs would otherwise slip
   through silently.
-- **False-positive guard at replay.** Because the detector flags any word whose
-  bit pattern lands in a live VA, a large scalar/double can be mis-flagged. To
+- **False-positive guard (capture + replay).** Because the detector flags any word
+  whose bit pattern lands in a live VA, a large scalar/double can be mis-flagged. To
   avoid silently corrupting such a scalar, replay overwrites a `value_kind == 3`
   offset **only when the recorded value resolves** to a known allocation; an
-  unresolved word is left as its original bytes (logged under `--verbose`). The
-  capture-time `cand < 0x10000` guard additionally skips small scalars.
+  unresolved word is left as its original bytes (logged under `--verbose`). Two
+  value-shape guards run on **both** the capture and replay sides: the
+  `cand < 0x10000` guard skips small scalars, and a packed-integer guard rejects
+  candidates whose **low 32 bits** look like a small scalar
+  (`(value & 0xFFFFFFFF) < 0x10000`) — these are typically two packed 32-bit
+  values mistaken for one 64-bit VA, a non-deterministic false positive that
+  previously caused occasional replay faults on ATen elementwise kernels.
+  `HIP_HRR_PTR_RELAX=1` disables the replay-side guard for debugging.
 
 **Scope:** only `hipMemoryTypeDevice`/`Unified` words are flagged. A pinned/host
 (`hipMemoryTypeHost`) pointer embedded by value keeps its capture-time host VA at
 replay (invalid in the replay process); translating embedded host pointers is
 intentionally out of scope.
 
-`co_hash` is always written as 0 in kernel launch events — no cheap mapping from
-kernel to code object at dispatch time. Playback resolves kernels by name, scanning
-all loaded modules.
+A per-launch `co_hash` (the FNV-1a-128 hash of the owning code object) **is** recorded
+in kernel launch events. Playback resolves kernels by `(co_hash, name)`: it first looks
+up the module for that hash and binds the named kernel within it, falling back to a
+name-only scan across all loaded modules when the hash is unknown (0) or unresolved.
+This disambiguates non-unique symbol names — e.g. Triton/inductor emits the generic
+entry symbol `triton_` from many distinct code objects.
 
 ### Debugging kernel args (`HIP_HRR_DEBUG_ARGS`)
 
@@ -585,9 +575,19 @@ hrr-playback <capture.hrr> [options]
   --timing              Report wall time, GPU kernel time, GPU graph time, and combined total
   --kernel-filter STR   Only launch kernels whose name contains STR
                         (silent full warm-up pass runs first to populate GPU state)
+  --replace-kernel N=P  Launch the kernel whose recorded name is exactly N from the
+                        external code object at path P instead of the recorded one
   --sync-after-launch   hipDeviceSynchronize after every kernel (surfaces GPU errors)
   --sync-after-event    hipDeviceSynchronize after every event (HW hang debug; very slow)
+  --sync-watchdog-ms N  Abort with a diagnostic if any device sync exceeds N ms
+  --trace-kernels       Print one compact line before every kernel launch
+  --progress-kernels N  Print a heartbeat every N launched kernels
+  --progress-seconds S  Print a heartbeat at most every S seconds
 ```
+
+Several options have `HIP_HRR_REPLAY_*` environment-variable equivalents (e.g.
+`HIP_HRR_REPLAY_TRACE_KERNELS`, `HIP_HRR_REPLAY_PROGRESS_KERNELS`,
+`HIP_HRR_REPLAY_PROGRESS_SECONDS`, `HIP_HRR_REPLAY_SYNC_WATCHDOG_MS`).
 
 **Replay `hipMalloc` padding:** `hip_playback.cpp` replays each device allocation at
 `max(recorded_size, min(recorded_size × factor, cap))` (defaults: factor **1** for
@@ -602,13 +602,41 @@ HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=256   # legacy padding (more VRAM; fewer pool fa
 HIP_HRR_REPLAY_ALLOC_PAD_MAX=268435456   # example: 256 MiB cap per allocation
 ```
 
+**Zero-init of replayed allocations.** Replay zero-initialises each device
+allocation (`hrr_replay_zero_init`) so kernels that read padded/over-allocated tail
+regions observe deterministic zeros rather than stale VRAM. This injected `memset`
+and the `--sync-after-launch` post-launch sync are **skipped while a stream is in
+graph capture** (`in_graph_capture`) — issuing an unrelated memset/sync into a
+capturing stream corrupts the graph (HIP error 901).
+
 For each D2H memcpy event that has a captured expected-data blob:
 1. Translates the recorded device src pointer to the live address
 2. Copies the result back to a host buffer via `hipMemcpy`
-3. Compares byte-for-byte with the expected blob from the archive
-4. Increments `ctx.d2h_pass` or `ctx.d2h_fail`
+3. Validates against the expected blob with `hrr_d2h_validate` (see below)
+4. Increments `ctx.d2h_pass` (byte-exact), `ctx.d2h_pass_tol` (within tolerance),
+   or `ctx.d2h_fail`
 
-Exits 0 if all checks pass (or no D2H blobs in archive), 1 on any failure.
+**Tolerance-based validation.** A byte-exact `memcmp` is tried first as a fast path.
+On mismatch, the validator interprets both buffers as each candidate float encoding
+(fp32, bf16, fp16, fp64) and passes when every element satisfies
+`|live − expected| ≤ atol + rtol·|expected|`. This absorbs benign GPU
+non-determinism (atomicAdd reduction order, dropout RNG ordering) that produces tiny
+floating-point differences without indicating a replay-fidelity bug. Thresholds and
+behavior are configurable:
+
+```
+HIP_HRR_D2H_ATOL=<float>   # absolute tolerance (default tuned for bf16/fp16)
+HIP_HRR_D2H_RTOL=<float>   # relative tolerance
+HIP_HRR_D2H_EXACT=1        # disable tolerance; require byte-exact match
+```
+
+On failure the validator reports element counts, max absolute/relative error, and
+64-bit FNV-1a content hashes (useful for replay-vs-replay determinism comparison).
+The summary distinguishes exact passes, within-tolerance passes, and failures.
+
+**Exit codes:** `0` if all checks pass or are within tolerance (or no D2H blobs);
+`1` on any unexplained D2H failure; `2` for an early "replay diverged" abort triggered
+once accumulated failures cross `HIP_HRR_REPLAY_DIVERGENCE_ABORT` (`note_d2h_fail`).
 
 ### Multi-Threaded Replay
 
@@ -619,27 +647,38 @@ synchronisation between threads is not replicated — see Limitations section.
 
 ## Build System
 
-The playback tools are now built as part of the main `amdhip` CMake tree via
+The playback tools are built as part of the main `amdhip` CMake tree via
 `add_subdirectory(playback)` in `hrr/CMakeLists.txt`. No separate CMake tree is needed.
+Builds are Linux/Ninja (on Windows, build inside WSL — there is no native Windows build).
 
-### Capture DLL + Playback Tools (combined)
+### Capture runtime + playback tool (combined)
 ```bash
-cd C:/MIGraphX/amdhip
-cmake --build . --config Release -j 6 --target amdhip64
-cmake --build . --config Release --target hrr-playback
-# DLL: Release/amdhip64_7.dll
-# Tool: Release/hrr-playback.exe  (or playback/Release/hrr-playback.exe)
+# Configure once (Ninja, single-config). Point at the live ROCm install and the
+# matching HIP headers; CMAKE_BUILD_TYPE selects the config (no --config flag).
+cmake -S projects/clr -B build -GNinja \
+  -DHIP_COMMON_DIR=<path-to-HIP> \
+  -DROCM_PATH=$ROCM_PATH \
+  -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF -DHIP_PLATFORM=amd \
+  -DCMAKE_BUILD_TYPE=Release
+
+# Build both targets
+ninja -C build amdhip64 hrr-playback -j"$(nproc)"
+# Runtime: build/hipamd/lib/libamdhip64.so*
+# Tool:    build/.../hrr/playback/hrr-playback  (locate via: find build -name hrr-playback -type f)
 ```
 
 ### Deploy
 ```bash
-copy Release\amdhip64_7.dll C:\MIGraphX\test\build2\
+# Make the freshly built capture runtime win over any system ROCm copy at run time
+export LD_LIBRARY_PATH=$PWD/build/hipamd/lib:$LD_LIBRARY_PATH
+# or LD_PRELOAD the capture lib for a single app:
+LD_PRELOAD=$PWD/build/hipamd/lib/libamdhip64.so.7 HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app
 ```
 
 ### Validation Tool (separate test tree)
 ```bash
-cmake --build C:/MIGraphX/test/build2 --config Release --target hrr-validate
-# Produces: hrr-validate.exe
+cmake --build build_test --target hrr-validate    # or: ninja -C build_test hrr-validate
+# Produces: build_test/.../hrr-validate
 ```
 
 ## Comparison with Out-of-Tree Proxy
@@ -703,14 +742,17 @@ pointer-based memcpy APIs are unaffected.
 host pointer, then at playback calling `hipModuleGetGlobal` on the loaded module to
 resolve the device address and rebuilding the symbol table entry.
 
-### `co_hash` Always Zero in Kernel Launch Events
+### `co_hash` Kernel → Code-Object Binding
 
-At dispatch time there is no cheap way to determine which code object a kernel
-function belongs to. `co_hash_lo` and `co_hash_hi` are always written as 0 in kernel
-launch payload. The playback resolves kernels by name, scanning all loaded modules.
+Kernel launch events record a per-launch `co_hash_lo`/`co_hash_hi` (the hash of the
+owning code object). Playback resolves kernels by `(co_hash, name)`, falling back to a
+name-only scan when the hash is 0 (unknown) or does not resolve to a loaded module.
+This binds non-unique symbol names (e.g. Triton's generic `triton_` entry symbol,
+emitted from many distinct code objects) to the correct kernel.
 
-**Impact:** if two loaded code objects define kernels with the same mangled name, the
-playback may call the wrong kernel.
+**Impact:** if `co_hash` is unavailable for a launch and two loaded code objects define
+kernels with the same mangled name, the name-only fallback may still pick the wrong
+kernel.
 
 ### Fat Binary Registration Race
 
