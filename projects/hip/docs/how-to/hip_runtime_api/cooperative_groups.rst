@@ -485,7 +485,7 @@ All cooperative groups operations receive the same arguments:
 
 * ``group`` is either a ``coalesced_group`` or a ``thread_block_tile``
 
-* ``val`` needs to be a type ``T`` that is trivially copyable, default constructible and up to 32 bytes in size.
+* ``val`` needs to be a type ``T`` that is trivially copyable, default constructible, and up to 32 bytes in size.
 
 * ``op`` must be a function object, which includes lambdas or functors which define ``operator()``. The following predefined functors in the ``cooperative_groups`` namespace:
 
