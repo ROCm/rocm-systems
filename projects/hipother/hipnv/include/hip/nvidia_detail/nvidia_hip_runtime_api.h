@@ -125,6 +125,7 @@ typedef enum hipMemoryAdvise {
 #define hipStreamWaitValueEq CU_STREAM_WAIT_VALUE_EQ
 #define hipStreamWaitValueAnd CU_STREAM_WAIT_VALUE_AND
 #define hipStreamWaitValueNor CU_STREAM_WAIT_VALUE_NOR
+#define hipStreamWriteValueDefault CU_STREAM_WRITE_VALUE_DEFAULT
 
 // hipLibraryPropertyType
 #define hipLibraryPropertyType libraryPropertyType
@@ -367,6 +368,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipHostMallocWriteCombined cudaHostAllocWriteCombined
 #define hipHostMallocCoherent 0x0
 #define hipHostMallocNonCoherent 0x0
+#define hipMallocSignalMemory 0x0
 
 #define hipHostAllocDefault cudaHostAllocDefault
 #define hipHostAllocPortable cudaHostAllocPortable

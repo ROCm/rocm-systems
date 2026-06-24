@@ -117,6 +117,16 @@ class TestDeriveScalarUnary:
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
 
+    @pytest.mark.parametrize('name', ['S_CLZ_I32_U32', 'S_CLZ_I32_U64'])
+    def test_clz_zero_returns_all_ones(self, name):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem.semantic_class == 'scalar_unary'
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'static_cast<uint32_t>(-1)' in cpp
+        assert '? 32u' not in cpp
+        assert '? 64u' not in cpp
+
     def test_lowers_without_error(self):
         for op in ['not', 'brev', 'sext8', 'sext16', 'floor', 'trunc']:
             sem = _FakeSem(f'S_{op.upper()}', 'scalar_unary', op, 'b32')
@@ -177,32 +187,41 @@ class TestDeriveScalarBinop:
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
 
-    def test_signed_co_uses_unsigned_carry(self):
-        sem = derive_semantics('S_ADD_CO_I32', 'ENC_SOP2')
-        assert sem.sets_scc == 'carry'
+    def test_signed_mul_uses_unsigned_result_slot(self):
+        sem = _FakeSem('S_MUL_I32', 'scalar_binop', 'mul', 'i32')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
 
-        assert 'uint32_t' in cpp
-        assert 'uint64_t' in cpp
+        assert 'uint32_t result' in cpp
+        assert re.search(r'\bint32_t\s+result\b', cpp) is None
+
+    def test_signed_co_uses_signed_overflow(self):
+        sem = derive_semantics('S_ADD_CO_I32', 'ENC_SOP2')
+        assert sem.sets_scc == 'overflow'
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert 'int32_t' in cpp
+        assert 'int64_t' in cpp
         assert 'write_scc' in cpp
-        assert 'static_cast<int64_t>' not in cpp
+        assert 'static_cast<uint64_t>' not in cpp
 
         sem = derive_semantics('S_SUB_CO_I32', 'ENC_SOP2')
-        assert sem.sets_scc == 'borrow'
+        assert sem.sets_scc == 'overflow'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'uint32_t' in cpp
+        assert 'int32_t' in cpp
+        assert 'int64_t' in cpp
         assert 'write_scc' in cpp
-        assert 'static_cast<int64_t>' not in cpp
+        assert 'static_cast<uint64_t>' not in cpp
 
     @pytest.mark.parametrize(
         'name,operation,dtype,scc',
         [
             ('S_ADD_CO_U32', 'add', 'u32', 'carry'),
             ('S_SUB_CO_U32', 'sub', 'u32', 'borrow'),
-            ('S_ADD_CO_I32', 'add', 'i32', 'carry'),
-            ('S_SUB_CO_I32', 'sub', 'i32', 'borrow'),
+            ('S_ADD_CO_I32', 'add', 'i32', 'overflow'),
+            ('S_SUB_CO_I32', 'sub', 'i32', 'overflow'),
             ('S_ADD_CO_CI_U32', 'addc', 'u32', 'carry'),
             ('S_SUB_CO_CI_U32', 'subb', 'u32', 'borrow'),
             ('S_ADD_NC_U64', 'add', 'u64', 'none'),
@@ -994,6 +1013,14 @@ class TestDeriveVectorBinop:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.SHL in all_kinds
 
+    def test_i24_mul_lowers_through_unsigned_helper(self):
+        sem = _FakeSem('V_MUL_I32_I24', 'vector_binop', 'mul_i24', 'i24')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert '::rocjitsu::amdgpu::mul_i24_u32' in cpp
+        assert 'a * b' not in cpp
+
     def test_min_max_use_call(self):
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_F32', 'vector_binop', op, 'f32')
@@ -1098,6 +1125,32 @@ class TestDeriveVectorTernary:
             assert '| (pack(' in cpp
             assert ' << 8);' in cpp
             assert f'{op}(' not in cpp
+
+    def test_lshl_add_lowers_through_masked_helper(self):
+        sem = _FakeSem('V_LSHL_ADD_U32', 'vector_ternary', 'lshl_add', 'u32')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert '::rocjitsu::amdgpu::lshl_masked' in cpp
+        assert (
+            'inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)' not in cpp
+        )
+
+    def test_i24_mad_lowers_through_unsigned_helper(self):
+        sem = _FakeSem('V_MAD_I32_I24', 'vector_ternary', 'mad_i24', 'i24')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert '::rocjitsu::amdgpu::mad_i24_u32' in cpp
+        assert 'a * b' not in cpp
+
+    def test_signed_bfe_keeps_braced_one_literal(self):
+        sem = _FakeSem('V_BFE_I32', 'vector_ternary', 'bfe_i', 'i32')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert 'uint32_t{1}' in cpp
+        assert 'uint32_tstatic_cast' not in cpp
 
 
 class TestDeriveVectorCmp:
@@ -1837,6 +1890,23 @@ class TestDerivePacked:
 
 
 class TestDeriveDot:
+    def test_rdna3_dot2acc_vop2_is_functional_dot2c(self):
+        sem = derive_semantics('V_DOT2ACC_F32_F16', 'ENC_VOP2')
+        assert sem is not None
+        assert sem.semantic_class == 'vector_dot'
+        assert sem.operation == 'dot2c'
+        assert sem.data_type == 'f32'
+
+    def test_vop3_dot2_true16_semantics(self):
+        cases = {
+            'V_DOT2_F16_F16': 'dot2_f16_f16',
+            'V_DOT2_BF16_BF16': 'dot2_bf16_bf16',
+        }
+        for name, semantic_class in cases.items():
+            sem = derive_semantics(name, 'ENC_VOP3')
+            assert sem is not None
+            assert sem.semantic_class == semantic_class
+
     def test_vector_dot(self):
         sem = _FakeSem('V_DOT2_F32_F16', 'vector_dot', 'dot2_f32_f16', 'f32')
         block = derive_sema_block(sem)
@@ -1900,12 +1970,17 @@ class TestDeriveWaitCounters:
     @pytest.mark.parametrize(
         ('name', 'operation'),
         [
+            ('S_WAITCNT_VSCNT', 'waitcnt_vscnt'),
+            ('S_WAITCNT_VMCNT', 'waitcnt_vmcnt'),
+            ('S_WAITCNT_LGKMCNT', 'waitcnt_lgkmcnt'),
+            ('S_WAITCNT_EXPCNT', 'waitcnt_expcnt'),
             ('S_WAIT_TENSORCNT', 'wait_tensorcnt'),
             ('S_WAIT_ASYNCCNT', 'wait_asynccnt'),
         ],
     )
-    def test_gfx1250_named_counter_is_split_wait(self, name, operation):
-        sem = derive_semantics(name, 'ENC_SOPP')
+    def test_named_counter_is_split_wait(self, name, operation):
+        enc_name = 'ENC_SOPK' if name.startswith('S_WAITCNT_') else 'ENC_SOPP'
+        sem = derive_semantics(name, enc_name)
         assert sem is not None
         assert sem.semantic_class == 'wait_counter'
         assert sem.operation == operation

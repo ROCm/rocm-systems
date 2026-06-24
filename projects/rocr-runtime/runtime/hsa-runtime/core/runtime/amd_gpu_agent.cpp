@@ -855,6 +855,26 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   return sdma;
 }
 
+uint32_t GpuAgent::NumSdmaEnginesTotal() const {
+  return static_cast<uint32_t>(properties_.NumSdmaEngines) +
+         static_cast<uint32_t>(properties_.NumSdmaXgmiEngines);
+}
+
+bool GpuAgent::SupportsSdmaQueueByEngineId() const {
+  // Targeting a specific SDMA engine at queue creation
+  // (HSA_QUEUE_SDMA_BY_ENG_ID) requires kernel interface >= 1.17.
+  const auto kfd_version = core::Runtime::runtime_singleton_->KfdVersion().version;
+  return kfd_version.KernelInterfaceMajorVersion > 1 ||
+         (kfd_version.KernelInterfaceMajorVersion == 1 &&
+          kfd_version.KernelInterfaceMinorVersion >= 17);
+}
+
+uint32_t GpuAgent::NextSdmaUserQueueEngineId() {
+  const uint32_t num_engines = NumSdmaEnginesTotal();
+  assert(num_engines != 0 && "No SDMA engines available for round-robin selection.");
+  return sdma_user_queue_rr_index_.fetch_add(1, std::memory_order_relaxed) % num_engines;
+}
+
 core::Blit* GpuAgent::CreateBlitKernel(core::Queue* queue) {
   AMD::BlitKernel* kernl = new AMD::BlitKernel(queue);
 
@@ -1316,7 +1336,9 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 bool GpuAgent::DmaEngineIsFree(uint32_t engine_offset) {
   SetCopyStatusCheckRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyStatusCheckRefCount(false); });
-  bool is_free = !!!(sdma_blit_used_mask_ & (1 << engine_offset)) ||
+  // Atomic load to pair with atomic write in GetBlitObject
+  uint32_t mask = sdma_blit_used_mask_.load(std::memory_order_relaxed);
+  bool is_free = !!!(mask & (1 << engine_offset)) ||
                     (blits_[engine_offset]->isSDMA() &&
                      !!!blits_[engine_offset]->PendingBytes());
   return is_free;
@@ -3257,7 +3279,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
 }
 
 lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(uint32_t engine_offset) {
-  sdma_blit_used_mask_ |= 1 << engine_offset;
+  sdma_blit_used_mask_.fetch_or(1 << engine_offset, std::memory_order_relaxed);
   return blits_[engine_offset];
 }
 

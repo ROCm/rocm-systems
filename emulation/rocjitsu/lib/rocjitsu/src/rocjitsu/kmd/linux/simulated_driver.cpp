@@ -1176,6 +1176,17 @@ bool SimulatedDriver::allocate_scratch_backing(uint32_t process_id, uint64_t gpu
   std::memset(host_ptr, 0, aligned_size);
   proc->map_pages(gpu_va, host_ptr, aligned_size);
 
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    KfdProcess::GpuAllocation alloc{};
+    alloc.gpu_va = gpu_va;
+    alloc.size = aligned_size;
+    alloc.host_ptr = host_ptr;
+    alloc.handle = proc->next_handle_++;
+    alloc.memfd = -1;
+    proc->allocations_[alloc.handle] = alloc;
+  }
+
   util::Logger::vm([&](auto &os) {
     os << "SCRATCH_BACKING pid=" << process_id << " gpu_va=0x" << std::hex << gpu_va << " size=0x"
        << aligned_size << std::dec << " host=" << host_ptr;
@@ -1249,8 +1260,18 @@ int SimulatedDriver::map_memory_ioctl(KfdProcess &proc, void *arg) {
   return 0;
 }
 
-int SimulatedDriver::unmap_memory_ioctl([[maybe_unused]] KfdProcess &proc, void *arg) {
+int SimulatedDriver::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg);
+  std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+  auto it = proc.allocations_.find(args->handle);
+  if (it != proc.allocations_.end()) {
+    // UNMAP only tears down GPU page-table mappings; the allocation record
+    // (and its backing memfd/dmabuf_fd) stays tracked until FREE_MEMORY_OF_GPU
+    // releases it. Erasing here would leak those fds and make a later FREE a
+    // no-op for this handle.
+    auto &alloc = it->second;
+    unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+  }
   args->n_success = args->n_devices;
   return 0;
 }
