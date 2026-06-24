@@ -460,7 +460,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  int block_size = get_flat_block_id();
+  int block_size = get_flat_block_size();
   int step_size = WF_SIZE <= block_size ? WF_SIZE : block_size;
 
   // Have each PE put their designated data to the other PEs

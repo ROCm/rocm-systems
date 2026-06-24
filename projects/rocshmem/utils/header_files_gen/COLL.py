@@ -91,7 +91,7 @@ def generate_alltoall_wave_api():
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
-                           heap.
+ *                         heap.
  * @param[in] nelems       Number of data blocks transferred per pair of PEs.
  *
  * @return int: zero on success, non-zero otherwise
@@ -285,7 +285,7 @@ def generate_reduce_on_stream_api():
 /**
  * @name ROCSHMEM_REDUCE_ON_STREAM
  * @brief Performs a reduction across all PEs in a team on the specified HIP
- * stream.
+ *        stream.
  *
  * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
@@ -414,6 +414,3 @@ namespace rocshmem {
     )
 
     write_to_file(output_file, expanded_code)
-
-
-print(generate_alltoall_wave_api())

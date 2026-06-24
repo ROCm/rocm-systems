@@ -38,7 +38,7 @@ namespace rocshmem {
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
-                           heap.
+ *                         heap.
  * @param[in] nelems       Number of data blocks transferred per pair of PEs.
  *
  * @return void
@@ -145,7 +145,7 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoall_wg(
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
-                           heap.
+ *                         heap.
  * @param[in] nelems       Number of data blocks transferred per pair of PEs.
  *
  * @return int: zero on success, non-zero otherwise
@@ -214,7 +214,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_alltoall_wave(
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
-                           heap.
+ *                         heap.
  * @param[in] nelems       Number of data blocks transferred per pair of PEs.
  *
  * @return int; zero on success, non-zero otherwise
