@@ -1141,6 +1141,8 @@ trace.
 Requirements
 ------------
 
+The minimum requirements to use the Triton trace feature are:
+
 * Valid Triton installation in the profiling environment.
 * The workload must be run as a Python script or a Python command.
 * The workload's Python version must match roctx's Python version.

@@ -814,6 +814,9 @@ List all captured Triton kernels
 
    $ rocprof-compute analyze --experimental --list-triton-operators --path ./workload
 
+Filter the Triton kernels
+-------------------------
+
 Filter Triton kernels with shell-style glob patterns (``fnmatch``); the syntax
 matches ``--torch-operator`` (``*``, ``?``, ``[seq]``; match all with no
 arguments, ``all``, ``*``, or ``**``):
