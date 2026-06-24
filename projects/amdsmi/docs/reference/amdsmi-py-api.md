@@ -3626,6 +3626,9 @@ Output: Dictionary with fields
 `pcie_nak_sent_count_acc` | PCIe NAC sent count accumulated |
 `pcie_nak_rcvd_count_acc` | PCIe NAC received count accumulated |
 `jpeg_activity` | List of JPEG engine activity | %
+`is_apu` | `True` when the device exposes APU metrics (the `apu_metrics.*` fields below are populated) | bool
+
+On APU devices (for example gfx1151 / Strix), the returned dictionary additionally contains `apu_metrics.*` fields — for example `apu_metrics.temperature_gfx`, `apu_metrics.average_socket_power`, `apu_metrics.average_gfxclk_frequency`, and the `apu_metrics.throttle_residency_*` group. Temperatures are in C, power in W, clocks in MHz, voltages in mV, currents in mA, and activities in %. These fields are populated only when `is_apu` is `True`; otherwise they report `N/A`. See the **Added APU metrics support** entry in the [CHANGELOG](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CHANGELOG.md) for the complete field list.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_metrics_info` function:
 
