@@ -6,36 +6,14 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
-      mi355_ubuntu2204:
-        description: 'MI355 • Ubuntu 22.04 (gfx950)'
+      mode:
+        description: 'Build mode'
         required: false
-        default: true
-        type: boolean
-      mi355_ubuntu2404:
-        description: 'MI355 • Ubuntu 24.04 (gfx950)'
-        required: false
-        default: true
-        type: boolean
-      mi325_ubuntu2204:
-        description: 'MI325 • Ubuntu 22.04 (gfx94X)'
-        required: false
-        default: true
-        type: boolean
-      mi325_ubuntu2404:
-        description: 'MI325 • Ubuntu 24.04 (gfx94X)'
-        required: false
-        default: true
-        type: boolean
-      strix_halo_ubuntu2204:
-        description: 'Strix Halo • Ubuntu 22.04 (gfx1151)'
-        required: false
-        default: true
-        type: boolean
-      strix_halo_ubuntu2404:
-        description: 'Strix Halo • Ubuntu 24.04 (gfx1151)'
-        required: false
-        default: true
-        type: boolean
+        default: 'continuous'
+        type: choice
+        options:
+          - continuous
+          - nightly
   push:
     branches: [ develop ]
     paths:
@@ -94,24 +72,11 @@ jobs:
         id: generate_matrix
         working-directory: projects/rocprofiler-compute/.github
         run: |
-          if [ '${{ github.event_name }}' == 'schedule' ]; then
+          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-nightly' -I=0 -o=json)
           else
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-ci' -I=0 -o=json)
           fi
-
-          # When dispatched manually, filter to only the selected configurations.
-          if [ '${{ github.event_name }}' == 'workflow_dispatch' ]; then
-            FILTER='.'
-            [ '${{ inputs.mi355_ubuntu2204 }}'      != 'true' ] && FILTER+=' | map(select(not (.gpu == "mi355"      and .["os-release"] == "22.04")))'
-            [ '${{ inputs.mi355_ubuntu2404 }}'      != 'true' ] && FILTER+=' | map(select(not (.gpu == "mi355"      and .["os-release"] == "24.04")))'
-            [ '${{ inputs.mi325_ubuntu2204 }}'      != 'true' ] && FILTER+=' | map(select(not (.gpu == "mi325"      and .["os-release"] == "22.04")))'
-            [ '${{ inputs.mi325_ubuntu2404 }}'      != 'true' ] && FILTER+=' | map(select(not (.gpu == "mi325"      and .["os-release"] == "24.04")))'
-            [ '${{ inputs.strix_halo_ubuntu2204 }}' != 'true' ] && FILTER+=' | map(select(not (.gpu == "strix-halo" and .["os-release"] == "22.04")))'
-            [ '${{ inputs.strix_halo_ubuntu2404 }}' != 'true' ] && FILTER+=' | map(select(not (.gpu == "strix-halo" and .["os-release"] == "24.04")))'
-            MATRIX_CONTENT=$(echo "${MATRIX_CONTENT}" | yq "${FILTER}" -I=0 -o=json)
-          fi
-
           echo "matrix=${MATRIX_CONTENT}" >> $GITHUB_OUTPUT
 
   ubuntu:
@@ -151,17 +116,14 @@ jobs:
       - name: Setup Environment
         id: setup_env
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ]; then
+          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
+            EXCLUDED_TESTS=""
             ADD_COVERAGE="--coverage"
           else
             MODE=Continuous
-            ADD_COVERAGE=""
-          fi
-          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
-            EXCLUDED_TESTS=""
-          else
             EXCLUDED_TESTS="test_profile_live_attach_detach"
+            ADD_COVERAGE=""
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
           echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
