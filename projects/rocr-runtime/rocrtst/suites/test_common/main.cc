@@ -88,6 +88,7 @@
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
 #include "suites/functional/filter_devices.h"
+#include "suites/functional/fp_exception_shutdown.h"
 #include "suites/functional/gpu_coredump.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
@@ -402,6 +403,13 @@ TEST(rocrtstFunc, GpuCoreDump_PipePattern) {
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestPipePattern();
     RunCustomTestEpilog(&gcd);
+}
+
+TEST(rocrtstFunc, FP_Exception_Shutdown) {
+    FpExceptionShutdownTest fpx;
+    if (!RunCustomTestProlog(&fpx)) return;
+    fpx.TestShutdownSurvivesStrictFpEnv();
+    RunCustomTestEpilog(&fpx);
 }
 
 

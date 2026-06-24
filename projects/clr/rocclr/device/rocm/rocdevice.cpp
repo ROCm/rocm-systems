@@ -138,9 +138,8 @@ Device::Device(hsa_agent_t bkendDevice)
       sdma_engine_allocator_(*this),
       cpu_agent_info_(nullptr),
       numHwPipes_(4) {
-  // Initialize queue pools with proper comparators (requires 'this' pointer)
   for (uint i = 0; i < QueuePriority::Total; ++i) {
-    queuePool_.emplace_back(QueueCompare(this));
+    queuePool_.emplace_back();
   }
 
   group_segment_.handle = 0;

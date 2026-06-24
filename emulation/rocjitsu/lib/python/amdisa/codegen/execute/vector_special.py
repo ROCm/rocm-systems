@@ -118,8 +118,11 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
     Sources S0 and S1 are 32-bit; the accumulator S2 and result D are
     64-bit VGPR pairs.
     """
+    writes_carry = len(dst) > 1
     L = []
     L.append('  uint64_t exec = wf.exec();')
+    if writes_carry:
+        L.append('  uint64_t carry = 0;')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'i64':
@@ -129,20 +132,34 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
         L.append(
             f'    int64_t s1 = static_cast<int32_t>({src[1]}.read_lane(wf, lane));'
         )
+        L.append(f'    uint64_t s2 = {src[2]}.read_lane64(wf, lane);')
         L.append(
-            f'    int64_t s2 = static_cast<int64_t>({src[2]}.read_lane64(wf, lane));'
+            '    uint64_t product = static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1);'
         )
-        L.append(
-            '    uint64_t result = static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1) +'
-        )
-        L.append('                      static_cast<uint64_t>(s2);')
+        L.append('    uint64_t result = product + s2;')
+        if writes_carry:
+            L.append('    constexpr uint64_t sign_bit = 1ULL << 63;')
+            L.append(
+                '    if (((~(product ^ s2) & (product ^ result)) & sign_bit) != 0)'
+            )
+            L.append('      carry |= 1ULL << lane;')
+        L.append(f'    {dst[0]}.write_lane64(wf, lane, result);')
     else:
         L.append(f'    uint64_t s0 = {src[0]}.read_lane(wf, lane);')
         L.append(f'    uint64_t s1 = {src[1]}.read_lane(wf, lane);')
         L.append(f'    uint64_t s2 = {src[2]}.read_lane64(wf, lane);')
-        L.append('    uint64_t result = s0 * s1 + s2;')
-    L.append(f'    {dst[0]}.write_lane64(wf, lane, result);')
+        L.append('    uint64_t product = s0 * s1;')
+        L.append('    uint64_t result = product + s2;')
+        if writes_carry:
+            L.append('    if (result < product)')
+            L.append('      carry |= 1ULL << lane;')
+        L.append(f'    {dst[0]}.write_lane64(wf, lane, result);')
     L.append('  }')
+    if writes_carry:
+        L.append('  if (wf.wf_size() <= 32)')
+        L.append(f'    {dst[1]}.write_scalar(wf, static_cast<uint32_t>(carry));')
+        L.append('  else')
+        L.append(f'    {dst[1]}.write_scalar64(wf, carry);')
     return '\n'.join(L)
 
 
