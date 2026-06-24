@@ -200,6 +200,12 @@ iterations, infinite mode), and additional environment options are documented in
 
    source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 
+Alternatively, if you are using modules, use:
+
+.. code-block:: shell
+
+   module use /opt/rocprofiler-systems/share/modulefiles
+
 2. Generate and point to a config file, then edit ``.rocprofsys.cfg`` with settings such
    as:
 
@@ -214,7 +220,7 @@ iterations, infinite mode), and additional environment options are documented in
   ROCPROFSYS_AMD_SMI_METRICS = busy,temp,power,mem_usage,sdma_usage
   ROCPROFSYS_ROCM_DOMAINS    = hip_runtime_api,memory_copy
 
-3. Build ``sdma_test`` (see the README), then profile it, for example:
+3. Build ``sdma_test`` (see the `sdma_test README on GitHub`_), then profile it, for example:
 
 .. code-block:: shell
 
