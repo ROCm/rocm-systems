@@ -360,9 +360,12 @@ def normalize_phdr_vaddr(surgery: ElfSurgery) -> bool:
         if ph.p_type == PT_LOAD and idx != cover_idx:
             ceiling = max(ceiling, ph.p_vaddr + ph.p_memsz)
 
-    # Nothing relocated (PHDR still in the first LOAD, vaddr==offset already), or
-    # already normalized.
-    if cover is None or cover.p_vaddr == cover.p_offset:
+    # Only act on a *relocated* PHDR table: a dedicated PT_LOAD that begins
+    # exactly at e_phoff. This excludes the non-relocated case where the PHDR
+    # still lives in the first PT_LOAD (e.g. ET_EXEC, where that segment has
+    # p_vaddr != p_offset and must not be rewritten). Also skip if already
+    # normalized (p_vaddr == p_offset).
+    if cover is None or cover.p_offset != e_phoff or cover.p_vaddr == cover.p_offset:
         return False
 
     page_ceiling = round_up_to_page(ceiling)
@@ -394,8 +397,10 @@ def normalize_phdr_vaddr(surgery: ElfSurgery) -> bool:
     # Table offset is below the address ceiling; pinning vaddr there would
     # overlap another segment. Copy the table to a fresh end-of-file offset
     # at/above the ceiling so vaddr == offset holds without overlap.
-    table_size = ehdr.e_phnum * ehdr.e_phentsize
-    table = bytes(surgery.data[e_phoff : e_phoff + table_size])
+    # Copy the covering segment's full p_filesz (table entries plus any spare
+    # slots), not just e_phnum*e_phentsize, so the file actually contains every
+    # byte the relocated PT_LOAD claims (otherwise it could map past EOF).
+    table = bytes(surgery.data[e_phoff : e_phoff + cover.p_filesz])
     new_off = round_up_to_page(max(len(surgery.data), page_ceiling))
     pad = new_off - len(surgery.data)
     if pad > 0:
