@@ -279,6 +279,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: CPC
           event: 24
     - name: CPC_ALWAYS_COUNT
@@ -1525,6 +1526,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: GRBM
           event: 31
     - name: GRBM_CP_BUSY
@@ -1546,6 +1548,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: GRBM
           event: 3
     - name: GRBM_EA_BUSY
@@ -1567,6 +1570,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: GRBM
           event: 35
     - name: GRBM_GDS_BUSY
@@ -1648,6 +1652,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: GRBM
           event: 11
     - name: GRBM_TA_BUSY
@@ -1669,6 +1674,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: GRBM
           event: 13
     - name: GRBM_TC_BUSY
@@ -1682,6 +1688,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: GRBM
           event: 28
     - name: GRBM_UTCL2_BUSY
@@ -1698,6 +1705,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: GRBM
           event: 34
     - name: GRBMA_COUNT
@@ -2325,6 +2333,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 45
     - name: SPI_RA_BAR_CU_FULL_CSN
@@ -2382,6 +2391,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 174
     - name: SPI_RA_REQ_NO_ALLOC
@@ -2423,6 +2433,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SPI
           event: 149
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 148
     - name: SPI_RA_RES_STALL_CSN
       description: Arb cycles with CSn req and no CSn fits. Source is RA0
       properties: []
@@ -2566,6 +2580,31 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 189
+    - name: SPI_SWC_CSN_WR
+      description: Number of clocks to write CSC waves to SGPRs Requires 
+        SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL = 0, source is CS0; 
+        DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL = 3, 
+        source is CS3; DEBUG_PIPE_SEL = 4, source is CS4; DEBUG_PIPE_SEL = 5, source is CS5; 
+        DEBUG_PIPE_SEL = 6, source is CS6; DEBUG_PIPE_SEL = 7, source is CS7; default, source is 
+        CS0;
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 272
+    - name: SPI_VWC_CSN_WR
+      description: Number of clocks to write CSC waves to VGPRs (need to multiply this value by 4) 
+        Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL = 1, source is CS1; 
+        DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL = 3, source is CS3; DEBUG_PIPE_SEL = 4, 
+        source is CS4; DEBUG_PIPE_SEL = 5, source is CS5; DEBUG_PIPE_SEL = 6, source is CS6; 
+        DEBUG_PIPE_SEL = 7, source is CS7; default, source is CS0;
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 279
     - name: SPI_UTIL
       description: Percentage of the GRBM_GUI_ACTIVE time that any of the Shader Pipe Interpolators 
         (SPI) are busy in the shader engine(s)
@@ -3167,6 +3206,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 281
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 651
     - name: SQC_DCACHE_MISSES
       description: Number of cache misses, includes uncached requests. (per-SQ, per-Bank, 
         nondeterministic)
@@ -3207,6 +3250,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 296
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 665
     - name: SQC_DCACHE_REQ
       description: Number of requests (post-bank-serialization). (per-SQ, per-Bank)
       properties: []
@@ -3245,6 +3292,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 306
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 672
     - name: SQC_DCACHE_REQ_READ_16
       description: Number of constant cache 16 dw read requests. (per-SQ)
       properties: []
@@ -3264,6 +3315,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 310
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 676
     - name: SQC_DCACHE_REQ_READ_2
       description: Number of constant cache 2 dw read requests. (per-SQ)
       properties: []
@@ -3283,6 +3338,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 307
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 673
     - name: SQC_DCACHE_REQ_READ_4
       description: Number of constant cache 4 dw read requests. (per-SQ)
       properties: []
@@ -3302,6 +3361,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 308
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 674
     - name: SQC_DCACHE_REQ_READ_8
       description: Number of constant cache 8 dw read requests. (per-SQ)
       properties: []
@@ -3321,6 +3384,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 309
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 675
     - name: SQC_ICACHE_BUSY_CYCLES
       description: Clock cycles while cache is reporting that it is busy. (No-Masking, 
         nondeterministic, unwindowed)
@@ -4735,6 +4802,15 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 41
+    - name: SQ_INSTS_VALU_EXEC_SKIPPED
+      description: Number of valu instructions completely skipped (wave32, or both halves of a 
+        wave64). {nondeterministic}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 134
     - name: SQ_INSTS_VALU_FMA_F16
       description: The number of VALU (Vector ALU) FMA (Fused-Multiply-Add)/MAD(Multiply-Add) 
         instructions on float16. For maximum performance lower precision floating point ops are 
@@ -5564,6 +5640,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 89
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 385
     - name: SQ_INST_LEVEL_VMEM
       description: Number of in-flight VMEM instructions. Set next counter to ACCUM_PREV and divide 
         by INSTS_VMEM for average latency. Includes FLAT instructions. This value is returned on a 
@@ -5792,6 +5872,10 @@ rocprofiler-sdk:
             - gfx1152
           block: SQ
           event: 7
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 5
         - architectures:
             - gfx90a
             - gfx908
