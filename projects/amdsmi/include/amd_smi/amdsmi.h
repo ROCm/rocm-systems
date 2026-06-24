@@ -248,6 +248,7 @@ typedef enum {
  */
 #define AMDSMI_PF_INDEX (AMDSMI_MAX_VF_COUNT - 1)
 #define AMDSMI_MAX_DRIVER_INFO_RSVD 64
+// Deprecation target: kept for ABI compatibility; prefer AMDSMI_FABRIC_PPOD_ID_SIZE.
 #define AMDSMI_MAX_UUID_ELEMENTS 16  //!< Max UUID elements supported
 
 /**
@@ -5794,7 +5795,7 @@ typedef struct {
   amdsmi_fabric_type_t fabric_type;  //!< UALOE or UALLINK
   uint32_t bandwidth;                //!< Station bandwidth share in Mb/s
   uint32_t latency;  //!< Latency in nanoseconds (depends on switch presence and type)
-  uint8_t ppod_id[AMDSMI_FABRIC_PPOD_ID_SIZE];  //!< Physical PoD Identifier (16 bytes)
+  uint8_t ppod_id[AMDSMI_MAX_UUID_ELEMENTS];  //!< Physical PoD Identifier (16 bytes)
 
   uint32_t ppod_size;  //!< Physical PoD size
   uint32_t vpod_id;    //!< Virtual PoD Identifier
