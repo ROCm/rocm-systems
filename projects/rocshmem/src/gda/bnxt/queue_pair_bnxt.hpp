@@ -331,7 +331,7 @@ template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool CheckCQ>
 __device__ uint64_t* QueuePairBNXT::write_amo_wqe(
     uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
-  constexpr size_t size = sizeof(uint64_t);
+  static constexpr size_t size = sizeof(uint64_t);
 
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_atomic amo;
