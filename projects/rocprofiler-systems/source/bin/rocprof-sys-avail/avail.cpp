@@ -6,7 +6,6 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
-#include <spdlog/fmt/fmt.h>
 #include "component_categories.hpp"
 #include "defines.hpp"
 #include "enumerated_list.hpp"
@@ -14,6 +13,7 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 #include <cstdint>
+#include <spdlog/fmt/fmt.h>
 
 #include "hw_counter_query.hpp"
 

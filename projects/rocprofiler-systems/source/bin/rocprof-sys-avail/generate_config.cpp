@@ -9,8 +9,8 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include <spdlog/fmt/fmt.h>
 #include "common/json_config.hpp"
+#include <spdlog/fmt/fmt.h>
 
 #include <nlohmann/json.hpp>
 #include <timemory/mpl/concepts.hpp>

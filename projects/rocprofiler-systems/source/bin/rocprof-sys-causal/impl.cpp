@@ -205,8 +205,8 @@ prepare_environment_for_run(std::vector<std::string>& _env)
     {
         update_env(_env, "LD_PRELOAD",
                    fmt::format("{}:{}", LIBPTHREAD_SO,
-                               path::realpath(path::get_internal_libpath(
-                                   "librocprof-sys-dl.so"))),
+                               path::realpath(
+                                   path::get_internal_libpath("librocprof-sys-dl.so"))),
                    true);
         update_env(_env, env_vars::SCRIPT_DIR, path::get_internal_script_path());
         update_env(_env, env_vars::ROOT, path::get_rocprofsys_root());

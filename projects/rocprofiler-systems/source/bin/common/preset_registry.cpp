@@ -41,8 +41,7 @@ find_preset_directory()
     const auto* rocm_path = std::getenv("ROCM_PATH");
     if(rocm_path && std::strlen(rocm_path) > 0)
     {
-        auto candidate =
-            fmt::format("{}/share/rocprofiler-systems/presets", rocm_path);
+        auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", rocm_path);
         if(common::path::exists(candidate)) return candidate;
     }
 

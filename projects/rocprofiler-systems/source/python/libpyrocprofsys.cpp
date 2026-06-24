@@ -171,8 +171,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
     // without it, loading librocprof-sys.so within librocprof-sys-dl.so segfaults
     if(!dlopen(_libpath.c_str(), RTLD_NOW | RTLD_GLOBAL))
     {
-        auto _msg =
-            fmt::format(R"(dlopen("{}", RTLD_NOW | RTLD_GLOBAL))", _libpath);
+        auto _msg = fmt::format(R"(dlopen("{}", RTLD_NOW | RTLD_GLOBAL))", _libpath);
         perror(_msg.c_str());
         fprintf(stderr, "[rocprofsys][dl][pid=%i] %s :: %s\n", getpid(), _msg.c_str(),
                 dlerror());
@@ -816,8 +815,8 @@ generate(py::module& _pymod)
             ar->finishNode();
             ar->finishNode();
         }
-        _name = fmt::format("{}.json",
-                            std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"));
+        _name = fmt::format(
+            "{}.json", std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"));
         std::ofstream ofs{};
         if(tim::filepath::open(ofs, _name))
         {
