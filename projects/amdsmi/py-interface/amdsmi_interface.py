@@ -2473,6 +2473,19 @@ def amdsmi_get_gpu_device_bdf(processor_handle: processor_handle_t) -> str:
 def amdsmi_get_gpu_device_bdf_bdf(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
 ) -> amdsmi_wrapper.amdsmi_bdf_t:
+    """Deprecated: use amdsmi_get_gpu_device_bdf() and format the returned BDF string instead.
+
+    Returns the raw amdsmi_bdf_t struct for a GPU. The same data is available as a
+    formatted string from amdsmi_get_gpu_device_bdf().
+    """
+    import warnings
+
+    warnings.warn(
+        "amdsmi_get_gpu_device_bdf_bdf() is deprecated, use amdsmi_get_gpu_device_bdf() "
+        "and format the returned BDF string instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
@@ -2725,8 +2738,17 @@ def amdsmi_get_switch_link_info(
     return link_info_dict
 
 
-def amdsmi_get_root_switch(amdsmi_bdf: amdsmi_wrapper.amdsmi_bdf_t) -> str:
-    if not isinstance(amdsmi_bdf, amdsmi_wrapper.amdsmi_bdf_t):
+def amdsmi_get_root_switch(amdsmi_bdf: Union[str, amdsmi_wrapper.amdsmi_bdf_t]) -> str:
+    # An empty BDF means the caller has no device to resolve (e.g. NIC info
+    # unavailable); report it as N/A instead of forcing callers to guard.
+    if isinstance(amdsmi_bdf, str):
+        if not amdsmi_bdf:
+            return "N/A"
+        parsed_bdf = _parse_bdf(amdsmi_bdf)
+        if parsed_bdf is None:
+            raise AmdSmiBdfFormatException(amdsmi_bdf)
+        amdsmi_bdf = _make_amdsmi_bdf_from_list(parsed_bdf)
+    elif not isinstance(amdsmi_bdf, amdsmi_wrapper.amdsmi_bdf_t):
         raise AmdSmiParameterException(amdsmi_bdf, amdsmi_wrapper.amdsmi_bdf_t)
 
     switch_bdf_info = amdsmi_wrapper.amdsmi_bdf_t()
@@ -4032,11 +4054,14 @@ def amdsmi_get_gpu_xcd_counter(processor_handle: processor_handle_t) -> int:
     return xcd_counter.value
 
 
-def amdsmi_get_processor_handle_from_bdf(bdf):
-    bdf = _parse_bdf(bdf)
-    if bdf is None:
-        raise AmdSmiBdfFormatException(bdf)
-    amdsmi_bdf = _make_amdsmi_bdf_from_list(bdf)
+def amdsmi_get_processor_handle_from_bdf(bdf: Union[str, amdsmi_wrapper.amdsmi_bdf_t]):
+    if isinstance(bdf, amdsmi_wrapper.amdsmi_bdf_t):
+        amdsmi_bdf = bdf
+    else:
+        parsed_bdf = _parse_bdf(bdf)
+        if parsed_bdf is None:
+            raise AmdSmiBdfFormatException(bdf)
+        amdsmi_bdf = _make_amdsmi_bdf_from_list(parsed_bdf)
     processor_handle = amdsmi_wrapper.amdsmi_processor_handle()
     _check_res(
         amdsmi_wrapper.amdsmi_get_processor_handle_from_bdf(
@@ -4152,6 +4177,22 @@ def amdsmi_topo_get_numa_node_number(processor_handle: processor_handle_t):
 def amdsmi_topo_get_link_weight(
     processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
 ):
+    """Return the qualitative link weight between two GPUs.
+
+    The weight is a cost metric derived from the KFD io_link weight property
+    (lower = closer/faster), analogous to numactl NUMA distances:
+
+    - xGMI: 15 per physical hop (e.g. a single-hop xGMI link has weight 15).
+    - PCIe: segments are summed (GPU→CPU + CPU→CPU + CPU→GPU). Each
+      GPU-to-CPU segment is typically 20. The CPU-to-CPU segment uses the
+      actual io_link weight when available; if that weight cannot be read, a
+      fallback of 10 is used for that segment.
+
+    Both handles must be GPU processor handles.
+
+    Returns:
+        int: The link weight.
+    """
     if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle)
 
@@ -4222,6 +4263,25 @@ def amdsmi_get_link_metrics(processor_handle: processor_handle_t):
 def amdsmi_topo_get_link_type(
     processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
 ):
+    """Return the abstracted hop count and link type between two GPUs.
+
+    Both handles must be GPU processor handles. The hop count is an abstracted
+    topology step count, not the number of physical xGMI links traversed:
+
+    - 1: The two GPUs are reachable over xGMI, regardless of the number of
+         physical xGMI links on the route.
+    - 2: The two GPUs communicate over PCIe within the same CPU NUMA node.
+    - 3: The two GPUs communicate over PCIe across different CPU NUMA nodes.
+    - 4: Fallback when the inter-CPU io_link weight cannot be read.
+
+    Two GPUs on the same xGMI fabric always report 1 even when data physically
+    crosses multiple xGMI links. For the literal physical xGMI hop count, read
+    ``/sys/class/drm/card*/device/xgmi_num_hops`` from the amdgpu driver.
+
+    Returns:
+        dict: ``{"hops": int, "type": int}`` where ``type`` is a value of
+        :class:`amdsmi_link_type_t`.
+    """
     if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle)
 
@@ -6936,7 +6996,7 @@ _FABRIC_ACCEL_STATE_NAMES = {
 }
 
 
-def amdsmi_get_fabric_telemetry(
+def amdsmi_get_fabric_telemetry_data(
     processor_handle: processor_handle_t, category_mask: int
 ) -> List[Dict[str, Any]]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):

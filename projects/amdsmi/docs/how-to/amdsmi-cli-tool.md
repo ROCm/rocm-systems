@@ -572,6 +572,36 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+#### Interpreting hops and weight
+
+The following descriptions apply to AMD Instinct GPUs up to and including MI355X.
+
+**Hops (`-o, --hops`)** — The hops table reports an *abstracted topology step count*, not
+the number of physical xGMI links between devices. The possible values are:
+
+| Hops | Meaning |
+|------|---------|
+| 1 | The two GPUs are reachable over xGMI, regardless of the number of physical xGMI links on the route. |
+| 2 | The two GPUs communicate over PCIe within the same CPU NUMA node. |
+| 3 | The two GPUs communicate over PCIe across different CPU NUMA nodes. |
+| 4 | Fallback when the inter-CPU io_link weight cannot be read. |
+
+Two GPUs on the same xGMI fabric always report `1`, even when data physically crosses
+multiple xGMI links. To determine the literal number of physical xGMI links between two
+devices, read the value from the `amdgpu` driver:
+
+```bash
+cat /sys/class/drm/card*/device/xgmi_num_hops
+```
+
+**Weight (`-w, --weight`)** — The weight table reports a qualitative cost metric derived
+from the KFD io_link `weight` property (lower = closer/faster), analogous to the NUMA
+distances reported by `numactl`. Each physical xGMI hop contributes 15 to the weight
+(for example, a single-hop xGMI connection has weight 15). PCIe routes are summed across
+segments (GPU→CPU + CPU→CPU + CPU→GPU); each GPU-to-CPU segment is typically 20, while
+the CPU-to-CPU segment uses the actual io_link weight, or a fallback of 10 if that weight
+cannot be read.
+
 (cmd-set)=
 ### amd-smi set
 
