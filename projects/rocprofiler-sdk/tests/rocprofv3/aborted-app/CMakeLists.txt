@@ -18,18 +18,26 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
     set(IS_DISABLED ON)
 else()
-    # set(IS_DISABLED OFF)
-    set(IS_DISABLED ON) # this test is currently unstable so we are disabling it
-    # unconditionally for now
+    set(IS_DISABLED OFF)
 endif()
 
 # app-abort
+#
+# The profiled app raises SIGINT mid-run (ROCPROF_TESTING_RAISE_SIGNAL=1). rocprofv3's
+# signal handler hands finalization off to its worker thread (which flushes the profiling
+# output) and then re-raises SIGINT, so the process is terminated by the signal. CTest
+# reports a signal-terminated process as an exception that WILL_FAIL does NOT invert, and
+# a SIGINT termination additionally interrupts the ctest run. The shell wrapper turns that
+# signal-termination into a regular non-zero exit code (128+signo) via "|| exit $?", which
+# WILL_FAIL inverts into a pass. (Using "|| exit $?" instead of "; exit $?" keeps the
+# whole command a single bash argument; CMake would otherwise split on the semicolon.) A
+# genuine handler deadlock makes the wrapper block, so it is still caught by the ctest
+# TIMEOUT below (timeouts are not inverted by WILL_FAIL).
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-app-abort
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out-aborted-app -- $<TARGET_FILE:vector-ops> 1 1
+        bash -c
+        "$<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.json -d ${CMAKE_CURRENT_BINARY_DIR}/out-aborted-app -- $<TARGET_FILE:vector-ops> 1 1 || exit $?"
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
@@ -37,7 +45,6 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROF_TESTING_RAISE_SIGNAL=1"
-                "ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT=1"
     FIXTURES_SETUP rocprofv3-test-app-abort)
 
 rocprofiler_add_integration_validate_test(

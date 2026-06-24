@@ -79,7 +79,7 @@ def test_kernel_trace_json(json_data):
         assert dispatch_info["grid_size"]["z"] == 1
         assert dispatch["end_timestamp"] >= dispatch["start_timestamp"]
 
-    assert kernels == kernel_trace_list
+    assert sorted(kernels) == kernel_trace_list
 
 
 def test_hip_api_trace_json(json_data):
