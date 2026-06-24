@@ -26,7 +26,7 @@ import os
 # Add TheRock's github_actions to path for shared utilities
 THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
 sys.path.insert(0, str(THEROCK_ACTIONS_PATH))
-from amdgpu_family_matrix import BUILD_RUNNER_LABELS, select_weighted_label
+from amdgpu_family_matrix import get_build_runner_labels, select_weighted_label
 
 logging.basicConfig(level=logging.INFO)
 
@@ -363,12 +363,13 @@ def retrieve_projects(args):
 
 def select_build_runner(platform: str) -> str:
     """Select a build runner label based on platform and build variant."""
-    if platform not in BUILD_RUNNER_LABELS:
+    build_runner_labels = get_build_runner_labels()
+    if platform not in build_runner_labels:
         # Platform not configured for weighted selection, return default
         print(f"  No build runner config for platform {platform}, using default")
         return ""
 
-    platform_config = BUILD_RUNNER_LABELS[platform]
+    platform_config = build_runner_labels[platform]
 
     labels_config = platform_config["default"]
     context_name = f"build-runner ({platform})"
