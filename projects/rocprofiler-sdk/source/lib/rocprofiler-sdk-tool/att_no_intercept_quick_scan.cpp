@@ -37,12 +37,10 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include <iostream>
 
 namespace rocprofiler
 {
@@ -67,44 +65,33 @@ struct scan_context_t
 std::optional<kernel_entry_t>
 resolve_kernel_entry(agent_state_t& state, const rocprofiler_thread_trace_decoder_pc_t& entry_point)
 {
+    auto key         = entry_key_t{entry_point.code_object_id, entry_point.address};
     auto shared_lock = std::shared_lock{state.mutex};
 
-    auto find_exact = [&state](entry_key_t key) -> std::optional<kernel_entry_t> {
+    if(auto itr = state.kernels_by_entry.find(key); itr != state.kernels_by_entry.end())
+        return itr->second;
+
+    auto ranges_itr = state.kernel_ranges_by_code_object.find(key.code_object_id);
+    if(ranges_itr == state.kernel_ranges_by_code_object.end()) return std::nullopt;
+
+    for(const auto& range : ranges_itr->second)
+    {
+        if(key.address < range.begin || key.address >= range.end) continue;
+
+        auto range_copy = range;
+        shared_lock.unlock();
+        auto unique_lock = std::unique_lock{state.mutex};
+
         if(auto itr = state.kernels_by_entry.find(key); itr != state.kernels_by_entry.end())
             return itr->second;
-        return std::nullopt;
-    };
-    auto find_range = [&](entry_key_t key) -> std::optional<kernel_entry_t> {
-        auto ranges_itr = state.kernel_ranges_by_code_object.find(key.code_object_id);
-        if(ranges_itr == state.kernel_ranges_by_code_object.end()) return std::nullopt;
 
-        for(const auto& range : ranges_itr->second)
-        {
-            if(key.address >= range.begin && key.address < range.end)
-            {
-                auto range_copy = range;
-                shared_lock.unlock();
-                auto unique_lock = std::unique_lock{state.mutex};
-
-                if(auto itr = state.kernels_by_entry.find(key); itr != state.kernels_by_entry.end())
-                    return itr->second;
-
-                auto [itr, _] = state.kernels_by_entry.emplace(
-                    key,
-                    kernel_entry_t{
-                        range_copy.kernel_id,
-                        range_copy.targeted ? std::make_shared<std::atomic<size_t>>(0) : nullptr});
-                return itr->second;
-            }
-        }
-
-        return std::nullopt;
-    };
-
-    auto key = entry_key_t{entry_point.code_object_id, entry_point.address};
-    if(auto entry = find_exact(key)) return entry;
-
-    if(auto entry = find_range(key)) return entry;
+        auto [itr, _] = state.kernels_by_entry.emplace(
+            key,
+            kernel_entry_t{
+                range_copy.kernel_id,
+                range_copy.targeted ? std::make_shared<std::atomic<size_t>>(0) : nullptr});
+        return itr->second;
+    }
 
     return std::nullopt;
 }
