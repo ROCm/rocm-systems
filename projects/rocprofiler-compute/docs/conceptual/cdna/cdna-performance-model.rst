@@ -177,7 +177,7 @@ to use ROCm Compute Profiler to optimize your code.
    For a comparison of AMD Instinct GPU specifications, refer to
    :doc:`Hardware specifications <rocm:reference/gpu-arch-specs>`.
 
-Hardware block
+Hardware blocks
 ================
 
 The AMD Instinct performance model is divided into the following blocks:
