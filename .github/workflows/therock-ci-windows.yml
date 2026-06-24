@@ -16,6 +16,9 @@ on:
       test_runs_on:
         type: string
         default: "windows-gfx1151-gpu-rocm"
+      build_runs_on:
+        type: string
+        default: "azure-windows-scale-rocm"
 
 permissions:
   contents: read
@@ -23,7 +26,7 @@ permissions:
 jobs:
   therock-build-windows:
     name: Build Windows Packages
-    runs-on: azure-windows-scale-rocm
+    runs-on: ${{ inputs.build_runs_on }}
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:

@@ -16,6 +16,9 @@ on:
       test_runs_on:
         type: string
         default: "linux-gfx942-1gpu-core42-ossci-rocm"
+      build_runs_on:
+        type: string
+        default: "azure-linux-scale-rocm"
 
 
 permissions:
@@ -24,7 +27,7 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build Linux Packages
-    runs-on: azure-linux-scale-rocm
+    runs-on: ${{ inputs.build_runs_on }}
     permissions:
       id-token: write
     container:
