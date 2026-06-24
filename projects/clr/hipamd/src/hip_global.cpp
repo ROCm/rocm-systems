@@ -45,16 +45,29 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use
 // ================================================================================================
 Function::Function(const std::string& name, FatBinaryInfo** modules)
     : name_(name), modules_(modules) {
-  dFunc_.resize(g_devices.size());
+  dFuncSize_ = g_devices.size();
+  dFunc_ = std::make_unique<std::atomic<amd::Kernel*>[]>(dFuncSize_);
+  for (size_t i = 0; i < dFuncSize_; ++i) dFunc_[i].store(nullptr, std::memory_order_relaxed);
 }
 
 // ================================================================================================
 Function::~Function() {
-  for (auto& kernel : dFunc_) {
-    if (kernel != nullptr) {
-      kernel->release();
-    }
+  for (size_t i = 0; i < dFuncSize_; ++i) {
+    amd::Kernel* k = dFunc_[i].load(std::memory_order_relaxed);
+    if (k != nullptr) k->release();
   }
+}
+
+// ================================================================================================
+void Function::ResizeDFunc(size_t size) {
+  auto newArr = std::make_unique<std::atomic<amd::Kernel*>[]>(size);
+  size_t copyCount = (size < dFuncSize_) ? size : dFuncSize_;
+  for (size_t i = 0; i < copyCount; ++i)
+    newArr[i].store(dFunc_[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+  for (size_t i = copyCount; i < size; ++i)
+    newArr[i].store(nullptr, std::memory_order_relaxed);
+  dFunc_ = std::move(newArr);
+  dFuncSize_ = size;
 }
 
 // ================================================================================================
@@ -67,40 +80,45 @@ amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
 
 // ================================================================================================
 hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
-  guarantee((dFunc_.size() == g_devices.size()), "dFunc Size mismatch");
+  guarantee((dFuncSize_ == g_devices.size()), "dFunc Size mismatch");
   int dev = ihipGetDevice();
-  if (dFunc_[dev] == nullptr) {
-    dFunc_[dev] = BuildKernel(hmod);
+  amd::Kernel* k = dFunc_[dev].load(std::memory_order_acquire);
+  if (k == nullptr) {
+    k = BuildKernel(hmod);
+    dFunc_[dev].store(k, std::memory_order_release);
   }
-  *hfunc = asHipFunction(dFunc_[dev]);
+  *hfunc = asHipFunction(k);
   return hipSuccess;
 }
 
 // ================================================================================================
 bool Function::IsValidDynFunc(const void* hfunc) {
-  return (hfunc == asHipFunction(dFunc_[ihipGetDevice()]));
+  return (hfunc == asHipFunction(dFunc_[ihipGetDevice()].load(std::memory_order_acquire)));
 }
 
 // ================================================================================================
 hipError_t Function::GetStatFunc(hipFunction_t* hfunc, int deviceId) {
-  if (deviceId >= static_cast<int>(dFunc_.size())) {
+  if (deviceId >= static_cast<int>(dFuncSize_)) {
     return hipErrorNoBinaryForGpu;
   }
-  if (dFunc_[deviceId] != nullptr) {
-    *hfunc = asHipFunction(dFunc_[deviceId]);
+  amd::Kernel* k = dFunc_[deviceId].load(std::memory_order_acquire);
+  if (k != nullptr) {
+    *hfunc = asHipFunction(k);
     return hipSuccess;
   }
   std::scoped_lock lock((*modules_)->FatBinaryLock());
   // Check again after acquiring lock — another thread may have built it
-  if (dFunc_[deviceId] != nullptr) {
-    *hfunc = asHipFunction(dFunc_[deviceId]);
+  k = dFunc_[deviceId].load(std::memory_order_acquire);
+  if (k != nullptr) {
+    *hfunc = asHipFunction(k);
     return hipSuccess;
   }
   hipModule_t hmod = nullptr;
   IHIP_RETURN_ONFAIL((*modules_)->BuildProgram(deviceId));
   IHIP_RETURN_ONFAIL((*modules_)->GetModule(deviceId, &hmod));
-  dFunc_[deviceId] = BuildKernel(hmod);
-  *hfunc = asHipFunction(dFunc_[deviceId]);
+  amd::Kernel* built = BuildKernel(hmod);
+  dFunc_[deviceId].store(built, std::memory_order_release);
+  *hfunc = asHipFunction(built);
   return hipSuccess;
 }
 
@@ -114,7 +132,7 @@ hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   IHIP_RETURN_ONFAIL(GetStatFunc(&hfunc, deviceId));
 
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
-  amd::Kernel* kernel = dFunc_[deviceId];
+  amd::Kernel* kernel = dFunc_[deviceId].load(std::memory_order_acquire);
   auto* device_handle = devices[deviceId];
   const device::Kernel::WorkGroupInfo* wginfo =
       kernel->getDeviceKernel(*device_handle)->workGroupInfo();

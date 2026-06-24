@@ -7,6 +7,8 @@
 #ifndef HIP_GLOBAL_HPP
 #define HIP_GLOBAL_HPP
 
+#include <atomic>
+#include <memory>
 #include <vector>
 #include <string>
 
@@ -41,14 +43,15 @@ class Function {
   bool IsValidDynFunc(const void* hfunc);
   hipError_t GetStatFunc(hipFunction_t* hfunc, int deviceId);
   hipError_t GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId);
-  void ResizeDFunc(size_t size) { dFunc_.resize(size); }
+  void ResizeDFunc(size_t size);
   FatBinaryInfo** ModuleInfo() { return modules_; }
   const std::string& GetName() const { return name_; }
 
  private:
   amd::Kernel* BuildKernel(hipModule_t hmod) const;
 
-  std::vector<amd::Kernel*> dFunc_;  //!< Per-device kernel objects; index matches g_devices
+  std::unique_ptr<std::atomic<amd::Kernel*>[]> dFunc_;  //!< Per-device kernel objects; index matches g_devices
+  size_t dFuncSize_ = 0;
   std::string name_;                 //!< Symbol name for kernel lookup in the program
   FatBinaryInfo** modules_;          //!< Owning fat binary; nullptr for dynamic COs
 };
