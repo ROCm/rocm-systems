@@ -359,6 +359,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "hip_stream",
         "presets",
         "cli_help",
+        "sample_workloads",
         "hpc",
         "hip",
         "scratch_memory",
