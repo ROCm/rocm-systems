@@ -520,15 +520,15 @@ On AMD, although all types ``T`` fulfilling the description above can be used wi
 
 For arithmetic reduces (``plus``, ``less`` and ``greater``):
 
-* On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
+* Nvidia: there is hardware acceleration for ``int`` or ``unsigned int``
 
-* On AMD platform: there is hardware acceleration for ``int`` or ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``unsigned long long``, ``long long``, ``half``/``float``/``double`` precision floating point types will also receive hardware acceleration.
+* AMD: there is hardware acceleration for ``int`` or ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``unsigned long long``, ``long long``, ``half``/``float``/``double`` precision floating point types will also receive hardware acceleration.
 
 For bitwise-reduces: (``bit_and``, ``bit_or``, ``bit_xor``)
 
-* On Nvidia platform: ``unsigned int``
+* Nvidia: ``unsigned int``
 
-* On AMD platform: ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``int``, ``unsigned long long`` or ``long long`` are also hardware-accelerated.
+* AMD: ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``int``, ``unsigned long long`` or ``long long`` are also hardware-accelerated.
 
 inclusive_scan
 -----------------
@@ -547,15 +547,15 @@ On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive 
 
 For arithmetic scans (``plus``, ``less`` and ``greater``):
 
-* On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
+* Nvidia: there is hardware acceleration for ``int`` or ``unsigned int``
 
-* On AMD platform: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
+* AMD: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
 
 For bitwise-scans: (``bit_and``, ``bit_or``, ``bit_xor``)
 
-* On Nvidia platform: ``unsigned int``
+* Nvidia: ``unsigned int``
 
-* On AMD platform: ``unsigned int``, ``int``, ``unsigned long long`` or ``long long``
+* AMD: ``unsigned int``, ``int``, ``unsigned long long`` or ``long long``
 
 exclusive_scan
 -----------------
@@ -591,15 +591,15 @@ On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive 
 
 For arithmetic scans (``plus``, ``less`` and ``greater``):
 
-* On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
+* Nvidia: there is hardware acceleration for ``int`` or ``unsigned int``
 
-* On AMD platform: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
+* AMD: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
 
 For bitwise-scans: (``bit_and``, ``bit_or``, ``bit_xor``)
 
-* On Nvidia platform: ``unsigned int``
+* Nvidia: ``unsigned int``
 
-* On AMD platform: ``unsigned int``, ``int``, ``unsigned long long`` or ``long long``
+* AMD: ``unsigned int``, ``int``, ``unsigned long long`` or ``long long``
 
 Unsupported NVIDIA CUDA features
 ================================
