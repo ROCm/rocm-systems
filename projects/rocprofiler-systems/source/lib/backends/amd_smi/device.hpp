@@ -43,11 +43,10 @@ concept backend_session_contract =
     } &&
     // ── Per-device GPU calls (always required) ────────────────────────────────
     requires(T sess, typename T::processor_handle ph, typename T::asic_info_t* aip,
-             typename T::gpu_metrics_t* gmp, typename T::memory_type_t mt,
-             std::uint64_t* u64p) {
+             typename T::memory_type_t mt, std::uint64_t* u64p) {
         { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
         { sess.get_gpu_asic_info(ph, aip) };
-        { sess.get_metrics_info(ph, gmp) };
+        { sess.get_metrics_info(ph) } -> std::convertible_to<typename T::gpu_metrics_t>;
         { sess.get_memory_usage(ph, mt, u64p) };
     }
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
@@ -110,8 +109,7 @@ public:
 
     [[nodiscard]] metrics get_metrics() const
     {
-        typename Backend::gpu_metrics_t raw{};
-        m_session->get_metrics_info(m_handle, &raw);
+        const auto raw = m_session->get_metrics_info(m_handle);
 
         metrics out{};
         convert_power(raw, out);

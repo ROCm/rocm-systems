@@ -178,9 +178,11 @@ public:
     // ── Per-device forwarding ─────────────────────────────────────────────────
     // Each method throws std::runtime_error on AMD SMI failure.
 
-    void get_metrics_info(processor_handle h, gpu_metrics_t* out) const
+    [[nodiscard]] gpu_metrics_t get_metrics_info(processor_handle h) const
     {
-        check_status(m_amdsmi.get_metrics_info(h, out), "amdsmi_get_gpu_metrics_info");
+        gpu_metrics_t raw{};
+        check_status(m_amdsmi.get_metrics_info(h, &raw), "amdsmi_get_gpu_metrics_info");
+        return raw;
     }
 
     void get_gpu_asic_info(processor_handle h, asic_info_t* out) const

@@ -290,8 +290,7 @@ TEST_F(BackendTest, get_metrics_info_calls_backend_method)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    testing::mock_gpu_metrics_t out{};
-    m_session.get_metrics_info(k_handle, &out);
+    const auto out = m_session.get_metrics_info(k_handle);
     EXPECT_EQ(out.current_socket_power, 200U);
 }
 
@@ -300,8 +299,8 @@ TEST_F(BackendTest, get_metrics_info_throws_on_backend_error)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    testing::mock_gpu_metrics_t out{};
-    EXPECT_THROW(m_session.get_metrics_info(k_handle, &out), std::runtime_error);
+    EXPECT_THROW(static_cast<void>(m_session.get_metrics_info(k_handle)),
+                 std::runtime_error);
 }
 
 TEST_F(BackendTest, get_metrics_info_error_message_contains_function_name)
@@ -309,12 +308,11 @@ TEST_F(BackendTest, get_metrics_info_error_message_contains_function_name)
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    testing::mock_gpu_metrics_t out{};
     EXPECT_THROW(
         {
             try
             {
-                m_session.get_metrics_info(k_handle, &out);
+                static_cast<void>(m_session.get_metrics_info(k_handle));
             } catch(const std::runtime_error& ex)
             {
                 EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_metrics_info"));
