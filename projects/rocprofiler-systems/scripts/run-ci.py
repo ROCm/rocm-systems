@@ -80,7 +80,7 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_GIT_INIT_SUBMODULES TRUE)
 
         set(CTEST_USE_LAUNCHERS TRUE)
-        set(CMAKE_CTEST_ARGUMENTS {CTEST_ARGS})
+        set(CMAKE_CTEST_ARGUMENTS --output-junit "{BINARY_DIR}/test-results.xml" {CTEST_ARGS})
 
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS "100")
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")

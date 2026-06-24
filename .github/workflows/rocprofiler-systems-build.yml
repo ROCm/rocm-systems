@@ -1259,6 +1259,14 @@ jobs:
           RUNNING_PROCS=$(pgrep trace_processor_shell)
           if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
 
+      - name: Publish test results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: projects/rocprofiler-systems/build/test-results.xml
+          check_name: "Tests — ${{ matrix.name }}"
+          comment_mode: always
+
       - name: CTest artifacts
         if: failure()
         continue-on-error: true
@@ -1781,6 +1789,14 @@ jobs:
           set +e
           RUNNING_PROCS=$(pgrep trace_processor_shell)
           if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
+
+      - name: Publish test results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: projects/rocprofiler-systems/build/test-results.xml
+          check_name: "Tests — ${{ matrix.name }}"
+          comment_mode: always
 
       - name: CTest artifacts
         if: failure()
