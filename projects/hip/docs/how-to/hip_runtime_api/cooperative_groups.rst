@@ -568,7 +568,7 @@ Defined in cooperative_groups/hip_scan.h. Performs an exclusive scan using the o
 
 The parameters are described here: :ref:`cg_operations`
 
-The value returned for the first active lane is platform-dependent, and the programmer should not depend on one value or another being returned as it might change in the future; but as a reference, given a ``val`` of type ``T``, the returned value is:
+ The value returned for the first active lane is platform-dependent and may change in future releases. As a reference: 
 
 * On AMD:
   Currently the "identity" value is returned, according to the operation:
