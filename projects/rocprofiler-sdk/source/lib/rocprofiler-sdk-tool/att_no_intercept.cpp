@@ -35,7 +35,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
-#include <iostream>
 
 #define CHECK_PTR(_x) ROCP_FATAL_IF(_x == nullptr) << "Called after finalize()";
 
@@ -119,32 +118,17 @@ add_range_locked(agent_state_t&            state,
         kernel_symbol_range_t{kernel_id, code_object_id, begin, end, targeted});
 }
 
-std::shared_ptr<std::atomic<size_t>>
-make_iteration_count(bool targeted, const kernel_entry_t* previous = nullptr)
-{
-    if(!targeted) return nullptr;
-    if(previous != nullptr && previous->iteration_count != nullptr) return previous->iteration_count;
-    return std::make_shared<std::atomic<size_t>>(0);
-}
-
 void
-add_exact_locked(
-    agent_state_t& state,
-    uint64_t code_object_id,
-    uint64_t address,
-    rocprofiler_kernel_id_t kernel_id,
-    bool targeted,
-    const std::unordered_map<entry_key_t, kernel_entry_t, entry_key_hash_t>& previous_entries)
+add_exact_locked(agent_state_t&            state,
+                 uint64_t                code_object_id,
+                 uint64_t                address,
+                 rocprofiler_kernel_id_t kernel_id,
+                 bool                    targeted)
 {
     if(address == 0) return;
-    auto        key          = entry_key_t{code_object_id, address};
-    const auto* previous_ptr = static_cast<const kernel_entry_t*>(nullptr);
-    if(auto itr = previous_entries.find(key);
-       itr != previous_entries.end() && itr->second.kernel_id == kernel_id)
-        previous_ptr = &itr->second;
-
-    state.kernels_by_entry[key] = kernel_entry_t{kernel_id,
-                                                 make_iteration_count(targeted, previous_ptr)};
+    state.kernels_by_entry[entry_key_t{code_object_id, address}] =
+        kernel_entry_t{kernel_id,
+                       targeted ? std::make_shared<std::atomic<size_t>>(0) : nullptr};
 }
 
 uint64_t
@@ -164,81 +148,28 @@ get_symbol_size_locked(const code_object_record_t& code_object, const kernel_sym
     return 0;
 }
 
-const kernel_symbol_range_t*
-find_range_locked(const agent_state_t& state, entry_key_t key)
-{
-    auto ranges_itr = state.kernel_ranges_by_code_object.find(key.code_object_id);
-    if(ranges_itr == state.kernel_ranges_by_code_object.end()) return nullptr;
-
-    for(const auto& range : ranges_itr->second)
-        if(key.address >= range.begin && key.address < range.end) return &range;
-
-    return nullptr;
-}
-
-void
-rebuild_kernel_ranges_locked(agent_state_t& state)
-{
-    auto previous_entries = std::move(state.kernels_by_entry);
-    state.kernels_by_entry.clear();
-    state.kernel_ranges_by_code_object.clear();
-
-    for(const auto& symbol : state.kernel_symbols)
-    {
-        auto code_object_itr = state.code_objects.find(symbol.code_object_id);
-        auto symbol_size     = uint64_t{0};
-        if(code_object_itr != state.code_objects.end())
-            symbol_size = get_symbol_size_locked(code_object_itr->second, symbol);
-
-        add_exact_locked(state,
-                         0,
-                         symbol.kernel_address,
-                         symbol.kernel_id,
-                         symbol.targeted,
-                         previous_entries);
-        add_range_locked(
-            state, 0, symbol.kernel_address, symbol_size, symbol.kernel_id, symbol.targeted);
-
-        if(code_object_itr == state.code_objects.end()) continue;
-
-        const auto& code_object = code_object_itr->second;
-        if(auto elf_vaddr = subtract_signed_delta(symbol.kernel_address, code_object.load_delta))
-        {
-            add_exact_locked(state,
-                             symbol.code_object_id,
-                             *elf_vaddr,
-                             symbol.kernel_id,
-                             symbol.targeted,
-                             previous_entries);
-            add_range_locked(state,
-                             symbol.code_object_id,
-                             *elf_vaddr,
-                             symbol_size,
-                             symbol.kernel_id,
-                             symbol.targeted);
-        }
-    }
-
-    for(const auto& [key, previous] : previous_entries)
-    {
-        if(state.kernels_by_entry.count(key) != 0) continue;
-
-        if(const auto* range = find_range_locked(state, key))
-        {
-            const auto* previous_ptr = (previous.kernel_id == range->kernel_id) ? &previous : nullptr;
-            state.kernels_by_entry.emplace(
-                key,
-                kernel_entry_t{range->kernel_id,
-                               make_iteration_count(range->targeted, previous_ptr)});
-        }
-    }
-}
-
 void
 register_kernel_symbol_locked(agent_state_t& state, const kernel_symbol_record_t& symbol)
 {
-    state.kernel_symbols.emplace_back(symbol);
-    rebuild_kernel_ranges_locked(state);
+    auto code_object_itr = state.code_objects.find(symbol.code_object_id);
+    auto symbol_size     = uint64_t{0};
+    if(code_object_itr != state.code_objects.end())
+        symbol_size = get_symbol_size_locked(code_object_itr->second, symbol);
+
+    add_exact_locked(state, 0, symbol.kernel_address, symbol.kernel_id, symbol.targeted);
+    add_range_locked(
+        state, 0, symbol.kernel_address, symbol_size, symbol.kernel_id, symbol.targeted);
+
+    if(code_object_itr == state.code_objects.end()) return;
+
+    const auto& code_object = code_object_itr->second;
+    if(auto elf_vaddr = subtract_signed_delta(symbol.kernel_address, code_object.load_delta))
+    {
+        add_exact_locked(
+            state, symbol.code_object_id, *elf_vaddr, symbol.kernel_id, symbol.targeted);
+        add_range_locked(
+            state, symbol.code_object_id, *elf_vaddr, symbol_size, symbol.kernel_id, symbol.targeted);
+    }
 }
 
 void
@@ -341,7 +272,7 @@ configure(std::vector<agent_config_t> agents,
 void
 code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& data)
 {
-    std::shared_ptr<agent_state_t>      state   = nullptr;
+    std::shared_ptr<agent_state_t> state = nullptr;
     {
         auto lock = std::unique_lock{manager_mutex};
         auto itr  = agent_states()->find(data.agent_id.handle);
@@ -351,8 +282,6 @@ code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& dat
         code_objects[data.code_object_id] = state;
     }
 
-    if (state == nullptr) return;
-
     {
         auto lock                                = std::unique_lock{state->mutex};
         state->code_objects[data.code_object_id] = code_object_record_t{
@@ -360,11 +289,6 @@ code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& dat
     }
 
     backend_code_object_load(*state, data);
-
-    {
-        auto lock = std::unique_lock{state->mutex};
-        rebuild_kernel_ranges_locked(*state);
-    }
 
     start_agent_context(*state);
 }

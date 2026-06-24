@@ -132,7 +132,6 @@ struct agent_state_t
     bool              started   = false;
     bool              finalized = false;
 
-    std::vector<kernel_symbol_record_t> kernel_symbols = {};
     std::unordered_map<entry_key_t, kernel_entry_t, entry_key_hash_t> kernels_by_entry = {};
     std::unordered_map<uint64_t, std::vector<kernel_symbol_range_t>>
         kernel_ranges_by_code_object                                  = {};
