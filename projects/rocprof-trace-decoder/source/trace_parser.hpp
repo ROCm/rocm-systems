@@ -528,7 +528,7 @@ public:
 
     static constexpr uint64_t BITMASK = (uint64_t{1} << 48) - 1;
 
-rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int me, int pipe)
+    rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int me, int pipe)
     {
         rocprofiler_thread_trace_decoder_dispatch_t event{};
         event.size = sizeof(rocprofiler_thread_trace_decoder_dispatch_t);
@@ -544,19 +544,16 @@ rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int m
         event.thread_dim_x = num_thread_x;
         event.thread_dim_y = num_thread_y;
         event.thread_dim_z = num_thread_z;
-        event.lds_size = ((rsrc2 >> 15) & 0x1FF) * 512;
+        event.lds_size = ((rsrc2 >> 15) & 0x1FF) * 128;
 
         event.sgprs = 128;
         event.vgprs = (rsrc1 & 0x3F) * 8 + 8;
         event.user_sgprs = (rsrc2 >> 1) & 0x1F;
 
         if (tt_version == 0) event.sgprs = ((rsrc1 >> 7) & 0x7) * 16 + 16;
-
-        if (tt_version >= 5)
-        {
-            event.vgprs *= 2;
-            event.lds_size *= 2;
-        }
+        if (tt_version == 1) event.lds_size *= 10;
+        if (tt_version >= 2) event.lds_size *= 2;
+        if (tt_version >= 5) event.vgprs *= 2;
 
         event.flags = ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_NONE;
         if ((rsrc1 >> 10) & 1) event.flags |= ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_SCALAR_CACHE_INVALIDATE;
