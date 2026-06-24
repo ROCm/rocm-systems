@@ -312,7 +312,7 @@ Gets metrics and performance information about the specified GPU.
 ~$ amd-smi metric --help
 usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
                       [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-m] [-u] [-p] [-c] [-t]
-                      [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [--cpu-power-metrics]
+                      [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [-X] [--cpu-power-metrics]
                       [--cpu-prochot] [--cpu-freq-metrics] [--cpu-c0-res]
                       [--cpu-lclk-dpm-level NBIOID] [--cpu-pwr-svi-telemetry-rails]
                       [--cpu-io-bandwidth IO_BW LINKID_NAME]
@@ -345,6 +345,9 @@ Metric arguments:
   -x, --xgmi-err               XGMI error information since last read
   -E, --energy                 Amount of energy consumed
   -v, --violation              Displays throttle accumulators;
+                                   Only available for MI300 or newer ASICs
+  -X, --partition              Switch temperature, clock, and usage to partition-scoped
+                                   (XCP/AID/MID) data sources; combine with those flags to scope it;
                                    Only available for MI300 or newer ASICs
 
 Watch Arguments:
