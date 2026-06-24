@@ -8,7 +8,7 @@ Compute unit (CU)
 *****************
 
 The compute unit (CU) is responsible for executing a user's kernels on
-CDNA™-based accelerators. All :ref:`wavefronts <desc-wavefront>` of a
+AMD Instinct™ MI-series GPUs based on CDNA-CDNA4 architectures. All :ref:`wavefronts <desc-wavefront>` of a
 :ref:`workgroup <desc-workgroup>` are scheduled on the same CU.
 
 .. image:: ../../data/performance-model/gcn_compute_unit.png
@@ -51,9 +51,9 @@ presented by ROCm Compute Profiler for these pipelines are described in
   write-through. The vL1D caches from multiple compute units are kept coherent
   with one another through software instructions.
 
-* CDNA accelerators -- that is, AMD Instinct™ MI100 and newer -- contain
+* CDNA-CDNA4 architecture-based GPUs (AMD Instinct MI100 and newer) contain
   specialized matrix-multiplication accelerator pipelines known as the
   :ref:`desc-mfma`.
 
-For a more in-depth description of a compute unit on a CDNA accelerator, see
+For a more in-depth description of a compute unit on CDNA-CDNA4 architecture-based GPUs, see
 :hip-training-pdf:`22` and :gcn-crash-course:`27`.
