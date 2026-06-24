@@ -9,7 +9,10 @@
 
 #include "hip_global.hpp"
 
+#include <atomic>
 #include <cstring>
+#include <memory>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -163,7 +166,6 @@ class StatCO : public CodeObject {
   FatBinaryInfo** AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
                                  bool& success);
   hipError_t RemoveFatBinary(FatBinaryInfo** module);
-  hipError_t DigestFatBinary(const void* data, FatBinaryInfo*& programs);
   void RemoveAllFatBinaries();
 
   // Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
@@ -192,7 +194,11 @@ class StatCO : public CodeObject {
   void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
 
  private:
-  mutable std::recursive_mutex sclock_;    //!< Guards Static Code object
+  // Lock ordering: sclock_ is always acquired before FatBinaryLock, never the reverse.
+  mutable std::shared_mutex sclock_;       //!< Guards Static Code object
+
+  // Precondition: caller must hold sclock_ exclusively.
+  hipError_t DigestFatBinary(const void* data, FatBinaryInfo*& programs);
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;
@@ -208,7 +214,8 @@ class StatCO : public CodeObject {
   //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
   //! Tracks managed var initialization per device
-  std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
+  std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitalized_;
+  size_t managedVarsDevicePtrInitalizedSize_ = 0;
 };
 
 };  // namespace hip
