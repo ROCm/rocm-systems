@@ -1860,7 +1860,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   };
 
   // Prepares a list of events for a wait inside KFD
-  auto PrepareInterrupt = [&](size_t idx, bool init_age) {
+  auto PrepareInterrupt = [&](size_t idx) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
     // If any signal doesn't have an interrupt, then switch to polling
     if (hsa_event == nullptr) {
@@ -1879,13 +1879,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // satisfied immediately (event_age != 1) and busy-spins this loop.
       const uint64_t default_age =
           runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
-      if (init_age) {
-        event_age[unique_evts] = default_age;
-      } else {
-        auto age_it = event_age_map.find(hsa_event);
-        event_age[unique_evts] =
-            (age_it != event_age_map.end()) ? age_it->second : default_age;
-      }
+      auto age_it = event_age_map.find(hsa_event);
+      event_age[unique_evts] =
+          (age_it != event_age_map.end()) ? age_it->second : default_age;
       hsa_events[unique_evts] = hsa_event;
       unique_evts++;
       return true;
@@ -1943,7 +1939,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // Process all signals on the CPU first
       bool finish = false;
       bool polling = false;
-      bool init_age = true;
 
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
@@ -1967,13 +1962,12 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             if (!wait_any) {
               finish = true;
-              init_age = true;
             }
           }
 
           // If the current signal isn't complete and polling is disabled, then prepare KFD wait for an interrupt
           if (!finish && !polling) {
-            interrupt_wait = PrepareInterrupt(i, init_age);
+            interrupt_wait = PrepareInterrupt(i);
             // If the interrupt was disabled, then force polling
             if (!interrupt_wait) {
               polling = true;
@@ -2037,7 +2031,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-          init_age = false;
         }
       }
     }
