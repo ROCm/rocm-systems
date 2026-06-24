@@ -216,10 +216,12 @@ top:
 
     // done move to next or loop
     ++x;
-    if (table[x].field_name == NULL && --num_smn) {
+    if (table[x].field_name == NULL && num_smn > 0) {
+      --num_smn;
       x = smn_start;
       ++cur_smn;
-    } else if (table[x].field_name == NULL && --num_instance) {
+    } else if (table[x].field_name == NULL && num_instance > 0) {
+      --num_instance;
       x = instance_start;
       ++cur_instance;
     }

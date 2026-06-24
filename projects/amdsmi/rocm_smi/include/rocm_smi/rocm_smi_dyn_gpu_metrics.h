@@ -1220,27 +1220,6 @@ class AMDGpuDynamicMetrics_t {
     return m_header;
   }
 
-  /*
-   *  The Cursor here, is a helper class to help with navigation within the dynamic metrics data
-   *  based on the data offsets
-   *
-   */
-  class AMDGpuDynamicMetricsCursor_t {
-   public:
-    AMDGpuDynamicMetricsCursor_t(const AMDGpuDynamicMetrics_t& metrics_data)
-        : m_metrics(metrics_data),
-          m_read_lock(metrics_data.m_mutex) {
-      m_current_metric_attribute = m_metrics.m_dynamic_metrics_data_offsets.lower_bound(0);
-    }
-
-    ~AMDGpuDynamicMetricsCursor_t() = default;
-
-   private:
-    const AMDGpuDynamicMetrics_t& m_metrics;
-    AMDGpuDynamicMetricsOffsetIt_t m_current_metric_attribute;
-    mutable std::shared_lock<std::shared_mutex> m_read_lock;
-  };
-
  private:
   std::string m_metric_source_file_path{};
   details::AMDGpuDynamicMetricsHeader_v1_t m_header;
