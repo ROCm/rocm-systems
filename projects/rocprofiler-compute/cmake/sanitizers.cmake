@@ -14,7 +14,8 @@ function(resolve_sanitizer)
         "HOST_ASAN"
         "TSAN"
     )
-    set(sanitizer_valid ${therock_sanitizer_valid} "UBSAN")
+    # Empty string is omitted by variable expansion, so add it explicitly.
+    set(sanitizer_valid "" ${therock_sanitizer_valid} "UBSAN")
 
     if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER IN_LIST therock_sanitizer_valid)
         message(
