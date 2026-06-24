@@ -1,0 +1,96 @@
+# AINIC RCCL test runner — manual trigger only (non-gate).
+#
+# Runs the A/B/C test suite (ainic_abc.json) on the AINIC cluster via the
+# test_runner framework. Dispatch inputs let the caller override the two paths
+# that vary between cluster setups; all other env is captured in the JSON config.
+#
+# This workflow is intentionally NOT a merge gate: it has no pull_request trigger
+# and its result does not block any PR. It exists so CI can drive the test runner
+# on demand and collect results as artifacts.
+name: AINIC RCCL Test Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      workdir:
+        description: 'Working directory on the runner (WORKDIR)'
+        required: false
+        default: '/apps/shared/nigusev/rocm-systems'
+      mpi_path:
+        description: 'MPI install path (MPI_PATH)'
+        required: false
+        default: '/apps/shared/rccl_sanity/pulsar/default/ubuntu22/rocm7.2.0/ompi_build'
+      rccl_home:
+        description: 'Pre-built RCCL install path (RCCL_HOME)'
+        required: false
+        default: '/apps/shared/nigusev/rccl-rocm720'
+      test_suites:
+        description: 'Comma-separated suite names to run (empty = all enabled)'
+        required: false
+        default: ''
+
+env:
+  AINIC_SHARED: /apps/shared/nigusev
+  ROCM_PATH: /opt/rocm-7.2.0
+  ANP_PLUGIN: /apps/build/amd-anp-tot/build/librccl-net.so
+
+jobs:
+  ainic-test-runner:
+    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    timeout-minutes: 480
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run AINIC test suite
+        id: run_tests
+        continue-on-error: true
+        env:
+          WORKDIR: ${{ github.event.inputs.workdir }}
+          MPI_PATH: ${{ github.event.inputs.mpi_path }}
+          RCCL_HOME: ${{ github.event.inputs.rccl_home }}
+          ROCM_PATH: ${{ env.ROCM_PATH }}
+          RCCL_AINIC_ROCE: '1'
+          IONIC_LOCKFREE: 'all'
+          NCCL_IB_HCA: 'ionic_0,ionic_1,ionic_2,ionic_3,ionic_4,ionic_5,ionic_6,ionic_7'
+          NCCL_IB_TC: '96'
+          HSA_ENABLE_SDMA: '0'
+        run: |
+          SUITE_FILTER=""
+          if [ -n "${{ github.event.inputs.test_suites }}" ]; then
+            SUITE_FILTER="--suites ${{ github.event.inputs.test_suites }}"
+          fi
+          python3 projects/rccl/tools/scripts/test_runner/run_tests.py \
+            --config projects/rccl/tools/scripts/test_runner/configs/ainic_abc.json \
+            --system ainic \
+            --report "${RUNNER_TEMP}/ainic_report.json" \
+            ${SUITE_FILTER}
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ainic-test-report
+          path: ${{ runner.temp }}/ainic_report.json
+
+      - name: Print summary
+        if: always()
+        run: |
+          if [ -f "${RUNNER_TEMP}/ainic_report.json" ]; then
+            python3 -c "
+import json, sys
+r = json.load(open('${RUNNER_TEMP}/ainic_report.json'))
+passed = sum(1 for t in r.get('tests', []) if t.get('status') == 'PASS')
+failed = sum(1 for t in r.get('tests', []) if t.get('status') == 'FAIL')
+total  = len(r.get('tests', []))
+print(f'Results: {passed}/{total} passed, {failed} failed')
+for t in r.get('tests', []):
+    icon = 'PASS' if t.get('status') == 'PASS' else 'FAIL'
+    print(f'  [{icon}] {t[\"name\"]}')
+" | tee -a "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Fail job if tests failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1

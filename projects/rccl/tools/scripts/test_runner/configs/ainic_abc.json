@@ -1,0 +1,403 @@
+{
+  "system_configurations": {
+    "name": "RCCL-AINIC-ABC",
+    "description": "AINIC test plan for Surya. Group A: NetIbMPI + GIN component/unit tests (2 nodes x 1 GPU = 2 ranks). Group B: NCCL_NET plugin x knobs sweep on rccl-tests perf (2 nodes x 8 GPU = 16 ranks), including out-of-the-box autodetect. Group C: IONIC hardware counter validation. Run on the AINIC cluster with --system ainic."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH}"
+  },
+  "auto_detect_hosts": true,
+  "mpi_args": {
+    "ainic": "--mca oob_tcp_if_include eno0 --mca btl_tcp_if_include eno0 --mca btl ^vader,openib --bind-to none"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "INFO",
+    "HSA_NO_SCRATCH_RECLAIM": "1"
+  },
+  "system_env_variables": {
+    "ainic": {
+      "NCCL_SOCKET_IFNAME": "eno0",
+      "NCCL_IB_HCA": "rdma0,rdma1,rdma2,rdma3",
+      "RCCL_AINIC_ROCE": "1",
+      "IONIC_LOCKFREE": "all"
+    }
+  },
+  "build_configuration": {
+    "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-mpi-tests", "--no_clean"],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "parallel_jobs": 64
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-$WORKDIR/rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": ["--mpi", "MPI_HOME=${MPI_PATH}"]
+  },
+
+  "test_configurations": {
+
+    "_comment_group_a": "=== GROUP A: component / unit tests (rccl-UnitTestsMPI). 2 nodes x 1 GPU = 2 ranks. ===",
+
+    "a_base": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1"
+      }
+    },
+
+    "a_netib_component": {
+      "extends": "a_base",
+      "_comment": "A1-A3: core NetIb plugin init / properties / data path on AINIC (IB-CAST plugin + libionic.so).",
+      "tests": [
+        {
+          "name": "A1_NetIB_InitializePlugin",
+          "description": "Verifies IB-CAST plugin init and libionic.so load on AINIC.",
+          "test_filter": "NetIbMPITest.InitializePlugin"
+        },
+        {
+          "name": "A2_NetIB_GetDeviceProperties",
+          "description": "Verifies IONIC devices (rdma0+) are visible and properties valid.",
+          "test_filter": "NetIbMPITest.GetDeviceProperties"
+        },
+        {
+          "name": "A3_NetIB_SimpleSendRecv",
+          "description": "Verifies basic send/recv over AINIC data path (no collectives).",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        }
+      ]
+    },
+
+    "a_cts_workaround": {
+      "extends": "a_base",
+      "timeout": 600,
+      "_comment": "A4: CTS-off P2P stress, sized to PASS cleanly. 16 conns x 64 = 1024 outstanding recvs; with RCCL_IB_P2P_DISABLE_CTS=1 all entries drain (retx=0, ack_timeout=0, 1024/1024 completions) and the test returns 0. Empirically on g27/g28 (job 9439) <=2048 outstanding drains cleanly; >=4096 stalls (drain timeout) which is the CTS match-table depth limit reproduced separately by A5. Do NOT bump CTS_QP_DEPTH back to 256 here or A4 will time out.",
+      "env_variables": {
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "CTS_NUM_CONNS": "16",
+        "CTS_QP_DEPTH": "64",
+        "CTS_SNAP_EVERY": "4"
+      },
+      "tests": [
+        {
+          "name": "A4_NetIB_CtsDepthStress_CtsOff",
+          "description": "CTS-off P2P stress path passes cleanly (1024 outstanding recvs drain fully).",
+          "test_filter": "NetIbMPITest.CtsDepthStress"
+        }
+      ]
+    },
+
+    "a_cts_overflow": {
+      "extends": "a_base",
+      "timeout": 600,
+      "_comment": "A5: CTS-on overflow reproducer (expected timeout/hang on AINIC).",
+      "env_variables": {
+        "RCCL_IB_P2P_DISABLE_CTS": "0",
+        "CTS_NUM_CONNS": "16",
+        "CTS_QP_DEPTH": "256",
+        "CTS_SNAP_EVERY": "4"
+      },
+      "tests": [
+        {
+          "name": "A5_NetIB_CtsDepthStress_CtsOn",
+          "description": "Reproduces AINIC CTS match-table overflow (~256 entries); expected to time out.",
+          "test_filter": "NetIbMPITest.CtsDepthStress"
+        }
+      ]
+    },
+
+    "a_cast_base": {
+      "extends": "a_base",
+      "timeout": 120,
+      "_comment": "CAST white-box tests REQUIRE the full WRR env set (the test guard checks every var, incl. RCCL_IB_QP_SCHED_WEIGHT) or they GTEST_SKIP. Env-only base (no tests) so children that extend it do not inherit each other's test lists. Mirrors cast_base in net_ib_transport.json.",
+      "env_variables": {
+        "RCCL_IB_QP_SCHED_ENABLE": "1",
+        "RCCL_IB_QP_SCHED_WRR_ENABLE": "1",
+        "RCCL_IB_QP_SCHED_WEIGHT": "0",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL": "60000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536",
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      }
+    },
+
+    "a_cast_wrr": {
+      "extends": "a_cast_base",
+      "_comment": "A7/A8: IB-CAST multi-QP WRR scheduler.",
+      "tests": [
+        {
+          "name": "A7_Cast_EqualWeightsTwoQPsTokenCounts",
+          "description": "WRR scheduler balances 2 QPs without corruption (token table sane).",
+          "test_filter": "NetIbMPITest.CastEqualWeightsTwoQPsTokenCounts"
+        },
+        {
+          "name": "A8_Cast_SingleQPBypassesWrr",
+          "description": "Single-QP connection bypasses WRR scheduler initialisation (keep sched enabled; just drop to 1 QP).",
+          "test_filter": "NetIbMPITest.CastSingleQPBypassesWrr",
+          "env_variables": {
+            "NCCL_IB_QPS_PER_CONNECTION": "1",
+            "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+          }
+        }
+      ]
+    },
+
+    "a_fault_inject": {
+      "extends": "a_cast_base",
+      "timeout": 180,
+      "_comment": "A9: per-QP fault injection on CAST path. Extends a_cast_base (NOT a_cast_wrr) so it does not inherit A7/A8.",
+      "tests": [
+        {
+          "name": "A9_Cast_FaultInjQpErrorIsFatal",
+          "description": "QP fault is detected (fatal) and does not corrupt other QPs on CAST path.",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorIsFatal"
+        }
+      ]
+    },
+
+    "a_gin": {
+      "extends": "a_base",
+      "timeout": 180,
+      "_comment": "A10-A15: GIN one-sided proxy tests. Gated at build by RCCL_HAS_GIN_IB_PROXY; require NCCL_NET=ib-cast (else GTEST_SKIP). Parameterized fixtures use wildcard filters.",
+      "env_variables": {
+        "NCCL_NET": "ib-cast"
+      },
+      "tests": [
+        {
+          "name": "A10_Gin_IPutBasic",
+          "description": "GIN one-sided iput RDMA write over AINIC.",
+          "test_filter": "*GinMPITest.IPutBasic*"
+        },
+        {
+          "name": "A11_Gin_IGetBasic",
+          "description": "GIN one-sided iget RDMA read over AINIC.",
+          "test_filter": "*GinMPITest.IGetBasic*"
+        },
+        {
+          "name": "A12_Gin_IPutSignal",
+          "description": "GIN put-with-signal (atomic inc/add) completion semantics.",
+          "test_filter": "*GinMPITest.IPutSignalInc*:*GinMPITest.IPutSignalAdd*"
+        },
+        {
+          "name": "A13_Gin_IFlushAfterIGet",
+          "description": "GIN GPU flush ordering after iget.",
+          "test_filter": "*GinMPITest.IFlushAfterIGet*"
+        },
+        {
+          "name": "A14_Gin_MultipleInflight",
+          "description": "Multiple outstanding GIN iput/iget complete without corruption.",
+          "test_filter": "*GinMPITest.MultipleInflightIPuts*:*GinMPITest.MultipleInflightIGets*"
+        },
+        {
+          "name": "A15_Gin_IPutSignalStress10k",
+          "description": "Stress: 10k put-with-signal ops, signal counter must equal 10000 (no drops).",
+          "test_filter": "*GinMPIStressTest.IPutSignalStress10k*"
+        }
+      ]
+    },
+
+    "_comment_group_b": "=== GROUP B: NCCL_NET plugin x knobs sweep on rccl-tests perf. 2 nodes x 8 GPU = 16 ranks. ===",
+
+    "b_base": {
+      "_comment": "Sweep base. command_args here (-e 8G) is inherited by the allreduce tests, which are healthy to 8G. The alltoall tests OVERRIDE command_args to -e 128M because CAST/ROCM-IB alltoall >=256M hits a real RCCL bug (IbCastCompletionEventProcess: expected 'recv' got 'Unused' -> internal error); the 8G alltoall repro lives in the disabled b_large_alltoall_repro suite. NCCL_IB_MERGE_NICS=0 isolates per-NIC behavior; do NOT set NCCL_NET_FORCE_MERGE in the ainic profile together with this (force-merge + merge-disabled => fatal 'Could not force merge NICs'). Validated on g27/g28 (job 9439).",
+      "is_gtest": false,
+      "num_ranks": 16,
+      "num_nodes": 2,
+      "num_gpus": 8,
+      "timeout": 600,
+      "command_args": "-b 1K -e 8G -f 2 -g 1",
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP",
+        "NCCL_IB_GID_INDEX": "1",
+        "NCCL_IB_MERGE_NICS": "0"
+      }
+    },
+
+    "b1_ib": {
+      "extends": "b_base",
+      "_comment": "B1: baseline plain RoCE, no AINIC/ionic/CTS.",
+      "env_variables": { "NCCL_NET": "IB" },
+      "tests": [
+        { "name": "B1_alltoall_IB", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "Baseline plain RoCE alltoall - confirms HW + MPI healthy. Capped at 128M (alltoall >=256M repro lives in disabled b_large_alltoall_repro)." },
+        { "name": "B1_allreduce_IB", "binary": "all_reduce_perf", "description": "Baseline plain RoCE allreduce." }
+      ]
+    },
+
+    "b2_cast_wrr_ctsoff": {
+      "extends": "b_base",
+      "_comment": "B2: explicit CAST, WRR ON, CTS OFF.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "1"
+      },
+      "tests": [
+        { "name": "B2_alltoall_CAST_WRR_CTSoff", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "CAST WRR ON / CTS OFF - validates multi-QP CAST path on AINIC. Capped at 128M: CAST alltoall >=256M hits IbCastCompletionEventProcess internal error (see b_large_alltoall_repro)." },
+        { "name": "B2_allreduce_CAST_WRR_CTSoff", "binary": "all_reduce_perf", "description": "CAST WRR ON / CTS OFF allreduce." }
+      ]
+    },
+
+    "b3_cast_nowrr_ctsoff": {
+      "extends": "b_base",
+      "_comment": "B3: CAST, WRR OFF, CTS OFF (isolate scheduler).",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_IB_P2P_DISABLE_CTS": "1"
+      },
+      "tests": [
+        { "name": "B3_alltoall_CAST_noWRR_CTSoff", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "CAST without WRR - isolates scheduler, ionic QP path only. Capped at 128M (CAST alltoall >=256M repro: b_large_alltoall_repro)." },
+        { "name": "B3_allreduce_CAST_noWRR_CTSoff", "binary": "all_reduce_perf", "description": "CAST without WRR allreduce." }
+      ]
+    },
+
+    "b4_rocmib_ctsoff": {
+      "extends": "b_base",
+      "_comment": "B4: ROCM-IB alias, CTS OFF (expected stable AINIC RoCEv2).",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB",
+        "RCCL_IB_P2P_DISABLE_CTS": "1"
+      },
+      "tests": [
+        { "name": "B4_alltoall_ROCMIB_CTSoff", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "AINIC alias path (sched OFF, CTS OFF). Capped at 128M (ROCM-IB alltoall >=256M repro: b_large_alltoall_repro)." },
+        { "name": "B4_allreduce_ROCMIB_CTSoff", "binary": "all_reduce_perf", "description": "AINIC alias allreduce." }
+      ]
+    },
+
+    "b5_rocmib_ctson": {
+      "extends": "b_base",
+      "_comment": "B5: ROCM-IB alias, CTS ON (hang repro candidate).",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB",
+        "RCCL_IB_P2P_DISABLE_CTS": "0"
+      },
+      "tests": [
+        { "name": "B5_alltoall_ROCMIB_CTSon", "binary": "alltoall_perf", "description": "CTS ON on P2P - hang repro via CTS table overflow at large sizes." },
+        { "name": "B5_allreduce_ROCMIB_CTSon", "binary": "all_reduce_perf", "description": "CTS ON allreduce." }
+      ]
+    },
+
+    "b6_cast_wrr_ctson": {
+      "extends": "b_base",
+      "_comment": "B6: CAST, WRR ON + CTS requested ON (CTS should be forced off when sched active).",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "0"
+      },
+      "tests": [
+        { "name": "B6_alltoall_CAST_WRR_CTSon", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "WRR ON + CTS requested - verifies CTS forced OFF under active scheduler. Capped at 128M (CAST alltoall >=256M repro: b_large_alltoall_repro)." },
+        { "name": "B6_allreduce_CAST_WRR_CTSon", "binary": "all_reduce_perf", "description": "WRR ON + CTS requested allreduce." }
+      ]
+    },
+
+    "b7_autodetect": {
+      "extends": "b_base",
+      "_comment": "B7: out-of-the-box - NCCL_NET intentionally OMITTED (do NOT set it to '' - the runner exports -x NCCL_NET='' which breaks net init). RCCL_AINIC_ROCE=1 comes from the --system ainic profile. NOTE: on this AINIC cluster autodetect selects netIbCast with CTS on and reproduces the alltoall hang (validated on job 9437); expect TIMEOUT until the CTS fix lands.",
+      "tests": [
+        { "name": "B7_alltoall_autodetect", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "Out-of-the-box: auto-select netIbCast on AINIC HW, stock defaults. Capped at 128M (autodetect=>CAST alltoall >=256M repro: b_large_alltoall_repro)." },
+        { "name": "B7_allreduce_autodetect", "binary": "all_reduce_perf", "description": "Out-of-the-box autodetect allreduce." }
+      ]
+    },
+
+    "b7a_pure_autodetect": {
+      "extends": "b_base",
+      "_comment": "B7a: pure PCI autodetect. NCCL_NET omitted; RCCL_AINIC_ROCE must ALSO be absent. The runner cannot unset a profile var via '', so run this config WITHOUT '--system ainic' (or with a profile that does not set RCCL_AINIC_ROCE) so detection is purely PCI-based (0x1dd8:0x10) and libionic.so auto-loads.",
+      "tests": [
+        { "name": "B7a_alltoall_pure_autodetect", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "Pure PCI autodetect (0x1dd8:0x10); libionic.so auto-loads. Capped at 128M (CAST alltoall >=256M repro: b_large_alltoall_repro)." },
+        { "name": "B7a_allreduce_pure_autodetect", "binary": "all_reduce_perf", "description": "Pure PCI autodetect allreduce." }
+      ]
+    },
+
+    "b7b_autodetect_off": {
+      "extends": "b_base",
+      "_comment": "B7b: negative control - plugin unset (NCCL_NET omitted), AINIC forced OFF via RCCL_AINIC_ROCE=0; expect fallback to plain IB/RoCE.",
+      "env_variables": {
+        "RCCL_AINIC_ROCE": "0"
+      },
+      "tests": [
+        { "name": "B7b_alltoall_autodetect_off", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "AINIC forced OFF - verifies fallback to plain IB/RoCE on same HW. Capped at 128M for parity with the rest of the sweep." },
+        { "name": "B7b_allreduce_autodetect_off", "binary": "all_reduce_perf", "description": "AINIC forced OFF allreduce." }
+      ]
+    },
+
+    "b8_no_cts_offload": {
+      "extends": "b_base",
+      "_comment": "B8: ROCM-IB with CTS offload fully disabled.",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0"
+      },
+      "tests": [
+        { "name": "B8_alltoall_ROCMIB_noOffload", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "CTS offload disabled - isolates ionic path without CTS handshake. Capped at 128M (ROCM-IB alltoall >=256M repro: b_large_alltoall_repro)." },
+        { "name": "B8_allreduce_ROCMIB_noOffload", "binary": "all_reduce_perf", "description": "CTS offload disabled allreduce." }
+      ]
+    },
+
+    "b_large_alltoall_repro": {
+      "extends": "b_base",
+      "command_args": "-b 1K -e 8G -f 2 -g 1",
+      "_comment": "DISABLED repro of a real RCCL bug: CAST/ROCM-IB alltoall fails at >=256M with 'NET/IB: IbCastCompletionEventProcess: Receiver expected a recv request but got Unused (IBV_WC_RECV_RDMA_WITH_IMM) -> internal error', and leaves orphaned ranks on the GPUs. The plain-IB control passes to 8G, proving HW/MPI are healthy and the defect is in the CAST P2P completion path. Enable only to reproduce/triage; expect the two CAST/ROCM-IB cases to FAIL. Observed on g27/g28 (job 9439).",
+      "tests": [
+        { "name": "BR_alltoall_IB_8G_control", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB" }, "description": "CONTROL: plain RoCE alltoall to 8G - expected PASS (HW healthy)." },
+        { "name": "BR_alltoall_CAST_8G", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB-CAST", "RCCL_IB_P2P_DISABLE_CTS": "1" }, "description": "CAST alltoall to 8G - expected FAIL at >=256M (IbCastCompletionEventProcess internal error)." },
+        { "name": "BR_alltoall_ROCMIB_8G", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "ROCM-IB", "RCCL_IB_P2P_DISABLE_CTS": "1" }, "description": "ROCM-IB alltoall to 8G - expected FAIL at >=256M (same defect via alias)." }
+      ]
+    },
+
+    "_comment_group_c": "=== GROUP C: IONIC hardware counter validation. ===",
+
+    "c_counters": {
+      "is_gtest": false,
+      "num_ranks": 16,
+      "num_nodes": 2,
+      "num_gpus": 8,
+      "timeout": 900,
+      "command_args": "-b 1G -e 8G -f 2 -g 1",
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP",
+        "NCCL_NET": "ROCM-IB",
+        "RCCL_TESTS_NET_COUNTER_ENABLE": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "NCCL_IB_GID_INDEX": "1"
+      },
+      "tests": [
+        { "name": "C1_alltoall_counters", "binary": "alltoall_perf", "command_args": "-b 1M -e 128M -f 2 -g 1", "description": "IONIC counters (tx_rdma_ucast_bytes) non-zero and BW > 10 GB/s. Capped at 128M to avoid the CAST/ROCM-IB alltoall >=256M defect (see b_large_alltoall_repro); 128M is ample for counter validation." },
+        { "name": "C1_allreduce_counters", "binary": "all_reduce_perf", "description": "IONIC counter validation on allreduce." }
+      ]
+    }
+  },
+
+  "test_suites": [
+    { "name": "A. Component - NetIb core",          "config": "a_netib_component", "enabled": true },
+    { "name": "A. Component - CTS workaround (off)", "config": "a_cts_workaround", "enabled": true },
+    { "name": "A. Component - CTS overflow (on)",    "config": "a_cts_overflow",   "enabled": false },
+    { "name": "A. Component - CAST WRR",             "config": "a_cast_wrr",        "enabled": true },
+    { "name": "A. Component - Fault injection",      "config": "a_fault_inject",    "enabled": true },
+    { "name": "A. Component - GIN proxy",            "config": "a_gin",             "enabled": true },
+
+    { "name": "B1. IB baseline",                     "config": "b1_ib",             "enabled": true },
+    { "name": "B2. CAST WRR / CTS off",              "config": "b2_cast_wrr_ctsoff","enabled": true },
+    { "name": "B3. CAST no-WRR / CTS off",           "config": "b3_cast_nowrr_ctsoff","enabled": true },
+    { "name": "B4. ROCM-IB / CTS off",               "config": "b4_rocmib_ctsoff",  "enabled": true },
+    { "name": "B5. ROCM-IB / CTS on (repro)",        "config": "b5_rocmib_ctson",   "enabled": false },
+    { "name": "B6. CAST WRR / CTS on",               "config": "b6_cast_wrr_ctson", "enabled": true },
+    { "name": "B7. Autodetect (out-of-box)",         "config": "b7_autodetect",     "enabled": true },
+    { "name": "B7a. Pure PCI autodetect",            "config": "b7a_pure_autodetect","enabled": true },
+    { "name": "B7b. Autodetect off (fallback)",      "config": "b7b_autodetect_off","enabled": true },
+    { "name": "B8. ROCM-IB / no CTS offload",        "config": "b8_no_cts_offload", "enabled": true },
+    { "name": "B-large. alltoall >=256M repro",      "config": "b_large_alltoall_repro", "enabled": false },
+
+    { "name": "C1. IONIC counter validation",        "config": "c_counters",        "enabled": true }
+  ]
+}
