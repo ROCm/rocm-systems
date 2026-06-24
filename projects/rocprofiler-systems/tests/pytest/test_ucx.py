@@ -78,8 +78,9 @@ def ucx_env(ucx_base_env) -> dict[str, str]:
     env = ucx_base_env.copy()
     env.update(
         {
-            "ROCPROFSYS_TRACE_LEGACY": "ON",
+            "ROCPROFSYS_TRACE_LEGACY": "OFF",
             "ROCPROFSYS_PERFETTO_COMBINE_TRACES": "ON",
+            "ROCPROFSYS_MERGE_PERFETTO_FILES": "ON",
         }
     )
     return env

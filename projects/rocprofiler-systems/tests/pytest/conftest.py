@@ -8,14 +8,16 @@ This module provides shared fixtures and configuration for all test modules.
 """
 
 from __future__ import annotations
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Callable, Generator, Optional
 
-import re
 import os
-import sys
+import re
 import shutil
+import subprocess
+import sys
+import time
 
 try:
     import yaml
@@ -2550,6 +2552,63 @@ def assert_file_regex(subtests, record_subtest_failure, request):
     return _assert_file_regex
 
 
+def _find_perfetto_merge_script(tests_dir: Path) -> Optional[Path]:
+    """Find the packaged Perfetto merge helper for this test install."""
+    candidates: list[Path] = []
+
+    script_path = os.environ.get("ROCPROFSYS_SCRIPT_PATH")
+    if script_path:
+        candidates.append(Path(script_path) / "rocprof-sys-merge-output.sh")
+
+    if len(tests_dir.parents) >= 3:
+        install_prefix = tests_dir.parents[2]
+        candidates.append(
+            install_prefix
+            / "libexec"
+            / "rocprofiler-systems"
+            / "rocprof-sys-merge-output.sh"
+        )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _recover_merged_perfetto_trace(perfetto: Path, tests_dir: Path) -> str:
+    """Try to create a missing merged Perfetto trace from per-rank traces."""
+    if perfetto.name != "merged.proto":
+        return "Recovery skipped: requested Perfetto file is not merged.proto"
+
+    for _ in range(20):
+        if perfetto.exists():
+            return "Recovery skipped: merged.proto appeared during wait"
+        time.sleep(0.1)
+
+    output_dir = perfetto.parent
+    rank_traces = sorted(output_dir.glob("perfetto-trace-*.proto"))
+    if not rank_traces:
+        return "Recovery skipped: no perfetto-trace-*.proto files found"
+
+    merge_script = _find_perfetto_merge_script(tests_dir)
+    if merge_script is None:
+        return "Recovery skipped: rocprof-sys-merge-output.sh not found"
+
+    result = subprocess.run(
+        [str(merge_script), str(output_dir)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    return (
+        "Recovery attempted with "
+        f"{merge_script}; returncode={result.returncode}\n{result.stdout}"
+    )
+
+
 @pytest.fixture
 def assert_perfetto(
     subtests, tests_dir, record_subtest_failure, request, test_output_dir
@@ -2602,8 +2661,12 @@ def assert_perfetto(
             else:
                 perfetto = result.perfetto_file
             if not perfetto.exists():
-                record_subtest_failure(subtest_name)
-                pytest.fail(f"Perfetto trace file {perfetto} not found")
+                recovery_msg = _recover_merged_perfetto_trace(perfetto, tests_dir)
+                if not perfetto.exists():
+                    record_subtest_failure(subtest_name)
+                    pytest.fail(
+                        f"Perfetto trace file {perfetto} not found\n{recovery_msg}"
+                    )
 
             validation = validate_perfetto_trace(
                 perfetto,
