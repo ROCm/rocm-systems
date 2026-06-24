@@ -151,7 +151,6 @@ def generate_cmake(categories):
     for category, config in categories.items():
         test_patterns = config.get("test_patterns") or []
         test_labels = config.get("test_labels") or []
-        excludes = config.get("exclude") or []
         custom_labels = config.get("labels") or []
 
         # Combine the tier labels and custom labels, and remove duplicates
@@ -167,16 +166,9 @@ def generate_cmake(categories):
                 lines, test_labels, labels_str, f"Category: {category} - test_labels"
             )
 
-        if excludes:
-            _emit_label_block(
-                lines,
-                excludes,
-                f"{category}_exclude",
-                f"Category: {category} - exclude",
-            )
-
+        # Emit a per-category label for exclude and any *_exclude list.
         for key, value in config.items():
-            if key.endswith("_exclude") and isinstance(value, list) and value:
+            if key.endswith("exclude") and isinstance(value, list) and value:
                 _emit_label_block(
                     lines,
                     value,
