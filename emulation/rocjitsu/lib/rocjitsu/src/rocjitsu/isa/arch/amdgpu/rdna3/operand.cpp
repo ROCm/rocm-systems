@@ -708,7 +708,7 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
 
 namespace {
 
-constexpr int kM0EncodingValue = 124;
+constexpr int kM0EncodingValue = 125;
 
 bool is_vgpr_only_type(OperandType t) {
   return t == OperandType::OPR_VGPR || t == OperandType::OPR_SRC_VGPR;
