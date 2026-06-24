@@ -31,7 +31,6 @@
 
 #include <limits>
 #include <memory>
-#include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -84,21 +83,6 @@ check_status(rocprofiler_status_t status, std::string_view msg)
         << rocprofiler_get_status_string(status);
 }
 
-std::optional<uint64_t>
-subtract_signed_delta(uint64_t address, int64_t delta)
-{
-    if(delta >= 0)
-    {
-        auto unsigned_delta = static_cast<uint64_t>(delta);
-        if(address < unsigned_delta) return std::nullopt;
-        return address - unsigned_delta;
-    }
-
-    auto unsigned_delta = static_cast<uint64_t>(-(delta + 1)) + 1;
-    if(address > std::numeric_limits<uint64_t>::max() - unsigned_delta) return std::nullopt;
-    return address + unsigned_delta;
-}
-
 void
 add_range_locked(agent_state_t&            state,
                  uint64_t                code_object_id,
@@ -132,12 +116,10 @@ add_exact_locked(agent_state_t&            state,
 uint64_t
 get_symbol_size_locked(const code_object_record_t& code_object, uint64_t kernel_address)
 {
-    if(auto elf_vaddr = subtract_signed_delta(kernel_address, code_object.load_delta))
-    {
-        if(auto itr = code_object.symbol_sizes_by_vaddr.find(*elf_vaddr);
-           itr != code_object.symbol_sizes_by_vaddr.end())
-            return itr->second;
-    }
+    auto elf_vaddr = kernel_address - static_cast<uint64_t>(code_object.load_delta);
+    if(auto itr = code_object.symbol_sizes_by_vaddr.find(elf_vaddr);
+       itr != code_object.symbol_sizes_by_vaddr.end())
+        return itr->second;
 
     return 0;
 }
@@ -156,11 +138,9 @@ register_kernel_symbol_locked(agent_state_t& state, const kernel_symbol_t& symbo
     if(code_object_itr == state.code_objects.end()) return;
 
     const auto& code_object = code_object_itr->second;
-    if(auto elf_vaddr = subtract_signed_delta(symbol.kernel_address.handle, code_object.load_delta))
-    {
-        add_exact_locked(state, symbol.code_object_id, *elf_vaddr, targeted);
-        add_range_locked(state, symbol.code_object_id, *elf_vaddr, symbol_size, targeted);
-    }
+    auto elf_vaddr = symbol.kernel_address.handle - static_cast<uint64_t>(code_object.load_delta);
+    add_exact_locked(state, symbol.code_object_id, elf_vaddr, targeted);
+    add_range_locked(state, symbol.code_object_id, elf_vaddr, symbol_size, targeted);
 }
 
 void
