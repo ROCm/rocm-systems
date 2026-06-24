@@ -59,11 +59,6 @@ def parse_operator_patterns(args: argparse.Namespace, attr: str) -> list[str]:
     return pattern_list
 
 
-def parse_torch_operator_patterns(args: argparse.Namespace) -> list[str]:
-    """Return the ``--torch-operator`` filter patterns."""
-    return parse_operator_patterns(args, "torch_operator")
-
-
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
