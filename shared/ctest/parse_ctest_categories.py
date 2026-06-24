@@ -175,10 +175,17 @@ def generate_cmake(categories):
                 f"Category: {category} - exclude",
             )
 
+        # Scope each *_exclude list to its category, mirroring {category}_exclude.
+        # A bare label would union the lists across categories (labels attach to
+        # test names, which recur in every category), so a per-category edit
+        # could not narrow the exclusion.
         for key, value in config.items():
             if key.endswith("_exclude") and isinstance(value, list) and value:
                 _emit_label_block(
-                    lines, value, key, f"Category: {category} - {key}"
+                    lines,
+                    value,
+                    f"{category}_{key}",
+                    f"Category: {category} - {key}",
                 )
 
     # Deduplicate labels across all tests, since APPEND_PROPERTY doesn't deduplicate.

@@ -200,7 +200,7 @@ jobs:
             -DPYTEST_NUMPROCS=8 \
             -- \
             -L full \
-            -LE rocprofiler_compute_ci_exclude
+            -LE full_rocprofiler_compute_ci_exclude
 
       - name: Output Logs
         if: steps.test.outcome == 'failure'
