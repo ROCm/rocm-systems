@@ -233,136 +233,46 @@ struct perfetto_policy
                 continue;
             }
 
-            // RX RDMA unicast bytes
-            if(effective_metrics.bits.rx_rdma_ucast_bytes)
-            {
-                auto it = device_tracks.find(RX_RDMA_UCAST_BYTES_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_rx_ucast_bytes",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.rx_rdma_ucast_bytes));
-                }
-            }
+            // Emit one counter sample per enabled metric. The category must be a
+            // compile-time literal (Perfetto resolves registered categories at build
+            // time), so this is a scoped macro rather than a runtime loop. Each row
+            // names a metric whose member is identically spelled in enabled_metrics,
+            // the metrics struct, and the *_VALUE track key.
+#define ROCPROFSYS_NIC_EMIT_COUNTER(MEMBER, VALUE_KEY, CATEGORY)                         \
+    if(effective_metrics.bits.MEMBER)                                                    \
+    {                                                                                    \
+        auto it = device_tracks.find(VALUE_KEY);                                         \
+        if(it != device_tracks.end())                                                    \
+        {                                                                                \
+            TRACE_COUNTER(CATEGORY,                                                      \
+                          counter_track::at(device_index, it->second.track_index), ts,   \
+                          static_cast<double>(sample.metric_values.MEMBER));             \
+        }                                                                                \
+    }
 
-            // TX RDMA unicast bytes
-            if(effective_metrics.bits.tx_rdma_ucast_bytes)
-            {
-                auto it = device_tracks.find(TX_RDMA_UCAST_BYTES_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_tx_ucast_bytes",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.tx_rdma_ucast_bytes));
-                }
-            }
+            ROCPROFSYS_NIC_EMIT_COUNTER(rx_rdma_ucast_bytes, RX_RDMA_UCAST_BYTES_VALUE,
+                                        "nic_rx_ucast_bytes")
+            ROCPROFSYS_NIC_EMIT_COUNTER(tx_rdma_ucast_bytes, TX_RDMA_UCAST_BYTES_VALUE,
+                                        "nic_tx_ucast_bytes")
+            ROCPROFSYS_NIC_EMIT_COUNTER(rx_rdma_ucast_pkts, RX_RDMA_UCAST_PKTS_VALUE,
+                                        "nic_rx_ucast_pkts")
+            ROCPROFSYS_NIC_EMIT_COUNTER(tx_rdma_ucast_pkts, TX_RDMA_UCAST_PKTS_VALUE,
+                                        "nic_tx_ucast_pkts")
+            ROCPROFSYS_NIC_EMIT_COUNTER(rx_rdma_cnp_pkts, RX_RDMA_CNP_PKTS_VALUE,
+                                        "nic_rx_cnp_pkts")
+            ROCPROFSYS_NIC_EMIT_COUNTER(tx_rdma_cnp_pkts, TX_RDMA_CNP_PKTS_VALUE,
+                                        "nic_tx_cnp_pkts")
+            ROCPROFSYS_NIC_EMIT_COUNTER(tx_rdma_ack_timeout, TX_RDMA_ACK_TIMEOUT_VALUE,
+                                        "nic_tx_rdma_ack_timeout")
+            ROCPROFSYS_NIC_EMIT_COUNTER(resp_tx_pkt_seq_err, RESP_TX_PKT_SEQ_ERR_VALUE,
+                                        "nic_resp_tx_pkt_seq_err")
+            ROCPROFSYS_NIC_EMIT_COUNTER(req_rx_pkt_seq_err, REQ_RX_PKT_SEQ_ERR_VALUE,
+                                        "nic_req_rx_pkt_seq_err")
+            ROCPROFSYS_NIC_EMIT_COUNTER(req_rx_impl_nak_seq_err,
+                                        REQ_RX_IMPL_NAK_SEQ_ERR_VALUE,
+                                        "nic_req_rx_impl_nak_seq_err")
 
-            // RX RDMA unicast packets
-            if(effective_metrics.bits.rx_rdma_ucast_pkts)
-            {
-                auto it = device_tracks.find(RX_RDMA_UCAST_PKTS_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_rx_ucast_pkts",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.rx_rdma_ucast_pkts));
-                }
-            }
-
-            // TX RDMA unicast packets
-            if(effective_metrics.bits.tx_rdma_ucast_pkts)
-            {
-                auto it = device_tracks.find(TX_RDMA_UCAST_PKTS_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_tx_ucast_pkts",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.tx_rdma_ucast_pkts));
-                }
-            }
-
-            // RX RDMA CNP packets
-            if(effective_metrics.bits.rx_rdma_cnp_pkts)
-            {
-                auto it = device_tracks.find(RX_RDMA_CNP_PKTS_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_rx_cnp_pkts",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.rx_rdma_cnp_pkts));
-                }
-            }
-
-            // TX RDMA CNP packets
-            if(effective_metrics.bits.tx_rdma_cnp_pkts)
-            {
-                auto it = device_tracks.find(TX_RDMA_CNP_PKTS_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_tx_cnp_pkts",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.tx_rdma_cnp_pkts));
-                }
-            }
-
-            // TX RDMA ACK timeouts
-            if(effective_metrics.bits.tx_rdma_ack_timeout)
-            {
-                auto it = device_tracks.find(TX_RDMA_ACK_TIMEOUT_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_tx_rdma_ack_timeout",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.tx_rdma_ack_timeout));
-                }
-            }
-
-            // RESP TX PKT SEQ errors
-            if(effective_metrics.bits.resp_tx_pkt_seq_err)
-            {
-                auto it = device_tracks.find(RESP_TX_PKT_SEQ_ERR_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_resp_tx_pkt_seq_err",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.resp_tx_pkt_seq_err));
-                }
-            }
-
-            // REQ RX PKT SEQ errors
-            if(effective_metrics.bits.req_rx_pkt_seq_err)
-            {
-                auto it = device_tracks.find(REQ_RX_PKT_SEQ_ERR_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_req_rx_pkt_seq_err",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.req_rx_pkt_seq_err));
-                }
-            }
-
-            // REQ RX IMPL NAK SEQ errors
-            if(effective_metrics.bits.req_rx_impl_nak_seq_err)
-            {
-                auto it = device_tracks.find(REQ_RX_IMPL_NAK_SEQ_ERR_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER("nic_req_rx_impl_nak_seq_err",
-                                  counter_track::at(device_index, it->second.track_index),
-                                  ts,
-                                  static_cast<double>(
-                                      sample.metric_values.req_rx_impl_nak_seq_err));
-                }
-            }
+#undef ROCPROFSYS_NIC_EMIT_COUNTER
         }
     }
 };
