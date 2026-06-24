@@ -178,7 +178,7 @@ class TestMIGPUSpecs:
         design = {"rdna_model": {"memory_die": 3}}
         with (
             patch.object(MIGPUSpecs, "_gpu_design", design),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}),
+            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "rdna3.5"}),
         ):
             assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 3
 
@@ -186,7 +186,7 @@ class TestMIGPUSpecs:
         design = {"rdna_model": {}}
         with (
             patch.object(MIGPUSpecs, "_gpu_design", design),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}),
+            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "rdna3.5"}),
         ):
             assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 1
 
