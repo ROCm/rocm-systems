@@ -553,6 +553,34 @@ The accumulate() function sums the values of a basic level counter over the spec
 
 ``MeanOccupancyPerCU``: In the preceding example, the ``MeanOccupancyPerCU`` metric calculates the mean occupancy per compute unit. It uses the accumulate() function with ``HIGH_RES`` to sum up the ``SQ_LEVEL_WAVES`` counter every clock cycle. This sum is then divided by the maximum value of ``GRBM_GUI_ACTIVE`` and the number of compute units ``CU_NUM`` to derive the mean occupancy.
 
+Kernel replay (multi-pass dispatch counting)
+----------------------------------------------
+
+When a single set of hardware counters cannot be collected in one pass (because the hardware has a limited number of counter registers), kernel replay re-executes the same dispatch multiple times — once per counter batch — while the application observes only a single completion.
+
+Between passes, directly-allocated device memory is saved and restored so every pass runs against identical inputs. The replay service is configured via:
+
+.. code-block:: cpp
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_kernel_replay_counting_service(
+            ctx,
+            dispatch_callback,      // invoked once per pass (counter batch selection)
+            dispatch_callback_args,
+            record_callback,        // invoked once per pass (counter records)
+            record_callback_args),
+        "Could not setup kernel replay counting service");
+
+.. note::
+    - This API is **mutually exclusive** with ``rocprofiler_configure_callback_dispatch_counting_service`` and ``rocprofiler_configure_buffer_dispatch_counting_service`` on the same context.
+    - Configure kernel replay *first*, or use only the regular dispatch counting entry points without replay.
+    - The number of replay passes is controlled via the ``ROCPROFILER_KERNEL_REPLAY_PASSES`` environment variable.
+    - Only directly-allocated device memory (``hipMalloc`` / ``hsa_amd_memory_pool_allocate``) is tracked and restored. Unified/managed memory is out of scope.
+
+The ``rocprofv3`` tool exposes this service through the ``--kernel-replay`` and ``--kernel-replay-passes`` command-line options (which set ``ROCPROF_KERNEL_REPLAY`` and ``ROCPROFILER_KERNEL_REPLAY_PASSES`` respectively). When enabled, counter collection is routed through the replay service instead of the regular dispatch counting service, and the output ``counter_collection.csv`` gains a ``Replay_Pass`` column distinguishing each pass of a replayed dispatch. See :ref:`kernel-counter-collection` in the rocprofv3 how-to guide for usage details.
+
+This API is marked **experimental** (``ROCPROFILER_SDK_EXPERIMENTAL``). See :ref:`kernel_replay_service_reference` for the full API documentation.
+
 Kernel serialization
 ---------------------
 

@@ -70,6 +70,7 @@ struct output_config
     bool                     rocpd_output                = false;
     bool                     summary_output              = false;
     bool                     kernel_rename               = false;
+    bool                     kernel_replay               = false;
     bool                     group_by_queue              = false;
     bool                     annotate_args               = false;
     bool                     annotate_kfd                = false;
@@ -135,6 +136,7 @@ output_config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(summary_output);
     CFG_SERIALIZE_MEMBER(rocpd_output);
     CFG_SERIALIZE_MEMBER(kernel_rename);
+    CFG_SERIALIZE_MEMBER(kernel_replay);
     CFG_SERIALIZE_MEMBER(group_by_queue);
     CFG_SERIALIZE_MEMBER(annotate_args);
     CFG_SERIALIZE_MEMBER(annotate_kfd);
