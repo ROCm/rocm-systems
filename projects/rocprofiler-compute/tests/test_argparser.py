@@ -6,7 +6,9 @@ Unit tests for rocprof-compute general CLI options.
 """
 
 import argparse
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from common import SUPPORTED_ARCHS
@@ -115,37 +117,28 @@ def test_config_dir_requires_value(capsys):
     assert "--config-dir" in capsys.readouterr().err
 
 
-# =============================================================================
-# analyze: PC sampling options
-# =============================================================================
+def test_pc_sampling_analyze_options():
+    """Defaults, overrides, and validation for the analyze PC sampling options."""
+    defaults = build_args(["analyze"])
+    assert defaults.pc_sampling_sorting_type == "count"
+    assert defaults.pc_sampling_rows == 10
 
-
-def test_pc_sampling_sorting_type_defaults_to_count():
-    assert build_args(["analyze"]).pc_sampling_sorting_type == "count"
-
-
-def test_pc_sampling_rows_defaults_to_ten():
-    assert build_args(["analyze"]).pc_sampling_rows == 10
-
-
-def test_pc_sampling_rows_zero_allowed():
-    assert build_args(["analyze", "--pc-sampling-rows", "0"]).pc_sampling_rows == 0
-
-
-def test_pc_sampling_rows_rejects_negative(capsys):
-    with pytest.raises(SystemExit) as exc:
-        build_args(["analyze", "--pc-sampling-rows", "-1"])
-    assert exc.value.code == 2
-    assert "non-negative" in capsys.readouterr().err
-
-
-def test_pc_sampling_options_accept_overrides():
-    args = build_args([
+    overrides = build_args([
         "analyze",
         "--pc-sampling-sorting-type",
         "offset",
         "--pc-sampling-rows",
         "25",
     ])
-    assert args.pc_sampling_sorting_type == "offset"
-    assert args.pc_sampling_rows == 25
+    assert overrides.pc_sampling_sorting_type == "offset"
+    assert overrides.pc_sampling_rows == 25
+
+    # 0 is allowed and means "show all rows".
+    assert build_args(["analyze", "--pc-sampling-rows", "0"]).pc_sampling_rows == 0
+
+    # Negative row counts are rejected with a non-zero exit and a clear message.
+    with patch("sys.stderr", new_callable=StringIO) as mock_stderr:
+        with pytest.raises(SystemExit) as exc:
+            build_args(["analyze", "--pc-sampling-rows", "-1"])
+    assert exc.value.code == 2
+    assert "non-negative" in mock_stderr.getvalue()
