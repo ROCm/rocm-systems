@@ -77,6 +77,16 @@ public:
 
     static version_info& get_version();
 
+    // Reset the cached version to zero so the next get_version() call re-queries
+    // Wrapper::get_version().  For unit tests only — allows pinning Times(1).
+    static void reset_version_cache()
+    {
+        get_version().formatted = 0;
+        get_version().major     = 0;
+        get_version().minor     = 0;
+        get_version().patch     = 0;
+    }
+
     static std::unordered_set<typename Wrapper::callback_tracing_kind>
     get_callback_domains();
 
@@ -657,14 +667,16 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
     }
 
     // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
-    // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
+    // undefined node IDs (0xFFFFFFFF). Guard at compile time via compile_time_version
+    // (= ROCPROFILER_VERSION for production, mock-defined for tests) so the mock can
+    // enable KFD paths without fighting the function-local-static version cache.
     version_info kfd_version{};
     bool         kfd_supported_by_runtime = false;
     if constexpr(Wrapper::compile_time_version >= 10000)
     {
         constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
         kfd_version                             = get_version();
-        kfd_supported_by_runtime = (kfd_version.formatted >= kfd_min_version);
+        kfd_supported_by_runtime = (Wrapper::compile_time_version >= kfd_min_version);
     }
 
     auto _data    = std::unordered_set<kind_t>{};

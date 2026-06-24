@@ -13,64 +13,17 @@
 namespace rocprofsys::mock::rocprofiler_sdk
 {
 
-// ─── Concrete integer-backed mock types ───────────────────────────────────────
-//
-// Each type is a plain struct holding an int, convertible to int via
-// operator int() only — no template conversion operators, which would
-// create ambiguous implicit conversions in switch statement conditions.
-//
-// Separate concrete types (not a template) give type-safety without any
-// template magic. operator int() is the sole integral conversion, making
-// switch(record.kind) unambiguous.
+enum kind_callback_tracing
+{
+};
 
-// Shared macro to avoid repetition — each type has the same body.
-// The std::uint32_t friends avoid -Wsign-compare against record_header_t::kind.
-#define ROCPROFSYS_MOCK_INT_TYPE(Name)                                                   \
-    struct Name                                                                          \
-    {                                                                                    \
-        int value                 = 0;                                                   \
-        constexpr Name() noexcept = default;                                             \
-        constexpr Name(int val) noexcept /* NOLINT */                                    \
-        : value(val)                                                                     \
-        {}                                                                               \
-        constexpr      operator int() const noexcept { return value; }                   \
-        constexpr bool operator==(const Name&) const noexcept = default;                 \
-        constexpr bool operator!=(const Name& rhs) const noexcept                        \
-        {                                                                                \
-            return value != rhs.value;                                                   \
-        }                                                                                \
-        constexpr bool operator<(const Name& rhs) const noexcept                         \
-        {                                                                                \
-            return value < rhs.value;                                                    \
-        }                                                                                \
-        friend std::ostream& operator<<(std::ostream& os, const Name& k)                 \
-        {                                                                                \
-            return os << k.value;                                                        \
-        }                                                                                \
-        friend constexpr bool operator==(std::uint32_t lhs, const Name& rhs) noexcept    \
-        {                                                                                \
-            return lhs == static_cast<std::uint32_t>(rhs.value);                         \
-        }                                                                                \
-        friend constexpr bool operator==(const Name& lhs, std::uint32_t rhs) noexcept    \
-        {                                                                                \
-            return static_cast<std::uint32_t>(lhs.value) == rhs;                         \
-        }                                                                                \
-        friend constexpr bool operator!=(std::uint32_t lhs, const Name& rhs) noexcept    \
-        {                                                                                \
-            return !(lhs == rhs);                                                        \
-        }                                                                                \
-        friend constexpr bool operator!=(const Name& lhs, std::uint32_t rhs) noexcept    \
-        {                                                                                \
-            return !(lhs == rhs);                                                        \
-        }                                                                                \
-    }
+enum kind_buffer_tracing
+{
+};
 
-ROCPROFSYS_MOCK_INT_TYPE(callback_tracing_kind);
-ROCPROFSYS_MOCK_INT_TYPE(buffer_tracing_kind);
-
-ROCPROFSYS_MOCK_INT_TYPE(mock_ompt_thread_t);
-
-#undef ROCPROFSYS_MOCK_INT_TYPE
+using callback_tracing_kind = kind_callback_tracing;
+using buffer_tracing_kind   = kind_buffer_tracing;
+using mock_ompt_thread_t    = int;
 
 // ─── Self-contained stub types ────────────────────────────────────────────────
 //
@@ -1394,34 +1347,4 @@ struct hash<::rocprofsys::mock::rocprofiler_sdk::handle_t>
     }
 };
 
-template <>
-struct hash<::rocprofsys::mock::rocprofiler_sdk::callback_tracing_kind>
-{
-    std::size_t operator()(
-        const ::rocprofsys::mock::rocprofiler_sdk::callback_tracing_kind& k)
-        const noexcept
-    {
-        return std::hash<int>{}(k.value);
-    }
-};
-
-template <>
-struct hash<::rocprofsys::mock::rocprofiler_sdk::buffer_tracing_kind>
-{
-    std::size_t operator()(
-        const ::rocprofsys::mock::rocprofiler_sdk::buffer_tracing_kind& k) const noexcept
-    {
-        return std::hash<int>{}(k.value);
-    }
-};
-
-template <>
-struct hash<::rocprofsys::mock::rocprofiler_sdk::mock_ompt_thread_t>
-{
-    std::size_t operator()(
-        const ::rocprofsys::mock::rocprofiler_sdk::mock_ompt_thread_t& k) const noexcept
-    {
-        return std::hash<int>{}(k.value);
-    }
-};
 }  // namespace std

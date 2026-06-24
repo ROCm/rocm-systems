@@ -15,21 +15,57 @@
 
 #include <memory>
 
-// ─── mock_externals ───────────────────────────────────────────────────────────
+// ─── gmock_externals / mock_externals ────────────────────────────────────────
 //
-// Null-object stub for the Externals policy parameter.  All boolean config
-// getters return false so that every Perfetto/timemory code path in library_sdk
-// is compiled out at template instantiation time.  The remaining methods are
-// no-op templates that satisfy the duck-typed interface without pulling in any
-// real subsystem.
+// Unified policy-based-DI pattern (see programming-cpp-policy-based-di skill):
+//
+//   gmock_externals  — GMock class; every non-template Externals method has a
+//                      MOCK_METHOD.  EXPECT_CALL / ON_CALL targets live here.
+//   g_mock_externals — global unique_ptr<NiceMock<gmock_externals>>; one per
+//                      test, created in library_sdk_test::SetUp().
+//   mock_externals   — static-method policy struct (Externals template param);
+//                      every non-template method delegates to g_mock_externals.
+//
+// Template perfetto/timemory methods stay as no-ops: they are only reachable
+// when get_use_perfetto() / get_use_timemory() return true, and those booleans
+// are now fully mocked.
+
+struct gmock_externals
+{
+    // ─── settings (get_choices returns const& → needs explicit ReturnRef default)
+    MOCK_METHOD(const std::vector<std::string>&, get_choices, (), (const));
+
+    // ─── boolean config
+    MOCK_METHOD(bool, get_use_perfetto, ());
+    MOCK_METHOD(bool, get_use_timemory, ());
+    MOCK_METHOD(bool, get_perfetto_annotations, ());
+    MOCK_METHOD(bool, get_use_rocpd, ());
+    MOCK_METHOD(bool, get_group_by_queue, ());
+    MOCK_METHOD(bool, get_use_rcclp, ());
+    MOCK_METHOD(bool, get_use_ompt, ());
+    MOCK_METHOD(bool, get_use_unified_memory_profiling, ());
+    MOCK_METHOD(bool, get_use_process_sampling, ());
+
+    // ─── string config
+    MOCK_METHOD(std::string, get_trace_region, ());
+    MOCK_METHOD(std::string, get_rocm_domains, ());
+    MOCK_METHOD(std::string, get_rocm_events_setting, ());
+    MOCK_METHOD(std::string, get_gpu_perf_counters, ());
+
+    // ─── side-effecting / PMC
+    MOCK_METHOD(void, set_pmc_state, (::rocprofsys::State));
+    MOCK_METHOD(void, gpu_add_device_metadata, ());
+    MOCK_METHOD(void, register_gpu_perf_counter_source,
+                (const std::vector<std::shared_ptr<::rocprofsys::agent>>&) );
+};
+
+inline std::unique_ptr<::testing::StrictMock<gmock_externals>> g_mock_externals;
+
+// ─── mock_externals ───────────────────────────────────────────────────────────
 
 struct mock_externals
 {
-    // ─── Stub types matching the concrete args used in library_sdk ────────────
-    //
-    // add_thread_info and add_track are called with brace-enclosed initializers
-    // whose field count must match the struct layout (C++ cannot deduce a type
-    // from a bare brace-initializer in a template call).
+    // ─── Stub types (kept for library_sdk template instantiation) ─────────────
 
     struct null_thread_info
     {
@@ -103,80 +139,61 @@ struct mock_externals
         return storage;
     }
 
-    // ─── Mock settings ────────────────────────────────────────────────────────────
-    // Duck-typed stand-in for tim::settings used by tool_init and sdk_core.
-    // Interface needed: settings->at(key)->get_choices().
-    //
-    // Two-class GMock pattern (GMock objects are non-copyable so they cannot be
-    // held by value inside the returning shared_ptr):
-    //   gmock_setting_entry  — EXPECT_CALL / ON_CALL target (global unique_ptr)
-    //   mock_setting_entry   — thin shared_ptr-able wrapper that delegates
-
-    struct gmock_setting_entry
-    {
-        MOCK_METHOD(const std::vector<std::string>&, get_choices, (), (const));
-    };
-
-    struct mock_setting_entry
-    {
-        const std::vector<std::string>& get_choices() const
-        {
-            return g_mock_setting->get_choices();
-        }
-    };
+    // ─── settings (get_choices delegates through a thin wrapper) ──────────────
 
     struct mock_settings
     {
-        std::shared_ptr<mock_setting_entry> at(const std::string& /*key*/) const
+        struct mock_entry
         {
-            return std::make_shared<mock_setting_entry>();
+            const std::vector<std::string>& get_choices() const
+            {
+                return g_mock_externals->get_choices();
+            }
+        };
+        std::shared_ptr<mock_entry> at(const std::string& /*key*/) const
+        {
+            return std::make_shared<mock_entry>();
         }
     };
-
     static auto* get_settings()
     {
-        static mock_settings stub{};
-        return &stub;
+        static mock_settings s{};
+        return &s;
     }
 
-    static inline std::unique_ptr<::testing::NiceMock<gmock_setting_entry>>
-        g_mock_setting;
-
-    // ─── Mock config methods ───────────────────────────────────────────────────────
-    // Per-test control of string-returning config accessors used by sdk_core to
-    // determine which domains are active.  Tests set ON_CALL expectations on
-    // g_mock_config to drive specific domain combinations through tool_init.
-
-    struct gmock_externals_config
+    // ─── boolean config → delegate ────────────────────────────────────────────
+    static bool get_use_perfetto() { return g_mock_externals->get_use_perfetto(); }
+    static bool get_use_timemory() { return g_mock_externals->get_use_timemory(); }
+    static bool get_perfetto_annotations()
     {
-        MOCK_METHOD(std::string, get_rocm_domains, ());
-        MOCK_METHOD(std::string, get_rocm_events_setting, ());
-        MOCK_METHOD(std::string, get_gpu_perf_counters, ());
-    };
+        return g_mock_externals->get_perfetto_annotations();
+    }
+    static bool get_use_rocpd() { return g_mock_externals->get_use_rocpd(); }
+    static bool get_group_by_queue() { return g_mock_externals->get_group_by_queue(); }
+    static bool get_use_rcclp() { return g_mock_externals->get_use_rcclp(); }
+    static bool get_use_ompt() { return g_mock_externals->get_use_ompt(); }
+    static bool get_use_unified_memory_profiling()
+    {
+        return g_mock_externals->get_use_unified_memory_profiling();
+    }
+    static bool get_use_process_sampling()
+    {
+        return g_mock_externals->get_use_process_sampling();
+    }
 
-    static inline std::unique_ptr<::testing::NiceMock<gmock_externals_config>>
-        g_mock_config;
-
-    static bool        get_use_perfetto() { return false; }
-    static bool        get_use_timemory() { return false; }
-    static bool        get_perfetto_annotations() { return false; }
-    static bool        get_use_rocpd() { return false; }
-    static bool        get_group_by_queue() { return false; }
-    static bool        get_use_rcclp() { return false; }
-    static bool        get_use_ompt() { return false; }
-    static bool        get_use_unified_memory_profiling() { return false; }
-    static bool        get_use_process_sampling() { return false; }
-    static std::string get_trace_region() { return {}; }
-    static std::string get_rocm_domains() { return g_mock_config->get_rocm_domains(); }
+    // ─── string config → delegate ─────────────────────────────────────────────
+    static std::string get_trace_region() { return g_mock_externals->get_trace_region(); }
+    static std::string get_rocm_domains() { return g_mock_externals->get_rocm_domains(); }
     static std::string get_rocm_events_setting()
     {
-        return g_mock_config->get_rocm_events_setting();
+        return g_mock_externals->get_rocm_events_setting();
     }
     static std::string get_gpu_perf_counters()
     {
-        return g_mock_config->get_gpu_perf_counters();
+        return g_mock_externals->get_gpu_perf_counters();
     }
 
+    // ─── template perfetto / timemory (no-ops; only reachable when flags true) ─
     template <typename... Args>
     static void push_timemory(Args&&...)
     {}
@@ -198,13 +215,11 @@ struct mock_externals
     template <typename... Args>
     static void add_perfetto_annotation(Args&&...)
     {}
-
     template <typename... Args>
     static std::nullptr_t get_perfetto_track(Args&&...)
     {
         return nullptr;
     }
-
     template <typename TidT, typename TagT>
     static const null_thread_data* get_thread_info(TidT, TagT)
     {
@@ -212,22 +227,22 @@ struct mock_externals
         return &stub;
     }
 
-    // ─── MarkerWriterPolicy interface (no-ops) ────────────────────────────────────
-    // Called by roctx_client/marker_writer when library_sdk uses Externals as the
-    // marker policy.  The variadic templates above (push_timemory, pop_timemory,
-    // push_perfetto_ts, pop_perfetto_ts) already cover those signatures.
-
+    // ─── MarkerWriterPolicy no-ops ─────────────────────────────────────────────
     static void add_string(std::string_view) {}
     static void store_region(const ::rocprofsys::trace_cache::region_sample&) {}
     static void add_thread_info(const ::rocprofsys::trace_cache::info::thread&) {}
 
-    // ─── PMC interface (no-ops) ───────────────────────────────────────────────────
+    // ─── PMC / state → delegate ───────────────────────────────────────────────
     static void register_gpu_perf_counter_source(
-        const std::vector<std::shared_ptr<::rocprofsys::agent>>&)
-    {}
-    static void set_pmc_state(::rocprofsys::State) {}
-
-    static void gpu_add_device_metadata() {}
+        const std::vector<std::shared_ptr<::rocprofsys::agent>>& agents)
+    {
+        g_mock_externals->register_gpu_perf_counter_source(agents);
+    }
+    static void set_pmc_state(::rocprofsys::State s)
+    {
+        g_mock_externals->set_pmc_state(s);
+    }
+    static void gpu_add_device_metadata() { g_mock_externals->gpu_add_device_metadata(); }
 };
 
 // ─── Type aliases ─────────────────────────────────────────────────────────────
@@ -256,6 +271,16 @@ protected:
     {
         mock_ns::g_mock_wrapper = std::make_unique<mock_ns::gmock_wrapper>();
 
+        // StrictMock: every call to g_mock_externals must have an EXPECT_CALL —
+        // any unmatched call is an immediate test failure.  For methods called in
+        // the base fixtures, use Times(AnyNumber()) so individual tests can add
+        // tighter EXPECT_CALLs that override these defaults via GMock's LIFO ordering.
+        // get_choices() returns const& and needs ReturnRef to a persistent object.
+        g_mock_externals = std::make_unique<::testing::StrictMock<gmock_externals>>();
+        static const std::vector<std::string> s_empty_choices{};
+        EXPECT_CALL(*g_mock_externals, get_choices())
+            .WillRepeatedly(::testing::ReturnRef(s_empty_choices));
+
         sut::tool_fini_done.store(false);
         sut::tool_init_done.store(false);
         sut::sdk_configured.store(false);
@@ -268,8 +293,7 @@ protected:
     void TearDown() override
     {
         mock_ns::g_mock_wrapper.reset();
-        mock_externals::g_mock_setting.reset();
-        mock_externals::g_mock_config.reset();
+        g_mock_externals.reset();
     }
 
     mock_ns::gmock_wrapper& mock() { return *mock_ns::g_mock_wrapper; }
@@ -424,35 +448,48 @@ protected:
     {
         library_sdk_test::SetUp();
 
+        // Reset the sdk_core::get_version() static cache so Wrapper::get_version()
+        // is called exactly once per test (from get_callback_domains()).
+        // get_callback_tracing_names(): 1x from client_data::initialize() +
+        //                               1x from sdk_core::get_callback_domains() = 2
+        // get_buffer_tracing_names():   1x from client_data::initialize() +
+        //                               1x from sdk_core::get_buffered_domains() = 2
+        using sut_core_t =
+            ::rocprofsys::rocprofiler_sdk::sdk_core<mock_backend_t, mock_externals>;
+        sut_core_t::reset_version_cache();
+
         EXPECT_CALL(mock(), get_version(_, _, _))
-            .Times(testing::AnyNumber())
-            .WillRepeatedly(DoAll(SetArgPointee<0>(1U), SetArgPointee<1>(1U),
-                                  SetArgPointee<2>(0U), Return(SUCCESS)));
+            .Times(1)
+            .WillOnce(DoAll(SetArgPointee<0>(1U), SetArgPointee<1>(1U),
+                            SetArgPointee<2>(0U), Return(SUCCESS)));
         EXPECT_CALL(mock(), get_callback_tracing_names())
-            .Times(testing::AnyNumber())
+            .Times(2)
             .WillRepeatedly(Return(mock_backend_t::callback_name_info_t{}));
         EXPECT_CALL(mock(), get_buffer_tracing_names())
-            .Times(testing::AnyNumber())
+            .Times(2)
             .WillRepeatedly(Return(mock_backend_t::buffer_name_info_t{}));
 
-        // Fresh mock for settings->at(key)->get_choices().
-        // Default: empty choices — no ROCM_DOMAINS configured.
-        mock_externals::g_mock_setting =
-            std::make_unique<::testing::NiceMock<mock_externals::gmock_setting_entry>>();
-        static const std::vector<std::string> empty_choices{};
-        ON_CALL(*mock_externals::g_mock_setting, get_choices())
-            .WillByDefault(::testing::ReturnRef(empty_choices));
-
-        // Fresh mock for string config accessors.
-        // Default: all empty — no domains, no events, no GPU perf counters.
-        mock_externals::g_mock_config = std::make_unique<
-            ::testing::NiceMock<mock_externals::gmock_externals_config>>();
-        ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
-            .WillByDefault(Return(std::string{}));
-        ON_CALL(*mock_externals::g_mock_config, get_rocm_events_setting())
-            .WillByDefault(Return(std::string{}));
-        ON_CALL(*mock_externals::g_mock_config, get_gpu_perf_counters())
-            .WillByDefault(Return(std::string{}));
+        // StrictMock defaults for every Externals method called by tool_init or
+        // sdk_core helpers (get_callback_domains, get_buffered_domains, get_rocm_events).
+        // Times(AnyNumber()) lets tests add tighter EXPECT_CALLs that take precedence.
+        EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+            .WillRepeatedly(Return(std::string{}));
+        EXPECT_CALL(*g_mock_externals, get_rocm_events_setting())
+            .WillRepeatedly(Return(std::string{}));
+        EXPECT_CALL(*g_mock_externals, get_gpu_perf_counters())
+            .WillRepeatedly(Return(std::string{}));
+        EXPECT_CALL(*g_mock_externals, get_trace_region())
+            .WillRepeatedly(Return(std::string{}));
+        EXPECT_CALL(*g_mock_externals, get_use_rcclp()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*g_mock_externals, get_use_ompt()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling())
+            .WillRepeatedly(Return(false));
+        EXPECT_CALL(*g_mock_externals, get_use_process_sampling())
+            .WillRepeatedly(Return(false));
+        EXPECT_CALL(*g_mock_externals, gpu_add_device_metadata())
+            .WillRepeatedly(::testing::Return());
+        EXPECT_CALL(*g_mock_externals, register_gpu_perf_counter_source(_))
+            .WillRepeatedly(::testing::Return());
     }
 
     // Expects create_context called 3 times in sequence; assigns distinct handles
@@ -642,10 +679,10 @@ TEST_F(tool_init_test, creates_memory_copy_buffer_when_memory_copy_domain_active
 {
     // Activate the "memory_copy" buffered domain
     static const std::vector<std::string> choices{ "memory_copy" };
-    ON_CALL(*mock_externals::g_mock_setting, get_choices())
-        .WillByDefault(::testing::ReturnRef(choices));
-    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
-        .WillByDefault(Return(std::string{ "memory_copy" }));
+    EXPECT_CALL(*g_mock_externals, get_choices())
+        .WillRepeatedly(::testing::ReturnRef(choices));
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+        .WillRepeatedly(Return(std::string{ "memory_copy" }));
 
     expect_three_contexts();
     expect_code_object_tracing();
@@ -695,10 +732,10 @@ TEST_F(tool_init_test, configures_hip_api_callback_tracing_when_hip_api_domain_a
                                     "", "");
 
     static const std::vector<std::string> choices{ "hip_api" };
-    ON_CALL(*mock_externals::g_mock_setting, get_choices())
-        .WillByDefault(::testing::ReturnRef(choices));
-    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
-        .WillByDefault(Return(std::string{ "hip_api" }));
+    EXPECT_CALL(*g_mock_externals, get_choices())
+        .WillRepeatedly(::testing::ReturnRef(choices));
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+        .WillRepeatedly(Return(std::string{ "hip_api" }));
 
     expect_three_contexts();
     expect_code_object_tracing();
@@ -745,17 +782,16 @@ TEST_F(tool_init_test, stores_client_fini_when_fini_func_is_non_null)
 TEST_F(tool_init_test, creates_scratch_memory_buffer_when_scratch_memory_domain_active)
 {
     static const std::vector<std::string> choices{ "scratch_memory" };
-    ON_CALL(*mock_externals::g_mock_setting, get_choices())
-        .WillByDefault(::testing::ReturnRef(choices));
-    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
-        .WillByDefault(Return(std::string{ "scratch_memory" }));
+    EXPECT_CALL(*g_mock_externals, get_choices())
+        .WillRepeatedly(::testing::ReturnRef(choices));
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+        .WillRepeatedly(Return(std::string{ "scratch_memory" }));
 
     // Provide name entry so get_buffered_domains() fallback finds SCRATCH_MEMORY.
     mock_backend_t::buffer_name_info_t buf_names;
-    buf_names[mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY.value].name =
-        "scratch_memory";
+    buf_names[mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY].name = "scratch_memory";
     EXPECT_CALL(mock(), get_buffer_tracing_names())
-        .Times(testing::AnyNumber())
+        .Times(2)
         .WillRepeatedly(Return(buf_names));
 
     expect_three_contexts();
@@ -792,16 +828,15 @@ TEST_F(tool_init_test, creates_scratch_memory_buffer_when_scratch_memory_domain_
 TEST_F(tool_init_test, creates_kernel_dispatch_buffer_when_kernel_dispatch_domain_active)
 {
     static const std::vector<std::string> choices{ "kernel_dispatch" };
-    ON_CALL(*mock_externals::g_mock_setting, get_choices())
-        .WillByDefault(::testing::ReturnRef(choices));
-    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
-        .WillByDefault(Return(std::string{ "kernel_dispatch" }));
+    EXPECT_CALL(*g_mock_externals, get_choices())
+        .WillRepeatedly(::testing::ReturnRef(choices));
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+        .WillRepeatedly(Return(std::string{ "kernel_dispatch" }));
 
     mock_backend_t::buffer_name_info_t buf_names;
-    buf_names[mock_backend_t::BUFFER_TRACING_KERNEL_DISPATCH.value].name =
-        "kernel_dispatch";
+    buf_names[mock_backend_t::BUFFER_TRACING_KERNEL_DISPATCH].name = "kernel_dispatch";
     EXPECT_CALL(mock(), get_buffer_tracing_names())
-        .Times(testing::AnyNumber())
+        .Times(2)
         .WillRepeatedly(Return(buf_names));
 
     expect_three_contexts();
@@ -843,10 +878,10 @@ TEST_F(tool_init_test,
        creates_memory_allocation_buffer_when_memory_allocation_domain_active)
 {
     static const std::vector<std::string> choices{ "memory_allocation" };
-    ON_CALL(*mock_externals::g_mock_setting, get_choices())
-        .WillByDefault(::testing::ReturnRef(choices));
-    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
-        .WillByDefault(Return(std::string{ "memory_allocation" }));
+    EXPECT_CALL(*g_mock_externals, get_choices())
+        .WillRepeatedly(::testing::ReturnRef(choices));
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+        .WillRepeatedly(Return(std::string{ "memory_allocation" }));
 
     expect_three_contexts();
     expect_code_object_tracing();
@@ -888,10 +923,10 @@ TEST_F(tool_init_test, configures_hsa_api_callback_tracing_for_all_four_hsa_kind
         sut_core::set_operation_options(kind, "", "", "");
 
     static const std::vector<std::string> choices{ "hsa_api" };
-    ON_CALL(*mock_externals::g_mock_setting, get_choices())
-        .WillByDefault(::testing::ReturnRef(choices));
-    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
-        .WillByDefault(Return(std::string{ "hsa_api" }));
+    EXPECT_CALL(*g_mock_externals, get_choices())
+        .WillRepeatedly(::testing::ReturnRef(choices));
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+        .WillRepeatedly(Return(std::string{ "hsa_api" }));
 
     expect_three_contexts();
     expect_code_object_tracing();
@@ -920,16 +955,15 @@ TEST_F(tool_init_test, configures_hsa_api_callback_tracing_for_all_four_hsa_kind
 TEST_F(tool_init_test, creates_two_callback_thread_pairs_for_two_active_buffers)
 {
     static const std::vector<std::string> choices{ "memory_copy", "scratch_memory" };
-    ON_CALL(*mock_externals::g_mock_setting, get_choices())
-        .WillByDefault(::testing::ReturnRef(choices));
-    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
-        .WillByDefault(Return(std::string{ "memory_copy scratch_memory" }));
+    EXPECT_CALL(*g_mock_externals, get_choices())
+        .WillRepeatedly(::testing::ReturnRef(choices));
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+        .WillRepeatedly(Return(std::string{ "memory_copy scratch_memory" }));
 
     mock_backend_t::buffer_name_info_t buf_names;
-    buf_names[mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY.value].name =
-        "scratch_memory";
+    buf_names[mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY].name = "scratch_memory";
     EXPECT_CALL(mock(), get_buffer_tracing_names())
-        .Times(testing::AnyNumber())
+        .Times(2)
         .WillRepeatedly(Return(buf_names));
 
     expect_three_contexts();
@@ -981,8 +1015,8 @@ TEST_F(tool_init_test, creates_two_callback_thread_pairs_for_two_active_buffers)
 // iterate_agent_supported_counters — allow those calls with AnyNumber().
 TEST_F(tool_init_test, creates_counter_ctx_when_rocm_events_configured)
 {
-    ON_CALL(*mock_externals::g_mock_config, get_rocm_events_setting())
-        .WillByDefault(Return(std::string{ "SQ_CYCLES" }));
+    EXPECT_CALL(*g_mock_externals, get_rocm_events_setting())
+        .WillRepeatedly(Return(std::string{ "SQ_CYCLES" }));
 
     // Four create_context calls in order: primary(1), code_object(2), control(3),
     // counter(4). Chained WillOnce on a single EXPECT_CALL delivers handles in order.
@@ -1004,10 +1038,8 @@ TEST_F(tool_init_test, creates_counter_ctx_when_rocm_events_configured)
                 configure_callback_dispatch_counting_service(handle_t{ 4 }, _, _, _, _))
         .WillOnce(Return(SUCCESS));
 
-    // initialize_event_info() iterates real GPU agents on this host.
-    EXPECT_CALL(mock(), iterate_agent_supported_counters(_, _, _))
-        .Times(testing::AnyNumber())
-        .WillRepeatedly(Return(SUCCESS));
+    // On this test host gpu_agents is empty (no GPU hardware) → 0 calls.
+    EXPECT_CALL(mock(), iterate_agent_supported_counters(_, _, _)).Times(0);
 
     expect_primary_ctx_valid();
 
@@ -1034,4 +1066,676 @@ TEST_F(library_sdk_test, reset_sdk_session_guards_clears_both_done_flags)
 
     EXPECT_FALSE(sut::tool_fini_done.load());
     EXPECT_FALSE(sut::tool_init_done.load());
+}
+
+// ─── tool_hip_stream_callback coverage tests ──────────────────────────────────
+//
+// Fixture that calls tool_init with the "memory_copy" buffered domain active.
+// This triggers the ROCPROFILER_VERSION >= 700 guard in tool_init and registers
+// tool_hip_stream_callback on primary_ctx (handle 1) via
+// configure_callback_tracing_service.  SaveArg<4> captures the raw function
+// pointer so each test can invoke the private static method directly, covering
+// every reachable branch of the callback body.
+
+class hip_stream_callback_test : public tool_init_test
+{
+protected:
+    using cb_t           = mock_backend_t::callback_tracing_cb_t;
+    cb_t m_hip_stream_cb = nullptr;
+
+    void SetUp() override
+    {
+        tool_init_test::SetUp();
+
+        static const std::vector<std::string> choices{ "memory_copy" };
+        EXPECT_CALL(*g_mock_externals, get_choices())
+            .WillRepeatedly(::testing::ReturnRef(choices));
+        EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+            .WillRepeatedly(Return(std::string{ "memory_copy" }));
+
+        expect_three_contexts();
+        expect_code_object_tracing();
+        expect_external_correlation();
+
+        // Exact-match: primary_ctx = handle_t{1}, CALLBACK_TRACING_HIP_STREAM,
+        // ops = nullptr, ops_count = 0, cb_data = nullptr.
+        // SaveArg<4> captures the tool_hip_stream_callback function pointer.
+        EXPECT_CALL(mock(),
+                    configure_callback_tracing_service(
+                        handle_t{ 1 }, mock_backend_t::CALLBACK_TRACING_HIP_STREAM,
+                        nullptr, 0, _, nullptr))
+            .WillOnce(DoAll(::testing::SaveArg<4>(&m_hip_stream_cb), Return(SUCCESS)));
+
+        const handle_t mem_buf{ 99 };
+        EXPECT_CALL(mock(), create_buffer(handle_t{ 1 }, _, _, _, _, _, _))
+            .WillOnce(DoAll(SetArgPointee<6>(mem_buf), Return(SUCCESS)));
+        EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                                handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_MEMORY_COPY,
+                                nullptr, 0, mem_buf))
+            .WillOnce(Return(SUCCESS));
+        const handle_t cb_thread{ 7 };
+        EXPECT_CALL(mock(), create_callback_thread(_))
+            .WillOnce(DoAll(SetArgPointee<0>(cb_thread), Return(SUCCESS)));
+        EXPECT_CALL(mock(), assign_callback_thread(mem_buf, cb_thread))
+            .WillOnce(Return(SUCCESS));
+
+        expect_primary_ctx_valid();
+        expect_start_for_initialized_contexts();
+
+        ASSERT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+        ASSERT_NE(m_hip_stream_cb, nullptr);
+    }
+};
+
+// Callback's first line is `if(record.kind != HIP_STREAM) return;`.
+// With a non-HIP_STREAM kind the body is skipped entirely — payload can be
+// null because it is never dereferenced.
+TEST_F(hip_stream_callback_test,
+       ignores_record_whose_kind_is_not_callback_tracing_hip_stream)
+{
+    mock_ns::callback_tracing_record_t rec{};
+    rec.kind    = mock_backend_t::CALLBACK_TRACING_CODE_OBJECT;
+    rec.payload = nullptr;
+
+    mock_ns::user_data_t ud{};
+    EXPECT_NO_FATAL_FAILURE(m_hip_stream_cb(rec, &ud, nullptr));
+}
+
+// HIP_STREAM_CREATE: extracts stream_id from payload, logs the operation,
+// and returns without modifying the stream stack.
+TEST_F(hip_stream_callback_test, handles_hip_stream_create_without_side_effects)
+{
+    mock_ns::hip_stream_data_t stream_data{ .stream_id = handle_t{ 10 } };
+
+    mock_ns::callback_tracing_record_t rec{};
+    rec.kind      = mock_backend_t::CALLBACK_TRACING_HIP_STREAM;
+    rec.operation = mock_backend_t::HIP_STREAM_CREATE;
+    rec.phase     = mock_backend_t::CALLBACK_PHASE_NONE;
+    rec.payload   = &stream_data;
+
+    mock_ns::user_data_t ud{};
+    EXPECT_NO_FATAL_FAILURE(m_hip_stream_cb(rec, &ud, nullptr));
+}
+
+// HIP_STREAM_DESTROY: mirrors CREATE — logs and returns, no stack change.
+TEST_F(hip_stream_callback_test, handles_hip_stream_destroy_without_side_effects)
+{
+    mock_ns::hip_stream_data_t stream_data{ .stream_id = handle_t{ 10 } };
+
+    mock_ns::callback_tracing_record_t rec{};
+    rec.kind      = mock_backend_t::CALLBACK_TRACING_HIP_STREAM;
+    rec.operation = mock_backend_t::HIP_STREAM_DESTROY;
+    rec.phase     = mock_backend_t::CALLBACK_PHASE_NONE;
+    rec.payload   = &stream_data;
+
+    mock_ns::user_data_t ud{};
+    EXPECT_NO_FATAL_FAILURE(m_hip_stream_cb(rec, &ud, nullptr));
+}
+
+// HIP_STREAM_SET ENTER pushes the stream_id onto the thread-local stream stack;
+// EXIT pops it.  Both phases are exercised in a single paired invocation so
+// the thread-local stack is left balanced for subsequent tests.
+TEST_F(hip_stream_callback_test, hip_stream_set_enter_pushes_and_exit_pops_stream_id)
+{
+    mock_ns::hip_stream_data_t stream_data{ .stream_id = handle_t{ 42 } };
+
+    mock_ns::callback_tracing_record_t enter_rec{};
+    enter_rec.kind      = mock_backend_t::CALLBACK_TRACING_HIP_STREAM;
+    enter_rec.operation = mock_backend_t::HIP_STREAM_SET;
+    enter_rec.phase     = mock_backend_t::CALLBACK_PHASE_ENTER;
+    enter_rec.payload   = &stream_data;
+
+    mock_ns::callback_tracing_record_t exit_rec{};
+    exit_rec.kind      = mock_backend_t::CALLBACK_TRACING_HIP_STREAM;
+    exit_rec.operation = mock_backend_t::HIP_STREAM_SET;
+    exit_rec.phase     = mock_backend_t::CALLBACK_PHASE_EXIT;
+    exit_rec.payload   = &stream_data;
+
+    mock_ns::user_data_t ud{};
+    m_hip_stream_cb(enter_rec, &ud, nullptr);
+    EXPECT_NO_FATAL_FAILURE(m_hip_stream_cb(exit_rec, &ud, nullptr));
+}
+
+// ─── KFD buffer domain tests ──────────────────────────────────────────────────
+//
+// "kfd_events" is the umbrella domain name added to valid choices when
+// compile_time_version >= 10000.  Activating it populates _buffered_domain with
+// all six KFD buffer tracing kinds, covering the entire KFD block in tool_init:
+//   metadata_initialize + one create_buffer / configure_buffer_tracing_service
+//   pair per kind + create_callback_thread / assign_callback_thread per buffer.
+//
+// KFD_EVENT_QUEUE is the only kind whose configure_buffer_tracing_service call
+// passes a non-null ops array (ops_count=1, only RESTORE_RESCHEDULED operation).
+// Every other kind uses nullptr/0.
+
+TEST_F(tool_init_test, creates_all_kfd_buffers_when_kfd_events_domain_active)
+{
+    static const std::vector<std::string> choices{ "kfd_events" };
+    EXPECT_CALL(*g_mock_externals, get_choices())
+        .WillRepeatedly(::testing::ReturnRef(choices));
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+        .WillRepeatedly(Return(std::string{ "kfd_events" }));
+
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    // Six KFD buffers created in the order the if-blocks appear in tool_init.
+    const handle_t pf_buf{ 101 };
+    const handle_t pm_buf{ 102 };
+    const handle_t q_buf{ 103 };
+    const handle_t eq_buf{ 104 };
+    const handle_t um_buf{ 105 };
+    const handle_t de_buf{ 106 };
+
+    EXPECT_CALL(mock(), create_buffer(handle_t{ 1 }, _, _, _, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<6>(pf_buf), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<6>(pm_buf), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<6>(q_buf), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<6>(eq_buf), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<6>(um_buf), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<6>(de_buf), Return(SUCCESS)));
+
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
+                            nullptr, 0, pf_buf))
+        .WillOnce(Return(SUCCESS));
+    EXPECT_CALL(mock(),
+                configure_buffer_tracing_service(
+                    handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                    nullptr, 0, pm_buf))
+        .WillOnce(Return(SUCCESS));
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_KFD_QUEUE,
+                            nullptr, 0, q_buf))
+        .WillOnce(Return(SUCCESS));
+    // Only RESTORE_RESCHEDULED is requested for EVENT_QUEUE — non-null ops, count=1.
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
+                            ::testing::NotNull(), 1, eq_buf))
+        .WillOnce(Return(SUCCESS));
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 },
+                            mock_backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                            nullptr, 0, um_buf))
+        .WillOnce(Return(SUCCESS));
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 },
+                            mock_backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+                            nullptr, 0, de_buf))
+        .WillOnce(Return(SUCCESS));
+
+    // Six non-zero buffer handles → six create_callback_thread/assign pairs.
+    EXPECT_CALL(mock(), create_callback_thread(_))
+        .Times(6)
+        .WillRepeatedly(DoAll(SetArgPointee<0>(handle_t{ 200 }), Return(SUCCESS)));
+    EXPECT_CALL(mock(), assign_callback_thread(_, _))
+        .Times(6)
+        .WillRepeatedly(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+
+    EXPECT_EQ(sut::tool_data->kfd_page_fault_buffer, pf_buf);
+    EXPECT_EQ(sut::tool_data->kfd_page_migrate_buffer, pm_buf);
+    EXPECT_EQ(sut::tool_data->kfd_queue_buffer, q_buf);
+    EXPECT_EQ(sut::tool_data->kfd_event_queue_buffer, eq_buf);
+    EXPECT_EQ(sut::tool_data->kfd_event_unmap_buffer, um_buf);
+    EXPECT_EQ(sut::tool_data->kfd_event_dropped_buffer, de_buf);
+}
+
+// ─── GPU agent / counter-event loop coverage ──────────────────────────────────
+//
+// The counter-event loop inside tool_init:
+//
+//   for(const auto& itr : _data->gpu_agents)
+//   {
+//       const auto& _agent_id = Wrapper::agent_id{ itr.agent->handle };
+//       _data->agent_events.emplace(
+//           _agent_id, create_agent_profile(_agent_id, _counter_events, _data));
+//   }
+//
+// never executes on GPU-less machines because agent_manager returns nothing.
+//
+// Strategy: pre-inject a fake ::rocprofsys::agent into tool_data->gpu_agents.
+// set_agents() (called by initialize()) does emplace_back without clearing, so
+// the entry survives.  The iterate_agent_supported_counters mock invokes
+// counters_supported_callback with 0 counters, which registers an empty entry
+// in agent_counter_info for the fake agent.  create_agent_profile then proceeds
+// past the "unsupported architecture" guard into the counter-matching loop,
+// finds no match for "SQ_CYCLES", and records an empty agent_events entry.
+
+TEST_F(tool_init_test, counter_loop_runs_for_each_gpu_agent_when_no_counters_match)
+{
+    EXPECT_CALL(*g_mock_externals, get_rocm_events_setting())
+        .WillRepeatedly(Return(std::string{ "SQ_CYCLES" }));
+
+    // Inject a fake GPU agent whose handle is used as the agent_id key.
+    // Static lifetime avoids a dangling pointer; tool_data->gpu_agents is
+    // reset in each SetUp() so there is no cross-test contamination.
+    static ::rocprofsys::agent fake_gpu{
+        .type      = ::rocprofsys::agent_type::GPU,
+        .handle    = 0xABCDABCDULL,
+        .device_id = 0,
+        .node_id   = 0,
+    };
+    sut::tool_data->gpu_agents.push_back(
+        ::rocprofsys::rocprofiler_sdk::tool_agent{ 0, &fake_gpu });
+
+    const handle_t fake_agent{ fake_gpu.handle };
+
+    // Four contexts: primary(1), code_object(2), control(3), counter(4).
+    EXPECT_CALL(mock(), create_context(_))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 1 }), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 2 }), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 3 }), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 4 }), Return(SUCCESS)));
+
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    // initialize_event_info calls iterate_agent_supported_counters for fake_agent.
+    // The lambda invokes counters_supported_callback with 0 counters so that
+    // agent_counter_info gains an empty entry — allowing create_agent_profile to
+    // reach the counter-matching loop instead of taking the early-return path.
+    using status_t = mock_backend_t::status_t;
+    using cb_t     = mock_backend_t::available_counters_cb_t;
+    EXPECT_CALL(mock(), iterate_agent_supported_counters(fake_agent, _, _))
+        .WillOnce([](handle_t id, cb_t cb, void* data) -> status_t {
+            cb(id, nullptr, 0, data);
+            return mock_backend_t::STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(mock(), configure_callback_tracing_service(
+                            handle_t{ 4 },
+                            mock_backend_t::CALLBACK_TRACING_KERNEL_DISPATCH, _, _, _, _))
+        .WillOnce(Return(SUCCESS));
+    EXPECT_CALL(mock(),
+                configure_callback_dispatch_counting_service(handle_t{ 4 }, _, _, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+
+    for(const auto h : { handle_t{ 1 }, handle_t{ 2 }, handle_t{ 3 }, handle_t{ 4 } })
+    {
+        EXPECT_CALL(mock(), context_is_active(h, _))
+            .WillOnce(DoAll(SetArgPointee<1>(0), Return(SUCCESS)));
+        EXPECT_CALL(mock(), start_context(h)).WillOnce(Return(SUCCESS));
+    }
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+
+    // Loop executed for fake_agent: no counter matched "SQ_CYCLES" → empty event list.
+    EXPECT_EQ(sut::tool_data->counter_ctx, handle_t{ 4 });
+    EXPECT_EQ(sut::tool_data->agent_events.count(fake_agent), 1u);
+    EXPECT_TRUE(sut::tool_data->agent_events.at(fake_agent).empty());
+}
+
+// When the injected GPU agent's counter_info contains a name that matches a
+// requested counter event, create_agent_profile reaches the
+//
+//   if(!counters_v.empty()) { create_counter_config(...); profile = profile_v; }
+//
+// branch.  This test drives that path end-to-end.
+//
+// Call chain inside initialize_event_info (NOT create_agent_profile):
+//   iterate_agent_supported_counters → lambda calls counters_supported_callback
+//     → query_counter_info   (populates counter_info_v0_t with name="SQ_CYCLES")
+//     → iterate_counter_dimensions (no dimensions)
+//   agent_counter_info[fake_agent] = [{name="SQ_CYCLES", id=handle_t{42}}]
+//
+// Then inside the tool_init counter loop → create_agent_profile:
+//   "SQ_CYCLES" matches citr.name  → counters_v = [handle_t{42}] (non-empty)
+//   create_counter_config called   → profile stored for fake_agent
+
+TEST_F(tool_init_test, creates_counter_profile_when_gpu_agent_counter_name_matches_event)
+{
+    EXPECT_CALL(*g_mock_externals, get_rocm_events_setting())
+        .WillRepeatedly(Return(std::string{ "SQ_CYCLES" }));
+
+    static ::rocprofsys::agent fake_gpu2{
+        .type      = ::rocprofsys::agent_type::GPU,
+        .handle    = 0xABCDABCEULL,
+        .device_id = 1,
+        .node_id   = 0,
+    };
+    sut::tool_data->gpu_agents.push_back(
+        ::rocprofsys::rocprofiler_sdk::tool_agent{ 1, &fake_gpu2 });
+
+    const handle_t fake_agent{ fake_gpu2.handle };
+    const handle_t sq_handle{ 42 };
+
+    EXPECT_CALL(mock(), create_context(_))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 1 }), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 2 }), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 3 }), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 4 }), Return(SUCCESS)));
+
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    // Provide one counter handle to counters_supported_callback.
+    using status_t = mock_backend_t::status_t;
+    using cb_t     = mock_backend_t::available_counters_cb_t;
+    EXPECT_CALL(mock(), iterate_agent_supported_counters(fake_agent, _, _))
+        .WillOnce([sq_handle](handle_t id, cb_t cb, void* data) -> status_t {
+            handle_t h = sq_handle;
+            cb(id, &h, 1, data);
+            return mock_backend_t::STATUS_SUCCESS;
+        });
+
+    // counters_supported_callback calls query_counter_info for the counter.
+    // Populate name and id so the counter matches "SQ_CYCLES" in create_agent_profile.
+    EXPECT_CALL(mock(), query_counter_info(sq_handle, _, _))
+        .WillOnce([sq_handle](handle_t, int, void* out) -> status_t {
+            auto* info        = static_cast<mock_backend_t::counter_info_v0_t*>(out);
+            info->id          = sq_handle;
+            info->name        = "SQ_CYCLES";
+            info->is_constant = 0;
+            info->is_derived  = 0;
+            return mock_backend_t::STATUS_SUCCESS;
+        });
+
+    // No dimensions for this counter.
+    EXPECT_CALL(mock(), iterate_counter_dimensions(sq_handle, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    // create_counter_config is called when counters_v is non-empty.
+    const handle_t profile_handle{ 77 };
+    EXPECT_CALL(mock(), create_counter_config(fake_agent, _, 1, _))
+        .WillOnce(DoAll(SetArgPointee<3>(profile_handle), Return(SUCCESS)));
+
+    EXPECT_CALL(mock(), configure_callback_tracing_service(
+                            handle_t{ 4 },
+                            mock_backend_t::CALLBACK_TRACING_KERNEL_DISPATCH, _, _, _, _))
+        .WillOnce(Return(SUCCESS));
+    EXPECT_CALL(mock(),
+                configure_callback_dispatch_counting_service(handle_t{ 4 }, _, _, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+
+    for(const auto h : { handle_t{ 1 }, handle_t{ 2 }, handle_t{ 3 }, handle_t{ 4 } })
+    {
+        EXPECT_CALL(mock(), context_is_active(h, _))
+            .WillOnce(DoAll(SetArgPointee<1>(0), Return(SUCCESS)));
+        EXPECT_CALL(mock(), start_context(h)).WillOnce(Return(SUCCESS));
+    }
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+
+    // create_agent_profile ran for fake_agent: "SQ_CYCLES" matched → profile created.
+    ASSERT_TRUE(sut::tool_data->agent_counter_profiles.count(fake_agent) > 0);
+    EXPECT_TRUE(sut::tool_data->agent_counter_profiles.at(fake_agent).has_value());
+    EXPECT_EQ(*sut::tool_data->agent_counter_profiles.at(fake_agent), profile_handle);
+
+    // agent_events holds the matched counter id.
+    ASSERT_EQ(sut::tool_data->agent_events.count(fake_agent), 1u);
+    ASSERT_FALSE(sut::tool_data->agent_events.at(fake_agent).empty());
+    EXPECT_EQ(sut::tool_data->agent_events.at(fake_agent).front(), sq_handle);
+}
+
+// ─── tool_tracing_callback coverage tests ─────────────────────────────────────
+//
+// tool_tracing_callback is registered as the sdk callback for every active
+// callback domain (hip_api, hsa_api, …).  This fixture activates "hip_api",
+// captures the callback pointer via SaveArg<4>, and then directly invokes it.
+//
+// Three control-flow branches are exercised:
+//   1. get_state() != Active  → early return at line 1793 (no phase dispatch)
+//   2. CALLBACK_PHASE_ENTER   → tool_tracing_callback_start path
+//   3. CALLBACK_PHASE_EXIT    → populate_backtrace_data + tool_tracing_callback_stop
+//
+// mock_externals returns false for get_use_perfetto() / get_use_timemory() /
+// get_use_rocpd(), so those branches are dead and only the three mock methods
+// below matter when state is Active:
+//   - get_timestamp   (called at function entry, before the state guard)
+//   - query_callback_op_name  (same)
+//   - iterate_callback_tracing_kind_operation_args  (EXIT only)
+
+class tool_tracing_callback_test : public tool_init_test
+{
+protected:
+    using sut_core =
+        ::rocprofsys::rocprofiler_sdk::sdk_core<mock_backend_t, mock_externals>;
+    using cb_t = mock_backend_t::callback_tracing_cb_t;
+
+    cb_t m_tracing_cb = nullptr;
+
+    void SetUp() override
+    {
+        tool_init_test::SetUp();
+
+        // set_operation_options must be called before tool_init so that
+        // sdk_core::get_operations() does not throw for hip_api kinds.
+        sut_core::set_operation_options(mock_backend_t::CALLBACK_TRACING_HIP_RUNTIME_API,
+                                        "", "", "");
+        sut_core::set_operation_options(mock_backend_t::CALLBACK_TRACING_HIP_COMPILER_API,
+                                        "", "", "");
+
+        static const std::vector<std::string> choices{ "hip_api" };
+        EXPECT_CALL(*g_mock_externals, get_choices())
+            .WillRepeatedly(::testing::ReturnRef(choices));
+        EXPECT_CALL(*g_mock_externals, get_rocm_domains())
+            .WillRepeatedly(Return(std::string{ "hip_api" }));
+
+        // tool_tracing_callback reads these booleans on every invocation.
+        EXPECT_CALL(*g_mock_externals, get_use_perfetto()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*g_mock_externals, get_use_timemory()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*g_mock_externals, get_perfetto_annotations())
+            .WillRepeatedly(Return(false));
+        EXPECT_CALL(*g_mock_externals, get_use_rocpd()).WillRepeatedly(Return(false));
+
+        expect_three_contexts();
+        expect_code_object_tracing();
+        expect_external_correlation();
+
+        // Capture tool_tracing_callback from the HIP_RUNTIME_API registration.
+        EXPECT_CALL(mock(),
+                    configure_callback_tracing_service(
+                        handle_t{ 1 }, mock_backend_t::CALLBACK_TRACING_HIP_RUNTIME_API,
+                        _, _, _, _))
+            .WillOnce(DoAll(::testing::SaveArg<4>(&m_tracing_cb), Return(SUCCESS)));
+        EXPECT_CALL(mock(),
+                    configure_callback_tracing_service(
+                        handle_t{ 1 }, mock_backend_t::CALLBACK_TRACING_HIP_COMPILER_API,
+                        _, _, _, _))
+            .WillOnce(Return(SUCCESS));
+
+        expect_primary_ctx_valid();
+        expect_start_for_initialized_contexts();
+
+        ASSERT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+        ASSERT_NE(m_tracing_cb, nullptr);
+    }
+
+    void TearDown() override
+    {
+        // Reset global tool state so other tests start from a clean baseline.
+        ::rocprofsys::reset_state();
+        tool_init_test::TearDown();
+    }
+
+    // Helpers to build records for the two phases under test.
+    static mock_ns::callback_tracing_record_t make_hip_enter()
+    {
+        mock_ns::callback_tracing_record_t rec{};
+        rec.kind      = mock_backend_t::CALLBACK_TRACING_HIP_RUNTIME_API;
+        rec.operation = 1;
+        rec.phase     = mock_backend_t::CALLBACK_PHASE_ENTER;
+        return rec;
+    }
+
+    static mock_ns::callback_tracing_record_t make_hip_exit()
+    {
+        mock_ns::callback_tracing_record_t rec{};
+        rec.kind      = mock_backend_t::CALLBACK_TRACING_HIP_RUNTIME_API;
+        rec.operation = 1;
+        rec.phase     = mock_backend_t::CALLBACK_PHASE_EXIT;
+        return rec;
+    }
+
+    // Every tool_tracing_callback invocation calls get_timestamp and
+    // query_callback_op_name before the state guard.
+    void expect_common_preamble(std::uint64_t ts_out = 100)
+    {
+        EXPECT_CALL(mock(), get_timestamp(_))
+            .WillOnce(DoAll(SetArgPointee<0>(ts_out), Return(SUCCESS)));
+        EXPECT_CALL(mock(), query_callback_op_name(_, _, _, _)).WillOnce(Return(SUCCESS));
+    }
+};
+
+// State != Active: callback logs a warning and returns before any phase dispatch.
+// Only get_timestamp and query_callback_op_name are called.
+TEST_F(tool_tracing_callback_test, returns_early_when_tool_state_is_not_active)
+{
+    expect_common_preamble();
+
+    auto                 rec = make_hip_enter();
+    mock_ns::user_data_t ud{};
+    EXPECT_NO_FATAL_FAILURE(m_tracing_cb(rec, &ud, nullptr));
+}
+
+// CALLBACK_PHASE_ENTER with HIP_RUNTIME_API: stores timestamp in user_data->value
+// and dispatches to tool_tracing_callback_start (timemory/perfetto both disabled
+// in mock_externals, so it returns immediately after the name lookup).
+TEST_F(tool_tracing_callback_test, enter_phase_stores_timestamp_in_user_data)
+{
+    ::rocprofsys::set_state(::rocprofsys::State::Active);
+
+    expect_common_preamble(/*ts_out=*/42);
+
+    auto                 rec = make_hip_enter();
+    mock_ns::user_data_t ud{};
+    EXPECT_NO_FATAL_FAILURE(m_tracing_cb(rec, &ud, nullptr));
+
+    EXPECT_EQ(ud.value, 42u);
+}
+
+// CALLBACK_PHASE_EXIT with HIP_RUNTIME_API: calls populate_backtrace_data (no-op
+// since perfetto+rocpd disabled), tool_tracing_callback_stop, and
+// iterate_callback_tracing_kind_operation_args, then caches the region.
+TEST_F(tool_tracing_callback_test, exit_phase_calls_stop_and_caches_region)
+{
+    ::rocprofsys::set_state(::rocprofsys::State::Active);
+
+    expect_common_preamble(/*ts_out=*/200);
+
+    // EXIT path calls iterate_callback_tracing_kind_operation_args inside
+    // tool_tracing_callback_stop to serialise function arguments.
+    EXPECT_CALL(mock(), iterate_callback_tracing_kind_operation_args(_, _, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    auto                 rec = make_hip_exit();
+    mock_ns::user_data_t ud{ .value = 100 };  // simulates timestamp from a prior ENTER
+    EXPECT_NO_FATAL_FAILURE(m_tracing_cb(rec, &ud, nullptr));
+}
+
+// ─── Boolean flag coverage (true / false for every Externals bool) ─────────────
+//
+// Each test below overrides one or more boolean EXPECT_CALLs set in the fixture
+// SetUp (the later registration takes precedence via GMock's LIFO ordering) and
+// invokes the captured callback.
+//
+// Template perfetto / timemory methods (push_timemory, push_perfetto_ts, etc.)
+// are no-op stubs — they compile and link without additional mock setup.
+
+// ENTER with timemory=true → tool_tracing_callback_start calls push_timemory.
+TEST_F(tool_tracing_callback_test, enter_phase_with_timemory_enabled_calls_push_timemory)
+{
+    ::rocprofsys::set_state(::rocprofsys::State::Active);
+
+    EXPECT_CALL(*g_mock_externals, get_use_timemory()).WillRepeatedly(Return(true));
+
+    expect_common_preamble(/*ts_out=*/10);
+
+    auto                 rec = make_hip_enter();
+    mock_ns::user_data_t ud{};
+    EXPECT_NO_FATAL_FAILURE(m_tracing_cb(rec, &ud, nullptr));
+}
+
+// EXIT with timemory=true → tool_tracing_callback_stop calls pop_timemory.
+TEST_F(tool_tracing_callback_test, exit_phase_with_timemory_enabled_calls_pop_timemory)
+{
+    ::rocprofsys::set_state(::rocprofsys::State::Active);
+
+    EXPECT_CALL(*g_mock_externals, get_use_timemory()).WillRepeatedly(Return(true));
+
+    expect_common_preamble(/*ts_out=*/20);
+    EXPECT_CALL(mock(), iterate_callback_tracing_kind_operation_args(_, _, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    auto                 rec = make_hip_exit();
+    mock_ns::user_data_t ud{ .value = 5 };
+    EXPECT_NO_FATAL_FAILURE(m_tracing_cb(rec, &ud, nullptr));
+}
+
+// EXIT with perfetto=true, annotations=false → enters the perfetto block,
+// calls push/pop_perfetto_ts (no-op stubs), and one iterate_args for RocPD args.
+TEST_F(tool_tracing_callback_test,
+       exit_phase_with_perfetto_enabled_no_annotations_calls_push_pop_perfetto)
+{
+    ::rocprofsys::set_state(::rocprofsys::State::Active);
+
+    EXPECT_CALL(*g_mock_externals, get_use_perfetto()).WillRepeatedly(Return(true));
+
+    expect_common_preamble(/*ts_out=*/30);
+    // Only one iterate_args call: the perfetto annotations block is skipped.
+    EXPECT_CALL(mock(), iterate_callback_tracing_kind_operation_args(_, _, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    auto                 rec = make_hip_exit();
+    mock_ns::user_data_t ud{ .value = 5 };
+    EXPECT_NO_FATAL_FAILURE(m_tracing_cb(rec, &ud, nullptr));
+}
+
+// EXIT with perfetto=true, annotations=true → enters full perfetto block:
+//   iterate_args called TWICE (once for save_args inside the block, once for
+//   the regular RocPD args after).
+TEST_F(tool_tracing_callback_test,
+       exit_phase_with_perfetto_and_annotations_enabled_calls_iterate_args_twice)
+{
+    ::rocprofsys::set_state(::rocprofsys::State::Active);
+
+    EXPECT_CALL(*g_mock_externals, get_use_perfetto()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*g_mock_externals, get_perfetto_annotations())
+        .WillRepeatedly(Return(true));
+
+    expect_common_preamble(/*ts_out=*/40);
+    // Two calls: one for save_args (inside perfetto block), one for
+    // iterate_args_callback.
+    EXPECT_CALL(mock(), iterate_callback_tracing_kind_operation_args(_, _, _, _))
+        .Times(2)
+        .WillRepeatedly(Return(SUCCESS));
+
+    auto                 rec = make_hip_exit();
+    mock_ns::user_data_t ud{ .value = 5 };
+    EXPECT_NO_FATAL_FAILURE(m_tracing_cb(rec, &ud, nullptr));
+}
+
+// EXIT with rocpd=true and backtrace_operations populated for the record's kind
+// and operation → populate_backtrace_data() enters the unwind branch.  The
+// unwind itself may produce an empty stack in the test process; that is fine —
+// the branch is covered regardless.
+TEST_F(tool_tracing_callback_test,
+       exit_phase_with_rocpd_and_backtrace_op_registered_enters_unwind_path)
+{
+    ::rocprofsys::set_state(::rocprofsys::State::Active);
+
+    EXPECT_CALL(*g_mock_externals, get_use_rocpd()).WillRepeatedly(Return(true));
+
+    // Insert the record's operation (1) into backtrace_operations for
+    // HIP_RUNTIME_API so the (use_rocpd && count>0) condition is true.
+    sut::tool_data->backtrace_operations[mock_backend_t::CALLBACK_TRACING_HIP_RUNTIME_API]
+        .insert(1);
+
+    expect_common_preamble(/*ts_out=*/50);
+    EXPECT_CALL(mock(), iterate_callback_tracing_kind_operation_args(_, _, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    auto                 rec = make_hip_exit();
+    mock_ns::user_data_t ud{ .value = 5 };
+    EXPECT_NO_FATAL_FAILURE(m_tracing_cb(rec, &ud, nullptr));
 }
