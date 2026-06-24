@@ -246,6 +246,15 @@ struct sdk_external_deps
     static void set_pmc_state(State state) { pmc::set_state(state); }
 
     static void gpu_add_device_metadata() { gpu::add_device_metadata(); }
+
+    template <size_t Depth>
+    using unwind_stack_t = ::tim::unwind::stack<Depth>;
+
+    template <size_t Depth, std::int64_t Offset = 1, bool WSignalFrame = false>
+    static unwind_stack_t<Depth> tim_get_unw_stack()
+    {
+        return tim::get_unw_stack<Depth, Offset, WSignalFrame>();
+    }
 };
 
 template <typename Wrapper, typename Externals>
@@ -1724,8 +1733,9 @@ library_sdk<Wrapper, Externals>::tool_tracing_callback(
            tool_data->backtrace_operations.at(record.kind).count(record.operation) > 0)
         {
             auto _backtrace =
-                tim::get_unw_stack<backtrace_stack_depth, backtrace_ignore_depth,
-                                   backtrace_with_signal_frame>();
+                Externals::template tim_get_unw_stack<backtrace_stack_depth,
+                                                      backtrace_ignore_depth,
+                                                      backtrace_with_signal_frame>();
             _bt_data = backtrace_entry_vec_t{};
             _bt_data->reserve(_backtrace.size());
             for(auto itr : _backtrace)

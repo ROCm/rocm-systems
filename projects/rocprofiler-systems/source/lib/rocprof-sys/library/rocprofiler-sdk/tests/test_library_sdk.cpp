@@ -15,6 +15,36 @@
 
 #include <memory>
 
+// ─── mock_unwind::stack<Depth> ────────────────────────────────────────────────
+//
+// Minimal stand-in for ::tim::unwind::stack<Depth> used by mock_externals.
+// Satisfies the interface consumed by populate_backtrace_data():
+//   .size(), begin()/end() (range-for), element bool-conversion, element .address().
+// Always empty so the inner loop never executes — no timemory dependency in tests.
+
+namespace mock_unwind
+{
+template <std::size_t Depth>
+struct stack
+{
+    struct entry
+    {
+        // Always false so the if(itr) body in populate_backtrace_data never runs.
+        explicit operator bool() const { return false; }
+        // operator-> needed: production code calls itr->address() (dead branch).
+        const entry*   operator->() const { return this; }
+        std::uintptr_t address() const { return 0; }
+    };
+
+    using value_type     = entry;
+    using const_iterator = const entry*;
+
+    static constexpr std::size_t size() noexcept { return 0; }
+    const_iterator               begin() const noexcept { return nullptr; }
+    const_iterator               end() const noexcept { return nullptr; }
+};
+}  // namespace mock_unwind
+
 // ─── gmock_externals / mock_externals ────────────────────────────────────────
 //
 // Unified policy-based-DI pattern (see programming-cpp-policy-based-di skill):
@@ -57,6 +87,11 @@ struct gmock_externals
     MOCK_METHOD(void, gpu_add_device_metadata, ());
     MOCK_METHOD(void, register_gpu_perf_counter_source,
                 (const std::vector<std::shared_ptr<::rocprofsys::agent>>&) );
+
+    // Returns mock_unwind::stack<16> — our own type, no timemory dependency.
+    // Depth 16 is the compile-time constant used by tool_tracing_callback.
+    using unwind_stack_16_t = mock_unwind::stack<16>;
+    MOCK_METHOD(unwind_stack_16_t, tim_get_unw_stack, ());
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_externals>> g_mock_externals;
@@ -243,6 +278,22 @@ struct mock_externals
         g_mock_externals->set_pmc_state(s);
     }
     static void gpu_add_device_metadata() { g_mock_externals->gpu_add_device_metadata(); }
+
+    // ─── backtrace unwind → mock_unwind::stack (no timemory dependency) ──────────
+    // Own type alias — independent of ::tim::unwind::stack<Depth>.
+    // Depth==16 delegates to the mock so tests can EXPECT_CALL / Return.
+    // Any other depth returns an empty mock_unwind::stack directly.
+    template <std::size_t Depth>
+    using unwind_stack_t = mock_unwind::stack<Depth>;
+
+    template <std::size_t Depth, std::int64_t Offset = 1, bool WSignalFrame = false>
+    static unwind_stack_t<Depth> tim_get_unw_stack()
+    {
+        if constexpr(Depth == 16)
+            return g_mock_externals->tim_get_unw_stack();
+        else
+            return {};
+    }
 };
 
 // ─── Type aliases ─────────────────────────────────────────────────────────────
@@ -453,21 +504,30 @@ protected:
         // get_callback_tracing_names(): 1x from client_data::initialize() +
         //                               1x from sdk_core::get_callback_domains() = 2
         // get_buffer_tracing_names():   1x from client_data::initialize() +
-        //                               1x from sdk_core::get_buffered_domains() = 2
+        //   get_callback_tracing_names: 1x from client_data::initialize() +
+        //                               1x from sdk_core::get_callback_domains()
+        //                             + 1x from sdk_core::get_operations_impl()
+        //                               (only when a callback domain is active)
+        //   get_buffer_tracing_names:   1x from client_data::initialize() +
+        //                               1x from sdk_core::get_buffered_domains() = always
+        //                               2
+        //
+        // Both ops-impl caches (callback + buffer) are reset so the next call
+        // to get_operations_impl() always re-queries Wrapper, making Times(N) exact.
         using sut_core_t =
             ::rocprofsys::rocprofiler_sdk::sdk_core<mock_backend_t, mock_externals>;
         sut_core_t::reset_version_cache();
+        sut_core_t::reset_tracing_names_cache();
 
         EXPECT_CALL(mock(), get_version(_, _, _))
             .Times(1)
             .WillOnce(DoAll(SetArgPointee<0>(1U), SetArgPointee<1>(1U),
                             SetArgPointee<2>(0U), Return(SUCCESS)));
-        EXPECT_CALL(mock(), get_callback_tracing_names())
-            .Times(2)
-            .WillRepeatedly(Return(mock_backend_t::callback_name_info_t{}));
-        EXPECT_CALL(mock(), get_buffer_tracing_names())
-            .Times(2)
-            .WillRepeatedly(Return(mock_backend_t::buffer_name_info_t{}));
+        // Tracing-name counts are set per-test via expect_buffer_tracing_names()
+        // and expect_callback_tracing_names().  Counter-event tests call
+        // initialize_event_info() which triggers a second initialize() call on
+        // GPU-less machines, adding a 3rd get_buffer_tracing_names() call.
+        // Tests with buffer-domain overrides supply their own buf_names.
 
         // StrictMock defaults for every Externals method called by tool_init or
         // sdk_core helpers (get_callback_domains, get_buffered_domains, get_rocm_events).
@@ -490,6 +550,36 @@ protected:
             .WillRepeatedly(::testing::Return());
         EXPECT_CALL(*g_mock_externals, register_gpu_perf_counter_source(_))
             .WillRepeatedly(::testing::Return());
+    }
+
+    // Pin the exact number of get_callback_tracing_names() calls.
+    //   n=2: no active callback domain  (initialize + get_callback_domains)
+    //   n=3: an active callback domain  (+ one call from get_operations_impl)
+    void expect_callback_tracing_names(int n = 2)
+    {
+        EXPECT_CALL(mock(), get_callback_tracing_names())
+            .Times(n)
+            .WillRepeatedly(Return(mock_backend_t::callback_name_info_t{}));
+    }
+
+    // Pin the exact number of get_buffer_tracing_names() calls.
+    //   n=2: no counter events          (initialize + get_buffered_domains)
+    //   n=3: counter events configured  (initialize_event_info calls initialize again
+    //                                    on GPU-less machines → 3rd call)
+    // Overloaded variant accepts specific buf_names for domain-fallback tests.
+    void expect_buffer_tracing_names(int n = 2)
+    {
+        EXPECT_CALL(mock(), get_buffer_tracing_names())
+            .Times(n)
+            .WillRepeatedly(Return(mock_backend_t::buffer_name_info_t{}));
+    }
+
+    void expect_buffer_tracing_names(int                                       n,
+                                     const mock_backend_t::buffer_name_info_t& names)
+    {
+        EXPECT_CALL(mock(), get_buffer_tracing_names())
+            .Times(n)
+            .WillRepeatedly(Return(names));
     }
 
     // Expects create_context called 3 times in sequence; assigns distinct handles
@@ -537,6 +627,8 @@ protected:
 
     void expect_full_tool_init_success()
     {
+        expect_callback_tracing_names(2);
+        expect_buffer_tracing_names(2);
         expect_three_contexts();
         expect_code_object_tracing();
         expect_external_correlation();
@@ -560,6 +652,8 @@ TEST_F(tool_init_test, sets_tool_init_done_to_true_after_first_call)
 // counter_ctx stays 0 because no counter events are configured.
 TEST_F(tool_init_test, assigns_context_handles_to_tool_data_fields)
 {
+    expect_callback_tracing_names(2);
+    expect_buffer_tracing_names(2);
     expect_external_correlation();
     expect_primary_ctx_valid();
     expect_start_for_initialized_contexts();
@@ -593,6 +687,8 @@ TEST_F(tool_init_test, assigns_context_handles_to_tool_data_fields)
 // (the second context created) with the CODE_OBJECT tracing kind.
 TEST_F(tool_init_test, configures_code_object_tracing_on_code_object_ctx)
 {
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names();
     expect_three_contexts();
     EXPECT_CALL(mock(), configure_callback_tracing_service(
                             handle_t{ 2 }, mock_backend_t::CALLBACK_TRACING_CODE_OBJECT,
@@ -608,6 +704,8 @@ TEST_F(tool_init_test, configures_code_object_tracing_on_code_object_ctx)
 // External correlation request service must be configured on primary_ctx.
 TEST_F(tool_init_test, configures_external_correlation_service_on_primary_ctx)
 {
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names();
     expect_three_contexts();
     expect_code_object_tracing();
     EXPECT_CALL(mock(), configure_external_correlation_id_request_service(handle_t{ 1 },
@@ -623,6 +721,8 @@ TEST_F(tool_init_test, configures_external_correlation_service_on_primary_ctx)
 // tool_init returns -1 and must not call start_context for any context.
 TEST_F(tool_init_test, returns_minus_one_when_primary_ctx_is_invalid)
 {
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names();
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -648,6 +748,8 @@ TEST_F(tool_init_test, returns_zero_when_primary_ctx_is_valid)
 // false for it and no SDK calls are made on its behalf.
 TEST_F(tool_init_test, starts_initialized_contexts_and_skips_uninitialized_counter_ctx)
 {
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names();
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -684,6 +786,8 @@ TEST_F(tool_init_test, creates_memory_copy_buffer_when_memory_copy_domain_active
     EXPECT_CALL(*g_mock_externals, get_rocm_domains())
         .WillRepeatedly(Return(std::string{ "memory_copy" }));
 
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names();
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -737,6 +841,10 @@ TEST_F(tool_init_test, configures_hip_api_callback_tracing_when_hip_api_domain_a
     EXPECT_CALL(*g_mock_externals, get_rocm_domains())
         .WillRepeatedly(Return(std::string{ "hip_api" }));
 
+    // Active callback domain: get_operations_impl cold → 3 callback calls.
+    // hip_api has no counter events → no extra initialize() call → 2 buffer calls.
+    expect_callback_tracing_names(3);
+    expect_buffer_tracing_names(2);
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -790,10 +898,9 @@ TEST_F(tool_init_test, creates_scratch_memory_buffer_when_scratch_memory_domain_
     // Provide name entry so get_buffered_domains() fallback finds SCRATCH_MEMORY.
     mock_backend_t::buffer_name_info_t buf_names;
     buf_names[mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY].name = "scratch_memory";
-    EXPECT_CALL(mock(), get_buffer_tracing_names())
-        .Times(2)
-        .WillRepeatedly(Return(buf_names));
 
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names(2, buf_names);
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -835,10 +942,9 @@ TEST_F(tool_init_test, creates_kernel_dispatch_buffer_when_kernel_dispatch_domai
 
     mock_backend_t::buffer_name_info_t buf_names;
     buf_names[mock_backend_t::BUFFER_TRACING_KERNEL_DISPATCH].name = "kernel_dispatch";
-    EXPECT_CALL(mock(), get_buffer_tracing_names())
-        .Times(2)
-        .WillRepeatedly(Return(buf_names));
 
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names(2, buf_names);
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -883,6 +989,8 @@ TEST_F(tool_init_test,
     EXPECT_CALL(*g_mock_externals, get_rocm_domains())
         .WillRepeatedly(Return(std::string{ "memory_allocation" }));
 
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names();
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -928,6 +1036,10 @@ TEST_F(tool_init_test, configures_hsa_api_callback_tracing_for_all_four_hsa_kind
     EXPECT_CALL(*g_mock_externals, get_rocm_domains())
         .WillRepeatedly(Return(std::string{ "hsa_api" }));
 
+    // Active callback domain: get_operations_impl cold → 3 callback calls.
+    // hsa_api has no counter events → no extra initialize() call → 2 buffer calls.
+    expect_callback_tracing_names(3);
+    expect_buffer_tracing_names(2);
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -962,10 +1074,9 @@ TEST_F(tool_init_test, creates_two_callback_thread_pairs_for_two_active_buffers)
 
     mock_backend_t::buffer_name_info_t buf_names;
     buf_names[mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY].name = "scratch_memory";
-    EXPECT_CALL(mock(), get_buffer_tracing_names())
-        .Times(2)
-        .WillRepeatedly(Return(buf_names));
 
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names(2, buf_names);
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -1018,6 +1129,26 @@ TEST_F(tool_init_test, creates_counter_ctx_when_rocm_events_configured)
     EXPECT_CALL(*g_mock_externals, get_rocm_events_setting())
         .WillRepeatedly(Return(std::string{ "SQ_CYCLES" }));
 
+    // Inject a fake GPU agent so iterate_agent_supported_counters is called exactly
+    // once (once per agent in gpu_agents) — making the test hardware-independent.
+    // The mock returns SUCCESS without invoking the callback, so agent_counter_info
+    // stays empty and create_agent_profile takes its early-return path.
+    static ::rocprofsys::agent fake_gpu_counter{
+        .type      = ::rocprofsys::agent_type::GPU,
+        .handle    = 0xABCDABCFULL,
+        .device_id = 0,
+        .node_id   = 0,
+    };
+    sut::tool_data->gpu_agents.push_back(
+        ::rocprofsys::rocprofiler_sdk::tool_agent{ 0, &fake_gpu_counter });
+
+    const handle_t fake_agent{ fake_gpu_counter.handle };
+
+    // initialize_event_info() calls initialize() again (agent_manager has no real
+    // agents even with the fake one) → 3 calls each for both tracing names.
+    expect_callback_tracing_names(3);
+    expect_buffer_tracing_names(3);
+
     // Four create_context calls in order: primary(1), code_object(2), control(3),
     // counter(4). Chained WillOnce on a single EXPECT_CALL delivers handles in order.
     EXPECT_CALL(mock(), create_context(_))
@@ -1038,8 +1169,12 @@ TEST_F(tool_init_test, creates_counter_ctx_when_rocm_events_configured)
                 configure_callback_dispatch_counting_service(handle_t{ 4 }, _, _, _, _))
         .WillOnce(Return(SUCCESS));
 
-    // On this test host gpu_agents is empty (no GPU hardware) → 0 calls.
-    EXPECT_CALL(mock(), iterate_agent_supported_counters(_, _, _)).Times(0);
+    // initialize_event_info calls iterate_agent_supported_counters exactly once —
+    // one call per entry in gpu_agents.  Returns SUCCESS without calling the callback,
+    // leaving agent_counter_info empty (agent treated as unsupported architecture).
+    EXPECT_CALL(mock(), iterate_agent_supported_counters(fake_agent, _, _))
+        .Times(1)
+        .WillOnce(Return(SUCCESS));
 
     expect_primary_ctx_valid();
 
@@ -1093,6 +1228,8 @@ protected:
         EXPECT_CALL(*g_mock_externals, get_rocm_domains())
             .WillRepeatedly(Return(std::string{ "memory_copy" }));
 
+        expect_callback_tracing_names(2);
+        expect_buffer_tracing_names(2);
         expect_three_contexts();
         expect_code_object_tracing();
         expect_external_correlation();
@@ -1216,6 +1353,8 @@ TEST_F(tool_init_test, creates_all_kfd_buffers_when_kfd_events_domain_active)
     EXPECT_CALL(*g_mock_externals, get_rocm_domains())
         .WillRepeatedly(Return(std::string{ "kfd_events" }));
 
+    expect_callback_tracing_names();
+    expect_buffer_tracing_names();
     expect_three_contexts();
     expect_code_object_tracing();
     expect_external_correlation();
@@ -1326,6 +1465,11 @@ TEST_F(tool_init_test, counter_loop_runs_for_each_gpu_agent_when_no_counters_mat
 
     const handle_t fake_agent{ fake_gpu.handle };
 
+    // Counter events → initialize_event_info() calls initialize() again on GPU-less
+    // machines → 3 calls each.
+    expect_callback_tracing_names(3);
+    expect_buffer_tracing_names(3);
+
     // Four contexts: primary(1), code_object(2), control(3), counter(4).
     EXPECT_CALL(mock(), create_context(_))
         .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 1 }), Return(SUCCESS)))
@@ -1406,6 +1550,9 @@ TEST_F(tool_init_test, creates_counter_profile_when_gpu_agent_counter_name_match
 
     const handle_t fake_agent{ fake_gpu2.handle };
     const handle_t sq_handle{ 42 };
+
+    expect_callback_tracing_names(3);
+    expect_buffer_tracing_names(3);
 
     EXPECT_CALL(mock(), create_context(_))
         .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 1 }), Return(SUCCESS)))
@@ -1528,6 +1675,10 @@ protected:
             .WillRepeatedly(Return(false));
         EXPECT_CALL(*g_mock_externals, get_use_rocpd()).WillRepeatedly(Return(false));
 
+        // Active callback domain (hip_api): get_operations_impl cold → 3 callback calls.
+        // No counter events → 2 buffer calls (initialize + get_buffered_domains).
+        expect_callback_tracing_names(3);
+        expect_buffer_tracing_names(2);
         expect_three_contexts();
         expect_code_object_tracing();
         expect_external_correlation();
@@ -1715,21 +1866,25 @@ TEST_F(tool_tracing_callback_test,
     EXPECT_NO_FATAL_FAILURE(m_tracing_cb(rec, &ud, nullptr));
 }
 
-// EXIT with rocpd=true and backtrace_operations populated for the record's kind
-// and operation → populate_backtrace_data() enters the unwind branch.  The
-// unwind itself may produce an empty stack in the test process; that is fine —
-// the branch is covered regardless.
+// EXIT with rocpd=true and backtrace_operations populated → populate_backtrace_data()
+// enters the unwind branch.  Externals::tim_get_unw_stack() is now a mock that
+// notifies gmock_externals and returns an empty stack — zero real libunwind time.
 TEST_F(tool_tracing_callback_test,
-       exit_phase_with_rocpd_and_backtrace_op_registered_enters_unwind_path)
+       exit_phase_with_rocpd_enabled_and_backtrace_op_registered_enters_unwind_path)
 {
     ::rocprofsys::set_state(::rocprofsys::State::Active);
 
     EXPECT_CALL(*g_mock_externals, get_use_rocpd()).WillRepeatedly(Return(true));
 
-    // Insert the record's operation (1) into backtrace_operations for
-    // HIP_RUNTIME_API so the (use_rocpd && count>0) condition is true.
+    // Insert the record's operation so the (use_rocpd && count>0) condition is true.
     sut::tool_data->backtrace_operations[mock_backend_t::CALLBACK_TRACING_HIP_RUNTIME_API]
         .insert(1);
+
+    // The mock returns a typed empty stack — verifies the path was entered
+    // without any real libunwind walking.
+    EXPECT_CALL(*g_mock_externals, tim_get_unw_stack())
+        .Times(1)
+        .WillOnce(Return(mock_externals::unwind_stack_t<16>{}));
 
     expect_common_preamble(/*ts_out=*/50);
     EXPECT_CALL(mock(), iterate_callback_tracing_kind_operation_args(_, _, _, _))

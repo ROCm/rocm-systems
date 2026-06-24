@@ -77,14 +77,17 @@ public:
 
     static version_info& get_version();
 
-    // Reset the cached version to zero so the next get_version() call re-queries
-    // Wrapper::get_version().  For unit tests only — allows pinning Times(1).
-    static void reset_version_cache()
+    // Reset cached state so the next tool_init call re-queries every Wrapper
+    // method exactly once.  For unit tests only — allows pinning Times(N).
+    // Direct assignment to s_version avoids calling get_version() (which would
+    // call Wrapper::get_version() via the cache-miss path before any EXPECT_CALL
+    // is registered, generating spurious "uninteresting" GMock warnings).
+    static void reset_version_cache() noexcept { s_version = version_info{ 0 }; }
+
+    static void reset_tracing_names_cache() noexcept
     {
-        get_version().formatted = 0;
-        get_version().major     = 0;
-        get_version().minor     = 0;
-        get_version().patch     = 0;
+        s_callback_names_init = false;
+        s_buffer_names_init   = false;
     }
 
     static std::unordered_set<typename Wrapper::callback_tracing_kind>
@@ -137,6 +140,17 @@ public:
         callback_operation_option_names;
     static std::unordered_map<typename Wrapper::buffer_tracing_kind, operation_options>
         buffered_operation_option_names;
+
+    // Cached version — class-level so reset_version_cache() can clear it without
+    // going through the cache-miss path (which would call Wrapper::get_version()).
+    static version_info s_version;
+
+    // Cached copies used by get_operations_impl; populated on first call and
+    // reset by reset_tracing_names_cache() so unit tests can pin Times(N).
+    static typename Wrapper::callback_name_info_t s_callback_names;
+    static bool                                   s_callback_names_init;
+    static typename Wrapper::buffer_name_info_t   s_buffer_names;
+    static bool                                   s_buffer_names_init;
 
     static std::unordered_set<std::int32_t> get_operations_impl(
         Wrapper::callback_tracing_kind kindv, const std::string& optname = {});
@@ -222,6 +236,21 @@ std::unordered_map<typename Wrapper::buffer_tracing_kind,
                    typename sdk_core<Wrapper, Externals>::operation_options>
     sdk_core<Wrapper, Externals>::buffered_operation_option_names{};
 
+template <typename Wrapper, typename Externals>
+typename Wrapper::callback_name_info_t sdk_core<Wrapper, Externals>::s_callback_names{};
+
+template <typename Wrapper, typename Externals>
+bool sdk_core<Wrapper, Externals>::s_callback_names_init{ false };
+
+template <typename Wrapper, typename Externals>
+typename Wrapper::buffer_name_info_t sdk_core<Wrapper, Externals>::s_buffer_names{};
+
+template <typename Wrapper, typename Externals>
+bool sdk_core<Wrapper, Externals>::s_buffer_names_init{ false };
+
+template <typename Wrapper, typename Externals>
+version_info sdk_core<Wrapper, Externals>::s_version{};
+
 // ─── Private method implementations ──────────────────────────────────────────
 
 template <typename Wrapper, typename Externals>
@@ -229,7 +258,12 @@ std::unordered_set<std::int32_t>
 sdk_core<Wrapper, Externals>::get_operations_impl(Wrapper::callback_tracing_kind kindv,
                                                   const std::string&             optname)
 {
-    static const auto callback_tracing_info = Wrapper::get_callback_tracing_names();
+    if(!s_callback_names_init)
+    {
+        s_callback_names      = Wrapper::get_callback_tracing_names();
+        s_callback_names_init = true;
+    }
+    const auto& callback_tracing_info = s_callback_names;
 
     if(optname.empty())
     {
@@ -274,7 +308,12 @@ std::unordered_set<std::int32_t>
 sdk_core<Wrapper, Externals>::get_operations_impl(Wrapper::buffer_tracing_kind kindv,
                                                   const std::string&           optname)
 {
-    static const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
+    if(!s_buffer_names_init)
+    {
+        s_buffer_names      = Wrapper::get_buffer_tracing_names();
+        s_buffer_names_init = true;
+    }
+    const auto& buffered_tracing_info = s_buffer_names;
 
     if(optname.empty())
     {
@@ -369,9 +408,7 @@ template <typename Wrapper, typename Externals>
 version_info&
 sdk_core<Wrapper, Externals>::get_version()
 {
-    static auto _version = version_info{ 0 };
-
-    if(_version.formatted == 0)
+    if(s_version.formatted == 0)
     {
         std::uint32_t _major = 0;
         std::uint32_t _minor = 0;
@@ -379,13 +416,13 @@ sdk_core<Wrapper, Externals>::get_version()
 
         Wrapper::get_version(&_major, &_minor, &_patch);
 
-        _version.major     = _major;
-        _version.minor     = _minor;
-        _version.patch     = _patch;
-        _version.formatted = _major * 10000u + _minor * 100u + _patch;
+        s_version.major     = _major;
+        s_version.minor     = _minor;
+        s_version.patch     = _patch;
+        s_version.formatted = _major * 10000u + _minor * 100u + _patch;
     }
 
-    return _version;
+    return s_version;
 }
 
 template <typename Wrapper, typename Externals>
