@@ -11,11 +11,11 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include <spdlog/fmt/fmt.h>
 #include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
 #include "log.hpp"
+#include <spdlog/fmt/fmt.h>
 
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>

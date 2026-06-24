@@ -6,8 +6,8 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
-#include <spdlog/fmt/fmt.h>
 #include "common/path.hpp"
+#include <spdlog/fmt/fmt.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -83,7 +83,8 @@ get_environ(int _verbose, std::string _search_paths = {},
 
     if(!_omnilib_dl_path.empty())
     {
-        _omnilib_dl   = fmt::format("{}/{}", _omnilib_dl_path, ::basename(_omnilib_dl.c_str()));
+        _omnilib_dl =
+            fmt::format("{}/{}", _omnilib_dl_path, ::basename(_omnilib_dl.c_str()));
         _search_paths = fmt::format("{}:{}", _omnilib_dl_path, _search_paths);
     }
 

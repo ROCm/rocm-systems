@@ -18,11 +18,11 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
-#include <spdlog/fmt/fmt.h>
 #include "common/setup.hpp"
 #include "dl/dl.hpp"
 #include "rocprofiler-systems/categories.h"
 #include "rocprofiler-systems/types.h"
+#include <spdlog/fmt/fmt.h>
 
 #include <timemory/utility/filepath.hpp>
 
@@ -216,7 +216,7 @@ struct ROCPROFSYS_INTERNAL_API indirect
         }
 
         auto _search_paths = fmt::format("{}:{}", common::path::dirname(_omnilib),
-                                          common::path::dirname(_dllib));
+                                         common::path::dirname(_dllib));
         common::setup_environ(_rocprofsys_dl_verbose, _search_paths, _omnilib, _dllib);
 
         m_omnihandle = open(m_omnilib);
@@ -611,16 +611,16 @@ extern "C"
     {
         if(dl::get_inited() && dl::get_finied())
         {
-            ROCPROFSYS_DL_LOG(
-                2, "%s(%s) ignored :: already initialized and finalized\n", __FUNCTION__,
-                fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
+            ROCPROFSYS_DL_LOG(2, "%s(%s) ignored :: already initialized and finalized\n",
+                              __FUNCTION__,
+                              fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
             return;
         }
         else if(dl::get_inited() && dl::get_active())
         {
-            ROCPROFSYS_DL_LOG(
-                2, "%s(%s) ignored :: already initialized and active\n", __FUNCTION__,
-                fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
+            ROCPROFSYS_DL_LOG(2, "%s(%s) ignored :: already initialized and active\n",
+                              __FUNCTION__,
+                              fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
             return;
         }
 
