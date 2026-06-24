@@ -214,7 +214,7 @@ template <typename Provider>
 struct QueuePairTraits;
 
 /*
- * @brief Atomic Memory Operation fetching behavior
+ * @brief Atomic Memory Operation fetching behavior.
  */
 enum class AMOFetchType {
   Blocking,
@@ -283,7 +283,7 @@ public:
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell
+   * @tparam RingDB Whether to ring the doorbell.
    */
   template <bool RingDB = true>
   __device__ void put_nbi(void *dest, const void *source, size_t nelems,
@@ -321,9 +321,9 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell
+   * @tparam RingDB Whether to ring the doorbell.
    *
-   * @return An atomic value
+   * @return An atomic value.
    */
   template <bool RingDB = true>
   __device__ uint64_t atomic_fetch_add(void *dest, uint64_t value, const ActiveWFInfo& wf_info);
@@ -339,9 +339,9 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell
+   * @tparam RingDB Whether to ring the doorbell.
    *
-   * @return An atomic value
+   * @return An atomic value.
    */
   template <bool RingDB = true>
   __device__ void atomic_fetch_add_nbi(uint64_t *fetch, void *dest, uint64_t value,
@@ -357,7 +357,7 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell
+   * @tparam RingDB Whether to ring the doorbell.
    */
   template <bool RingDB = true>
   __device__ void atomic_add_nbi(void *dest, uint64_t value, const ActiveWFInfo& wf_info);
@@ -372,9 +372,9 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell
+   * @tparam RingDB Whether to ring the doorbell.
    *
-   * @return An atomic value
+   * @return An atomic value.
    */
   template <bool RingDB = true>
   __device__ uint64_t atomic_cas(void *dest, uint64_t cond, uint64_t value,
@@ -392,9 +392,9 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell
+   * @tparam RingDB Whether to ring the doorbell.
    *
-   * @return An atomic value
+   * @return An atomic value.
    */
   template <bool RingDB = true>
   __device__ void atomic_cas_nbi(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
@@ -411,9 +411,9 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell
+   * @tparam RingDB Whether to ring the doorbell.
    *
-   * @return An atomic value
+   * @return An atomic value.
    */
   template <bool RingDB = true>
   __device__ void atomic_cas_nbi_nofetch(void *dest, uint64_t cond, uint64_t value,
