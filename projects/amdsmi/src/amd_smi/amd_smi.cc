@@ -55,8 +55,8 @@
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
+#include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
 #include "amd_smi/impl/scoped_fd.h"
-#include "amdsmi_unified/interface/smi_nic_interface.h"
 #include "config/amd_smi_config.h"
 
 #ifdef BRCM_NIC

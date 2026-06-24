@@ -706,6 +706,20 @@ void** capture___hipRegisterFatBinary(const void* data) {
 }
 
 // ---------------------------------------------------------------------------
+// __hipUnregisterFatBinary — snapshot *modules before the real call
+//
+// The real call frees the node *modules points into, so we read *modules
+// (used to correlate with the register event) first, then forward the call.
+// ---------------------------------------------------------------------------
+void capture___hipUnregisterFatBinary(void** modules) {
+  hrr_args___hipUnregisterFatBinary a{};
+  if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
+  hrr_cap::writer::write_event_raw(HRR_API_HIPUNREGISTERFATBINARY, &a.hdr, sizeof(a));
+
+  g_real_compiler_table.__hipUnregisterFatBinary_fn(modules);
+}
+
+// ---------------------------------------------------------------------------
 // hipHostRegister / hipHostUnregister — sysmem blob snapshotting
 //
 // We snapshot the host memory at Register time so the replayer can restore it
