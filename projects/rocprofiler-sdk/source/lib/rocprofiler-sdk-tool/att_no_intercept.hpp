@@ -27,8 +27,10 @@
 #include <rocprofiler-sdk/experimental/thread-trace/core.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -37,7 +39,7 @@ namespace tool
 {
 namespace att_no_intercept
 {
-struct agent_config
+struct agent_config_t
 {
     rocprofiler_agent_id_t                            id                  = {};
     uint64_t                                          gpu_index           = 0;
@@ -48,22 +50,22 @@ struct agent_config
 
 using shader_data_forwarder_t = void (*)(rocprofiler_thread_trace_shader_data_t,
                                          rocprofiler_user_data_t);
-using kernel_target_filter_t  = bool (*)(rocprofiler_kernel_id_t);
 
 bool
 is_supported();
 
 void
-configure(std::vector<agent_config> agents,
+configure(std::vector<agent_config_t> agents,
           shader_data_forwarder_t   shader_data_forwarder,
-          kernel_target_filter_t    kernel_target_filter);
+          std::unordered_set<size_t> kernel_filter_range);
 
 void
 code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& data);
 
 void
 kernel_symbol_load(
-    const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& data);
+    const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& data,
+    bool is_targeted);
 
 void
 finalize();

@@ -34,6 +34,7 @@ typedef uint64_t rocprof_trace_decoder_handle_t;
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <optional>
@@ -48,27 +49,27 @@ namespace tool
 {
 namespace att_no_intercept
 {
-struct entry_key
+struct entry_key_t
 {
     uint64_t code_object_id = 0;
     uint64_t address        = 0;
 
-    friend bool operator==(const entry_key& lhs, const entry_key& rhs)
+    friend bool operator==(const entry_key_t& lhs, const entry_key_t& rhs)
     {
         return lhs.code_object_id == rhs.code_object_id && lhs.address == rhs.address;
     }
 };
 
-struct entry_key_hash
+struct entry_key_hash_t
 {
-    size_t operator()(const entry_key& key) const
+    size_t operator()(const entry_key_t& key) const
     {
         return static_cast<size_t>((key.address >> 2) ^ (key.code_object_id << 24) ^
                                    (key.code_object_id >> 40));
     }
 };
 
-struct code_object_record
+struct code_object_record_t
 {
     uint64_t code_object_id = 0;
     int64_t  load_delta     = 0;
@@ -79,21 +80,29 @@ struct code_object_record
     std::unordered_map<uint64_t, uint64_t>    symbol_sizes_by_vaddr = {};
 };
 
-struct kernel_symbol_record
+struct kernel_symbol_record_t
 {
     rocprofiler_kernel_id_t kernel_id                     = 0;
     uint64_t                code_object_id                = 0;
     std::string             kernel_name                   = {};
     uint64_t                kernel_address                = 0;
     int64_t                 kernel_code_entry_byte_offset = 0;
+    bool                    targeted                      = false;
 };
 
-struct kernel_symbol_range
+struct kernel_symbol_range_t
 {
     rocprofiler_kernel_id_t kernel_id      = 0;
     uint64_t                code_object_id = 0;
     uint64_t                begin          = 0;
     uint64_t                end            = 0;
+    bool                    targeted       = false;
+};
+
+struct kernel_entry_t
+{
+    rocprofiler_kernel_id_t              kernel_id       = 0;
+    std::shared_ptr<std::atomic<size_t>> iteration_count = {};
 };
 
 struct trace_range_t
@@ -123,11 +132,11 @@ struct agent_state_t
     bool              started   = false;
     bool              finalized = false;
 
-    std::vector<kernel_symbol_record>                                      kernel_symbols   = {};
-    std::unordered_map<entry_key, rocprofiler_kernel_id_t, entry_key_hash> kernels_by_entry = {};
-    std::unordered_map<uint64_t, std::vector<kernel_symbol_range>> kernel_ranges_by_code_object =
-        {};
-    std::unordered_map<uint64_t, code_object_record> code_objects = {};
+    std::vector<kernel_symbol_record_t> kernel_symbols = {};
+    std::unordered_map<entry_key_t, kernel_entry_t, entry_key_hash_t> kernels_by_entry = {};
+    std::unordered_map<uint64_t, std::vector<kernel_symbol_range_t>>
+        kernel_ranges_by_code_object                                  = {};
+    std::unordered_map<uint64_t, code_object_record_t> code_objects = {};
 
     std::atomic<bool>     chunk_failed{false};
     std::atomic<uint64_t> chunk_completed{0};
@@ -157,7 +166,7 @@ void
 backend_shader_data(agent_state_t&                           state,
                     rocprofiler_thread_trace_shader_data_t shader_data,
                     shader_data_forwarder_t                shader_data_forwarder,
-                    kernel_target_filter_t                 kernel_target_filter);
+                    const std::unordered_set<size_t>&      kernel_filter_range);
 }  // namespace att_no_intercept
 }  // namespace tool
 }  // namespace rocprofiler
