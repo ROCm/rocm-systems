@@ -454,9 +454,6 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
     void *dst, const void *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
-  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int stride = team_obj->tinfo_wrt_world->stride;
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
@@ -494,7 +491,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
     team_obj->alltoall_sequence_number++;
   }
 
-  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+  sync_wave(team);
 }
 
 }  // namespace rocshmem

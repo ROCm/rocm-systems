@@ -30,12 +30,11 @@ __device__ void alltoall_wave([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unuse
 }
 
 /* Define templates to call rocSHMEM */
-#define ALLTOALLWAVEGEN(T, TNAME)                                        \
+#define ALLTOALLWAVEGEN(T, TNAME)                                              \
   template <>                                                                  \
-  __device__ void alltoall_wave<T>(rocshmem_ctx_t ctx, rocshmem_team_t team,\
+  __device__ void alltoall_wave<T>(rocshmem_ctx_t ctx, rocshmem_team_t team,   \
                                  T * dest, const T *source, int nelem) {       \
-    rocshmem_ctx_##TNAME##_alltoall_wave(ctx, team, dest, source, nelem);        \
-  }
+    rocshmem_ctx_##TNAME##_alltoall_wave(ctx, team, dest, source, nelem);}
 
 ALLTOALLWAVEGEN(float, float)
 ALLTOALLWAVEGEN(double, double)
