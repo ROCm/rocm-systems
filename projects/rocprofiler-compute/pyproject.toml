@@ -111,7 +111,6 @@ markers = [
     "torch_ops",
     "torch_trace",
     "triton_trace",
-    "ml_api_trace",
     "division_by_zero",
     "multi_rank",
     "experimental_feature",

@@ -3134,7 +3134,7 @@ def test_triton_trace_profile(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ml_api_trace
+@pytest.mark.triton_trace
 def test_ml_api_trace_torch_compile_triton(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
