@@ -46,8 +46,7 @@ def _in_launch() -> bool:
 
 
 def _next_launch_index(marker: str) -> int:
-    """Per-thread occurrence count for marker, matching the torch backend so
-    repeated launches stay distinguishable in the call tree."""
+    """Per-thread occurrence count for marker."""
     counters = getattr(_thread_local, "launch_counters", None)
     if counters is None:
         counters = {}

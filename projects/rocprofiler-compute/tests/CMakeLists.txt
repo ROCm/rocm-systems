@@ -118,3 +118,12 @@ add_custom_target(
         ${CMAKE_SOURCE_DIR}/tests/triton_ffn.py
     COMMENT "Copying triton_ffn.py to tests directory"
 )
+
+add_custom_target(
+    torch_compile_triton
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/torch_compile_triton.py
+        ${CMAKE_SOURCE_DIR}/tests/torch_compile_triton.py
+    COMMENT "Copying torch_compile_triton.py to tests directory"
+)

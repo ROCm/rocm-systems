@@ -382,8 +382,6 @@ class cli_analysis(OmniAnalyze_Base):
         }
 
         matched_df["Kernel_ID"] = matched_df["Kernel_Name"].str.strip().map(name_to_id)
-        if not hasattr(workload, "matched_ml_api_trace_dfs"):
-            workload.matched_ml_api_trace_dfs = {}
         workload.matched_ml_api_trace_dfs[backend] = matched_df
 
         kernel_names = set(matched_df["Kernel_Name"].dropna().str.strip().unique())
@@ -424,7 +422,7 @@ class cli_analysis(OmniAnalyze_Base):
         """Display the matched operator call tree for a single backend."""
         cli = _BACKEND_CLI[backend]
         label = cli["label"]
-        matched_df = getattr(workload, "matched_ml_api_trace_dfs", {}).get(backend)
+        matched_df = workload.matched_ml_api_trace_dfs.get(backend)
         if matched_df is None or matched_df.empty:
             return
 

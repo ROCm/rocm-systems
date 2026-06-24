@@ -1,12 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""
-Minimal Triton-in-PyTorch workload (torch.compile / Inductor).
-
-torch.compile lowers the function to generated Triton kernels, so the run
-exercises both the torch and triton backends.
-"""
+"""Minimal torch.compile workload that generates Triton kernels."""
 
 import sys
 
