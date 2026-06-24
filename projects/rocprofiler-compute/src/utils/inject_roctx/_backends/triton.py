@@ -70,6 +70,10 @@ def _register_framework_root() -> None:
     try:
         import triton
 
+        console_log(
+            "ml api trace",
+            f"Triton version: {getattr(triton, '__version__', '<unknown>')}",
+        )
         triton_file = getattr(triton, "__file__", None)
         if triton_file:
             core.add_framework_root(str(Path(triton_file).parent))
