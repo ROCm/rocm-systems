@@ -1045,6 +1045,7 @@ void GraphExec::FindStreamsReqPerDevForSegments() {
     if (graphExec == this) {
       // Single-device graph: derive captureDeviceId_ from the authoritative map key.
       // Multi-device graphs are not supported on the segment scheduling path.
+      // Empty graphs have no segments, so fall back to the current device.
       if (max_streams_dev_.size() == 1) {
         captureDeviceId_ = max_streams_dev_.begin()->first;
       } else if (max_streams_dev_.size() > 1) {
@@ -1052,6 +1053,8 @@ void GraphExec::FindStreamsReqPerDevForSegments() {
                 "[hipGraph] Multi-device graph is not supported on the segment scheduling path");
         captureDeviceId_ = -1;
         return;
+      } else {
+        captureDeviceId_ = hip::getCurrentDevice()->deviceId();
       }
     }
 
@@ -1206,19 +1209,19 @@ void GraphExec::DFSStreamAssignment() {
 
 // ================================================================================================
 // Select stream assignment algorithm:
-//   DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2 → force DFS
-//   DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 3 → force round-robin
+//   DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 1 → force DFS
+//   DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2 → force round-robin
 //   otherwise (auto): complex graphs (16+ segs, avg length < 8) → DFS
 //                     simple/parallel graphs                     → round-robin
 void GraphExec::SelectStreamAssignment() {
   // Forced modes via env var
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2) {
+  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 1) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
             "[hipGraph] SelectStreamAssignment: forced DFS (%zu segs)", segments_.size());
     DFSStreamAssignment();
     return;
   }
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 3) {
+  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
             "[hipGraph] SelectStreamAssignment: forced round-robin (%zu segs)", segments_.size());
     RoundRobinStreamAssignment();
@@ -1259,15 +1262,16 @@ void GraphExec::SelectStreamAssignment() {
 // ================================================================================================
 hipError_t GraphExec::Init() {
   hipError_t status = hipSuccess;
+  // captureDeviceId_ is set inside FindStreamsReqPerDevForSegments() from
+  // max_streams_dev_ once all segments are analysed. Must run unconditionally
+  // so that captureDeviceId_ is valid before CaptureAQLPackets/BuildSyncPlan.
+  FindStreamsReqPerDevForSegments();
+  if (captureDeviceId_ == -1) {
+    return hipErrorNotSupported;
+  }
+
   // create extra stream to avoid queue collision with the default execution stream
   if (max_streams_ >= 1) {
-    // captureDeviceId_ is set inside FindStreamsReqPerDevForSegments() from
-    // max_streams_dev_ once all segments are analysed.
-    FindStreamsReqPerDevForSegments();
-    if (captureDeviceId_ == -1) {
-      return hipErrorNotSupported;
-    }
-
     // Cap per-device stream counts to the hardware queue limit and compute the total.
     // This must happen before SelectStreamAssignment() reads max_streams_dev_ so
     // both stream creation and stream-id assignment see the same capped values.
