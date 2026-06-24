@@ -8,6 +8,9 @@
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 
+#include <cstdint>
+#include <vector>
+
 #include "TestBed.hpp"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -138,6 +141,73 @@ TEST(Alloc, ncclCuMemFreeAddr)
     );
 }
 #endif // ROCM_VERSION < 70000
+
+#if ROCM_VERSION >= 70000
+// Regression test for NCCL GitHub issue #1962 ("Fix memory initialization in the
+// P2P transport"), fixed upstream in NCCL 2.29.7. The cuMem (VMM) allocation path
+// must hand back zero-initialized memory: it backs the P2P shareable buffers whose
+// control structures (ncclSendMem/ncclRecvMem head, tail, ptrExchange,
+// redOpArgExchange) must start at zero. RCCL satisfies this by zeroing inside
+// ncclCuMemAlloc (the ROCM-20370 workaround, where hsa_amd_vmem_map leaves
+// non-zero residue after the driver's SDMA clear). Pre-fix, the freshly mapped
+// buffer carried residue at specific offsets; this test fails in that case.
+TEST(Alloc, ncclCuMemAllocZeroInitialized)
+{
+    RUN_ISOLATED_TEST(
+        "ncclCuMemAllocZeroInitialized",
+        []()
+        {
+            int devCount = 0;
+            if(hipGetDeviceCount(&devCount) != hipSuccess || devCount < 1)
+            {
+                GTEST_SKIP() << "No HIP-visible GPU; skipping";
+            }
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+            // Note: we call ncclCuMemAlloc directly rather than gating on
+            // ncclCuMemEnable(). The zero-init fix lives inside ncclCuMemAlloc and
+            // is independent of NCCL's runtime decision to *use* cuMem (which is
+            // version-gated and may be off, e.g. on ROCm releases in the
+            // HIP-version gap below the 7.12 native cutoff). If the VMM driver API
+            // is genuinely unavailable, the allocation fails and we skip.
+
+            // Use a multi-MB size (larger than the VMM allocation granularity) to
+            // span the offsets where the ROCM-20370 residue was observed.
+            constexpr size_t size = 4 * 1024 * 1024;
+
+            void*                           ptr    = nullptr;
+            hipMemGenericAllocationHandle_t handle = {};
+            ncclResult_t                    result
+                = ncclCuMemAlloc(&ptr, &handle, ncclCuMemHandleType, size, /*manager=*/nullptr);
+            if(result != ncclSuccess)
+            {
+                // VMM requested but not actually usable on this device/driver.
+                GTEST_SKIP() << "ncclCuMemAlloc unsupported here (result=" << result << ")";
+            }
+            ASSERT_NE(ptr, nullptr);
+
+            // Pre-fill the host buffer with a poison pattern so a successful copy of
+            // genuinely-zeroed device memory is what clears it.
+            std::vector<uint8_t> host(size, 0xFF);
+            ASSERT_EQ(hipMemcpy(host.data(), ptr, size, hipMemcpyDeviceToHost), hipSuccess);
+
+            size_t firstNonZero = size;
+            for(size_t i = 0; i < size; ++i)
+            {
+                if(host[i] != 0)
+                {
+                    firstNonZero = i;
+                    break;
+                }
+            }
+            EXPECT_EQ(firstNonZero, size)
+                << "ncclCuMemAlloc returned non-zero byte at offset " << firstNonZero
+                << " (NCCL issue #1962 / ROCM-20370 regression)";
+
+            EXPECT_EQ(ncclCuMemFree(ptr, /*manager=*/nullptr), ncclSuccess);
+        });
+}
+#endif // ROCM_VERSION >= 70000
 
 TEST(Alloc, NcclCudaMemcpy)
 {
