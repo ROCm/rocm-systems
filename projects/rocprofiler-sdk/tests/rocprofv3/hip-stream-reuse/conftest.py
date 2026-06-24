@@ -49,7 +49,7 @@ def pytest_addoption(parser):
 def json_data(request):
     filename = request.config.getoption("--json-input")
     if not os.path.isfile(filename):
-        return pytest.skip("stream tracing unavailable")
+        pytest.fail(f"stream tracing output unavailable: {filename}")
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
@@ -59,6 +59,6 @@ def pointer_data(request):
     """Read the raw hipStream_t pointer values written by the test binary."""
     filename = request.config.getoption("--pointer-file")
     if not os.path.isfile(filename):
-        return pytest.skip("pointer file unavailable")
+        pytest.fail(f"stream pointer file unavailable: {filename}")
     with open(filename, "r") as inp:
         return [line.strip() for line in inp if line.strip()]
