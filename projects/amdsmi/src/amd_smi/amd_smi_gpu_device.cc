@@ -502,13 +502,18 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_i
       while (std::getline(sstr, node_cpus, ',')) {
         size_t hyphen = node_cpus.find('-');
         if (hyphen != std::string::npos) {
-          size_t start = static_cast<size_t>(std::stoi(node_cpus.substr(0, hyphen)));
-          size_t end = static_cast<size_t>(std::stoi(node_cpus.substr(hyphen + 1)));
+          int start_int = std::stoi(node_cpus.substr(0, hyphen));
+          int end_int = std::stoi(node_cpus.substr(hyphen + 1));
+          if (start_int < 0 || end_int < 0) continue;
+          size_t start = static_cast<size_t>(start_int);
+          size_t end = static_cast<size_t>(end_int);
           for (size_t i = start; i <= end; ++i) {
             bitmask[i / 64] |= (1ULL << (i % 64));
           }
         } else {
-          size_t core = static_cast<size_t>(std::stoi(node_cpus));
+          int core_int = std::stoi(node_cpus);
+          if (core_int < 0) continue;
+          size_t core = static_cast<size_t>(core_int);
           bitmask[core / 64] |= (1ULL << (core % 64));
         }
       }
@@ -537,13 +542,18 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_local_cpulist(uint32_t d
       while (std::getline(sstr, node_cpus, ',')) {
         size_t hyphen = node_cpus.find('-');
         if (hyphen != std::string::npos) {
-          size_t start = static_cast<size_t>(std::stoi(node_cpus.substr(0, hyphen)));
-          size_t end = static_cast<size_t>(std::stoi(node_cpus.substr(hyphen + 1)));
+          int start_int = std::stoi(node_cpus.substr(0, hyphen));
+          int end_int = std::stoi(node_cpus.substr(hyphen + 1));
+          if (start_int < 0 || end_int < 0) continue;
+          size_t start = static_cast<size_t>(start_int);
+          size_t end = static_cast<size_t>(end_int);
           for (size_t i = start; i <= end; ++i) {
             bitmask[i / 64] |= (1ULL << (i % 64));
           }
         } else {
-          size_t core = static_cast<size_t>(std::stoi(node_cpus));
+          int core_int = std::stoi(node_cpus);
+          if (core_int < 0) continue;
+          size_t core = static_cast<size_t>(core_int);
           bitmask[core / 64] |= (1ULL << (core % 64));
         }
       }
