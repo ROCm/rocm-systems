@@ -62,7 +62,7 @@ Formatted with **gersemi** (cmake-format replacement).
 ## Pull Request Guidelines ##
 
 When you create a pull request, you should target the default branch. Our
-current default branch is the **amd-staging** branch, which serves as our
+current default branch is the **develop** branch, which serves as our
 integration branch.
 
 ### Deliverables ###

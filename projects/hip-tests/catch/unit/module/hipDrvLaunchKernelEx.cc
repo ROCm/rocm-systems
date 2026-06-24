@@ -435,6 +435,174 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
   HIP_CHECK(hipModuleUnload(module));
   CTX_DESTROY();
 }
+#if !defined(_WIN32)
+/**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipDrvLaunchKernelEx with hipLaunchAttributeClusterDimension
+ *  - is correctly captured during stream capture:
+ *  - 1) Captured graph node count >= 1.
+ *  - 2) hipGraphKernelNodeGetAttribute returns the captured cluster dims.
+ *  - 3) hipGraphKernelNodeSetAttribute updates cluster dims on the graph node.
+ *  - 4) Graph replay produces the expected kernel output.
+ *  - Only runs on devices with cluster launch support (gfx1250/gfx1251).
+ * Test source
+ * ------------------------
+ *  - unit/module/hipDrvLaunchKernelEx.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ *  - AMD GPU with cluster launch support (gfx1250/gfx1251)
+ */
+HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+
+  if (!prop.clusterLaunch) {
+    HIP_SKIP_TEST("Test requires a device with cluster launch support");
+  }
+
+  static const char* fill_src = R"(
+    extern "C" __global__ void fill(int* out, int val, int n) {
+      int i = blockIdx.x * blockDim.x + threadIdx.x;
+      if (i < n) out[i] = val;
+    }
+  )";
+
+  hiprtcProgram prog;
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, fill_src, "fill.cu", 0, nullptr, nullptr));
+  char arch_flag[64];
+  snprintf(arch_flag, sizeof(arch_flag), "--offload-arch=%s", prop.gcnArchName);
+  const char* opts[] = {arch_flag};
+  REQUIRE(hiprtcCompileProgram(prog, 1, opts) == HIPRTC_SUCCESS);
+
+  size_t code_size;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &code_size));
+  std::vector<char> code(code_size);
+  HIPRTC_CHECK(hiprtcGetCode(prog, code.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+
+  hipModule_t mod;
+  hipFunction_t fn;
+  HIP_CHECK(hipModuleLoadData(&mod, code.data()));
+  HIP_CHECK(hipModuleGetFunction(&fn, mod, "fill"));
+
+  constexpr int N_ELEM  = 1024;
+  constexpr int BLOCK   = 64;
+  constexpr int GRID    = N_ELEM / BLOCK;  // 16 blocks
+  constexpr int CLUSTER = 4;              // 4 blocks per cluster
+
+  int* d_out = nullptr;
+  HIP_CHECK(hipMalloc(&d_out, N_ELEM * sizeof(int)));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // Warmup run before capture to ensure JIT compilation is done
+  {
+    HIP_LAUNCH_CONFIG cfg{};
+    cfg.gridDimX = GRID; cfg.gridDimY = 1; cfg.gridDimZ = 1;
+    cfg.blockDimX = BLOCK; cfg.blockDimY = 1; cfg.blockDimZ = 1;
+    cfg.hStream = stream;
+    hipLaunchAttribute attr{};
+    attr.id = hipLaunchAttributeClusterDimension;
+    attr.value.clusterDim = {CLUSTER, 1, 1};
+    cfg.attrs = &attr;
+    cfg.numAttrs = 1;
+    int val = 0, n = N_ELEM;
+    void* kargs[] = {&d_out, &val, &n};
+    HIP_CHECK(hipDrvLaunchKernelEx(&cfg, fn, kargs, nullptr));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+
+  HIP_CHECK(hipMemset(d_out, 0, N_ELEM * sizeof(int)));
+
+  // Capture a cluster-dim kernel launch into a graph
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  {
+    HIP_LAUNCH_CONFIG cfg{};
+    cfg.gridDimX = GRID; cfg.gridDimY = 1; cfg.gridDimZ = 1;
+    cfg.blockDimX = BLOCK; cfg.blockDimY = 1; cfg.blockDimZ = 1;
+    cfg.hStream = stream;
+    hipLaunchAttribute attr{};
+    attr.id = hipLaunchAttributeClusterDimension;
+    attr.value.clusterDim = {CLUSTER, 1, 1};
+    cfg.attrs = &attr;
+    cfg.numAttrs = 1;
+    int val = 42, n = N_ELEM;
+    void* kargs[] = {&d_out, &val, &n};
+    HIP_CHECK(hipDrvLaunchKernelEx(&cfg, fn, kargs, nullptr));
+  }
+
+  hipGraph_t graph;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+  // 1) Verify at least one kernel node was captured
+  size_t num_nodes = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes));
+  REQUIRE(num_nodes >= 1);
+
+  std::vector<hipGraphNode_t> nodes(num_nodes);
+  HIP_CHECK(hipGraphGetNodes(graph, nodes.data(), &num_nodes));
+
+  // Find the kernel node
+  hipGraphNode_t kernel_node = nullptr;
+  for (auto node : nodes) {
+    hipGraphNodeType type;
+    HIP_CHECK(hipGraphNodeGetType(node, &type));
+    if (type == hipGraphNodeTypeKernel) {
+      kernel_node = node;
+      break;
+    }
+  }
+  REQUIRE(kernel_node != nullptr);
+
+  // 2) Verify hipGraphKernelNodeGetAttribute returns the captured cluster dims
+  hipKernelNodeAttrValue got_attr{};
+  HIP_CHECK(hipGraphKernelNodeGetAttribute(kernel_node, hipLaunchAttributeClusterDimension,
+                                           &got_attr));
+  REQUIRE(got_attr.clusterDim.x == CLUSTER);
+  REQUIRE(got_attr.clusterDim.y == 1);
+  REQUIRE(got_attr.clusterDim.z == 1);
+
+  // 3) Update cluster dims via hipGraphKernelNodeSetAttribute and read back
+  hipKernelNodeAttrValue set_attr{};
+  set_attr.clusterDim = {2, 1, 1};
+  HIP_CHECK(hipGraphKernelNodeSetAttribute(kernel_node, hipLaunchAttributeClusterDimension,
+                                           &set_attr));
+
+  hipKernelNodeAttrValue verify_attr{};
+  HIP_CHECK(hipGraphKernelNodeGetAttribute(kernel_node, hipLaunchAttributeClusterDimension,
+                                           &verify_attr));
+  REQUIRE(verify_attr.clusterDim.x == 2);
+  REQUIRE(verify_attr.clusterDim.y == 1);
+  REQUIRE(verify_attr.clusterDim.z == 1);
+
+  // Restore original cluster dim for replay
+  set_attr.clusterDim = {CLUSTER, 1, 1};
+  HIP_CHECK(hipGraphKernelNodeSetAttribute(kernel_node, hipLaunchAttributeClusterDimension,
+                                           &set_attr));
+
+  // 4) Instantiate and replay; verify correct kernel output
+  hipGraphExec_t exec;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(exec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<int> h_out(N_ELEM);
+  HIP_CHECK(hipMemcpy(h_out.data(), d_out, N_ELEM * sizeof(int), hipMemcpyDeviceToHost));
+  for (int i = 0; i < N_ELEM; i++) {
+    REQUIRE(h_out[i] == 42);
+  }
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipModuleUnload(mod));
+}
+#endif  // !defined(_WIN32)
+
 /**
  * End doxygen group ModuleTest.
  * @}

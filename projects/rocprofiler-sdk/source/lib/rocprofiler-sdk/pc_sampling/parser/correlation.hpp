@@ -54,7 +54,7 @@ struct dispatch_correlation_ids_t
 };
 
 /**
- * @brief Struct immitating the correlation_id returned by the trap handler in raw PC samples.
+ * @brief Struct imitating the correlation_id returned by the trap handler in raw PC samples.
  */
 union trap_correlation_id_t
 {
@@ -129,7 +129,7 @@ public:
     };
 
     /**
-     * Checks wether a dispatch pkt will generate a collision.
+     * Checks whether a dispatch pkt will generate a collision.
      * @returns true on collision and false when slot is available.
      */
     bool checkDispatch(const dispatch_pkt_id_t& pkt) const
@@ -196,7 +196,7 @@ public:
      * @param[in] write_idx The dispatch packet write index, [optional] not wrapped
      * @param[in] queue_size The queue size. [optional] If write_index is already wrapped,
      *                       then this value can just be a large integer > queue_size.
-     * @returns The correlation_id immitating the ones returned by the trap handler.
+     * @returns The correlation_id imitating the ones returned by the trap handler.
      */
     static trap_correlation_id_t trap_correlation_id(uint64_t doorbell,
                                                      uint64_t write_idx,

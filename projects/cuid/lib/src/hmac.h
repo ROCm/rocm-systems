@@ -25,6 +25,10 @@
 
 #include "include/amd_cuid.h"
 #include <cstddef>
+#include <fstream>
+#include <iostream>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <string>
 
 #define key_length 32
@@ -42,18 +46,24 @@ private:
   uint8_t *key;
   size_t key_len;
   bool valid;
+  std::string key_file_path = "/opt/amdcuid/etc/hmac_key.bin";
 
 public:
   cuid_hmac();
+  cuid_hmac(uint8_t key_data[key_length]);
   ~cuid_hmac();
   bool is_valid() const { return valid; }
 
   amdcuid_status_t generate_hmac_sha256(const uint8_t *data, size_t data_len,
                                         uint8_t *out_hash, size_t *out_len);
+  amdcuid_status_t set_hmac_algorithm(const char *digest_name);
   amdcuid_status_t set_hmac_key(const uint8_t key_data[key_length]);
   amdcuid_status_t generate_key(uint8_t key[key_length]);
-
-  std::string key_file_path = "/opt/amdcuid/etc/hmac_key.bin";
+  std::string get_key_file_path() const { return key_file_path; }
 };
+
+// Unkeyed SHA-256 digest of data into a 32-byte output buffer.
+amdcuid_status_t sha256_unkeyed(const uint8_t *data, size_t data_len,
+                                uint8_t out[32]);
 
 #endif // HMAC_H

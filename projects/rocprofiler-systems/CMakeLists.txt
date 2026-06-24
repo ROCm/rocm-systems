@@ -51,31 +51,47 @@ set(BINARY_NAME_PREFIX "rocprof-sys")
 
 find_package(Git)
 
-if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+# ROCPROFSYS_GIT_DESCRIBE / ROCPROFSYS_GIT_REVISION may be provided on the command
+# line (e.g. tarball/CI builds with no git checkout); honor those if set.
+if(
+    NOT DEFINED ROCPROFSYS_GIT_DESCRIBE
+    AND NOT DEFINED ROCPROFSYS_GIT_REVISION
+    AND Git_FOUND
+)
+    # detect a git checkout via git itself rather than a literal .git directory so
+    # this works when the source is a subdirectory/submodule of a larger repo (the
+    # rocm-systems monorepo) where .git is not under PROJECT_SOURCE_DIR
     execute_process(
-        COMMAND ${GIT_EXECUTABLE} describe --tags
-        OUTPUT_VARIABLE ROCPROFSYS_GIT_DESCRIBE
+        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        OUTPUT_VARIABLE ROCPROFSYS_GIT_REVISION
         OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _GIT_DESCRIBE_RESULT
+        RESULT_VARIABLE _GIT_REVISION_RESULT
         ERROR_QUIET
     )
-    if(NOT _GIT_DESCRIBE_RESULT EQUAL 0)
+    if(_GIT_REVISION_RESULT EQUAL 0)
+        # Only record a tag when HEAD is *exactly* a tagged commit; otherwise leave
+        # it empty so the banner falls back to the full commit SHA instead of
+        # reporting a stale/nearest tag name that does not identify the source
         execute_process(
-            COMMAND ${GIT_EXECUTABLE} describe
+            COMMAND ${GIT_EXECUTABLE} describe --tags --exact-match
+            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
             OUTPUT_VARIABLE ROCPROFSYS_GIT_DESCRIBE
             OUTPUT_STRIP_TRAILING_WHITESPACE
             RESULT_VARIABLE _GIT_DESCRIBE_RESULT
             ERROR_QUIET
         )
+        if(NOT _GIT_DESCRIBE_RESULT EQUAL 0)
+            set(ROCPROFSYS_GIT_DESCRIBE "")
+        endif()
+    else()
+        set(ROCPROFSYS_GIT_REVISION "")
     endif()
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
-        OUTPUT_VARIABLE ROCPROFSYS_GIT_REVISION
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-else()
-    set(ROCPROFSYS_GIT_DESCRIBE "v${ROCPROFSYS_VERSION}")
+endif()
+if(NOT DEFINED ROCPROFSYS_GIT_DESCRIBE)
+    set(ROCPROFSYS_GIT_DESCRIBE "")
+endif()
+if(NOT DEFINED ROCPROFSYS_GIT_REVISION)
     set(ROCPROFSYS_GIT_REVISION "")
 endif()
 
