@@ -679,7 +679,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_Concurrent) {
   // Deallocate resources in each device
   for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    // Destroy resources
+    tesObjBuf[idx]->setThreadSafe(false);
     tesObjBuf[idx]->freeMempool();
     tesObjBuf[idx]->freeHostBuf();
     HIP_CHECK(hipStreamDestroy(stream_buf[idx]));
@@ -744,7 +744,8 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_MultiStream) {
   // Deallocate resources in each device
   for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    // Destroy resources
+    tesObjBuf[streamPerAsic * idx]->setThreadSafe(false);
+    tesObjBuf[streamPerAsic * idx + 1]->setThreadSafe(false);
     tesObjBuf[streamPerAsic * idx]->freeMempool();
     tesObjBuf[streamPerAsic * idx]->freeHostBuf();
     tesObjBuf[streamPerAsic * idx + 1]->freeMempool();

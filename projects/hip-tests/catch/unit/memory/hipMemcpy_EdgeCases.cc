@@ -242,11 +242,11 @@ template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hme
   }
 
   HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceSynchronize());
-  // checkVectorADD is thread-safe aware: when threadSafe is set it records any
-  // mismatch as a deferred result that is reported on the main thread by
-  // HIP_CHECK_THREAD_FINALIZE() instead of using thread-unsafe Catch2 macros.
-  HipTest::checkVectorADD(hmem->A_h(), hmem->B_h(), hmem->C_h(), numElements, true, true,
-                          threadSafe);
+  if (threadSafe) {
+    HipTest::checkVectorADDT(hmem->A_h(), hmem->B_h(), hmem->C_h(), numElements);
+  } else {
+    HipTest::checkVectorADD(hmem->A_h(), hmem->B_h(), hmem->C_h(), numElements);
+  }
 
 
   printf("  %s success\n", __func__);

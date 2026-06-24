@@ -24,7 +24,7 @@
 namespace HipTest {
 template <typename T>
 size_t checkVectors(T* A, T* B, T* Out, size_t N, T (*F)(T a, T b), bool expectMatch = true,
-                    bool reportMismatch = true, bool threadSafe = false) {
+                    bool reportMismatch = true) {
   size_t mismatchCount = 0;
   size_t firstMismatch = 0;
   size_t mismatchesToPrint = 10;
@@ -36,16 +36,8 @@ size_t checkVectors(T* A, T* B, T* Out, size_t N, T (*F)(T a, T b), bool expectM
       }
       mismatchCount++;
       if ((mismatchCount <= mismatchesToPrint) && expectMatch) {
-        if (threadSafe) {
-          // INFO/CHECK touch thread-unsafe Catch2 state, so from a worker thread
-          // record a deferred failure (carrying its diagnostic message) that is
-          // reported on the main thread by HIP_CHECK_THREAD_FINALIZE().
-          TestContext::get().addResults(HCResult(__LINE__, __FILE__, hipSuccess,
-                                                 "Mismatch at index " + std::to_string(i), false));
-        } else {
-          INFO("Mismatch at " << i << " Computed: " << Out[i] << " Expected: " << expected);
-          CHECK(false);
-        }
+        INFO("Mismatch at " << i << " Computed: " << Out[i] << " Expected: " << expected);
+        CHECK(false);
       }
     }
   }
@@ -53,31 +45,55 @@ size_t checkVectors(T* A, T* B, T* Out, size_t N, T (*F)(T a, T b), bool expectM
   if (reportMismatch) {
     if (expectMatch) {
       if (mismatchCount) {
-        if (threadSafe) {
-          TestContext::get().addResults(
-              HCResult(__LINE__, __FILE__, hipSuccess,
-                       std::to_string(mismatchCount) + " Mismatches. First Mismatch at index : " +
-                           std::to_string(firstMismatch),
-                       false));
-        } else {
-          INFO(mismatchCount << " Mismatches. First Mismatch at index : " << firstMismatch);
-          REQUIRE(false);
-        }
+        INFO(mismatchCount << " Mismatches. First Mismatch at index : " << firstMismatch);
+        REQUIRE(false);
       }
     } else {
       if (mismatchCount == 0) {
-        if (threadSafe) {
-          TestContext::get().addResults(HCResult(__LINE__, __FILE__, hipSuccess,
-                                                 "Expected Mismatch but not found any", false));
-        } else {
-          INFO("Expected Mismatch but not found any");
-          REQUIRE(false);
-        }
+        INFO("Expected Mismatch but not found any");
+        REQUIRE(false);
       }
     }
   }
 
   return mismatchCount;
+}
+
+// Thread-safe variant of checkVectors to be called from multi thread tests.
+// Call HIP_CHECK_THREAD_FINALIZE() after join.
+template <typename T>
+void checkVectorsT(T* A, T* B, T* Out, size_t N, T (*F)(T a, T b), bool expectMatch = true,
+                   bool reportMismatch = true) {
+  size_t mismatchCount = 0;
+  size_t firstMismatch = 0;
+  size_t mismatchesToPrint = 10;
+  for (size_t i = 0; i < N; i++) {
+    T expected = F(A[i], B[i]);
+    if (std::fabs(Out[i] - expected) > TOL) {
+      if (mismatchCount == 0) {
+        firstMismatch = i;
+      }
+      mismatchCount++;
+      if ((mismatchCount <= mismatchesToPrint) && expectMatch) {
+        INFO_THREAD("Mismatch at " << i << " Computed: " << Out[i] << " Expected: " << expected);
+        CHECK_THREAD(false);
+      }
+    }
+  }
+
+  if (reportMismatch) {
+    if (expectMatch) {
+      if (mismatchCount) {
+        INFO_THREAD(mismatchCount << " Mismatches. First Mismatch at index : " << firstMismatch);
+        CHECK_THREAD(false);
+      }
+    } else {
+      if (mismatchCount == 0) {
+        INFO_THREAD("Expected Mismatch but not found any");
+        CHECK_THREAD(false);
+      }
+    }
+  }
 }
 template <typename T>  // pointer type
 bool checkArray(T* hData, T* hOutputData, size_t width, size_t height, size_t depth = 1) {
@@ -99,10 +115,18 @@ bool checkArray(T* hData, T* hOutputData, size_t width, size_t height, size_t de
 
 template <typename T>
 size_t checkVectorADD(T* A_h, T* B_h, T* result_H, size_t N, bool expectMatch = true,
-                      bool reportMismatch = true, bool threadSafe = false) {
+                      bool reportMismatch = true) {
   return checkVectors<T>(
-      A_h, B_h, result_H, N, [](T a, T b) { return a + b; }, expectMatch, reportMismatch,
-      threadSafe);
+      A_h, B_h, result_H, N, [](T a, T b) { return a + b; }, expectMatch, reportMismatch);
+}
+
+// Thread-safe variant of checkVectorADD to be called from multi thread tests.
+// Call HIP_CHECK_THREAD_FINALIZE() after join.
+template <typename T>
+void checkVectorADDT(T* A_h, T* B_h, T* result_H, size_t N, bool expectMatch = true,
+                     bool reportMismatch = true) {
+  checkVectorsT<T>(
+      A_h, B_h, result_H, N, [](T a, T b) { return a + b; }, expectMatch, reportMismatch);
 }
 
 template <typename T>
