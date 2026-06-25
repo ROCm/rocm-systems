@@ -54,7 +54,7 @@ namespace rocr {
 namespace core {
 
   std::string ThunkLoader::whoami() {
-    is_dtif_ = is_dxg_ = false;
+    is_dtif_ = is_win_dxg_ = is_wsl_dxg_ = false;
     if (core::Runtime::runtime_singleton_->flag().enable_dtif()) {
       is_dtif_ = true;
 #if defined(_WIN32)
@@ -69,12 +69,12 @@ namespace core {
       int fd = open("/dev/dxg", O_RDWR);
       if (fd >= 0) {
         close(fd);
-        is_dxg_ = true;
+        is_wsl_dxg_ = true;
         return "librocdxg.so";
       }
     }
 #else
-    is_dxg_ = true;
+    is_win_dxg_ = true;
 #endif
 
     return "";

@@ -41,15 +41,31 @@ env:
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
 
 jobs:
-  pytest:
+  test:
     runs-on: azure-linux-scale-rocm
-    name: pytest
+    name: test (${{ matrix.name }})
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --user 0:0
       env:
         DEBIAN_FRONTEND: noninteractive
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            build_type: Release
+            enable_asan: 0
+            enable_ubsan: 0
+            enable_tsan: 0
+            enable_msan: 0
+          - name: asan-ubsan
+            build_type: RelWithDebInfo
+            enable_asan: 1
+            enable_ubsan: 1
+            enable_tsan: 0
+            enable_msan: 0
 
     steps:
       - name: Install base dependencies
@@ -73,6 +89,7 @@ jobs:
             .github
 
       - name: Checkout rocjitsu corpus
+        if: matrix.name == 'release'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
@@ -96,6 +113,7 @@ jobs:
 
       - name: Build rocjitsu
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        shell: bash
         run: |
           ROCMINFO=RocminfoTest
           ROCBLAS_GEMM=RocblasGemmTest
@@ -104,28 +122,93 @@ jobs:
           ROCBLAS_GEMM_FUZZ=RocblasGemmFuzz
           ROCBLAS_GEMM_CDNA3=RocblasGemmCdna3
           EXCLUDED_TESTS="${ROCMINFO}|${ROCBLAS_GEMM}|${RCCL_DAEMON}|${ROCBLAS_GEMMS}|${ROCBLAS_GEMM_FUZZ}|${ROCBLAS_GEMM_CDNA3}"
-          echo "CXXFLAGS=-Wno-error=unknown-warning-option -Wno-error=nested-anon-types" >> "${GITHUB_ENV}"
+          ASAN_UBSAN_EXCLUDED_TESTS=(
+            "HsaTest\.InitSucceeded"
+            "HsaTest\.GpuAgentFound"
+            "HipMemcpyTest\.RoundTripFloat"
+            "HipMemcpyTest\.RoundTripInt"
+            "HipMemcpyTest\.DeviceToDevice"
+            "HipVectorAddTest\.CorrectResult"
+            "DaemonTest\.HipVectorAdd"
+            "DaemonTest\.HipMemcpyRoundTripFloat"
+            "DaemonTest\.HipMemcpyRoundTripInt"
+            "DaemonTest\.HipMemcpyDeviceToDevice"
+            "DaemonTest\.TwoIndependentClients"
+            "BfeRegressionTest\.ThreadIdxY"
+            "LoggingTest\.dispatch_logged"
+            "ProfiledPluginTest\.hook_profile_output"
+            "CvtNarrow\.AllTests"
+            "RaceTest\.vgpr_waitcnt"
+            "RaceTest\.vgpr_waitcnt_race"
+            "RaceTest\.sgpr_waitcnt"
+            "RaceTest\.sgpr_waitcnt_race"
+            "RaceTest\.lds_cross_wave"
+            "RaceTest\.lds_cross_wave_race"
+            "RaceTest\.global_to_lds_buffer"
+            "RaceTest\.global_to_lds_buffer_race"
+            "RaceTest\.partial_vmcnt_race"
+            "RaceTest\.multiple_race"
+            "RaceTest\.multi_kernel"
+            "RaceTest\.multi_kernel_race"
+            "RaceTest\.multi_workgroup"
+            "RaceTest\.multi_workgroup_race"
+            "RaceTest\.mixed_counters_race"
+            "RaceTest\.stress_wavefront_reuse"
+            "RaceTest\.stress_wavefront_reuse_race"
+            "RaceTest\.exec_mask"
+            "RaceTest\.exec_mask_race"
+            "RaceTest\.exec_mask_same_wave"
+            "RaceTest\.exec_mask_cross_wave_race"
+            "RaceTest\.exec_mask_cross_wave"
+            "RaceTest\.lds_transpose"
+            "RaceTest\.lds_transpose_race"
+            "RaceTest\.dual_offset_lds"
+            "RaceTest\.dual_offset_lds_race"
+            "RaceTest\.scratch_vmcnt"
+            "RaceTest\.scratch_vmcnt_race"
+            "RaceTest\.f64_vgpr_safe"
+            "RaceTest\.f64_vgpr_race"
+          )
+
+          CMAKE_CONFIG_FLAGS=()
+          if [[ "${{ matrix.name }}" == "asan-ubsan" ]]; then
+            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
+            CMAKE_CONFIG_FLAGS+=(
+              -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
+              -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
+            )
+          fi
+
+          CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
           ROCM_PATH=`rocm-sdk path --root` \
-          cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
+            cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
             -DCMAKE_C_FLAGS="${CFLAGS:-}" \
-            -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}"
+            -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}" \
+            "${CMAKE_CONFIG_FLAGS[@]}" \
+            -DRJ_ENABLE_ASAN=${{ matrix.enable_asan }} \
+            -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
+            -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
+            -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
+
           cmake --build "${ROCJITSU_BUILD_DIR}"
 
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
-            -E ${EXCLUDED_TESTS} \
+            -E "${EXCLUDED_TESTS}" \
             --output-on-failure
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
 
       - name: Install corpus test dependencies
+        if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
       - name: Run corpus tests
+        if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:
