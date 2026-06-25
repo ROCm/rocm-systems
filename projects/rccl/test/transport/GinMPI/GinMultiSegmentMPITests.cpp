@@ -274,6 +274,53 @@ TEST_F(GinMultiSegmentMPITest, IGetMultiSegment)
     Barrier();
 }
 
+// Receiver-side flush over a multi-segment buffer: after a plain iput, rank 1
+// must fence EVERY physical segment via iflush (one loopback read per segment)
+// before reading. Exercises the multi-segment flush path; a segment-0-only
+// flush faults here on a multi-segment handle.
+TEST_F(GinMultiSegmentMPITest, IFlushMultiSegment)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* sb = AllocSym(kNumSegments, kSegRequestBytes);
+    MultiSegmentVmmBuffer* rb = AllocSym(kNumSegments, kSegRequestBytes);
+
+    if (SyncSkip(sb == nullptr || rb == nullptr))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t kSize = sb->totalSize;
+    if (worldRank_ == 0)
+        FillBuf(sb->ptr, kSize, /*seed=*/0x3C);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize, &recvMh, &recvGh));
+
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  gin_->iput(ginCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        void* freq = nullptr;
+        EXPECT_EQ(ncclSuccess, gin_->iflush(ginCtx_, 0, recvMh, /*peerRank=*/0, &freq))
+            << "multi-segment iflush post failed";
+        EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+        EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x3C))
+            << "data corrupted across segment boundaries after flush";
+    }
+    Barrier();
+}
+
 // IPutSignal over a multi-segment payload: data WRs split per segment, then a
 // chained signal WR. Verifies both payload and the atomic.
 TEST_F(GinMultiSegmentMPITest, IPutSignalMultiSegment)

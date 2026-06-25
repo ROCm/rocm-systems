@@ -18,8 +18,7 @@
 namespace RCCLGinTests
 {
 
-// Contiguous VA range backed by N distinct VMM allocations mapped back-to-back
-// (the AIRUNTIME-2351 shape). See docs/dev/gin-multi-segment-dmabuf.md.
+// Contiguous VA range backed by N distinct VMM allocations mapped back-to-back.
 struct MultiSegmentVmmBuffer
 {
     void*                                        ptr        = nullptr;

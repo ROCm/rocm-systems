@@ -398,14 +398,13 @@ ncclGin_t ncclGinIbGdaki = {
 #endif // !defined(__HIP_PLATFORM_AMD__)
 
 
-// Cap on physical segments per symmetric buffer (AIRUNTIME-2351 per-segment MRs).
-// See docs/dev/gin-multi-segment-dmabuf.md.
+// Cap on physical segments per symmetric buffer.
 #define NCCL_GIN_MAX_SEGMENTS 16
 
 struct ncclIbGinProxyMrHandle {
   int nSegments;
   // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs; remote view
-  // base_vas/rkeys indexed [rank*nSegments + seg]. See walkthrough doc.
+  // base_vas/rkeys indexed [rank*nSegments + seg].
   size_t segOff[NCCL_GIN_MAX_SEGMENTS + 1];
   struct ncclIbMrHandle *mrHandle[NCCL_GIN_MAX_SEGMENTS];
   uintptr_t *base_vas;
@@ -430,13 +429,23 @@ static inline bool ncclGinRangeOk(const struct ncclIbGinProxyMrHandle* h, uint64
   return off <= bytes && (uint64_t)size <= bytes - off;
 }
 
-// Build a chained RDMA WR list moving size bytes, splitting at segment
-// boundaries on both sides so each WR stays in one local + one remote MR.
+// Build a chained RDMA WR list, splitting at segment boundaries so every WR
+// stays within a single physical segment's MR.
+//
+// Paired mode (flushSge == NULL): move `size` bytes between a local and a
+// remote symmetric buffer, splitting on both sides; each WR carries one local
+// lkey and one remote rkey.
+//
+// Flush mode (flushSge != NULL): the local handle is ignored; emit one tiny
+// RDMA_READ per remote segment touched by [remoteOff, remoteOff+size), each
+// landing a single byte in the caller's flush scratch. Passing the whole
+// window thus fences GPUDirect writes across every physical segment (the
+// caller reads its own buffer via base_vas[self]/rkeys[self] on a loopback QP).
 static ncclResult_t ncclGinBuildSegmentedWrs(
     struct ibv_send_wr* wr, struct ibv_sge* sge, int maxWr, int* nWr, enum ibv_wr_opcode opcode, uint64_t wrId,
     struct ncclIbGinProxyMrHandle* localH,  int localRank,  uint64_t localOff,
     struct ncclIbGinProxyMrHandle* remoteH, int remoteRank, uint64_t remoteOff,
-    size_t size) {
+    size_t size, const struct ibv_sge* flushSge) {
   int n = 0;
   uint64_t lOff = localOff, rOff = remoteOff;
   size_t rem = size;
@@ -445,13 +454,16 @@ static ncclResult_t ncclGinBuildSegmentedWrs(
       WARN("NET/IB/GIN: transfer of %zu bytes spans more than %d segment slices", size, maxWr);
       return ncclInternalError;
     }
-    int ls = ncclGinSegOf(localH, lOff);
     int rs = ncclGinSegOf(remoteH, rOff);
     size_t chunk = rem;
-    if (localH->segOff[ls + 1] - lOff < chunk)  chunk = localH->segOff[ls + 1] - lOff;
     if (remoteH->segOff[rs + 1] - rOff < chunk) chunk = remoteH->segOff[rs + 1] - rOff;
 
-    uintptr_t lAddr = localH->base_vas[(size_t)localRank  * localH->nSegments  + ls] + (lOff - localH->segOff[ls]);
+    int ls = 0;
+    if (flushSge == NULL) {
+      ls = ncclGinSegOf(localH, lOff);
+      if (localH->segOff[ls + 1] - lOff < chunk) chunk = localH->segOff[ls + 1] - lOff;
+    }
+
     uintptr_t rAddr = remoteH->base_vas[(size_t)remoteRank * remoteH->nSegments + rs] + (rOff - remoteH->segOff[rs]);
 
     memset(&wr[n], 0, sizeof(wr[n]));
@@ -463,9 +475,16 @@ static ncclResult_t ncclGinBuildSegmentedWrs(
     wr[n].wr.rdma.rkey = remoteH->rkeys[(size_t)remoteRank * remoteH->nSegments + rs];
     wr[n].sg_list = &sge[n];
     wr[n].num_sge = 1;
-    sge[n].addr = (uintptr_t)lAddr;
-    sge[n].length = chunk;
-    sge[n].lkey = localH->mrHandle[ls]->mrs[0]->lkey;
+    if (flushSge != NULL) {
+      // Touch one byte of this segment; the data lands in the fixed scratch.
+      sge[n] = *flushSge;
+      sge[n].length = 1;
+    } else {
+      uintptr_t lAddr = localH->base_vas[(size_t)localRank * localH->nSegments + ls] + (lOff - localH->segOff[ls]);
+      sge[n].addr = (uintptr_t)lAddr;
+      sge[n].length = chunk;
+      sge[n].lkey = localH->mrHandle[ls]->mrs[0]->lkey;
+    }
     if (n > 0) wr[n - 1].next = &wr[n];
 
     lOff += chunk; rOff += chunk; rem -= chunk; n++;
@@ -752,7 +771,7 @@ ncclResult_t ncclGinIbProxyIPut(void *ginCtx, int context, uint64_t srcOff, void
   NCCLCHECK(ncclGinBuildSegmentedWrs(wr, sge, 2 * NCCL_GIN_MAX_SEGMENTS, &nWr, IBV_WR_RDMA_WRITE,
                                      req - comm->base.reqs,
                                      srcMrHandle, ginProxyCtx->rank, srcOff,
-                                     dstMrHandle, rank, dstOff, size));
+                                     dstMrHandle, rank, dstOff, size, /*flushSge=*/NULL));
   for (int i = 0; i < nWr; i++) {
     wr[i].send_flags = IBV_SEND_SIGNALED;
     ncclIbAddEvent(req, qp->devIndex);
@@ -804,7 +823,7 @@ ncclResult_t ncclGinIbProxyIGet(void *ginCtx, int context, uint64_t remoteOffset
   NCCLCHECK(ncclGinBuildSegmentedWrs(wr, sge, 2 * NCCL_GIN_MAX_SEGMENTS, &nWr, IBV_WR_RDMA_READ,
                                      req - comm->base.reqs,
                                      localMrHandle, ginProxyCtx->rank, localOffset,
-                                     remoteMrHandle, rank, remoteOffset, size));
+                                     remoteMrHandle, rank, remoteOffset, size, /*flushSge=*/NULL));
   for (int i = 0; i < nWr; i++) {
     wr[i].send_flags = IBV_SEND_SIGNALED;
     ncclIbAddEvent(req, qp->devIndex);
@@ -873,7 +892,7 @@ ncclResult_t ncclGinIbProxyIPutSignal(void *ginCtx, int context, uint64_t srcOff
     NCCLCHECK(ncclGinBuildSegmentedWrs(wr, sge, 2 * NCCL_GIN_MAX_SEGMENTS, &nPut, IBV_WR_RDMA_WRITE,
                                        req - comm->base.reqs,
                                        srcMrHandle, ginProxyCtx->rank, srcOff,
-                                       dstMrHandle, rank, dstOff, size));
+                                       dstMrHandle, rank, dstOff, size, /*flushSge=*/NULL));
     for (int i = 0; i < nPut; i++) wr[i].send_flags = 0;
   }
 
@@ -981,29 +1000,31 @@ ncclResult_t ncclGinIbProxyIFlush(void *ginCtx, int context, void* mhandle, uint
   req->iput.rank = rank;
   req->ginProxyCtx = ginProxyCtx;
 
-  struct ibv_send_wr wr;
-  memset(&wr, 0, sizeof(wr));
-  wr.wr_id = req - comm->base.reqs;
+  // Fence GPUDirect writes across EVERY physical segment, not just segment 0.
+  // The builder (flush mode) emits one loopback RDMA_READ per segment of the
+  // local recv buffer -- read via base_vas[self]/rkeys[self], the same own-MR
+  // addr/rkey ncclIbIflush uses -- each landing one byte in the flush scratch.
+  struct ibv_send_wr wr[NCCL_GIN_MAX_SEGMENTS];
+  struct ibv_sge sge[NCCL_GIN_MAX_SEGMENTS];
+  int nWr = 0;
+  NCCLCHECK(ncclGinBuildSegmentedWrs(wr, sge, NCCL_GIN_MAX_SEGMENTS, &nWr, IBV_WR_RDMA_READ,
+                                     req - comm->base.reqs,
+                                     /*localH=*/NULL, /*localRank=*/0, /*localOff=*/0,
+                                     /*remoteH=*/ginMrHandle, /*remoteRank=*/ginProxyCtx->rank, /*remoteOff=*/0,
+                                     /*size=*/ncclGinMrBytes(ginMrHandle),
+                                     /*flushSge=*/&comm->devs[qp->devIndex].gpuFlush.sge));
+  for (int i = 0; i < nWr; i++) {
+    wr[i].send_flags = IBV_SEND_SIGNALED;
+    ncclIbAddEvent(req, qp->devIndex);
+  }
 
-  // A flush just needs to read back any byte of the remote window; use the
-  // first segment's base VA / rkey.
-  void *flushPtr = (void *)(ginMrHandle->base_vas[(size_t)rank * ginMrHandle->nSegments]);
-  wr.wr.rdma.remote_addr = (uint64_t)flushPtr;
-  wr.wr.rdma.rkey = ginMrHandle->rkeys[(size_t)rank * ginMrHandle->nSegments];
-  wr.sg_list = &comm->devs[qp->devIndex].gpuFlush.sge;
-  wr.num_sge = 1;
-  wr.opcode = IBV_WR_RDMA_READ;
-  wr.send_flags = IBV_SEND_SIGNALED;
-
-  TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base, wr.wr_id);
+  TRACE(NCCL_NET, "NET/IB: %s: Posting %d-segment flush request (req=%p, comm=%p)", __func__, nWr, req, req->base);
   TIME_START(4);
-  struct ibv_send_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_send(qp->qp, &wr, &bad_wr));
+  if (nWr > 0) {
+    struct ibv_send_wr* bad_wr;
+    NCCLCHECK(wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr));
+  }
   TIME_STOP(4);
-
-  ncclIbAddEvent(req, qp->devIndex);
-
-  TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base, wr.wr_id);
 
   *request = req;
   return ncclSuccess;
