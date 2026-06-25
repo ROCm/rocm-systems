@@ -794,7 +794,7 @@ class db_analysis(OmniAnalyze_Base):
             gfx_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
             arch_config = self._arch_configs[gfx_arch]
 
-            # Build table_id -> title map (e.g. 201 -> "Wavefront").
+            # Build table_id -> title map (e.g. 700 -> "Wavefront", 701 -> "Wavefront Launch Stats").
             table_names_map: dict[int, str] = {}
             for panel_config in arch_config.panel_configs.values():
                 table_names_map[panel_config["id"]] = panel_config["title"]
