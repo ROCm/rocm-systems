@@ -20,21 +20,17 @@
  * THE SOFTWARE.
  */
 
-// Driver-free unit test for amdsmi status-code handling. It needs no GPU and
-// performs no amdsmi_init(), so it can move into a dedicated unit-test target
-// during the test refactor.
+// Driver-free unit test for amdsmi status-code handling: no GPU, no
+// amdsmi_init().
 //
-// Two complementary checks:
-//   1. Positive (mirror of the Python test_status_code_to_string): every
-//      amdsmi_status_t enumerator must resolve, via amdsmi_status_code_to_string(),
-//      to a description that begins with its own enum name. A missing `case`
-//      makes the code fall through to the UNKNOWN_ERROR default, which this
-//      catches.
-//   2. Negative: simulate a lower-level (rocm_smi) status that the amdsmi layer
-//      has no mapping for and confirm rsmi_to_amdsmi_status() surfaces
-//      AMDSMI_STATUS_MAP_ERROR rather than silently mistranslating it. This is
-//      the case the Python test cannot reach, because it can only feed codes
-//      that already exist in the amdsmi layer.
+// Two checks:
+//   1. Positive: every amdsmi_status_t enumerator resolves, via
+//      amdsmi_status_code_to_string(), to a description starting with its own
+//      enum name. A missing `case` falls through to the UNKNOWN_ERROR default,
+//      which this catches. (Mirrors the Python test_status_code_to_string.)
+//   2. Negative: a lower-level rocm_smi status with no amdsmi mapping must
+//      surface AMDSMI_STATUS_MAP_ERROR via rsmi_to_amdsmi_status(). The Python
+//      test cannot reach this, since it only feeds existing amdsmi codes.
 
 #include <gtest/gtest.h>
 
@@ -52,32 +48,26 @@ namespace {
 // ---------------------------------------------------------------------------
 // Compile-time enum reflection (stopgap until C++26 static reflection / P2996).
 //
-// C++17 erases enums to plain integers: there is no built-in way to list an
-// enum's members or recover their names, which is why the matching Python test
-// can loop `for status in amdsmi.AmdSmiStatus` but C++ cannot. We recover the
-// names the same way the magic_enum library does: instantiate a template on the
-// value and read the enumerator name the compiler bakes into __PRETTY_FUNCTION__
-// (or __FUNCSIG__ on MSVC). For a real enumerator GCC/Clang render
-// `... V = AMDSMI_STATUS_TIMEOUT]`; for an unused slot GCC renders a cast,
-// `... V = (amdsmi_status_t)28]`, and Clang renders a bare integer,
-// `... V = 28]`. A real enumerator name is therefore the one that starts like a
-// C identifier, which lets us auto-discover every member in a bounded range.
+// C++17 cannot enumerate an enum's members or recover their names, so unlike
+// the Python test we cannot just loop over amdsmi.AmdSmiStatus. We use the
+// magic_enum trick: instantiate a template on a value and read the enumerator
+// name the compiler bakes into __PRETTY_FUNCTION__. A real enumerator renders
+// as `V = AMDSMI_STATUS_TIMEOUT`; an unused value renders as a cast on GCC
+// (`V = (amdsmi_status_t)28`) or a bare integer on Clang (`V = 28`). A name
+// that starts like a C identifier is therefore a real enumerator, which lets
+// us auto-discover every member by scanning a bounded range of values.
 //
-// amdsmi_status_t is sparse and ends in two ~4-billion sentinels
-// (AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE, AMDSMI_STATUS_UNKNOWN_ERROR =
-// 0xFFFFFFFF). A value scan cannot practically reach those, so the normal codes
-// are discovered by scanning the low range and the two stable sentinels are
-// seeded explicitly (their names still come from reflection, not hand-typing).
-// Adding a normal status code in range needs no change here.
+// The two sentinels sit at the top of the value range: AMDSMI_STATUS_MAP_ERROR
+// (UINT_MAX - 1) and AMDSMI_STATUS_UNKNOWN_ERROR (UINT_MAX). A scan cannot
+// reach those, so the low range is scanned for normal codes and the two
+// sentinels are seeded explicitly (names still come from reflection). Adding a
+// normal status code in range needs no change here.
 // ---------------------------------------------------------------------------
 
-// The reflection trick relies on __PRETTY_FUNCTION__ AND on the compiler
-// rendering enumerator *names* (not numeric casts) for enum template arguments.
-// Clang does this at any version; GCC only started doing so in GCC 9. On GCC 8
-// and earlier every value renders as "(amdsmi_status_t)N", so reflection finds
-// no enumerators. On GCC < 9 or any other compiler the helper is unavailable and
-// the positive test GTEST_SKIPs rather than failing the build; the driverless
-// negative test below needs no reflection and always runs.
+// Reflection needs the compiler to render enumerator *names* (not numeric
+// casts) in __PRETTY_FUNCTION__. Clang does this at any version; GCC only since
+// GCC 9. On older GCC the positive test GTEST_SKIPs instead of failing the
+// build; the negative test needs no reflection and always runs.
 #if defined(__clang__)
 #define AMDSMI_ENUM_REFLECTION_AVAILABLE 1
 #elif defined(__GNUC__) && (__GNUC__ >= 9)
@@ -90,8 +80,7 @@ namespace enum_reflect {
 
 constexpr bool kAvailable = AMDSMI_ENUM_REFLECTION_AVAILABLE;
 
-// Human-readable compiler identification for diagnostics, so a failure or skip
-// on an unexpected toolchain names the compiler and version in its output.
+// Compiler name and version, included in failure/skip diagnostics.
 inline const char* CompilerId() {
 #if defined(__clang__)
   return "clang " __clang_version__;
@@ -106,8 +95,8 @@ inline const char* CompilerId() {
 
 template <amdsmi_status_t V>
 constexpr const char* Signature() {
-  // Return type is `const char*` (not a library typedef) so the signature
-  // carries no extra "= " clause from typedef expansion to confuse parsing.
+  // Return type is a plain `const char*` so the signature has no stray "= "
+  // from typedef expansion to confuse the parse below.
   return __PRETTY_FUNCTION__;
 }
 
@@ -122,11 +111,9 @@ constexpr std::string_view EnumName() {
   return s.substr(start, end - start);
 }
 
-// True when V names a real enumerator rather than an unused slot. A real
-// enumerator name is a C identifier (starts with a letter or '_'); an unused
-// slot starts with '(' on GCC ("(amdsmi_status_t)28") or a digit on Clang
-// ("28"). Requiring an identifier-start character rejects both, so this works
-// on either compiler.
+// True when V names a real enumerator. A real name starts like a C identifier
+// (letter or '_'); an unused value starts with '(' on GCC or a digit on Clang,
+// so requiring an identifier-start character rejects both.
 template <amdsmi_status_t V>
 constexpr bool IsEnumerator() {
   const auto name = EnumName<V>();
@@ -152,7 +139,7 @@ constexpr uint32_t kScanLimit = 128;
 std::vector<std::pair<amdsmi_status_t, std::string>> AllStatusCodes() {
   std::vector<std::pair<amdsmi_status_t, std::string>> out;
   Collect(out, std::make_integer_sequence<uint32_t, kScanLimit>{});
-  // Sentinels live at 0xFFFFFFFE/0xFFFFFFFF, far outside any practical scan.
+  // Append the two sentinels the scan can't reach (see note above).
   out.push_back({AMDSMI_STATUS_MAP_ERROR, std::string(EnumName<AMDSMI_STATUS_MAP_ERROR>())});
   out.push_back(
       {AMDSMI_STATUS_UNKNOWN_ERROR, std::string(EnumName<AMDSMI_STATUS_UNKNOWN_ERROR>())});
@@ -194,12 +181,10 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
   const auto all_status_codes = enum_reflect::AllStatusCodes();
 
   // Guard against a vacuous pass without pinning a magic count (which would need
-  // bumping every time a status code is added). Reflection must have discovered
-  // the specific normal codes whose missing cases prompted this test, plus the
-  // two out-of-range sentinels. TIMEOUT (8) and MORE_DATA (39) are ordinary
-  // scanned codes: if the __PRETTY_FUNCTION__ parser broke (e.g. a compiler
-  // change) the scan finds no enumerators and they drop out, failing the check
-  // below -- a test-harness problem, not an amdsmi library bug.
+  // bumping for every new status code). Reflection must have found the codes
+  // whose missing cases prompted this test (TIMEOUT, MORE_DATA) plus the two
+  // sentinels; if the __PRETTY_FUNCTION__ parser broke they would drop out and
+  // fail the check below -- a test-harness problem, not an amdsmi library bug.
   auto contains = [&](amdsmi_status_t code) {
     for (const auto& [value, name] : all_status_codes) {
       if (value == code) return true;
@@ -234,13 +219,10 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
   }
 }
 
-// Simpler alternative to the reflection-based test above. It does not aim for
-// exhaustive coverage; it just spot-checks the codes that actually regressed
-// (AMDSMI_STATUS_TIMEOUT, AMDSMI_STATUS_MORE_DATA) plus a couple of controls.
-// No enum reflection, no scan, no compiler dependency -- it reads top to bottom
-// and pins the exact bug this change fixes. The trade-off is that a future
-// missing case for some *other* code would slip past it (the reflection test
-// and the Python test cover that breadth).
+// Simpler companion to the reflection test above: no reflection, no scan, no
+// compiler dependency. It spot-checks the codes that regressed (TIMEOUT,
+// MORE_DATA) plus a few controls. It will not catch a missing case for some
+// other code -- the reflection test and the Python test cover that breadth.
 TEST(AmdSmiStatusStringTest, KnownStatusCodesResolveToTheirOwnName) {
   const std::vector<std::pair<amdsmi_status_t, const char*>> spot_checks = {
       // The two codes whose missing cases prompted this fix.
