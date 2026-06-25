@@ -79,7 +79,8 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
   uint32_t per_lane_bytes = d.num_elems * d.elem_size;
   std::vector<ClusterLdsTarget> targets;
   size_t target_count = 1;
-  if (d.cluster_multicast) {
+  const bool cluster_downgrades_to_ordinary = d.cluster_multicast && wf.cluster_size() <= 1;
+  if (d.cluster_multicast && !cluster_downgrades_to_ordinary) {
     targets = resolve_lds_write_targets(d, wf, cu);
     target_count = targets.size();
   }
@@ -104,7 +105,7 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
     }
   });
 
-  if (!d.cluster_multicast) {
+  if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
     write_lds_dst_load_direct(d, cu, per_lane_bytes);
     return MemoryAccessCompletion::Complete;
   }

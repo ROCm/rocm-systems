@@ -1588,6 +1588,48 @@ TEST(Gfx1250ExecutionTest, OrdinaryLdsDstLoadWritesDirectlyAndCompletesAsyncCoun
   cu->set_cluster_lds_multicast_engine(nullptr);
 }
 
+TEST(Gfx1250ExecutionTest, NonClusterClusterLdsLoadDowngradesToOrdinaryAsyncToLds) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(5);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobalAddr = 0x9080;
+  constexpr uint32_t kLoadedValue = 0x78563412;
+  for (uint32_t byte = 0; byte < sizeof(kLoadedValue); ++byte) {
+    sim.memory->write8(kGlobalAddr + byte,
+                       static_cast<uint8_t>((kLoadedValue >> (byte * 8)) & 0xffu));
+  }
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  state->lds_dst = true;
+  state->lds_per_lane_addr = true;
+  state->lds_base = wf->lds_base();
+  state->wf_size = 32;
+  state->lane_mask = 0x1;
+  state->exec_mask = 0x1;
+  state->cluster_multicast = true;
+  state->cluster_mcast_mask = 0x2; // Excludes rank 0, but non-clustered loads downgrade.
+  state->per_lane_addr[0] = kGlobalAddr;
+  state->per_lane_lds_addr[0] = wf->lds_base() + 0x24;
+
+  DeferredClusterLdsMulticastEngine deferred_engine;
+  cu->set_cluster_lds_multicast_engine(&deferred_engine);
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+
+  EXPECT_EQ(wf->wait_counters().asynccnt, 0u);
+  EXPECT_FALSE(static_cast<bool>(deferred_engine.completion));
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0x24), kLoadedValue);
+  cu->set_cluster_lds_multicast_engine(nullptr);
+}
+
 TEST(Gfx1250ExecutionTest, ClusterLdsFallbackSkipsSelfWhenMaskExcludesSource) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
