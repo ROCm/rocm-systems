@@ -57,7 +57,7 @@ struct LivenessAnalysisOptions {
   /// @brief Lanes per wavefront (EXEC bit width), passed to the EXEC-state
   /// analysis so it can tell full-EXEC writes from partial half-writes. 64 for
   /// Wave64, 32 for Wave32. Defaults to 64.
-  uint32_t wave_size = 64;
+  uint8_t wave_size = 64;
 };
 
 /// @brief Reverse-post-order traversal of one kernel's implicit CFG.
@@ -113,7 +113,7 @@ private:
   void analyze(KernelBlockScope blocks);
 
   uint16_t min_free_vgpr_ = 0;
-  uint32_t wave_size_ = 64;
+  uint8_t wave_size_ = 0;
   std::vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;

@@ -9,13 +9,14 @@
 
 #include <deque>
 #include <optional>
+#include <stdexcept>
 
 namespace rocjitsu {
 
 namespace {
 
 /// @brief How an instruction affects the EXEC mask.
-enum class ExecWrite {
+enum class ExecWrite : uint8_t {
   None,      ///< Does not write EXEC; state unchanged.
   AllOnes,   ///< Writes the whole EXEC mask to all-ones -> Full.
   Preserve,  ///< Sets a subset of EXEC to all-ones (e.g. only exec_lo on
@@ -161,8 +162,10 @@ enum class Combinator { Other, Copy, Or };
 
 } // namespace
 
-ExecMaskAnalysis::ExecMaskAnalysis(KernelBlockScope blocks, uint32_t wave_size)
+ExecMaskAnalysis::ExecMaskAnalysis(KernelBlockScope blocks, uint8_t wave_size)
     : wave_size_(wave_size) {
+  if (wave_size != 32 && wave_size != 64)
+    throw std::invalid_argument("ExecMaskAnalysis: wave_size must be 32 or 64");
   analyze(blocks);
 }
 
@@ -187,7 +190,8 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks) {
         break;
       }
     }
-    states_[i].is_entry = !has_in_scope_pred;
+    // consider entry to be scope leader and blocks with no predecessors in scope
+    states_[i].is_entry = (!has_in_scope_pred || i == 0);
   }
 
   const auto rpo = reverse_post_order(blocks);

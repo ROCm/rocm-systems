@@ -147,5 +147,22 @@ class TestResultCombinatorFlagStmts:
         )
         assert _result_combinator_flag_stmts(sem) == []
 
+    def test_vector_mov_is_not_copy(self):
+        # RESULT_COPY is scalar-only; a vector mov must not emit it.
+        sem = InstructionSemantics('V_MOV_B32', 'vector_mov', data_type='b32')
+        assert _result_combinator_flag_stmts(sem) == []
+
+    def test_vector_binop_or_is_not_or(self):
+        # RESULT_OR is scalar-only; a vector bitwise-or must not emit it.
+        sem = InstructionSemantics(
+            'V_OR_B32', 'vector_binop', operation='or', data_type='b32'
+        )
+        assert _result_combinator_flag_stmts(sem) == []
+
+    def test_vector_cndmask_is_not_copy(self):
+        # A non-scalar select is not a plain copy.
+        sem = InstructionSemantics('V_CNDMASK_B32', 'vector_cndmask', data_type='b32')
+        assert _result_combinator_flag_stmts(sem) == []
+
     def test_none_is_empty(self):
         assert _result_combinator_flag_stmts(None) == []
