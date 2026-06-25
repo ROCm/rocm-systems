@@ -85,7 +85,10 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
       std::string device_path =
           std::string(drm_path) + "/" + card_name + "/device";
       amdcuid_gpu_info info = {};
-      discover_single(&info, device_path);
+      amdcuid_status_t status = CuidGpu::discover_single(&info, device_path);
+      if (status == AMDCUID_STATUS_UNSUPPORTED) {
+        continue;
+      }
 
       gpus.emplace_back(std::make_shared<CuidGpu>(info));
     }
@@ -105,6 +108,12 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   // For VFs, unit_id is the 1-based VF index.
   // Falls back to 0 if VF detection is unavailable.
   info.header.fields.gpu.unit_id = CuidUtilities::get_gpu_vf_id(device_path);
+
+  // check for XCP partitioning and skip if so
+  if (CuidUtilities::read_sysfs_file(device_path + "/unique_id").empty() &&
+      info.header.fields.gpu.unit_id == 0) {
+    return AMDCUID_STATUS_UNSUPPORTED;
+  }
 
   std::string vendor = CuidUtilities::read_sysfs_file(device_path + "/vendor");
   if (vendor.empty() && !bdf.empty()) {
@@ -280,7 +289,7 @@ amdcuid_status_t CuidGpu::get_primary_cuid(amdcuid_primary_id &id) const {
 
     CuidFileEntry entry;
     status = primary_file.find_by_device_node(m_info.render_node, entry);
-    if (status == AMDCUID_STATUS_SUCCESS) {
+    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
       id.UUIDv8_representation = entry.primary_cuid;
       CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
       return AMDCUID_STATUS_SUCCESS;

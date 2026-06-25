@@ -449,6 +449,8 @@ amdcuid_status_t CuidFile::load() {
 
         if (key == "primary_cuid") {
           current_entry.primary_cuid = string_to_cuid(value);
+        } else if (key == "is_temporary") {
+          current_entry.is_temporary = (value == "true");
         } else if (key == "derived_cuid") {
           current_entry.derived_cuid = string_to_cuid(value);
         } else if (key == "device_node") {

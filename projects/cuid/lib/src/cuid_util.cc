@@ -458,10 +458,13 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
   // insert reserved bits part 1 at bits 64-71
   id_bits[8] = reserved_1;
 
-  // copy next 6 bytes (46 bits) from hash and mask off last 2 bits for bits
-  // 72-117
+  // copy next 6 bytes (45 bits) from hash and mask off last 3 bits for bits
+  // 72-116
   memcpy(id_bits + 9, derived_id->hash + 8, 6);
-  id_bits[14] &= 0xFC;
+  id_bits[14] &= 0xF8;
+
+  // bit 117: temp bit carried over from primary ID
+  id_bits[14] |= (primary_id->raw_bits[14] & 0x04) >> 2;
 
   // bits 118-121: reserved bits part 2 (4 bits)
   id_bits[14] |= (reserved_2 >> 2); // upper 2 bits of reserved bits part 2

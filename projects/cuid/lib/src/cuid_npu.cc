@@ -309,7 +309,7 @@ amdcuid_status_t CuidNpu::get_primary_cuid(amdcuid_primary_id &id) const {
 
     CuidFileEntry entry;
     status = primary_file.find_by_device_node(m_info.accel_node, entry);
-    if (status == AMDCUID_STATUS_SUCCESS) {
+    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
       id.UUIDv8_representation = entry.primary_cuid;
       CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
       return AMDCUID_STATUS_SUCCESS;

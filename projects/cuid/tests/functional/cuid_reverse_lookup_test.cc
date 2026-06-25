@@ -238,7 +238,7 @@ void test_cuid_reverse_unit_id() {
     //   upper 6 bits: bits [7:2] of raw_bits[14]
     uint16_t extracted_unit_id =
         static_cast<uint16_t>(raw_bits[8]) |
-        (static_cast<uint16_t>((raw_bits[14] >> 2) & 0x3F) << 8);
+        (static_cast<uint16_t>((raw_bits[14] >> 3) & 0x1F) << 8);
 
     uint16_t queried_unit_id = 0;
     length = sizeof(queried_unit_id);

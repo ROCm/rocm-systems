@@ -423,7 +423,7 @@ amdcuid_status_t CuidCpu::get_primary_cuid(amdcuid_primary_id &id) const {
     // share the same physical_id:core_id)
     if (!m_info.device_node.empty()) {
       status = primary_file.find_by_device_node(m_info.device_node, entry);
-      if (status == AMDCUID_STATUS_SUCCESS) {
+      if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
         id.UUIDv8_representation = entry.primary_cuid;
         CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation,
                                           id.raw_bits);
@@ -436,9 +436,8 @@ amdcuid_status_t CuidCpu::get_primary_cuid(amdcuid_primary_id &id) const {
     std::string package_core_id =
         std::to_string(m_info.header.fields.cpu.physical_id) + ":" +
         std::to_string(m_info.header.fields.cpu.core);
-    amdcuid_status_t status =
-        primary_file.find_by_package_core_id(package_core_id, entry);
-    if (status == AMDCUID_STATUS_SUCCESS) {
+    status = primary_file.find_by_package_core_id(package_core_id, entry);
+    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
       id.UUIDv8_representation = entry.primary_cuid;
       CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
       return AMDCUID_STATUS_SUCCESS;
