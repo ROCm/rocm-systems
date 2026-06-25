@@ -105,6 +105,8 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipMemcpyDtoHAsync",
     # Fat binary registration — blob snapshotting
     "__hipRegisterFatBinary",
+    # Fat binary unregistration — must record *modules before the real call
+    "__hipUnregisterFatBinary",
     # Host memory registration — blob snapshotting of initial host mem contents
     "hipHostRegister",
     "hipHostUnregister",
@@ -496,6 +498,14 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemRangeGetAttribute",
     # hipMemRangeGetAttributes — attribute arrays stale
     "hipMemRangeGetAttributes",
+    # hipMemDiscardBatchAsync — void** dev_ptrs is a stale device address array (no alloc_map translation in generated shim)
+    "hipMemDiscardBatchAsync",
+    # hipDrvMemDiscardBatchAsync — hipDeviceptr_t* dptrs output param; generator emits wrong cast
+    "hipDrvMemDiscardBatchAsync",
+    # hipMemDiscardAndPrefetchBatchAsync — void** dptrs stale device addresses + hipMemLocation* prefetchLocs (stale struct ptr)
+    "hipMemDiscardAndPrefetchBatchAsync",
+    # hipDrvMemDiscardAndPrefetchBatchAsync — hipDeviceptr_t* dptrs output param; generator emits wrong cast
+    "hipDrvMemDiscardAndPrefetchBatchAsync",
     # Category 13: Driver 3D/2D memcpy — HIP_MEMCPY3D* / hipMemcpy3DPeerParms* / hip_Memcpy2D* stale struct ptrs
     "hipDrvMemcpy3D",
     "hipDrvMemcpy3DAsync",

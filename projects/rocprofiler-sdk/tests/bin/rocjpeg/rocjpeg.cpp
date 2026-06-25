@@ -261,7 +261,7 @@ main(int argc, char** argv)
             }
             if(num_jpegs_with_unknown_subsampling)
             {
-                std::cout << " ,total images with unknwon chroam subsampling: "
+                std::cout << " ,total images with unknown chroam subsampling: "
                           << num_jpegs_with_unknown_subsampling;
             }
             if(num_jpegs_with_unsupported_resolution)

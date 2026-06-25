@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "hotswap.hpp"
+#include "hotswap_gfx_query.hpp"
 #include "hotswap_platform_io.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -24,6 +25,7 @@
 #include <elf.h>
 #include <hsa.h>
 #include <hsa_api_trace.h>
+#include <hsa_ext_amd.h>
 #include <memory>
 #include <mutex>
 #include <limits>
@@ -31,11 +33,20 @@
 #include <unordered_map>
 #include <vector>
 
+// The agent's gfx target and ASIC revision are read through the HSA runtime
+// (HSA_AMD_AGENT_INFO_ASIC_REVISION) in hotswap_gfx_query.{hpp,cpp}, which is
+// portable across Linux and Windows. 
+
 #define HSA_HOTSWAP_EXPORT __attribute__((visibility("default")))
 
 namespace {
 
 namespace hotswap_io = rocr::hotswap::platform_io;
+
+using rocr::hotswap::AgentGfxRevision;
+using rocr::hotswap::gate_allows_hotswap;
+using rocr::hotswap::get_agent_isa_name;
+using rocr::hotswap::query_agent_gfx_revision;
 
 using ByteVec = std::shared_ptr<std::vector<uint8_t>>;
 using OwnedElf = std::unique_ptr<void, decltype(&std::free)>;
@@ -330,36 +341,6 @@ hotswap_reader_destroy(hsa_code_object_reader_t code_object_reader) {
   return g_orig_reader_destroy(code_object_reader);
 }
 
-std::string get_agent_isa_name(hsa_agent_t agent) {
-  auto cb = [](hsa_isa_t isa, void *data) -> hsa_status_t {
-    try {
-      auto *name = static_cast<std::string *>(data);
-      uint32_t len = 0;
-      if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
-          HSA_STATUS_SUCCESS) {
-        return HSA_STATUS_ERROR;
-      }
-      name->resize(len);
-      if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name->data()) !=
-          HSA_STATUS_SUCCESS) {
-        name->clear();
-        return HSA_STATUS_ERROR;
-      }
-      if (!name->empty() && name->back() == '\0') {
-        name->pop_back();
-      }
-      return HSA_STATUS_INFO_BREAK;
-    } catch (const std::bad_alloc &) {
-      auto *name = static_cast<std::string *>(data);
-      name->clear();
-      return HSA_STATUS_ERROR;
-    }
-  };
-  std::string name;
-  hsa_agent_iterate_isas(agent, cb, &name);
-  return name;
-}
-
 hsa_status_t load_original_reader(hsa_executable_t executable, hsa_agent_t agent,
                                   hsa_code_object_reader_t code_object_reader,
                                   const char *options,
@@ -444,6 +425,15 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
                          &reader_from_file);
 
     if (!local_bytes) {
+      return load_original_reader(executable, agent, code_object_reader,
+                                  options, loaded_code_object,
+                                  reader_from_file);
+    }
+
+    // Gate HotSwap to gfx1250 A0 silicon. On any other GPU or stepping, load
+    // the original code object unchanged instead of routing through COMGR.
+    const AgentGfxRevision gfx = query_agent_gfx_revision(agent);
+    if (!gate_allows_hotswap(gfx)) {
       return load_original_reader(executable, agent, code_object_reader,
                                   options, loaded_code_object,
                                   reader_from_file);
