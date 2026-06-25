@@ -1429,12 +1429,12 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
     }
     sps_ptr->pic_width_in_luma_samples = Parser::ExpGolomb::ReadUe(nalu, offset);
     // Maximum picture width in luma samples is 16888 for HEVC Level 6.2 (Annex A.4 Sqrt(MaxLumaPs * 8))
-    CHECK_ALLOWED_MAX("pic_width_in_luma_samples", sps_ptr->pic_width_in_luma_samples, 16888);
+    CHECK_ALLOWED_RANGE("pic_width_in_luma_samples", sps_ptr->pic_width_in_luma_samples, 1u, 16888u);
     sps_ptr->pic_height_in_luma_samples = Parser::ExpGolomb::ReadUe(nalu, offset);
     // Maximum picture height in luma samples is 16888 for HEVC Level 6.2 (Annex A.4 Sqrt(MaxLumaPs * 8))
-    CHECK_ALLOWED_MAX("pic_height_in_luma_samples", sps_ptr->pic_height_in_luma_samples, 16888);
+    CHECK_ALLOWED_RANGE("pic_height_in_luma_samples", sps_ptr->pic_height_in_luma_samples, 1u, 16888u);
     // Maximum picture size in luma samples is 35651584 for HEVC Level 6.2 (Annex A.4 MaxLumaPs.)
-    CHECK_ALLOWED_MAX("pic_width_in_luma_samples * pic_height_in_luma_samples", static_cast<uint64_t>(sps_ptr->pic_width_in_luma_samples) * sps_ptr->pic_height_in_luma_samples, 35651584);
+    CHECK_ALLOWED_MAX("pic_width_in_luma_samples * pic_height_in_luma_samples", static_cast<uint64_t>(sps_ptr->pic_width_in_luma_samples) * sps_ptr->pic_height_in_luma_samples, 35651584u);
     sps_ptr->conformance_window_flag = Parser::GetBit(nalu, offset);
     if (sps_ptr->conformance_window_flag) {
         sps_ptr->conf_win_left_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
