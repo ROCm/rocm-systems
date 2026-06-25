@@ -104,7 +104,7 @@ jobs:
 
     steps:
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
@@ -131,7 +131,7 @@ jobs:
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ${{ steps.submods.outputs.paths }}
@@ -143,7 +143,7 @@ jobs:
       run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Clone ROCDecode
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         repository: 'ROCm/rocDecode'
         ref: 'release/rocm-rel-7.0'
@@ -151,7 +151,7 @@ jobs:
         path: 'rocDecode'
 
     - name: Clone ROCJPEG
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         repository: 'ROCm/rocJPEG'
         ref: 'release/rocm-rel-7.0'
@@ -161,7 +161,7 @@ jobs:
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
       id: load-coverage
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         key: ${{ github.event.pull_request.base.sha }}-codecov
         path: .codecov/**
@@ -291,7 +291,7 @@ jobs:
 
     - name: Save XML Code Coverage
       id: save-coverage
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         key: ${{ github.sha }}-codecov
         path: |
@@ -346,7 +346,7 @@ jobs:
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 10
-      uses: actions/github-script@v6
+      uses: actions/github-script@v9
       env:
         COMMENT_BODY: |
           <details>

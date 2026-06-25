@@ -99,7 +99,7 @@ jobs:
         apt update
         apt install -y git
 
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/rocprofiler-register
         submodules: false

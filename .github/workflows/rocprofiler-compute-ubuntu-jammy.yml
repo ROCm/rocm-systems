@@ -53,7 +53,7 @@ jobs:
           apt-get install -y libdw-dev pkg-config
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             projects/rocprofiler-compute

@@ -16,7 +16,7 @@ jobs:
       contents: read
     steps:
       - name: Add/Remove labels based on branch names and ABI results
-        uses: actions/github-script@v6
+        uses: actions/github-script@v9
         with:
           script: |
             const pr = context.payload.pull_request;
