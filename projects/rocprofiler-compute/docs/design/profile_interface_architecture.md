@@ -54,12 +54,17 @@ Each decision below is recorded with its rationale and consequences
 
 ### AD-1: Remove the CSV profile backend
 
-The CSV profile *output format* (the alternate csv profile path and the
-profile-side code that chose it) is removed and rocpd becomes the canonical
-profile source. The `results_*.csv` intermediate that the rocpd path still emits
-is removed later with the reader boundary (AD-3), not here. Backward compatibility
-for ROCm versions older than 7.0 (which come before rocpd support) is
-_intentionally_ not carried forward in profile mode.
+The CSV profile *output format* is removed end to end and rocpd becomes the
+canonical profile source. This covers both halves of the CSV backend: the
+profile-side path that chose and wrote csv, and the analyze-side path that read
+csv-shaped workload directories (the `format_rocprof_output` selection in
+`join_prof` that merged `results_pmc_perf_*.csv` / `SQ_*.csv` / `SQC_*.csv`).
+As a consequence, workload directories produced by the old csv output format are
+no longer analyzable by a current release; users who need to analyze those use an
+older rocprof-compute release. The `results_*.csv` intermediate that the rocpd
+path still emits is removed later with the reader boundary (AD-3), not here.
+Backward compatibility for ROCm versions older than 7.0 (which come before rocpd
+support) is _intentionally_ not carried forward in profile or analyze mode.
 
 Keeping csv forces two parallel storage implementations with
 different dependencies, requires "not supported in CSV" warnings to be sprinkled
@@ -75,13 +80,15 @@ boundary makes it cheap to add back as one implementation.
 ### AD-2: Remove the rocprofv3 backend so rocprofiler-sdk is the lone backend
 
 Counter collection is ultimately performed by the SDK tool in
-both cases, so v3 only adds a redundant script layer plus legacy csv shaped
-analysis handling
+both cases, so v3 only adds a redundant script layer. The csv-shaped *analysis*
+handling is tied to the csv output format, not to v3, so it is removed earlier in
+Phase A with the CSV backend (AD-1); what remains for this decision is the
+rocprofv3 script layer and any v3-specific output shaping.
 
-Removing v3 deletes a meaningful amount of "fluffy" analysis
-code. This is planned in the backend phase (Phase C) together with the
-inheritance cleanup in AD-5 because it is a backend execution concern rather
-than a profile-data-storage concern.
+Removing v3 deletes the redundant script layer and its v3-specific handling. This
+is planned in the backend phase (Phase C) together with the inheritance cleanup
+in AD-5 because it is a backend execution concern rather than a
+profile-data-storage concern.
 
 ### AD-3: `pmc_perf.csv` is no longer in the analyze read path
 
@@ -166,22 +173,28 @@ Removed in this phase:
   it relied on (`process_rocprofv3_output`, `v3_counter_csv_to_v2_csv`,
   `convert_native_counter_collection_csv`, `process_kokkos_trace_output`),
 - the `--format-rocprof-output` flag and the rocpd->csv fallback, so profile mode
-  no longer chooses a storage format.
+  no longer chooses a storage format,
+- the analyze-side csv-format path in `join_prof` (the `format_rocprof_output`
+  selection and the `results_pmc_perf_*.csv` / `SQ_*.csv` / `SQC_*.csv` wide
+  merge, with its `join_type` / `kokkos_trace` reads and `SQ_ACCUM_PREV_HIRES`
+  rename), so analyze no longer supports csv-shaped workload directories. The
+  rocpd `results_*.csv` concat that builds `pmc_perf.csv` is unchanged.
 
 Intentionally **kept** in this phase (they move in Phase B):
 
 - `results_*.csv`. The rocpd path still converts each `.db` into `results_*.csv`,
-  and analyze still reads `results_*.csv`. Removing it requires analyze to read
-  the frame directly from `.db`, which is the reader contract introduced in
-  Phase B (AD-3).
+  and analyze still reads `results_*.csv` through the rocpd concat path. Removing
+  it requires analyze to read the frame directly from `.db`, which is the reader
+  contract introduced in Phase B (AD-3).
 - `utils_profile_csv.py`. It is the stdlib (pandas-free) csv helper used by the
   rocpd path (`results_*.csv`, counter-collection csv), `sysinfo.csv`, and
   marker-trace augmentation. It is not pandas-dependent; it is what keeps these
   writes pandas free. It shrinks and goes away as those csv intermediates are
   eliminated in later phases.
 
-Phase A is a deliberately smaller scope change: it deletes the format choice,
-not the read path.
+Phase A deletes the csv format choice and the csv-format analyze branch, but
+keeps the rocpd read path (`results_*.csv` -> `pmc_perf.csv`). Moving analyze off
+`results_*.csv` / `pmc_perf.csv` to read `.db` directly is Phase B.
 
 ### Before
 
@@ -241,9 +254,12 @@ On the data path the structural change is small: the `if csv` branch, the
 `csv-only conversion helpers` node, and the `--format-rocprof-output` flag go
 away, so profile mode no longer chooses a storage format, while `results_*.csv`
 and `utils_profile_csv.py` remain (their removal and analyze reading directly
-from `.db` is Phase B). That is why the Before and Target diagrams look nearly
-identical: these are *data-flow* diagrams, and both backends already fed the same
-`results_*.csv`, so deleting one backend only drops a single branch.
+from `.db` is Phase B). On the analyze side the format-specific join
+(`joins (format specific)` in the Before diagram) collapses to a plain rocpd
+`reads` of `results_*.csv`, since the csv-format merge branch is removed with the
+backend. That is why the Before and Target diagrams look nearly identical: these
+are *data-flow* diagrams, and both backends already fed the same `results_*.csv`,
+so deleting the csv backend only drops a single branch on each side.
 
 The diff is much larger than the diagram suggests because most of what is removed
 does not live on the data-flow path: the deleted code is *inside* the boxes
@@ -253,6 +269,9 @@ of the runtime flow. Removing the format choice includes removing:
 - the v3->v2 csv conversion and the kokkos / native-counter csv shaping helpers
   in `utils_profile.py`, plus the now-unused pandas-style helpers pruned from
   `utils_profile_csv.py` (~800 deletions of profile-side code),
+- the analyze-side csv-format branch in `analysis_base.join_prof` and its unit
+  coverage (e.g. the `SQ_ACCUM_PREV_HIRES` rename test in
+  `test_analyze_commands.py`),
 - the test coverage for all of the above, which is the bulk of it (~2k deletions
   across `test_utils.py`, `test_utils_profile_csv.py`, and the profile tests).
 
@@ -516,6 +535,8 @@ These remain after the boundary lands; they do not block it.
 
 The design is working when:
 
+- Profile mode cannot produce, and analyze mode cannot read, the legacy csv
+  output format; rocpd is the only profile source (Phase A)
 - Profile mode does not decide or know the storage layout, and does not depend on
   pandas
 - Analyze mode can ask for a pmc DataFrame without knowing what the source is and without reading `pmc_perf.csv`.
