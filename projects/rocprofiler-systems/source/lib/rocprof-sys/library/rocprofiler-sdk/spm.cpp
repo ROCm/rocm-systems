@@ -9,7 +9,9 @@
 
 #include "logger/debug.hpp"
 
-#include <rocprofiler-sdk/experimental/spm.h>
+#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
+#    include <rocprofiler-sdk/experimental/spm.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -24,9 +26,12 @@ namespace spm
 {
 namespace
 {
-constexpr auto beta_env_name          = "ROCPROFILER_SPM_BETA_ENABLED";
-constexpr auto beta_env_value         = "1";
+constexpr auto beta_env_name  = "ROCPROFILER_SPM_BETA_ENABLED";
+constexpr auto beta_env_value = "1";
+
+#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
 constexpr auto invalid_context_handle = 0UL;
+#endif
 
 bool
 has_non_space_value(std::string_view value)
@@ -41,6 +46,7 @@ warn_once(std::atomic<bool>& warned, std::string_view message) noexcept
     if(!warned.exchange(true)) LOG_WARNING("{}", message);
 }
 
+#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
 std::string_view
 status_name(rocprofiler_status_t status)
 {
@@ -72,6 +78,7 @@ spm_record_callback(
     warn_once(warned, "SPM records were received, but SPM record translation is "
                       "not implemented yet");
 }
+#endif
 }  // namespace
 
 bool
@@ -157,6 +164,16 @@ bool
 configure_runtime(client_data* data, const beta_request& request)
 {
     if(!request.requested()) return true;
+
+#if !ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
+    (void) data;
+    static auto warned = std::atomic<bool>{ false };
+    warn_once(warned, "SPM runtime collection was requested, but this "
+                      "rocprofiler-sdk build does not provide the experimental "
+                      "SPM API. Build with a rocprofiler-sdk version that "
+                      "provides rocprofiler-sdk/experimental/spm.h.");
+    return false;
+#else
     if(data == nullptr)
     {
         LOG_WARNING("SPM runtime collection requested but client data is unavailable");
@@ -186,6 +203,7 @@ configure_runtime(client_data* data, const beta_request& request)
     LOG_DEBUG("Configured SPM callback dispatch service on spm_ctx={}",
               data->spm_ctx.handle);
     return true;
+#endif
 }
 }  // namespace spm
 }  // namespace rocprofiler_sdk
