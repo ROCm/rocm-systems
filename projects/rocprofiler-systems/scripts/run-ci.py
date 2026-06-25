@@ -259,11 +259,80 @@ def generate_build_script(args):
         """
 
 
-def generate_test_script(args):
-    """Stage 3: Attach to existing CDash session (APPEND), run tests, submit Done."""
+def _ctest_test_params(ctest_args, binary_dir):
+    """Parse ctest command-line args into cmake ctest_test() named parameters.
+
+    Returns (preamble, params) where preamble is cmake set() calls that must
+    appear before ctest_test(), and params is the inline keyword block.
+
+    cmake 3.24+ ctest_test() has named parameters for filtering:
+      -E  <regex>   -> EXCLUDE
+      -R  <regex>   -> INCLUDE
+      -LE <regex>   -> EXCLUDE_LABEL
+      -L  <regex>   -> INCLUDE_LABEL
+
+    OUTPUT_JUNIT is always set to produce the JUnit test-results file.
+    """
+    exclude = None
+    include = None
+    exclude_label = None
+    include_label = None
+
+    args_list = list(ctest_args or [])
+    i = 0
+    while i < len(args_list):
+        a = args_list[i]
+        if a == "-E" and i + 1 < len(args_list):
+            exclude = args_list[i + 1]
+            i += 2
+        elif a == "-R" and i + 1 < len(args_list):
+            include = args_list[i + 1]
+            i += 2
+        elif a == "-LE" and i + 1 < len(args_list):
+            exclude_label = args_list[i + 1]
+            i += 2
+        elif a == "-L" and i + 1 < len(args_list):
+            include_label = args_list[i + 1]
+            i += 2
+        elif a == "--repeat":
+            # Repeat is handled by the outer ctest -S invocation in split
+            # stages, matching the pre-refactor dashboard behavior.
+            i += 1
+            while i < len(args_list) and not args_list[i].startswith("-"):
+                i += 1
+        elif re.match(r"^(until-pass|until-fail|after-timeout):\d+$", a):
+            i += 1
+        else:
+            i += 1
+
+    # inline ctest_test() keyword arguments
+    kw_lines = [f'OUTPUT_JUNIT "{binary_dir}/test-results.xml"']
+    if exclude:
+        kw_lines.append(f'EXCLUDE "{exclude}"')
+    if include:
+        kw_lines.append(f'INCLUDE "{include}"')
+    if exclude_label:
+        kw_lines.append(f'EXCLUDE_LABEL "{exclude_label}"')
+    if include_label:
+        kw_lines.append(f'INCLUDE_LABEL "{include_label}"')
+
+    params = "\n            ".join(kw_lines)
+    return "", params
+
+
+def generate_test_script(args, ctest_args=None):
+    """Stage 3: Attach to existing CDash session (APPEND), run tests, submit Done.
+
+    CMAKE_CTEST_ARGUMENTS is NOT applied by ctest_test() in dashboard scripts
+    (it is only used when cmake --build --target test is invoked).  Test
+    filtering and JUnit output are passed via ctest_test()'s named parameters
+    (cmake 3.24+) which directly map to ctest command-line flags.
+    """
     CODECOV = 1 if args.coverage else 0
     BINARY_DIR = os.path.realpath(args.binary_dir)
     DASHBOARD_MODE = args.mode
+
+    test_preamble, test_params = _ctest_test_params(ctest_args, BINARY_DIR)
 
     _cov_block = ""
     if CODECOV:
@@ -277,7 +346,10 @@ def generate_test_script(args):
 
     return _script_preamble() + _pytest_setup_block(BINARY_DIR) + f"""
         ctest_start({DASHBOARD_MODE} APPEND)
-        ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
+        {test_preamble}
+        ctest_test(BUILD "{BINARY_DIR}"
+            {test_params}
+            RETURN_VALUE _test_ret)
         safe_submit(PARTS Test)
         {_cov_block}
         handle_error("Testing" _test_ret)
@@ -285,12 +357,14 @@ def generate_test_script(args):
         """
 
 
-def generate_all_script(args):
+def generate_all_script(args, ctest_args=None):
     """Legacy single-script mode (all stages in one ctest -S invocation)."""
     CODECOV = 1 if args.coverage else 0
     DASHBOARD_MODE = args.mode
     SOURCE_DIR = os.path.realpath(args.source_dir)
     BINARY_DIR = os.path.realpath(args.binary_dir)
+
+    test_preamble, test_params = _ctest_test_params(ctest_args, BINARY_DIR)
 
     _cov_block = ""
     if CODECOV:
@@ -317,7 +391,10 @@ def generate_all_script(args):
         """
         + _pytest_setup_block(BINARY_DIR)
         + f"""
-        ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
+        {test_preamble}
+        ctest_test(BUILD "{BINARY_DIR}"
+            {test_params}
+            RETURN_VALUE _test_ret)
         safe_submit(PARTS Test)
         {_cov_block}
         handle_error("Testing" _test_ret)
@@ -496,17 +573,25 @@ def set_python_hints_from_cmake_args(cmake_args):
 def collect_test_artifacts(args, ctest_args):
     log_group_start("Collecting test artifacts")
     if "-VV" not in ctest_args:
+        # Session-management files that are never useful as CI artifacts.
+        _skip_artifact = {"TAG", "LastStart.log"}
         for file in glob.glob(
             os.path.join(args.binary_dir, "Testing/**"), recursive=True
         ):
             if not os.path.isfile(file):
                 continue
+            oname = os.path.basename(file)
+            if oname in _skip_artifact:
+                continue
             log(f"Reading {file}")
             with open(file) as inpf:
                 fdata = inpf.read()
-            if "LastTest" not in file and "Coverage" not in file:
+            # Only print CDash XML files to stdout — they contain the
+            # configure/build/test summaries that are meaningful in CI logs.
+            # Temporary/*.log files (LastTest, LastBuild, etc.) are verbose
+            # raw output; upload them as artifacts but don't flood the log.
+            if file.endswith(".xml"):
                 print(fdata)
-            oname = os.path.basename(file)
             if not oname.endswith(".log"):
                 oname += ".log"
             out = os.path.join(args.binary_dir, oname)
@@ -544,8 +629,8 @@ def do_generate(args, cmake_args, ctest_args):
     scripts = {
         "dashboard_configure.cmake": generate_configure_script(args),
         "dashboard_build.cmake": generate_build_script(args),
-        "dashboard_test.cmake": generate_test_script(args),
-        "dashboard.cmake": generate_all_script(args),  # kept for compat
+        "dashboard_test.cmake": generate_test_script(args, ctest_args),
+        "dashboard.cmake": generate_all_script(args, ctest_args),  # kept for compat
     }
     for name, content in scripts.items():
         path = os.path.join(args.binary_dir, name)
@@ -554,16 +639,16 @@ def do_generate(args, cmake_args, ctest_args):
         log(f"Wrote {path}")
 
 
-def do_stage(args, script_name, stage_label):
+def do_stage(args, script_name, stage_label, ctest_args=None):
     CTEST_CMD = which("ctest", require=True)
     script_path = os.path.join(args.binary_dir, script_name)
 
     if not os.path.exists(script_path):
-        raise RuntimeError(
-            f"{script_path} not found — run '--stage generate' first"
-        )
+        raise RuntimeError(f"{script_path} not found — run '--stage generate' first")
 
     cmd = [CTEST_CMD, "-S", script_path, "--output-on-failure", "-V"]
+    if stage_label == "test":
+        cmd += list(ctest_args or [])
 
     log_group_start(f"Running CTest stage: {stage_label}")
     log(_color(f"Command: {' '.join(cmd)}", "white"))
@@ -576,7 +661,7 @@ def do_stage(args, script_name, stage_label):
         raise
     finally:
         if stage_label == "test":
-            collect_test_artifacts(args, [])
+            collect_test_artifacts(args, ctest_args or [])
 
 
 def do_all(args, ctest_args):
@@ -655,12 +740,16 @@ if __name__ == "__main__":
             )
 
     if args.stage == "generate":
-        log(_color("Files written. Run configure / build / test as separate steps.", "green"))
+        log(
+            _color(
+                "Files written. Run configure / build / test as separate steps.", "green"
+            )
+        )
     elif args.stage == "configure":
         do_stage(args, "dashboard_configure.cmake", "configure")
     elif args.stage == "build":
         do_stage(args, "dashboard_build.cmake", "build")
     elif args.stage == "test":
-        do_stage(args, "dashboard_test.cmake", "test")
+        do_stage(args, "dashboard_test.cmake", "test", ctest_args)
     else:  # "all"
         do_all(args, ctest_args)

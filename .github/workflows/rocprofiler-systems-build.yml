@@ -802,7 +802,12 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           set -v
-          ./scripts/test-find-package.sh --install-dir ${{ matrix.install_prefix }}
+          # For distros that run CPack (non-RHEL), the cmake install prefix is
+          # cleaned and CPack re-installs to cpack_prefix.  Use cpack_prefix
+          # when set (non-empty), falling back to install_prefix for RHEL which
+          # skips CPack and installs directly to install_prefix.
+          INSTALL_DIR="${{ matrix.cpack_prefix || matrix.install_prefix }}"
+          ./scripts/test-find-package.sh --install-dir "${INSTALL_DIR}"
 
       - &_step-kill-perfetto
         name: Kill Perfetto
