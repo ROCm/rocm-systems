@@ -571,7 +571,7 @@ def set_python_hints_from_cmake_args(cmake_args):
 
 
 def collect_test_artifacts(args, ctest_args):
-    log_group_start("Collecting test artifacts")
+    log_group_start("Collecting dashboard artifacts")
     if "-VV" not in ctest_args:
         # Session-management files that are never useful as CI artifacts.
         _skip_artifact = {"TAG", "LastStart.log"}
@@ -654,14 +654,18 @@ def do_stage(args, script_name, stage_label, ctest_args=None):
     log(_color(f"Command: {' '.join(cmd)}", "white"))
     log_group_end()
 
+    failed = False
     try:
         run(cmd, check=True)
     except Exception as e:
+        failed = True
         log(f"CTest {stage_label} failed: {e}", level="error")
         raise
     finally:
-        if stage_label == "test":
-            collect_test_artifacts(args, ctest_args or [])
+        if stage_label == "test" or failed:
+            collect_test_artifacts(
+                args, ctest_args or [] if stage_label == "test" else []
+            )
 
 
 def do_all(args, ctest_args):

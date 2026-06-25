@@ -1,4 +1,4 @@
-vname: rocprofiler-systems Ubuntu 24.04 Sanitizers (GCC)
+name: rocprofiler-systems Ubuntu 24.04 Sanitizers (GCC)
 run-name: ubuntu-noble-sanitizers
 
 on:

@@ -145,11 +145,15 @@ jobs:
 
       - name: Install Latest Nightly ROCm
         run: |
-          set -e
-          mkdir ${{ env.ROCM_PATH }}
-          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}
-          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+          set -euo pipefail
+          tarball=$(ls /opt/rocm-*-multiarch.tar.gz | head -n 1)
+          TARBALL_ROCM_VERSION=$(basename "${tarball}" | sed -E 's/^rocm-([0-9]+\.[0-9]+\.[0-9]+)-multiarch\.tar\.gz$/\1/')
+          mkdir -p "${ROCM_PATH}"
+          tar -xf "${tarball}" -C "${ROCM_PATH}"
+          echo "ROCM_VERSION=${TARBALL_ROCM_VERSION}" >> "${GITHUB_ENV}"
+          echo "${ROCM_PATH}/bin" >> "${GITHUB_PATH}"
+          echo "${ROCM_PATH}/llvm/bin" >> "${GITHUB_PATH}"
+          echo "ROCm ${TARBALL_ROCM_VERSION} installed to: ${ROCM_PATH}"
           echo "✅ ROCm Installation Complete!"
 
       - name: Output TheRock Manifest

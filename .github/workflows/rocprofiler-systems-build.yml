@@ -595,9 +595,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-${{ matrix.ccache_key_distro }}-${{ github.job }}-${{ matrix.distro }}-${{ matrix.compiler }}-${{ github.sha }}
+          key: ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.distro }}-${{ matrix.compiler }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ matrix.ccache_key_distro }}-${{ github.job }}-${{ matrix.distro }}-${{ matrix.compiler }}-
+            ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.distro }}-${{ matrix.compiler }}-
 
       - &_step-configure-ccache
         name: Configure ccache
@@ -1087,9 +1087,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-${{ matrix.ccache_key_distro }}-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
+          key: ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ matrix.ccache_key_distro }}-${{ github.job }}-${{ matrix.compiler }}-
+            ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.compiler }}-
 
       - *_step-configure-ccache
 
