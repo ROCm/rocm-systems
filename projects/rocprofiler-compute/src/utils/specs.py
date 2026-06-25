@@ -255,9 +255,14 @@ def set_cache_sizes(
 
 
 def _kw_only(cls: T) -> T:
-    """Decorator to mimic the behavior of kw_only found in Python 3.10."""
+    """Enforce keyword-only dataclass initialization (Python 3.9 compatible)."""
 
     def __init__(self: Any, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+        if args:
+            raise TypeError(
+                f"{cls.__name__}() takes keyword arguments only, "
+                f"got {len(args)} positional argument(s)"
+            )
         for name, value in kwargs.items():
             setattr(self, name, value)
 
