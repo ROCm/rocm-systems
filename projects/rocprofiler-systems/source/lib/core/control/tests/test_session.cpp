@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/control/clocks/manual.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/control/session.hpp"
 #include "core/control/subscriber.hpp"
 #include "core/control/trigger.hpp"
@@ -378,4 +379,92 @@ TEST_F(session_test, subscriber_added_after_delay_elapsed_observes_active_window
     const auto late_events = late_log.snapshot();
     ASSERT_EQ(late_events.size(), 1u);
     EXPECT_EQ(late_events[0], "late:pause");
+}
+
+// ---------------------------------------------------------------------------
+// clocks::posix tests
+// ---------------------------------------------------------------------------
+
+// Verify the concept is satisfied at compile time.
+static_assert(rocprofsys::control::ClockPolicy<rocprofsys::control::clocks::posix>,
+              "clocks::posix must satisfy ClockPolicy");
+
+TEST(posix_clock_test, now_returns_advancing_time_points)
+{
+    using namespace std::chrono_literals;
+    rocprofsys::control::clocks::posix clk{ CLOCK_REALTIME };
+
+    const auto t0 = clk.now();
+    std::this_thread::sleep_for(5ms);
+    const auto t1 = clk.now();
+
+    EXPECT_GT(t1, t0) << "now() should advance over time";
+}
+
+TEST(posix_clock_test, interrupt_makes_sleep_until_return_false)
+{
+    using namespace std::chrono_literals;
+    using rocprofsys::control::clock_duration;
+    using rocprofsys::control::clocks::posix;
+
+    posix clk{ CLOCK_REALTIME };
+
+    // Schedule a deadline far in the future; interrupt from another thread.
+    const auto deadline = clk.now() + clock_duration{ 30'000'000'000LL };  // 30s
+
+    std::atomic<bool> result{ true };
+    std::thread       sleeper{ [&] { result.store(clk.sleep_until(deadline)); } };
+
+    std::this_thread::sleep_for(10ms);
+    clk.interrupt();
+    sleeper.join();
+
+    EXPECT_FALSE(result.load()) << "sleep_until should return false when interrupted";
+}
+
+TEST(posix_clock_test, reset_allows_reuse_after_interrupt)
+{
+    using namespace std::chrono_literals;
+    using rocprofsys::control::clock_duration;
+    using rocprofsys::control::clocks::posix;
+
+    posix clk{ CLOCK_REALTIME };
+    clk.interrupt();
+    clk.reset();
+
+    // After reset, a deadline already in the past should return true (no interrupt).
+    const auto past = clk.now() - clock_duration{ 1 };
+    EXPECT_TRUE(clk.sleep_until(past));
+}
+
+TEST(posix_clock_test, time_window_with_posix_clock_drives_session)
+{
+    // Use clocks::manual to control virtual time — the posix clock test above
+    // covers the real-time behaviour. Here we verify that time_window<posix>
+    // integrates with session the same way time_window<manual> does.
+    using namespace std::chrono_literals;
+    using clock_t       = rocprofsys::control::clocks::manual;
+    using time_window_t = rocprofsys::control::triggers::time_window<clock_t>;
+    using clock_dur     = rocprofsys::control::clock_duration;
+
+    rocprofsys::control::session s{};
+    call_log                     log{};
+    s.subscribe(make_logged_subscriber(log, "sub"));
+
+    clock_t        clk{};
+    constexpr auto delay = clock_dur{ 100'000'000 };
+    constexpr auto dur   = clock_dur{ 200'000'000 };
+    time_window_t  tw{ s, clk, time_window_t::config{ delay, dur } };
+    s.attach(tw);
+    s.force_initial_pause();
+
+    ASSERT_EQ(log.snapshot().size(), 1u);
+    EXPECT_EQ(log.snapshot()[0], "sub:pause");
+
+    tw.start();
+    ASSERT_TRUE(wait_with_advance(log, clk, 2u, delay));
+    EXPECT_EQ(log.snapshot()[1], "sub:resume");
+
+    ASSERT_TRUE(wait_with_advance(log, clk, 3u, dur));
+    EXPECT_EQ(log.snapshot()[2], "sub:pause");
 }

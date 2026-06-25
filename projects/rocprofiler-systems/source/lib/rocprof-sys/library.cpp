@@ -17,8 +17,10 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/control/clocks/steady.hpp"
 #include "core/control/session.hpp"
+#include "core/control/trigger.hpp"
 #include "core/control/triggers/time_window.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
@@ -84,7 +86,9 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <mutex>
+#include <optional>
 #include <pthread.h>
 #include <sstream>
 #include <stdexcept>
@@ -419,20 +423,39 @@ invoke_external_resume_callbacks()
         _fn();
 }
 
+// trace_window_t uses clocks::steady — used for the schedule config type
+// and for sampling duration (which is always wall-clock).
 using trace_window_t =
     rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::steady>;
 
-// File-scope owners for time_window triggers. Constructed on demand inside
-// the init lambda; stopped from rocprofsys_finalize_hidden so the worker
-// threads are joined while the session is still alive.
-//
-// g_trace_window: TRACE_DELAY/DURATION (global scope - pauses everything)
-// g_sampling_dur_window: SAMPLING_DURATION (sampling_only scope - pauses
-//   only sampling-tagged subscribers)
-rocprofsys::control::clocks::steady g_trace_window_clock;
-rocprofsys::control::clocks::steady g_sampling_dur_window_clock;
-std::unique_ptr<trace_window_t>     g_trace_window;
-std::unique_ptr<trace_window_t>     g_sampling_dur_window;
+// File-scope clock owners. g_posix_window_clock is only emplaced when
+// ROCPROFSYS_TRACE_PERIOD_CLOCK_ID selects a CPU-time clock.
+rocprofsys::control::clocks::steady               g_trace_window_clock;
+rocprofsys::control::clocks::steady               g_sampling_dur_window_clock;
+std::optional<rocprofsys::control::clocks::posix> g_posix_window_clock;
+
+// Owned as trigger* so both clocks::steady and clocks::posix instantiations
+// can be stored uniformly; jthread cleanup happens via virtual ~trigger().
+std::unique_ptr<rocprofsys::control::trigger> g_trace_window;
+std::unique_ptr<rocprofsys::control::trigger> g_sampling_dur_window;
+
+// Instantiates time_window<Clock>, attaches to session, starts the worker,
+// then upcasts ownership to trigger* — call start() before the upcast since
+// it is not part of the trigger ABC.
+template <rocprofsys::control::ClockPolicy Clock>
+void
+attach_and_start_time_window(
+    rocprofsys::control::session& session, Clock& clock,
+    rocprofsys::control::triggers::time_window_schedule schedule,
+    std::unique_ptr<rocprofsys::control::trigger>&      out,
+    rocprofsys::control::scope scope = rocprofsys::control::scope::global)
+{
+    using tw_t = rocprofsys::control::triggers::time_window<Clock>;
+    auto tw    = std::make_unique<tw_t>(session, clock, std::move(schedule), scope);
+    session.attach(*tw);
+    tw->start();
+    out = std::move(tw);
+}
 
 void
 stop_time_windows()
@@ -490,36 +513,35 @@ build_time_windows(control::session& session)
                                                         _spec.repeat });
         }
 
-        g_trace_window = std::make_unique<trace_window_t>(session, g_trace_window_clock,
-                                                          std::move(_schedule));
-
-        // Safety-net subscriber for category-traited recording paths
-        // (timemory storage, perfetto trace_events from callbacks not
-        // covered by a subsystem pause subscriber). Toggles the
-        // per-category runtime_enabled trait so those sites gate off
-        // during the delay/duration window. Only registered when a
-        // trace window is configured.
+        // Safety-net subscriber for category-traited recording paths.
         session.subscribe(
             { []() { categories::disable_categories(config::get_enabled_categories()); },
               []() { categories::enable_categories(config::get_enabled_categories()); },
               "trace_categories" });
 
-        session.attach(*g_trace_window);
-        g_trace_window->start();
+        const auto _clock_id = constraint::get_trace_period_clock_id();
+        if(_clock_id == CLOCK_PROCESS_CPUTIME_ID)
+        {
+            g_posix_window_clock.emplace(_clock_id);
+            attach_and_start_time_window(session, *g_posix_window_clock,
+                                         std::move(_schedule), g_trace_window);
+        }
+        else
+        {
+            attach_and_start_time_window(session, g_trace_window_clock,
+                                         std::move(_schedule), g_trace_window);
+        }
     }
 
     const auto _samp_delay = config::get_sampling_delay();
     const auto _samp_dur   = config::get_sampling_duration();
     if(_samp_delay > 0.0 || _samp_dur > 0.0)
     {
-        g_sampling_dur_window = std::make_unique<trace_window_t>(
+        attach_and_start_time_window(
             session, g_sampling_dur_window_clock,
-            trace_window_t::config{ seconds_to_ns(_samp_delay),
-                                    seconds_to_ns(_samp_dur) },
-            control::scope::sampling_only);
-
-        session.attach(*g_sampling_dur_window);
-        g_sampling_dur_window->start();
+            trace_window_t::schedule_type{ trace_window_t::config{
+                seconds_to_ns(_samp_delay), seconds_to_ns(_samp_dur) } },
+            g_sampling_dur_window, control::scope::sampling_only);
     }
 }
 

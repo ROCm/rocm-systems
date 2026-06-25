@@ -4,69 +4,44 @@
 #pragma once
 
 /// @file
-/// This provides generic functionality for constraining data collection within
-/// a windows of time. E.g., delay, delay + duration, (delay + duration) * nrepeat
+/// Constrains data collection to configurable time windows.
+/// Each window is defined by a delay before collection begins, a duration
+/// for how long it runs, and an optional repeat count.
 ///
-/// @todo Migrate delay/duration for sampling, process sampling, and causal profiling
-/// to use this
+/// The clock governing all windows is set once via
+/// ROCPROFSYS_TRACE_PERIOD_CLOCK_ID:
+///   "realtime" (default) — wall-clock time (std::chrono::steady_clock)
+///   "cputime"            — process CPU time (CLOCK_PROCESS_CPUTIME_ID)
 ///
+/// @todo Migrate delay/duration for process sampling and causal profiling
+///       to this model (sampling delay/duration already wired; causal deferred).
 
 #include "common/defines.h"
 
 #include <cstdint>
 #include <ctime>
-#include <set>
-#include <string>
 #include <vector>
 
 namespace rocprofsys
 {
 namespace constraint
 {
-struct clock_identifier
-{
-    int              value    = -1;
-    std::string_view raw_name = {};
-    std::string      name     = {};
-
-    clock_identifier() = default;
-    clock_identifier(std::string_view, int);
-
-    clock_identifier(const clock_identifier&)                = default;
-    clock_identifier(clock_identifier&&) noexcept            = default;
-    clock_identifier& operator=(const clock_identifier&)     = default;
-    clock_identifier& operator=(clock_identifier&&) noexcept = default;
-
-    std::string as_string() const;
-
-    bool operator<(const clock_identifier& _rhs) const;
-    bool operator==(const clock_identifier& _rhs) const;
-    bool operator==(int _rhs) const;
-    bool operator==(std::string _rhs) const;
-
-    friend std::ostream& operator<<(std::ostream& _os, const clock_identifier& _v)
-    {
-        return (_os << _v.as_string());
-    }
-};
-
 struct spec
 {
-    double           delay    = 0.0;
-    double           duration = 0.0;
-    std::uint64_t    repeat   = 1;
-    clock_identifier clock_id = {};
+    double        delay    = 0.0;
+    double        duration = 0.0;
+    std::uint64_t repeat   = 1;
 };
-
-const std::set<clock_identifier>&
-get_valid_clock_ids();
 
 std::vector<spec>
 get_trace_specs();
 
+/// Returns CLOCK_PROCESS_CPUTIME_ID when ROCPROFSYS_TRACE_PERIOD_CLOCK_ID is
+/// "cputime"; returns CLOCK_REALTIME (routed to clocks::steady) otherwise.
+[[nodiscard]] clockid_t
+get_trace_period_clock_id();
+
 /// True iff the first configured trace window starts with a delay > 0.
-/// Used by tool_init to decide whether SDK contexts must be deferred until
-/// the delay elapses (the time_window trigger will hold things paused initially).
 [[nodiscard]] bool
 trace_has_initial_delay();
 }  // namespace constraint

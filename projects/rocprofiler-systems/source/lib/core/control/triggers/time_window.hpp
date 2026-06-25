@@ -18,6 +18,18 @@
 
 namespace rocprofsys::control::triggers
 {
+/// Clock-independent schedule entry. Hoisted out of the time_window template so
+/// all clock instantiations share one concrete type — allowing callers to build
+/// a schedule without knowing which ClockPolicy will be used.
+struct time_window_config
+{
+    clock_duration delay{};
+    clock_duration duration{};
+    std::uint64_t  repeat{ 1 };
+};
+
+using time_window_schedule = std::vector<time_window_config>;
+
 /// Time-windowed pause/resume trigger driven by an injected clock.
 ///
 /// Lifecycle votes:
@@ -38,14 +50,8 @@ template <ClockPolicy Clock>
 class time_window : public trigger
 {
 public:
-    struct config
-    {
-        clock_duration delay{};
-        clock_duration duration{};
-        std::uint64_t  repeat{ 1 };
-    };
-
-    using schedule_type = std::vector<config>;
+    using config        = time_window_config;
+    using schedule_type = time_window_schedule;
 
     time_window(session& sess, Clock& clk, config cfg, scope event_scope = scope::global)
     : time_window{ sess, clk, schedule_type{ cfg }, event_scope }
@@ -66,7 +72,10 @@ public:
     time_window(time_window&&)                 = delete;
     time_window& operator=(time_window&&)      = delete;
 
-    [[nodiscard]] std::string_view name() const noexcept override { return "time_window"; }
+    [[nodiscard]] std::string_view name() const noexcept override
+    {
+        return "time_window";
+    }
 
     [[nodiscard]] vote initial_vote() const noexcept override
     {
@@ -115,7 +124,10 @@ private:
         return nullptr;
     }
 
-    [[nodiscard]] bool has_window() const noexcept { return first_window_config() != nullptr; }
+    [[nodiscard]] bool has_window() const noexcept
+    {
+        return first_window_config() != nullptr;
+    }
 
     void worker(std::stop_token st)
     {
