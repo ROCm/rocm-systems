@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <stdexcept>
 
 using namespace rocprofsys::pmc::collectors::gpu;
 using ::testing::_;
@@ -44,6 +45,13 @@ protected:
         EXPECT_CALL(*mock_backend, get_gpu_asic_info())
             .Times(AnyNumber())
             .WillRepeatedly(Return(asic_info{ "Test GPU", "AMD" }));
+
+        EXPECT_CALL(*mock_backend, get_hotspot_temperature())
+            .Times(AnyNumber())
+            .WillRepeatedly(Throw(std::runtime_error("temperature not supported")));
+        EXPECT_CALL(*mock_backend, get_edge_temperature())
+            .Times(AnyNumber())
+            .WillRepeatedly(Throw(std::runtime_error("temperature not supported")));
     }
 
     /**
@@ -76,6 +84,13 @@ protected:
         EXPECT_CALL(*mock_backend, get_memory_usage())
             .Times(AtLeast(1))
             .WillRepeatedly(Return(8589934592ULL));
+
+        EXPECT_CALL(*mock_backend, get_hotspot_temperature())
+            .Times(AtLeast(1))
+            .WillRepeatedly(Return(std::int64_t{ 75 }));
+        EXPECT_CALL(*mock_backend, get_edge_temperature())
+            .Times(AtLeast(1))
+            .WillRepeatedly(Return(std::int64_t{ 70 }));
 
         SetupSDMAExpectations(mock_backend);
     }
@@ -119,7 +134,6 @@ protected:
         metrics met = CreateSentinelMetrics();
 
         met.current_socket_power = 150;
-        met.hotspot_temperature  = 75;
         met.gfx_activity         = 85;
 
         EXPECT_CALL(*mock_backend, get_gpu_metrics())
@@ -130,7 +144,25 @@ protected:
             .Times(AtLeast(1))
             .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
+        EXPECT_CALL(*mock_backend, get_hotspot_temperature())
+            .Times(AtLeast(1))
+            .WillRepeatedly(Return(std::int64_t{ 75 }));
+
         SetupSDMAExpectations(mock_backend);
+    }
+
+    /**
+     * @brief Default temperature expectations for a mock not using fixture SetUp().
+     */
+    template <typename MockPtr>
+    static void SetupTemperatureExpectationsUnsupported(MockPtr& m)
+    {
+        EXPECT_CALL(*m, get_hotspot_temperature())
+            .Times(AnyNumber())
+            .WillRepeatedly(Throw(std::runtime_error("temperature not supported")));
+        EXPECT_CALL(*m, get_edge_temperature())
+            .Times(AnyNumber())
+            .WillRepeatedly(Throw(std::runtime_error("temperature not supported")));
     }
 
     /**
@@ -435,8 +467,7 @@ TEST_F(DeviceTest, power_metrics_not_collected_when_unsupported)
  */
 TEST_F(DeviceTest, hotspot_temperature_collection)
 {
-    metrics met             = CreateSentinelMetrics();
-    met.hotspot_temperature = 75;
+    metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
@@ -445,6 +476,10 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
     EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
+
+    EXPECT_CALL(*mock_backend, get_hotspot_temperature())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::int64_t{ 75 }));
 
     SetupSDMAExpectations(mock_backend);
 
@@ -465,8 +500,7 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
  */
 TEST_F(DeviceTest, edge_temperature_collection)
 {
-    metrics met          = CreateSentinelMetrics();
-    met.edge_temperature = 70;
+    metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
@@ -475,6 +509,10 @@ TEST_F(DeviceTest, edge_temperature_collection)
     EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
+
+    EXPECT_CALL(*mock_backend, get_edge_temperature())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::int64_t{ 70 }));
 
     SetupSDMAExpectations(mock_backend);
 
@@ -1642,6 +1680,8 @@ TEST_F(DeviceTest, concurrent_device_objects)
         .Times(AnyNumber())
         .WillRepeatedly(Return(asic_info{ "GPU1", "AMD" }));
 
+    SetupTemperatureExpectationsUnsupported(mock_backend1);
+
     metrics met2              = CreateSentinelMetrics();
     met2.current_socket_power = 200;
 
@@ -1658,6 +1698,8 @@ TEST_F(DeviceTest, concurrent_device_objects)
     EXPECT_CALL(*mock_backend2, get_gpu_asic_info())
         .Times(AnyNumber())
         .WillRepeatedly(Return(asic_info{ "GPU2", "AMD" }));
+
+    SetupTemperatureExpectationsUnsupported(mock_backend2);
 
     device<MockBackend> dev1(mock_backend1, 0);
     device<MockBackend> dev2(mock_backend2, 1);
@@ -1737,6 +1779,15 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
     EXPECT_CALL(*mock, get_gpu_asic_info())
         .Times(AnyNumber())
         .WillRepeatedly(Return(asic_info{ "Test GPU", "AMD" }));
+
+    EXPECT_CALL(*mock, get_hotspot_temperature())
+        .WillOnce(Return(std::int64_t{ 70 }))
+        .WillOnce(Return(std::int64_t{ 70 }))
+        .WillOnce(Return(std::int64_t{ 75 }))
+        .WillOnce(Return(std::int64_t{ 73 }));
+    EXPECT_CALL(*mock, get_edge_temperature())
+        .Times(AnyNumber())
+        .WillRepeatedly(Throw(std::runtime_error("temperature not supported")));
 
     device<MockBackend> dev(mock, test_index);
 
