@@ -361,7 +361,7 @@ resolve_symbol_no_dlopen(const common::elf_utils::ElfInfo& _elf,
     {
         if(sym.name != _symname) continue;
         if(sym.section_index == SHN_UNDEF) continue;  // undefined import, not a definition here
-        if(sym.type != STT_FUNC) return nullptr;      // refuse IFUNC/exotic symbol types
+        if(sym.type != STT_FUNC) continue;            // refuse IFUNC/exotic symbol types
         if(sym.value == 0) continue;
         auto  _addr      = _load_bias + static_cast<uintptr_t>(sym.value);
         FuncT _fn        = nullptr;
