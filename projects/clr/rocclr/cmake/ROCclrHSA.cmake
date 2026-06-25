@@ -2,67 +2,43 @@
 #
 # SPDX-License-Identifier: MIT
 
-option(ROCCLR_USE_SHARED_HSA_RUNTIME
-  "Use a separately built shared hsa-runtime64 package on AMD_COMPUTE_WIN"
-  OFF)
-
 if (AMD_COMPUTE_WIN)
-  if(ROCCLR_USE_SHARED_HSA_RUNTIME)
-    find_package(hsa-runtime64 1.11 REQUIRED CONFIG
-      PATHS
-        ${ROCM_PATH}
-        ${ROCM_INSTALL_PATH}
-        ${CMAKE_CURRENT_BINARY_DIR}
-        ${CMAKE_INSTALL_PREFIX}
-        ${CMAKE_INSTALL_PREFIX}/..
-      PATH_SUFFIXES
-        rocr/lib/cmake/hsa-runtime64
-        rocr/runtime/hsa-runtime
-        cmake/hsa-runtime64
-        lib/cmake/hsa-runtime64
-        lib64/cmake/hsa-runtime64)
-    target_link_libraries(rocclr PUBLIC hsa-runtime64::hsa-runtime64)
-    if (WIN32)
-      target_link_libraries(rocclr PRIVATE OneCoreUAP.Lib)
-    endif()
-  else()
-    find_path(AMD_HSA_INCLUDE_DIR hsa.h
-      PATHS
-        ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime/inc
-        ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
-        ${CMAKE_CURRENT_BINARY_DIR}/../../rocr/inc
-        ${CMAKE_CURRENT_BINARY_DIR}/../../rocr
-        ${CMAKE_CURRENT_BINARY_DIR}/../..
-        ${CMAKE_CURRENT_BINARY_DIR}/..
-        ${CMAKE_CURRENT_BINARY_DIR}
-        ${ROCM_PATH}
-        ${ROCM_INSTALL_PATH}
-      PATH_SUFFIXES
-        include
-        include/hsa
-        inc
-      NO_DEFAULT_PATH)
-    message("Roc CLR: " ${ROCCLR_SRC_DIR} "; HSA headers:" ${AMD_HSA_INCLUDE_DIR})
-    target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR})
-    target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR}/..)
-    # Build hsa-runtime64 as a subdirectory
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
-    set(ROCM_PATCH_VERSION 99999 CACHE STRING "")
-    add_subdirectory(${ROCCLR_SRC_DIR}/../../rocr-runtime hsa-runtime64)
-    set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries" FORCE)
-    # Create alias target to match find_package() convention
-    # The actual static library target is hsa-runtime64_static, with hsa-runtime64 being an INTERFACE wrapper
-    if(TARGET hsa-runtime64_static AND NOT TARGET hsa-runtime64::hsa-runtime64_static)
-      add_library(hsa-runtime64::hsa-runtime64_static ALIAS hsa-runtime64_static)
-    endif()
-    # Link the static library (use the INTERFACE wrapper which applies --whole-archive correctly)
-    target_link_libraries(rocclr PUBLIC hsa-runtime64)
-    if (NOT ROCCLR_ENABLE_PAL)
-      find_package(AMD_HSA_LOADER)
-      target_link_libraries(rocclr PUBLIC oclelf)
-    endif()
-    target_compile_definitions(rocclr PUBLIC ROCR_STATIC_OPEN)
+  find_path(AMD_HSA_INCLUDE_DIR hsa.h
+    PATHS
+      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime/inc
+      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
+      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr/inc
+      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr
+      ${CMAKE_CURRENT_BINARY_DIR}/../..
+      ${CMAKE_CURRENT_BINARY_DIR}/..
+      ${CMAKE_CURRENT_BINARY_DIR}
+      ${ROCM_PATH}
+      ${ROCM_INSTALL_PATH}
+    PATH_SUFFIXES
+      include
+      include/hsa
+      inc
+    NO_DEFAULT_PATH)
+  message("Roc CLR: " ${ROCCLR_SRC_DIR} "; HSA headers:" ${AMD_HSA_INCLUDE_DIR})
+  target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR})
+  target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR}/..)
+  # Build hsa-runtime64 as a subdirectory
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+  set(ROCM_PATCH_VERSION 99999 CACHE STRING "")
+  add_subdirectory(${ROCCLR_SRC_DIR}/../../rocr-runtime hsa-runtime64)
+  set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries" FORCE)
+  # Create alias target to match find_package() convention
+  # The actual static library target is hsa-runtime64_static, with hsa-runtime64 being an INTERFACE wrapper
+  if(TARGET hsa-runtime64_static AND NOT TARGET hsa-runtime64::hsa-runtime64_static)
+    add_library(hsa-runtime64::hsa-runtime64_static ALIAS hsa-runtime64_static)
   endif()
+  # Link the static library (use the INTERFACE wrapper which applies --whole-archive correctly)
+  target_link_libraries(rocclr PUBLIC hsa-runtime64)
+  if (NOT ROCCLR_ENABLE_PAL)
+    find_package(AMD_HSA_LOADER)
+    target_link_libraries(rocclr PUBLIC oclelf)
+  endif()
+  target_compile_definitions(rocclr PUBLIC ROCR_STATIC_OPEN)
 else()
   if(UNIX)
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
