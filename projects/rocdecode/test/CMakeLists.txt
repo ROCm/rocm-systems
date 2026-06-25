@@ -93,14 +93,74 @@ else()
 endif(BUILD_FROM_SOURCE)
 find_package(FFmpeg QUIET)
 
+# Check if ASAN is enabled via environment variables or compiler flags
+set(ASAN_ENABLED OFF)
+# Check common ASAN environment variables
+if(DEFINED ENV{ASAN_OPTIONS} OR DEFINED ENV{ASAN_SYMBOLIZER_PATH} OR DEFINED ENV{LSAN_OPTIONS})
+  set(ASAN_ENABLED ON)
+endif()
+# Check if -fsanitize=address is in the compiler flags
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR
+   CMAKE_C_FLAGS MATCHES "-fsanitize=address" OR
+   CMAKE_EXE_LINKER_FLAGS MATCHES "-fsanitize=address")
+  set(ASAN_ENABLED ON)
+endif()
+
+# Locate the ASAN runtime library if ASAN is enabled
+set(ASAN_PRELOAD "")
+if(ASAN_ENABLED)
+  set(ASAN_LIB_PATH "${ROCM_PATH}/lib/llvm/lib/clang")
+  # Try to get the clang version from the compiler
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} --version
+    OUTPUT_VARIABLE CLANG_VERSION_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  # Extract major version (e.g., "19" from "clang version 19.0.0")
+  if(CLANG_VERSION_OUTPUT MATCHES "clang version ([0-9]+)")
+    set(CLANG_MAJOR_VERSION "${CMAKE_MATCH_1}")
+    set(ASAN_LIB_CANDIDATE "${ASAN_LIB_PATH}/${CLANG_MAJOR_VERSION}/lib/linux/libclang_rt.asan-x86_64.so")
+    if(EXISTS "${ASAN_LIB_CANDIDATE}")
+      set(ASAN_PRELOAD "${ASAN_LIB_CANDIDATE}")
+      message("-- ${White}${PROJECT_NAME}: ASAN enabled, runtime library found -- ${ASAN_PRELOAD}${ColourReset}")
+    endif()
+  endif()
+  # Fallback: search available versions (sorted descending) if compiler detection failed
+  if(NOT ASAN_PRELOAD)
+    file(GLOB CLANG_VERSION_DIRS "${ASAN_LIB_PATH}/*")
+    list(SORT CLANG_VERSION_DIRS ORDER DESCENDING)
+    foreach(CLANG_DIR ${CLANG_VERSION_DIRS})
+      if(IS_DIRECTORY ${CLANG_DIR})
+        set(ASAN_LIB_CANDIDATE "${CLANG_DIR}/lib/linux/libclang_rt.asan-x86_64.so")
+        if(EXISTS "${ASAN_LIB_CANDIDATE}")
+          set(ASAN_PRELOAD "${ASAN_LIB_CANDIDATE}")
+          message("-- ${White}${PROJECT_NAME}: ASAN enabled, runtime library found (fallback) -- ${ASAN_PRELOAD}${ColourReset}")
+          break()
+        endif()
+      endif()
+    endforeach()
+  endif()
+  if(NOT ASAN_PRELOAD)
+    message(WARNING "${PROJECT_NAME}: ASAN detected but libclang_rt.asan-x86_64.so not found in ${ASAN_LIB_PATH}")
+  endif()
+endif()
+
 # Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
 set(USING_THE_ROCK OFF)
 if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
   set(USING_THE_ROCK ON)
   set(THEROCK_SYSDEPS_LIB "${ROCM_PATH}/lib/rocm_sysdeps/lib")
-  set(THEROCK_ENV
-    "LD_PRELOAD=${THEROCK_SYSDEPS_LIB}/librocm_sysdeps_va.so.2:${THEROCK_SYSDEPS_LIB}/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${THEROCK_SYSDEPS_LIB}"
-  )
+  set(VA_LIBS "${THEROCK_SYSDEPS_LIB}/librocm_sysdeps_va.so.2:${THEROCK_SYSDEPS_LIB}/librocm_sysdeps_va-drm.so.2")
+  if(ASAN_PRELOAD)
+    set(THEROCK_ENV
+      "LD_PRELOAD=${ASAN_PRELOAD}:${VA_LIBS};LIBVA_DRIVERS_PATH=${THEROCK_SYSDEPS_LIB}"
+    )
+  else()
+    set(THEROCK_ENV
+      "LD_PRELOAD=${VA_LIBS};LIBVA_DRIVERS_PATH=${THEROCK_SYSDEPS_LIB}"
+    )
+  endif()
 endif()
 
 # Helper macro: apply TheRock VA environment to a test when building via TheRock
