@@ -12,9 +12,7 @@ XGMI, PCIe, and SDMA metrics sampling and monitoring
 
 It allows you to gather key performance metrics for GPU-to-GPU communication via XGMI
 links, CPU-to-GPU communication via PCIe links, and asynchronous copy activity handled by
-the SDMA engines. This information can be used to optimize multi-GPU workloads, identify
-communication bottlenecks, and analyze data transfer efficiency in high-performance
-computing applications.
+the SDMA engines. Use this information to optimize multi-GPU workloads, identify communication bottlenecks, and analyze data transfer efficiency in high-performance computing applications.
 
 __ https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems
 
@@ -23,10 +21,9 @@ Sampling support
 
 Sampling of XGMI, PCIe, and SDMA metrics is supported by leveraging `AMD SMI
 <https://rocm.docs.amd.com/projects/amdsmi/en/latest/>`_ which provides the interface for
-GPU metric collection. Follow the steps:
+GPU metric collection. To enable sampling, follow these steps:
 
-1. Set the ``ROCPROFSYS_USE_AMD_SMI`` environment variable to enable GPU metric
-   collection:
+1. Set the ``ROCPROFSYS_USE_AMD_SMI`` environment variable to enable GPU metric collection:
 
 .. code-block:: shell
 
@@ -45,7 +42,7 @@ To include XGMI, PCIe, and SDMA usage metrics, update it to:
 
   ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,mem_usage,xgmi,pcie,sdma_usage
 
-Alternatively, you can use the following to collect all available GPU metrics:
+Alternatively, to collect all available GPU metrics, run:
 
 .. code-block:: shell
 
@@ -56,10 +53,10 @@ XGMI metrics
 
 XGMI (AMD Infinity Fabric™ XGMI) provides high-bandwidth, low-latency GPU-to-GPU interconnects in multi-GPU systems. The following XGMI metrics are collected:
 
-- **XGMI Link Width**: The number of active XGMI links between GPUs
-- **XGMI Link Speed**: The speed of XGMI links (in GT/s)
-- **XGMI Read Data**: Accumulated data read through each XGMI link (in KB)
-- **XGMI Write Data**: Accumulated data written through each XGMI link (in KB)
+- **XGMI Link Width**: The number of active XGMI links between GPUs.
+- **XGMI Link Speed**: The speed of XGMI links (in GT/s).
+- **XGMI Read Data**: Accumulated data read through each XGMI link (in KB).
+- **XGMI Write Data**: Accumulated data written through each XGMI link (in KB).
 
 These metrics help identify GPU-to-GPU communication patterns and bandwidth utilization in multi-GPU workloads.
 
@@ -85,7 +82,7 @@ SDMA metrics
 ------------
 
 SDMA engines perform asynchronous memory copies and related DMA work on the GPU. When
-the ``sdma_usage`` metric is enabled, ROCm Systems Profiler samples **SDMA usage**:
+the ``sdma_usage`` metric is enabled, ROCm Systems Profiler samples SDMA usage:
 device-level SDMA utilization as a percentage (0-100), aggregated across processes on that
 GPU.
 
@@ -112,7 +109,7 @@ flags, and ``rocprof-sys-run`` invocations).
 Using TransferBench for testing
 ================================
 
-For testing and benchmarking GPU connectivity, you can use the `TransferBench
+For testing and benchmarking GPU connectivity, you can use `TransferBench
 <https://rocm.docs.amd.com/projects/TransferBench/en/latest/index.html>`_.
 TransferBench is a benchmarking utility designed to measure the performance of
 simultaneous data transfers between user-specified devices, such as CPUs and GPUs.
@@ -236,11 +233,11 @@ memory-copy activity.
 Tips for effective profiling
 =============================
 
-1. **Multi-GPU workloads**: XGMI metrics are most useful when profiling applications that use multiple GPUs and transfer data between them.
+1. Multi-GPU workloads: XGMI metrics are most useful when profiling applications that use multiple GPUs and transfer data between them.
 
-2. **Sampling frequency**: Adjust the sampling frequency using ``ROCPROFSYS_PROCESS_SAMPLING_FREQ`` (default is 50Hz) to capture more or fewer samples based on your analysis needs.
+2. Sampling frequency: Adjust the sampling frequency using ``ROCPROFSYS_PROCESS_SAMPLING_FREQ`` (default is 50Hz) to capture more or fewer samples based on your analysis needs.
 
-3. **Focus on specific metrics**: If you only need XGMI, PCIe, or SDMA metrics, you can
+3. Focus on specific metrics: If you only need XGMI, PCIe, or SDMA metrics, you can
    specify just those:
 
    .. code-block:: shell
@@ -249,7 +246,7 @@ Tips for effective profiling
      ROCPROFSYS_AMD_SMI_METRICS=pcie  # Only PCIe metrics
      ROCPROFSYS_AMD_SMI_METRICS=sdma_usage  # Only SDMA usage
 
-4. **Combine with API tracing**: For detailed analysis, combine XGMI, PCIe, or SDMA
+4. Combine with API tracing: For detailed analysis, combine XGMI, PCIe, or SDMA
    metrics with HIP/HSA API tracing to correlate data transfers with application behavior:
 
    .. code-block:: shell
