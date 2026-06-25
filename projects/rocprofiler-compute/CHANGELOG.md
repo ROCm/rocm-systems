@@ -68,13 +68,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Kernels with missing counter data after iteration multiplexing imputation are now excluded from metrics calculations. A warning at analysis time lists the affected kernels. Their execution times remain visible in Top Stats.
 
-* Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (MI 200 series) GPUs
+* Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (AMD Instinct MI200 Series) GPUs.
 
-* PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped
+* PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped.
 
 ### Upcoming changes
 
-* Roofline support for RDNA 3.5 gfx1151 devices
+* Roofline support for RDNA3.5 gfx115x devices.
 
 ### Known issues
 

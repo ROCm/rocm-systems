@@ -57,7 +57,7 @@ env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
 
-  EXCLUDED_TESTS: "fork.*|roctx-sampling|roctx-runtime-instrument|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode-*|matrix-exponential.*|selective-region-region-1-filter.*|selective-region-region-2-and-3.*|selective-region-no-marker-region-1-filter.*|kfd-*|unified-memory-output-sys-run|rccl-alltoall-perf-sys-run"
+  EXCLUDED_TESTS: "fork.*|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode-.*|matrix-exponential.*|selective-region-region-1-filter.*|selective-region-region-2-and-3.*|selective-region-no-marker-region-1-filter.*|kfd-.*|unified-memory-output-sys-run|rccl-alltoall-perf-sys-run"
   EXCLUDED_LABELS: "thread_limit"
 
 jobs:
@@ -146,11 +146,14 @@ jobs:
         run: |
           set -e
           mkdir ${{ env.ROCM_PATH }}
-          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
+          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
           tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}
-          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
+
+      - name: Output TheRock Manifest
+        run: |
+          cat ${{ env.ROCM_PATH }}/share/therock/therock_manifest.json
 
       - name: Install Python Test Dependencies
         timeout-minutes: 10
