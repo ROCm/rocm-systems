@@ -367,6 +367,17 @@ static inline int ncclRmaSegOf(const struct ncclRmaIbProxyMrHandle* h, uint64_t 
   return h->nSegments - 1;
 }
 
+// Total registered bytes (segOff[nSegments] is the cumulative end offset).
+static inline uint64_t ncclRmaMrBytes(const struct ncclRmaIbProxyMrHandle* h) {
+  return h->segOff[h->nSegments];
+}
+
+// True iff [off, off+size) fits in the window (overflow-safe).
+static inline bool ncclRmaRangeOk(const struct ncclRmaIbProxyMrHandle* h, uint64_t off, size_t size) {
+  uint64_t bytes = ncclRmaMrBytes(h);
+  return off <= bytes && (uint64_t)size <= bytes - off;
+}
+
 // Build a chained RDMA WR list moving size bytes, splitting at segment
 // boundaries on both sides so each WR stays in one local + one remote MR.
 static ncclResult_t ncclRmaBuildSegmentedWrs(
@@ -598,10 +609,27 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
 #endif
   }
 
+  // Cross-rank symmetry guard: every rank must register the same segment count,
+  // else the fixed-stride all-gather/indexing below would corrupt memory.
+  {
+    int* allNSeg = NULL;
+    NCCLCHECKGOTO(ncclCalloc(&allNSeg, cComm->nranks), ret, fail);
+    ret = cComm->allGather(cComm, &nSeg, allNSeg, sizeof(int));
+    for (int r = 0; ret == ncclSuccess && r < cComm->nranks; r++) {
+      if (allNSeg[r] != nSeg) {
+        WARN("NET/IB/RMA: buffer %p segment-count mismatch (rank %d has %d, local %d); "
+             "symmetric registration required", data, r, allNSeg[r], nSeg);
+        ret = ncclInternalError;
+      }
+    }
+    free(allNSeg);
+    if (ret != ncclSuccess) goto fail;
+  }
+
   NCCLCHECKGOTO(ncclCalloc(&rmaMrHandle->base_vas, (size_t)cComm->nranks * nSeg), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&rmaMrHandle->rkeys, (size_t)cComm->nranks * nSeg), ret, fail);
 
-  // Gather per-segment base VAs/rkeys; symmetric registration keeps nSeg/sizes aligned.
+  // Gather per-segment base VAs/rkeys; symmetry verified above keeps nSeg/sizes aligned.
   NCCLCHECKGOTO(cComm->allGather(cComm, localVas, rmaMrHandle->base_vas, sizeof(uintptr_t) * nSeg), ret, fail);
   NCCLCHECKGOTO(cComm->allGather(cComm, localRkeys, rmaMrHandle->rkeys, sizeof(uint32_t) * nSeg), ret, fail);
 
@@ -669,6 +697,12 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
   struct ncclRmaIbProxyMrHandle* srcMrHandle = (struct ncclRmaIbProxyMrHandle*)srcMhandle;
   struct ncclRmaIbProxyMrHandle* dstMrHandle = (struct ncclRmaIbProxyMrHandle*)dstMhandle;
 
+  // Reject out-of-range transfers before any WR is posted.
+  if (!ncclRmaRangeOk(srcMrHandle, srcOff, size) || !ncclRmaRangeOk(dstMrHandle, dstOff, size)) {
+    WARN("NET/IB/RMA: iput out of range (srcOff=%lu dstOff=%lu size=%zu)", srcOff, dstOff, size);
+    return ncclInvalidArgument;
+  }
+
   struct ncclIbSendComm* comm;
   NCCLCHECK(ncclRmaIbProxyGetSendComm(rmaProxyCtx, rank, &comm));
   struct ncclIbQp* qp = &comm->base.qps[0];
@@ -714,6 +748,12 @@ ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
 
   struct ncclRmaIbProxyMrHandle* remoteMrHandle = (struct ncclRmaIbProxyMrHandle*)remoteMhandle;
   struct ncclRmaIbProxyMrHandle* localMrHandle = (struct ncclRmaIbProxyMrHandle*)localMhandle;
+
+  // Reject out-of-range transfers before any WR is posted.
+  if (!ncclRmaRangeOk(remoteMrHandle, remoteOffset, size) || !ncclRmaRangeOk(localMrHandle, localOffset, size)) {
+    WARN("NET/IB/RMA: iget out of range (remoteOff=%lu localOff=%lu size=%zu)", remoteOffset, localOffset, size);
+    return ncclInvalidArgument;
+  }
 
   struct ncclIbSendComm* comm;
   NCCLCHECK(ncclRmaIbProxyGetSendComm(rmaProxyCtx, rank, &comm));
@@ -768,6 +808,16 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
   struct ncclRmaIbProxyMrHandle* srcMrHandle = (struct ncclRmaIbProxyMrHandle*)srcMhandle;
   struct ncclRmaIbProxyMrHandle* dstMrHandle = (struct ncclRmaIbProxyMrHandle*)dstMhandle;
   struct ncclRmaIbProxyMrHandle* signalMrHandle = (struct ncclRmaIbProxyMrHandle*)signalMhandle;
+
+  // Reject out-of-range payload/signal before any WR is posted (signal is an 8-byte atomic).
+  if ((size > 0 && (!srcMrHandle || !dstMrHandle ||
+                    !ncclRmaRangeOk(srcMrHandle, srcOff, size) ||
+                    !ncclRmaRangeOk(dstMrHandle, dstOff, size))) ||
+      !signalMrHandle || !ncclRmaRangeOk(signalMrHandle, signalOff, sizeof(uint64_t))) {
+    WARN("NET/IB/RMA: iputSignal out of range (srcOff=%lu dstOff=%lu size=%zu signalOff=%lu)",
+         srcOff, dstOff, size, signalOff);
+    return ncclInvalidArgument;
+  }
 
   struct ncclIbSendComm* comm;
   NCCLCHECK(ncclRmaIbProxyGetSendComm(rmaProxyCtx, rank, &comm));
