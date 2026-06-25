@@ -199,21 +199,6 @@ typedef enum {
 #define MAX_NUMBER_OF_AFIDS_PER_RECORD 12  //!< Maximum AFIDs per CPER record
 
 /**
- * @brief Maximum size definitions AMDSMI
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-#define AMDSMI_MAX_VF_COUNT 32               //!< Maximum virtual functions supported
-#define AMDSMI_MAX_DRIVER_NUM 2              //!< Maximum drivers supported
-#define AMDSMI_DFC_FW_NUMBER_OF_ENTRIES 9    //!< DFC firmware entries supported
-#define AMDSMI_MAX_WHITE_LIST_ELEMENTS 16    //!< Max white list elements for device access control
-#define AMDSMI_MAX_BLACK_LIST_ELEMENTS 64    //!< Max black list elements for device access control
-#define AMDSMI_MAX_UUID_ELEMENTS 16          //!< Max UUID elements supported
-#define AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS 8  //!< Max Trusted Application white list elements
-#define AMDSMI_MAX_ERR_RECORDS 10            //!< Maximum error records that can be stored
-#define AMDSMI_MAX_PROFILE_COUNT 16          //!< Maximum profiles supported
-
-/**
  * @brief Introduced in gpu metrics v1.9+
  *
  * @cond @tag{gpu_bm_linux} @endcond
@@ -261,8 +246,19 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
+// Deprecation targets: kept for source/ABI compatibility, slated for removal.
+#define AMDSMI_MAX_VF_COUNT 32               //!< Maximum virtual functions supported
+#define AMDSMI_MAX_DRIVER_NUM 2              //!< Maximum drivers supported
+#define AMDSMI_DFC_FW_NUMBER_OF_ENTRIES 9    //!< DFC firmware entries supported
+#define AMDSMI_MAX_WHITE_LIST_ELEMENTS 16    //!< Max white list elements for device access control
+#define AMDSMI_MAX_BLACK_LIST_ELEMENTS 64    //!< Max black list elements for device access control
+#define AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS 8  //!< Max Trusted Application white list elements
+#define AMDSMI_MAX_ERR_RECORDS 10            //!< Maximum error records that can be stored
+#define AMDSMI_MAX_PROFILE_COUNT 16          //!< Maximum profiles supported
 #define AMDSMI_PF_INDEX (AMDSMI_MAX_VF_COUNT - 1)
 #define AMDSMI_MAX_DRIVER_INFO_RSVD 64
+// Deprecation target: kept for ABI compatibility; prefer AMDSMI_FABRIC_PPOD_ID_SIZE.
+#define AMDSMI_MAX_UUID_ELEMENTS 16  //!< Max UUID elements supported
 
 /**
  * @brief GPU Capability info
@@ -1481,9 +1477,13 @@ typedef struct {
   uint8_t is_iolink_bi_directional;  //!< 1 = true, 0 = false, UINT8_MAX = Not defined
 } amdsmi_p2p_capability_t;
 
-//! Guaranteed maximum possible number of supported frequencies
-//! @cond @tag{gpu_bm_linux} @tag{host} @endcond
-#define AMDSMI_MAX_NUM_FREQUENCIES 33
+/**
+ * @brief Maximum size definitions
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+#define AMDSMI_MAX_NUM_FREQUENCIES \
+  33  //!< Guaranteed maximum possible number of supported frequencies
 
 //! Maximum possible value for fan speed for legacy hwmon GPUs.
 //! For GPUs with the gpu_od sysfs interface, use
@@ -3331,8 +3331,7 @@ amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_hand
  *
  *  @ingroup tagProcDiscovery
  *
- *  @platform{gpu_bm_linux} @platform{cpu_bm} @platform{guest_1vf}
- *  @platform{guest_mvf}
+ *  @platform{gpu_bm_linux} @platform{cpu_bm}
  *
  *  @details This function writes the processor's index into @p name as a decimal
  *  string (for example "0", "1", "2"). The index is the processor's zero-based
@@ -3356,7 +3355,7 @@ amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_hand
  *
  *  @ingroup tagProcDiscovery
  *
- *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm}
+ *  @platform{gpu_bm_linux} @platform{cpu_bm}
  *
  *  @details This function classifies a list of processor handles and returns the per-type
  *  totals. Counts are derived purely from ::amdsmi_get_processor_type and do not require
@@ -3543,6 +3542,61 @@ amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle proce
  */
 amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
                                                    amdsmi_virtualization_mode_t* mode);
+
+/**
+ *  @brief Get the list of the NIC processor handles associated to a socket.
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function retrieves the processor handles of a socket. The
+ *  @p socket_handle must be provided for the processor.
+ *
+ *  @note Sockets are not supported on the @platform{host}.
+ *
+ *  The number of processor count is returned through @p processor_count
+ *  if @p processor_handles is NULL. Then the number of @p processor_count can be pass
+ *  as input to retrieval all processors on the socket to @p processor_handles.
+ *
+ *  @param[in] socket_handle The socket to query
+ *
+ *  @param[in,out] processor_count As input, the value passed
+ *  through this parameter is the number of ::amdsmi_processor_handle's that
+ *  may be safely written to the memory pointed to by @p processor_handles. This is the
+ *  limit on how many processor handles will be written to @p processor_handles. On return, @p
+ *  processor_count will contain the number of processor handles written to @p processor_handles,
+ *  or the number of processor handles that could have been written if enough memory had been
+ *  provided.
+ *  If @p processor_handles is NULL, as output, @p processor_count will contain
+ *  how many processors are available to read for the socket.
+ *
+ *  @param[in,out] processor_handles A pointer to a block of memory to which the
+ *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *  In this case, this function can be used to query how many processors are
+ *  available to read.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_processor_handles(amdsmi_socket_handle socket_handle,
+                                                 uint32_t* processor_count,
+                                                 amdsmi_processor_handle* processor_handles);
+
+/**
+ *  @brief Returns BDF of the given NIC device
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] bdf Reference to BDF. Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_device_bdf(amdsmi_processor_handle processor_handle,
+                                          amdsmi_bdf_t* bdf);
 
 /** @} End tagProcDiscovery */
 
@@ -5504,6 +5558,7 @@ amdsmi_status_t amdsmi_clean_gpu_local_data(amdsmi_processor_handle processor_ha
 /**
  * @brief Fabric telemetry categories
  *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef enum {
   AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN = 0xFFFFFFFF,  //!< Unknown telemetry
@@ -5514,12 +5569,14 @@ typedef enum {
   AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4,           //!< Network Port telemetry
   AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5,     //!< Derived UALOE telemetry
   AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6,   //!< Derived Network Port telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7                //!< Maximum number of categories
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7,               //!< Maximum number of categories
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID = 0xFFFFFFFF   //!< Unknown telemetry
 } amdsmi_fabric_telemetry_category_t;
 
 /**
  * @brief Fabric telemetry category bitmask values
  *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef enum {
   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE),
@@ -5541,6 +5598,8 @@ typedef enum {
 
 /**
  * @brief Fabric telemetry item structure
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
   uint64_t id;     //!< Identifier of the telemetry item
@@ -5551,9 +5610,12 @@ typedef struct {
  * @brief Fabric textual label structure
  *
  * Labels must be null terminated
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 #define AMDSMI_FABRIC_LABEL_MAX_LENGTH \
   32  //!< Maximum length of the textual label (must be null terminated)
+#define AMDSMI_FABRIC_PPOD_ID_SIZE 16  //!< Physical PoD Identifier size in bytes (128-bit UUID)
 
 typedef struct {
   char text[AMDSMI_FABRIC_LABEL_MAX_LENGTH];  //!< Textual label content
@@ -5563,6 +5625,8 @@ typedef struct {
  * @brief Fabric telemetry instance structure
  *
  * Collection of telemetry data items for an instance of a category of telemetry
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
   amdsmi_fabric_label_t name;             //!< Name for this instance
@@ -5575,6 +5639,8 @@ typedef struct {
  * @brief Fabric telemetry dataset structure
  *
  * Contains all telemetry for one category
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
   amdsmi_fabric_telemetry_category_t category;  //!< Telemetry category
@@ -5590,6 +5656,8 @@ typedef struct {
  * Top level structure defining telemetry data for Fabric. Contains datasets
  * for each category of telemetry. A null pointer means no telemetry is
  * available for that category.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
   amdsmi_fabric_telemetry_dataset_t*
@@ -5644,7 +5712,7 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
  *
  *  @ingroup tagFabric
  *
- *  @platform{gpu_bm_linux} @platform{host}
+ *  @platform{gpu_bm_linux}
  *
  *  @details Given a telemetry item ID @p telem_id,
  *  this function returns a pointer to a string containing the human-readable name
@@ -5685,7 +5753,7 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
 typedef enum {
   AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE =
       32,  //!< Active accelerators bitmap size (32 x 32-bit words = 1024 bits)
-  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 8  //!< Maximum local GPUs in fabric
+  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16  //!< Maximum local GPUs in fabric
 } amdsmi_fabric_size_constants_t;
 
 /**
@@ -5735,9 +5803,10 @@ typedef struct {
   uint32_t bandwidth;                //!< Station bandwidth share in Mb/s
   uint32_t latency;  //!< Latency in nanoseconds (depends on switch presence and type)
   uint8_t ppod_id[AMDSMI_MAX_UUID_ELEMENTS];  //!< Physical PoD Identifier (16 bytes)
-  uint32_t ppod_size;                         //!< Physical PoD size
-  uint32_t vpod_id;                           //!< Virtual PoD Identifier
-  uint32_t vpod_size;                         //!< Virtual PoD size
+
+  uint32_t ppod_size;  //!< Physical PoD size
+  uint32_t vpod_id;    //!< Virtual PoD Identifier
+  uint32_t vpod_size;  //!< Virtual PoD size
   uint32_t vpod_active_accelerators
       [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< 1024-bit list (32 x 32-bit words): bit
                                                         //!< N set = accelerator ID N is active
@@ -5756,6 +5825,7 @@ typedef struct {
 /**
  * @brief Fabric device information structure
  *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
   amdsmi_bdf_t bdf;                      //!< BDF (Bus, Device, Function) of the Fabric device
@@ -9441,6 +9511,82 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
                                                     uint32_t rdma_port_index, uint32_t* num_stats,
                                                     amdsmi_nic_stat_t* stats);
+
+/**
+ *  @brief Retrieves firmware version information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @note This API depends on libmnl. If libmnl is not installed on the
+ *  system, this function returns ::AMDSMI_STATUS_NOT_SUPPORTED.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic firmware info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
+                                       amdsmi_nic_fw_info_t* info);
+
+/**
+ *  @brief Retrieve PORT statistics for the specified NIC port
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  This function follows a two-call pattern:
+ *  1. First call with stats=NULL to get the count of available statistics
+ *  2. Second call with allocated array to retrieve all statistics
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *  @param[in] port_index index of the NIC port to query
+ *  @param[in,out] num_stats pointer to the number of statistics
+ *    - Input: maximum number of statistics that stats array can hold
+ *    - Output: actual number of statistics available/returned
+ *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
+ *    - If NULL, only num_stats is filled with the count of available statistics
+ *    - If not NULL, must be allocated by user with at least num_stats elements
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,
+                                               uint32_t port_index, uint32_t* num_stats,
+                                               amdsmi_nic_stat_t* stats);
+
+/**
+ *  @brief Retrieve vendor specific statistics for the NIC port
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  This function follows a two-call pattern:
+ *  1. First call with stats=NULL to get the count of available statistics
+ *  2. Second call with allocated array to retrieve all statistics
+ *
+ *  This API provides access to vendor/driver specific statistics that may vary
+ *  between different NIC vendors and driver/fw versions. The statistic names are
+ *  preserved as provided by the underlying driver implementation.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *  @param[in] port_index index of the NIC port to query
+ *  @param[in,out] num_stats pointer to the number of statistics
+ *    - Input: maximum number of statistics that stats array can hold
+ *    - Output: actual number of statistics available/returned
+ *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
+ *    - If NULL, only num_stats is filled with the count of available statistics
+ *    - If not NULL, must be allocated by user with at least num_stats elements
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
+                                                 uint32_t port_index, uint32_t* num_stats,
+                                                 amdsmi_nic_stat_t* stats);
 
 /** @} End tagNicInfo */
 

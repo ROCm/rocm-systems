@@ -6,15 +6,29 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/log.h"
 
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
 #include <cassert>
 #include <format>
+#include <mutex>
 #include <sstream>
 
 namespace rocjitsu::plugins::race_detector {
+
+namespace {
+
+void warn_cluster_peer_writes_ignored_once() {
+  static std::once_flag warned;
+  std::call_once(warned, [] {
+    util::Logger::warn(
+        "race detector does not model cluster LDS multicast peer writes; peer writes are ignored");
+  });
+}
+
+} // namespace
 
 std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detector) {
   auto make = [&](auto eid) -> MarkedPc {
@@ -282,10 +296,19 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
     if (d.lds_dst) {
       uint32_t perLaneBytes = d.num_elems * d.elem_size;
+      if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
+        uint32_t selfMask = amdgpu::cluster_multicast_rank_mask(wf.cluster_rank());
+        uint32_t peerMask = d.cluster_mcast_mask & ~selfMask;
+        if (peerMask != 0)
+          warn_cluster_peer_writes_ignored_once();
+        if ((d.cluster_mcast_mask & selfMask) == 0)
+          return;
+      }
       uint32_t ldsAddrs[64];
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-        ldsAddrs[lane] = d.lds_base + lane * perLaneBytes;
-      rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, wf.exec(), wf.wf_size(),
+        ldsAddrs[lane] =
+            d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;
+      rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, d.lane_mask, wf.wf_size(),
                            std::span<const uint32_t>(ldsAddrs, wf.wf_size()), perLaneBytes);
     } else if (d.is_load && d.dst_reg_base >= wf.vgpr_alloc().base) {
       uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;

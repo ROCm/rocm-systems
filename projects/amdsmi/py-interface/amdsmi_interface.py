@@ -2473,6 +2473,19 @@ def amdsmi_get_gpu_device_bdf(processor_handle: processor_handle_t) -> str:
 def amdsmi_get_gpu_device_bdf_bdf(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
 ) -> amdsmi_wrapper.amdsmi_bdf_t:
+    """Deprecated: use amdsmi_get_gpu_device_bdf() and format the returned BDF string instead.
+
+    Returns the raw amdsmi_bdf_t struct for a GPU. The same data is available as a
+    formatted string from amdsmi_get_gpu_device_bdf().
+    """
+    import warnings
+
+    warnings.warn(
+        "amdsmi_get_gpu_device_bdf_bdf() is deprecated, use amdsmi_get_gpu_device_bdf() "
+        "and format the returned BDF string instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
@@ -2725,8 +2738,17 @@ def amdsmi_get_switch_link_info(
     return link_info_dict
 
 
-def amdsmi_get_root_switch(amdsmi_bdf: amdsmi_wrapper.amdsmi_bdf_t) -> str:
-    if not isinstance(amdsmi_bdf, amdsmi_wrapper.amdsmi_bdf_t):
+def amdsmi_get_root_switch(amdsmi_bdf: Union[str, amdsmi_wrapper.amdsmi_bdf_t]) -> str:
+    # An empty BDF means the caller has no device to resolve (e.g. NIC info
+    # unavailable); report it as N/A instead of forcing callers to guard.
+    if isinstance(amdsmi_bdf, str):
+        if not amdsmi_bdf:
+            return "N/A"
+        parsed_bdf = _parse_bdf(amdsmi_bdf)
+        if parsed_bdf is None:
+            raise AmdSmiBdfFormatException(amdsmi_bdf)
+        amdsmi_bdf = _make_amdsmi_bdf_from_list(parsed_bdf)
+    elif not isinstance(amdsmi_bdf, amdsmi_wrapper.amdsmi_bdf_t):
         raise AmdSmiParameterException(amdsmi_bdf, amdsmi_wrapper.amdsmi_bdf_t)
 
     switch_bdf_info = amdsmi_wrapper.amdsmi_bdf_t()
@@ -4032,11 +4054,14 @@ def amdsmi_get_gpu_xcd_counter(processor_handle: processor_handle_t) -> int:
     return xcd_counter.value
 
 
-def amdsmi_get_processor_handle_from_bdf(bdf):
-    bdf = _parse_bdf(bdf)
-    if bdf is None:
-        raise AmdSmiBdfFormatException(bdf)
-    amdsmi_bdf = _make_amdsmi_bdf_from_list(bdf)
+def amdsmi_get_processor_handle_from_bdf(bdf: Union[str, amdsmi_wrapper.amdsmi_bdf_t]):
+    if isinstance(bdf, amdsmi_wrapper.amdsmi_bdf_t):
+        amdsmi_bdf = bdf
+    else:
+        parsed_bdf = _parse_bdf(bdf)
+        if parsed_bdf is None:
+            raise AmdSmiBdfFormatException(bdf)
+        amdsmi_bdf = _make_amdsmi_bdf_from_list(parsed_bdf)
     processor_handle = amdsmi_wrapper.amdsmi_processor_handle()
     _check_res(
         amdsmi_wrapper.amdsmi_get_processor_handle_from_bdf(
@@ -6971,7 +6996,7 @@ _FABRIC_ACCEL_STATE_NAMES = {
 }
 
 
-def amdsmi_get_fabric_telemetry(
+def amdsmi_get_fabric_telemetry_data(
     processor_handle: processor_handle_t, category_mask: int
 ) -> List[Dict[str, Any]]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
