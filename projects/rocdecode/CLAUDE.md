@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-rocDecode is AMD's high-performance video decode SDK. It provides a C/C++ API to access hardware-accelerated video decoding (VCN engines) on AMD GPUs via VA-API, with HIP for GPU interoperability. Supported codecs: H.265 (HEVC), H.264 (AVC), AV1, VP9 (8-bit and 10-bit). Requires AMD GPU gfx908+.
+rocDecode is AMD's high-performance video decode SDK. It provides a C/C++ API to access hardware-accelerated video decoding (VCN engines) on AMD GPUs via VA-API, with HIP for GPU interoperability. Supported codecs: H.265/HEVC (8/10 bit), H.264/AVC (8 bit), AV1 (8/10/12 bit), VP9 (8-bit and 10-bit). Requires AMD GPU gfx908+.
 
 - rocDecode is located at projects/rocdecode
 - rocDecode CI is located at .github/workflows/media-libs-ci.yml
@@ -18,8 +18,8 @@ mkdir build && cd build
 cmake ..
 make -j$(nproc)
 
-# Debug build
-cmake .. -DCMAKE_BUILD_TYPE=Debug
+# Release build
+cmake .. -DCMAKE_BUILD_TYPE=Release
 
 # Install (required before running tests)
 sudo make install
@@ -40,9 +40,9 @@ Tests use a build-and-test pattern: CTest builds each sample in a temp directory
 
 ## Key CMake Options
 
-- `ROCM_PATH` - ROCm installation path (default: `/opt/rocm` or your_path_to_site_packages/_rocm_sdk_devel)
+- `ROCM_PATH` - ROCm installation path (default: `/opt/rocm` or 
 - `ROCDECODE_ENABLE_ROCPROFILER_REGISTER` - Enable profiling support (default: ON)
-- `ROCDECODE_ENABLE_HOST_DECODER` - Build FFmpeg-based software decoder `librocdecode-host.so` (default: OFF)
+- `ROCDECODE_ENABLE_HOST_DECODER` - Build FFmpeg-based software decoder `librocdecode-host.so` (default: ON; only built when FFmpeg is found)
 - `ENABLE_EXTENDED_TESTS` - Enable FFmpeg-dependent tests (default: OFF)
 
 ## Required Dependencies
@@ -88,6 +88,6 @@ Input (video file) -> Demuxing (FFmpeg or bitstream reader) -> Parsing (codec-sp
 
 - C++17, compiled with `-Wall`
 - `#pragma once` for header guards
-- MIT license header block required on all files
+- MIT license header block required on all C/C++ and CMake files
 - Compiler: `amdclang++` from ROCm toolchain
 - Release: `-O3 -DNDEBUG -fPIC`; Debug: `-O0 -gdwarf-4` (Valgrind compatible)
