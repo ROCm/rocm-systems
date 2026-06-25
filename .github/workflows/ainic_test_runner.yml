@@ -19,7 +19,7 @@ on:
       workdir:
         description: 'Working directory on the runner (WORKDIR)'
         required: false
-        default: '/apps/shared/nigusev/rocm-systems'
+        default: '/it-share/rccl-ci/rocm-systems'
       mpi_path:
         description: 'MPI install path (MPI_PATH)'
         required: false
@@ -27,7 +27,7 @@ on:
       rccl_home:
         description: 'Pre-built RCCL install path (RCCL_HOME)'
         required: false
-        default: '/apps/shared/nigusev/rccl-rocm720'
+        default: '/it-share/rccl-ci/rccl-rocm720'
       test_suites:
         description: 'Comma-separated suite names to run (empty = all enabled)'
         required: false
@@ -40,9 +40,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AINIC_SHARED: /apps/shared/nigusev
-  ROCM_PATH: /opt/rocm-7.2.0
-  ANP_PLUGIN: /apps/build/amd-anp-tot/build/librccl-net.so
+  # Shared CI root on the AINIC cluster (configs, prebuilt libs, artifacts),
+  # mirroring rccl_perf_regression.yml (PR #7546).
+  RCCL_CI_ROOT: /it-share/rccl-ci
   TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
 
 jobs:
@@ -61,7 +61,6 @@ jobs:
           WORKDIR: ${{ github.event.inputs.workdir }}
           MPI_PATH: ${{ github.event.inputs.mpi_path }}
           RCCL_HOME: ${{ github.event.inputs.rccl_home }}
-          ROCM_PATH: ${{ env.ROCM_PATH }}
           RCCL_AINIC_ROCE: '1'
           IONIC_LOCKFREE: 'all'
           NCCL_IB_HCA: 'ionic_0,ionic_1,ionic_2,ionic_3,ionic_4,ionic_5,ionic_6,ionic_7'
