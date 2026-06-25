@@ -300,3 +300,21 @@ contract:
   Contract_ManagedMemory_PrefetchAsync_SucceedsWhenSupported:
     <<: *level_0
     tags: [managed_memory]
+  Contract_MemoryPool_DeviceGetDefaultMemPool_ReturnsPool:
+    <<: *level_0
+    tags: [memory_pool]
+  Contract_MemoryPool_DeviceGetMemPool_ReturnsCurrentPool:
+    <<: *level_0
+    tags: [memory_pool]
+  Contract_MemoryPool_SetCurrentMemPool_RoundTripsThroughGetMemPool:
+    <<: *level_0
+    tags: [memory_pool]
+  Contract_MemoryPool_GetSetReleaseThreshold_RoundTripsValue:
+    <<: *level_0
+    tags: [memory_pool]
+  Contract_MemoryPool_MallocAsyncFreeAsync_SucceedsWhenSupported:
+    <<: *level_0
+    tags: [memory_pool]
+  Contract_MemoryPool_MallocAsync_MemoryUsableAfterStreamSynchronize:
+    <<: *level_0
+    tags: [memory_pool]
