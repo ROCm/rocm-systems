@@ -130,3 +130,6 @@
 [submodule "projects/rocprofiler-compute/src/lib/external/json"]
 	path = projects/rocprofiler-compute/src/lib/external/json
 	url = https://github.com/nlohmann/json.git
+[submodule "shared/amdgpu-windows-interop/pal"]
+	path = shared/amdgpu-windows-interop/pal
+	url = https://github.com/ROCm/pal-static-lib
