@@ -511,6 +511,8 @@ class _ScalarBinop(_ScalarDeriver):
             result = SemaNode(kind, ty=ty, children=(src0, src1))
 
         result_ty = calc_ty if raw_carry_bits else ty
+        if op == 'mul' and ty.base == 'I':
+            result_ty = result.ty or result_ty
         if ty.base in ('F', 'BF') and ty.size == 16:
             result_ty = SemaType.F32
         stmts.append(_assign(_id('result', result_ty), result))

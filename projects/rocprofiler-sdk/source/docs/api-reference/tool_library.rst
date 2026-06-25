@@ -10,6 +10,8 @@ ROCprofiler-SDK tool library
 
 The tool library utilizes APIs from ``rocprofiler-sdk`` and ``rocprofiler-register`` libraries for profiling and tracing HIP applications. This document provides information to help you design a tool by utilizing the ``rocprofiler-sdk`` and ``rocprofiler-register`` libraries efficiently. The command-line tool ``rocprofv3`` is also built on ``librocprofiler-sdk-tool.so.X.Y.Z``, which uses these libraries.
 
+For the environment variables that control loading, registration, and diagnostics of a custom tool, see :ref:`tool-library-environment`.
+
 ROCm runtimes design
 ---------------------
 

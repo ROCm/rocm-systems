@@ -240,6 +240,12 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   uint32_t partition_id{};
 
   ret = amdsmi_get_gpu_accelerator_partition_profile(proc_handle, &profile, &partition_id);
+  // Non-partitionable GPUs report this as unsupported; treat them as a single
+  // partition. All consumers handle a count of 1 correctly.
+  if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+    *num_partition = 1;
+    return AMDSMI_STATUS_SUCCESS;
+  }
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }

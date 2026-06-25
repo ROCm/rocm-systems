@@ -34,14 +34,14 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 set(hip-stream-reuse-env "${PRELOAD_ENV}")
+set(hip-stream-reuse-pointer-file "${CMAKE_CURRENT_BINARY_DIR}/stream_pointers.txt")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-hip-stream-reuse
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -s -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json --log-level
-        env -- $<TARGET_FILE:hip-stream-reuse>
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-stream-reuse-trace/stream_pointers.txt
+        env -- $<TARGET_FILE:hip-stream-reuse> ${hip-stream-reuse-pointer-file}
     DEPENDS hip-stream-reuse
     TIMEOUT 60
     LABELS "integration-tests"
@@ -55,8 +55,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/hip-stream-reuse-trace/out_results.json
-         --pointer-file
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-stream-reuse-trace/stream_pointers.txt
+         --pointer-file ${hip-stream-reuse-pointer-file}
     TIMEOUT 60
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-hip-stream-reuse
