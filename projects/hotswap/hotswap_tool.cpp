@@ -54,15 +54,37 @@ struct ReaderEntry {
   bool keepalive_after_load = false;
 };
 
-std::mutex g_reader_map_mutex;
-std::unordered_map<uint64_t, ReaderEntry> g_reader_map;
+// These four are deliberately immortal (heap-allocated, never destroyed). HSA
+// calls OnUnload from hsa_shut_down, which is driven by libamdhip64's atexit
+// handler -- this runs AFTER this library's C++ static destructors (the tool is
+// dlopen'd by hsa_init, so its __cxa_atexit dtors are LIFO-earlier-to-run than
+// HIP's shutdown handler). If these were ordinary statics, their destructors
+// would free the backing storage first, and OnUnload's clear()/lock would then
+// touch freed memory -> use-after-free SIGSEGV. Making them never-destroyed
+// singletons removes that hazard. This is NOT a buffer leak: OnUnload still
+// clear()s the containers and frees every malloc'd ELF buffer; only the small
+// container shells persist to process exit (reclaimed by the OS).
+std::mutex &reader_map_mutex() {
+  static std::mutex *m = new std::mutex();
+  return *m;
+}
+std::unordered_map<uint64_t, ReaderEntry> &reader_map() {
+  static auto *m = new std::unordered_map<uint64_t, ReaderEntry>();
+  return *m;
+}
 
 // Rewritten ELF buffers must outlive the executable because ROCR's
 // LoadedCodeObjectImpl stores a raw pointer to the ELF data (used by
 // debuggers, profilers, and hsa_ven_amd_loader queries). We keep them
 // alive until OnUnload.
-std::mutex g_rewritten_elfs_mutex;
-std::vector<OwnedElf> g_rewritten_elfs;
+std::mutex &rewritten_elfs_mutex() {
+  static std::mutex *m = new std::mutex();
+  return *m;
+}
+std::vector<OwnedElf> &rewritten_elfs() {
+  static auto *v = new std::vector<OwnedElf>();
+  return *v;
+}
 
 CoreApiTable *g_core_table = nullptr;
 
@@ -76,14 +98,14 @@ decltype(hsa_executable_load_agent_code_object) *g_orig_load_agent_code_object =
 
 void stash_bytes(uint64_t handle, const uint8_t *data, size_t size) {
   auto vec = std::make_shared<std::vector<uint8_t>>(data, data + size);
-  std::scoped_lock lock(g_reader_map_mutex);
-  g_reader_map[handle] = ReaderEntry{std::move(vec), false, false};
+  std::scoped_lock lock(reader_map_mutex());
+  reader_map()[handle] = ReaderEntry{std::move(vec), false, false};
 }
 
 bool try_get_reader_entry(uint64_t handle, ByteVec *bytes, bool *from_file) {
-  std::scoped_lock lock(g_reader_map_mutex);
-  const auto it = g_reader_map.find(handle);
-  if (it == g_reader_map.end()) {
+  std::scoped_lock lock(reader_map_mutex());
+  const auto it = reader_map().find(handle);
+  if (it == reader_map().end()) {
     return false;
   }
   *bytes = it->second.bytes;
@@ -93,8 +115,8 @@ bool try_get_reader_entry(uint64_t handle, ByteVec *bytes, bool *from_file) {
 
 void retain_rewritten_elf(OwnedElf elf) {
   try {
-    std::scoped_lock lock(g_rewritten_elfs_mutex);
-    g_rewritten_elfs.push_back(std::move(elf));
+    std::scoped_lock lock(rewritten_elfs_mutex());
+    rewritten_elfs().push_back(std::move(elf));
   } catch (const std::bad_alloc &) {
     // Intentionally leak to preserve debugger/profiler correctness if the
     // keepalive vector itself cannot grow.
@@ -103,9 +125,9 @@ void retain_rewritten_elf(OwnedElf elf) {
 }
 
 void mark_reader_keepalive(uint64_t handle) {
-  std::scoped_lock lock(g_reader_map_mutex);
-  auto it = g_reader_map.find(handle);
-  if (it != g_reader_map.end()) {
+  std::scoped_lock lock(reader_map_mutex());
+  auto it = reader_map().find(handle);
+  if (it != reader_map().end()) {
     it->second.keepalive_after_load = true;
   }
 }
@@ -157,8 +179,8 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
     }
 
     {
-      std::scoped_lock lock(g_reader_map_mutex);
-      g_reader_map[reader.handle] = ReaderEntry{std::move(vec), true, false};
+      std::scoped_lock lock(reader_map_mutex());
+      reader_map()[reader.handle] = ReaderEntry{std::move(vec), true, false};
     }
     *code_object_reader = reader;
     return HSA_STATUS_SUCCESS;
@@ -174,10 +196,10 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
 hsa_status_t HSA_API
 hotswap_reader_destroy(hsa_code_object_reader_t code_object_reader) {
   {
-    std::scoped_lock lock(g_reader_map_mutex);
-    auto it = g_reader_map.find(code_object_reader.handle);
-    if (it != g_reader_map.end() && !it->second.keepalive_after_load) {
-      g_reader_map.erase(it);
+    std::scoped_lock lock(reader_map_mutex());
+    auto it = reader_map().find(code_object_reader.handle);
+    if (it != reader_map().end() && !it->second.keepalive_after_load) {
+      reader_map().erase(it);
     }
   }
   return g_orig_reader_destroy(code_object_reader);
@@ -363,13 +385,13 @@ void OnUnload() {
   g_orig_load_agent_code_object = nullptr;
 
   {
-    std::scoped_lock lock(g_reader_map_mutex);
-    g_reader_map.clear();
+    std::scoped_lock lock(reader_map_mutex());
+    reader_map().clear();
   }
 
   {
-    std::scoped_lock lock(g_rewritten_elfs_mutex);
-    g_rewritten_elfs.clear();
+    std::scoped_lock lock(rewritten_elfs_mutex());
+    rewritten_elfs().clear();
   }
 
   fprintf(stderr, "hotswap: tool unloaded\n");
