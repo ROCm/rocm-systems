@@ -460,11 +460,6 @@ bool Device::init() {
     if (amd::IS_HIP && ROC_GLOBAL_CU_MASK[0] != '\0') {
       roc_device->getGlobalCUMask(ROC_GLOBAL_CU_MASK);
     }
-    // Note: for now disable HSA path by default except for gfx942
-    if (IS_WINDOWS && (GPU_ENABLE_PAL == 2) &&
-        (std::string_view(roc_device->info().name_).find("gfx942") == std::string_view::npos)) {
-      return false;
-    }
     roc_device.release()->registerDevice();
   }
 
