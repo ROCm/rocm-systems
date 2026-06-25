@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/06/23.
-        default: "34a1241bb374307d24c5aee93c9fbd2279c1b04b"
+        # Last updated on 2026/06/25.
+        default: "3998d8edc92c87fd26d000d06c9af51f518d7439"
         required: true
 
 concurrency:
