@@ -57,6 +57,8 @@ class ProfileModeImportGuard:
         "rocprofv3",  # rocprofv3 python modules such as avail
         "rocprofv3_avail_module",  # Alternative avail module for
         # backward compatibility
+        "rocm_sdk",  # TheRock ROCm SDK; amdsmi_wrapper probes it to
+        # locate libamd_smi.so for TheRock wheel installs
     ])
 
     def __enter__(self):

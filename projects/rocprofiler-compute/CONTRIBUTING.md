@@ -244,6 +244,7 @@ non-stdlib packages are imported.
 - `amdsmi` - AMD System Management Interface
 - `hip` - HIP runtime Python bindings
 - `rocprofv3` - rocprofv3 Python bindings
+- `rocm_sdk` - TheRock ROCm SDK (amdsmi probes it to locate `libamd_smi.so` for TheRock wheels)
 
 ### What's NOT Allowed
 
