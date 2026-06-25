@@ -177,20 +177,20 @@ static __forceinline unsigned long long int strtoull(const char* str,
 } while (false)
 #endif
 
-/* Limitted printing when in release mode, always prints when in debug mode*/
+/* Limited printing when in release mode, always prints when in debug mode */
 #ifdef NDEBUG
-#define log_warning_n(limit, fmt, ...)                                                             \
-  do {                                                                                             \
-    fprintf(stderr, "Warning: " fmt, ##__VA_ARGS__);                                             \
-  } while (false)
-#else
 #define log_warning_n(limit, fmt, ...)                                                             \
   do {                                                                                             \
     static std::atomic<unsigned int> count(0);                                                     \
     if (limit == 0 || count < limit) {                                                             \
-      fprintf(stderr, "Warning: " fmt, ##__VA_ARGS__);                                             \
+      fprintf(stderr, "Warning: " fmt, ##__VA_ARGS__);                                           \
       count++;                                                                                     \
     }                                                                                              \
+  } while (false)
+#else
+#define log_warning_n(limit, fmt, ...)                                                             \
+  do {                                                                                             \
+    fprintf(stderr, "Warning: " fmt, ##__VA_ARGS__);                                             \
   } while (false)
 #endif
 
