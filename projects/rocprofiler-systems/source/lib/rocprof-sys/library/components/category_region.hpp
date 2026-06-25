@@ -21,6 +21,7 @@
 #include <charconv>
 #include <concepts>
 #include <map>
+#include <system_error>
 #include <thread>
 #include <timemory/components/gotcha/backends.hpp>
 #include <timemory/hash/types.hpp>
@@ -297,9 +298,19 @@ struct category_region
             search_end = pos - 1;
         }
 
-        std::uint32_t idx = 0;
-        std::from_chars(args_str.data() + record_start, args_str.data() + args_str.size(),
-                        idx);
+        std::uint32_t idx    = 0;
+        const auto [ptr, ec] = std::from_chars(args_str.data() + record_start,
+                                               args_str.data() + args_str.size(), idx);
+        if(ec != std::errc{})
+        {
+            // The idx field did not parse: the wire string is malformed (e.g. an
+            // unescaped delimiter shifted the fields). Fall back to 0 rather than
+            // continuing from a garbage index.
+            LOG_WARNING("[category_region] next_arg_index: malformed record index in "
+                        "\"{}\"; restarting numbering from 0",
+                        args_str);
+            return 0;
+        }
         return idx + 1;
     }
 
