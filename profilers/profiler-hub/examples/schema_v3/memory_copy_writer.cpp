@@ -183,13 +183,6 @@ writer(const std::string& db_path)
     writer.flush_in_memory_data_to_disk();
 }
 
-template <typename T>
-void
-print(const char* key, const T& value)
-{
-    std::cout << key << "=" << value << "\n";
-}
-
 }  // namespace
 
 int
@@ -207,7 +200,7 @@ main(int argc, char** argv)
     try
     {
         writer(db_path);
-        print("db_path", db_path);
+        std::cout << "db_path=" << db_path << "\n";
     } catch(const std::exception& e)
     {
         std::cerr << "[error] exception: " << e.what() << "\n";
