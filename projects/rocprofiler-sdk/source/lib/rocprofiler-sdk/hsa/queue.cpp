@@ -31,7 +31,7 @@
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"

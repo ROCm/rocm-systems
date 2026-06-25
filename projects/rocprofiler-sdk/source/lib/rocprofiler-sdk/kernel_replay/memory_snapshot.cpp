@@ -20,11 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/hsa/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/memory_tracker.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
 #include <hsa/hsa.h>
 

@@ -34,10 +34,10 @@
 
 | Component | File | Lines | GitHub |
 |-----------|------|-------|--------|
-| Public interface | `memory_tracker.hpp` | 42–68 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_tracker.hpp#L42-L68) |
-| HSA hook wrappers (`pool_allocate_wrapper`, etc.) | `memory_tracker.cpp` | 69–103 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_tracker.cpp#L69-L103) |
-| `update_table()` — installs hooks | `memory_tracker.cpp` | 139–159 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_tracker.cpp#L139-L159) |
-| `snap_inventory()` | `memory_tracker.cpp` | 132–137 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_tracker.cpp#L132-L137) |
+| Public interface | `memory_tracker.hpp` | 42–68 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp#L42-L68) |
+| HSA hook wrappers (`pool_allocate_wrapper`, etc.) | `memory_tracker.cpp` | 69–103 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp#L69-L103) |
+| `update_table()` — installs hooks | `memory_tracker.cpp` | 139–159 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp#L139-L159) |
+| `snap_inventory()` | `memory_tracker.cpp` | 132–137 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp#L132-L137) |
 
 #### 3.2 Queue WriteInterceptor (Replay Loop)
 
@@ -59,13 +59,13 @@
 
 | Component | File | Lines | GitHub |
 |-----------|------|-------|--------|
-| `Snapshot` class definition | `memory_snapshot.hpp` | 46–65 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.hpp#L46-L65) |
-| `snap()` — full device→host→file save | `memory_snapshot.cpp` | 149–226 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L149-L226) |
-| `snap_module_variables()` | `memory_snapshot.cpp` | 229–321 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L229-L321) |
-| `restore()` — dirty-page diffing + H2D writeback | `memory_snapshot.cpp` | 323–403 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L323-L403) |
-| `restore_module_variables()` | `memory_snapshot.cpp` | 406–430 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L406-L430) |
-| MurmurHash3 implementation | `memory_snapshot.cpp` | 62–106 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L62-L106) |
-| `dma_copy()` helper | `memory_snapshot.cpp` | 108–114 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L108-L114) |
+| `Snapshot` class definition | `memory_snapshot.hpp` | 46–65 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp#L46-L65) |
+| `snap()` — full device→host→file save | `memory_snapshot.cpp` | 149–226 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L149-L226) |
+| `snap_module_variables()` | `memory_snapshot.cpp` | 229–321 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L229-L321) |
+| `restore()` — dirty-page diffing + H2D writeback | `memory_snapshot.cpp` | 323–403 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L323-L403) |
+| `restore_module_variables()` | `memory_snapshot.cpp` | 406–430 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L406-L430) |
+| MurmurHash3 implementation | `memory_snapshot.cpp` | 62–106 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L62-L106) |
+| `dma_copy()` helper | `memory_snapshot.cpp` | 108–114 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L108-L114) |
 
 ### 4. Counter Collection
 
@@ -112,11 +112,11 @@ Kernel replay is exposed through the `rocprofv3` tool so it can be driven from t
 | 1 | Dispatch intercepted by WriteInterceptor | `queue.cpp` | 778–779 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L778-L779) |
 | 2 | Gate: `kernel_replay_active()` + pass count | `queue.cpp` | 117–123, 103–113 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L117-L123) |
 | 3 | Submit drain barrier + wait | `queue.cpp` | 785–793 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L785-L793) |
-| 4 | `snap_inventory()` | `memory_tracker.cpp` | 132–137 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_tracker.cpp#L132-L137) |
-| 5 | `snapshot.snap()` | `memory_snapshot.cpp` | 149–226 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L149-L226) |
-| 5a | DMA device→host (chunked) | `memory_snapshot.cpp` | 193 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L193) |
-| 5b | Write file + MurmurHash3 per page | `memory_snapshot.cpp` | 200–207 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L200-L207) |
-| 5c | `snap_module_variables()` | `memory_snapshot.cpp` | 229–321 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L229-L321) |
+| 4 | `snap_inventory()` | `memory_tracker.cpp` | 132–137 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp#L132-L137) |
+| 5 | `snapshot.snap()` | `memory_snapshot.cpp` | 149–226 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L149-L226) |
+| 5a | DMA device→host (chunked) | `memory_snapshot.cpp` | 193 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L193) |
+| 5b | Write file + MurmurHash3 per page | `memory_snapshot.cpp` | 200–207 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L200-L207) |
+| 5c | `snap_module_variables()` | `memory_snapshot.cpp` | 229–321 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L229-L321) |
 | 6 | Set `is_final`, reset `pass_done` | `queue.cpp` | 809–810 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L809-L810) |
 | 7 | `process_packet_batch(..., &replay_state)` | `queue.cpp` | 812–816 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L812-L816) |
 | 8 | `write_interceptor()` → AQL counter packets | `queue.cpp` | 621–639 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L621-L639) |
@@ -126,10 +126,10 @@ Kernel replay is exposed through the `rocprofv3` tool so it can be driven from t
 | 10 | `writer(transformed_packets)` | `queue.cpp` | 768 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L768) |
 | 11 | `hsa_signal_wait(pass_done)` | `queue.cpp` | 818–819 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L818-L819) |
 | 12 | `snapshot.restore()` (not final) | `queue.cpp` | 823 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L823) |
-| 12a | DMA D2H (read current GPU pages) | `memory_snapshot.cpp` | 348 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L348) |
-| 12b | Hash + diff vs `checksums1` | `memory_snapshot.cpp` | 375–394 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L375-L394) |
-| 12c | DMA H2D (dirty pages only) | `memory_snapshot.cpp` | 366 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L366) |
-| 12d | `restore_module_variables()` | `memory_snapshot.cpp` | 406–430 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/memory_snapshot.cpp#L406-L430) |
+| 12a | DMA D2H (read current GPU pages) | `memory_snapshot.cpp` | 348 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L348) |
+| 12b | Hash + diff vs `checksums1` | `memory_snapshot.cpp` | 375–394 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L375-L394) |
+| 12c | DMA H2D (dirty pages only) | `memory_snapshot.cpp` | 366 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L366) |
+| 12d | `restore_module_variables()` | `memory_snapshot.cpp` | 406–430 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp#L406-L430) |
 | 13 | Signal cleanup | `queue.cpp` | 829–830 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L829-L830) |
 | 14 | App completion signal fires | `queue.cpp` | 691–698 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L691-L698) |
 | 15 | `record_callback` via AsyncSignalHandler | `queue.cpp` | 152–274 | [link](https://github.com/ROCm/rocm-systems/blob/users/vkale/kernel-replay-simplified/projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue.cpp#L152-L274) |
