@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """Tests for hip_runtime_supports_ais()."""
 
 # The FakeHip double mirrors the HIP C API: its method names must match the

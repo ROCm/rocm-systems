@@ -3,7 +3,13 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## (Unreleased) rocJPEG 1.6.0
+## rocJPEG 1.6.0 for ROCm 7.14
+
+### Added
+
+* Added a logging mechanism for core APIs that can be controlled by setting the `ROCJPEG_LOG_LEVEL` environment variable.
+
+## rocJPEG 1.5.0 for ROCm 7.13
 
 ### Changed
 
@@ -14,10 +20,6 @@ Documentation for rocJPEG is available at
 * Removed package install documentation; updated all documentation to reference TheRock for installation.
 * Simplified libva version check (single `>= 1.22` requirement).
 * Cleaned up CMake error messages.
-
-### Added
-
-* Added a logging mechanism for core APIs that can be controlled by setting the ROCJPEG_LOG_LEVEL environment variable.
 
 ## rocJPEG 1.4.0 for ROCm 7.2.1
  

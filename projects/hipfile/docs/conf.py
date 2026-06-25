@@ -1,6 +1,16 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 # Configuration file for the Sphinx documentation builder.
 #
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
+
+# pylint: disable=invalid-name
+
+"""
+Configuration for hipFile documentation
+"""
 
 import re
 
@@ -24,7 +34,9 @@ version_number = (
 
 project = "hipFile"
 author = "Advanced Micro Devices, Inc."
+# pylint: disable=redefined-builtin
 copyright = "2024-2026, Advanced Micro Devices, Inc."
+# pylint: enable=redefined-builtin
 version = version_number
 release = version_number
 html_title = f"hipFile {version_number} documentation"
