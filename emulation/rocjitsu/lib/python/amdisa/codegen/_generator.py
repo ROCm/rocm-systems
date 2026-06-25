@@ -3852,6 +3852,8 @@ class CodeGenerator:
             L.append(f'  d->transpose = {sem.transpose_kind};')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
+        if sem.name.startswith('CLUSTER_LOAD_'):
+            L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -3921,17 +3923,26 @@ class CodeGenerator:
         self._append_wait_counter_type(L, 'global_load_async_to_lds')
         L.append('  d->lds_dst = true;')
         L.append('  d->lds_per_lane_addr = true;')
+        L.append('  d->lds_base = wf.lds_base();')
+        if sem.name.startswith('CLUSTER_LOAD_ASYNC_TO_LDS_'):
+            L.append('  d->cluster_multicast = true;')
+            L.append(
+                '  d->cluster_mcast_mask = wf.m0() & amdgpu::kClusterMulticastMask;'
+            )
+            L.append('  d->request_force_l1_bypass = true;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
+        L.append(
+            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+        )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vdst')};")
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            '    d->per_lane_lds_addr[lane] = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);'
-        )
+        L.append('    uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);')
+        L.append('    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;')
         L.append('  }')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -3956,6 +3967,9 @@ class CodeGenerator:
         L.append('  auto &cu = wf.cu();')
         L.append('  const auto &lds = cu.lds();')
         L.append('  uint64_t exec = wf.exec();')
+        L.append(
+            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+        )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vsrc')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -4977,6 +4991,26 @@ class CodeGenerator:
             self.isa_spec.profile.vop3p_opsel_fields,
         )
 
+    @staticmethod
+    def _operand_encoding_value_expr(
+        opnd_name: str, is_smem: bool, packed_16bit: bool
+    ) -> str:
+        """C++ expression for the decoded value passed to an Operand constructor.
+
+        For most operands this is just the value. SMEM SBASE is an
+        exception, as it is encoded in units of 2 SGPRs (where N gets
+        s[2N:2N+1]), so this helper scales it to the real SGPR index.
+        This keeps the operand's register-ref (disassembly, def/use, liveness)
+        consistent with execution, which scales the raw field independently
+        (addr_calc_scalar.h: ``sbase = base + inst.sbase * 2``).
+        """
+        expr = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd_name}'
+        if is_smem and opnd_name == 'sbase':
+            expr = f'({expr} * 2)'
+        if packed_16bit:
+            expr = f'static_cast<unsigned short>({expr})'
+        return expr
+
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
@@ -5133,11 +5167,9 @@ class CodeGenerator:
                                 )
                                 else ''
                             )
-                            operand_value = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd.name}'
-                            if packed_16bit_source_arg:
-                                operand_value = (
-                                    f'static_cast<unsigned short>({operand_value})'
-                                )
+                            operand_value = self._operand_encoding_value_expr(
+                                opnd.name, is_smem, bool(packed_16bit_source_arg)
+                            )
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
                                 f'OperandType::{opr_type}, '

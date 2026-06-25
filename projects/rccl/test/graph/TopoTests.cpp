@@ -58,22 +58,21 @@ protected:
     system->hostHashes[systemId] = hostHash;
   }
 
-  // Create a GPU node whose id is namespaced by systemId, mirroring how the
-  // topology builder stores GPUs.
+  // v2.30 attaches XGMI links to the DEV node ncclTopoAddXGMI() looks up at
+  // NCCL_TOPO_ID(systemId, busId), so build DEV nodes (and set dev.gcn) directly.
   struct ncclTopoNode* addGpu(int systemId, const char* busId, const char* gcn,
-                              int rank, int dev) {
+                              int /*rank*/, int dev) {
     int64_t bus = 0;
     EXPECT_EQ(busIdToInt64(busId, &bus), ncclSuccess);
-    struct ncclTopoNode* gpu = nullptr;
-    EXPECT_EQ(ncclTopoCreateNode(system, &gpu, GPU, NCCL_TOPO_ID(systemId, bus)),
+    struct ncclTopoNode* devNode = nullptr;
+    EXPECT_EQ(ncclTopoCreateNode(system, &devNode, DEV, NCCL_TOPO_ID(systemId, bus)),
               ncclSuccess);
-    if (gpu) {
-      strncpy(gpu->gpu.gcn, gcn, GCN_ARCH_NAME_LEN - 1);
-      gpu->gpu.gcn[GCN_ARCH_NAME_LEN - 1] = '\0';
-      gpu->gpu.rank = rank;
-      gpu->gpu.dev = dev;
+    if (devNode) {
+      strncpy(devNode->dev.gcn, gcn, GCN_ARCH_NAME_LEN - 1);
+      devNode->dev.gcn[GCN_ARCH_NAME_LEN - 1] = '\0';
+      devNode->dev.dev = dev;
     }
-    return gpu;
+    return devNode;
   }
 
   // <cpu host_hash="0x..."> — resolves to a systemId during traversal.
@@ -337,15 +336,17 @@ TEST_F(TopoTest, GetSystemFromXml_SingleSystem_BuildsLinks) {
   ASSERT_EQ(busIdToInt64("0000:01:00.0", &bus0), ncclSuccess);
   ASSERT_EQ(busIdToInt64("0000:02:00.0", &bus1), ncclSuccess);
 
-  struct ncclTopoNode* g0 = nullptr;
-  struct ncclTopoNode* g1 = nullptr;
-  ASSERT_EQ(ncclTopoGetNode(built, &g0, GPU, NCCL_TOPO_ID(0, bus0)), ncclSuccess);
-  ASSERT_EQ(ncclTopoGetNode(built, &g1, GPU, NCCL_TOPO_ID(0, bus1)), ncclSuccess);
-  ASSERT_NE(g0, nullptr);
-  ASSERT_NE(g1, nullptr);
+  // XGMI links attach to DEV nodes (stored at NCCL_TOPO_ID(systemId, busId));
+  // GPU rank nodes live at a separate NCCL_TOPO_GPU_LOCAL_ID.
+  struct ncclTopoNode* d0 = nullptr;
+  struct ncclTopoNode* d1 = nullptr;
+  ASSERT_EQ(ncclTopoGetNode(built, &d0, DEV, NCCL_TOPO_ID(0, bus0)), ncclSuccess);
+  ASSERT_EQ(ncclTopoGetNode(built, &d1, DEV, NCCL_TOPO_ID(0, bus1)), ncclSuccess);
+  ASSERT_NE(d0, nullptr);
+  ASSERT_NE(d1, nullptr);
 
-  struct ncclTopoLink* l01 = findLink(g0, g1);
-  struct ncclTopoLink* l10 = findLink(g1, g0);
+  struct ncclTopoLink* l01 = findLink(d0, d1);
+  struct ncclTopoLink* l10 = findLink(d1, d0);
   ASSERT_NE(l01, nullptr);
   ASSERT_NE(l10, nullptr);
   EXPECT_FLOAT_EQ(l01->bw, 8 * ncclTopoXGMISpeed("gfx942"));

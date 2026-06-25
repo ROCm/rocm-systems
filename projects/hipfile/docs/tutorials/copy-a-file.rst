@@ -151,7 +151,7 @@ Allocate a GPU buffer
        goto close_src;
    }
 
-The ``align_up`` helper rounds up to the next multiple of a power-of-two alignment:
+``align_up`` is a helper in ``aiscp`` to round up to the next multiple of a power-of-two alignment:
 
 .. code-block:: cpp
 

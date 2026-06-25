@@ -155,6 +155,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::HEADER:
             {
                 tt_version = header_type{.raw = token.contents}.version;
+                csregister.tt_version = tt_version;
 
                 if (tt_version >= 4) double_buffer = (token.contents >> 43) & 1;
 

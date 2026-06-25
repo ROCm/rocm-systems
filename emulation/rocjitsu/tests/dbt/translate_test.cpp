@@ -2318,8 +2318,7 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3MfmaPartialScratchGrowsDescriptor) {
   expect_cdna3_translated_descriptor_vgprs_at_least(result.elf_bytes, kScratchFloor + 4);
 }
 
-TEST(BinaryTranslatorE2E, RelocatedKernelPreservesEntryWindowAndPatchesBranches) {
-  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+TEST(BinaryTranslatorE2E, RelocatedKernelCompactsEntryWindowAndPatchesBranches) {
   constexpr uint32_t kCdna4SCbranchScc1ToSourceTarget = rocjitsu::pack_sopp(5, 4);
   const std::vector<uint32_t> words = {
       rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> source 0x0c.
@@ -2331,7 +2330,7 @@ TEST(BinaryTranslatorE2E, RelocatedKernelPreservesEntryWindowAndPatchesBranches)
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x18 unreachable.
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x1c unreachable.
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x20 conditional target.
-      kCdna4SEndpgm,                                         // 0x24 fallthrough-branch target.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x24 fallthrough-branch target.
   };
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -2347,21 +2346,15 @@ TEST(BinaryTranslatorE2E, RelocatedKernelPreservesEntryWindowAndPatchesBranches)
 
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  // The first 256 bytes after the descriptor entry are layout-stable for the
-  // kernarg preload compatibility entry path. Explicit branch immediates are
-  // still patched into target-ISA encodings, but source gaps in that protected
-  // window are intentionally preserved.
+  // Without kernarg preload, the relocated body keeps only reachable blocks.
+  // Explicit branches are retargeted in that compact body while unreachable
+  // source gaps are removed.
   const std::vector<uint32_t> expected = {
-      rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::pack_sopp(5, 1),
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3),
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::pack_sopp(5, 4),
-      rocjitsu::build_s_branch(4, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
-      kCdna4SEndpgm,
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3),
   };
   for (size_t i = 0; i < expected.size(); ++i) {
     SCOPED_TRACE(i);
@@ -2369,12 +2362,11 @@ TEST(BinaryTranslatorE2E, RelocatedKernelPreservesEntryWindowAndPatchesBranches)
   }
 }
 
-TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableGapAfterEntryWindow) {
-  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBlocksAfterEntry) {
   std::vector<uint32_t> words(74, rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   words[0] = rocjitsu::build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4); // 0x00 -> 0x100.
   words[64] = rocjitsu::build_s_branch(7, ROCJITSU_CODE_ARCH_CDNA4); // 0x100 -> 0x120.
-  words[72] = kCdna4SEndpgm;                                         // Reachable target.
+  words[72] = rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);    // Reachable target.
 
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -2393,12 +2385,14 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableGapAfterEntryWindow) {
 
   const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
   // The final ELF section is tail-padded back to the original size, but the
-  // relocated body still compacts reachable blocks after the protected 256-byte
-  // entry window. The source 0x120 target therefore lands immediately after the
-  // branch at word 64 instead of remaining at the original word 72.
-  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[64], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[65], kCdna4SEndpgm);
+  // relocated body starts at the descriptor entry and keeps only reachable
+  // blocks. The source 0x100 and 0x120 targets therefore land immediately after
+  // their predecessor branches instead of remaining at the original words 64
+  // and 72.
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[64], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[72], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
 }
 

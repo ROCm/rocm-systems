@@ -98,6 +98,12 @@ const char* ihipGetErrorName(hipError_t hip_error);
 
 } // namespace hip
 
+#if defined(__GNUC__) || defined(__clang__)
+extern "C" __attribute__((visibility("default"))) void __hipOnError(const void *err_info);
+#else
+extern "C" void __hipOnError(const void *err_info);
+#endif
+
 // Helper: set up TLS device pointer on first use.
 #define HIP_INIT_TLS_DEVICE()                                                                      \
   if (hip::tls.device_ == nullptr && !hip::g_devices.empty()) {                                    \
@@ -173,6 +179,28 @@ const char* ihipGetErrorName(hipError_t hip_error);
   } else if (hip::tls.last_command_error_ != hipSuccess &&                                         \
              hip::tls.last_command_error_ != hipErrorNotReady) {                                   \
     hip::tls.last_error_ = hip::tls.last_command_error_;                                           \
+  }                                                                                                \
+  if (hip::tls.last_command_error_ != hipSuccess &&                                                \
+      hip::tls.last_command_error_ != hipErrorNotReady) {                                          \
+    /*                                                                                             \
+     * The "version" is bumped when more fields are added to the structure.                        \
+     * Newer versions must keep backward compatibility with the previous ones,                     \
+     * by only tacking new fields at the end of the structure, so that older                       \
+     * clients can still extract the parameters they know.                                         \
+     */                                                                                            \
+    struct {                                                                                       \
+      uint32_t version;                                                                            \
+      uint32_t err_no;                                                                             \
+      const char *err_name;                                                                        \
+      const char *err_string;                                                                      \
+    } err_info = {                                                                                 \
+      1,                                                                                           \
+      hip::tls.last_command_error_,                                                                \
+      hipGetErrorName(hip::tls.last_command_error_),                                               \
+      hipGetErrorString(hip::tls.last_command_error_)                                              \
+    };                                                                                             \
+    /* The debugger may place a breakpoint at __hipOnError to catch failed API calls. */           \
+    __hipOnError((void *) &err_info);                                                              \
   }
 
 #define HIP_RETURN_DURATION(ret, ...)                                                              \
