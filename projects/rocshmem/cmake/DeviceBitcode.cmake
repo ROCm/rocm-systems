@@ -23,7 +23,7 @@ if(NOT LLVM_CLANG OR NOT LLVM_LINK)
   return()
 endif()
 
-# Strip feature suffixes (gfx942:sramecc+:xnack- → gfx942) and deduplicate.
+# Strip feature suffixes (gfx942:sramecc+:xnack- -> gfx942) and deduplicate.
 function(strip_arch_features targets_list out_var)
   set(_result "")
   foreach(_t ${targets_list})
@@ -34,14 +34,11 @@ function(strip_arch_features targets_list out_var)
   set(${out_var} "${_result}" PARENT_SCOPE)
 endfunction()
 
-# Convert arch feature suffix to a list of llc -mattr=<feature> flags.
-# gfx950:sramecc+:xnack-  →  CMake list: "-mattr=+sramecc;-mattr=-xnack"
-# Caller uses the list directly in add_custom_command COMMAND so each element
-# becomes a separate shell argument (avoiding comma-joining issues).
-function(arch_features_to_mattr_flags full_arch out_var)
-  # Split the full arch string on ":" into a list
+# Convert arch feature suffix to clang -Xclang -target-feature flags.
+# gfx950:sramecc+:xnack-  ->  "-Xclang;-target-feature;-Xclang;+sramecc;-Xclang;-target-feature;-Xclang;-xnack"
+# Caller passes the list directly to add_custom_command COMMAND.
+function(arch_features_to_target_feature_flags full_arch out_var)
   string(REPLACE ":" ";" _all_tokens "${full_arch}")
-  # Skip the first token (the base arch name) and process the rest as features
   list(LENGTH _all_tokens _ntokens)
   set(_flags "")
   if(_ntokens GREATER 1)
@@ -50,15 +47,15 @@ function(arch_features_to_mattr_flags full_arch out_var)
       if(_tok STREQUAL "")
         continue()
       endif()
-      # "sramecc+" → "+sramecc", "xnack-" → "-xnack"
-      string(REGEX REPLACE "([a-zA-Z0-9_]+)([+-])$" "\\2\\1" _part "${_tok}")
-      list(APPEND _flags "-mattr=${_part}")
+      # "sramecc+" -> "+sramecc", "xnack-" -> "-xnack"
+      string(REGEX REPLACE "([a-zA-Z0-9_]+)([+-])$" "\\2\\1" _feat "${_tok}")
+      list(APPEND _flags -Xclang -target-feature -Xclang ${_feat})
     endforeach()
   endif()
   set(${out_var} "${_flags}" PARENT_SCOPE)
 endfunction()
 
-# Resolve the target arch list: GPU_TARGETS CMake var → auto-detect local GPUs.
+# Resolve the target arch list: GPU_TARGETS CMake var -> auto-detect local GPUs.
 # Both accept comma- or semicolon-separated lists.
 if(GPU_TARGETS)
   # Convert comma-separated string to CMake list (semicolon-separated)
@@ -81,8 +78,8 @@ set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architecture
 
 # BITCODE_GPU_ARCHS_FULL: full arch strings with feature suffixes (e.g.
 # gfx950:sramecc+:xnack-), used by CMakeDeviceBitcodeTester to pass the correct
-# -mattr flags to llc. llc embeds these in the HSACO amdhsa.target metadata
-# string, which HIP validates when loading the module — a mismatch causes error 209.
+# -target-feature flags to clang. These are embedded in the HSACO amdhsa.target
+# metadata string, which HIP validates when loading the module — a mismatch causes error 209.
 #
 # The arch list always comes from GPU_TARGETS/auto-detect. ROCSHMEM_GPU_TARGETS
 # is an optional env var that supplies feature suffixes for individual arches —
@@ -102,7 +99,7 @@ else()
   set(_FULL_BASE_LIST ${_BITCODE_DEFAULT_ARCHS})
 endif()
 
-# Build a base→full map from ROCSHMEM_GPU_TARGETS (feature suffix overlay).
+# Build a base->full map from ROCSHMEM_GPU_TARGETS (feature suffix overlay).
 if(DEFINED ENV{ROCSHMEM_GPU_TARGETS})
   string(REPLACE "," ";" _ROCSHMEM_GPU_TARGETS_LIST "$ENV{ROCSHMEM_GPU_TARGETS}")
   foreach(_entry ${_ROCSHMEM_GPU_TARGETS_LIST})
@@ -131,7 +128,7 @@ message(STATUS "Device bitcode GPU archs (base):  ${BITCODE_GPU_ARCHS}")
 message(STATUS "Device bitcode GPU archs (full):  ${BITCODE_GPU_ARCHS_FULL}")
 
 # -fvisibility=default ensures extern "C" device API symbols remain
-# externally visible after llvm-link and llc.
+# externally visible after llvm-link and clang backend compilation.
 set(BITCODE_COMPILE_FLAGS_BASE
     -Wall
     -Wextra

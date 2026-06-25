@@ -45,9 +45,9 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   set(HSACO_FILE ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}.hsaco)
 
   # Find the full arch string (with feature suffixes) for this base arch so we can
-  # pass -mattr flags. Without features the amdhsa.target metadata in the HSACO
-  # omits the suffix, causing hipModuleLoadData error 209 on devices that report
-  # e.g. gfx950:sramecc+:xnack-.
+  # pass target-feature flags. Without features the amdhsa.target metadata in the
+  # HSACO omits the suffix, causing hipModuleLoadData error 209 on devices that
+  # report e.g. gfx950:sramecc+:xnack-.
   set(_FULL_ARCH "${GPU_ARCH}")
   foreach(_candidate ${BITCODE_GPU_ARCHS_FULL})
     string(REGEX REPLACE ":.*" "" _candidate_base "${_candidate}")
@@ -56,13 +56,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
       break()
     endif()
   endforeach()
-  arch_features_to_mattr_flags("${_FULL_ARCH}" _MATTR_FLAGS)
-  set(_CLANG_MATTR_FLAGS "")
-  foreach(_f ${_MATTR_FLAGS})
-    # _f is "-mattr=+sramecc" or "-mattr=-xnack"; extract the feature part
-    string(REGEX REPLACE "^-mattr=" "" _feat "${_f}")
-    list(APPEND _CLANG_MATTR_FLAGS -Xclang -target-feature -Xclang ${_feat})
-  endforeach()
+  arch_features_to_target_feature_flags("${_FULL_ARCH}" _CLANG_MATTR_FLAGS)
 
   # message(status "_MATTR_FLAGS" ${_MATTR_FLAGS})
   
@@ -70,7 +64,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   # __device__ functions. When compiled at -O3 independently, LLVM DCEs them
   # because no amdgpu_kernel in the same TU calls them. Compiling at -O0
   # avoids DCE but produces unoptimized IR patterns that trigger an AMDGPU
-  # backend register-class bug (V_CMP_NE_U32 on $src_private_base) in llc.
+  # backend register-class bug (V_CMP_NE_U32 on $src_private_base).
   #
   # Solution: compile with -Xclang -disable-llvm-passes, which runs the
   # frontend at -O3 (generating valid, structured IR) but skips the LLVM
