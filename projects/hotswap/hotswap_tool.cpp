@@ -86,6 +86,24 @@ std::vector<OwnedElf> &rewritten_elfs() {
   return *v;
 }
 
+// Opt-in diagnostic logging (HSA_HOTSWAP_VERBOSE=1). Off by default so
+// production stays quiet; lets us confirm which code objects are intercepted,
+// gated, and rewritten. Runtime-gated (no rebuild to toggle); when off the cost
+// is a single cached bool load per call site.
+bool verbose() {
+  static const bool v = [] {
+    const char *e = std::getenv("HSA_HOTSWAP_VERBOSE");
+    return e && e[0] && e[0] != '0';
+  }();
+  return v;
+}
+
+#define HOTSWAP_LOG(...)                                                        \
+  do {                                                                         \
+    if (verbose())                                                            \
+      fprintf(stderr, __VA_ARGS__);                                           \
+  } while (0)
+
 CoreApiTable *g_core_table = nullptr;
 
 decltype(hsa_code_object_reader_create_from_memory)
@@ -144,6 +162,8 @@ hsa_status_t HSA_API hotswap_reader_create_from_memory(
 
   try {
     stash_bytes(reader.handle, static_cast<const uint8_t *>(code_object), size);
+    HOTSWAP_LOG("hotswap: reader_create_from_memory handle=%lu size=%zu\n",
+                static_cast<unsigned long>(reader.handle), size);
   } catch (const std::bad_alloc &) {
     // Fall back to the original load path without rewrite support.
   }
@@ -182,6 +202,9 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
       std::scoped_lock lock(reader_map_mutex());
       reader_map()[reader.handle] = ReaderEntry{std::move(vec), true, false};
     }
+    HOTSWAP_LOG("hotswap: reader_create_from_file handle=%lu size=%lld\n",
+                static_cast<unsigned long>(reader.handle),
+                static_cast<long long>(file_size));
     *code_object_reader = reader;
     return HSA_STATUS_SUCCESS;
   } catch (const std::bad_alloc &) {
@@ -253,6 +276,8 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
       local_bytes->data(), local_bytes->size());
   const std::string target_isa = get_agent_isa_name(agent);
   if (source_isa.empty() || target_isa.empty()) {
+    HOTSWAP_LOG("hotswap: rewrite SKIP empty isa (src='%s' tgt='%s' size=%zu)\n",
+                source_isa.c_str(), target_isa.c_str(), local_bytes->size());
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
@@ -261,6 +286,10 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
   const int rc = rocr::hotswap::RetargetCodeObject(
       local_bytes->data(), local_bytes->size(), source_isa.c_str(),
       target_isa.c_str(), &out_elf, &out_elf_size);
+
+  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s in=%zu rc=%d out=%zu changed=%d\n",
+              source_isa.c_str(), target_isa.c_str(), local_bytes->size(), rc,
+              out_elf_size, out_elf != local_bytes->data());
 
   if (rc != 0 || out_elf == local_bytes->data()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
@@ -285,6 +314,10 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     try_get_reader_entry(code_object_reader.handle, &local_bytes,
                          &reader_from_file);
 
+    HOTSWAP_LOG("hotswap: load_agent_code_object handle=%lu has_bytes=%d\n",
+                static_cast<unsigned long>(code_object_reader.handle),
+                local_bytes ? 1 : 0);
+
     if (!local_bytes) {
       return load_original_reader(executable, agent, code_object_reader,
                                   options, loaded_code_object,
@@ -295,6 +328,8 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     // the original code object unchanged instead of routing through COMGR.
     const AgentGfxRevision gfx = query_agent_gfx_revision(agent);
     if (!gate_allows_hotswap(gfx)) {
+      HOTSWAP_LOG("hotswap: gate BLOCKED (gfx=%s rev=%u valid=%d)\n",
+                  gfx.gfx_target.c_str(), gfx.asic_revision, gfx.revision_valid);
       return load_original_reader(executable, agent, code_object_reader,
                                   options, loaded_code_object,
                                   reader_from_file);
