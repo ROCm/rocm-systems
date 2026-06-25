@@ -229,8 +229,16 @@ function(ROCPROFILER_CHECKOUT_GIT_SUBMODULE)
         if(RET GREATER 0)
             set(_CMD "${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}")
-            message(STATUS "function(rocprofiler_checkout_git_submodule) failed.")
-            message(FATAL_ERROR "Command: \"${_CMD}\"")
+            if(_HAS_REPO_URL)
+                message(
+                    WARNING
+                        "Command failed: \"${_CMD}\". Falling back to cloning ${CHECKOUT_REPO_URL}."
+                    )
+                set(_TEST_FILE_EXISTS OFF)
+            else()
+                message(STATUS "function(rocprofiler_checkout_git_submodule) failed.")
+                message(FATAL_ERROR "Command: \"${_CMD}\"")
+            endif()
         else()
             set(_TEST_FILE_EXISTS ON)
         endif()
