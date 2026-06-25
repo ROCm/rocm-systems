@@ -379,10 +379,10 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
-    const bool is_dxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
+    const bool is_windxg =
+        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
     const bool require_pinning =
-        !is_dxg &&
+        !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
          m_region.IsScratch());
 

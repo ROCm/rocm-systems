@@ -55,6 +55,10 @@ constexpr uint32_t S_NOP = 0xBF800000u;          ///< s_nop    (SOPP op=0,  simm
 constexpr uint32_t S_ENDPGM_GFX9 = 0xBF810000u;  ///< s_endpgm (SOPP op=1,  simm16=0): CDNA/RDNA1/2
 constexpr uint32_t S_ENDPGM_GFX11 = 0xBFB00000u; ///< s_endpgm (SOPP op=48, simm16=0): RDNA3/3.5/4
 
+constexpr uint32_t make_sopp(uint32_t op, uint32_t simm16) {
+  return (0x17Fu << 23) | ((op & 0x7Fu) << 16) | (simm16 & 0xFFFFu);
+}
+
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {
   EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RDNA4), 8);
   EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RV32I), 9);
@@ -119,6 +123,18 @@ INSTANTIATE_TEST_SUITE_P(
       name += info.param.expected_mnemonic;
       return name;
     });
+
+TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {
+  constexpr uint32_t s_waitcnt_vmcnt1 = make_sopp(/*op=*/9, /*simm16=*/1u << 10);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> inst(decoder->decode(&s_waitcnt_vmcnt1));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "s_waitcnt");
+  EXPECT_EQ(inst->disassemble(), "s_waitcnt vmcnt(1) expcnt(0) lgkmcnt(0)");
+}
 
 struct VopdDecodeCase {
   rj_code_arch_t arch;
@@ -332,6 +348,255 @@ TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(vb + kFmaDst, lane), expected_fma) << tc.arch_name << " lane " << lane;
     EXPECT_EQ(cu->read_vgpr(vb + kDx9Dst, lane), kPositiveZero) << tc.arch_name << " lane " << lane;
+  }
+}
+
+TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskConsumesVccLo) {
+  const auto &tc = GetParam();
+  constexpr std::array<uint32_t, 2> kWords = {
+      0xCA521307u, // v_dual_cndmask_b32 v7, v7, v9 :: v_dual_cndmask_b32 v6, v6, v8
+      0x07061106u,
+  };
+  constexpr uint32_t kXDst = 7;
+  constexpr uint32_t kYDst = 6;
+  constexpr uint32_t kXFalse = 0x10100000u;
+  constexpr uint32_t kXTrue = 0x20200000u;
+  constexpr uint32_t kYFalse = 0x30300000u;
+  constexpr uint32_t kYTrue = 0x40400000u;
+  constexpr uint64_t kVcc = 0xAAAA'AAAAu;
+  constexpr uint64_t kExecMask = 0xFFFF'FFFFULL;
+
+  amdgpu::GpuMemory gpu_mem(std::string(tc.arch_name) + "_vopd_cndmask_mem");
+  amdgpu::L2Cache l2(std::string(tc.arch_name) + "_vopd_cndmask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(tc.arch_name) + "_vopd_cndmask", cfg,
+                                            &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(kExecMask);
+  wf->set_vcc(kVcc);
+
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(kWords.data()));
+  ASSERT_NE(inst, nullptr);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vb + 7, lane, kXFalse | lane);
+    cu->write_vgpr(vb + 9, lane, kXTrue | lane);
+    cu->write_vgpr(vb + 6, lane, kYFalse | lane);
+    cu->write_vgpr(vb + 8, lane, kYTrue | lane);
+  }
+
+  cu->execute_instruction(inst.get(), *wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const bool select_true = ((kVcc >> lane) & 1u) != 0;
+    EXPECT_EQ(cu->read_vgpr(vb + kXDst, lane), (select_true ? kXTrue : kXFalse) | lane)
+        << tc.arch_name << " lane " << lane;
+    EXPECT_EQ(cu->read_vgpr(vb + kYDst, lane), (select_true ? kYTrue : kYFalse) | lane)
+        << tc.arch_name << " lane " << lane;
+  }
+}
+
+TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskAfterScalarVccMerge) {
+  const auto &tc = GetParam();
+  constexpr uint32_t kModulusMinusOne = 0xFF65CF7Au;
+  constexpr uint32_t kLaneCount = 9;
+  constexpr uint64_t kExecMask = (1ULL << kLaneCount) - 1;
+  constexpr uint64_t kCorrectionMask = 0x1D8u;
+  constexpr std::array<uint64_t, kLaneCount> kA = {
+      0,
+      1,
+      2,
+      4284862330ULL,
+      4284862329ULL,
+      1071215583ULL,
+      2142431166ULL,
+      3213646750ULL,
+      4284862327ULL,
+  };
+  constexpr std::array<uint64_t, kLaneCount> kB = {
+      0, 1, 2, 4284862330ULL, 4284862329ULL, 1071215588ULL, 2142431165ULL, 3213646748ULL, 4,
+  };
+  constexpr std::array<uint64_t, kLaneCount> kExpected = {
+      0, 2, 4, 4284862329ULL, 4284862327ULL, 2142431171ULL, 0, 2142431167ULL, 0,
+  };
+  const std::array<std::array<uint32_t, 3>, 10> words = {{
+      {0xBE8001FFu, kModulusMinusOne, 0u},     // s_mov_b64 s[0:1], 0xff65cf7a
+      {0xD7006A06u, 0x02020D08u, 0u},          // v_add_co_u32 v6, vcc_lo, v8, v6
+      {0x400E0F09u, 0u, 0u},                   // v_add_co_ci_u32_e32 v7, vcc_lo, v9, v7, vcc_lo
+      {0xD4590000u, 0x02020C00u, 0u},          // v_cmp_lt_u64_e64 s0, s[0:1], v[6:7]
+      {0xD7000108u, 0x02020CFFu, 0x009A3085u}, // v_add_co_u32 v8, s1, 0x9a3085, v6
+      {0xD5207C09u, 0x00060EC1u, 0u},          // v_add_co_ci_u32_e64 v9, null, -1, v7, s1
+      {0xD7000100u, 0x02020002u, 0u},          // v_add_co_u32 v0, s1, s2, v0
+      {0x8C6A006Au, 0u, 0u},                   // s_or_b32 vcc_lo, vcc_lo, s0
+      {0xD5207C01u, 0x00060203u, 0u},          // v_add_co_ci_u32_e64 v1, null, s3, v1, s1
+      {0xCA521307u, 0x07061106u, 0u},          // v_dual_cndmask_b32 v7/v6
+  }};
+
+  amdgpu::GpuMemory gpu_mem(std::string(tc.arch_name) + "_vopd_vcc_merge_mem");
+  amdgpu::L2Cache l2(std::string(tc.arch_name) + "_vopd_vcc_merge_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(tc.arch_name) + "_vopd_vcc_merge", cfg,
+                                            &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(kExecMask);
+
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+  const auto execute = [&](const std::array<uint32_t, 3> &inst_words) {
+    std::unique_ptr<Instruction> inst(decoder->decode(inst_words.data()));
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst.get(), *wf);
+  };
+
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_sgpr(sb + 0, 0xAAAAAAAAu);
+  cu->write_sgpr(sb + 1, 0xBBBBBBBBu);
+  cu->write_sgpr(sb + 2, 0u);
+  cu->write_sgpr(sb + 3, 0u);
+  for (uint32_t lane = 0; lane < kLaneCount; ++lane) {
+    cu->write_vgpr(vb + 0, lane, 0u);
+    cu->write_vgpr(vb + 1, lane, 0u);
+    cu->write_vgpr(vb + 6, lane, static_cast<uint32_t>(kA[lane]));
+    cu->write_vgpr(vb + 7, lane, static_cast<uint32_t>(kA[lane] >> 32));
+    cu->write_vgpr(vb + 8, lane, static_cast<uint32_t>(kB[lane]));
+    cu->write_vgpr(vb + 9, lane, static_cast<uint32_t>(kB[lane] >> 32));
+  }
+
+  execute(words[0]);
+  EXPECT_EQ(cu->read_sgpr(sb + 0), kModulusMinusOne);
+  EXPECT_EQ(cu->read_sgpr(sb + 1), 0u);
+
+  execute(words[1]);
+  execute(words[2]);
+  EXPECT_EQ(wf->vcc() & kExecMask, 0u);
+
+  execute(words[3]);
+  EXPECT_EQ(cu->read_sgpr(sb + 0) & kExecMask, kCorrectionMask);
+
+  execute(words[4]);
+  execute(words[5]);
+  execute(words[6]);
+  execute(words[7]);
+  EXPECT_EQ(wf->vcc() & kExecMask, kCorrectionMask);
+  execute(words[8]);
+  EXPECT_EQ(wf->vcc() & kExecMask, kCorrectionMask);
+  execute(words[9]);
+
+  for (uint32_t lane = 0; lane < kLaneCount; ++lane) {
+    uint64_t actual = static_cast<uint64_t>(cu->read_vgpr(vb + 6, lane)) |
+                      (static_cast<uint64_t>(cu->read_vgpr(vb + 7, lane)) << 32);
+    EXPECT_EQ(actual, kExpected[lane]) << tc.arch_name << " lane " << lane;
+  }
+}
+
+TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskAfterScalarVccMergeViaCuStep) {
+  const auto &tc = GetParam();
+  constexpr uint32_t kModulusMinusOne = 0xFF65CF7Au;
+  constexpr uint32_t kLaneCount = 9;
+  constexpr uint64_t kExecMask = (1ULL << kLaneCount) - 1;
+  constexpr uint64_t kCorrectionMask = 0x1D8u;
+  constexpr std::array<uint64_t, kLaneCount> kA = {
+      0,
+      1,
+      2,
+      4284862330ULL,
+      4284862329ULL,
+      1071215583ULL,
+      2142431166ULL,
+      3213646750ULL,
+      4284862327ULL,
+  };
+  constexpr std::array<uint64_t, kLaneCount> kB = {
+      0, 1, 2, 4284862330ULL, 4284862329ULL, 1071215588ULL, 2142431165ULL, 3213646748ULL, 4,
+  };
+  constexpr std::array<uint64_t, kLaneCount> kExpected = {
+      0, 2, 4, 4284862329ULL, 4284862327ULL, 2142431171ULL, 0, 2142431167ULL, 0,
+  };
+  constexpr std::array<uint32_t, 19> kWords = {
+      0xBE8001FFu, kModulusMinusOne,              // s_mov_b64 s[0:1], 0xff65cf7a
+      0xD7006A06u, 0x02020D08u,                   // v_add_co_u32 v6, vcc_lo, v8, v6
+      0x400E0F09u,                                // v_add_co_ci_u32_e32 v7, vcc_lo, v9, v7, vcc_lo
+      0xD4590000u, 0x02020C00u,                   // v_cmp_lt_u64_e64 s0, s[0:1], v[6:7]
+      0xD7000108u, 0x02020CFFu,      0x009A3085u, // v_add_co_u32 v8, s1, 0x9a3085, v6
+      0xD5207C09u, 0x00060EC1u,                   // v_add_co_ci_u32_e64 v9, null, -1, v7, s1
+      0xD7000100u, 0x02020002u,                   // v_add_co_u32 v0, s1, s2, v0
+      0x8C6A006Au,                                // s_or_b32 vcc_lo, vcc_lo, s0
+      0xD5207C01u, 0x00060203u,                   // v_add_co_ci_u32_e64 v1, null, s3, v1, s1
+      0xCA521307u, 0x07061106u,                   // v_dual_cndmask_b32 v7/v6
+  };
+  constexpr std::array<uint64_t, 10> kExpectedPc = {8, 16, 20, 28, 40, 48, 56, 60, 68, 76};
+
+  amdgpu::GpuMemory gpu_mem(std::string(tc.arch_name) + "_vopd_vcc_merge_step_mem");
+  amdgpu::L2Cache l2(std::string(tc.arch_name) + "_vopd_vcc_merge_step_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(tc.arch_name) + "_vopd_vcc_merge_step", cfg,
+                                            &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(kExecMask);
+
+  for (uint32_t i = 0; i < kWords.size(); ++i)
+    gpu_mem.write32(i * sizeof(uint32_t), kWords[i]);
+
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_sgpr(sb + 0, 0xAAAAAAAAu);
+  cu->write_sgpr(sb + 1, 0xBBBBBBBBu);
+  cu->write_sgpr(sb + 2, 0u);
+  cu->write_sgpr(sb + 3, 0u);
+  for (uint32_t lane = 0; lane < kLaneCount; ++lane) {
+    cu->write_vgpr(vb + 0, lane, 0u);
+    cu->write_vgpr(vb + 1, lane, 0u);
+    cu->write_vgpr(vb + 6, lane, static_cast<uint32_t>(kA[lane]));
+    cu->write_vgpr(vb + 7, lane, static_cast<uint32_t>(kA[lane] >> 32));
+    cu->write_vgpr(vb + 8, lane, static_cast<uint32_t>(kB[lane]));
+    cu->write_vgpr(vb + 9, lane, static_cast<uint32_t>(kB[lane] >> 32));
+  }
+
+  for (uint32_t i = 0; i < kExpectedPc.size(); ++i) {
+    cu->step();
+    EXPECT_EQ(wf->pc, kExpectedPc[i]) << tc.arch_name << " step " << i;
+    if (i == 0) {
+      EXPECT_EQ(cu->read_sgpr(sb + 0), kModulusMinusOne);
+      EXPECT_EQ(cu->read_sgpr(sb + 1), 0u);
+    }
+  }
+
+  EXPECT_EQ(wf->vcc() & kExecMask, kCorrectionMask);
+  for (uint32_t lane = 0; lane < kLaneCount; ++lane) {
+    uint64_t actual = static_cast<uint64_t>(cu->read_vgpr(vb + 6, lane)) |
+                      (static_cast<uint64_t>(cu->read_vgpr(vb + 7, lane)) << 32);
+    EXPECT_EQ(actual, kExpected[lane]) << tc.arch_name << " lane " << lane;
   }
 }
 
