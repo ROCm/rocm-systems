@@ -336,6 +336,7 @@ if(BUILD_TESTS)
       WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
+      NChannelsPerNetPeerMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       mem_manager/SuspendResumeMPITests.cpp
