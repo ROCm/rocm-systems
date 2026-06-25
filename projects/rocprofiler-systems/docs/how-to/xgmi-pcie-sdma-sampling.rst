@@ -101,8 +101,7 @@ flags, and ``rocprof-sys-run`` invocations).
 
 .. note::
 
-   The ``sdma_usage`` metric requires AMD GPU driver 31.40 or higher and an Instinct-family
-   GPU.
+   The ``sdma_usage`` metric requires AMD GPU Driver (amdgpu) 31.40.0 or later and an AMD Instinct-family GPU.
 
    If the driver or hardware does not expose SDMA usage, values may appear as ``N/A``.
 
