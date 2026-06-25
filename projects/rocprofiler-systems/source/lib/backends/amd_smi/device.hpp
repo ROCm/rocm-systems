@@ -51,15 +51,26 @@ concept backend_session_contract =
         typename T::asic_info_t;
         typename T::gpu_metrics_t;
         typename T::memory_type_t;
+        typename T::temperature_type_t;
+        typename T::temperature_metric_t;
         { T::sdma_supported } -> std::convertible_to<bool>;
     } &&
     // ── Per-device GPU calls (always required) ────────────────────────────────
     requires(T sess, typename T::processor_handle ph, typename T::asic_info_t* aip,
-             typename T::memory_type_t mt, std::uint64_t* u64p) {
+             typename T::memory_type_t mt, std::uint64_t* u64p,
+             typename T::temperature_type_t tt, typename T::temperature_metric_t tm) {
         { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
+        { T::TEMP_CURRENT } -> std::convertible_to<typename T::temperature_metric_t>;
+        {
+            T::TEMPERATURE_TYPE_HOTSPOT
+        } -> std::convertible_to<typename T::temperature_type_t>;
+        {
+            T::TEMPERATURE_TYPE_EDGE
+        } -> std::convertible_to<typename T::temperature_type_t>;
         { sess.get_gpu_asic_info(ph, aip) };
         { sess.get_metrics_info(ph) } -> std::convertible_to<typename T::gpu_metrics_t>;
         { sess.get_memory_usage(ph, mt, u64p) };
+        { sess.get_temp_metric(ph, tt, tm) } -> std::convertible_to<std::int64_t>;
     } &&
     // ── SDMA methods — only required when sdma_supported == true ─────────────
     (!T::sdma_supported || sdma_session_contract<T>)
@@ -128,6 +139,18 @@ public:
         convert_pcie(raw, out);
         convert_clocks(raw, out);
         return out;
+    }
+
+    [[nodiscard]] std::int64_t get_hotspot_temperature() const
+    {
+        return m_session->get_temp_metric(m_handle, Backend::TEMPERATURE_TYPE_HOTSPOT,
+                                          Backend::TEMP_CURRENT);
+    }
+
+    [[nodiscard]] std::int64_t get_edge_temperature() const
+    {
+        return m_session->get_temp_metric(m_handle, Backend::TEMPERATURE_TYPE_EDGE,
+                                          Backend::TEMP_CURRENT);
     }
 
     [[nodiscard]] std::uint64_t get_memory_usage() const

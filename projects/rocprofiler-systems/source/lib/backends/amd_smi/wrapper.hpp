@@ -18,7 +18,7 @@ namespace rocprofsys::backends::amd_smi
  *
  * Every public method maps directly to one amdsmi_* call and returns its raw
  * status code.  No error checking, no exceptions — this struct is a pure
- * dependency-injection seam that lets upper layers (backend<wrapper>)
+ * dependency-injection seam that lets upper layers (backend<wrapper>get_temp_metric)
  * swap in a mock for testing without touching AMD SMI headers.
  *
  * Type aliases hide amdsmi_* names from callers: use wrapper::processor_handle,
@@ -27,13 +27,21 @@ namespace rocprofsys::backends::amd_smi
 struct wrapper
 {
     // ── Type aliases ──────────────────────────────────────────────────────────
-    using status_t         = amdsmi_status_t;
-    using version_t        = amdsmi_version_t;
-    using socket_handle    = amdsmi_socket_handle;
-    using processor_handle = amdsmi_processor_handle;
-    using gpu_metrics_t    = amdsmi_gpu_metrics_t;
-    using asic_info_t      = amdsmi_asic_info_t;
-    using memory_type_t    = amdsmi_memory_type_t;
+    using status_t             = amdsmi_status_t;
+    using version_t            = amdsmi_version_t;
+    using socket_handle        = amdsmi_socket_handle;
+    using processor_handle     = amdsmi_processor_handle;
+    using gpu_metrics_t        = amdsmi_gpu_metrics_t;
+    using asic_info_t          = amdsmi_asic_info_t;
+    using memory_type_t        = amdsmi_memory_type_t;
+    using temperature_type_t   = amdsmi_temperature_type_t;
+    using temperature_metric_t = amdsmi_temperature_metric_t;
+
+    static constexpr temperature_metric_t TEMP_CURRENT = AMDSMI_TEMP_CURRENT;
+    static constexpr temperature_type_t   TEMPERATURE_TYPE_HOTSPOT =
+        AMDSMI_TEMPERATURE_TYPE_HOTSPOT;
+    static constexpr temperature_type_t TEMPERATURE_TYPE_EDGE =
+        AMDSMI_TEMPERATURE_TYPE_EDGE;
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     using nic_asic_info_t         = amdsmi_nic_asic_info_t;
@@ -112,6 +120,14 @@ struct wrapper
                                      std::uint64_t* out)
     {
         return amdsmi_get_gpu_memory_usage(handle, type, out);
+    }
+
+    static status_t get_temp_metric(processor_handle     handle,
+                                    temperature_type_t   sensor_type,
+                                    temperature_metric_t metric,
+                                    std::int64_t*        temperature)
+    {
+        return amdsmi_get_temp_metric(handle, sensor_type, metric, temperature);
     }
 
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1

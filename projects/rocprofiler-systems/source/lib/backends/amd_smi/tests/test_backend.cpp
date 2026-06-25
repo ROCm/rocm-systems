@@ -363,6 +363,64 @@ TEST_F(BackendTest, get_memory_usage_error_message_contains_function_name)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Temperature forwarding
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_F(BackendTest, get_temp_metric_returns_temperature_value)
+{
+    constexpr std::int64_t k_temp = 85000;
+    EXPECT_CALL(*testing::g_mock_backend, get_temp_metric(k_handle, _, _, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<3>(k_temp), Return(k_ok)));
+
+    EXPECT_EQ(m_session.get_temp_metric(k_handle, sut_t::TEMPERATURE_TYPE_HOTSPOT,
+                                        sut_t::TEMP_CURRENT),
+              k_temp);
+}
+
+TEST_F(BackendTest, get_temp_metric_passes_sensor_type_and_metric)
+{
+    constexpr std::int64_t k_temp = 72000;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_temp_metric(k_handle, testing::mock_backend::TEMPERATURE_TYPE_EDGE,
+                                testing::mock_backend::TEMP_CURRENT, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<3>(k_temp), Return(k_ok)));
+
+    EXPECT_EQ(m_session.get_temp_metric(k_handle, sut_t::TEMPERATURE_TYPE_EDGE,
+                                        sut_t::TEMP_CURRENT),
+              k_temp);
+}
+
+TEST_F(BackendTest, get_temp_metric_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_temp_metric(k_handle, _, _, _))
+        .WillOnce(Return(k_err));
+
+    EXPECT_THROW(static_cast<void>(m_session.get_temp_metric(
+                     k_handle, sut_t::TEMPERATURE_TYPE_HOTSPOT, sut_t::TEMP_CURRENT)),
+                 std::runtime_error);
+}
+
+TEST_F(BackendTest, get_temp_metric_error_message_contains_function_name)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_temp_metric(k_handle, _, _, _))
+        .WillOnce(Return(k_err));
+
+    EXPECT_THROW(
+        {
+            try
+            {
+                static_cast<void>(m_session.get_temp_metric(
+                    k_handle, sut_t::TEMPERATURE_TYPE_HOTSPOT, sut_t::TEMP_CURRENT));
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_temp_metric"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SDMA forwarding
 // ─────────────────────────────────────────────────────────────────────────────
 

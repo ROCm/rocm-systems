@@ -413,6 +413,79 @@ TEST_F(DeviceBackendTest, get_memory_usage_error_message_contains_function_name)
         std::runtime_error);
 }
 
+// ── get_hotspot_temperature / get_edge_temperature ───────────────────────────
+
+TEST_F(DeviceBackendTest, get_hotspot_temperature_returns_reported_value)
+{
+    constexpr std::int64_t k_temp = 85000;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_temp_metric(k_handle, testing::mock_backend::TEMPERATURE_TYPE_HOTSPOT,
+                                testing::mock_backend::TEMP_CURRENT, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<3>(k_temp), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_EQ(sut.get_hotspot_temperature(), k_temp);
+}
+
+TEST_F(DeviceBackendTest, get_hotspot_temperature_passes_hotspot_sensor_type)
+{
+    constexpr auto k_hotspot = testing::mock_backend::TEMPERATURE_TYPE_HOTSPOT;
+    constexpr auto k_edge    = testing::mock_backend::TEMPERATURE_TYPE_EDGE;
+    static_assert(k_hotspot != k_edge, "test requires distinct sensor type values");
+
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_temp_metric(k_handle, k_hotspot, _, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<3>(std::int64_t{ 0 }), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    static_cast<void>(sut.get_hotspot_temperature());
+}
+
+TEST_F(DeviceBackendTest, get_hotspot_temperature_throws_on_backend_error)
+{
+    EXPECT_CALL(
+        *testing::g_mock_backend,
+        get_temp_metric(k_handle, testing::mock_backend::TEMPERATURE_TYPE_HOTSPOT, _, _))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_hotspot_temperature()), std::runtime_error);
+}
+
+TEST_F(DeviceBackendTest, get_edge_temperature_returns_reported_value)
+{
+    constexpr std::int64_t k_temp = 72000;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_temp_metric(k_handle, testing::mock_backend::TEMPERATURE_TYPE_EDGE,
+                                testing::mock_backend::TEMP_CURRENT, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<3>(k_temp), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_EQ(sut.get_edge_temperature(), k_temp);
+}
+
+TEST_F(DeviceBackendTest, get_edge_temperature_passes_edge_sensor_type)
+{
+    constexpr auto k_edge = testing::mock_backend::TEMPERATURE_TYPE_EDGE;
+
+    EXPECT_CALL(*testing::g_mock_backend, get_temp_metric(k_handle, k_edge, _, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<3>(std::int64_t{ 0 }), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    static_cast<void>(sut.get_edge_temperature());
+}
+
+TEST_F(DeviceBackendTest, get_edge_temperature_throws_on_backend_error)
+{
+    EXPECT_CALL(
+        *testing::g_mock_backend,
+        get_temp_metric(k_handle, testing::mock_backend::TEMPERATURE_TYPE_EDGE, _, _))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_edge_temperature()), std::runtime_error);
+}
+
 // ── NIC methods ──────────────────────────────────────────────────────────────
 
 TEST_F(DeviceBackendTest, get_nic_asic_info_maps_product_and_vendor_names)

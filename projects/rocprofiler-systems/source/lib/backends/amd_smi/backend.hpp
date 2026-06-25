@@ -43,6 +43,8 @@ concept wrapper_policy =
         typename T::gpu_metrics_t;
         typename T::asic_info_t;
         typename T::memory_type_t;
+        typename T::temperature_type_t;
+        typename T::temperature_metric_t;
         { T::sdma_supported } -> std::convertible_to<bool>;
     } &&
     // ── Constants, status helpers, lifecycle, enumeration, per-device calls ───
@@ -50,9 +52,18 @@ concept wrapper_policy =
              typename T::socket_handle sh, typename T::socket_handle* shp,
              typename T::processor_handle ph, typename T::processor_handle* php,
              typename T::gpu_metrics_t* gmp, typename T::asic_info_t* aip,
-             typename T::memory_type_t mt, std::uint64_t* u64p) {
+             typename T::memory_type_t mt, std::uint64_t* u64p,
+             typename T::temperature_type_t tt, typename T::temperature_metric_t tm,
+             std::int64_t* i64p) {
         { T::STATUS_SUCCESS } -> std::convertible_to<typename T::status_t>;
         { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
+        { T::TEMP_CURRENT } -> std::convertible_to<typename T::temperature_metric_t>;
+        {
+            T::TEMPERATURE_TYPE_HOTSPOT
+        } -> std::convertible_to<typename T::temperature_type_t>;
+        {
+            T::TEMPERATURE_TYPE_EDGE
+        } -> std::convertible_to<typename T::temperature_type_t>;
         { T::status_to_string(s) } -> std::convertible_to<std::string>;
         { t.init() } -> std::convertible_to<typename T::status_t>;
         { t.shutdown() } -> std::convertible_to<typename T::status_t>;
@@ -64,6 +75,9 @@ concept wrapper_policy =
         { t.get_metrics_info(ph, gmp) } -> std::convertible_to<typename T::status_t>;
         { t.get_gpu_asic_info(ph, aip) } -> std::convertible_to<typename T::status_t>;
         { t.get_memory_usage(ph, mt, u64p) } -> std::convertible_to<typename T::status_t>;
+        {
+            t.get_temp_metric(ph, tt, tm, i64p)
+        } -> std::convertible_to<typename T::status_t>;
     } &&
     // ── SDMA methods — only required when sdma_supported == true ─────────────
     (!T::sdma_supported || sdma_wrapper_contract<T>)
@@ -115,13 +129,21 @@ public:
     static constexpr bool sdma_supported = Wrapper::sdma_supported;
 
     // ── Type aliases — forwarded from Wrapper ─────────────────────────────────
-    using status_t         = typename Wrapper::status_t;
-    using version_t        = typename Wrapper::version_t;
-    using socket_handle    = typename Wrapper::socket_handle;
-    using processor_handle = typename Wrapper::processor_handle;
-    using gpu_metrics_t    = typename Wrapper::gpu_metrics_t;
-    using asic_info_t      = typename Wrapper::asic_info_t;
-    using memory_type_t    = typename Wrapper::memory_type_t;
+    using status_t             = typename Wrapper::status_t;
+    using version_t            = typename Wrapper::version_t;
+    using socket_handle        = typename Wrapper::socket_handle;
+    using processor_handle     = typename Wrapper::processor_handle;
+    using gpu_metrics_t        = typename Wrapper::gpu_metrics_t;
+    using asic_info_t          = typename Wrapper::asic_info_t;
+    using memory_type_t        = typename Wrapper::memory_type_t;
+    using temperature_type_t   = typename Wrapper::temperature_type_t;
+    using temperature_metric_t = typename Wrapper::temperature_metric_t;
+
+    static constexpr temperature_metric_t TEMP_CURRENT = Wrapper::TEMP_CURRENT;
+    static constexpr temperature_type_t   TEMPERATURE_TYPE_HOTSPOT =
+        Wrapper::TEMPERATURE_TYPE_HOTSPOT;
+    static constexpr temperature_type_t TEMPERATURE_TYPE_EDGE =
+        Wrapper::TEMPERATURE_TYPE_EDGE;
 
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     using proc_info_t = typename Wrapper::proc_info_t;
@@ -204,8 +226,16 @@ public:
                      "amdsmi_get_gpu_memory_usage");
     }
 
-    // Returns false without throwing when the process list is unavailable (capability
-    // probe). Body is only active when sdma_supported.
+    std::int64_t get_temp_metric(processor_handle handle, temperature_type_t sensor_type,
+                                 temperature_metric_t metric)
+
+    {
+        std::int64_t temperature{};
+        check_status(m_amdsmi.get_temp_metric(handle, sensor_type, metric, &temperature),
+                     "amdsmi_get_temp_metric");
+        return temperature;
+    }
+
     [[nodiscard]] bool try_get_gpu_process_list(processor_handle h, std::uint32_t* count,
                                                 auto* list) const noexcept
     {

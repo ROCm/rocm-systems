@@ -132,7 +132,9 @@ struct mock_nic_stat_t
 
 // NOLINTEND(readability-identifier-naming)
 
-using mock_status_t = std::uint32_t;
+using mock_status_t      = std::uint32_t;
+using mock_temp_type_t   = std::uint32_t;
+using mock_temp_metric_t = std::uint32_t;
 
 // ── GMock class ─────────────────────────────────────────────────────────────
 // Lifecycle/enumeration methods are mocked as regular instance methods
@@ -162,6 +164,9 @@ struct gmock_backend_api
                 (std::uint64_t handle, mock_asic_info_t* out));
     MOCK_METHOD(mock_status_t, get_memory_usage,
                 (std::uint64_t handle, std::uint32_t type, std::uint64_t* out));
+    MOCK_METHOD(mock_status_t, get_temp_metric,
+                (std::uint64_t handle, mock_temp_type_t sensor_type,
+                 mock_temp_metric_t metric, std::int64_t* temperature));
     MOCK_METHOD(mock_status_t, get_gpu_process_list,
                 (std::uint64_t handle, std::uint32_t* count, mock_proc_info_t* list));
     MOCK_METHOD(mock_status_t, get_nic_asic_info,
@@ -197,6 +202,12 @@ struct mock_backend
     using nic_port_info_t         = mock_nic_port_info_t;
     using nic_rdma_devices_info_t = mock_nic_rdma_devices_info_t;
     using nic_stat_t              = mock_nic_stat_t;
+    using temperature_type_t      = mock_temp_type_t;
+    using temperature_metric_t    = mock_temp_metric_t;
+
+    static constexpr temperature_metric_t TEMP_CURRENT             = 0;
+    static constexpr temperature_type_t   TEMPERATURE_TYPE_HOTSPOT = 1;
+    static constexpr temperature_type_t   TEMPERATURE_TYPE_EDGE    = 0;
 
     static constexpr processor_type_t NIC_PROCESSOR_TYPE = 5;
 
@@ -253,6 +264,12 @@ struct mock_backend
                               std::uint64_t* out) const
     {
         return g_mock_backend->get_memory_usage(handle, type, out);
+    }
+
+    status_t get_temp_metric(processor_handle handle, temperature_type_t sensor_type,
+                             temperature_metric_t metric, std::int64_t* temperature) const
+    {
+        return g_mock_backend->get_temp_metric(handle, sensor_type, metric, temperature);
     }
 
     status_t get_gpu_process_list(processor_handle handle, std::uint32_t* count,
