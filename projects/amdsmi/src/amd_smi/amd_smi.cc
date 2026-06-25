@@ -49,6 +49,7 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_addc.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_cper.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
@@ -5168,12 +5169,26 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_UNEXPECTED_DATA;
   }
   uint32_t i = 0;
+#ifdef AMDSMI_ENABLE_ADDC
+  std::vector<uint64_t> addc_afids;
+  amdsmi_status_t addc_status = amdsmi::addc::get_afids_via_addc(cper_buffer, buf_size, addc_afids);
+  if (addc_status != AMDSMI_STATUS_SUCCESS) {
+    return addc_status;
+  }
+  for (uint64_t afid : addc_afids) {
+    if (i < *num_afids) {
+      afids[i] = afid;
+    }
+    ++i;
+  }
+#else
   for (int afid : cper_decode(cper)) {
     if (i < *num_afids) {
       afids[i] = afid;
     }
     ++i;
   }
+#endif  // AMDSMI_ENABLE_ADDC
   *num_afids = i;
 
   return AMDSMI_STATUS_SUCCESS;

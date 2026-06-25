@@ -39,6 +39,7 @@ set(NIC_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/")
 
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
+    "${SRC_DIR}/amd_smi_addc.cc"
     "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_drm.cc"
@@ -96,6 +97,74 @@ list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c")
 set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
 set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})
 
+# ADDC CPER decode backend (optional). Built only when ENABLE_ADDC is ON. ADDC
+# needs a C++20/<format>-capable toolchain (GCC 13+), so it is compiled as an
+# isolated static library and consumed solely through its C API (addc/lib_c.h);
+# libamd_smi.so itself stays C++17. The source is cloned at configure time,
+# mirroring the ras-decode acquisition pattern.
+if(ENABLE_ADDC)
+    set(ADDC_REPO "git@github-emu:AMD-DCTOOLS/addc-base.git")
+    set(ADDC_TAG "v3.2.0")
+    set(ADDC_DIR "${CMAKE_CURRENT_BINARY_DIR}/addc-base")
+    # Record the cloned tag so bumping ADDC_TAG on an already-configured tree
+    # forces a fresh clone instead of silently reusing the old checkout.
+    set(ADDC_TAG_STAMP "${ADDC_DIR}/.amdsmi_addc_tag")
+    set(_addc_cloned_tag "")
+    if(EXISTS "${ADDC_TAG_STAMP}")
+        file(READ "${ADDC_TAG_STAMP}" _addc_cloned_tag)
+        string(STRIP "${_addc_cloned_tag}" _addc_cloned_tag)
+    endif()
+    if(NOT EXISTS "${ADDC_DIR}/meson.build" OR NOT "${_addc_cloned_tag}" STREQUAL "${ADDC_TAG}")
+        if(NOT GIT_FOUND)
+            message(FATAL_ERROR "ENABLE_ADDC requires Git to clone ${ADDC_REPO}")
+        endif()
+        message(STATUS "Cloning ${ADDC_REPO} (${ADDC_TAG}) for ENABLE_ADDC")
+        file(REMOVE_RECURSE "${ADDC_DIR}")
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} clone --depth 1 --branch ${ADDC_TAG} ${ADDC_REPO} ${ADDC_DIR}
+            RESULT_VARIABLE ADDC_CLONE_RESULT
+        )
+        if(NOT ADDC_CLONE_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to clone ${ADDC_REPO} (rc=${ADDC_CLONE_RESULT})")
+        endif()
+        file(WRITE "${ADDC_TAG_STAMP}" "${ADDC_TAG}\n")
+    endif()
+
+    # Every library translation unit lives under src/; only the addc-tool CLI is
+    # excluded.
+    file(GLOB_RECURSE ADDC_SOURCES CONFIGURE_DEPENDS "${ADDC_DIR}/src/*.cpp")
+    list(FILTER ADDC_SOURCES EXCLUDE REGEX "/addc-tool/")
+
+    # ADDC sources #include <nlohmann/json.hpp>. ADDC pins 3.12.0 via a meson wrap;
+    # we are not using meson, so fetch the same release (hash-checked) into the
+    # build dir and put it on addc_lib's private include path.
+    set(NLOHMANN_DIR "${CMAKE_CURRENT_BINARY_DIR}/nlohmann-3.12.0")
+    if(NOT EXISTS "${NLOHMANN_DIR}/single_include/nlohmann/json.hpp")
+        set(NLOHMANN_ZIP "${CMAKE_CURRENT_BINARY_DIR}/nlohmann-3.12.0-include.zip")
+        file(
+            DOWNLOAD "https://github.com/nlohmann/json/releases/download/v3.12.0/include.zip"
+            "${NLOHMANN_ZIP}"
+            EXPECTED_HASH SHA256=b8cb0ef2dd7f57f18933997c9934bb1fa962594f701cd5a8d3c2c80541559372
+            STATUS NLOHMANN_DL
+        )
+        list(GET NLOHMANN_DL 0 NLOHMANN_DL_CODE)
+        if(NOT NLOHMANN_DL_CODE EQUAL 0)
+            message(FATAL_ERROR "ENABLE_ADDC: failed to download nlohmann 3.12.0 (${NLOHMANN_DL})")
+        endif()
+        file(ARCHIVE_EXTRACT INPUT "${NLOHMANN_ZIP}" DESTINATION "${NLOHMANN_DIR}")
+    endif()
+
+    add_library(addc_lib STATIC ${ADDC_SOURCES})
+    set_target_properties(
+        addc_lib
+        PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON
+    )
+    target_include_directories(addc_lib PUBLIC "${ADDC_DIR}/include" PRIVATE "${NLOHMANN_DIR}/single_include")
+    target_compile_definitions(addc_lib PRIVATE ADDC_BUILDING_LIB ADDC_VERSION="${ADDC_TAG}")
+    # ADDC owns its own warning policy; do not impose amd-smi's -Werror/-Wconversion on it.
+    target_compile_options(addc_lib PRIVATE -w)
+endif()
+
 # Include UALOE library - always required
 set(UALOE_LIB "ualoe_lib")
 set(UALOE_LIB_SRC_DIR "${PROJECT_SOURCE_DIR}/src/${UALOE_LIB}")
@@ -139,6 +208,12 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
         ${_TARGET}
         PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
     )
+
+    if(ENABLE_ADDC)
+        target_compile_definitions(${_TARGET} PRIVATE AMDSMI_ENABLE_ADDC)
+        # PUBLIC include on addc_lib propagates addc/lib_c.h to this target.
+        target_link_libraries(${_TARGET} PRIVATE addc_lib)
+    endif()
 
     target_include_directories(
         ${_TARGET}

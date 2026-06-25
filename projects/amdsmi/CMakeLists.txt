@@ -120,6 +120,11 @@ endif()
 
 option(BUILD_EXAMPLES "Build examples" OFF)
 
+# Route CPER decoding through the external ADDC library (requires a C++20/
+# <format>-capable toolchain, GCC 13+). Off by default: the build stays on the
+# vendored ras-decode path and the default GCC-11 toolchain.
+option(ENABLE_ADDC "Route CPER decode through the ADDC library" OFF)
+
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Enable position independent code for all targets")
 mark_as_advanced(CMAKE_POSITION_INDEPENDENT_CODE)

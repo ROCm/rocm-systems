@@ -24,7 +24,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - When `--partition` is set with `--clock`: sources GFX/VCLK/DCLK/SOCCLK from partition metrics and adds per-AID and per-XCP clock entries with their limits.
   - When `--partition` is set with `--usage`: reports per-XCP GFX/JPEG/VCN activity.
 
-- **Added `--folder` support to `amd-smi ras --afid`**.  
+- **Added optional `ENABLE_ADDC` build option to route CPER decoding through the ADDC library**.
+  - When configured with `-DENABLE_ADDC=ON`, AFID extraction (`amdsmi_get_afids_from_cper`) decodes the raw CPER record through the ADDC library's error-summary C API instead of the in-tree ras-decode path.
+  - The option is off by default; the default build and public API are unchanged. ADDC requires a C++20 toolchain (GCC 13+) and is built as an isolated static library consumed only through its C API.
+  - With `ENABLE_ADDC=ON`, a CPER record that ADDC cannot summarize returns `AMDSMI_STATUS_UNEXPECTED_DATA` instead of success with zero AFIDs.
+
+- **Added `--folder` support to `amd-smi ras --afid`**.
   - `amd-smi ras --afid --folder <DIR>` decodes every `*.cper` in a directory and prints a `file_name | list of afids` table (or a JSON array under `--json`).
   - Records with no AFIDs show `-`; files that cannot be parsed show `decode failed`.
 
