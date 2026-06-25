@@ -247,7 +247,9 @@ class Database:
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
-            json_serializer=lambda value: json.dumps(cls._json_sanitize(value)),
+            json_serializer=lambda value: json.dumps(
+                cls._json_sanitize(value), allow_nan=False
+            ),
         )
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
