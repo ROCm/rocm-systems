@@ -11,9 +11,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unmodified over the simulator; DRM device discovery and queries are handled at
   the syscall layer instead of by intercepting libdrm library symbols
 - **BREAKING:** `rj_vm_device_open()` now takes a connecting client's PID:
-  `rj_vm_device_open(vm, pid_t client_pid, uint32_t *process_id)`. Pass 0 in
-  local mode; a nonzero PID enables daemon-mode process reuse and cross-process
-  memory access
+  `rj_vm_device_open(vm, rj_client_pid_t client_pid, uint32_t *process_id)`. The
+  new `rj_client_pid_t` is a fixed-width (`int32_t`) typedef so the public header
+  stays OS- and ABI-width-agnostic. Pass 0 in local mode; a nonzero PID enables
+  daemon-mode process reuse and cross-process memory access
 
 ### Added
 - Daemon-mode multi-process client support: per-client process reuse,

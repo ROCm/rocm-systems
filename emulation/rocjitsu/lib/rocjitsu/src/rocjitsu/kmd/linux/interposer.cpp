@@ -179,7 +179,7 @@ public:
   /// the next open("/dev/kfd") creates a fresh connection.
   void reset_after_fork() {
     rj_vm_ = nullptr;
-    remote_ = nullptr;
+    remote_.store(nullptr, std::memory_order_relaxed);
     remote_kfd_fd_.store(-1, std::memory_order_relaxed);
     remote_open_refs_.store(0, std::memory_order_relaxed);
     new (&init_mutex_) std::mutex();
@@ -197,27 +197,33 @@ public:
     auto *d = driver();
     return d ? d->fd() : -1;
   }
-  bool initialized() const { return rj_vm_ != nullptr || remote_ != nullptr; }
+  bool initialized() const {
+    return rj_vm_ != nullptr || remote_.load(std::memory_order_acquire) != nullptr;
+  }
 
   std::unique_lock<std::mutex> lock_remote() { return std::unique_lock(remote_mutex_); }
 
-  RemoteDriver *remote() { return remote_; }
+  RemoteDriver *remote() { return remote_.load(std::memory_order_acquire); }
 
   int remote_kfd_fd() const { return remote_kfd_fd_.load(std::memory_order_acquire); }
 
   RemoteDriver *remote_lookup(int fd) {
-    return (fd >= 0 && fd == remote_kfd_fd_.load(std::memory_order_acquire) && remote_) ? remote_
-                                                                                        : nullptr;
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    return (fd >= 0 && fd == remote_kfd_fd_.load(std::memory_order_acquire) && active_remote)
+               ? active_remote
+               : nullptr;
   }
 
   std::string remote_topology_path() {
     std::lock_guard lock(remote_mutex_);
-    return remote_ ? std::string(remote_->topology_path()) : std::string{};
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    return active_remote ? std::string(active_remote->topology_path()) : std::string{};
   }
 
   std::string remote_drm_path() {
     std::lock_guard lock(remote_mutex_);
-    return remote_ ? std::string(remote_->drm_path()) : std::string{};
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    return active_remote ? std::string(active_remote->drm_path()) : std::string{};
   }
 
   /// @brief True when a daemon-mode (remote) KFD connection is open.
@@ -243,24 +249,27 @@ public:
 
   RemoteDriver *get_or_create_remote() {
     std::lock_guard lock(remote_mutex_);
-    if (remote_ && remote_kfd_fd_.load(std::memory_order_acquire) >= 0) {
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    if (active_remote && remote_kfd_fd_.load(std::memory_order_acquire) >= 0) {
       // Re-open of an already-connected daemon: each open holds one reference,
       // mirroring SimulatedDriver::open() retaining the local process.
       retain_remote_open();
-      return remote_;
+      return active_remote;
     }
     int sock = connect_to_daemon();
     if (sock < 0)
       return nullptr;
-    if (!remote_)
-      remote_ = new RemoteDriver(sock);
-    int fd = remote_->open();
+    if (!active_remote) {
+      active_remote = new RemoteDriver(sock);
+      remote_.store(active_remote, std::memory_order_release);
+    }
+    int fd = active_remote->open();
     if (fd < 0)
       return nullptr;
     remote_kfd_fd_.store(fd, std::memory_order_release);
     // The primary remote KFD fd holds the first open reference.
     remote_open_refs_.store(1, std::memory_order_release);
-    return remote_;
+    return active_remote;
   }
 
   SimulatedDriver *lookup(int fd) {
@@ -348,11 +357,12 @@ public:
   /// instead of being misrouted to a dead RPC connection.
   void teardown_remote() {
     std::lock_guard lock(remote_mutex_);
-    if (!remote_)
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    if (!active_remote)
       return;
-    remote_->close();
-    delete remote_;
-    remote_ = nullptr;
+    active_remote->close();
+    remote_.store(nullptr, std::memory_order_release);
+    delete active_remote;
     int fd = remote_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
     if (fd >= 0)
       InterposerContext::real.close(fd);
@@ -503,7 +513,14 @@ public:
 
 private:
   rj_vm_t *rj_vm_ = nullptr;
-  RemoteDriver *remote_ = nullptr;
+  /// @brief Active daemon-mode remote driver, or nullptr in local mode.
+  /// @details Stored atomically so lock-free readers (`remote()`,
+  /// `remote_lookup()`, `initialized()`, the AMDKFD ioctl fallback, the mmap
+  /// path) never race the writer that swaps it under `remote_mutex_` in
+  /// `get_or_create_remote()`/`teardown_remote()`. The mutex still serializes the
+  /// compound new+open and delete+clear sequences; the atomic only makes the
+  /// bare pointer read/write data-race-free.
+  std::atomic<RemoteDriver *> remote_{nullptr};
   std::atomic<int> remote_kfd_fd_{-1};
   /// @brief Open-reference count for the remote (daemon-mode) KFD connection.
   /// @details The primary remote fd and every dup of it each hold one
@@ -800,9 +817,18 @@ int ioctl(int fd, unsigned long request, ...) {
       ver->version_minor = 57;
       ver->version_patchlevel = 0;
       static constexpr const char drv_name[] = "amdgpu";
-      if (ver->name && ver->name_len >= sizeof(drv_name) - 1)
-        std::memcpy(ver->name, drv_name, sizeof(drv_name));
-      ver->name_len = sizeof(drv_name) - 1;
+      constexpr size_t kNameStrLen = sizeof(drv_name) - 1;
+      // Mirror the kernel's drm_version contract: copy at most the caller's
+      // advertised buffer length, and only write the NUL terminator when the
+      // buffer has room for it. A caller that sized name to exactly the queried
+      // length must not get a terminator written one byte past the end.
+      if (ver->name && ver->name_len > 0) {
+        size_t copy = ver->name_len < kNameStrLen ? ver->name_len : kNameStrLen;
+        std::memcpy(ver->name, drv_name, copy);
+        if (ver->name_len > kNameStrLen)
+          ver->name[kNameStrLen] = '\0';
+      }
+      ver->name_len = kNameStrLen;
       if (ver->date && ver->date_len > 0)
         ver->date[0] = '\0';
       ver->date_len = 1;
@@ -960,32 +986,37 @@ int dup(int oldfd) {
 
 int dup2(int oldfd, int newfd) {
   assert(InterposerContext::real.ready());
+  // dup2(fd, fd) is a POSIX no-op that leaves the descriptor live; mutating
+  // tracking would drop a still-open ref. Forward without touching tracking.
+  if (oldfd == newfd)
+    return InterposerContext::real.dup2(oldfd, newfd);
+  int rc = InterposerContext::real.dup2(oldfd, newfd);
+  if (rc < 0)
+    return rc;
+  // newfd was atomically closed and replaced; reconcile its tracking only now.
   InterposerContext::ctx.untrack_sysfs(newfd);
   InterposerContext::ctx.untrack_drm(newfd);
-  InterposerContext::ctx.untrack_dup(newfd);
-  int rc = InterposerContext::real.dup2(oldfd, newfd);
-  if (rc >= 0) {
-    if (InterposerContext::ctx.is_kfd_tracked(oldfd))
-      InterposerContext::ctx.track_dup(rc);
-    else
-      InterposerContext::ctx.untrack_dup(rc);
-  }
+  if (InterposerContext::ctx.is_kfd_tracked(oldfd))
+    InterposerContext::ctx.track_dup(rc);
+  else
+    InterposerContext::ctx.untrack_dup(rc);
   return rc;
 }
 
 #ifdef SYS_dup3
 int dup3(int oldfd, int newfd, int flags) {
   assert(InterposerContext::real.ready());
+  // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
+  // descriptor; do not mutate tracking before the syscall confirms that.
+  int rc = InterposerContext::real.dup3(oldfd, newfd, flags);
+  if (rc < 0)
+    return rc;
   InterposerContext::ctx.untrack_sysfs(newfd);
   InterposerContext::ctx.untrack_drm(newfd);
-  InterposerContext::ctx.untrack_dup(newfd);
-  int rc = InterposerContext::real.dup3(oldfd, newfd, flags);
-  if (rc >= 0) {
-    if (InterposerContext::ctx.is_kfd_tracked(oldfd))
-      InterposerContext::ctx.track_dup(rc);
-    else
-      InterposerContext::ctx.untrack_dup(rc);
-  }
+  if (InterposerContext::ctx.is_kfd_tracked(oldfd))
+    InterposerContext::ctx.track_dup(rc);
+  else
+    InterposerContext::ctx.untrack_dup(rc);
   return rc;
 }
 #endif
@@ -1549,6 +1580,8 @@ int stat64(const char *path, struct stat64 *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_stat64(actual, buf);
 }
@@ -1561,6 +1594,8 @@ int lstat64(const char *path, struct stat64 *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_lstat64(actual, buf);
 }
@@ -1573,6 +1608,8 @@ int __xstat(int ver, const char *path, struct stat *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_xstat(ver, actual, buf);
 }
@@ -1585,6 +1622,8 @@ int __xstat64(int ver, const char *path, struct stat64 *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_xstat64(ver, actual, buf);
 }
@@ -1597,6 +1636,8 @@ int __lxstat(int ver, const char *path, struct stat *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_lxstat(ver, actual, buf);
 }
@@ -1609,6 +1650,8 @@ int __lxstat64(int ver, const char *path, struct stat64 *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_lxstat64(ver, actual, buf);
 }

@@ -12,7 +12,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +29,11 @@ typedef struct rj_vm_t rj_vm_t;
 
 /// @brief Platform-specific handle type (fd on Linux, HANDLE on Windows).
 typedef int rj_handle_t;
+
+/// @brief Connecting client's process ID, in fixed-width form.
+/// @details Kept ABI-stable and OS agnostic so we don't depend on the
+/// platform width of a process ID.
+typedef int32_t rj_client_pid_t;
 
 /// @brief VM creation mode.
 typedef enum rj_vm_mode_t {
@@ -231,7 +235,8 @@ RJ_API_EXPORT rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_
 ///   there is no separate client process. If a process already exists for a
 ///   nonzero client_pid, it is reused.
 /// @param[out] process_id The simulator's process handle (may be NULL).
-RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, pid_t client_pid, uint32_t *process_id);
+RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_pid,
+                                            uint32_t *process_id);
 
 /// @brief Close a specific KFD process by ID.
 /// @param[in] vm VM handle.

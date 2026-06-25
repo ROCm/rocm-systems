@@ -376,7 +376,13 @@ uint32_t SimulatedDriver::open_process(pid_t client_pid) {
   uint32_t pid;
   {
     std::lock_guard<std::mutex> lk(process_mutex_);
-    if (client_pid > 0) {
+    // Client-PID process reuse (and its matching retain) is a daemon-mode
+    // feature: multiple client opens of the same PID share one process and
+    // balance against multiple close()/release_open() calls. Gating reuse on
+    // daemon_mode_ keeps it symmetric with close() — outside daemon mode every
+    // open creates a fresh process so the first close cannot tear down a
+    // still-referenced one.
+    if (daemon_mode_ && client_pid > 0) {
       for (auto &[id, proc] : processes_) {
         if (proc->client_pid() == client_pid) {
           proc->retain_open();
