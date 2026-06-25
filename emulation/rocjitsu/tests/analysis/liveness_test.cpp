@@ -475,7 +475,7 @@ TEST(ExecFlagsRealDecode, Cdna4SMovExecAllOnesPromotesVgprDefToKill) {
 
   // EXEC is provably full at the def, so its vector write is a real kill.
   auto scope = block_scope(blocks);
-  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
   EXPECT_EQ(exec.before(def), ExecState::Full);
 
   LivenessAnalysis liveness = analyze_scope(blocks);
@@ -494,7 +494,7 @@ TEST(ExecFlagsRealDecode, Cdna4VgprDefStaysLiveWithoutFullExec) {
   EXPECT_TRUE(def.mnemonic().starts_with("v_mov_b32"));
 
   auto scope = block_scope(blocks);
-  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
   EXPECT_EQ(exec.before(def), ExecState::Unknown);
 
   LivenessAnalysis liveness = analyze_scope(blocks);
@@ -507,7 +507,7 @@ TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
       build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::DefVgpr0,
                          TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0, TestOpcode::End});
   auto scope = block_scope(blocks);
-  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
 
   auto insts = insts_of(*blocks[0]);
   ASSERT_EQ(insts.size(), 5u);
@@ -523,7 +523,7 @@ TEST(ExecMaskAnalysis, OrWithAllOnesConstantIsFull) {
   auto blocks =
       build_test_blocks({TestOpcode::WriteExecOrAllOnes, TestOpcode::DefVgpr0, TestOpcode::End});
   auto scope = block_scope(blocks);
-  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
 
   auto insts = insts_of(*blocks[0]);
   ASSERT_GE(insts.size(), 2u);
@@ -537,7 +537,7 @@ TEST(ExecMaskAnalysis, AndSaveexecWithAllOnesStaysUnknown) {
   auto blocks =
       build_test_blocks({TestOpcode::WriteExecAndSaveexec, TestOpcode::DefVgpr0, TestOpcode::End});
   auto scope = block_scope(blocks);
-  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
 
   auto insts = insts_of(*blocks[0]);
   ASSERT_GE(insts.size(), 2u);
@@ -551,7 +551,7 @@ TEST(ExecMaskAnalysis, PartialAllOnesWritePreservesButDoesNotEstablishFull) {
     auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::WriteExecLoHalf,
                                      TestOpcode::DefVgpr0, TestOpcode::End});
     auto scope = block_scope(blocks);
-    ExecMaskAnalysis exec{KernelBlockScope(scope)}; // default Wave64
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
     auto insts = insts_of(*blocks[0]);
     ASSERT_GE(insts.size(), 3u);
     EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the half write
@@ -562,7 +562,7 @@ TEST(ExecMaskAnalysis, PartialAllOnesWritePreservesButDoesNotEstablishFull) {
     auto blocks =
         build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
     auto scope = block_scope(blocks);
-    ExecMaskAnalysis exec{KernelBlockScope(scope)}; // default Wave64
+    ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
     auto insts = insts_of(*blocks[0]);
     ASSERT_GE(insts.size(), 2u);
     EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown);
@@ -574,7 +574,7 @@ TEST(ExecMaskAnalysis, Wave32ExecLoWriteCoversFullMask) {
   auto blocks =
       build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
   auto scope = block_scope(blocks);
-  ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/32};
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 32};
   auto insts = insts_of(*blocks[0]);
   ASSERT_GE(insts.size(), 2u);
   EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);
@@ -632,7 +632,7 @@ TEST(ExecMaskAnalysis, CfgJoinMeetsToUnknownUnlessAllPredecessorsFull) {
                                    TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0,
                                    TestOpcode::UseVgpr0, TestOpcode::End});
   auto scope = block_scope(blocks);
-  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
 
   BasicBlock *join = block_starting_at(blocks, 12);
   ASSERT_NE(join, nullptr);
