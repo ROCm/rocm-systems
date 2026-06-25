@@ -1521,14 +1521,16 @@ bool Device::populateOCLDeviceConstants() {
     }
     info_.imageMaxBufferSize_ = (amd::IS_HIP) ? image_max_dim[0] : (1 << 27);
 
-    info_.imagePitchAlignment_ = 256;
-
-    info_.imageBaseAddressAlignment_ = 256;
-
-    info_.bufferFromImageSupport_ = false;
-
     info_.imageSupport_ = (info_.maxReadWriteImageArgs_ > 0) ? true : false;
   }
+
+  // These are properties of the device's linear memory layout, not the image
+  // extension.  They must be set unconditionally so that hipMallocPitch /
+  // hipMalloc3D produce correct pitch alignment even when IMAGE_SUPPORT is
+  // off.  The PAL backend already sets them unconditionally.
+  info_.imagePitchAlignment_ = 256;
+  info_.imageBaseAddressAlignment_ = 256;
+  info_.bufferFromImageSupport_ = false;
 
   // Enable SVM Capabilities of Hsa device. Ensure
   // user has not setup memory to be non-coherent
