@@ -408,6 +408,54 @@ def test_calc_dataframe_expressions_with_builtin_vars():
     assert pd.isna(result.iloc[1])
 
 
+def test_calc_dataframe_expressions_empty_returns_assignable_series():
+    """An empty expression_df returns an empty Series, not a DataFrame."""
+    expression_df = pd.DataFrame(columns=["metric_id", "value_name", "value"])
+
+    result = db_analysis.calc_dataframe_expressions(
+        pd.DataFrame({"Counter1": [1, 2, 3]}),
+        {"gpu_arch": "gfx942"},
+        expression_df,
+    )
+
+    assert isinstance(result, pd.Series)
+    assert result.empty
+    # Reproduces the call site: assigning the result as a single column must
+    # not raise "Columns must be same length as key".
+    expression_df["value"] = result
+
+
+# =============================================================================
+# calc_metrics_data tests
+# =============================================================================
+
+
+def test_calc_metrics_data_empty_filter_preserves_schema():
+    """With no metric tables, the output frames keep their columns."""
+    workload_path = "/fake/workload"
+    arch_config = schema.ArchConfig()
+    # Only a non-metric table survives the filter (no Metric/Channel column).
+    arch_config.dfs = {1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]})}
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    metrics_info, expressions = analyzer.calc_metrics_data()
+
+    assert metrics_info[workload_path].empty
+    assert "pct_of_peak" in metrics_info[workload_path].columns
+    assert "metric_id" in metrics_info[workload_path].columns
+    assert list(expressions[workload_path].columns) == [
+        "metric_id",
+        "value_name",
+        "value",
+    ]
+
+
 # =============================================================================
 # Noise-clamp warning + summary tests
 # =============================================================================
