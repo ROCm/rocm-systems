@@ -318,3 +318,18 @@ contract:
   Contract_MemoryPool_MallocAsync_MemoryUsableAfterStreamSynchronize:
     <<: *level_0
     tags: [memory_pool]
+  Contract_Vmm_GetAllocationGranularity_ReturnsPositiveValue:
+    <<: *level_0
+    tags: [vmm]
+  Contract_Vmm_AddressReserveFree_Succeeds:
+    <<: *level_0
+    tags: [vmm]
+  Contract_Vmm_CreateReleaseAllocationHandle_SucceedsWhenSupported:
+    <<: *level_0
+    tags: [vmm]
+  Contract_Vmm_MapUnmap_SucceedsWhenSupported:
+    <<: *level_0
+    tags: [vmm]
+  Contract_Vmm_SetAccess_AllowsRoundTripWhenSupported:
+    <<: *level_0
+    tags: [vmm]
