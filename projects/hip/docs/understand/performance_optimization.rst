@@ -45,9 +45,6 @@ This categorization aligns with the textbook approach to optimization:
 determine the bottleneck, elevate the bottleneck until it is no longer
 limiting, and repeat on the new bottleneck.
 
-:ref:`Roofline model analysis <roofline_model>` helps quickly identify whether a
-kernel's performance is bottlenecked by compute throughput or memory bandwidth.
-
 .. _roofline_model:
 
 Roofline model
@@ -75,17 +72,16 @@ slope equals the memory bandwidth (in bytes per second). Because slope is
 "rise over run," its units correspond to throughput per intensity.
 
 .. figure:: ../data/understand/performance_optimization/roofline.svg
-   :alt: Roofline model diagram showing memory bandwidth ceiling and
-         compute ceiling
+   :alt: Roofline model diagram showing a diagonal memory bandwidth ceiling
+         and a horizontal compute ceiling meeting at the ridge point.
    :align: center
    :width: 100%
 
-   Roofline model showing the relationship between arithmetic intensity
-   and achievable performance. The memory bandwidth ceiling represents
-   the GPU's memory bandwidth limit, while the compute ceiling shows the
-   maximum achievable TFLOPs. Kernels falling into the area to the left
-   of the ridge point are memory-bound, while they are compute-bound if they
-   fall into the right area.
+   Roofline model. The x-axis shows arithmetic intensity (FLOPs/byte); the
+   y-axis shows achievable performance (FLOPs/second). The diagonal memory
+   bandwidth ceiling and horizontal compute ceiling meet at the ridge point.
+   Kernels whose arithmetic intensity falls to the left of the ridge point
+   are memory-bound; kernels to the right are compute-bound.
 
 A kernel's position on the x-axis indicates whether it is fundamentally
 compute-bound (beneath the flat roof) or memory-bound (beneath the slanted
@@ -222,9 +218,16 @@ Because algorithms have different operational and memory complexities, they
 scale differently in arithmetic intensity:
 
 * An algorithm with :math:`\mathcal{O}(1)` operations and :math:`\mathcal{O}(N)`
-  memory has :math:`\mathcal{O}(\frac{1}{N})` intensity (decreasing with size)
+  memory has :math:`\mathcal{O}(\frac{1}{N})` intensity (decreasing with size).
+  A plain memory copy (``hipMemcpy``) is a representative example: it moves
+  :math:`N` bytes but performs no arithmetic, so intensity approaches zero as
+  :math:`N` grows.
 * One with :math:`\mathcal{O}(N)` operations and :math:`\mathcal{O}(1)` memory
-  has :math:`\mathcal{O}(N)` intensity (increasing with size)
+  has :math:`\mathcal{O}(N)` intensity (increasing with size). Iterative
+  algorithms that repeatedly apply a fixed-size stencil or reduction to a
+  constant working set—such as in-place iterative solvers—can exhibit this
+  behavior: the working set stays resident in cache while compute scales with
+  iteration count.
 
 Examples of kernel complexity scaling:
 
@@ -263,10 +266,10 @@ multithreading rather than complex CPU techniques like out-of-order
 execution.
 
 Latency hiding is the strategy of masking long-latency operations by
-running them concurrently. On AMD GPUs, performant kernels
-interleave the execution of many threads across :ref:`warps <wavefront>` keeping
-overall throughput high even when individual instructions take many cycles. When
-one warp stalls on a slow :ref:`global-memory <hbm>` access, the
+running them concurrently. On AMD GPUs, execution is interleaved among many
+threads across :ref:`warps <wavefront>`, keeping overall throughput high even
+when individual instructions take many cycles. When one warp stalls on a slow
+:ref:`global-memory <hbm>` access, the
 :ref:`scheduler <wave-scheduling>` immediately issues instructions from another
 eligible warp.
 
@@ -344,10 +347,12 @@ The state of the :ref:`warps <wavefront>` executing a kernel on an AMD GPU
 can be described using several non-exclusive terms—active, stalled, eligible,
 and selected.
 
-A warp is considered **active** from the time its threads begin executing until
-all threads in that warp have completed the kernel. The
-:ref:`warp schedulers <wave-scheduling>` select warps from the active pool each
-cycle; the selected warps then issue their instructions.
+A warp is considered **active** from the time it is assigned to a
+:ref:`compute unit <compute_unit>` until all its threads have completed the
+kernel. Note that a warp remains active even while stalled—"active" means it
+is resident on the CU and holds resources, not that it is necessarily issuing
+instructions. The :ref:`warp schedulers <wave-scheduling>` select warps from
+the active pool each cycle; the selected warps then issue their instructions.
 
 An **eligible** warp is an active warp ready to issue its next instruction. For
 a warp to be eligible:
@@ -397,6 +402,16 @@ work to select, ensuring the CU pipelines remain fully utilized.
 
 Occupancy theory
 ================
+
+.. note::
+
+   This documentation uses two related terms consistently: **thread** refers
+   to the HIP programming model abstraction (a ``threadIdx``-indexed unit of
+   execution), while **lane** refers to the corresponding hardware execution
+   slot within a warp. Each thread maps to exactly one lane; the terms are
+   interchangeable in most contexts but "lane" is used where the hardware
+   SIMD perspective matters (for example, when discussing EXEC masks, bank
+   conflict patterns, or memory coalescing at the DRAM transaction level).
 
 Occupancy measures the ratio of active :ref:`warp <wavefront>` to the maximum
 possible warps on a :ref:`compute unit <compute_unit>`.
@@ -666,11 +681,13 @@ threads.
 Register pressure occurs when a kernel requires more registers than optimal
 for the target occupancy.
 
-In GPU programming, registers are the fastest level of the memory
-hierarchy, holding per-thread variables for arithmetic and address
-computation. However, while the compiler (`amdclang++` for ROCm) works with an
-unbounded set of virtual registers, the hardware has only a finite number
-of physical registers per compute unit.
+In GPU programming, registers are the fastest level of the memory hierarchy,
+holding per-thread variables for arithmetic and address computation. The
+compiler (``amdclang++`` for ROCm) assigns virtual registers during
+compilation; these are then mapped to a fixed set of physical registers by the
+register allocator before code generation. The hardware has a finite number of
+physical registers per compute unit, and that allocation is determined at
+compile time—not dynamically at runtime.
 
 How register pressure arises
 -----------------------------
@@ -680,7 +697,8 @@ determined by the compiled Instruction Set Architecture (ISA) code (AMD CDNA or
 RDNA assembly). All threads in a work-group share the same CU, so the total
 register file usage per work-group depends on both:
 
-* The number of threads per work-group (launch configuration), and
+* The number of threads per work-group, which is chosen by the developer in
+  the kernel launch configuration, and
 * The number of registers required per thread (kernel complexity)
 
 As the register footprint per work-group increases, fewer work-groups can
@@ -739,6 +757,27 @@ Actual performance is always below peak due to various inefficiencies.
 Utilization metrics
 -------------------
 
+.. _kernel_utilization:
+
+Kernel utilization
+~~~~~~~~~~~~~~~~~~
+
+Kernel utilization measures how often the GPU is actively executing a kernel,
+as opposed to being idle between launches or blocked on host-device
+synchronization. It is the broadest utilization metric: a low kernel
+utilization indicates the GPU is simply not being kept busy—often due to
+insufficient kernel launch frequency, excessive CPU-GPU synchronization, or
+small problem sizes.
+
+**Kernel utilization**: The percentage of wall-clock time during which at
+least one kernel is executing on the device.
+
+Kernel utilization is typically the first metric to examine. If it is low,
+optimizing memory access patterns or arithmetic intensity will have little
+effect—the bottleneck is that the GPU is idle. Common remedies include
+overlapping computation with data transfers using streams, reducing
+host-device synchronization points, and batching small kernels.
+
 .. _pipe_utilization:
 
 Pipe utilization
@@ -767,10 +806,11 @@ is actively processing instructions. Low utilization indicates stalls or
 insufficient work.
 
 Before analyzing performance at the level of pipe utilization, you should
-first examine kernel utilization (how often CUs are busy) and CU
-utilization (how evenly work is distributed across CUs). Once those are
-sufficient, per-pipe metrics reveal whether the performance limit is
-arithmetic, memory, or control-bound.
+first examine :ref:`kernel utilization <kernel_utilization>` (how often the
+GPU is running a kernel at all) and :ref:`CU utilization <cu_utilization>`
+(how evenly work is distributed across CUs). Once those are sufficient,
+per-pipe metrics reveal whether the performance limit is arithmetic, memory,
+or control-bound.
 
 On AMD GPUs, these measurements are exposed through ROCm profiling tools
 such as ``rocprofv3``.
@@ -811,7 +851,7 @@ On AMD GPUs, issue efficiency can be measured using hardware performance
 counters exposed through ROCProfiler or Omnitrace, such as:
 
 * ``SQ_WAVES_BUSY`` — percentage of cycles where any warp was actively executing
-* ``SQ_WAVES_ISSUED`` — number of issued waves per cycle
+* ``SQ_WAVES_ISSUED`` — number of issued warps per cycle
 * ``SQ_ACCUM_INSTS_ISSUED`` — total instructions issued per CU
 * ``SQ_ACCUM_CYCLES_BUSY`` — number of cycles the CU was active
 

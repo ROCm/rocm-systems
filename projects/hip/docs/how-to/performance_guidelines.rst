@@ -419,23 +419,6 @@ Instruction throughput optimization
 Arithmetic instructions
 -----------------------
 
-**Use efficient operations**
-
-Division requires many more hardware cycles than multiplication. Similarly,
-bitwise operations (shifts, AND, OR) are single-cycle instructions on integer
-units, making them far more efficient than equivalent arithmetic for
-power-of-two calculations.
-
-.. code-block:: cuda
-
-   // Prefer multiplication over division
-   float result = value * 0.5f;     // Fast
-   float result = value / 2.0f;     // Slower
-
-   // Use bitwise operations for powers of 2
-   int index = threadIdx.x << 2;    // Multiply by 4
-   int mask = (1 << n) - 1;         // Create bit mask
-
 **Use single-precision when possible**
 
 AMD GPUs have significantly higher throughput for single-precision (FP32)
