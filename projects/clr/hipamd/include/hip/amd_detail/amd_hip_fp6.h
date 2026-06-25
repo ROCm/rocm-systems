@@ -44,7 +44,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6_storage_t __hip_cvt_bfloat16raw_to_fp6(
   } u{0};
 #if __gfx950__
   __amd_bf16x32_storage_t in;
-  __amd_fp6x32_storage_t out;
+  __amd_fp6x32_storage_t out{};
   in[0] = internal::hipbf16_to_bf16(x);
   if (fp6_interpretation == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16))
@@ -76,7 +76,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_bfloat16raw2_to_fp6x2
   __amd_bf16x32_storage_t in;
   in[0] = internal::hipbf16_to_bf16(x.x);
   in[1] = internal::hipbf16_to_bf16(x.y);
-  __amd_fp6x32_storage_t out;
+  __amd_fp6x32_storage_t out{};
   if (fp6_interpretation == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16(in, 1.0f /* scale */);
@@ -111,7 +111,7 @@ __hip_cvt_double_to_fp6(const double x, const __hip_fp6_interpretation_t fp6_int
 #if __gfx950__
   __amd_floatx16_storage_t in1;
   __amd_floatx16_storage_t in2;
-  __amd_fp6x32_storage_t out;
+  __amd_fp6x32_storage_t out{};
   in1[0] = float(x);
   in2[0] = 0.0f;
   if (fp6_interpretation_t == __HIP_E2M3) {
@@ -142,7 +142,7 @@ __hip_cvt_double2_to_fp6x2(const double2 x, const __hip_fp6_interpretation_t fp6
 #if __gfx950__
   __amd_floatx16_storage_t in1;
   __amd_floatx16_storage_t in2;
-  __amd_fp6x32_storage_t out;
+  __amd_fp6x32_storage_t out{};
   in1[0] = float(x.x);
   in2[0] = float(x.y);
   if (fp6_interpretation_t == __HIP_E2M3) {
@@ -178,7 +178,7 @@ __hip_cvt_float_to_fp6(const float x, const __hip_fp6_interpretation_t fp6_inter
 #if __gfx950__
   __amd_floatx16_storage_t in1;
   __amd_floatx16_storage_t in2;
-  __amd_fp6x32_storage_t out;
+  __amd_fp6x32_storage_t out{};
   in1[0] = x;
   in2[0] = 0.0f;
   if (fp6_interpretation_t == __HIP_E2M3) {
@@ -208,7 +208,7 @@ __hip_cvt_float2_to_fp6x2(const float2 x, const __hip_fp6_interpretation_t fp6_i
 #if __gfx950__
   __amd_floatx16_storage_t in1;
   __amd_floatx16_storage_t in2;
-  __amd_fp6x32_storage_t out;
+  __amd_fp6x32_storage_t out{};
   in1[0] = x.x;
   in2[0] = x.y;
   if (fp6_interpretation_t == __HIP_E2M3) {
@@ -238,7 +238,7 @@ __FP6_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp6_to_halfraw(
     const __hip_fp6_storage_t x, const __hip_fp6_interpretation_t fp6_interpretation_t) {
   __half_raw ret;
 #if __gfx950__
-  __amd_fp16x32_storage_t out;
+  __amd_fp16x32_storage_t out{};
   __amd_fp6x32_storage_t in;
   in[0] = (uint32_t)x;
   if (fp6_interpretation_t == __HIP_E2M3) {
@@ -263,7 +263,7 @@ __FP6_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp6x2_to_halfraw2(
     const __hip_fp6x2_storage_t x, const __hip_fp6_interpretation_t fp6_interpretation_t) {
   __half2_raw ret;
 #if __gfx950__
-  __amd_fp16x32_storage_t out;
+  __amd_fp16x32_storage_t out{};
   __amd_fp6x32_storage_t in;
   in[0] = x & 0x3Fu;            // first 6 bits
   in[0] |= (x & 0x3F00u) >> 2;  // next 6 bits
@@ -298,7 +298,7 @@ __hip_cvt_halfraw_to_fp6(const __half_raw x, const __hip_fp6_interpretation_t fp
   } u{0};
 #if __gfx950__
   __amd_fp16x32_storage_t in;
-  __amd_fp6x32_storage_t out;
+  __amd_fp6x32_storage_t out{};
   in[0] = x.data;
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_f16))
@@ -329,7 +329,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_halfraw2_to_fp6x2(
   } u{0};
 #if __gfx950__
   __amd_fp16x32_storage_t in;
-  __amd_fp6x32_storage_t out;
+  __amd_fp6x32_storage_t out{};
   in[0] = x.data[0];
   in[1] = x.data[1];
   if (fp6_interpretation_t == __HIP_E2M3) {
@@ -401,7 +401,7 @@ struct __hip_fp6_e2m3 {
     } u;
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_bf16x32_storage_t out;
+    __amd_bf16x32_storage_t out{};
     in[0] = (uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
@@ -415,7 +415,7 @@ struct __hip_fp6_e2m3 {
   __FP6_HOST_DEVICE__ operator float() const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_floatx32_storage_t out;
+    __amd_floatx32_storage_t out{};
     in[0] = (uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
@@ -472,7 +472,7 @@ struct __hip_fp6_e3m2 {
     } u;
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_bf16x32_storage_t out;
+    __amd_bf16x32_storage_t out{};
     in[0] = (uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
@@ -486,7 +486,7 @@ struct __hip_fp6_e3m2 {
   __FP6_HOST_DEVICE__ operator float() const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_floatx32_storage_t out;
+    __amd_floatx32_storage_t out{};
     in[0] = (uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
@@ -526,7 +526,7 @@ struct __hip_fp6x2_e2m3 {
     } u;
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_bf16x32_storage_t out;
+    __amd_bf16x32_storage_t out{};
     in[0] = __x & 0x3Fu;          // first 6 bits
     in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6))
@@ -543,7 +543,7 @@ struct __hip_fp6x2_e2m3 {
   __FP6_HOST_DEVICE__ operator float2() const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_floatx32_storage_t out;
+    __amd_floatx32_storage_t out{};
     in[0] = __x & 0x3Fu;          // first 6 bits
     in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6))
@@ -588,7 +588,7 @@ struct __hip_fp6x2_e3m2 {
     } u;
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_bf16x32_storage_t out;
+    __amd_bf16x32_storage_t out{};
     in[0] = __x & 0x3Fu;          // first 6 bits
     in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6))
@@ -605,7 +605,7 @@ struct __hip_fp6x2_e3m2 {
   __FP6_HOST_DEVICE__ operator float2() const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_floatx32_storage_t out;
+    __amd_floatx32_storage_t out{};
     in[0] = __x & 0x3Fu;          // first 6 bits
     in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_bf6))
@@ -647,7 +647,7 @@ struct __hip_fp6x4_e2m3 {
   __FP6_HOST_DEVICE__ operator float4() const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_floatx32_storage_t out;
+    __amd_floatx32_storage_t out{};
     in[0] = __x & 0x3Fu;                 // first 6 bits
     in[0] |= ((__x >> 8) & 0x3Fu) << 6;  // second 6 bits
     in[0] |= ((__x >> 16) & 0x3Fu) << 12;
@@ -696,7 +696,7 @@ struct __hip_fp6x4_e3m2 {
   __FP6_HOST_DEVICE__ operator float4() const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in;
-    __amd_floatx32_storage_t out;
+    __amd_floatx32_storage_t out{};
     in[0] = __x & 0x3Fu;                 // first 6 bits
     in[0] |= ((__x >> 8) & 0x3Fu) << 6;  // second 6 bits
     in[0] |= ((__x >> 16) & 0x3Fu) << 12;
