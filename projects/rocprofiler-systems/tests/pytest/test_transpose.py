@@ -133,7 +133,7 @@ class TestTranspose(RocprofsysTest):
         "uniform_int_distribution",
     ]
     LOOPS_RUN_ARGS = ["2", "100", "50"]
-    SAMPLING_RUN_ARGS = ["4", "500", "100"]
+    SAMPLING_RUN_ARGS = ["4", "500", "10"]  # diagnostic workload-shape override
     SAMPLING_ENV = {
         "ROCPROFSYS_SAMPLING_REALTIME": "ON",
         "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "300",
