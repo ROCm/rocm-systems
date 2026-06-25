@@ -379,10 +379,10 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
-    const bool is_dxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
+    const bool is_windxg =
+        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
     const bool require_pinning =
-        !is_dxg &&
+        !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
          m_region.IsScratch());
 
@@ -593,21 +593,23 @@ hsa_status_t KfdDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* ha
 }
 
 hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
-                            hsa_access_permission_t perms) {
+                            hsa_access_permission_t perms, uint32_t node_id) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, static_cast<HSAuint64>(offset),
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle,
+                                     static_cast<HSAuint64>(offset),
                                      static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
-                                     mem_perm(perms)));
+                                     mem_perm(perms), node_id));
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
-                              size_t offset, size_t size) {
+                              size_t offset, size_t size, uint32_t node_id) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, static_cast<HSAuint64>(offset),
-                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem)));
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle,
+                                     static_cast<HSAuint64>(offset),
+                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem), node_id));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }

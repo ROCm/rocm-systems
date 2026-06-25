@@ -1543,6 +1543,14 @@ typedef union rocprofiler_hsa_api_args_t
 #    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
     struct
     {
+        hsa_agent_t                  agent;
+        hsa_amd_queue_create_desc_t* descs;
+        uint32_t                     num_descs;
+    } hsa_amd_queue_create;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x11
+    struct
+    {
         hsa_queue_t*                 queue;
         hsa_amd_external_semaphore_t sem;
         uint64_t                     value;

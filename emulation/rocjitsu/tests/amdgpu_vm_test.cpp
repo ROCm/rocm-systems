@@ -22,6 +22,8 @@ RJ_DIAGNOSTIC_POP
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -38,7 +40,8 @@ struct VmFixture {
   SoC *soc_ptr = nullptr;
   amdgpu::GpuMemory *gpu_mem = nullptr;
 
-  VmFixture(const std::string &arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10) {
+  VmFixture(const std::string &arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
+            uint32_t lds_size_kb = 64) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -66,7 +69,9 @@ struct VmFixture {
                        R"("},)"
                        R"({"key":"sgprs_per_wf","value":"104"},)"
                        R"({"key":"vgprs_per_wf","value":"256"},)"
-                       R"({"key":"lds_size_kb","value":"64"})"
+                       R"({"key":"lds_size_kb","value":")" +
+                       std::to_string(lds_size_kb) +
+                       R"("})"
                        R"(]}]}]}]},"links":[)" +
                        links + R"(]}})";
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
@@ -103,31 +108,6 @@ struct VmFixture {
     return addr;
   }
 };
-
-struct AmdExtKernelDispatchPacketForTest {
-  uint16_t header = 0;
-  uint8_t amd_format = 0;
-  uint8_t setup = 0;
-  uint16_t workgroup_size_x = 0;
-  uint16_t workgroup_size_y = 0;
-  uint16_t workgroup_size_z = 0;
-  uint16_t reserved0 = 0;
-  uint32_t cluster_count_x = 0;
-  uint16_t cluster_count_y = 0;
-  uint16_t cluster_count_z = 0;
-  uint8_t cluster_size_x = 0;
-  uint8_t cluster_size_y = 0;
-  uint8_t cluster_size_z = 0;
-  uint8_t perf_hint = 0;
-  uint32_t private_segment_size = 0;
-  uint32_t group_segment_size = 0;
-  uint64_t kernel_object = 0;
-  void *kernarg_address = nullptr;
-  hsa_signal_t dep_signal{};
-  hsa_signal_t completion_signal{};
-};
-
-static_assert(sizeof(AmdExtKernelDispatchPacketForTest) == 64);
 
 void step_until_halted(simdojo::SimulationEngine &engine,
                        std::initializer_list<amdgpu::ComputeUnitCore *> cus,
@@ -352,9 +332,9 @@ TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
 
-  AmdExtKernelDispatchPacketForTest ext{};
+  amdgpu::AmdExtKernelDispatchPacket ext{};
   ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
-  ext.amd_format = 3; // HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH.
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
   ext.setup = 1;
   ext.workgroup_size_x = 64;
   ext.workgroup_size_y = 1;
@@ -375,6 +355,161 @@ TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
 
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
   EXPECT_GE(f.cu()->num_wfs(), 1u);
+}
+
+TEST_P(IsaTest, VendorSpecificExtKernelDispatchReadsDependencySignalFromGpuMemory) {
+  VmFixture f(arch(), 1, 8);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint64_t kDepSignal = 0x7000;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kDepSignal + kSignalValueOffset, 1);
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 64;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 1;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 1;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.dep_signal.handle = kDepSignal;
+  ext.kernel_object = ko;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+  (void)f.engine->step();
+  EXPECT_EQ(f.cp()->dispatched_count(), 0u);
+
+  f.mem()->write64(kDepSignal + kSignalValueOffset, 0);
+  f.engine->run();
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+}
+
+TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
+  VmFixture f("gfx1250", 1, 1);
+
+  const uint32_t code[] = {0xBFB00000u}; // s_endpgm
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch_clustered(ko, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/32);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+  EXPECT_FALSE(f.cu()->has_active_wfs());
+  EXPECT_TRUE(f.cp()
+                  ->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
+                                        /*mcast_mask=*/0x3)
+                  .empty());
+}
+
+TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster) {
+  VmFixture f("gfx1250", 1, 3, /*lds_size_kb=*/1);
+
+  const uint32_t code[] = {0xBFB00000u}; // s_endpgm
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch_clustered(ko, /*cluster_count_x=*/1, /*cluster_size_x=*/3,
+                           /*workgroup_size_x=*/32, /*kernarg_addr=*/0,
+                           /*group_segment_size=*/257);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+  EXPECT_FALSE(f.cu()->has_active_wfs());
+}
+
+TEST(ClusterDispatchTest, ReclaimsLdsBetweenClusterWaves) {
+  VmFixture f("cdna3", 2, 1, /*lds_size_kb=*/1);
+
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint64_t kSignal = 0x7000;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kSignal + kSignalValueOffset, 1);
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 32;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 2;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.group_segment_size = 769;
+  ext.kernel_object = ko;
+  ext.completion_signal.handle = kSignal;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+
+  EXPECT_NO_THROW(f.engine->run());
+  EXPECT_EQ(f.mem()->read64(kSignal + kSignalValueOffset), 0u);
+  EXPECT_FALSE(f.cu(0)->has_active_wfs());
+  EXPECT_FALSE(f.cu(1)->has_active_wfs());
+}
+
+TEST(ClusterDispatchTest, RejectsExtKernelDispatchWithZeroClusterShape) {
+  VmFixture f("cdna3", 1, 8);
+
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 32;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 0;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.kernel_object = ko;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+}
+
+TEST(ClusterDispatchTest, RejectsExtKernelDispatchGridOverflow) {
+  VmFixture f("cdna3", 1, 8);
+
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 64;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = std::numeric_limits<uint32_t>::max();
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.kernel_object = ko;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
 }
 
 TEST_P(IsaTest, DispatchCreatesWavefronts) {

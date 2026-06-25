@@ -107,6 +107,7 @@ hipError_t hipMallocManaged(void** dev_ptr, size_t size, unsigned int flags) {
 // ================================================================================================
 hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device, hipStream_t stream) {
   HIP_INIT_API(hipMemPrefetchAsync, dev_ptr, count, device, stream);
+  CHECK_STREAM_DETACHED_API(stream);
   CHECK_STREAM_CAPTURE_SUPPORTED();
   hipMemLocation location;
   if (device == hipCpuDeviceId) {
@@ -123,6 +124,7 @@ hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device, hi
 hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location,
                                   unsigned int flags, hipStream_t stream) {
   HIP_INIT_API(hipMemPrefetchAsync_v2, dev_ptr, count, location, flags, stream);
+  CHECK_STREAM_DETACHED_API(stream);
   CHECK_STREAM_CAPTURE_SUPPORTED();
   if (flags != 0) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -159,6 +161,16 @@ hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
     return hipErrorInvalidValue;
   }
 
+  // Validate each operation's arguments before checking device capability, so
+  // that invalid arguments are reported as hipErrorInvalidValue regardless of
+  // whether the device supports the discard feature. Otherwise a bad argument
+  // would be masked by hipErrorNotSupported on platforms without HMM.
+  for (size_t op_idx = 0; op_idx < count; op_idx++) {
+    if (dev_ptrs[op_idx] == nullptr || sizes[op_idx] == 0) {
+      return hipErrorInvalidValue;
+    }
+  }
+
   // Check that all devices support HMM (required for discard)
   if (!AllDevicesSupportHmm()) {
     return hipErrorNotSupported;
@@ -182,14 +194,11 @@ hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
     std::vector<amd::Memory*> mem_objs =
         getMemoryObjectBatch(hip::getCurrentDevice(), dev_ptrs, count, offsets);
 
-    // Validate and prepare each operation
+    // Prepare each operation. Null pointers and zero sizes were already
+    // rejected above, before the device-capability check.
     for (size_t op_idx = 0; op_idx < count; op_idx++) {
       void* dev_ptr = dev_ptrs[op_idx];
       size_t size = sizes[op_idx];
-
-      if (size == 0 || dev_ptr == nullptr) {
-        return hipErrorInvalidValue;
-      }
 
       amd::Memory* mem_obj = mem_objs[op_idx];
       size_t offset = offsets[op_idx];
@@ -406,6 +415,7 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
   }
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED_API(stream);
 
   if (flags != hipMemAttachGlobal && flags != hipMemAttachHost && flags != hipMemAttachSingle) {
     HIP_RETURN(hipErrorInvalidValue);

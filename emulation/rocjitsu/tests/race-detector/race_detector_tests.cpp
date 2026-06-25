@@ -409,6 +409,18 @@ TEST(RaceDetector, LdsCrossWave_GlobalLoadToLdsWriteMissingVmcnt) {
   EXPECT_TRUE(b.hasVgprRace(1));
 }
 
+TEST(RaceDetector, GlobalToLdsHonorsLaneMask) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8, /*waveSize=*/4);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0, 4, 8, 12}, /*bytesPerLane=*/4,
+                /*exec=*/0x1);
+
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(0));
+}
+
 TEST(RaceDetector, LdsSameWave_MultiLaneReadOk) {
   // All lanes read same LDS byte after write+waitcnt → safe.
   // Multiple lanes reading same address is not a race.

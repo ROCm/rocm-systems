@@ -60,11 +60,13 @@ table KfdDeviceInfo {
   unique_id: uint64;              // Globally unique GPU identifier (PSP-generated on real HW).
   marketing_name: string;         // Human-readable name (e.g., "AMD Instinct MI350X").
   drm_render_minor: uint32 = 128; // DRM render device minor number.
+  revision_id: uint32 = 0;        // amdgpu adev->rev_id; KFD capability ASIC revision bits.
+  pci_revision_id: uint32 = 0;    // PCI config-space revision from DRM sysfs device/revision.
 
   // Compute organization (from kfd_topology.c kfd_fill_gpu_properties)
   simd_count: uint32;             // Total SIMD units (CUs * SIMDs/CU).
   max_waves_per_simd: uint32 = 10;
-  num_shader_engines: uint32;
+  num_shader_engines: uint32;    // KFD array_count: total shader arrays, not libdrm SE count.
   num_shader_arrays_per_engine: uint32 = 1;
   num_cu_per_sh: uint32;
   simd_per_cu: uint32 = 4;       // 4 for CDNA, 2 for RDNA.
@@ -95,6 +97,7 @@ table KfdDeviceInfo {
   location_id: uint32 = 768;  // PCI BDF: 0x0300 = bus 3, dev 0, func 0.
   hive_id: uint64 = 0;        // XGMI hive ID (shared by GPUs in same node).
   domain: uint32 = 0;         // PCI domain.
+  vram_type: uint32 = 6;      // AMDGPU_VRAM_TYPE_* (6 = HBM, 9 = GDDR6).
 }
 
 /// Top-level AMDGPU configuration.

@@ -605,6 +605,15 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
 #        endif
 #        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
 HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_create,
+                          hsa_amd_queue_create,
+                          hsa_amd_queue_create_fn,
+                          agent,
+                          descs,
+                          num_descs)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x11
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_signal_external_semaphore,
                           hsa_amd_queue_signal_external_semaphore,
                           hsa_amd_queue_signal_external_semaphore_fn,

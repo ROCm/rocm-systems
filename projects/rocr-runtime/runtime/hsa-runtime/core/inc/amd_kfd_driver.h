@@ -115,9 +115,9 @@ public:
                                   void* mem = nullptr) override;
   hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
-                   size_t size, hsa_access_permission_t perms) override;
+                   size_t size, hsa_access_permission_t perms,uint32_t node_id) override;
   hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
-                     size_t size) override;
+                     size_t size, uint32_t node_id) override;
   hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
                                      core::DriverMemoryHandle* handle, uint64_t* offset) override;
   hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;

@@ -103,6 +103,7 @@ hsaKmtHandleExport;
 hsaKmtMemoryVaMap;
 hsaKmtMemoryVaUnmap;
 hsaKmtMemHandleFree;
+hsaKmtMemHandleFreePreserveMetadata;
 hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
 hsaKmtSetSigbusDelay;
