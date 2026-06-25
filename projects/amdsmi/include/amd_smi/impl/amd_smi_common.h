@@ -41,8 +41,11 @@ extern "C" {
 }
 namespace amd::smi {
 
-// Define a map of rsmi status codes to amdsmi status codes
-const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
+// Define a map of rsmi status codes to amdsmi status codes. Declared inline
+// (C++17) so it has external linkage and is a single entity across translation
+// units, which is required for the inline rsmi_to_amdsmi_status() below to
+// legally reference it.
+inline const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
     {RSMI_STATUS_SUCCESS, AMDSMI_STATUS_SUCCESS},
     {RSMI_STATUS_INVALID_ARGS, AMDSMI_STATUS_INVAL},
     {RSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED},
@@ -78,7 +81,19 @@ const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
     {12, AMDSMI_VRAM_TYPE_LPDDR5}, {13, AMDSMI_VRAM_TYPE_HBM3E},
 };
 
-amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status);
+inline amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status) {
+  amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
+
+  // Look for it in the map
+  // If found: use the mapped value
+  // If not found: return the map error established above
+  auto search = rsmi_status_map.find(status);
+  if (search != rsmi_status_map.end()) {
+    amdsmi_status = search->second;
+  }
+
+  return amdsmi_status;
+}
 
 amdsmi_vram_type_t vram_type_value(unsigned type);
 

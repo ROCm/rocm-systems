@@ -45,14 +45,7 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
-#include "rocm_smi/rocm_smi.h"
-
-// rsmi_to_amdsmi_status() is compiled into libamd_smi and declared in
-// amd_smi/impl/amd_smi_common.h. Forward-declare it here to avoid pulling in the
-// heavy esmi/nic includes that header transitively requires.
-namespace amd::smi {
-amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status);
-}  // namespace amd::smi
+#include "amd_smi/impl/amd_smi_common.h"
 
 namespace {
 
