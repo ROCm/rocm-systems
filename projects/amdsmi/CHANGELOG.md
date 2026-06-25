@@ -135,6 +135,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The module is additionally staged under `share/amd_smi` (its historical location) for consumers that resolve it via `ROCM_PATH/share/amd_smi` rather than `site-packages` (e.g. rocprofiler-compute, omnistat) and for the TheRock artifact layout, whose manifest captures `share/amd_smi` but not the interpreter's `site-packages`. `site-packages` remains the primary importable location.
   - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
   - `py-interface/amdsmi_wrapper.py` now loads the shared library in this order: the `AMDSMI_LIB_OVERRIDE` env var (development / ABI-test escape hatch), a `libamd_smi_python.so` bundled next to the wrapper (pip wheel), then the system `libamd_smi.so` via the dynamic linker. A `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable, so import-time tooling (docs, lint) still works without a runtime library.
+
+- **Aligned the fabric telemetry and NIC firmware API surface with the unified ABI**.
+  - `amdsmi_fabric_telem_id_to_string()` now returns `amdsmi_status_t` and writes the name through a `const char**` out-parameter, instead of returning a `const char*` directly.
+  - Renamed the `amdsmi_fabric_info_t` member `fabric_info` to `info`.
+  - Renamed `amdsmi_nic_fw_t` to `amdsmi_nic_fw_entry_t`.
+  - Renamed the `amdsmi_fabric_type_t` enumerator `AMDSMI_FABRIC_TYPE_UALLINK` to `AMDSMI_FABRIC_TYPE_UALINK`.
+
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
   - Human-readable output is unchanged, since it uppercases all keys.
@@ -152,6 +159,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The label now correctly reflects that it shows the ionic kernel driver version.
 
 ### Removed
+
+- **Removed unused public macros and a duplicate fabric telemetry enumerator to match the unified ABI**.
+  - Dropped the `AMDSMI_MAX_VF_COUNT`, `AMDSMI_MAX_DRIVER_NUM`, `AMDSMI_DFC_FW_NUMBER_OF_ENTRIES`, `AMDSMI_MAX_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_BLACK_LIST_ELEMENTS`, `AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_ERR_RECORDS`, and `AMDSMI_MAX_PROFILE_COUNT` defines, which were unreferenced by any API or struct.
+  - Removed the redundant `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` enumerator from `amdsmi_fabric_telemetry_category_t`; `AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID` carries the same `0xFFFFFFFF` value.
 
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
 
