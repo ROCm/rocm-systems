@@ -102,7 +102,8 @@ std::string_view trim(std::string_view str) {
   auto last_itr = std::find_if_not(str.rbegin(), str.rend(),
                                    [](unsigned char character) { return std::isspace(character); });
 
-  return str.substr(first_itr - str.begin(), last_itr.base() - first_itr);
+  return str.substr(static_cast<size_t>(first_itr - str.begin()),
+                    static_cast<size_t>(last_itr.base() - first_itr));
 }
 
 // Given original string and string to remove (removeMe)
