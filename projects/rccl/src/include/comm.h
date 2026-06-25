@@ -674,6 +674,9 @@ struct ncclComm {
   // Hierarchical AG temporary buffers
   void* hierarchicalAGTempBuffer;
 
+  // Hierarchical RS temporary buffer
+  void* hierarchicalRSTempBuffer;
+
   // Force PAT algorithm for this communicator
   bool forcePatEnable;
 

@@ -63,7 +63,7 @@ set(SRC_FILES
   device/reduce_scatter.h
   device/rccl_metadata.h
   device/sendrecv.h
-  device/hierarchical_ag_shuffle.h
+  device/hierarchical_shuffle.h
   device/common.cu
   device/onerank.cu
   device/network/unpack/unpack_defs.h

@@ -391,6 +391,45 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
         *protocol, *maxChannels, intraProto, intraChan);
     return ncclSuccess;
   }
+  if (coll == ncclFuncReduceScatter && rcclUseHierarchicalReduceScatter(comm, msgSize)) {
+    *algo = rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER;
+    ncclComm* interComm = comm->hierarchicalInterComm;
+    ncclComm* intraComm = comm->hierarchicalIntraComm;
+    int nNodes = interComm->nRanks;
+
+    size_t interMsgSize = count * ncclTypeSize(dataType) * nNodes;
+    if (rcclUseReduceScatterDirect(interComm, interMsgSize)) {
+      *protocol = NCCL_PROTO_SIMPLE;
+      *maxChannels = interComm->p2pnChannels;
+    } else {
+      struct ncclTaskColl task;
+      task.func = ncclFuncReduceScatter;
+      task.count = count;
+      task.datatype = dataType;
+      NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
+      *protocol = task.protocol;
+      *maxChannels = task.nMaxChannels;
+    }
+
+    int intraProto, intraChan;
+    size_t intraCount = count * nNodes;
+    {
+      struct ncclTaskColl task;
+      task.func = ncclFuncReduceScatter;
+      task.count = intraCount;
+      task.datatype = dataType;
+      NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
+      intraProto = task.protocol;
+      intraChan = task.nMaxChannels;
+    }
+
+    // For hierarchical algorithm, only the inter-comm protocol/channels are
+    // reported in rccl-tests -A output.
+    // The intra-comm values are logged below for debugging purposes
+    INFO(NCCL_COLL, "Hierarchical RS inter: proto=%d channels=%d, intra: proto=%d channels=%d",
+        *protocol, *maxChannels, intraProto, intraChan);
+    return ncclSuccess;
+  }
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
     *protocol = NCCL_PROTO_SIMPLE; // TODO: consider LL for small messages
@@ -457,6 +496,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
         *algoName = "Direct";
         break;
       case rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER:
+        *algoName = "Hier";
+        break;
+      case rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER:
         *algoName = "Hier";
         break;
 #ifdef ENABLE_WARP_SPEED
@@ -608,6 +650,23 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   if (comm->nNodes == 4) return (msgSize <= (size_t)4194304);
   if (comm->nNodes == 8 || comm->nNodes == 16) return true;
   return false;
+}
+
+RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 1);
+
+bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
+  if (comm->nNodes < 8) return false;
+  if (rcclParamHierarchicalReduceScatter() != 1) return false;
+  if (!comm->hierarchicalCommsInitialized) return false;
+
+  size_t threshold = 0;
+  if (comm->nNodes >= 16) {
+    threshold = HIERARCHICAL_RS_TEMP_BUFFER_SIZE;
+  } else if (comm->nNodes >= 8) {
+    threshold = HIERARCHICAL_RS_TEMP_BUFFER_SIZE / 2;
+  }
+
+  return threshold > 0 && msgSize <= threshold;
 }
 
 

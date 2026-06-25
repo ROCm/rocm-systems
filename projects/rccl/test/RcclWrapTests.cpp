@@ -1544,4 +1544,99 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalAllGather Tests Completed ===");
 }
 
+TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
+{
+    TEST_INFO("=== Starting Process-Isolated rcclUseHierarchicalReduceScatter Tests ===");
+    struct HierRSCase
+    {
+        std::string                                  name;
+        int                                          nNodes;
+        bool                                         hierCommsInit;
+        size_t                                       msgSize;
+        bool                                         expected;
+        std::unordered_map<std::string, std::string> extraEnv;
+    };
+
+    const size_t HALF = HIERARCHICAL_RS_TEMP_BUFFER_SIZE / 2; // 8-node threshold (64MB)
+    const size_t FULL = HIERARCHICAL_RS_TEMP_BUFFER_SIZE;     // 16-node threshold (128MB)
+
+    std::vector<HierRSCase> testCases = {
+        // nNodes < 8 --> disabled
+        {"LessThan8Nodes",            4,  true,  1ULL << 20, false, {}},
+        // sub-comms not initialized --> disabled
+        {"CommsNotInitialized",       16, false, 1ULL << 20, false, {}},
+        // 8 node size > 64MB --> disabled
+        {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {}},
+        // 16 node size > 128MB --> disabled
+        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {}},
+        // env var forces off --> disabled
+        {"DisabledByEnvVar",          16, true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "0"}}},
+        // 8 nodes, initialized, below threshold --> enabled
+        {"Enabled_8Nodes_BelowHalf",  8,  true,  1ULL << 20, true,  {}},
+        // 8 nodes, exactly at threshold --> enabled
+        {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {}},
+        // 16 nodes, initialized, below threshold --> enabled
+        {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {}},
+        // 16 nodes, exactly at threshold --> enabled
+        {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {}},
+    };
+
+    // Base environment shared by every case
+    std::unordered_map<std::string, std::string> baseEnv = {
+        {       "NCCL_DEBUG", "TRACE"},
+        {"NCCL_DEBUG_SUBSYS",   "ALL"}
+    };
+
+    for(const auto& tc : testCases)
+    {
+        ProcessIsolatedTestRunner::registerTest(
+            ProcessIsolatedTestRunner::TestConfig(
+                tc.name,
+                [tc]()
+                {
+                    ncclComm_t            mockComm = nullptr;
+                    struct ncclTopoSystem mockTopo;
+                    struct ncclTopoNode   mockGpu;
+                    CreateMockComm(mockComm,
+                                   mockTopo,
+                                   mockGpu,
+                                   "gfx942",
+                                   /*nRanks=*/8 * tc.nNodes);
+                    mockComm->nNodes                       = tc.nNodes;
+                    mockComm->hierarchicalCommsInitialized = tc.hierCommsInit;
+
+                    EXPECT_EQ(rcclUseHierarchicalReduceScatter(mockComm, tc.msgSize),
+                              tc.expected)
+                        << "Case: " << tc.name
+                        << " (nNodes=" << tc.nNodes
+                        << ", hierCommsInit=" << tc.hierCommsInit
+                        << ", msgSize=" << tc.msgSize << ")";
+
+                    CleanupMockComm(mockComm);
+                }
+            )
+                .withEnvironment(
+                    [&tc, &baseEnv]()
+                    {
+                        auto env = baseEnv;
+                        env.insert(tc.extraEnv.begin(), tc.extraEnv.end());
+                        return env;
+                    }()
+                )
+                .withTimeout(std::chrono::seconds(60))
+        );
+    }
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    bool allTestsPassed = ProcessIsolatedTestRunner::executeAllTests(options);
+
+    EXPECT_TRUE(allTestsPassed)
+        << "One or more rcclUseHierarchicalReduceScatter tests failed";
+
+    TEST_INFO("=== Process-Isolated rcclUseHierarchicalReduceScatter Tests Completed ===");
+}
+
 } // namespace RcclUnitTesting

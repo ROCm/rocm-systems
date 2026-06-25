@@ -62,6 +62,7 @@ typedef enum {
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
   RCCL_HIERARCHICAL_ALLGATHER, // Hierarchical AllGather
+  RCCL_HIERARCHICAL_REDUCESCATTER, // Hierarchical ReduceScatter
 #ifdef ENABLE_WARP_SPEED
   RCCL_WARP_SPEED,
 #endif
@@ -121,6 +122,7 @@ NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName)
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
+bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm,  int& rcclP2pNetChunkSize);
@@ -133,11 +135,15 @@ bool validHsaScratchEnvSetting(const char*hsaScratchEnv, int hipRuntimeVersion, 
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 // Hierarchical AllGather enabled
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
+// Hierarchical ReduceScatter enabled
+RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
+
 // DDA threashold
 RCCL_PARAM_DECLARE(DdaThreshold);
 RCCL_PARAM_DECLARE(DdaEnable);
 
 #define HIERARCHICAL_AG_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
+#define HIERARCHICAL_RS_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 #ifdef ENABLE_WARP_SPEED
