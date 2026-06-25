@@ -67,26 +67,24 @@ def check_python_version() -> None:
     min_python = (3, 8)
     # Check which version of python is being used
     if sys.version_info < min_python:  # noqa: UP036
-        print(
-            f"[ERROR] Python {min_python[0]}.{min_python[1]} or higher "
-            f"is required for rocprofiler-compute. "
-            f"The current version is "
+        console_error(
+            f"Python {min_python[0]}.{min_python[1]} or higher "
+            "is required for rocprofiler-compute. "
+            "The current version is "
             f"{sys.version_info[0]}.{sys.version_info[1]}."
         )
-        sys.exit(1)
 
 
 def check_analyze_python_version() -> None:
     """Enforce the analyze-mode Python floor (its dependencies require 3.9+)."""
     min_python = (3, 9)
     if sys.version_info < min_python:
-        print(
-            f"[ERROR] analyze mode requires Python {min_python[0]}.{min_python[1]} "
-            f"or higher. The current version is "
+        console_error(
+            f"analyze mode requires Python {min_python[0]}.{min_python[1]} "
+            "or higher. The current version is "
             f"{sys.version_info[0]}.{sys.version_info[1]}. "
-            f"Profile mode supports Python 3.8+."
+            "Profile mode supports Python 3.8+."
         )
-        sys.exit(1)
 
 
 def verify_deps() -> None:
@@ -108,6 +106,9 @@ def verify_deps() -> None:
             version_pattern = re.compile(r"^([^=<>]+)([=<>]+)(.*)$")
 
             for dependency in dependencies:
+                dependency = dependency.strip()
+                if not dependency or dependency.startswith("#"):
+                    continue
                 match = version_pattern.match(dependency)
                 if match:
                     package, operator, desired_version = match.groups()
@@ -118,9 +119,10 @@ def verify_deps() -> None:
                     local_version = metadata.distribution(package).version
                 except metadata.PackageNotFoundError:
                     error = True
-                    print(
-                        f"[ERROR] The '{dependency}' package was not found "
-                        "in the current execution environment."
+                    console_error(
+                        f"The '{dependency}' package was not found "
+                        "in the current execution environment.",
+                        exit=False,
                     )
                     continue
 
@@ -128,21 +130,22 @@ def verify_deps() -> None:
                 if desired_version and not check_version(
                     local_version, desired_version, operator
                 ):
-                    print(
-                        f"[ERROR] the '{dependency}' distribution does not meet "
+                    console_error(
+                        f"the '{dependency}' distribution does not meet "
                         "version requirements to use rocprofiler-compute."
+                        f"\n  --> version installed : {local_version}",
+                        exit=False,
                     )
-                    print(f"  --> version installed : {local_version}")
                     error = True
 
             if error:
-                print(
+                console_error(
                     "\nPlease verify all of the python dependencies called out "
                     "in the requirements file"
+                    "\nare installed locally prior to running "
+                    "rocprofiler-compute."
+                    f"\n\nSee: {check_file}"
                 )
-                print("are installed locally prior to running rocprofiler-compute.")
-                print(f"\nSee: {check_file}")
-                sys.exit(1)
             return
 
 
