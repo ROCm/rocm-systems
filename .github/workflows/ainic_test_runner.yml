@@ -11,6 +11,9 @@
 # This workflow is intentionally NOT a merge gate: it has no pull_request trigger
 # and its result does not block any PR. It exists so CI can drive the test runner
 # on demand and collect results as artifacts.
+#
+# Push to the CI branch triggers a run for end-to-end pipeline testing before
+# this workflow lands on develop. Remove once merged (same pattern as PR #7546).
 name: AINIC RCCL Test Runner
 
 on:
@@ -32,6 +35,12 @@ on:
         description: 'Comma-separated suite names to run (empty = all enabled)'
         required: false
         default: ''
+  push:
+    branches:
+      - rccl-ci/ainic-test-runner
+    paths:
+      - '.github/workflows/ainic_test_runner.yml'
+      - 'projects/rccl/tools/scripts/test_runner/configs/ainic_abc.json'
 
 # Serialise on the shared AINIC nodes: only one run at a time, and never cancel
 # an in-progress allocation (it must finish cleanly to release the nodes).
@@ -44,6 +53,9 @@ env:
   # mirroring rccl_perf_regression.yml (PR #7546).
   RCCL_CI_ROOT: /it-share/rccl-ci
   TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
+  DEFAULT_WORKDIR: /it-share/rccl-ci/rocm-systems
+  DEFAULT_MPI_PATH: /apps/shared/rccl_sanity/pulsar/default/ubuntu22/rocm7.2.0/ompi_build
+  DEFAULT_RCCL_HOME: /it-share/rccl-ci/rccl-rocm720
 
 jobs:
   ainic-test-runner:
@@ -58,15 +70,15 @@ jobs:
         id: run_tests
         continue-on-error: true
         env:
-          WORKDIR: ${{ github.event.inputs.workdir }}
-          MPI_PATH: ${{ github.event.inputs.mpi_path }}
-          RCCL_HOME: ${{ github.event.inputs.rccl_home }}
+          WORKDIR: ${{ github.event.inputs.workdir || env.DEFAULT_WORKDIR }}
+          MPI_PATH: ${{ github.event.inputs.mpi_path || env.DEFAULT_MPI_PATH }}
+          RCCL_HOME: ${{ github.event.inputs.rccl_home || env.DEFAULT_RCCL_HOME }}
           RCCL_AINIC_ROCE: '1'
           IONIC_LOCKFREE: 'all'
           NCCL_IB_HCA: 'ionic_0,ionic_1,ionic_2,ionic_3,ionic_4,ionic_5,ionic_6,ionic_7'
           NCCL_IB_TC: '96'
           HSA_ENABLE_SDMA: '0'
-          TEST_SUITES: ${{ github.event.inputs.test_suites }}
+          TEST_SUITES: ${{ github.event.inputs.test_suites || '' }}
         run: |
           set -o pipefail
           # --suite-name takes a gtest-style glob ( ':' = OR ), so convert the
