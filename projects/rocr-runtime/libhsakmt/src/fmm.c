@@ -207,7 +207,8 @@ typedef struct {
 						 * dgpu_aperture. When requested by RT, each
 						 * GPU will get a differnt range
 						 */
-	manageable_aperture_t gpuvm_aperture;   /* used for GPUVM on APU, outsidethe canonical address range */
+	manageable_aperture_t gpuvm_aperture;   /* used for GPUVM on APU, outside the canonical address range */
+	aperture_t gpuvm_range;                 /* raw gpuvm base/limit from kernel, always valid */
 	int drm_render_fd;
 	uint32_t usable_peer_id_num;
 	uint32_t *usable_peer_id_array;
@@ -3074,6 +3075,11 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		gpu_mem[gpu_mem_id].scratch_aperture.limit =
 			PORT_UINT64_TO_VPTR(process_apertures[i].scratch_limit);
 
+		gpu_mem[gpu_mem_id].gpuvm_range.base =
+			PORT_UINT64_TO_VPTR(process_apertures[i].gpuvm_base);
+		gpu_mem[gpu_mem_id].gpuvm_range.limit =
+			PORT_UINT64_TO_VPTR(process_apertures[i].gpuvm_limit);
+
 		if (IS_CANONICAL_ADDR(process_apertures[i].gpuvm_limit)) {
 			uint64_t vm_alignment = get_vm_alignment(
 				gpu_mem[gpu_mem_id].device_id);
@@ -3263,10 +3269,10 @@ HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
 
 	switch (aperture_type) {
 	case FMM_GPUVM:
-		if (aperture_is_valid(fmm_ctx->gpu_mem[slot].gpuvm_aperture.base,
-			fmm_ctx->gpu_mem[slot].gpuvm_aperture.limit)) {
-			*aperture_base = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_aperture.base);
-			*aperture_limit = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_aperture.limit);
+		if (aperture_is_valid(fmm_ctx->gpu_mem[slot].gpuvm_range.base,
+			fmm_ctx->gpu_mem[slot].gpuvm_range.limit)) {
+			*aperture_base = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_range.base);
+			*aperture_limit = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_range.limit);
 			err = HSAKMT_STATUS_SUCCESS;
 		}
 		break;
