@@ -44,6 +44,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocm-core/**/*'
 
+"project: rocjitsu":
+- changed-files:
+  - any-glob-to-any-file: 'emulation/rocjitsu/**/*'
+
 "project: rocminfo":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocminfo/**/*'

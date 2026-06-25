@@ -194,11 +194,17 @@ class HostInterface {
 
   __host__ void barrier_all(WindowInfo* window_info);
 
+  __host__ void barrier(rocshmem_team_t team, WindowInfo* window_info);
+
   __host__ void barrier_all_on_stream(hipStream_t stream);
+
+  __host__ void barrier_on_stream(rocshmem_team_t team, hipStream_t stream);
 
   __host__ void quiet_on_stream(hipStream_t stream);
 
   __host__ void sync_all_on_stream(hipStream_t stream);
+
+  __host__ void sync_on_stream(rocshmem_team_t team, hipStream_t stream);
 
   __host__ void alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                       const void *source, size_t size,
@@ -226,6 +232,8 @@ class HostInterface {
   __host__ void barrier_for_sync();
 
   __host__ void sync_all(WindowInfo* window_info);
+
+  __host__ void sync(rocshmem_team_t team, WindowInfo* window_info);
 
   template <typename T>
   __host__ void broadcast(T* dest, const T* source, int nelems, int pe_root,

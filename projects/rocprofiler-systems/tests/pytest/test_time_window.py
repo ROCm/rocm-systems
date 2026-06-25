@@ -10,10 +10,7 @@ from pathlib import Path
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [
-    pytest.mark.time_window,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
-]
+pytestmark = [pytest.mark.time_window]
 
 # ============================================================================
 # Time Window Fixtures
@@ -34,18 +31,18 @@ def time_window_env() -> dict[str, str]:
 # ============================================================================
 
 
+@pytest.mark.parametrize(
+    "mode",
+    [
+        pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
+        "runtime_instrument",
+    ],
+)
 @pytest.mark.class_name("trace-time-window")
 class TestTraceTimeWindow(RocprofsysTest):
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
     RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]
 
-    @pytest.mark.parametrize(
-        "mode",
-        [
-            pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
-            pytest.param("runtime_instrument", marks=pytest.mark.timeout(300)),
-        ],
-    )
     def test(self, mode, time_window_env):
 
         env = time_window_env.copy()
@@ -81,13 +78,6 @@ class TestTraceTimeWindow(RocprofsysTest):
             fail_regex=["outer_d"],  # time window should exclude this
         )
 
-    @pytest.mark.parametrize(
-        "mode",
-        [
-            pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
-            pytest.param("runtime_instrument", marks=pytest.mark.timeout(300)),
-        ],
-    )
     def test_delay(self, mode, time_window_env):
         env = time_window_env.copy()
         env.update(

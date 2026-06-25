@@ -3,6 +3,7 @@
 
 #include "constraint.hpp"
 #include "common/delimit.hpp"
+#include "common/env_vars.hpp"
 #include "config.hpp"
 #include "utility.hpp"
 
@@ -21,9 +22,11 @@ get_trace_specs()
 
     {
         const auto _delay_v =
-            config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
+            config::get_setting_value<double>(std::string{ env_vars::TRACE_DELAY })
+                .value_or(0.0);
         const auto _duration_v =
-            config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
+            config::get_setting_value<double>(std::string{ env_vars::TRACE_DURATION })
+                .value_or(0.0);
         if(_delay_v > 0.0 || _duration_v > 0.0)
             _v.push_back(spec{ _delay_v, _duration_v, 1 });
     }
@@ -31,14 +34,16 @@ get_trace_specs()
     // Each ROCPROFSYS_TRACE_PERIODS entry: delay[:duration[:repeat]]
     // Clock for all entries is set via ROCPROFSYS_TRACE_PERIOD_CLOCK_ID.
     if(auto _periods_v =
-           config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIODS")
+           config::get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIODS })
                .value_or("");
        !_periods_v.empty())
     {
         const auto _default_delay =
-            config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
+            config::get_setting_value<double>(std::string{ env_vars::TRACE_DELAY })
+                .value_or(0.0);
         const auto _default_dur =
-            config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
+            config::get_setting_value<double>(std::string{ env_vars::TRACE_DURATION })
+                .value_or(0.0);
         for(const auto& _entry : rocprofsys::common::delimit(_periods_v, " ;\t\n"))
         {
             const auto _parts = rocprofsys::common::delimit(_entry, ":");
@@ -58,7 +63,8 @@ clockid_t
 get_trace_period_clock_id()
 {
     const auto _str =
-        config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
+        config::get_setting_value<std::string>(
+            std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
             .value_or("realtime");
     // "cputime" is the only value that changes runtime behaviour — it routes
     // delay/duration scheduling to clocks::posix(CLOCK_PROCESS_CPUTIME_ID) so

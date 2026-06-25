@@ -22,7 +22,7 @@
                      },
                     "pmc_group_interval": {
                          "type" : "integer",
-                          "description": "Number of kernel launches between selecting the next group of counters to collect"
+                         "description": "Number of kernel launches between selecting the next group of counters to collect"
                      },
                      
                      "kernel_include_regex":{
@@ -168,7 +168,7 @@
                      },
                      "minimum-output-data":{
                       "type": "integer",
-                      "description": "Minimum output data, the output files are generated only if output data size is greater than minimum output data size. It can be used for controlling the generation of output files so that user don't recieve empty files. The input is in KB units"
+                      "description": "Minimum output data, the output files are generated only if output data size is greater than minimum output data size. It can be used for controlling the generation of output files so that user don't receive empty files. The input is in KB units"
                      },
                      "disable-signal-handlers":{
                          "type": "boolean",
@@ -176,7 +176,7 @@
                      },
                     "process-sync":{
                          "type": "boolean",
-                         "description": "Enables the process synchronization in the rocprofv3 tool finalization stage. When --process-sync is set to true, rocprofv3 tool will force process to wait for its peer processes finishing write the trace data, then they proceed. Note: some workload will teminate the process group when one of the process is finished"
+                         "description": "Enables the process synchronization in the rocprofv3 tool finalization stage. When --process-sync is set to true, rocprofv3 tool will force process to wait for its peer processes finishing write the trace data, then they proceed. Note: some workloads will terminate the process group when one of the processes is finished"
                     },
                      "pc_sampling_unit": {
                       "type": "string",
@@ -193,6 +193,22 @@
                     "pc-sampling-beta-enabled": {
                          "type": "boolean",
                          "description": "enable pc sampling support; beta version"
+                    },
+                    "spm_beta_enabled": {
+                         "type": "boolean",
+                         "description": "enable streaming performance monitors; beta version"
+                    },
+                    "spm_sample_interval": {
+                         "type" : "integer",
+                         "description": "Specifies the sampling interval"
+                    },
+                    "spm_sample_interval_unit": {
+                         "type" : "string",
+                         "description": "Unit of the sample interval."
+                    },
+                    "spm": {
+                         "type" : "array",
+                         "description": "list of SPM counters to collect"
                     }
                  }
               }

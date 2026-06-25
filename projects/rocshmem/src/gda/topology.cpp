@@ -257,8 +257,9 @@ namespace rocshmem
     char const* deviceName = ibv.get_device_name(context->device);
     char gidRoceVerStr[16]      = {};
     char roceTypePath[PATH_MAX] = {};
-    sprintf(roceTypePath, "/sys/class/infiniband/%s/ports/%d/gid_attrs/types/%d",
-            deviceName, portNum, gidIndex);
+    snprintf(roceTypePath, sizeof(roceTypePath),
+             "/sys/class/infiniband/%s/ports/%d/gid_attrs/types/%d",
+             deviceName, portNum, gidIndex);
 
     int fd = open(roceTypePath, O_RDONLY);
     if (fd == -1) {

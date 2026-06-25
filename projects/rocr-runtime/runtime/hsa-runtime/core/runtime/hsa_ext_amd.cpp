@@ -41,6 +41,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <algorithm>
+#include <cstddef>
+#include <cstring>
 #include <exception>
 #include <map>
 #include <memory>
@@ -55,6 +57,7 @@
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
+#include "core/inc/amd_sdma_queue.h"
 #include "core/inc/default_signal.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/intercept_queue.h"
@@ -63,6 +66,7 @@
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/inc/counted_queue_manager.h"
+#include "core/util/os.h"
 
 namespace rocr {
 
@@ -152,6 +156,54 @@ static __forceinline bool IsValid(T* ptr) {
 
 namespace AMD {
 
+// Lock the descriptor ABI: size, alignment, and the offset of every field so
+// that any reorder, type change, or implicit padding is caught at compile time.
+static_assert(sizeof(hsa_amd_queue_create_desc_t) == 96,
+              "hsa_amd_queue_create_desc_t ABI layout changed");
+static_assert(alignof(hsa_amd_queue_create_desc_t) == 8,
+              "hsa_amd_queue_create_desc_t alignment changed");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, version) == 0, "ABI: version");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, flags) == 2, "ABI: flags");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, engine_type) == 4, "ABI: engine_type");
+static_assert(sizeof(((hsa_amd_queue_create_desc_t*)0)->engine_type) == 1,
+              "ABI: engine_type width");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, reserved_header) == 5,
+              "ABI: reserved_header");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, queue_size_bytes) == 8,
+              "ABI: queue_size_bytes");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, priority) == 12, "ABI: priority");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, callback) == 16, "ABI: callback");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, callback_data) == 24, "ABI: callback_data");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, queue) == 32, "ABI: queue");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, engine) == 40, "ABI: engine union");
+static_assert(sizeof(((hsa_amd_queue_create_desc_t*)0)->engine) == 32, "ABI: engine union size");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, traffic_class) == 72, "ABI: traffic_class");
+static_assert(offsetof(hsa_amd_queue_create_desc_t, reserved) == 76, "ABI: reserved tail");
+// Engine-specific parameter layouts.
+static_assert(sizeof(hsa_amd_compute_queue_params_t) == 32, "ABI: compute params size");
+static_assert(offsetof(hsa_amd_compute_queue_params_t, cu_mask) == 0, "ABI: compute.cu_mask");
+static_assert(offsetof(hsa_amd_compute_queue_params_t, type) == 8, "ABI: compute.type");
+static_assert(offsetof(hsa_amd_compute_queue_params_t, private_segment_size) == 12,
+              "ABI: compute.private_segment_size");
+static_assert(offsetof(hsa_amd_compute_queue_params_t, cu_mask_count) == 16,
+              "ABI: compute.cu_mask_count");
+static_assert(offsetof(hsa_amd_compute_queue_params_t, reserved) == 20,
+              "ABI: compute.reserved");
+static_assert(sizeof(hsa_amd_sdma_queue_params_t) == 32, "ABI: sdma params size");
+static_assert(offsetof(hsa_amd_sdma_queue_params_t, sdma_engine_id) == 0,
+              "ABI: sdma.sdma_engine_id");
+static_assert(sizeof(hsa_amd_aie_queue_params_t) == 32, "ABI: aie params size");
+
+namespace {
+
+bool IsValidQueuePriority(hsa_amd_queue_priority_t priority) {
+  return priority == HSA_AMD_QUEUE_PRIORITY_LOW ||
+         priority == HSA_AMD_QUEUE_PRIORITY_NORMAL ||
+         priority == HSA_AMD_QUEUE_PRIORITY_HIGH;
+}
+
+}  // namespace
+
 hsa_status_t handleException() {
   try {
     throw;
@@ -183,6 +235,131 @@ template <class T> static __forceinline T handleExceptionT() {
   abort();
   return T();
 }
+
+// Vmem Allocation Registry
+// Internal registry to track vmem allocations and their deallocation callbacks
+namespace {
+
+struct VmemCallbackEntry {
+  void* ptr;  // Registered pointer (may be offset from base)
+  hsa_amd_deallocation_callback_t callback;
+  void* user_data;
+};
+
+struct VmemAllocationMetadata {
+  void* base_address;
+  size_t reserved_size;
+  std::vector<VmemCallbackEntry> callbacks;
+};
+
+class VmemAllocationRegistry {
+public:
+  VmemAllocationRegistry() = default;
+
+  hsa_status_t register_allocation(void* addr, size_t size) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // (Re)create metadata for this base address to avoid stale size/callbacks
+    auto& meta = allocations_[addr];
+    meta.base_address = addr;
+    meta.reserved_size = size;
+    meta.callbacks.clear();  // Clear any stale callbacks from previous reservation
+    return HSA_STATUS_SUCCESS;
+  }
+
+  hsa_status_t register_dealloc_callback(void* ptr, hsa_amd_deallocation_callback_t callback,
+                                         void* user_data) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    VmemAllocationMetadata* meta = find_unlocked(ptr);
+    if (!meta) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+    VmemCallbackEntry entry;
+    entry.ptr = ptr;  // Store the registered pointer (may be offset)
+    entry.callback = callback;
+    entry.user_data = user_data;
+    meta->callbacks.push_back(entry);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  hsa_status_t deregister_dealloc_callback(void* ptr, hsa_amd_deallocation_callback_t callback) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    VmemAllocationMetadata* meta = find_unlocked(ptr);
+    if (!meta) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+    // Remove matching callback (must match both pointer and callback function)
+    auto& cbs = meta->callbacks;
+    auto it = std::find_if(cbs.begin(), cbs.end(),
+                           [ptr, callback](const VmemCallbackEntry& e) {
+                             return e.ptr == ptr && e.callback == callback;
+                           });
+    if (it != cbs.end()) {
+      cbs.erase(it);
+      return HSA_STATUS_SUCCESS;
+    }
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  void invoke_callbacks(void* addr) {
+    std::vector<VmemCallbackEntry> callbacks_to_invoke;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      VmemAllocationMetadata* meta = find_unlocked(addr);
+      if (meta) {
+        callbacks_to_invoke = meta->callbacks;
+      }
+    }
+    // Invoke callbacks outside of lock to prevent deadlocks
+    for (const auto& entry : callbacks_to_invoke) {
+      try {
+        entry.callback(entry.ptr, entry.user_data);  // Pass registered pointer, not base address
+      } catch (...) {
+        std::throw_with_nested(std::runtime_error("Callback exception"));
+      }
+    }
+  }
+
+  hsa_status_t unregister_allocation(void* addr) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = allocations_.find(addr);
+    if (it == allocations_.end()) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+    allocations_.erase(it);
+    return HSA_STATUS_SUCCESS;
+  }
+
+private:
+  VmemAllocationMetadata* find_unlocked(void* ptr) {
+    // First try exact match
+    auto it = allocations_.find(ptr);
+    if (it != allocations_.end()) {
+      return &it->second;
+    }
+
+    // Try to find allocation containing this pointer (offset pointer support)
+    // Use upper_bound for O(log N) instead of O(N) linear search
+    it = allocations_.upper_bound(ptr);
+    if (it != allocations_.begin()) {
+      --it;
+      uintptr_t base = reinterpret_cast<uintptr_t>(it->first);
+      uintptr_t ptr_val = reinterpret_cast<uintptr_t>(ptr);
+      if (ptr_val >= base && ptr_val < base + it->second.reserved_size) {
+        return &it->second;
+      }
+    }
+
+    return nullptr;
+  }
+
+  std::map<void*, VmemAllocationMetadata> allocations_;
+  std::mutex mutex_;
+};
+
+// Global vmem allocation registry
+static VmemAllocationRegistry g_vmem_registry;
+
+}  // anonymous namespace
 
 hsa_status_t hsa_amd_coherency_get_type(hsa_agent_t agent_handle, hsa_amd_coherency_type_t* type) {
   TRY;
@@ -1202,8 +1379,7 @@ hsa_status_t hsa_amd_agents_allow_access(uint32_t num_agents, const hsa_agent_t*
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  return core::Runtime::runtime_singleton_->AllowAccess(num_agents, agents,
-                                                        ptr);
+  return core::Runtime::runtime_singleton_->AllowAccess(num_agents, agents, ptr);
   CATCH;
 }
 
@@ -1492,6 +1668,27 @@ hsa_status_t hsa_amd_register_deallocation_callback(void* ptr,
   IS_BAD_PTR(ptr);
   IS_BAD_PTR(callback);
 
+  // Detect pointer type and route to appropriate mechanism
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(hsa_amd_pointer_info_t);
+  hsa_status_t status = ::hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr);
+
+  if (status == HSA_STATUS_SUCCESS) {
+    if (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM ||
+        info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
+      // Route to vmem registry (vmem or reserved addresses)
+      hsa_status_t vmem_status = g_vmem_registry.register_dealloc_callback(ptr, callback, user_data);
+      if (vmem_status != HSA_STATUS_ERROR_INVALID_ALLOCATION) {
+        return vmem_status;
+      }
+      // Fall through if registry doesn't recognize it
+    } else if (info.type == HSA_EXT_POINTER_TYPE_HSA) {
+      // Route to traditional mechanism
+      return core::Runtime::runtime_singleton_->RegisterReleaseNotifier(ptr, callback, user_data);
+    }
+  }
+
+  // If pointer_info fails or type is unknown, try traditional mechanism as fallback
   return core::Runtime::runtime_singleton_->RegisterReleaseNotifier(ptr, callback, user_data);
 
   CATCH;
@@ -1504,6 +1701,23 @@ hsa_status_t hsa_amd_deregister_deallocation_callback(void* ptr,
   IS_BAD_PTR(ptr);
   IS_BAD_PTR(callback);
 
+  // Detect pointer type and route to appropriate mechanism
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(hsa_amd_pointer_info_t);
+  hsa_status_t status = ::hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr);
+
+  if (status == HSA_STATUS_SUCCESS &&
+      (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM ||
+       info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR)) {
+    // Route to vmem registry (vmem or reserved addresses)
+    hsa_status_t vmem_status = g_vmem_registry.deregister_dealloc_callback(ptr, callback);
+    if (vmem_status != HSA_STATUS_ERROR_INVALID_ALLOCATION) {
+      return vmem_status;
+    }
+    // Fall through if registry doesn't recognize it
+  }
+
+  // Traditional mechanism (HSA or unknown)
   return core::Runtime::runtime_singleton_->DeregisterReleaseNotifier(ptr, callback);
 
   CATCH;
@@ -1621,7 +1835,7 @@ hsa_status_t hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size,
 
 hsa_status_t hsa_amd_portable_close_dmabuf(int dmabuf) {
   TRY;
-  return core::Runtime::runtime_singleton_->DmaBufClose(dmabuf);
+  return rocr::os::DmaBufClose(dmabuf);
   CATCH;
 }
 
@@ -1634,7 +1848,14 @@ hsa_status_t hsa_amd_vmem_address_reserve(void** va, size_t size, uint64_t addre
   if (!(flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER))
     IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
 
-  return core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, 0, flags);
+  hsa_status_t status = core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, 0, flags);
+
+  // Option B: Register allocation in vmem registry
+  if (status == HSA_STATUS_SUCCESS && va && *va) {
+    g_vmem_registry.register_allocation(*va, size);
+  }
+
+  return status;
   CATCH;
 }
 
@@ -1645,7 +1866,15 @@ hsa_status_t hsa_amd_vmem_address_reserve_align(void** va, size_t size, uint64_t
   IS_ZERO(size);
   if (!(flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER))
     IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
-  return core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, alignment, flags);
+
+  hsa_status_t status = core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, alignment, flags);
+
+  // Register allocation in vmem registry
+  if (status == HSA_STATUS_SUCCESS && va && *va) {
+    g_vmem_registry.register_allocation(*va, size);
+  }
+
+  return status;
   CATCH;
 }
 
@@ -1655,7 +1884,16 @@ hsa_status_t hsa_amd_vmem_address_free(void* va, size_t size) {
   IS_OPEN();
   IS_BAD_PTR(va);
   IS_ZERO(size);
-  return core::Runtime::runtime_singleton_->VMemoryAddressFree(va, size);
+
+  hsa_status_t status = core::Runtime::runtime_singleton_->VMemoryAddressFree(va, size);
+
+  // Invoke callbacks and unregister only when free succeeded
+  if (status == HSA_STATUS_SUCCESS) {
+    g_vmem_registry.invoke_callbacks(va);
+    (void)g_vmem_registry.unregister_allocation(va);
+  }
+
+  return status;
   CATCH;
 }
 
@@ -1723,7 +1961,6 @@ hsa_status_t hsa_amd_vmem_set_access(void* va, size_t size,
   IS_ZERO(size);
   IS_BAD_PTR(desc);
   IS_ZERO(desc_cnt);
-
   return core::Runtime::runtime_singleton_->VMemorySetAccess(va, size, desc, desc_cnt);
   CATCH;
 }
@@ -1994,6 +2231,259 @@ hsa_status_t hsa_amd_external_semaphore_handle_close(
     if (s != HSA_STATUS_ERROR_INVALID_AGENT) return s;
   }
   return HSA_STATUS_ERROR_INVALID_AGENT;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_vmem_export_fabric_handle(hsa_fabric_handle_t *fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t handle,
+                                               uint64_t flags) {
+  TRY;
+  IS_OPEN();
+  return core::Runtime::runtime_singleton_->VMemoryExportFabricHandle(fabric_handle,
+                                                handle, flags);
+  CATCH;
+}
+
+
+hsa_status_t hsa_amd_vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t* handle) {
+  TRY;
+  IS_OPEN();
+  return core::Runtime::runtime_singleton_->VMemoryImportFabricHandle(fabric_handle,
+                                                handle);
+  CATCH;
+}
+
+
+hsa_status_t hsa_amd_queue_create(hsa_agent_t agent_handle,
+                                  hsa_amd_queue_create_desc_t* descs,
+                                  uint32_t num_descs) {
+  TRY;
+  IS_OPEN();
+
+  if (descs == nullptr || num_descs == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  core::Agent* agent = core::Agent::Convert(agent_handle);
+  IS_VALID(agent);
+
+  hsa_queue_type32_t agent_queue_type = HSA_QUEUE_TYPE_MULTI;
+  hsa_status_t status =
+      agent->GetInfo(HSA_AGENT_INFO_QUEUE_TYPE, &agent_queue_type);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  hsa_status_t first_error = HSA_STATUS_SUCCESS;
+
+  for (uint32_t i = 0; i < num_descs; ++i) {
+    auto& d = descs[i];
+
+    // Clear output field
+    d.queue = nullptr;
+
+    // ---- Validate common header fields (apply to every engine type) ----
+    if (d.version != HSA_AMD_QUEUE_CREATE_DESC_VERSION) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    if (d.queue_size_bytes == 0 || !IsPowerOfTwo(d.queue_size_bytes)) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    if (!IsValidQueuePriority(d.priority)) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    // Traffic class is reserved for future QoS steering and not yet
+    // implemented. It must be left at 0 (runtime default) for all engine
+    // types until the runtime learns to honour it.
+    if (d.traffic_class != 0) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    // Reserved header and trailing reserved bytes must be zero.
+    {
+      static const uint8_t header_zeroes[sizeof(d.reserved_header)] = {};
+      static const uint8_t zeroes[sizeof(d.reserved)] = {};
+      if (memcmp(d.reserved_header, header_zeroes, sizeof(d.reserved_header)) != 0 ||
+          memcmp(d.reserved, zeroes, sizeof(d.reserved)) != 0) {
+        if (first_error == HSA_STATUS_SUCCESS)
+          first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        continue;
+      }
+    }
+
+    // ---- Engine-specific dispatch ----
+    if (d.engine_type == HSA_AMD_QUEUE_ENGINE_AIE) {
+      // Design captured by hsa_amd_aie_queue_params_t; queue creation not yet implemented.
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+      continue;
+    }
+    if (d.engine_type != HSA_AMD_QUEUE_ENGINE_COMPUTE &&
+        d.engine_type != HSA_AMD_QUEUE_ENGINE_SDMA) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    if (d.engine_type == HSA_AMD_QUEUE_ENGINE_SDMA) {
+      const hsa_amd_sdma_queue_params_t& sp = d.engine.sdma;
+      static const uint8_t zeroes[sizeof(sp.reserved)] = {};
+      if (memcmp(sp.reserved, zeroes, sizeof(sp.reserved)) != 0) {
+        if (first_error == HSA_STATUS_SUCCESS)
+          first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        continue;
+      }
+
+      if (agent->device_type() != core::Agent::kAmdGpuDevice) {
+        if (first_error == HSA_STATUS_SUCCESS)
+          first_error = HSA_STATUS_ERROR_INVALID_AGENT;
+        continue;
+      }
+
+      const bool requests_device_mem_queue =
+          (d.flags & (HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF |
+                      HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR)) != 0;
+      if (requests_device_mem_queue &&
+          !static_cast<AMD::GpuAgent*>(agent)->LargeBarEnabled()) {
+        if (first_error == HSA_STATUS_SUCCESS)
+          first_error = HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+        continue;
+      }
+
+      // HSA_AMD_SDMA_ENGINE_ID_ANY requests automatic (round-robin) engine
+      // selection; any other value selects a specific engine and must be within
+      // the agent's SDMA engine-id space.
+      int32_t sdma_engine_id = -1;
+      if (sp.sdma_engine_id != HSA_AMD_SDMA_ENGINE_ID_ANY) {
+        const uint32_t num_engines =
+            static_cast<AMD::GpuAgent*>(agent)->NumSdmaEnginesTotal();
+        if (sp.sdma_engine_id >= num_engines) {
+          if (first_error == HSA_STATUS_SUCCESS)
+            first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+          continue;
+        }
+        sdma_engine_id = static_cast<int32_t>(sp.sdma_engine_id);
+      }
+
+      auto* sdma_queue = new AMD::SdmaQueue(agent, d.queue_size_bytes, d.flags, sdma_engine_id);
+      status = sdma_queue->Initialize();
+      if (status != HSA_STATUS_SUCCESS) {
+        sdma_queue->Destroy();
+        if (first_error == HSA_STATUS_SUCCESS) first_error = status;
+        continue;
+      }
+
+      hsa_queue_t* hsa_q = core::Queue::Convert(sdma_queue);
+      core::Runtime::runtime_singleton_->InternalQueueCreateNotify(hsa_q, agent_handle);
+      d.queue = hsa_q;
+      continue;
+    }
+
+    // ---- Compute (AQL) queue parameters ----
+    const hsa_amd_compute_queue_params_t& cp = d.engine.compute;
+    constexpr uint32_t kAqlPacketSize = sizeof(core::AqlPacket);
+
+    {
+      static const uint8_t zeroes[sizeof(cp.reserved)] = {};
+      if (memcmp(cp.reserved, zeroes, sizeof(cp.reserved)) != 0) {
+        if (first_error == HSA_STATUS_SUCCESS)
+          first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        continue;
+      }
+    }
+
+    if (d.queue_size_bytes % kAqlPacketSize != 0) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+    const uint32_t queue_size_packets = d.queue_size_bytes / kAqlPacketSize;
+
+    if (cp.type > HSA_QUEUE_TYPE_COOPERATIVE) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    if ((agent_queue_type == HSA_QUEUE_TYPE_SINGLE) &&
+        (cp.type != HSA_QUEUE_TYPE_SINGLE)) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+      continue;
+    }
+
+    const bool requests_device_mem_queue =
+        (d.flags & (HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF |
+                    HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR)) != 0;
+    if (requests_device_mem_queue) {
+      if (agent->device_type() != core::Agent::kAmdGpuDevice ||
+          !static_cast<AMD::GpuAgent*>(agent)->LargeBarEnabled()) {
+        if (first_error == HSA_STATUS_SUCCESS)
+          first_error = HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+        continue;
+      }
+    }
+
+    if ((cp.cu_mask_count == 0 && cp.cu_mask != nullptr) ||
+        (cp.cu_mask_count > 0 && cp.cu_mask == nullptr) ||
+        (cp.cu_mask_count % 32 != 0)) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    {
+      auto callback = d.callback ? d.callback : core::Queue::DefaultErrorHandler;
+      uint64_t queue_create_flags = d.flags;
+
+      core::Queue* cmd_queue = nullptr;
+      status = agent->QueueCreate(queue_size_packets, cp.type, queue_create_flags, callback,
+                                  d.callback_data, cp.private_segment_size, UINT32_MAX,
+                                  true, &cmd_queue);
+      if (status != HSA_STATUS_SUCCESS) {
+        if (first_error == HSA_STATUS_SUCCESS) first_error = status;
+        continue;
+      }
+
+      hsa_queue_t* hsa_q = core::Queue::Convert(cmd_queue);
+
+      // Apply priority if non-default
+      if (d.priority != HSA_AMD_QUEUE_PRIORITY_NORMAL) {
+        auto prio = static_cast<HSA::hsa_amd_queue_priority_internal_t>(d.priority);
+        status = cmd_queue->SetPriority(prio);
+        if (status != HSA_STATUS_SUCCESS) {
+          cmd_queue->Destroy();
+          if (first_error == HSA_STATUS_SUCCESS) first_error = status;
+          continue;
+        }
+      }
+
+      // Apply CU mask if specified
+      if (cp.cu_mask_count > 0 && cp.cu_mask != nullptr) {
+        status = cmd_queue->SetCUMasking(cp.cu_mask_count, cp.cu_mask);
+        if (status != HSA_STATUS_SUCCESS) {
+          cmd_queue->Destroy();
+          if (first_error == HSA_STATUS_SUCCESS) first_error = status;
+          continue;
+        }
+      }
+
+      core::Runtime::runtime_singleton_->InternalQueueCreateNotify(hsa_q, agent_handle);
+      d.queue = hsa_q;
+    }
+  }
+
+  return first_error;
   CATCH;
 }
 

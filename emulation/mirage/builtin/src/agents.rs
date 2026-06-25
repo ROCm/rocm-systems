@@ -1,12 +1,12 @@
 //! Strongly-typed builtin [`AgentDef`]s.
 //!
-//! Each function returns the same value the corresponding legacy
-//! `agents/<NAME>.json` produced once parsed into an [`AgentDef`].
-//! The `MI300X` / `MI350X` agents differ only in their device
-//! identity, the shader-engine fan-out, and the per-CU LDS size, so
-//! they share builders. `MI450X` mirrors the rocjitsu
-//! `amdgpu_gfx1250.json` config and uses a dedicated builder for its
-//! larger XCD/IOD fabric.
+//! Each agent mirrors one of the rocjitsu `configs/*.json` files:
+//! `MI300X` follows `amdgpu_cdna3.json`, `MI350X` follows
+//! `amdgpu_cdna4.json`, and `MI450X` follows `amdgpu_gfx1250.json`.
+//! All three share the same `soc -> {vram, iod, xcd -> {l2, cp,
+//! se -> cu}}` component tree and six link patterns; they differ
+//! only in their device identity, the IOD fan-out, and the per-CU
+//! wavefront/register/LDS config.
 
 use mirage_core::agent::{
     AgentDef, AgentTopologyDef, AmdgpuConfig, ComponentDef, ConfigEntry, ForRange, KfdDeviceInfo,
@@ -14,71 +14,22 @@ use mirage_core::agent::{
 };
 
 /// All builtin agents, keyed by the name written to disk.
+///
+/// Agent names are case-insensitive and always stored lowercase, so the
+/// registry keys are lowercase to match the on-disk filenames.
 pub fn agents() -> Vec<(&'static str, AgentDef)> {
     vec![
-        ("MI300X", mi300x()),
-        ("MI350X", mi350x()),
-        ("MI450X", mi450x()),
+        ("mi300x", mi300x()),
+        ("mi350x", mi350x()),
+        ("mi450x", mi450x()),
     ]
 }
 
-/// `MI300X` builtin agent (registry key `MI300X`).
-///
-/// The embedded device identity reports `arch = cdna4` /
-/// marketing name "AMD Instinct MI350X"; this is preserved verbatim
-/// from the original `MI300X.json`.
+/// `MI300X` builtin agent (registry key `MI300X`), mirroring the
+/// rocjitsu `amdgpu_cdna3.json` config: `arch = cdna3`, marketing
+/// name "AMD Instinct MI300X", and an 8-XCD / 4-SE / 8-CU shader
+/// fabric over a 4-IOD memory tier.
 pub fn mi300x() -> AgentDef {
-    AgentDef {
-        vm: VirtualMachineConfig {
-            arch: "cdna4".to_string(),
-            gpu: AmdgpuConfig {
-                num_xcds: 0,
-                num_iods: 0,
-                memory: None,
-                device: KfdDeviceInfo {
-                    gpu_id: 38144,
-                    gfx_target_version: 90500,
-                    vendor_id: 4098,
-                    device_id: 5892,
-                    family_id: 160,
-                    unique_id: 5929628898254127105,
-                    marketing_name: "AMD Instinct MI350X".to_string(),
-                    drm_render_minor: 128,
-                    simd_count: 1024,
-                    max_waves_per_simd: 8,
-                    num_shader_engines: 4,
-                    num_shader_arrays_per_engine: 2,
-                    num_cu_per_sh: 4,
-                    simd_per_cu: 4,
-                    wave_front_size: 64,
-                    max_slots_scratch_cu: 32,
-                    local_mem_size: 309237645312,
-                    lds_size_kb: 160,
-                    mem_width: 8192,
-                    mem_clk_max: 1600,
-                    l1_size_kb: 32,
-                    l1_line_size: 128,
-                    l1_assoc: 4,
-                    l2_size_kb: 4096,
-                    l2_line_size: 128,
-                    l2_assoc: 16,
-                    num_sdma_engines: 5,
-                    num_sdma_xgmi_engines: 12,
-                    num_cp_queues: 128,
-                    max_engine_clk_fcompute: 2700,
-                },
-            },
-        },
-        topology: topology("se[0:7]", "160"),
-    }
-}
-
-/// `MI350X` builtin agent (registry key `MI350X`).
-///
-/// The embedded device identity reports `arch = cdna3` /
-/// marketing name "AMD Instinct MI300X"; this is preserved verbatim
-/// from the original `MI350X.json`.
-pub fn mi350x() -> AgentDef {
     AgentDef {
         vm: VirtualMachineConfig {
             arch: "cdna3".to_string(),
@@ -86,6 +37,7 @@ pub fn mi350x() -> AgentDef {
                 num_xcds: 0,
                 num_iods: 0,
                 memory: None,
+                num_gpus: 1,
                 device: KfdDeviceInfo {
                     gpu_id: 50148,
                     gfx_target_version: 90402,
@@ -94,39 +46,86 @@ pub fn mi350x() -> AgentDef {
                     family_id: 146,
                     unique_id: 0,
                     marketing_name: "AMD Instinct MI300X".to_string(),
+                    // First DRM render node (`/dev/dri/renderD128`); the
+                    // rocjitsu schema defaults this to 128 and a 0 here
+                    // maps the emulated GPU onto a non-existent render
+                    // node, so HSA aborts with OUT_OF_RESOURCES.
                     drm_render_minor: 128,
-                    simd_count: 16,
+                    simd_count: 1216,
                     max_waves_per_simd: 8,
-                    num_shader_engines: 1,
-                    num_shader_arrays_per_engine: 1,
-                    num_cu_per_sh: 4,
+                    num_shader_engines: 4,
+                    num_shader_arrays_per_engine: 2,
+                    num_cu_per_sh: 5,
                     simd_per_cu: 4,
                     wave_front_size: 64,
-                    max_slots_scratch_cu: 32,
                     local_mem_size: 206158430208,
                     lds_size_kb: 64,
                     mem_width: 8192,
                     mem_clk_max: 1300,
-                    l1_size_kb: 32,
-                    l1_line_size: 128,
-                    l1_assoc: 4,
                     l2_size_kb: 4096,
-                    l2_line_size: 128,
-                    l2_assoc: 16,
                     num_sdma_engines: 4,
                     num_sdma_xgmi_engines: 6,
                     num_cp_queues: 128,
                     max_engine_clk_fcompute: 2100,
+                    ..Default::default()
                 },
             },
         },
-        topology: topology("se[0:1]", "64"),
+        topology: topology(4, "2", "32", "104", "512", "64"),
     }
 }
 
-/// `MI450X` builtin agent (registry key `MI450X`).
-///
-/// The embedded device identity and component tree mirror the
+/// `MI350X` builtin agent (registry key `MI350X`), mirroring the
+/// rocjitsu `amdgpu_cdna4.json` config: `arch = cdna4`, marketing
+/// name "AMD Instinct MI350X", and an 8-XCD / 4-SE / 8-CU shader
+/// fabric over a 2-IOD memory tier.
+pub fn mi350x() -> AgentDef {
+    AgentDef {
+        vm: VirtualMachineConfig {
+            arch: "cdna4".to_string(),
+            gpu: AmdgpuConfig {
+                num_xcds: 0,
+                num_iods: 0,
+                memory: None,
+                num_gpus: 1,
+                device: KfdDeviceInfo {
+                    gpu_id: 38144,
+                    gfx_target_version: 90500,
+                    vendor_id: 4098,
+                    device_id: 5892,
+                    family_id: 160,
+                    unique_id: 5929628898254127105,
+                    marketing_name: "AMD Instinct MI350X".to_string(),
+                    // First DRM render node (`/dev/dri/renderD128`); the
+                    // rocjitsu schema defaults this to 128 and a 0 here
+                    // maps the emulated GPU onto a non-existent render
+                    // node, so HSA aborts with OUT_OF_RESOURCES.
+                    drm_render_minor: 128,
+                    simd_count: 1024,
+                    max_waves_per_simd: 8,
+                    num_shader_engines: 4,
+                    num_shader_arrays_per_engine: 2,
+                    num_cu_per_sh: 4,
+                    simd_per_cu: 4,
+                    wave_front_size: 64,
+                    local_mem_size: 309237645312,
+                    lds_size_kb: 160,
+                    mem_width: 8192,
+                    mem_clk_max: 1600,
+                    l2_size_kb: 4096,
+                    num_sdma_engines: 5,
+                    num_sdma_xgmi_engines: 12,
+                    num_cp_queues: 128,
+                    max_engine_clk_fcompute: 2700,
+                    ..Default::default()
+                },
+            },
+        },
+        topology: topology(2, "4", "32", "104", "512", "160"),
+    }
+}
+
+/// `MI450X` builtin agent (registry key `MI450X`), mirroring the
 /// rocjitsu `amdgpu_gfx1250.json` config: `arch = gfx1250`, an
 /// 8-XCD / 4-SE / 8-CU shader fabric and a 2-IOD memory tier.
 pub fn mi450x() -> AgentDef {
@@ -137,6 +136,7 @@ pub fn mi450x() -> AgentDef {
                 num_xcds: 0,
                 num_iods: 0,
                 memory: None,
+                num_gpus: 1,
                 device: KfdDeviceInfo {
                     gpu_id: 1250,
                     gfx_target_version: 120500,
@@ -145,48 +145,57 @@ pub fn mi450x() -> AgentDef {
                     family_id: 0,
                     unique_id: 1250,
                     marketing_name: "gfx1250".to_string(),
-                    drm_render_minor: 0,
+                    // First DRM render node (`/dev/dri/renderD128`); the
+                    // rocjitsu schema defaults this to 128 and a 0 here
+                    // maps the emulated GPU onto a non-existent render
+                    // node, so HSA aborts with OUT_OF_RESOURCES.
+                    drm_render_minor: 128,
                     simd_count: 1024,
-                    max_waves_per_simd: 8,
+                    max_waves_per_simd: 20,
                     num_shader_engines: 4,
                     num_shader_arrays_per_engine: 2,
                     num_cu_per_sh: 4,
                     simd_per_cu: 4,
                     wave_front_size: 32,
-                    max_slots_scratch_cu: 0,
                     local_mem_size: 309237645312,
                     lds_size_kb: 160,
                     mem_width: 8192,
                     mem_clk_max: 1600,
-                    l1_size_kb: 0,
-                    l1_line_size: 0,
-                    l1_assoc: 0,
                     l2_size_kb: 4096,
-                    l2_line_size: 0,
-                    l2_assoc: 0,
                     num_sdma_engines: 5,
                     num_sdma_xgmi_engines: 12,
                     num_cp_queues: 128,
                     max_engine_clk_fcompute: 2700,
+                    ..Default::default()
                 },
             },
         },
-        topology: gfx1250_topology(),
+        topology: topology(2, "4", "80", "128", "1024", "160"),
     }
 }
 
-/// Build the gfx1250 `soc -> {vram, iod, xcd -> {l2, cp, se -> cu}}`
-/// component tree and its six link patterns, mirroring the rocjitsu
-/// `amdgpu_gfx1250.json` config.
-fn gfx1250_topology() -> AgentTopologyDef {
+/// Build the shared `soc -> {vram, iod, xcd -> {l2, cp, se -> cu}}`
+/// component tree used by every builtin agent.
+///
+/// `num_iods` / `num_hbm_stacks` set the IOD memory-tier fan-out and
+/// the remaining arguments populate the per-CU `num_wf_slots`,
+/// `sgprs_per_wf`, `vgprs_per_wf`, and `lds_size_kb` config values.
+fn topology(
+    num_iods: u32,
+    num_hbm_stacks: &str,
+    num_wf_slots: &str,
+    sgprs_per_wf: &str,
+    vgprs_per_wf: &str,
+    lds_size_kb: &str,
+) -> AgentTopologyDef {
     let cu = ComponentDef {
         name: "cu[0:8]".to_string(),
         r#type: "compute_unit".to_string(),
         config: vec![
-            entry("num_wf_slots", "32"),
-            entry("sgprs_per_wf", "128"),
-            entry("vgprs_per_wf", "1024"),
-            entry("lds_size_kb", "160"),
+            entry("num_wf_slots", num_wf_slots),
+            entry("sgprs_per_wf", sgprs_per_wf),
+            entry("vgprs_per_wf", vgprs_per_wf),
+            entry("lds_size_kb", lds_size_kb),
         ],
         ..Default::default()
     };
@@ -203,9 +212,9 @@ fn gfx1250_topology() -> AgentTopologyDef {
         ..Default::default()
     };
     let iod = ComponentDef {
-        name: "iod[0:2]".to_string(),
+        name: format!("iod[0:{num_iods}]"),
         r#type: "iod".to_string(),
-        config: vec![entry("num_hbm_stacks", "4")],
+        config: vec![entry("num_hbm_stacks", num_hbm_stacks)],
         ..Default::default()
     };
     let root = ComponentDef {
@@ -216,14 +225,16 @@ fn gfx1250_topology() -> AgentTopologyDef {
     };
     AgentTopologyDef {
         root,
-        links: gfx1250_links(),
+        links: links(num_iods),
     }
 }
 
-/// The six gfx1250 link patterns wiring the command processor to the
-/// CUs, the CUs to the L2 and IOD memory tier, the IODs to each
-/// other, and adjacent CUs together.
-fn gfx1250_links() -> Vec<LinkDef> {
+/// The six link patterns wiring the command processor to the CUs,
+/// the CUs to the L2 and IOD memory tier, the IODs to each other,
+/// and adjacent CUs together. Only the L2->IOD fan-out and the IOD
+/// peer range depend on `num_iods`.
+fn links(num_iods: u32) -> Vec<LinkDef> {
+    let xcds_per_iod = 8 / num_iods;
     let ijk = || vec![range("i", 0, 8), range("j", 0, 4), range("k", 0, 8)];
     let ijk_adj = || vec![range("i", 0, 8), range("j", 0, 4), range("k", 0, 7)];
     vec![
@@ -240,14 +251,14 @@ fn gfx1250_links() -> Vec<LinkDef> {
             ..Default::default()
         },
         LinkDef {
-            pattern: "xcd[i].l2.req -> iod[i/4].msc.cpl_[i%4]".to_string(),
+            pattern: format!("xcd[i].l2.req -> iod[i/{xcds_per_iod}].msc.cpl_[i%{xcds_per_iod}]"),
             for_ranges: vec![range("i", 0, 8)],
             weight: 3,
             ..Default::default()
         },
         LinkDef {
             pattern: "iod[i].peer_req -> iod[j].peer_cpl".to_string(),
-            for_ranges: vec![range("i", 0, 2), range("j", 0, 2)],
+            for_ranges: vec![range("i", 0, num_iods), range("j", 0, num_iods)],
             where_expr: "i != j".to_string(),
             weight: 1,
             ..Default::default()
@@ -265,71 +276,6 @@ fn gfx1250_links() -> Vec<LinkDef> {
             ..Default::default()
         },
     ]
-}
-
-/// Build the shared `soc -> xcd -> {l2, cp, se -> cu}` component tree.
-///
-/// `se_range` is the shader-engine range pattern (e.g. `"se[0:7]"`)
-/// and `cu_lds_kb` is the per-CU `lds_size_kb` config value.
-fn topology(se_range: &str, cu_lds_kb: &str) -> AgentTopologyDef {
-    let cu = ComponentDef {
-        name: "cu[0:4]".to_string(),
-        r#type: "compute_unit".to_string(),
-        config: vec![
-            entry("num_wf_slots", "32"),
-            entry("sgprs_per_wf", "104"),
-            entry("vgprs_per_wf", "512"),
-            entry("lds_size_kb", cu_lds_kb),
-        ],
-        ..Default::default()
-    };
-    let se = ComponentDef {
-        name: se_range.to_string(),
-        r#type: "shader_engine".to_string(),
-        children: vec![cu],
-        ..Default::default()
-    };
-    let xcd = ComponentDef {
-        name: "xcd[0:1]".to_string(),
-        r#type: "xcd".to_string(),
-        children: vec![leaf("l2", "l2_cache"), leaf("cp", "command_processor"), se],
-        ..Default::default()
-    };
-    let root = ComponentDef {
-        name: "soc".to_string(),
-        r#type: "soc".to_string(),
-        children: vec![leaf("vram", "gpu_memory"), xcd],
-        ..Default::default()
-    };
-    AgentTopologyDef {
-        root,
-        links: links(),
-    }
-}
-
-/// The two link patterns wiring the command processor to the CUs and
-/// the CUs back to the L2, shared by every builtin agent.
-fn links() -> Vec<LinkDef> {
-    vec![
-        LinkDef {
-            pattern: "xcd[i].cp.req_[j*4+k] -> xcd[i].se[j].cu[k].cpl".to_string(),
-            for_ranges: ijk(),
-            weight: 2,
-            ..Default::default()
-        },
-        LinkDef {
-            pattern: "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*4+k]".to_string(),
-            for_ranges: ijk(),
-            weight: 10,
-            ..Default::default()
-        },
-    ]
-}
-
-/// The `i in [0,1), j in [0,1), k in [0,4)` loop variables shared by
-/// both link patterns.
-fn ijk() -> Vec<ForRange> {
-    vec![range("i", 0, 1), range("j", 0, 1), range("k", 0, 4)]
 }
 
 fn leaf(name: &str, r#type: &str) -> ComponentDef {
@@ -363,23 +309,27 @@ mod tests {
     fn agents_have_expected_keys() {
         let a = agents();
         assert_eq!(a.len(), 3);
-        assert_eq!(a[0].0, "MI300X");
-        assert_eq!(a[1].0, "MI350X");
-        assert_eq!(a[2].0, "MI450X");
+        assert_eq!(a[0].0, "mi300x");
+        assert_eq!(a[1].0, "mi350x");
+        assert_eq!(a[2].0, "mi450x");
     }
 
     #[test]
     fn mi300x_identity() {
-        let d = mi300x().vm.gpu.device;
-        assert_eq!(d.marketing_name, "AMD Instinct MI350X");
+        let a = mi300x();
+        let d = &a.vm.gpu.device;
+        assert_eq!(d.marketing_name, "AMD Instinct MI300X");
         assert_eq!(d.num_shader_engines, 4);
+        assert_eq!(d.simd_count, 1216);
+        assert_eq!(a.topology.links.len(), 6);
     }
 
     #[test]
     fn mi350x_identity() {
         let d = mi350x().vm.gpu.device;
-        assert_eq!(d.marketing_name, "AMD Instinct MI300X");
-        assert_eq!(d.num_shader_engines, 1);
+        assert_eq!(d.marketing_name, "AMD Instinct MI350X");
+        assert_eq!(d.num_shader_engines, 4);
+        assert_eq!(d.simd_count, 1024);
     }
 
     #[test]
