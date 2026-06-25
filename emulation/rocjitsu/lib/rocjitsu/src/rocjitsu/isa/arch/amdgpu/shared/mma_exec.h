@@ -3284,7 +3284,7 @@ inline void exec_swmmac_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t
 /// MFMA execute for f64 output with f64 input: D = C + A x B.
 inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
                      uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                     uint32_t const_acc = ACC_FROM_VGPR) {
+                     uint32_t const_acc = ACC_FROM_VGPR, uint32_t neg = 0) {
   struct Result {
     uint32_t reg;
     uint32_t lane;
@@ -3293,6 +3293,10 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
   };
   std::vector<Result> results;
   results.reserve(M * N * B);
+  auto apply_neg = [neg](double value, uint32_t bit) {
+    return (neg & bit) ? std::bit_cast<double>(std::bit_cast<uint64_t>(value) ^ (uint64_t{1} << 63))
+                       : value;
+  };
 
   auto run_scalar = [&]() {
     for (uint32_t b = 0; b < B; ++b) {
@@ -3308,10 +3312,12 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
             uint32_t hi = cu.read_vgpr(s2 + out.reg + 1, out.lane);
             acc = std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
           }
+          acc = apply_neg(acc, 0x4u);
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 64);
             auto bl = input_loc(N, K, B, col, k, b, 64);
-            acc += extract_f64(cu, s0, al) * extract_f64(cu, s1, bl);
+            acc +=
+                apply_neg(extract_f64(cu, s0, al), 0x1u) * apply_neg(extract_f64(cu, s1, bl), 0x2u);
           }
           uint64_t bits = std::bit_cast<uint64_t>(acc);
           results.push_back(
@@ -3355,16 +3361,17 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
               Cbuf[row * stride + col] =
                   std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
             }
+            Cbuf[row * stride + col] = apply_neg(Cbuf[row * stride + col], 0x4u);
           }
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 64);
-            Abuf[row * K + k] = extract_f64(cu, s0, al);
+            Abuf[row * K + k] = apply_neg(extract_f64(cu, s0, al), 0x1u);
           }
         for (uint32_t k = 0; k < K; ++k)
           for (uint32_t col = 0; col < N; ++col) {
             auto bl = input_loc(N, K, B, col, k, b, 64);
-            Bbuf[k * stride + col] = extract_f64(cu, s1, bl);
+            Bbuf[k * stride + col] = apply_neg(extract_f64(cu, s1, bl), 0x2u);
           }
         for (uint32_t row = 0; row < M; ++row) {
           uint32_t col = 0;

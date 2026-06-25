@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from amdisa.codegen import CodeGenerator
 from amdisa.codegen.execute.vector_special import (
+    gen_vector_mad_64_32,
     gen_vector_div_scale,
     gen_vector_movrel,
 )
@@ -306,6 +307,18 @@ def test_vop3_add_co_writes_explicit_sdst_mask_width_for_wave_size():
     assert 'wf.set_vcc(vcc)' not in body
 
 
+def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
+    body = gen_vector_mad_64_32(['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'u64')
+
+    assert 'uint64_t carry = 0;' in body
+    assert 'uint64_t product = s0 * s1;' in body
+    assert 'if (result < product)' in body
+    assert 'carry |= 1ULL << lane;' in body
+    assert 'sdst.write_scalar(wf, static_cast<uint32_t>(carry));' in body
+    assert 'sdst.write_scalar64(wf, carry);' in body
+    assert 'wf.set_vcc(carry)' not in body
+
+
 def test_vector_cmp_class_writes_explicit_sdst_mask():
     body = gen_vector_cmp_class(
         ['sdst'], ['src0', 'src1'], 'f32', is_cmpx=False, is_vop3=True
@@ -485,6 +498,24 @@ def test_cdna4_fp8_mfma_keeps_ocp_helper_variant():
 
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>(' in body
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' not in body
+
+
+def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
+    operands = [
+        Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
+        Operand('src0', 64, 'OPR_SRC_VGPR', True, False, False, False, 1),
+        Operand('src1', 64, 'OPR_SRC_VGPR', True, False, False, False, 2),
+        Operand('src2', 256, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
+    ]
+    inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, operands)
+
+    for arch in ('cdna3', 'cdna4'):
+        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
+        assert 's2, const_acc, inst_.blgp);' in body
+
+    for arch in ('rdna3', 'rdna4', 'gfx1250'):
+        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
+        assert 's2, const_acc, 0u);' in body
 
 
 def test_div_scale_uses_signed_tiny_exponent_threshold():

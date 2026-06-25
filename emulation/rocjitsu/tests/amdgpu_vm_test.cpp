@@ -5,6 +5,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
@@ -1153,6 +1154,101 @@ TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
     }
   }
   EXPECT_EQ(mismatches, 0u);
+}
+
+void init_mfma_f64_neg_inputs(amdgpu::ComputeUnitCore *cu, uint32_t s0, uint32_t s1, uint32_t s2) {
+  uint64_t one_bits = std::bit_cast<uint64_t>(1.0);
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    cu->write_vgpr(s0, lane, static_cast<uint32_t>(one_bits));
+    cu->write_vgpr(s0 + 1, lane, static_cast<uint32_t>(one_bits >> 32));
+    cu->write_vgpr(s1, lane, static_cast<uint32_t>(one_bits));
+    cu->write_vgpr(s1 + 1, lane, static_cast<uint32_t>(one_bits >> 32));
+    cu->write_vgpr(s2, lane, static_cast<uint32_t>(one_bits));
+    cu->write_vgpr(s2 + 1, lane, static_cast<uint32_t>(one_bits >> 32));
+  }
+}
+
+void expect_mfma_f64_neg5_outputs(amdgpu::ComputeUnitCore *cu, uint32_t dst) {
+  uint64_t expected_bits = std::bit_cast<uint64_t>(-5.0);
+  uint32_t mismatches = 0;
+  for (uint32_t b = 0; b < 4; ++b) {
+    for (uint32_t row = 0; row < 4; ++row) {
+      for (uint32_t col = 0; col < 4; ++col) {
+        auto out = amdgpu::output_loc_64(4, 4, row, col, b);
+        uint32_t lo = cu->read_vgpr(dst + out.reg, out.lane);
+        uint32_t hi = cu->read_vgpr(dst + out.reg + 1, out.lane);
+        uint64_t got_bits = static_cast<uint64_t>(hi) << 32 | lo;
+        if (got_bits != expected_bits) {
+          if (mismatches < 5)
+            ADD_FAILURE() << "F64 NEG5 mismatch b=" << b << " row=" << row << " col=" << col
+                          << " got=" << std::bit_cast<double>(got_bits);
+          ++mismatches;
+        }
+      }
+    }
+  }
+  EXPECT_EQ(mismatches, 0u);
+}
+
+void expect_mfma_f64_neg_modifier(const std::string &arch) {
+  VmFixture f(arch);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64);
+  step_until_halted(*f.engine, {f.cu()});
+
+  auto *cu = f.cu();
+  auto *wf = cu->wf(0);
+  uint32_t vb = wf->vgpr_alloc().base;
+  uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET;
+  uint32_t s0 = vb + 10;
+  uint32_t s1 = vb + 20;
+  uint32_t s2 = dst;
+
+  init_mfma_f64_neg_inputs(cu, s0, s1, s2);
+
+  // CDNA f64 MFMA uses the BLGP bit range as NEG[2:0]. NEG=5 negates A and C:
+  // D = -C + (-A * B) * K = -1 + (-1 * 1) * 4 = -5.
+  amdgpu::exec_f64(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR, 5);
+
+  expect_mfma_f64_neg5_outputs(cu, dst);
+}
+
+TEST(MfmaF64Cdna3Test, NegModifier) { expect_mfma_f64_neg_modifier("cdna3"); }
+
+TEST(MfmaF64Cdna4Test, NegModifier) { expect_mfma_f64_neg_modifier("cdna4"); }
+
+TEST(MfmaF64Cdna4Test, GeneratedInstructionUsesBlgpNegModifier) {
+  VmFixture f("cdna4");
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64);
+  step_until_halted(*f.engine, {f.cu()});
+
+  auto *cu = f.cu();
+  auto *wf = cu->wf(0);
+  uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kSrc0 = 10;
+  constexpr uint32_t kSrc1 = 20;
+  constexpr uint32_t kDst = 0;
+  uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET + kDst;
+  init_mfma_f64_neg_inputs(cu, vb + kSrc0, vb + kSrc1, dst);
+
+  cdna4::Vop3pMfmaMachineInst raw{};
+  raw.vdst = kDst;
+  raw.acc_cd = 1;
+  raw.src0 = 256 + kSrc0;
+  raw.src1 = 256 + kSrc1;
+  raw.src2 = 256 + kDst;
+  raw.blgp = 5;
+  cdna4::VMfmaF644x4x44bF64Vop3pMfma inst(reinterpret_cast<const cdna4::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  expect_mfma_f64_neg5_outputs(cu, dst);
 }
 
 // ---------------------------------------------------------------------------

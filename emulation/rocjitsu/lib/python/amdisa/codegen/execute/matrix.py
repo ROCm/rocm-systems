@@ -344,7 +344,8 @@ def gen_mfma(
         else:
             L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
             L.append(f'                 amdgpu::src_base(vb, {s1}.encoding_value_),')
-        L.append(f'                 s2, const_acc);')
+        neg = 'inst_.blgp' if arch in ('cdna3', 'cdna4') else '0u'
+        L.append(f'                 s2, const_acc, {neg});')
     elif result_type == 'I32':
         if arch == 'gfx1250':
             # LLVM's gfx1250 IU WMMA convention overloads neg_lo: bit set means
