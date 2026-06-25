@@ -138,6 +138,11 @@ class TestTranspose(RocprofsysTest):
         "ROCPROFSYS_SAMPLING_REALTIME": "ON",
         "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "300",
         "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
+        # Diagnostic branch override: enable signal-pool hang diagnostics so the
+        # CI-only transpose-sampling timeout reports which pool mutex stalls and
+        # which thread owns it. Injected via the test env dict because ROCPROFILER_*
+        # vars are stripped from the inherited child environment.
+        "ROCPROFILER_DEBUG_POOL_HANG": "1",
     }
 
     @pytest.mark.parametrize(

@@ -26,13 +26,16 @@
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/demangle.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
+#include "lib/common/utility.hpp"
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -48,6 +51,64 @@ namespace common
 {
 namespace container
 {
+inline bool
+debug_pool_hang()
+{
+    static const bool _enabled = common::get_env("ROCPROFILER_DEBUG_POOL_HANG", 0) != 0;
+    return _enabled;
+}
+
+struct pool_hang_lock_guard
+{
+    template <typename AvailSizeT, typename PoolSizeT>
+    pool_hang_lock_guard(std::timed_mutex&     mtx,
+                         std::atomic<uint64_t>& owner,
+                         const char*           site,
+                         const char*           mtx_name,
+                         AvailSizeT&&          avail_size,
+                         PoolSizeT&&           pool_size)
+    : m_mutex{mtx}
+    , m_owner{owner}
+    , m_debug{debug_pool_hang()}
+    {
+        if(!m_debug)
+        {
+            m_mutex.lock();
+            return;
+        }
+
+        const auto _cur_tid = common::get_tid();
+        while(!m_mutex.try_lock_for(std::chrono::seconds{5}))
+        {
+            ROCP_WARNING << fmt::format(
+                "POOL_HANG site={} mtx={} waiting tid={} owner_tid={} avail_size={} pool_size={}",
+                site,
+                mtx_name,
+                _cur_tid,
+                m_owner.load(std::memory_order_relaxed),
+                avail_size(),
+                pool_size());
+        }
+        m_owner.store(_cur_tid, std::memory_order_relaxed);
+    }
+
+    ~pool_hang_lock_guard()
+    {
+        if(m_debug) m_owner.store(0, std::memory_order_relaxed);
+        m_mutex.unlock();
+    }
+
+    pool_hang_lock_guard(const pool_hang_lock_guard&)     = delete;
+    pool_hang_lock_guard(pool_hang_lock_guard&&) noexcept = delete;
+    pool_hang_lock_guard& operator=(const pool_hang_lock_guard&) = delete;
+    pool_hang_lock_guard& operator=(pool_hang_lock_guard&&) noexcept = delete;
+
+private:
+    std::timed_mutex&      m_mutex;
+    std::atomic<uint64_t>& m_owner;
+    bool                   m_debug = false;
+};
+
 template <typename Tp>
 struct pool
 {
@@ -79,13 +140,15 @@ struct pool
 private:
     size_type              m_count         = 256;
     std::function<void()>  m_function      = nullptr;
-    mutable std::mutex     m_pool_mtx      = {};
-    pool_array_type        m_pool          = {};
-    mutable std::mutex     m_available_mtx = {};
-    std::queue<size_type>  m_available     = {};
-    std::atomic<size_type> m_released      = 0;
-    std::atomic<size_type> m_reused        = 0;
-    std::atomic<size_type> m_new_batch     = 0;
+    mutable std::timed_mutex m_pool_mtx        = {};
+    pool_array_type          m_pool            = {};
+    mutable std::timed_mutex m_available_mtx   = {};
+    std::queue<size_type>    m_available       = {};
+    mutable std::atomic<uint64_t> m_pool_owner = 0;
+    mutable std::atomic<uint64_t> m_available_owner = 0;
+    std::atomic<size_type>   m_released        = 0;
+    std::atomic<size_type>   m_reused          = 0;
+    std::atomic<size_type>   m_new_batch       = 0;
 };
 
 template <typename Tp>
@@ -117,7 +180,12 @@ pool<Tp>::acquire()
 {
     auto _idx = std::optional<size_type>{};
     {
-        auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+        auto _avail_lk = pool_hang_lock_guard{m_available_mtx,
+                                              m_available_owner,
+                                              "acquire:avail-pop",
+                                              "m_available_mtx",
+                                              [this]() { return m_available.size(); },
+                                              [this]() { return m_pool.size(); }};
         if(!m_available.empty())
         {
             _idx = m_available.front();
@@ -131,7 +199,12 @@ pool<Tp>::acquire()
 
     if(_idx.has_value())
     {
-        auto  _read_lk = std::unique_lock<std::mutex>{m_pool_mtx};
+        auto  _read_lk = pool_hang_lock_guard{m_pool_mtx,
+                                             m_pool_owner,
+                                             "acquire:pool-read",
+                                             "m_pool_mtx",
+                                             []() { return -1; },
+                                             [this]() { return m_pool.size(); }};
         auto& _obj     = m_pool.at(_idx.value());
         ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
             "Pool object at index {} was expected to be available but was not", _idx.value());
@@ -140,8 +213,18 @@ pool<Tp>::acquire()
 
     // add a new batch
     {
-        auto _write_pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
-        auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+        auto _write_pool_lk = pool_hang_lock_guard{m_pool_mtx,
+                                                   m_pool_owner,
+                                                   "acquire:batch-pool",
+                                                   "m_pool_mtx",
+                                                   []() { return -1; },
+                                                   [this]() { return m_pool.size(); }};
+        auto _write_avail_lk = pool_hang_lock_guard{m_available_mtx,
+                                                    m_available_owner,
+                                                    "acquire:batch-avail",
+                                                    "m_available_mtx",
+                                                    [this]() { return m_available.size(); },
+                                                    [this]() { return m_pool.size(); }};
         if(m_available.empty())
         {
             ROCP_INFO << fmt::format(
@@ -163,7 +246,12 @@ pool<Tp>::release(size_type idx)
 {
     if(idx < m_pool.size())
     {
-        auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
+        auto _write_lk = pool_hang_lock_guard{m_available_mtx,
+                                              m_available_owner,
+                                              "release:avail",
+                                              "m_available_mtx",
+                                              [this]() { return m_available.size(); },
+                                              [this]() { return m_pool.size(); }};
         ROCP_FATAL_IF(m_pool.at(idx).in_use())
             << fmt::format("Pool object at index {} was expected to be not in use", idx);
         m_available.push(idx);
@@ -188,7 +276,12 @@ template <typename FuncT>
 void
 pool<Tp>::clear(FuncT&& func)
 {
-    auto _write_pool_lk = std::unique_lock<std::mutex>{m_pool_mtx};
+    auto _write_pool_lk = pool_hang_lock_guard{m_pool_mtx,
+                                               m_pool_owner,
+                                               "clear:pool",
+                                               "m_pool_mtx",
+                                               []() { return -1; },
+                                               [this]() { return m_pool.size(); }};
 
     for(auto& itr : m_pool)
     {
@@ -211,7 +304,12 @@ pool<Tp>::clear(FuncT&& func)
         }
     }
 
-    auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+    auto _write_avail_lk = pool_hang_lock_guard{m_available_mtx,
+                                                m_available_owner,
+                                                "clear:avail",
+                                                "m_available_mtx",
+                                                [this]() { return m_available.size(); },
+                                                [this]() { return m_pool.size(); }};
 
     while(!m_available.empty())
         m_available.pop();
@@ -225,8 +323,18 @@ template <typename Tp>
 std::string
 pool<Tp>::get_usage_report() const
 {
-    auto _pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
-    auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+    auto _pool_lk = pool_hang_lock_guard{m_pool_mtx,
+                                         m_pool_owner,
+                                         "usage:pool",
+                                         "m_pool_mtx",
+                                         []() { return -1; },
+                                         [this]() { return m_pool.size(); }};
+    auto _avail_lk = pool_hang_lock_guard{m_available_mtx,
+                                          m_available_owner,
+                                          "usage:avail",
+                                          "m_available_mtx",
+                                          [this]() { return m_available.size(); },
+                                          [this]() { return m_pool.size(); }};
     return fmt::format("Usage report for pool (type='{}') :: size={}, available={}, reused={}, "
                        "released={}, batches={}",
                        cxx_demangle(typeid(Tp).name()),
