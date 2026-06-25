@@ -26,8 +26,17 @@
 #elif (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__) ||                      \
        defined(__gfx1250__)) &&                                                                    \
        __HIP_DEVICE_COMPILE__
+// These targets natively support the OCP fp8 encodings (e4m3 / e5m2). They do
+// not have a device intrinsic that produces the fnuz encoding, but the fnuz
+// types can still be supported on device through the arch-independent software
+// conversion path (internal::cast_to_f8 / internal::cast_from_f8). Enabling
+// HIP_FP8_TYPE_FNUZ here keeps the *_fnuz struct constructors / conversion
+// operators __FP8_HOST_DEVICE__ so device kernels can construct and convert
+// them; the fnuz interpretations are routed to the software conversion path in
+// the __hip_cvt_* helpers below (the hardware fast path only produces OCP on
+// these targets). See https://github.com/ROCm/rocm-systems/issues/7509
 #define HIP_FP8_TYPE_OCP 1
-#define HIP_FP8_TYPE_FNUZ 0
+#define HIP_FP8_TYPE_FNUZ 1
 #else
 #define HIP_FP8_TYPE_FNUZ 1
 #define HIP_FP8_TYPE_OCP 1
@@ -157,10 +166,13 @@ namespace internal {
 
 __FP8_HOST_DEVICE_STATIC__ void __is_interpret_supported(__hip_fp8_interpretation_t interp) {
 #if __HIP_DEVICE_COMPILE__
-#if HIP_FP8_TYPE_OCP
+// When both the OCP and fnuz families are enabled for the target (e.g. gfx950,
+// where fnuz is provided via the software conversion path) any of the four
+// interpretations is valid, so do not assert a single family. Only restrict the
+// interpretation when exactly one family is supported on the device.
+#if HIP_FP8_TYPE_OCP && !HIP_FP8_TYPE_FNUZ
   __assert_ocp_support(interp);
-#endif
-#if HIP_FP8_TYPE_FNUZ
+#elif HIP_FP8_TYPE_FNUZ && !HIP_FP8_TYPE_OCP
   __assert_fnuz_support(interp);
 #endif
 #endif
@@ -680,6 +692,15 @@ __FP8_HOST_DEVICE_STATIC__ bool hip_fp8_ocp_is_inf(__hip_fp8_storage_t a,
 __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_float_to_fp8(
     const float f, const __hip_saturation_t sat, const __hip_fp8_interpretation_t interp) {
   internal::__is_interpret_supported(interp);
+  // The hardware fast path produces the OCP encoding for the e4m3/e5m2
+  // intrinsics. For the fnuz interpretations (supported on these targets only
+  // via software) use the arch-independent software conversion so the produced
+  // bytes are actually fnuz-encoded. See rocm-systems#7509.
+  if (interp == __HIP_E4M3_FNUZ || interp == __HIP_E5M2_FNUZ) {
+    int we = interp == __HIP_E4M3_FNUZ ? 4 : 5;
+    int wm = interp == __HIP_E4M3_FNUZ ? 3 : 2;
+    return internal::cast_to_f8<float, true>(f, wm, we, sat == __HIP_SATFINITE);
+  }
   return internal::cast_to_f8_from_f32<false>(f, sat == __HIP_SATFINITE, interp);
 #else
 #if HIP_FP8_TYPE_OCP && HIP_FP8_TYPE_FNUZ
