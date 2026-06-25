@@ -990,15 +990,16 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
     CHECK_ALLOWED_RANGE("max_num_ref_frames", p_sps->max_num_ref_frames, 0, AVC_MAX_DPB_FRAMES - 1);
     p_sps->gaps_in_frame_num_value_allowed_flag = Parser::GetBit(p_stream, offset);
     p_sps->pic_width_in_mbs_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    uint64_t pic_width_in_mbs = static_cast<uint64_t>(p_sps->pic_width_in_mbs_minus1) + 1;
     // Maximum picture width in MBs is 1056 for AVC Level 6.2 (Annex A.3 Sqrt(MaxFS * 8))
-    CHECK_ALLOWED_MAX("PicWidthInMbs", p_sps->pic_width_in_mbs_minus1 + 1, 1056);
+    CHECK_ALLOWED_MAX("PicWidthInMbs", pic_width_in_mbs, 1056);
     p_sps->pic_height_in_map_units_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
     p_sps->frame_mbs_only_flag = Parser::GetBit(p_stream, offset);
-    uint32_t frame_height_in_mbs = (2 - p_sps->frame_mbs_only_flag) * (p_sps->pic_height_in_map_units_minus1 + 1);
+    uint64_t frame_height_in_mbs = static_cast<uint64_t>(2 - p_sps->frame_mbs_only_flag) * (static_cast<uint64_t>(p_sps->pic_height_in_map_units_minus1) + 1);
     // Maximum picture height in MBs is 1056 for AVC Level 6.2 (Annex A.3 Sqrt(MaxFS * 8))
     CHECK_ALLOWED_MAX("PicHeightInMbs", frame_height_in_mbs, 1056);
     // Maximum picture size in MBs is 139264 for AVC Level 6.2 (Annex A.3 MaxFS)
-    CHECK_ALLOWED_MAX("PicWidthInMbs * PicHeightInMbs", (p_sps->pic_width_in_mbs_minus1 + 1) * frame_height_in_mbs, 139264);
+    CHECK_ALLOWED_MAX("PicWidthInMbs * PicHeightInMbs", pic_width_in_mbs * frame_height_in_mbs, 139264);
 
     if (!p_sps->frame_mbs_only_flag) {
         p_sps->mb_adaptive_frame_field_flag = Parser::GetBit(p_stream, offset);
