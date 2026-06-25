@@ -129,23 +129,15 @@ class webui_analysis(OmniAnalyze_Base):
                     self.dest_dir,
                     args,
                     pc_sampling_data,
-                    filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 )
             else:
                 # Generate original raw df
                 run_workload.raw_pmc = file_io.create_df_pmc(
                     self.dest_dir,
-                    args.nodes,
-                    args.spatial_multiplexing,
                     args.kernel_verbose,
                     args.verbose,
                     self._profiling_config,
                 )
-
-                if args.spatial_multiplexing:
-                    run_workload.raw_pmc = self.spatial_multiplex_merge_counters(
-                        run_workload.raw_pmc
-                    )
 
                 if self._profiling_config.get("iteration_multiplexing") is not None:
                     run_workload.raw_pmc = self.iteration_multiplex_impute_counters(
@@ -177,7 +169,6 @@ class webui_analysis(OmniAnalyze_Base):
                     raw_data_dir=str(self.dest_dir),
                     filter_gpu_ids=run_workload.filter_gpu_ids,
                     filter_dispatch_ids=run_workload.filter_dispatch_ids,
-                    filter_nodes=self._runs[self.dest_dir].filter_nodes,
                     time_unit=args.time_unit,
                     kernel_verbose=args.kernel_verbose,
                 )
@@ -418,15 +409,10 @@ class webui_analysis(OmniAnalyze_Base):
 
         workload.raw_pmc = file_io.create_df_pmc(
             self.dest_dir,
-            args.nodes,
-            args.spatial_multiplexing,
             args.kernel_verbose,
             args.verbose,
             self._profiling_config,
         )
-
-        if args.spatial_multiplexing:
-            workload.raw_pmc = self.spatial_multiplex_merge_counters(workload.raw_pmc)
 
         if self._profiling_config.get("iteration_multiplexing") is not None:
             workload.raw_pmc = self.iteration_multiplex_impute_counters(
@@ -440,7 +426,6 @@ class webui_analysis(OmniAnalyze_Base):
             raw_data_dir=self.dest_dir,
             filter_gpu_ids=workload.filter_gpu_ids,
             filter_dispatch_ids=workload.filter_dispatch_ids,
-            filter_nodes=workload.filter_nodes,
             time_unit=args.time_unit,
             kernel_verbose=args.kernel_verbose,
         )

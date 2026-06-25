@@ -972,10 +972,8 @@ def test_apply_filters_direct():
                     "vecMul",
                 ],
                 "Dispatch_ID": [0, 1, 2, 3],
-                "Node": ["node0", "node0", "node1", "node1"],
             })
 
-        filter_nodes = None
         filter_gpu_ids = None
         filter_kernel_ids = None
         filter_dispatch_ids = None
@@ -995,12 +993,6 @@ def test_apply_filters_direct():
     workload.filter_dispatch_ids = ["0", "1"]
     result = apply_filters(workload, "/tmp", False, False)
     assert len(result) == 2
-
-    # Test node filter with list of strings
-    workload = MockWorkload()
-    workload.filter_nodes = ["node0", "node1"]
-    result = apply_filters(workload, "/tmp", False, False)
-    assert len(result) == 4
 
     # Test GPU filter with list of integers
     workload = MockWorkload()
@@ -1537,7 +1529,6 @@ def test_create_df_kernel_top_stats_returns_valid_dataframes(
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
             sortby="sum",
@@ -1587,7 +1578,6 @@ def test_create_df_kernel_top_stats_grouping_and_aggregation(
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
             sortby="sum",
@@ -1608,7 +1598,6 @@ def test_create_df_kernel_top_stats_grouping_and_aggregation(
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
             sortby="kernel",
@@ -1622,16 +1611,14 @@ def test_create_df_kernel_top_stats_grouping_and_aggregation(
 @pytest.mark.misc
 def test_create_df_kernel_top_stats_filters():
     """Test GPU ID, dispatch ID (including '> n' syntax),
-    node filters, and empty input handling."""
+    and empty input handling."""
     import tempfile
 
     from utils.file_io import create_df_kernel_top_stats
 
-    # Create test data with Node column for node filtering
     raw_pmc_with_node = pd.DataFrame({
         "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
         "GPU_ID": [0, 0, 1, 0],
-        "Node": ["node0", "node0", "node1", "node0"],
         "Dispatch_ID": [1, 2, 3, 4],
         "Start_Timestamp": [1000, 2000, 3000, 4000],
         "End_Timestamp": [1500, 2800, 3400, 4200],
@@ -1644,7 +1631,6 @@ def test_create_df_kernel_top_stats_filters():
             raw_data_dir=temp_dir,
             filter_gpu_ids="0",
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
         )
@@ -1657,7 +1643,6 @@ def test_create_df_kernel_top_stats_filters():
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=["> 2"],
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
         )
@@ -1671,24 +1656,10 @@ def test_create_df_kernel_top_stats_filters():
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=["1", "2"],
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
         )
         assert len(dispatch_df) == 2
-
-        # Test node filter
-        kernel_top_df, dispatch_df = create_df_kernel_top_stats(
-            df_in=raw_pmc_with_node,
-            raw_data_dir=temp_dir,
-            filter_gpu_ids=None,
-            filter_dispatch_ids=None,
-            filter_nodes="node1",
-            time_unit="ns",
-            kernel_verbose=0,
-        )
-        assert len(dispatch_df) == 1
-        assert dispatch_df.iloc[0]["Kernel_Name"] == "kernel_a"
 
         # Test empty input handling
         empty_raw_pmc = pd.DataFrame({
@@ -1703,7 +1674,6 @@ def test_create_df_kernel_top_stats_filters():
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
         )
@@ -1871,8 +1841,6 @@ def test_join_prof_renames_sq_accum_prev_hires_to_bucket_target(tmp_path):
     inst = cli_analysis.__new__(cli_analysis)
     args = Namespace(
         path=[[str(tmp_path)]],
-        nodes=None,
-        spatial_multiplexing=False,
         join_type="kernel",
         kokkos_trace=False,
     )

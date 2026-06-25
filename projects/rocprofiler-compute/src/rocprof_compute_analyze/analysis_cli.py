@@ -80,17 +80,10 @@ class cli_analysis(OmniAnalyze_Base):
             # create 'mega dataframe'
             workload.raw_pmc = file_io.create_df_pmc(
                 path_info[0],
-                args.nodes,
-                args.spatial_multiplexing,
                 args.kernel_verbose,
                 args.verbose,
                 self._profiling_config,
             )
-
-            if args.spatial_multiplexing:
-                workload.raw_pmc = self.spatial_multiplex_merge_counters(
-                    workload.raw_pmc
-                )
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
                 workload.raw_pmc = self.iteration_multiplex_impute_counters(
@@ -104,7 +97,6 @@ class cli_analysis(OmniAnalyze_Base):
                 raw_data_dir=path_info[0],
                 filter_gpu_ids=workload.filter_gpu_ids,
                 filter_dispatch_ids=workload.filter_dispatch_ids,
-                filter_nodes=workload.filter_nodes,
                 time_unit=args.time_unit,
                 kernel_verbose=args.kernel_verbose,
             )

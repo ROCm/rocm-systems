@@ -170,7 +170,6 @@ def add_general_group(
             "Enable experimental feature(s):\n"
             "   GUI (--gui)\n"
             "   TUI (--tui)\n"
-            "   Spatial multiplexing (--spatial-multiplexing)\n"
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
@@ -540,21 +539,6 @@ Examples:
     ## ----------------------------
     # Experimental Features
     ## ----------------------------
-
-    profile_group.add_argument(
-        "--spatial-multiplexing",
-        dest="spatial_multiplexing",
-        required=False,
-        default=None,
-        base_action="store",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Spatial multiplexing",
-        type=int,
-        nargs="*",
-        metavar="",
-        help="\t\t\tProvide Node ID and GPU number per node.",
-    )
 
     profile_group.add_argument(
         "--membw-analysis",
@@ -972,40 +956,10 @@ Examples:
         help="\t\tSpecify the specs to correct. e.g. "
         '--specs-correction="specname1:specvalue1,specname2:specvalue2"',
     )
-    analyze_advanced_group.add_argument(
-        "--list-nodes",
-        action="store_true",
-        help="\t\tMulti-node option: list all node names.",
-    )
-    analyze_advanced_group.add_argument(
-        "--nodes",
-        metavar="",
-        type=str,
-        dest="nodes",
-        nargs="*",
-        help=(
-            "\t\tMulti-node option: filter with node names. "
-            "Enable it without node names means ALL."
-        ),
-    )
 
     ## ----------------------------
     # Experimental Features
     ## ----------------------------
-    analyze_group.add_argument(
-        "--spatial-multiplexing",
-        dest="spatial_multiplexing",
-        required=False,
-        default=False,
-        base_action="store_const",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Spatial multiplexing",
-        nargs=0,
-        const=True,
-        help="\t\tMode of spatial multiplexing.",
-    )
-
     analyze_group.add_argument(
         "--membw-analysis",
         dest="membw_analysis",

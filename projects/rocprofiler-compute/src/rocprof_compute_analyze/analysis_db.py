@@ -333,7 +333,6 @@ class db_analysis(OmniAnalyze_Base):
 
     def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
-        args = self.get_args()
 
         for workload_path in self._runs.keys():
             if not (Path(workload_path) / "pmc_perf.csv").exists():
@@ -342,9 +341,6 @@ class db_analysis(OmniAnalyze_Base):
             pmc_df = utils_analysis.process_rocpd_csv(
                 pd.read_csv(Path(workload_path) / "pmc_perf.csv")
             )
-
-            if args.spatial_multiplexing:
-                pmc_df = self.spatial_multiplex_merge_counters(pmc_df)
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(

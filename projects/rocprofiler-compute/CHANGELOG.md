@@ -77,6 +77,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Removed
 
+* Removed the multi-node analysis options ``--nodes``, ``--list-nodes`` (analyze mode) and the experimental ``--spatial-multiplexing`` option (profile and analyze modes). These features did not work as expected and will be redesigned in a future release.
+
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
 
 * Removed redundant `if (X != 0) else None` divide-by-zero guards from metric equations across all analysis YAML configurations. Division by zero is already handled by the metric evaluation engine, which returns `"N/A"` for `inf` and `NaN` results.

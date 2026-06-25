@@ -282,16 +282,6 @@ def apply_filters(
     # TODO: error out properly if filters out of bound
     filtered_df = workload.raw_pmc
 
-    # Apply node filter
-    if workload.filter_nodes:
-        filtered_df = filtered_df.loc[
-            filtered_df["Node"]
-            .astype(str)
-            .isin(normalize_filter_to_str_list(workload.filter_nodes))
-        ]
-        if filtered_df.empty:
-            console_error("analysis", f"{workload.filter_nodes} is invalid")
-
     # Apply GPU ID filter
     if workload.filter_gpu_ids:
         filtered_df = filtered_df.loc[
