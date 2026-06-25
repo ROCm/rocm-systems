@@ -254,6 +254,23 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
     import csv as _csv
     import json
     import html as _html
+    import math
+
+    # Determine format per column: scientific if any float in the column >= 1e6
+    def _col_fmt(col_vals):
+        floats = [v for v in col_vals if isinstance(v, float) and not math.isnan(v)]
+        if floats and max(abs(v) for v in floats) >= 1e6:
+            return "{:.6e}"
+        return "{:.6f}"
+
+    def _fmt_val(v, fmt):
+        if v is None:
+            return "NaN"
+        if isinstance(v, float):
+            if math.isnan(v):
+                return "NaN"
+            return fmt.format(v)
+        return str(v)
 
     libpyrocpd.rocpd_log_info(
         f"Running query via stdlib for export format: {export_format}"
@@ -268,8 +285,12 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
         sys.stderr.flush()
         return None
 
+    col_fmts = [_col_fmt([row[ci] for row in rows]) for ci in range(len(col_names_raw))]
+
     if export_format in (None, "console"):
-        str_rows = [[str(v) for v in row] for row in rows]
+        str_rows = [
+            [_fmt_val(v, col_fmts[ci]) for ci, v in enumerate(row)] for row in rows
+        ]
         col_widths = [len(c) for c in col_names_raw]
         for row in str_rows:
             for i, v in enumerate(row):
@@ -293,7 +314,7 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
             [c.title() for c in col_names_raw] if title_columns else col_names_raw[:]
         )
         with open(export_path, "w", newline="", encoding="utf-8") as f:
-            writer = _csv.writer(f, quoting=_csv.QUOTE_NONNUMERIC)
+            writer = _csv.writer(f, quoting=_csv.QUOTE_NONNUMERIC, lineterminator="\n")
             writer.writerow(col_names)
             writer.writerows(rows)
 
@@ -310,8 +331,8 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
         lines += ["    </tr>", "  </thead>", "  <tbody>"]
         for row in rows:
             lines.append("    <tr>")
-            for v in row:
-                lines.append(f"      <td>{_html.escape(str(v))}</td>")
+            for ci, v in enumerate(row):
+                lines.append(f"      <td>{_html.escape(_fmt_val(v, col_fmts[ci]))}</td>")
             lines.append("    </tr>")
         lines += ["  </tbody>", "</table>"]
         with open(export_path, "w", encoding="utf-8") as f:
@@ -322,7 +343,11 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
             f.write("| " + " | ".join(col_names_raw) + " |\n")
             f.write("|" + "|".join("---" for _ in col_names_raw) + "|\n")
             for row in rows:
-                f.write("| " + " | ".join(str(v) for v in row) + " |\n")
+                f.write(
+                    "| "
+                    + " | ".join(_fmt_val(v, col_fmts[ci]) for ci, v in enumerate(row))
+                    + " |\n"
+                )
 
     print(f"Exported to: {export_path}\n")
     return export_path
