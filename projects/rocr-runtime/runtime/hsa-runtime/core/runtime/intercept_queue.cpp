@@ -108,7 +108,13 @@ bool InterceptQueue::IsPendingRetryPoint(uint64_t wrapped_current_read_index) co
   // queue doorbell signal is also being used as the retry completion signal.
   // If that is done then the minimum queue size needs to be changed from 3 to
   // 2 (enforced in hsa_amd_queue_intercept_create).
-  return retry_index_ > wrapped_current_read_index;
+  //
+  // Augment the read-index proxy with retry_outstanding_: the read index can lag
+  // arbitrarily, so retry_index_ > read may still hold for an already-completed
+  // barrier. Without this the replacement barrier is suppressed and a non-empty
+  // overflow_ is stranded with no wakeup (the counter-collection hang).
+  return retry_outstanding_.load(std::memory_order_acquire) &&
+         retry_index_ > wrapped_current_read_index;
 }
 
 InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
@@ -154,10 +160,26 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(err, "Doorbell handler registration failed.\n");
 
+  // Dedicated retry-barrier completion signal (see retry_doorbell_ in the header).
+  // Initialized to DOORBELL_MAX; a completing retry barrier decrements it, tripping
+  // the NE async handler.
+  if (!core::g_use_interrupt_wait)
+    retry_doorbell_ = new DefaultSignal(DOORBELL_MAX);
+  else
+    retry_doorbell_ = new InterruptSignal(DOORBELL_MAX);
+  MAKE_NAMED_SCOPE_GUARD(retrySigGuard, [&]() { retry_doorbell_->DestroySignal(); });
+
+  err = Runtime::runtime_singleton_->SetAsyncSignalHandler(
+      core::Signal::Convert(retry_doorbell_), HSA_SIGNAL_CONDITION_NE,
+      retry_doorbell_->LoadRelaxed(), HandleRetryDoorbell, this);
+  if (err != HSA_STATUS_SUCCESS)
+    throw AMD::hsa_exception(err, "Retry doorbell handler registration failed.\n");
+
   // Install copy submission interceptor.
   AddInterceptor(Submit, this);
 
   sigGuard.Dismiss();
+  retrySigGuard.Dismiss();
 }
 
 InterceptQueue::~InterceptQueue() {
@@ -172,6 +194,14 @@ InterceptQueue::~InterceptQueue() {
   if (val != 0)
     async_doorbell_->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_BLOCKED);
   async_doorbell_->DestroySignal();
+
+  // Kill the retry doorbell handler (quit_ already set), same teardown protocol
+  // as async_doorbell_ above.
+  retry_doorbell_->StoreRelaxed(DOORBELL_MAX);
+  val = retry_doorbell_->ExchRelaxed(1);
+  if (val != 0)
+    retry_doorbell_->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_BLOCKED);
+  retry_doorbell_->DestroySignal();
 }
 
 bool InterceptQueue::HandleAsyncDoorbell(hsa_signal_value_t value, void* arg) {
@@ -181,6 +211,21 @@ bool InterceptQueue::HandleAsyncDoorbell(hsa_signal_value_t value, void* arg) {
     return false;
   }
   queue->async_doorbell_->StoreRelaxed(DOORBELL_MAX);
+  queue->StoreRelease(value);
+  return true;
+}
+
+bool InterceptQueue::HandleRetryDoorbell(hsa_signal_value_t value, void* arg) {
+  InterceptQueue* queue = reinterpret_cast<InterceptQueue*>(arg);
+  if (queue->quit_) {
+    queue->retry_doorbell_->StoreRelaxed(0);
+    return false;
+  }
+  queue->retry_doorbell_->StoreRelaxed(DOORBELL_MAX);
+  // The tracked retry barrier has completed. Clearing here (the only clear site)
+  // lets Submit() insert a fresh barrier if overflow_ remains, and keeps at most
+  // one retry barrier outstanding so the slot accounting stays consistent.
+  queue->retry_outstanding_.store(false, std::memory_order_release);
   queue->StoreRelease(value);
   return true;
 }
@@ -224,7 +269,14 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
   while (true) {
     uint64_t write = wrapped->LoadWriteIndexRelaxed();
     uint64_t read = wrapped->LoadReadIndexRelaxed();
-    uint64_t free_slots = wrapped->amd_queue_.hsa_queue.size - (write - read);
+    // write/read are loaded non-atomically; read can transiently exceed the stale
+    // write, making size - (write - read) underflow and overcommit submitted_count
+    // (OOB ring copy). Clamp in-flight to [0, size] (transient read>write => full).
+    // Do NOT spin here: Submit() holds lock_, so spinning would starve the producer.
+    uint64_t qsize = wrapped->amd_queue_.hsa_queue.size;
+    uint64_t inflight = (write >= read) ? (write - read) : qsize;
+    if (inflight > qsize) inflight = qsize;
+    uint64_t free_slots = qsize - inflight;
     bool pending_retry_point = IsPendingRetryPoint(read);
 
     uint64_t submitted_count = count - marker_count;
@@ -234,7 +286,10 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
     // slot free for the retry barrier packet if it is not already on the
     // queue.
     if (submitted_count >= wrapped->amd_queue_.hsa_queue.size) {
-      submitted_count = free_slots - (pending_retry_point ? 0 : 1);
+      uint64_t reserve = pending_retry_point ? 0 : 1;
+      // Saturating: free_slots can be 0 (queue full / transient read>write), so do
+      // not underflow when reserving a slot for the retry barrier.
+      submitted_count = (free_slots > reserve) ? (free_slots - reserve) : 0;
     }
 
     // Prefer to either submit all the packets, or none of the packets. This
@@ -252,23 +307,27 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       }
     }
 
+    // Defensive clamp: packets[] has exactly (count - marker_count) non-marker
+    // entries; never copy more than that (guards the ring copy against OOB).
+    if (submitted_count > (count - marker_count)) submitted_count = count - marker_count;
+
     // If we are not submitting all the packets, we need to ensure there is a
     // retry packet to cause the remaining packets to be submitted. If there is
     // not already a pending retry point add one.
-    if (submitted_count < (count - marker_count) && !pending_retry_point) {
-      // Reserve one slot for the barrier packet. There will always be at least
-      // one free slot.
-      assert(free_slots >= 1 &&
-             "Packet intercept error: there is no free slot for a retry barrier packet.\n");
-      // Reserve a slot for the barrier packet.
+    if (submitted_count < (count - marker_count) && !pending_retry_point && free_slots >= 1) {
+      // free_slots >= 1 is now part of the guard: completion-aware IsPendingRetryPoint
+      // can report !pending while a completed-but-unread barrier still holds its slot,
+      // so the old "!pending implies a free slot" invariant no longer holds. If the
+      // queue is momentarily full we skip insertion; the in-progress drain retries.
       uint64_t barrier = wrapped->AddWriteIndexRelaxed(1);
       assert(barrier == write &&
              "Packet intercept error: wrapped queue has been updated by another thread.\n");
       ++write;
 
-      // Submit barrier which will wake async queue processing.
+      // Submit barrier which will wake async queue processing. Completion signal is
+      // the dedicated retry_doorbell_ so HandleRetryDoorbell() tracks it unambiguously.
       ring[barrier & mask].packet.body = {};
-      ring[barrier & mask].barrier_and.completion_signal = Signal::Convert(async_doorbell_);
+      ring[barrier & mask].barrier_and.completion_signal = Signal::Convert(retry_doorbell_);
       if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
         // Ensure the packet body is written as header may get reordered when writing over PCIE
         _mm_sfence();
@@ -280,6 +339,9 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
 
       // Record the retry point
       retry_index_ = barrier;
+      // Mark a retry barrier as outstanding; cleared only when its dedicated
+      // retry_doorbell_ completion wake is delivered in HandleRetryDoorbell().
+      retry_outstanding_.store(true, std::memory_order_release);
     }
 
     // Attempt to reserve useable queue space if some packets need to be
