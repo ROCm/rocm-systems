@@ -184,7 +184,6 @@ function(enable_sanitizer_python_launcher out_var)
             -E
             env
             ${_sanitizer_env}
-            --
         )
     endif()
     set(${out_var} "${_launcher}" PARENT_SCOPE)
