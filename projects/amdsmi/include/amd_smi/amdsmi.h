@@ -246,7 +246,6 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
-#define AMDSMI_PF_INDEX (AMDSMI_MAX_VF_COUNT - 1)
 #define AMDSMI_MAX_DRIVER_INFO_RSVD 64
 // Deprecation target: kept for ABI compatibility; prefer AMDSMI_FABRIC_PPOD_ID_SIZE.
 #define AMDSMI_MAX_UUID_ELEMENTS 16  //!< Max UUID elements supported

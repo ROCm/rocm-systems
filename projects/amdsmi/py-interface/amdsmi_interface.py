@@ -7031,7 +7031,12 @@ def amdsmi_get_fabric_telemetry_data(
                 for item_idx in range(inst.item_count):
                     item = inst.items[item_idx]
                     telem_id = item.id
-                    _check_res(amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(telem_id, name_ptr))
+                    name_ptr = ctypes.POINTER(ctypes.c_char)()
+                    _check_res(
+                        amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(
+                            telem_id, ctypes.byref(name_ptr)
+                        )
+                    )
                     # Handle both c_char_p (string) and POINTER(c_char) (pointer) return types
                     if name_ptr:
                         if isinstance(name_ptr, bytes):

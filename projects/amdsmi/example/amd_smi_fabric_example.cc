@@ -206,6 +206,7 @@ int main() {
                 if (ret != AMDSMI_STATUS_SUCCESS) {
                   std::cout << "\t\t\t\t\tWarning: Failed to retrieve Fabric name: " << ret
                             << std::endl;
+                  continue;
                 }
                 std::cout << "\t\t\t\t\t\tItem " << item_idx << ": "
                           << "ID=0x" << std::hex << item.id << std::dec << "(" << telem_name << ")"
