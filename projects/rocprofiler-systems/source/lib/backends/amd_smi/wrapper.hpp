@@ -26,6 +26,11 @@ namespace rocprofsys::backends::amd_smi
  */
 struct wrapper
 {
+private:
+    // this type do not start with amdsmi_
+    using amdsmi_processor_type = ::processor_type_t;
+
+public:
     // ── Type aliases ──────────────────────────────────────────────────────────
     using status_t             = amdsmi_status_t;
     using version_t            = amdsmi_version_t;
@@ -36,6 +41,7 @@ struct wrapper
     using memory_type_t        = amdsmi_memory_type_t;
     using temperature_type_t   = amdsmi_temperature_type_t;
     using temperature_metric_t = amdsmi_temperature_metric_t;
+    using processor_type       = amdsmi_processor_type;
 
     static constexpr temperature_metric_t TEMP_CURRENT = AMDSMI_TEMP_CURRENT;
     static constexpr temperature_type_t   TEMPERATURE_TYPE_HOTSPOT =
@@ -49,7 +55,7 @@ struct wrapper
     using nic_rdma_devices_info_t = amdsmi_nic_rdma_devices_info_t;
     using nic_stat_t              = amdsmi_nic_stat_t;
 
-    static constexpr processor_type_t NIC_PROCESSOR_TYPE = AMDSMI_PROCESSOR_TYPE_AMD_NIC;
+    static constexpr processor_type NIC_PROCESSOR_TYPE = AMDSMI_PROCESSOR_TYPE_AMD_NIC;
 #endif
 
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
@@ -97,7 +103,7 @@ struct wrapper
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     static status_t get_processor_handles_by_type(socket_handle     socket,
-                                                  processor_type_t  type,
+                                                  processor_type    type,
                                                   processor_handle* handles,
                                                   std::uint32_t*    count)
     {

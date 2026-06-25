@@ -197,7 +197,7 @@ struct mock_backend
     using asic_info_t             = mock_asic_info_t;
     using memory_type_t           = std::uint32_t;
     using proc_info_t             = mock_proc_info_t;
-    using processor_type_t        = std::uint32_t;
+    using processor_type          = std::uint32_t;
     using nic_asic_info_t         = mock_nic_asic_info_t;
     using nic_port_info_t         = mock_nic_port_info_t;
     using nic_rdma_devices_info_t = mock_nic_rdma_devices_info_t;
@@ -209,7 +209,7 @@ struct mock_backend
     static constexpr temperature_type_t   TEMPERATURE_TYPE_HOTSPOT = 1;
     static constexpr temperature_type_t   TEMPERATURE_TYPE_EDGE    = 0;
 
-    static constexpr processor_type_t NIC_PROCESSOR_TYPE = 5;
+    static constexpr processor_type NIC_PROCESSOR_TYPE = 5;
 
     static constexpr bool          sdma_supported = true;
     static constexpr status_t      STATUS_SUCCESS = 0;
@@ -241,7 +241,7 @@ struct mock_backend
     }
 
     static status_t get_processor_handles_by_type(socket_handle     socket,
-                                                  processor_type_t  type,
+                                                  processor_type    type,
                                                   processor_handle* handles,
                                                   std::uint32_t*    count)
     {

@@ -84,14 +84,14 @@ concept wrapper_policy =
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     &&
     requires {
-        typename T::processor_type_t;
+        typename T::processor_type;
         typename T::nic_asic_info_t;
         typename T::nic_port_info_t;
         typename T::nic_rdma_devices_info_t;
         typename T::nic_stat_t;
     } &&
-    requires(typename T::processor_type_t pt) {
-        { T::NIC_PROCESSOR_TYPE } -> std::convertible_to<typename T::processor_type_t>;
+    requires(typename T::processor_type pt) {
+        { T::NIC_PROCESSOR_TYPE } -> std::convertible_to<typename T::processor_type>;
     } &&
     requires(T t, typename T::processor_handle ph, typename T::nic_asic_info_t* nap,
              typename T::nic_port_info_t* npp, typename T::nic_rdma_devices_info_t* ndp,
