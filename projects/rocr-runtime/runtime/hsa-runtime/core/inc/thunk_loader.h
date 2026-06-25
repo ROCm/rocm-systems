@@ -435,7 +435,9 @@ class ThunkLoader {
     bool CreateThunkInstance();
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
-    bool IsDXG() const { return is_dxg_; }
+    bool IsDXG() const { return is_win_dxg_ || is_wsl_dxg_; }
+    bool IsWinDxg() const { return is_win_dxg_; }
+    bool IsWslDxg() const { return is_wsl_dxg_; }
     bool IsDTIF() const { return is_dtif_; }
     bool IsSharedLibraryLoaded() const { return is_loaded_; }
     void* ThunkHandle() const { return thunk_handle; }
@@ -567,7 +569,8 @@ class ThunkLoader {
     std::string whoami();
     void *thunk_handle;
     std::string library_name;
-    bool is_dxg_;
+    bool is_win_dxg_;
+    bool is_wsl_dxg_;
     bool is_dtif_;
     bool is_loaded_;
 };

@@ -1176,6 +1176,52 @@ def test_gfx1250_flat_u64_atomic_payload_width_uses_two_dwords():
     assert 'data_base + 1' in body
 
 
+def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        profile=Gfx1250Profile(),
+    )
+
+    cluster = SimpleNamespace(
+        name='CLUSTER_LOAD_B32',
+        elem_size=4,
+        num_elems=1,
+        sign_extend=False,
+        d16_hi=False,
+        d16_lo=False,
+    )
+    ordinary = SimpleNamespace(
+        name='GLOBAL_LOAD_B32',
+        elem_size=4,
+        num_elems=1,
+        sign_extend=False,
+        d16_hi=False,
+        d16_lo=False,
+    )
+    cluster_body = codegen._gen_flat_load([], [], cluster)
+    ordinary_body = codegen._gen_flat_load([], [], ordinary)
+
+    assert 'd->request_force_l1_bypass = true;' in cluster_body
+    assert 'd->request_force_l1_bypass = true;' not in ordinary_body
+
+    cluster_async = SimpleNamespace(
+        name='CLUSTER_LOAD_ASYNC_TO_LDS_B32',
+        elem_size=4,
+        num_elems=1,
+    )
+    global_async = SimpleNamespace(
+        name='GLOBAL_LOAD_ASYNC_TO_LDS_B32',
+        elem_size=4,
+        num_elems=1,
+    )
+    cluster_async_body = codegen._gen_global_load_async_to_lds([], [], cluster_async)
+    global_async_body = codegen._gen_global_load_async_to_lds([], [], global_async)
+
+    assert 'd->request_force_l1_bypass = true;' in cluster_async_body
+    assert 'd->request_force_l1_bypass = true;' not in global_async_body
+
+
 def test_gfx1250_buffer_cmpswap_payload_width_is_independent_of_element_width():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(

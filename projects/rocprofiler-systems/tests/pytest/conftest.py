@@ -59,20 +59,19 @@ from rocprofsys import (
 # Key for storing the single test result on pytest items
 # Item-level stash keys
 _result_key: StashKey = StashKey()
-_subtest_failures_key: StashKey[list] = StashKey()
 _output_printed_key: StashKey[bool] = StashKey()
 _original_nodeid_key: StashKey[str] = StashKey()
 
-# Config-level stash keys
-_show_output_key: StashKey[bool] = StashKey()
-_show_on_subfail_key: StashKey[bool] = StashKey()
-
 # GNU convention. Used for CTests
 SKIP_RETURN_CODE = 77
-# Default timeout for tests in seconds
+
+# As test + subtests are collapsed into a single pytest, there is only one global timeout that the
+# ctest will use as reference.
+# The DEFAULT_TIMEOUT is used as the "run_test" timeout and
+# the CTEST_TIMEOUT_BUFFER is a fixed amount added to handle subtests + flush + teardown
+# CTests set their timeout to DEFAULT_TIMEOUT + CTEST_TIMEOUT_BUFFER
 DEFAULT_TIMEOUT = 300
-# Extra seconds added to pytest timeout in generated CTest (flush / teardown)
-CTEST_TIMEOUT_BUFFER = 30
+CTEST_TIMEOUT_BUFFER = 30  # Not overridable
 
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_CLASSES = {
@@ -104,16 +103,8 @@ KFD_MIN_SDK_VERSION: tuple[int, int, int] = (1, 2, 2)
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Add custom command-line options."""
     group = parser.getgroup("rocprofsys", "rocprofiler-systems test options")
-    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     group.addoption(
-        "--show-test-output",
-        action="store",
-        default="subtest",
-        choices=("none", "subtest", "all"),
-        help="Show runner output: 'none' (no output), 'subtest' (default, on failure only), or 'all' (always)",
-    )
-    group.addoption(
-        "--show-config-only",
+        "--show-config-only",  # Only used by "rocprofiler-systems-pytest-config" test
         action="store_true",
         default=False,
         help="Show the test configuration and exit without running any tests",
@@ -123,26 +114,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store",
         default=None,
         help="Set the test output directory (default: <build_dir>/rocprof-sys-pytest-output in build mode, /tmp/<user>/rocprof-sys-pytest-output in install mode)",
-    )
-    group.addoption(
-        "--num-processes",
-        action="store",
-        type=int,
-        default=2,
-        help="Set the number of processes to use for transpose MPI tests (default 2)",
-    )
-    group.addoption(
-        "--monochrome",
-        action="store_true",
-        default=False,
-        help="Runners use ROCPROFSYS_MONOCHROME=ON and pytest color output is disabled",
-    )
-    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-    group.addoption(
-        "--ci-mode",
-        action="store_true",
-        default=False,
-        help="Enable CI mode (developer flag : default: False)",
     )
     group.addoption(
         "--ctest-mode",
@@ -156,13 +127,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store",
         default=None,
         help="Path to write the CTest definitions file when in CTest generate mode (default: None)",
-    )
-    # TODO: Deprecate once TheRock switches to CTest
-    group.addoption(
-        "--dev",
-        action="store_true",
-        default=False,
-        help="Enables some QOL flags (developer flag : default off)",
     )
     group.addoption(
         "--python-versions",
@@ -181,10 +145,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers and configure pytest"""
 
-    configure_mode(config)
+    config.option.verbose = max(config.option.verbose, 1)  # -v
+    config.option.tbstyle = "short"  # --tb=short
+    config.option.no_header = True
+    config.option.reportchars += "s"  # -rs
 
     if config.getoption("--ctest-mode", default="off") == "cleanup":
-        _run_cleanup(config)
+        _run_cleanup()
         pytest.exit("Cleanup complete", returncode=0)
 
     if config.getoption("--show-config-only", default=False):
@@ -193,10 +160,6 @@ def pytest_configure(config: pytest.Config) -> None:
         for line in header:
             print(line)
         pytest.exit("Header generated", returncode=0)
-
-    is_monochrome = config.getoption("--monochrome", default=False)
-    if is_monochrome:
-        config.option.color = "no"
 
     # Disable pytest-timeout plugin if detected
     # It will interfere with our timeout marker
@@ -243,16 +206,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
-    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-    config.addinivalue_line(
-        "markers",
-        "ci_enable: Full test will be run when in CI mode. To disable a subtest, use ci_disable(name) (CI mode only)",
-    )
-    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-    config.addinivalue_line(
-        "markers",
-        "ci_disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest. Overrides ci_enable (CI mode only)",
-    )
     config.addinivalue_line(
         "markers",
         "mpi_implementation(implementation): mark test as requiring specific MPI implementation",
@@ -263,7 +216,7 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
-        "timeout(seconds): mark test as having a timeout of seconds",
+        "timeout(seconds): mark test as having a timeout of seconds (default: 300)",
     )
     # Used for CTest
     config.addinivalue_line(
@@ -287,7 +240,7 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
-        "rockoff: prevents the test from being run on TheRock",
+        "build_only: prevents the test from being run in install mode",  # TheRock CI runs in install mode
     )
 
     # See pytest_collection_modifyitems
@@ -369,28 +322,13 @@ def pytest_configure(config: pytest.Config) -> None:
         "selective_regions",
         "minimal",
         "rank_filter",
+        "pytest_impl",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
-    #
-    _show_test_output = config.getoption("--show-test-output", default="subtest")
-    config.stash[_show_output_key] = _show_test_output == "all"
-    config.stash[_show_on_subfail_key] = _show_test_output == "subtest"
 
     # Keep a module-level ref for hooks that don't receive config directly
     pytest._config_ref = config
-
-
-# ----------------------------------------------------------------------------
-# Session start hooks
-# ----------------------------------------------------------------------------
-
-
-# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-def pytest_report_header(config) -> list[str]:
-    if not config.getoption("--ci-mode", default=False):
-        return []
-    return _generate_rocprofsys_config_header()
 
 
 # ----------------------------------------------------------------------------
@@ -405,9 +343,9 @@ def pytest_generate_tests(metafunc):
         rocprof_config = get_rocprof_config()
         supported = set(rocprof_config.capabilities.supported_python_versions or [])
 
-        # When --python-versions is explicitly passed (e.g. from CTest),
-        # always parametrize with those exact versions so node IDs match.
-        # Unsupported versions are marked as skip.
+        # When --python-versions is explicitly passed, always parametrize
+        # with those exact versions so node IDs match.
+        # Unsupported versions are marked as "skip"
         pytest_config = getattr(pytest, "_config_ref", None)
         requested_str = (
             pytest_config.getoption("--python-versions", default=None)
@@ -437,11 +375,7 @@ def pytest_generate_tests(metafunc):
             )
 
 
-# ----------------------------------------------------------------------------
-# run_if_gpu_category: namespace for eval() (not an availability / skip reason helper)
-# ----------------------------------------------------------------------------
-
-
+# Used by the run_if_gpu_category marker
 def gpu_category_eval_context() -> dict[str, bool]:
     info = get_gpu_info()
     return {
@@ -511,26 +445,14 @@ def pytest_collection_modifyitems(config, items) -> None:
             base_modifications(item)
         return
 
-    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-    if config.getoption("--ci-mode", default=False):
-        selected_tests = []
-        deselected_tests = []
-        for item in items:
-            base_modifications(item)
-            disable_marker = item.get_closest_marker("ci_disable")
-            ci_disabled = disable_marker and "all" in disable_marker.args
-            if item.get_closest_marker("ci_enable") and not ci_disabled:
-                selected_tests.append(item)
-            else:
-                deselected_tests.append(item)
-        config.hook.pytest_deselected(items=deselected_tests)
-        items[:] = selected_tests
-        return
-
     # Marker checks
     # "Skip" markers are left for runtime evaluation
     for item in items:
         base_modifications(item)
+        if "build_only" in item.keywords and rocprof_config.is_installed:
+            item.add_marker(
+                pytest.mark.skip(reason="Test only runs in build mode (build_only)")
+            )
         if "gpu" in item.keywords:
             _msg = gpu_unavailable_reason()
             if _msg is not None:
@@ -672,23 +594,9 @@ def pytest_collection_modifyitems(config, items) -> None:
                         reason=f"Test requires atleast {num_gpu} GPUs but system has {info.device_count}"
                     )
                 )
-        # ----------------------------------------------------------------------------
-        # Deselect tests for CI mode (TheRock)
-        # Only tests explicitly marked with @pytest.mark.ci_enable are selected.
-        # Note that ci_disable("all") overrides ci_enable.
-        if config.getoption("--ci-mode", default=False) and not config.getoption(
-            "--allow-disabled", default=False
-        ):
-            disable_marker = item.get_closest_marker("ci_disable")
-            ci_disabled = disable_marker and "all" in disable_marker.args
-            if item.get_closest_marker("ci_enable") and not ci_disabled:
-                selected_tests.append(item)
-            else:
-                deselected_tests.append(item)
 
 
 def pytest_collection_finish(session):
-    """Generate CTest definitions after collection."""
     if session.config.getoption("--ctest-mode", default="off") == "generate":
         raw_path = session.config.getoption("--ctest-output-path", default=None)
         output_path = Path(raw_path) if raw_path else None
@@ -700,77 +608,82 @@ def pytest_collection_finish(session):
 # ----------------------------------------------------------------------------
 
 
-# TODO: Deprecate once TheRock switches to CTest
 @pytest.hookimpl(hookwrapper=True)  # Allows yield
 def pytest_runtest_makereport(item, call):
-    """Build runner output and attach to report."""
+    """
+    Attaches a "Runner Output" section to the call-phase report of the form:
+
+    =========================================
+    Command: <command>
+    Environment:
+    <environment>
+    =========================================
+    Test Output:
+    <test output>
+    =========================================
+    """
     outcome = yield
     rep = outcome.get_result()
 
     setattr(item, f"rep_{rep.when}", rep)
 
-    # Relevant flags
-    config = item.config
-    show_output_flag = config.stash.get(_show_output_key, False)
-    show_on_subfail_flag = config.stash.get(_show_on_subfail_key, False)
-
-    has_subtest_failures = len(item.stash.get(_subtest_failures_key, [])) > 0
-    show_runner_output = (show_output_flag and not rep.failed) or (
-        show_on_subfail_flag and has_subtest_failures
-    )
-
-    if (
-        rep.when != "call"
-        or item.stash.get(_output_printed_key, False)
-        or not (show_runner_output)
-    ):
+    if rep.when != "call" or item.stash.get(_output_printed_key, False):
         return
 
-    # A test should only call run_test once
-    result = item.stash.get(_result_key, None)
-    if not result:
+    item.stash[_output_printed_key] = True
+    test_result = item.stash.get(_result_key, None)
+    if test_result is None:
         return
 
-    output_parts = []
+    report_output = []
+    cmd = " ".join(str(c) for c in getattr(test_result, "command", []))
+    if cmd:
+        report_output.append(f"{'='*70}")
+        report_output.append(f"Command: {cmd}")
+    test_env = getattr(test_result, "environment", None)
+    if test_env:
+        env_lines = [f"  {k}={v}" for k, v in sorted(test_env.items())]
+        report_output.append("Environment:\n\n" + "\n".join(env_lines) + "\n")
+        report_output.append(f"{'='*70}")
+    test_output = getattr(test_result, "test_output", "")
+    extra_output = getattr(test_result, "extra_output", None)
+    if test_output or extra_output:
+        report_output.append("Test Output:\n")
+        if test_output:
+            report_output.append(test_output)
+        if extra_output:
+            report_output.append(extra_output)
+        report_output.append(f"{'='*70}")
 
-    # Build the output
-    if show_runner_output:
-        item.stash[_output_printed_key] = True
-        cmd = " ".join(str(c) for c in getattr(result, "command", []))
-        if cmd:
-            output_parts.append(f"{'='*70}")
-            output_parts.append(f"Command: {cmd}")
-        result_env = getattr(result, "environment", None)
-        if isinstance(result_env, dict) and result_env:
-            env_lines = [f"  {k}={v}" for k, v in sorted(result_env.items())]
-            output_parts.append("Environment:\n\n" + "\n".join(env_lines) + "\n")
-            output_parts.append(f"{'='*70}")
-        output_parts.append("Test Output:\n")
-        test_out = getattr(result, "test_output", "")
-        if test_out:
-            output_parts.append(test_out)
-
-    if not output_parts:
+    if not report_output:
         return
 
-    output_text = "\n".join(output_parts) + "\n\n"
-    rep.sections.append(("Runner Output", output_text))
+    rep.sections.append(("Runner Output", "\n".join(report_output) + "\n\n"))
 
 
-# TODO: Deprecate once TheRock switches to CTest
 def pytest_runtest_logreport(report):
-    """Handle output display for passing tests."""
-    # Determine if we should show runner output
+    """Print the runner output inline for passing tests in CTest run mode.
+
+    Failing tests already have their "Runner Output" section printed by pytest's
+    failure summary.
+    """
     config = getattr(pytest, "_config_ref", None)
-    show_output_flag = config.stash.get(_show_output_key, False) if config else False
-    if show_output_flag and report.when == "call" and report.passed:
-        terminal = config.pluginmanager.get_plugin("terminalreporter") if config else None
-        if terminal:
-            for section_name, section_content in report.sections:
-                if section_name == "Runner Output":
-                    terminal.write_line(f"\n--- {section_name} ---")
-                    for line in section_content.splitlines():
-                        terminal.write_line(line)
+    if config is None:
+        return
+    if config.getoption("--ctest-mode", default="off") != "run":
+        return
+    if report.when != "call" or not report.passed:
+        return
+
+    terminal = config.pluginmanager.get_plugin("terminalreporter")
+    if terminal is None:
+        return
+
+    for section_name, section_content in report.sections:
+        if section_name == "Runner Output":
+            terminal.write_line(f"\n--- {section_name} ---")
+            for line in section_content.splitlines():
+                terminal.write_line(line)
 
 
 # ----------------------------------------------------------------------------
@@ -866,14 +779,11 @@ def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     )
 
 
-# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
 def mpi_unavailable_reason(
     rocprof_config: RocprofsysConfig, config: pytest.Config
 ) -> Optional[str]:
     if rocprof_config.capabilities.mpiexec_exec is None:
         return "MPI not available"
-    if config.getoption("--ci-mode", default=False):
-        return "MPI tests are not run in --ci-mode"
     return None
 
 
@@ -1269,8 +1179,6 @@ def _ctest_generate_tests(
         "xfail",
         # Internal markers
         "python_versions",
-        "ci_enable",
-        "ci_disable",
         "mpi_optional",
         "no_docker",
         "oshrun_min_version",
@@ -1371,44 +1279,6 @@ def _ctest_generate_tests(
 # ----------------------------------------------------------------------------
 
 
-# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-def configure_mode(config: pytest.Config) -> None:
-    """Configure the mode based on the command line options.
-
-    Modes:
-     - --ci-mode: CI mode
-     - --ctest-mode: CTest integration mode
-     - --dev: Developer mode
-    """
-
-    # MPI is disabled in CI mode, this is done in collection_modifyit
-    ci_mode = config.getoption("--ci-mode", default=False)
-    ctest_mode = config.getoption("--ctest-mode", default="off") == "run"
-    dev_mode = config.getoption("--dev", default=False)
-
-    if ci_mode or ctest_mode:
-        config.option.verbose = max(config.option.verbose, 1)  # -v
-        config.option.tbstyle = "short"  # --tb=short
-        if "s" not in config.option.reportchars:  # -rs
-            config.option.reportchars += "s"
-
-    if ctest_mode:
-        config.option.no_header = True
-        config.option.show_test_output = "all"
-
-    if ci_mode:
-        config.option.show_config = True
-        config.option.show_test_output = "subtest"
-
-    if dev_mode:
-        config.option.show_config = True
-        config.option.show_test_output = "subtest"
-        config.option.verbose = max(config.option.verbose, 1)  # -v
-        config.option.tbstyle = "short"  # --tb=short
-        if "s" not in config.option.reportchars:  # -rs
-            config.option.reportchars += "s"
-
-
 def _standardize_test_name(
     item: pytest.Item, config: pytest.Config, verbose: bool = False
 ) -> None:
@@ -1420,12 +1290,10 @@ def _standardize_test_name(
         if test_name.startswith(("_", "-")):
             test_name = test_name[1:]
 
-    ctest_mode = config.getoption("--ctest-mode", default="off") in ("generate", "run")
     class_name = None
-    if ctest_mode:
-        name_marker = item.get_closest_marker("class_name")
-        if name_marker and name_marker.args:
-            class_name = str(name_marker.args[0]).strip()
+    name_marker = item.get_closest_marker("class_name")
+    if name_marker and name_marker.args:
+        class_name = str(name_marker.args[0]).strip()
 
     if class_name:
         full_name = f"{class_name}-{test_name}"
@@ -1438,19 +1306,11 @@ def _standardize_test_name(
         full_name = test_name
 
     formatted_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
-
-    if ctest_mode:
-        formatted_name = formatted_name.replace("_", "-")
-        while "--" in formatted_name:
-            formatted_name = formatted_name.replace("--", "-")
-        formatted_name = formatted_name.strip("-")
-        formatted_name = formatted_name.lower()
-    else:
-        # TODO: Deprecate once TheRock switches to CTests
-        formatted_name = formatted_name.replace("-", "_")
-        while "__" in formatted_name:
-            formatted_name = formatted_name.replace("__", "_")
-        formatted_name = formatted_name.strip("_")
+    formatted_name = formatted_name.replace("_", "-")
+    while "--" in formatted_name:
+        formatted_name = formatted_name.replace("--", "-")
+    formatted_name = formatted_name.strip("-")
+    formatted_name = formatted_name.lower()
 
     item.stash[_original_nodeid_key] = item.nodeid
     # nodeid is what is used to display the test name in the terminal
@@ -1749,7 +1609,7 @@ def get_gpu_info() -> GPUInfo:
     return detect_gpu(rocprof_config.rocm_path)
 
 
-def _run_cleanup(config: pytest.Config) -> None:
+def _run_cleanup() -> None:
     """Run cleanup of temp files and optionally the test output directory."""
     import glob
     import getpass
@@ -1904,12 +1764,6 @@ def timemory_env(base_env: dict[str, str]) -> dict[str, str]:
 
 
 @pytest.fixture(scope="session")
-def num_processes(request) -> int:
-    """Get the number of processes for the test."""
-    return request.config.getoption("--num-processes", default=2)
-
-
-@pytest.fixture(scope="session")
 def get_test_num_threads(rocprof_config) -> int:
     """Get the number of threads for the test."""
     num_threads = rocprof_config.capabilities.num_procs + (
@@ -1957,38 +1811,11 @@ def validation_rules_dir(rocprof_config) -> Path:
 
 
 @pytest.fixture(scope="module")
-def test_output_base(rocprof_config, request) -> Path:
+def test_output_base(rocprof_config) -> Path:
     """Base directory for test outputs"""
     output_dir = rocprof_config.test_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
-
-
-# TODO: Deprecate once TheRock switches to CTest
-@pytest.fixture(scope="module", autouse=True)
-def cleanup_module_temp_files(request: pytest.FixtureRequest):
-    """Module-scoped cleanup that runs AFTER each test module completes.
-
-    Execution Order:
-        1. Module starts
-        2. All tests in module run (with their validations)
-        3. Module ends
-        4. This cleanup runs (after yield)
-
-    Cleans up instrumented binaries and intermediate files created during module tests.
-    This does NOT interfere with individual test validations.
-    """
-    yield  # All tests in module run here
-
-    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
-        return
-
-    import glob
-
-    if not request.config.getoption("--ctest-mode", default="off") == "run":
-        for pattern in ["/tmp/buffered_storage*.bin", "/tmp/metadata*.json"]:
-            for filepath in glob.glob(pattern):
-                safe_remove(Path(filepath))
 
 
 # ----------------------------------------------------------------------------
@@ -2139,36 +1966,10 @@ def apply_rocpd_marker(request):
     env["ROCPROFSYS_USE_ROCPD"] = "ON"
 
 
-# This is needed for pytest-subtests plugin compatibility when pytest < 9.0.0
-@pytest.fixture
-def record_subtest_failure(request):
-    """Fixture to record subtest failures for --show-output-on-subtest-fail.
-
-    Used by assert fixtures to track failures with pytest-subtests plugin.
-    """
-
-    def _record(name: str):
-        request.node.stash.setdefault(_subtest_failures_key, []).append(name)
-
-    return _record
-
-
-# TODO: Will be default once TheRock switches to CTest based filtering
 def _print_subtest_output(request, subtest_name: str, output: str) -> None:
     """Print subtest validation output for important subtests when in CTest run mode."""
     if request.config.getoption("--ctest-mode", default="off") == "run" and output:
         print(f"\n--- {subtest_name} ---\n{output}\n", flush=True)
-
-
-# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-def _is_assert_disabled(request: pytest.FixtureRequest, subtest_name: str) -> bool:
-    """Check if a subtest is disabled via ci_disable marker in CI mode."""
-    if not request.config.getoption("--ci-mode", default=False):
-        return False
-    for marker in request.node.iter_markers("ci_disable"):
-        if subtest_name in marker.args:
-            return True
-    return False
 
 
 # Contains a set of kwargs accepted for a given (function, mode) pair.
@@ -2360,10 +2161,6 @@ def run_test(
 
         env = env.copy() if env else {}
 
-        # Apply --monochrome option if set
-        if request.config.getoption("--monochrome", default=False):
-            env["ROCPROFSYS_MONOCHROME"] = "ON"
-
         # Timeout: ROCPROFSYS_CI_TIMEOUT env, else @pytest.mark.timeout, else default
         ci_timeout_env = os.environ.get("ROCPROFSYS_CI_TIMEOUT")
         if ci_timeout_env is not None:
@@ -2403,48 +2200,16 @@ def run_test(
 
         result = runner.run()
         collect_result(result)
-        output = (
-            f"{result.test_output}\n{result.extra_output}"
-            if result.extra_output
-            else result.test_output
-        )
 
         if not result.success and not fail_on_pass:
             short_msg = fail_message or f"{runner_type} test failed"
-            ctest_mode = request.config.getoption("--ctest-mode", default="off")
-
-            cmd_str = " ".join(str(c) for c in getattr(result, "command", []))
-            env_dict = getattr(result, "environment", {})
-            env_str = (
-                "\n".join(f"  {k}={v}" for k, v in sorted(env_dict.items()))
-                if env_dict
-                else ""
-            )
-
-            details = []
-            if cmd_str:
-                details.append(f"Command: {cmd_str}")
-            if env_str:
-                details.append(f"Environment:\n{env_str}")
-            details.append(f"Runner Output:\n{output}")
-            detail_text = "\n\n".join(details)
-
-            # TODO: This will be made the standard once TheRock switches to CTest
-            if ctest_mode == "run":
-                # Print details to stdout (captured by CTest) and fail with
-                # a short message to avoid the same output appearing twice.
-                print(f"\n{detail_text}", flush=True)
-                msg = short_msg
-            else:
-                msg = f"{short_msg}\n\n{detail_text}"
-
             if skip_on_error:
-                pytest.skip(msg)
+                pytest.skip(short_msg)
             else:
-                pytest.fail(msg)
+                pytest.fail(short_msg)
 
         if fail_on_pass and result.success:
-            pytest.fail(f"{runner_type} test passed unexpectedly: {result.test_output}")
+            pytest.fail(f"{runner_type} test passed unexpectedly")
 
         return result
 
@@ -2452,7 +2217,7 @@ def run_test(
 
 
 @pytest.fixture
-def assert_regex(subtests, record_subtest_failure, request):
+def assert_regex(subtests):
     """Fixture that returns an assert_regex function.
 
     Args:
@@ -2467,8 +2232,6 @@ def assert_regex(subtests, record_subtest_failure, request):
         fail_message: Custom message for failure (defaults to validation message)
         **kwargs: Mode-specific regexes (see _FUNCTION_ALLOWED_KWARGS for valid kwargs)
     """
-    if _is_assert_disabled(request, "assert_regex"):
-        return lambda *args, **kwargs: None
 
     def _assert_regex(
         result: TestResult,
@@ -2508,17 +2271,14 @@ def assert_regex(subtests, record_subtest_failure, request):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
 
     return _assert_regex
 
 
 @pytest.fixture
-def assert_file_regex(subtests, record_subtest_failure, request):
+def assert_file_regex(subtests):
     """Variant of assert_regex that validates against a file."""
-    if _is_assert_disabled(request, "assert_file_regex"):
-        return lambda *args, **kwargs: None
 
     def _assert_file_regex(
         file_path: Path,
@@ -2544,16 +2304,13 @@ def assert_file_regex(subtests, record_subtest_failure, request):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
 
     return _assert_file_regex
 
 
 @pytest.fixture
-def assert_perfetto(
-    subtests, tests_dir, record_subtest_failure, request, test_output_dir
-):
+def assert_perfetto(subtests, tests_dir, request, test_output_dir):
     """Fixture that returns an assert_perfetto function.
 
     Trace validation kwargs (``categories``, ``labels``, ``counts``, ``depths``,
@@ -2568,8 +2325,6 @@ def assert_perfetto(
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    if _is_assert_disabled(request, "assert_perfetto"):
-        return lambda *args, **kwargs: None
 
     def _assert_perfetto(
         result: TestResult,
@@ -2602,7 +2357,6 @@ def assert_perfetto(
             else:
                 perfetto = result.perfetto_file
             if not perfetto.exists():
-                record_subtest_failure(subtest_name)
                 pytest.fail(f"Perfetto trace file {perfetto} not found")
 
             validation = validate_perfetto_trace(
@@ -2627,19 +2381,16 @@ def assert_perfetto(
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
             if pass_regex:
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Pass regex not found: {pattern}\n{output}", pytrace=False
                         )
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
@@ -2649,7 +2400,7 @@ def assert_perfetto(
 
 
 @pytest.fixture
-def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
+def assert_rocpd(subtests, tests_dir, request):
     """Fixture that returns an assert_rocpd function.
 
     Must be used with @pytest.mark.rocpd("<env fixture name>")
@@ -2663,8 +2414,6 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         gpu_category_to_skip: GPU categories to skip tagged validation queries for
             (instinct, radeon, apu). Omit or pass empty to run all queries
     """
-    if _is_assert_disabled(request, "assert_rocpd"):
-        return lambda *args, **kwargs: None
 
     def _assert_rocpd(
         result: TestResult,
@@ -2682,14 +2431,12 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                 pytest.skip("ROCpd is disabled")
             rocpd_file = result.rocpd_file
             if rocpd_file is None:
-                record_subtest_failure(subtest_name)
                 pytest.fail("ROCpd database not created")
 
             existing_rules = None
             if rules_files is not None:
                 existing_rules = [r for r in rules_files if r.exists()]
                 if not existing_rules:
-                    record_subtest_failure(subtest_name)
                     pytest.fail("No validation rules found")
 
             validation = validate_rocpd_database(
@@ -2705,19 +2452,16 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
             if pass_regex:
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Pass regex not found: {pattern}\n{output}", pytrace=False
                         )
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
@@ -2727,7 +2471,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
 
 
 @pytest.fixture
-def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
+def assert_timemory(subtests, tests_dir, request):
     """Fixture that returns an assert_timemory function.
 
     Args not from validate_timemory_json:
@@ -2737,8 +2481,6 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    if _is_assert_disabled(request, "assert_timemory"):
-        return lambda *args, **kwargs: None
 
     def _assert_timemory(
         result: TestResult,
@@ -2758,7 +2500,6 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
         with subtests.test(subtest_name):
             timemory_file = result.output_dir / file_name
             if not timemory_file.exists():
-                record_subtest_failure(subtest_name)
                 pytest.fail(f"Timemory file not found: {timemory_file}")
             validation = validate_timemory_json(
                 json_path=timemory_file,
@@ -2776,19 +2517,16 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
             if pass_regex:
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Pass regex not found: {pattern}\n{output}", pytrace=False
                         )
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
@@ -2798,7 +2536,7 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
 
 
 @pytest.fixture
-def assert_file_exists(subtests, record_subtest_failure, request):
+def assert_file_exists(subtests):
     """Fixture that returns an assert_file_exists function.
 
     Args not from validate_file_exists:
@@ -2806,8 +2544,6 @@ def assert_file_exists(subtests, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    if _is_assert_disabled(request, "assert_file_exists"):
-        return lambda *args, **kwargs: None
 
     def _assert_file_exists(
         path: Path | list[Path],
@@ -2828,17 +2564,14 @@ def assert_file_exists(subtests, record_subtest_failure, request):
                     if skip_on_fail:
                         pytest.skip(msg)
                     else:
-                        record_subtest_failure(subtest_name)
                         pytest.fail(msg)
 
     return _assert_file_exists
 
 
 @pytest.fixture
-def assert_unified_memory_output(subtests, tests_dir, record_subtest_failure, request):
+def assert_unified_memory_output(subtests, tests_dir, request):
     """Fixture that returns an assert_unified_memory_output function."""
-    if _is_assert_disabled(request, "assert_unified_memory_output"):
-        return lambda *args, **kwargs: None
 
     def _assert_unified_memory_output(
         result: TestResult,
@@ -2861,12 +2594,10 @@ def assert_unified_memory_output(subtests, tests_dir, record_subtest_failure, re
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
             if pass_regex:
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Pass regex not found: {pattern}\n{output}",
                             pytrace=False,
@@ -2874,7 +2605,6 @@ def assert_unified_memory_output(subtests, tests_dir, record_subtest_failure, re
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}",
                             pytrace=False,
@@ -2885,7 +2615,7 @@ def assert_unified_memory_output(subtests, tests_dir, record_subtest_failure, re
 
 
 @pytest.fixture
-def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
+def assert_causal_json(subtests, tests_dir, request):
     """Fixture that returns an assert_causal_json function.
 
     Args not from validate_causal_json:
@@ -2894,8 +2624,6 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    if _is_assert_disabled(request, "assert_causal_json"):
-        return lambda *args, **kwargs: None
 
     def _assert_causal_json(
         result: TestResult,
@@ -2912,7 +2640,6 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
         with subtests.test(subtest_name):
             causal_file = result.output_dir / file_name
             if not causal_file.exists():
-                record_subtest_failure(subtest_name)
                 pytest.fail(f"Causal JSON file not found: {causal_file}")
 
             validation = validate_causal_json(
@@ -2931,13 +2658,11 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
 
             if pass_regex:
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Pass regex not found: {pattern}\n{output}", pytrace=False
                         )
@@ -2945,7 +2670,6 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
-                        record_subtest_failure(subtest_name)
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
