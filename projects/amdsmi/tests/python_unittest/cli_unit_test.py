@@ -70,6 +70,11 @@ class TestAmdSmiCli(unittest.TestCase):
         cls.PermissionDenied = 203
         cls.UnknownError = 255
 
+        cls.openBracket = "["
+        cls.closeBracket = "]"
+        cls.openCurlyBrace = "{"
+        cls.closeCurlyBrace = "}"
+
         # Record starting values; running here (once per class) rather than in
         # __init__ (once per test method) reduces setup overhead from O(N) to
         # O(1) — N being the number of test methods in this class.
@@ -152,11 +157,6 @@ class TestAmdSmiCli(unittest.TestCase):
         #      2: from amdsmi.h, AMDSMI_STATUS_NOT_SUPPORTED
         #    199: from amd-smi,  AmdSmiCommandNotSupportedException
         self.not_supported_error_codes = [2, 199]
-
-        self.openBracket = "["
-        self.closeBracket = "]"
-        self.openCurlyBrace = "{"
-        self.closeCurlyBrace = "}"
 
         self.monitor_args = "--power-usage --temperature --base-board-temps --gpu-board-temps --gfx --mem --encoder --decoder --ecc --vram-usage --pcie"
 
@@ -323,8 +323,8 @@ class TestAmdSmiCli(unittest.TestCase):
                 }
             )
             if not exclude:
-                data["vram_free"] = None
-                data["vram_total"] = None
+                data[i]["vram_free"] = None
+                data[i]["vram_total"] = None
             # Find the larger of the two amounts
             if metric is not None:
                 total_gtt = int(metric["gpu_data"][i]["mem_usage"]["total_gtt"]["value"])
@@ -761,7 +761,7 @@ class TestAmdSmiCli(unittest.TestCase):
                         limit_type = "MIN"
                         clk_limit_name = "max_clk"
                     clk_type_limit_name = clock[clk_type_name][clk_limit_name]
-                    if type(clk_type_limit_name) is dict:
+                    if isinstance(clk_type_limit_name, dict):
                         value = clk_type_limit_name["value"]
                         cmd = cmd.replace(nameStr, f"{clk_type} {limit_type} {value}", 1)
                     else:
@@ -785,13 +785,13 @@ class TestAmdSmiCli(unittest.TestCase):
                         bus = self.static_data["gpu_data"][gpu_index]["bus"]
                         clk_type = "PCIE"
                         pcie_levels = bus["pcie_levels"]
-                        if type(pcie_levels) is dict:
+                        if isinstance(pcie_levels, dict):
                             value = len(pcie_levels)
                             if value > 0:
                                 value = 0
                     if clk_type != "PCIE" and value < 0:
                         clk_type_name = clock[clk_type_name]
-                        if type(clk_type_name) is dict:
+                        if isinstance(clk_type_name, dict):
                             current_level = clk_type_name["current_level"]
                             freq_levels = clk_type_name["frequency_levels"]
                             if current_level == 0:
@@ -804,7 +804,7 @@ class TestAmdSmiCli(unittest.TestCase):
                         cmd = ""
                 elif nameStr == "{soc_pstate}":
                     soc_pstate = self.static_data["gpu_data"][gpu_index]["soc_pstate"]
-                    if type(soc_pstate) is dict:
+                    if isinstance(soc_pstate, dict):
                         num_supported = int(soc_pstate["num_supported"])
                         if num_supported > 0:
                             current = int(soc_pstate["current_id"])
@@ -819,7 +819,7 @@ class TestAmdSmiCli(unittest.TestCase):
                         cmd = ""
                 elif nameStr == "{xgmi_plpd}":
                     xgmi_plpd = self.static_data["gpu_data"][gpu_index]["xgmi_plpd"]
-                    if type(xgmi_plpd) is dict:
+                    if isinstance(xgmi_plpd, dict):
                         num_supported = int(xgmi_plpd["num_supported"])
                         if num_supported > 0:
                             current = int(xgmi_plpd["current_id"])
@@ -1044,7 +1044,7 @@ class TestAmdSmiCli(unittest.TestCase):
             (f"{self.amd_smi_exe} set", self.FAIL),
             (f"{self.amd_smi_exe} set --fan", self.FAIL),
             (f"{self.amd_smi_exe} set --fan 500", self.FAIL),
-            (f"{self.amd_smi_exe} set --fan 150%", self.FAIL),
+            # (f"{self.amd_smi_exe} set --fan 150%", self.FAIL),  #TODO requires y/n answer
             (f"{self.amd_smi_exe} set --perf-level", self.FAIL),
             (f"{self.amd_smi_exe} set --perf-level INVALID", self.FAIL),
             (f"{self.amd_smi_exe} set --profile", self.FAIL),
@@ -1066,6 +1066,7 @@ class TestAmdSmiCli(unittest.TestCase):
             (f"{self.amd_smi_exe} set --clk-limit MCLK INVALID", self.FAIL),
             (f"{self.amd_smi_exe} set --clk-limit SCLK MIN", self.FAIL),
             (f"{self.amd_smi_exe} set --clk-limit MCLK MAX", self.FAIL),
+            (f"{self.amd_smi_exe} set --clk-level", self.FAIL),
             (f"{self.amd_smi_exe} set --clk-level SCLK", self.FAIL),
             (f"{self.amd_smi_exe} set --clk-level SCLK INVALID", self.FAIL),
             (f"{self.amd_smi_exe} set --clk-level MCLK", self.FAIL),
@@ -1093,7 +1094,7 @@ class TestAmdSmiCli(unittest.TestCase):
             (f"{self.amd_smi_exe} monitor --watch_time 2 --watch 1", self.FAIL),
         ]
 
-        for index, gpu in enumerate(self.common.processors):
+        for index, _ in enumerate(self.common.processors):
             # Test invalid power-cap values
             cmds.append((f"{self.amd_smi_exe} set --power-cap --gpu {index}", self.FAIL))
             for power_type in self.power_types:
@@ -1289,7 +1290,7 @@ class TestAmdSmiCli(unittest.TestCase):
         # TODO allow set commands to be executed
         if not self.PrintCmdsOnly:
             if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs input"
+                msg = f"{self.tab}Needs input from User"
                 # self.common.print(msg)
                 self.skipTest(msg)
 
@@ -1606,7 +1607,7 @@ class TestAmdSmiCli(unittest.TestCase):
         time_stamp = time.monotonic()
         if self.Debug:
             print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
-        q.put(time_stamp)
+            q.put(time_stamp)
 
         # Get monitor data
         cmd = f"{self.amd_smi_exe} monitor {self.monitor_args} --json"
@@ -1632,7 +1633,7 @@ class TestAmdSmiCli(unittest.TestCase):
         time_stamp = time.monotonic()
         if self.Debug:
             print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
-        q.put(time_stamp)
+            q.put(time_stamp)
 
         # Get metric data
         cmd = f"{self.amd_smi_exe} metric --json"
@@ -1661,12 +1662,6 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi monitor workload"
         self.common.print(msg)
 
-        if not self.PrintCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs Testing, Not Yet Implemented"
-                self.common.print(msg)
-                self.skipTest(msg)
-
         # Setup queue between processes
         q = multiprocessing.Queue()
 
@@ -1682,9 +1677,9 @@ class TestAmdSmiCli(unittest.TestCase):
         p1.start()
         # Send time_stamp
         time_stamp = time.monotonic()
-        q.put(time_stamp)
         if self.Debug:
             print(f"{time_stamp} Producer pid={os.getpid()} Sending rvs")
+            q.put(time_stamp)
 
         # Get monitor data under workload
         time.sleep(2)
@@ -1698,10 +1693,9 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Receive process data and time_stamp
         process_data = q.get()
+        process_time_stamp = q.get()
         if verbose == common.VERBOSITY_VERBOSE:
             print(process_data)
-        process_time_stamp = q.get()
-        if self.Debug:
             print(f"Producer pid={os.getpid()}  _process: {process_time_stamp}")
         p1.join()
 
