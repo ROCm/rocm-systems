@@ -224,17 +224,22 @@ struct category_region
         }
     }
 
+    // A serialized record is four delimiter-terminated fields: idx;;type;;name;;value;;
+    static constexpr std::size_t fields_per_record = 4;
+
     // Renumber the arg_number field of every record in args_str so that the first
     // record becomes next_idx, the second next_idx+1, and so on. Returns the number
     // of records that were renumbered
     static std::uint32_t renumber_serialized_args(std::string&  args_str,
                                                   std::uint32_t next_idx)
     {
-        constexpr std::string_view delim             = rocprofsys::ARG_DELIMITER;
-        constexpr std::size_t      fields_per_record = 4;  // idx, type, name, value
+        constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
+
+        // each renumbered idx field can grow by a few digits; reserve a little slack
+        constexpr std::size_t renumber_growth_slack = 16;
 
         std::string out;
-        out.reserve(args_str.size() + 16);
+        out.reserve(args_str.size() + renumber_growth_slack);
 
         std::uint32_t count       = 0;
         std::size_t   field_start = 0;
@@ -263,29 +268,33 @@ struct category_region
         return count;
     }
 
-    // Index the next appended record should use, i.e. the count of records already
-    // present
+    // Index the next appended record should use: the last record's idx field + 1.
+    // This is the record count only when the records are numbered contiguously from
+    // zero; after a renumber to a non-zero base it continues from the last idx.
     static std::uint32_t next_arg_index(const std::string& args_str)
     {
         if(args_str.empty()) return 0;
 
         constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
 
-        // Less than 5 delimiters means last record is the first one and starts at offset
-        // 0
+        // Step back over the trailing delimiter plus the last record's fields to find
+        // where its idx field begins. Fewer than that many delimiters means there is a
+        // single record starting at offset 0.
+        constexpr std::size_t delims_to_last_record = fields_per_record + 1;
+
         std::size_t record_start = 0;
         std::size_t search_end   = std::string::npos;
-        for(int i = 0; i < 5; ++i)
+        for(std::size_t i = 0; i < delims_to_last_record; ++i)
         {
-            const std::size_t p = args_str.rfind(delim, search_end);
-            if(p == std::string::npos) break;
-            if(i == 4)
+            const std::size_t pos = args_str.rfind(delim, search_end);
+            if(pos == std::string::npos) break;
+            if(i == fields_per_record)
             {
-                record_start = p + delim.size();
+                record_start = pos + delim.size();
                 break;
             }
-            if(p == 0) break;
-            search_end = p - 1;
+            if(pos == 0) break;
+            search_end = pos - 1;
         }
 
         std::uint32_t idx = 0;
@@ -508,7 +517,7 @@ struct category_region : comp::base<category_region<CategoryT>, void>
     static void start_with_args(std::string_view name, std::string serialized_args);
 
     // Appends pre-serialized args to the currently-open region with this name.
-    // Used by the gotcha audit and perfetto-annotation paths
+    // Used by the gotcha audit paths
     static void append_cache_args(std::string_view name, std::string serialized_args);
 
 private:
