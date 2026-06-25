@@ -13,6 +13,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <tuple>
@@ -72,7 +73,7 @@ renumber_serialized_args(std::string& args_str, std::uint32_t next_idx)
     return region_cache::renumber_serialized_args(args_str, next_idx);
 }
 
-inline std::uint32_t
+inline std::optional<std::uint32_t>
 next_arg_index(const std::string& args_str)
 {
     return region_cache::next_arg_index(args_str);
@@ -227,6 +228,32 @@ TEST(category_region_serialization, serialize_name_value_pairs_invalid_returns_e
     EXPECT_TRUE(serialize_name_value_pairs(1, 2).empty());    // non-string name slot
 }
 
+// An argument value that itself contains the field delimiter ";;" must not corrupt
+// the wire format: it should round-trip back as a single record whose value is
+// preserved verbatim.
+TEST(category_region_serialization, serialize_name_value_pairs_value_with_delimiter)
+{
+    auto args = parse(serialize_name_value_pairs("path", "a;;b"));
+    ASSERT_EQ(args.size(), 1u);
+    EXPECT_EQ(args[0].arg_number, 0u);
+    EXPECT_EQ(args[0].arg_name, "path");
+    EXPECT_EQ(args[0].arg_value, "a;;b");
+}
+
+// The escape character itself ('%') and a bare ';' must also survive the round-trip so
+// the encoding is lossless, not merely delimiter-safe.
+TEST(category_region_serialization, serialize_name_value_pairs_value_with_escape_chars)
+{
+    auto args = parse(serialize_name_value_pairs("a", std::string{ "50%;done" }, "b",
+                                                 std::string{ "x%3By" }));
+    ASSERT_EQ(args.size(), 2u);
+    EXPECT_EQ(args[0].arg_name, "a");
+    EXPECT_EQ(args[0].arg_value, "50%;done");
+    EXPECT_EQ(args[1].arg_name, "b");
+    // a value that already looks like an escape sequence must not be double-decoded
+    EXPECT_EQ(args[1].arg_value, "x%3By");
+}
+
 // ---------------------------------------------------------------------------------------
 // renumber_serialized_args
 // ---------------------------------------------------------------------------------------
@@ -274,6 +301,13 @@ TEST(category_region_serialization, next_arg_index)
     auto renumbered = serialize_name_value_pairs("a", 1, "b", 2);
     renumber_serialized_args(renumbered, 5);  // -> indices 5, 6
     EXPECT_EQ(next_arg_index(renumbered), 7u);
+}
+
+TEST(category_region_serialization, next_arg_index_malformed_returns_nullopt)
+{
+    // the leading idx field of the last record is not a number -> cannot continue
+    // numbering, so the index is reported as absent rather than guessed
+    EXPECT_FALSE(next_arg_index("notanumber;;string;;name;;value;;").has_value());
 }
 
 // ---------------------------------------------------------------------------------------
@@ -448,6 +482,27 @@ TEST(category_region_cache, append_cache_args_noop_without_open_entry)
     append_cache_args<category_t>(name, std::string{});
     EXPECT_TRUE(map_name_to_args[key].back().args.empty());
     EXPECT_EQ(parse(map_name_to_args[key].back().args).size(), 0u);
+
+    map_name_to_args.clear();
+}
+
+TEST(category_region_cache, append_cache_args_drops_batch_when_existing_args_malformed)
+{
+    using category_t = rocprofsys::category::host;
+    const char* name = "malformed_region";
+    entry_key   key{ name, rocprofsys::trait::name<category_t>::value };
+
+    map_name_to_args.clear();
+    // open entry whose existing args have a non-numeric leading idx field: the next
+    // index cannot be determined, so a subsequent append must be dropped rather than
+    // produce colliding indices.
+    const std::string malformed = "bad;;string;;x;;1;;";
+    map_name_to_args[key].push_back(pending_cache_entry{ 0, malformed });
+
+    append_cache_args<category_t>(name, serialize_name_value_pairs("b", 2));
+
+    // the existing (malformed) args are left untouched and the new batch is not appended
+    EXPECT_EQ(map_name_to_args[key].back().args, malformed);
 
     map_name_to_args.clear();
 }

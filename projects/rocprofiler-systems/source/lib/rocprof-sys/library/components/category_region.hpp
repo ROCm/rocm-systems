@@ -21,6 +21,8 @@
 #include <charconv>
 #include <concepts>
 #include <map>
+#include <optional>
+#include <system_error>
 #include <thread>
 #include <timemory/components/gotcha/backends.hpp>
 #include <timemory/hash/types.hpp>
@@ -72,6 +74,17 @@ struct pending_cache_entry
 // A type qualifies as a trace-cache argument "name" slot when it is string-like
 template <typename Tp>
 concept trace_cache_arg_name = std::convertible_to<std::decay_t<Tp>, std::string_view>;
+
+// The trace-cache record layout
+using rocprofsys::fields_per_record;
+
+// To reach the start of the last record we step back over the trailing delimiter plus
+// that record's fields_per_record fields. Fewer than this many delimiters means there is
+// a single record starting at offset 0.
+inline constexpr std::size_t delims_to_last_record = fields_per_record + 1;
+
+// Each renumbered idx field can grow by a few digits
+inline constexpr std::size_t renumber_growth_slack = 16;
 
 struct wall_clock_source
 {
@@ -230,11 +243,10 @@ struct category_region
     static std::uint32_t renumber_serialized_args(std::string&  args_str,
                                                   std::uint32_t next_idx)
     {
-        constexpr std::string_view delim             = rocprofsys::ARG_DELIMITER;
-        constexpr std::size_t      fields_per_record = 4;  // idx, type, name, value
+        constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
 
         std::string out;
-        out.reserve(args_str.size() + 16);
+        out.reserve(args_str.size() + renumber_growth_slack);
 
         std::uint32_t count       = 0;
         std::size_t   field_start = 0;
@@ -263,23 +275,23 @@ struct category_region
         return count;
     }
 
-    // Index the next appended record should use, i.e. the count of records already
-    // present
-    static std::uint32_t next_arg_index(const std::string& args_str)
+    // Index the next appended record should use, i.e. the last record's index + 1.
+    // Returns std::nullopt when the wire string is malformed
+    static std::optional<std::uint32_t> next_arg_index(const std::string& args_str)
     {
-        if(args_str.empty()) return 0;
+        if(args_str.empty()) return 0u;
 
         constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
 
-        // Less than 5 delimiters means last record is the first one and starts at offset
-        // 0
+        // Fewer than delims_to_last_record delimiters means the last record is the
+        // first one and starts at offset 0
         std::size_t record_start = 0;
         std::size_t search_end   = std::string::npos;
-        for(int i = 0; i < 5; ++i)
+        for(std::size_t i = 0; i < delims_to_last_record; ++i)
         {
             const std::size_t p = args_str.rfind(delim, search_end);
             if(p == std::string::npos) break;
-            if(i == 4)
+            if(i == fields_per_record)
             {
                 record_start = p + delim.size();
                 break;
@@ -288,9 +300,17 @@ struct category_region
             search_end = p - 1;
         }
 
-        std::uint32_t idx = 0;
-        std::from_chars(args_str.data() + record_start, args_str.data() + args_str.size(),
-                        idx);
+        std::uint32_t   idx = 0;
+        const std::errc ec  = std::from_chars(args_str.data() + record_start,
+                                              args_str.data() + args_str.size(), idx)
+                                 .ec;
+        if(ec != std::errc{})
+        {
+            LOG_WARNING("[category_region] next_arg_index: malformed record index in "
+                        "\"{}\"; dropping args",
+                        args_str);
+            return std::nullopt;
+        }
         return idx + 1;
     }
 
@@ -354,7 +374,11 @@ struct category_region
             }
             else
             {
-                renumber_serialized_args(args_str, next_arg_index(entry.args));
+                const auto next_idx = next_arg_index(entry.args);
+                // Existing args are malformed: drop this batch
+                if(!next_idx) return;
+
+                renumber_serialized_args(args_str, *next_idx);
                 entry.args += std::move(args_str);
             }
         }
@@ -508,7 +532,7 @@ struct category_region : comp::base<category_region<CategoryT>, void>
     static void start_with_args(std::string_view name, std::string serialized_args);
 
     // Appends pre-serialized args to the currently-open region with this name.
-    // Used by the gotcha audit and perfetto-annotation paths
+    // Used by the gotcha audit paths
     static void append_cache_args(std::string_view name, std::string serialized_args);
 
 private:
