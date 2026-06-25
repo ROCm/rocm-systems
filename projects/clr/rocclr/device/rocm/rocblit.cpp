@@ -2845,6 +2845,20 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
     if (!hsaCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
+      // Swap ops cannot fall back to shader copy (it only does one-directional
+      // copy, not a bidirectional swap). Fail the entire batch if any swap op
+      // was in the SDMA batch that failed.
+      bool hasSwap = false;
+      for (const auto& op : p2pCopyOps) {
+        if (op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
+          hasSwap = true;
+          break;
+        }
+      }
+      if (hasSwap) {
+        LogError("KernelBlitManager::copyBufferBatch: SDMA batch with swap ops failed");
+        return false;
+      }
       LogWarning(
           "KernelBlitManager::copyBufferBatch: Batch copy failed, falling back to copyBuffer");
       d2dCopyOps.insert(d2dCopyOps.end(), p2pCopyOps.begin(), p2pCopyOps.end());

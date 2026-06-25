@@ -161,7 +161,7 @@ extract_pc_sampling_config_prefer(rocprofiler_pc_sampling_method_t method,
 
     const rocprofiler_pc_sampling_configuration_t* first_preferred_method_config = nullptr;
     const rocprofiler_pc_sampling_configuration_t* first_remained_method_config  = nullptr;
-    // Search until encountering the prefered method configuration, if any.
+    // Search until encountering the preferred method configuration, if any.
     // Otherwise, use what remained.
     for(auto const& cfg : configs)
     {
