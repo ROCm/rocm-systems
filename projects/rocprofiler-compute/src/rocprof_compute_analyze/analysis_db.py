@@ -800,45 +800,46 @@ class db_analysis(OmniAnalyze_Base):
             for panel_config in arch_config.panel_configs.values():
                 table_names_map[panel_config["id"]] = panel_config["title"]
                 for source in panel_config["data source"]:
-                    table = next(iter(source.values()))
-                    table_names_map[table["id"]] = table["title"]
+                    for table in source.values():
+                        table_names_map[table["id"]] = table["title"]
 
-            # Build metric info and expression rows. Compute table-level fields
-            # (table_name, sub_table_name, value_columns) once per table.
-            metric_info_rows: list[MetricInfoRow] = []
-            expression_rows: list[ExpressionRow] = []
-            for table_id, metric_df in arch_config.dfs.items():
-                if table_id == 402:
-                    continue
-                if not set(metric_df.columns).intersection({"Metric", "Channel"}):
-                    continue
-                table_name = table_names_map[table_id // 100 * 100]
-                sub_table_name = table_names_map[table_id]
-                value_columns = [
-                    col
-                    for col in metric_df.columns
-                    if col not in non_expression_columns
-                ]
-                for metric_id, row in metric_df.iterrows():
-                    metric_info_rows.append(
-                        MetricInfoRow(
-                            name=row.get("Metric") or row["Channel"].strip(),
-                            metric_id=metric_id,
-                            description=row.get("Description"),
-                            unit=row.get("Unit"),
-                            pct_of_peak=row.get("Percent of Peak") is True,
-                            table_name=table_name,
-                            sub_table_name=sub_table_name,
-                        )
-                    )
-                    for value_name in value_columns:
-                        expression_rows.append(
-                            ExpressionRow(
-                                metric_id=metric_id,
-                                value_name=value_name,
-                                value=row[value_name].strip(),
-                            )
-                        )
+            # Collect metric tables with table-level fields (table_name,
+            # sub_table_name, value_columns) and rows computed once per table.
+            metric_tables = [
+                (
+                    table_names_map[table_id // 100 * 100],
+                    table_names_map[table_id],
+                    [c for c in metric_df.columns if c not in non_expression_columns],
+                    list(metric_df.iterrows()),
+                )
+                for table_id, metric_df in arch_config.dfs.items()
+                if table_id != 402  # roofline points handled in calc_roofline_data
+                if set(metric_df.columns).intersection({"Metric", "Channel"})
+            ]
+
+            metric_info_rows = [
+                MetricInfoRow(
+                    name=row.get("Metric") or row["Channel"].strip(),
+                    metric_id=metric_id,
+                    description=row.get("Description"),
+                    unit=row.get("Unit"),
+                    pct_of_peak=row.get("Percent of Peak") is True,
+                    table_name=table_name,
+                    sub_table_name=sub_table_name,
+                )
+                for table_name, sub_table_name, _value_columns, rows in metric_tables
+                for metric_id, row in rows
+            ]
+            expression_rows = [
+                ExpressionRow(
+                    metric_id=metric_id,
+                    value_name=value_name,
+                    value=row[value_name].strip(),
+                )
+                for _table_name, _sub_table_name, value_columns, rows in metric_tables
+                for metric_id, row in rows
+                for value_name in value_columns
+            ]
 
             metrics_info_df = pd.DataFrame(
                 metric_info_rows, columns=MetricInfoRow._fields
