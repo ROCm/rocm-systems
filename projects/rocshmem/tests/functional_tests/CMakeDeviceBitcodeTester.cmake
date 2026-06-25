@@ -25,12 +25,11 @@ endif()
 
 # LLVM_CLANG and LLVM_LINK are already set by DeviceBitcode.cmake.
 # Search for additional tools needed for HSACO generation.
-find_program(LLVM_LLC llc PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin NO_DEFAULT_PATH QUIET)
 find_program(LLVM_LLD ld.lld PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin NO_DEFAULT_PATH QUIET)
 find_program(LLVM_OPT opt PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin NO_DEFAULT_PATH QUIET)
 
-if(NOT LLVM_LLC OR NOT LLVM_LLD OR NOT LLVM_OPT)
-  message(WARNING "device_bitcode_tester: llc/ld.lld/opt not found (ROCM_PATH=${ROCM_PATH}). "
+if(NOT LLVM_LLD OR NOT LLVM_OPT)
+  message(WARNING "device_bitcode_tester: ld.lld/opt not found (ROCM_PATH=${ROCM_PATH}). "
     "HSACOs will not be built; test will skip at runtime.")
   return()
 endif()
@@ -46,7 +45,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   set(HSACO_FILE ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}.hsaco)
 
   # Find the full arch string (with feature suffixes) for this base arch so we can
-  # pass -mattr to llc. Without features the amdhsa.target metadata in the HSACO
+  # pass -mattr flags. Without features the amdhsa.target metadata in the HSACO
   # omits the suffix, causing hipModuleLoadData error 209 on devices that report
   # e.g. gfx950:sramecc+:xnack-.
   set(_FULL_ARCH "${GPU_ARCH}")
@@ -57,9 +56,16 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
       break()
     endif()
   endforeach()
-  arch_features_to_mattr_flags("${_FULL_ARCH}" _LLC_MATTR_FLAGS)
+  arch_features_to_mattr_flags("${_FULL_ARCH}" _MATTR_FLAGS)
+  set(_CLANG_MATTR_FLAGS "")
+  foreach(_f ${_MATTR_FLAGS})
+    # _f is "-mattr=+sramecc" or "-mattr=-xnack"; extract the feature part
+    string(REGEX REPLACE "^-mattr=" "" _feat "${_f}")
+    list(APPEND _CLANG_MATTR_FLAGS -Xclang -target-feature -Xclang ${_feat})
+  endforeach()
 
-  message(status "_LLC_MATTR_FLAGS" ${_LLC_MATTR_FLAGS})
+  # message(status "_MATTR_FLAGS" ${_MATTR_FLAGS})
+  
   # The device API functions (rocshmem_my_pe, rocshmem_putmem, etc.) are plain
   # __device__ functions. When compiled at -O3 independently, LLVM DCEs them
   # because no amdgpu_kernel in the same TU calls them. Compiling at -O0
@@ -143,13 +149,13 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
 
   add_custom_command(
     OUTPUT ${OBJ_FILE}
-    COMMAND ${LLVM_LLC}
-      -mtriple=amdgcn-amd-amdhsa
+    COMMAND ${LLVM_CLANG}
+      -target amdgcn-amd-amdhsa
       -mcpu=${GPU_ARCH}
-      ${_LLC_MATTR_FLAGS}
-      --amdgpu-internalize-symbols=false
-      -filetype=obj
-      ${LINKED_BC}
+      ${_CLANG_MATTR_FLAGS}
+      -mllvm -amdgpu-internalize-symbols=false
+      -x ir
+      -c ${LINKED_BC}
       -o ${OBJ_FILE}
     DEPENDS ${LINKED_BC}
     COMMENT "device_bitcode_tester: compiling to object for ${GPU_ARCH}"
