@@ -48,26 +48,10 @@ ncclResult_t ncclRmaCeInit(struct ncclComm* comm){
 
     NCCLCHECKGOTO(ncclMemAlloc((void**)&signalsDevBase, signalsBufSize), ret, fail);
     NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, signalsDevBase, signalsBufSize, NCCL_WIN_COLL_SYMMETRIC, &signalsWinDev), ret, fail);
-
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    // RCCL: decode win like rmaTaskAppend; shadow pool for sym/IPC, type-pun for proxy.
-    bool useShadowPool = comm->symmetricSupport || comm->devrState.ceSize > 1;
-    if (useShadowPool) {
-      NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows,
-                                         signalsWinDev, &signalsWinDevHost),
-                    ret, fail);
-      ceCtx->signalsWin = (struct ncclDevrWindow*)signalsWinDevHost->winHost;
-    } else {
-      ceCtx->signalsWin = (struct ncclDevrWindow*)signalsWinDev;
-      ceCtx->signalsWin->vidmem = signalsWinDev;
-    }
-#else
     NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, signalsWinDev, &signalsWinDevHost), ret, fail);
 
     // Get the ncclDevrWindow from the winHost field
     ceCtx->signalsWin = (struct ncclDevrWindow*)signalsWinDevHost->winHost;
-#endif
-
     ceCtx->signalsDev = signalsDevBase;
     ceCtx->graphSignalsDev = signalsDevBase + nRanks + 1;
     ceCtx->graphAckDev = signalsDevBase + 2 * nRanks + 2;

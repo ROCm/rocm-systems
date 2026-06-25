@@ -34,11 +34,6 @@ NCCL_PARAM(RmaProxyDumpSignal, "RMA_PROXY_DUMP_SIGNAL", -1);
 NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
 RCCL_PARAM(RmaProxyUseDMABUF, "RMA_USE_DMABUF", 0);
 
-// When set, export the DMA-BUF FD for VMM (cuMem) buffers via
-// cuMemGetHandleForAddressRange instead of hsa_amd_portable_export_dmabuf.
-// The HSA exporter cannot export cuMem/VMM allocations on some ROCm/NIC stacks
-RCCL_PARAM(DmaBufUseVmmExport, "DMABUF_USE_VMM_EXPORT", 0);
-
 
 #include <signal.h>
 static ncclRmaProxyState* ncclLastRmaProxyState;

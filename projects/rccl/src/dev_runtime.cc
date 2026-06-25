@@ -190,12 +190,22 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   } else {
     devr->bigSize = 1; // proxy-only: marks devrState as initialized
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    devr->ceSize = comm->localRanks;
-    devr->ceSelf = comm->localRank;
-    devr->ceRankList = (int*)malloc(devr->ceSize * sizeof(int));
-    if (devr->ceRankList == nullptr) { ret = ncclSystemError; goto fail_lsaRankList; }
-    for (int i = 0; i < devr->ceSize; i++) {
-      devr->ceRankList[i] = comm->localRankToRank[i];
+    // RCCL: the non-sym (host API) path routes co-located peers through CE/IPC
+    // over the full node-local team, which the gcd-based consecutive LSA
+    // team above cannot represent. Reuse the lsa* fields for this team
+    free(devr->lsaRankList);
+    devr->lsaSize = comm->localRanks;
+    devr->lsaSelf = comm->localRank;
+    devr->nLsaTeams = comm->nRanks / devr->lsaSize;
+
+    devr->lsaRankList = (int*)malloc(devr->lsaSize * sizeof(int));
+    if (devr->lsaRankList == nullptr) {
+      ret = ncclSystemError;
+      goto fail_lsaRankList;
+    }
+
+    for (int i = 0; i < devr->lsaSize; i++) {
+      devr->lsaRankList[i] = comm->localRankToRank[i];
     }
 #endif
   }
@@ -234,10 +244,7 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
     while (devr->winSortedCount > 0) {
       int before = devr->winSortedCount;
       struct ncclDevrWindow* win = devr->winSorted[0].win;
-      struct ncclWindow_vidmem* winDev =
-        (devr->ceSize > 1) ? win->vidmem
-                           : reinterpret_cast<struct ncclWindow_vidmem*>(win);
-      NCCLCHECKIGNORE(windowDeregisterNonSym(comm, winDev), ret);
+      NCCLCHECKIGNORE(windowDeregisterNonSym(comm, win->vidmem), ret);
       // windowDeregisterNonSym only removes the entry on success; drop it on
       // failure too so abort-time finalize always makes progress.
       if (devr->winSortedCount >= before) {
@@ -305,10 +312,6 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
   ncclShadowPoolDestruct(&devr->shadows);
 
   free(devr->lsaRankList);
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  free(devr->ceRankList); // RCCL: intra-node CE team
-  devr->ceRankList = nullptr;
-#endif
   free(devr->winSorted);
   return ncclSuccess;
 }
@@ -1055,13 +1058,23 @@ fail:
 }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+static void windowCloseIpcPeers(struct ncclComm* comm,
+                                struct ncclDevrWindow* win) {
+  if (win->ipcPeerPtrsAllocBase == nullptr) return;
+  int teamSelf = comm->devrState.lsaSelf;
+  for (int r = 0; r < win->ipcPeerCount; r++) {
+    if (r == teamSelf) continue;
+    void* peerAllocBase = win->ipcPeerPtrsAllocBase[r];
+    if (peerAllocBase == nullptr) continue;
+    CUDACHECKIGNORE(cudaIpcCloseMemHandle(peerAllocBase));
+  }
+}
+
 // RCCL: register a non-sym window. Mirrors upstream sym's two-stage shape:
 //   (1) intra-node mapping via cudaIpcOpenMemHandle peer pointers, when
-//       ceSize > 1.
+//       lsaSize > 1.
 //   (2) inter-node MR via ncclRmaProxyRegister, when hostRmaSupport. Same
 //       call upstream issues from symMemoryRegisterRma.
-// outWinDev is a shadow pool entry for IPC or a type-pun ncclDevrWindow*
-// for proxy-only.
 static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr,
                                          size_t userSize, int winFlags,
                                          void* localRegHandle,
@@ -1078,10 +1091,9 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr,
   static constexpr int kNonSymWindowBarrierTag = 0xbeed;
 
   struct ncclDevrState* devr = &comm->devrState;
-  // Non-sym path uses the CE team (all same-node ranks), not gcd lsa.
-  int teamSize = devr->ceSize;
-  int teamSelf = devr->ceSelf;
-  int* teamRankList = devr->ceRankList;
+  int teamSize = devr->lsaSize;
+  int teamSelf = devr->lsaSelf;
+  int* teamRankList = devr->lsaRankList;
 
   bool doIpc = teamSize > 1;
   bool doRma = comm->hostRmaSupport && (teamSize < comm->nRanks);
@@ -1092,7 +1104,6 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr,
   struct ncclWindow_vidmem* winDevHost = nullptr;
   ExchangeEntry* peers = nullptr;
   int openedCount = 0;
-
 
   win = (struct ncclDevrWindow*)malloc(sizeof(struct ncclDevrWindow));
   if (win == nullptr) goto fail;
@@ -1144,8 +1155,8 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr,
     }
 
     win->ipcPeerPtrs = (void**)calloc(teamSize, sizeof(void*));
-    win->ipcPeerOpenedBases = (void**)calloc(teamSize, sizeof(void*));
-    if (win->ipcPeerPtrs == nullptr || win->ipcPeerOpenedBases == nullptr) {
+    win->ipcPeerPtrsAllocBase = (void**)calloc(teamSize, sizeof(void*));
+    if (win->ipcPeerPtrs == nullptr || win->ipcPeerPtrsAllocBase == nullptr) {
       goto fail;
     }
     win->ipcPeerCount = teamSize;
@@ -1157,10 +1168,10 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr,
         // Same address space: self reuses userPtr; same-PID cross-thread
         // peers stay nullptr (MVP: no cross-thread peer mapping).
         if (r == teamSelf) {
-          win->ipcPeerOpenedBases[r] = reinterpret_cast<void*>(allocBase);
+          win->ipcPeerPtrsAllocBase[r] = reinterpret_cast<void*>(allocBase);
           win->ipcPeerPtrs[r] = userPtr;
         } else {
-          win->ipcPeerOpenedBases[r] = nullptr;
+          win->ipcPeerPtrsAllocBase[r] = nullptr;
           win->ipcPeerPtrs[r] = nullptr;
         }
       } else {
@@ -1174,7 +1185,7 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr,
                r, cudaGetErrorString(orErr));
           goto fail;
         }
-        win->ipcPeerOpenedBases[r] = peerBase;
+        win->ipcPeerPtrsAllocBase[r] = peerBase;
         win->ipcPeerPtrs[r] = (char*)peerBase + peers[r].userOffset;
         openedCount += 1;
       }
@@ -1195,35 +1206,30 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr,
     }
   }
 
-  // Stage 3: encode device-side handle. IPC needs a shadow pool entry so
-  // the kernel/CE resolves winHost via ncclShadowPoolToHost; proxy-only
-  // type-puns the win pointer (pre-IPC upstream layout).
-  if (doIpc) {
-    if (cudaSuccess !=
-        cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking)) {
-      WARN("windowRegisterNonSym: cudaStreamCreateWithFlags failed");
-      goto fail;
-    }
+  // Stage 3: encode the device-side handle as a shadow pool entry so the
+  // kernel/CE resolves winHost via ncclShadowPoolToHost
+  if (cudaSuccess !=
+      cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking)) {
+    WARN("windowRegisterNonSym: cudaStreamCreateWithFlags failed");
+    goto fail;
+  }
 
-    if (ncclSuccess !=
-        ncclShadowPoolAlloc(&devr->shadows, &winDev, &winDevHost, stream)) {
-      WARN("windowRegisterNonSym: ncclShadowPoolAlloc failed");
-      goto fail;
-    }
+  if (ncclSuccess !=
+      ncclShadowPoolAlloc(&devr->shadows, &winDev, &winDevHost, stream)) {
+    WARN("windowRegisterNonSym: ncclShadowPoolAlloc failed");
+    goto fail;
+  }
 
-    win->vidmem = winDev;
-    memset(winDevHost, 0, sizeof(*winDevHost));
-    winDevHost->lsaRank = teamSelf;
-    winDevHost->worldRank = comm->rank;
-    winDevHost->winHost = (void*)win;
+  win->vidmem = winDev;
+  memset(winDevHost, 0, sizeof(*winDevHost));
+  winDevHost->lsaRank = teamSelf;
+  winDevHost->worldRank = comm->rank;
+  winDevHost->winHost = (void*)win;
 
-    if (cudaSuccess != cudaMemcpyAsync(winDev, winDevHost, sizeof(*winDevHost),
-                                       cudaMemcpyHostToDevice, stream)) {
-      WARN("windowRegisterNonSym: cudaMemcpyAsync (window header) failed");
-      goto fail;
-    }
-  } else {
-    winDev = reinterpret_cast<struct ncclWindow_vidmem*>(win);
+  if (cudaSuccess != cudaMemcpyAsync(winDev, winDevHost, sizeof(*winDevHost),
+                                     cudaMemcpyHostToDevice, stream)) {
+    WARN("windowRegisterNonSym: cudaMemcpyAsync (window header) failed");
+    goto fail;
   }
 
   {
@@ -1239,10 +1245,11 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr,
                &devr->winSortedCount, idx, winSort);
   }
 
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  stream = nullptr;
+
   if (doIpc) {
-    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
-    CUDACHECKIGNORE(cudaStreamDestroy(stream));
-    stream = nullptr;
     // Intra-node sync; sym path uses bootstrapBarrier post-mapping.
     if (ncclSuccess != bootstrapIntraNodeBarrier(comm->bootstrap, teamRankList,
                                                  teamSelf, teamSize,
@@ -1274,19 +1281,9 @@ fail:
     if (win->rmaHostWins[0] != nullptr) {
       (void)ncclRmaProxyDeregister(comm, win->rmaHostWins);
     }
-    if (win->ipcPeerOpenedBases != nullptr) {
-      // Close only entries that came from cudaIpcOpenMemHandle.
-      for (int r = 0; r < teamSize; r++) {
-        if (r == teamSelf) continue;
-        void* b = win->ipcPeerOpenedBases[r];
-        if (b == nullptr) continue;
-        bool sameProc = peers &&
-                        (peers[r].hostHash == peers[teamSelf].hostHash) &&
-                        (peers[r].pidHash == peers[teamSelf].pidHash);
-        if (sameProc) continue;
-        CUDACHECKIGNORE(cudaIpcCloseMemHandle(b));
-      }
-    }
+
+    windowCloseIpcPeers(comm, win);
+
     // Free the shadow-pool entry if it was allocated 
     if (win->vidmem != nullptr) {
       if (stream == nullptr) {
@@ -1295,7 +1292,7 @@ fail:
       (void)ncclShadowPoolFree(&devr->shadows, win->vidmem, stream);
     }
     free(win->ipcPeerPtrs);
-    free(win->ipcPeerOpenedBases);
+    free(win->ipcPeerPtrsAllocBase);
     free(win);
   }
   if (stream != nullptr) {
@@ -1867,20 +1864,13 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
   struct ncclDevrState* devr = &comm->devrState;
   cudaStream_t stream = nullptr;
   struct ncclDevrWindow* win = nullptr;
-  int teamSize = devr->ceSize;
-  int teamSelf = devr->ceSelf;
-  bool ipcBacked = teamSize > 1;
   int winIdx = -1;
 
-  // Decode win from winDev: IPC uses shadow pool, PROXY type-puns.
-  if (ipcBacked) {
-    struct ncclWindow_vidmem* winDevHost = nullptr;
-    NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, winDev, &winDevHost),
-                  ret, fail);
-    win = (struct ncclDevrWindow*)winDevHost->winHost;
-  } else {
-    win = reinterpret_cast<struct ncclDevrWindow*>(winDev);
-  }
+  // Decode win from winDev via the shadow pool
+  struct ncclWindow_vidmem* winDevHost = nullptr;
+  NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, winDev, &winDevHost),
+                ret, fail);
+  win = (struct ncclDevrWindow*)winDevHost->winHost;
 
   // Locate this window's registration. A stale handle (e.g. a second
   // deregister of an already-freed window) is no longer in winSorted
@@ -1905,31 +1895,20 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
   }
 
   // Undo stage 1: intra-node IPC peer mappings.
-  if (win->ipcPeerOpenedBases != nullptr) {
-    for (int r = 0; r < teamSize; r++) {
-      if (r == teamSelf) continue;
-      // Same-PID peers are stored as nullptr by RegisterNonSym on purpose,
-      // so any non-null entry needs a matching cudaIpcCloseMemHandle.
-      void* b = win->ipcPeerOpenedBases[r];
-      if (b == nullptr) continue;
-      CUDACHECKIGNORE(cudaIpcCloseMemHandle(b));
-    }
-  }
+  windowCloseIpcPeers(comm, win);
   free(win->ipcPeerPtrs);
-  free(win->ipcPeerOpenedBases);
+  free(win->ipcPeerPtrsAllocBase);
   win->ipcPeerPtrs = nullptr;
-  win->ipcPeerOpenedBases = nullptr;
+  win->ipcPeerPtrsAllocBase = nullptr;
 
-  // Undo stage 3: shadow pool entry (only allocated for IPC backing).
-  if (ipcBacked) {
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking),
-                  ret, fail);
-    NCCLCHECKGOTO(ncclShadowPoolFree(&devr->shadows, winDev, stream), ret,
-                  fail_stream);
-    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
-    CUDACHECKIGNORE(cudaStreamDestroy(stream));
-    stream = nullptr;
-  }
+  // Undo stage 3: shadow pool entry.
+  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking),
+                ret, fail);
+  NCCLCHECKGOTO(ncclShadowPoolFree(&devr->shadows, winDev, stream), ret,
+                fail_stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  stream = nullptr;
 
   NCCLCHECKGOTO(ncclCommDeregister(comm, win->localRegHandle), ret, fail);
   listRemove(devr->winSorted, &devr->winSortedCount, winIdx);
@@ -2197,8 +2176,8 @@ ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm* comm, int peerWorldRank, in
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (!comm->symmetricSupport) {
     struct ncclDevrState* devr = &comm->devrState;
-    for (int i = 0; i < devr->ceSize; i++) {
-      if (devr->ceRankList[i] == peerWorldRank) {
+    for (int i = 0; i < devr->lsaSize; i++) {
+      if (devr->lsaRankList[i] == peerWorldRank) {
         *peerLsaRank = i;
         return ncclSuccess;
       }
@@ -2230,7 +2209,7 @@ ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow*
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // RCCL non-sym: a self-targeted op resolves to the local window base directly.
-  if (!comm->symmetricSupport && lsaRank == devr->ceSelf) {
+  if (!comm->symmetricSupport && lsaRank == devr->lsaSelf) {
     *outPtr = (void*)((uintptr_t)winHost->userPtr + offset);
     return ncclSuccess;
   }

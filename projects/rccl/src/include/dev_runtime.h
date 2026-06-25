@@ -31,9 +31,9 @@ struct ncclDevrWindow {
   void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]; // IB MR handles per GIN connection (proxy-only path)
   ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]; // device-side GIN window handles (proxy-only path)
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // RCCL: intra-node IPC peer table (NULL when inactive), sized to ceSize.
+  // RCCL: intra-node IPC peer table (NULL when inactive), sized to lsaSize.
   void** ipcPeerPtrs;
-  void** ipcPeerOpenedBases;
+  void** ipcPeerPtrsAllocBase;
   int ipcPeerCount;
 #endif
 };
@@ -64,14 +64,6 @@ struct ncclDevrState {
   int lsaSize;
   int* lsaRankList;
   int nLsaTeams;
-
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // RCCL: intra-node CE team for !symmetricSupport. Co-located peers route
-  // through CE/IPC. Symmetric path keeps using lsa* above.
-  int ceSelf;
-  int ceSize;
-  int* ceRankList;
-#endif
 
   size_t granularity; // cuMemGetAllocationGranularity
   bool ginEnabled;
