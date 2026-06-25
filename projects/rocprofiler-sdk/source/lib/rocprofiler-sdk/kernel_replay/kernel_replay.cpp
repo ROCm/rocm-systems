@@ -22,7 +22,7 @@
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
-#include "lib/rocprofiler-sdk/hsa/memory_tracker.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
 #include <rocprofiler-sdk/kernel_replay.h>
 
@@ -46,7 +46,7 @@ rocprofiler_configure_kernel_replay_counting_service(
     if(ctx->kernel_replay) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
 
-     // TODO[amd-vkale]: an optimization but should we allow kernel replay  without counter collection? Could be useful for warmups of replay.  <-- Mythreya and Vivek's question 
+     // TODO[amd-vkale]: an optimization but should we allow kernel replay  without counter collection? Could be useful for warmups of replay.  <-- Mythreya and Vivek's question
     if(ctx->dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
     auto st = rocprofiler::counters::configure_callback_dispatch(context_id,

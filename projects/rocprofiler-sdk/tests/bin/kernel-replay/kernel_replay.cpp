@@ -26,8 +26,8 @@
 // managed memory. Each test snapshots its device buffers, runs the kernel several times restoring
 // memory between passes, checks correctness, and reports snap/restore timing.
 
-#include "lib/rocprofiler-sdk/hsa/memory_snapshot.hpp"
-#include "lib/rocprofiler-sdk/hsa/memory_tracker.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
 #include <hip/hip_runtime.h>
 #include <gtest/gtest.h>

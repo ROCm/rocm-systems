@@ -20,7 +20,6 @@ set(ROCPROFILER_LIB_SOURCES
     external_correlation.cpp
     intercept_table.cpp
     internal_threading.cpp
-    kernel_replay.cpp
     ompt.cpp
     pc_sampling.cpp
     registration.cpp
@@ -52,6 +51,7 @@ add_subdirectory(thread_trace)
 add_subdirectory(spm)
 add_subdirectory(tracing)
 add_subdirectory(kernel_dispatch)
+add_subdirectory(kernel_replay)
 add_subdirectory(kfd)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
