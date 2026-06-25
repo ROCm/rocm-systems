@@ -81,3 +81,16 @@ repos:
         files: ^projects/rocprofiler-compute/
         pass_filenames: false
         stages: [pre-commit]
+
+  # Local hook: YAML and metric equation formatting
+  - repo: local
+    hooks:
+      - id: yaml-format-check
+        name: YAML metric equation formatting
+        entry: python projects/rocprofiler-compute/tools/format_yaml.py --check
+        language: python
+        additional_dependencies: [pyyaml>=6.0]
+        files: ^projects/rocprofiler-compute/.*\.ya?ml$
+        exclude: (workloads/.*/profiling_config\.yaml|tests/workloads/.*/profiling_config\.yaml|docs/data/metrics/.*\.yaml|build/)
+        pass_filenames: true
+        stages: [pre-commit]
