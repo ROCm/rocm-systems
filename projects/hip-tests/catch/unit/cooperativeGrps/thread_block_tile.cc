@@ -1743,6 +1743,54 @@ TEST_CASE(Unit_Thread_Block_Scan_partition)
   }
 }
 
+__global__ void multiDimReduce(int* output)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<16>(mygroup);
+  int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+
+  output[tid] = cooperative_groups::reduce(mytile, tid, cooperative_groups::plus<int>());
+}
+
+// test tiles reduces on multidimensional blocks. Basically splits the 128 threads in the block
+// into 16 threads tiles, each one contributing the tid to their reduces
+HIP_TEST_CASE(Unit_Thread_Block_Tile_Multi_Dimensional_Reduce)
+{
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int) * 128);
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
+  dim3 gridDim = { 1 };
+  // use a block size bigger than the warp size
+  dim3 blockDim = { 16, 4, 2 };
+  void* devicePtr = d_result.ptr();
+  void* args[1] = { &devicePtr };
+  hipError_t status;
+
+  status = hipLaunchCooperativeKernel(multiDimReduce,
+                                      gridDim,
+                                      blockDim,
+                                      args,
+                                      0,
+                                      nullptr);
+  HIP_CHECK(status);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+
+  for (int row = 0; row < 8; row++) {
+    int rowResult = 0;
+
+    for (int index = 0; index < 16; index++) {
+      rowResult += row * 16 + index;
+    }
+
+    for (int index = 0; index < 16; index++) {
+      INFO("row: " << row << " index: " << index);
+      REQUIRE(h_result.host_ptr()[row * 16 + index] == rowResult);
+    }
+  }
+}
+
 /**
  * End doxygen group DeviceLanguageTest.
  * @}
