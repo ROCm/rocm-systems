@@ -14,8 +14,6 @@ namespace rocjitsu {
 
 namespace {
 
-inline constexpr uint64_t kKernargPreloadSkipBytes = 256;
-
 [[nodiscard]] uint32_t text_word_at(std::span<const uint8_t> text, uint64_t offset) {
   uint32_t word = 0;
   if (offset + sizeof(word) <= text.size())
@@ -61,25 +59,6 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
                                            uint64_t alignment) {
   const uint64_t current_residue = current_offset % alignment;
   return (target_residue + alignment - current_residue) % alignment;
-}
-
-[[nodiscard]] uint64_t preserve_entry_skip_window_offset(const KernelTextLayout &layout,
-                                                         const BasicBlock &block, uint64_t cursor) {
-  if (block.start_offset() < layout.source_entry)
-    return cursor;
-
-  // Kernels with kernarg preloading have two valid hardware entry paths:
-  // incompatible firmware executes the descriptor entry and branches around the
-  // preload compatibility prologue, while compatible firmware adds 256 bytes to
-  // KERNEL_CODE_ENTRY_BYTE_OFFSET and starts at the real body directly. Local
-  // body compaction must therefore keep the first 256 bytes after the descriptor
-  // entry stable. Otherwise compatible firmware lands in the middle of compacted
-  // translated code with the preloaded SGPR ABI assumed but not honored.
-  const uint64_t source_delta = block.start_offset() - layout.source_entry;
-  if (source_delta > kKernargPreloadSkipBytes)
-    return cursor;
-
-  return std::max(cursor, layout.body_begin + source_delta);
 }
 
 [[nodiscard]] std::optional<uint64_t> target_for_source_offset(const KernelTextLayout &layout,
