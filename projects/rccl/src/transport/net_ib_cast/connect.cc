@@ -45,31 +45,6 @@ static int IbCastCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const
   return maxNqps;
 }
 
-// Export a cuMem/VMM GPU range as a DMA-BUF FD and register the gpu-flush buffer as dmabuf MR.
-static ncclResult_t regGpuFlushDmabufCuMem(struct ncclIbGpuFlush* gpuFlush,
-                                           struct ibv_pd* pd, size_t regLen) {
-  void* const gpuAddr = gpuFlush->gpuFlushGpuMem;
-  CUresult vmmStatus =
-    cuMemGetHandleForAddressRange((void*)&gpuFlush->dmabufFd,
-                                  (CUdeviceptr)gpuAddr, regLen,
-                                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
-  if (vmmStatus != CUDA_SUCCESS || gpuFlush->dmabufFd < 0) {
-    WARN("Failed to export DMA BUF via cuMemGetHandleForAddressRange");
-    return ncclSystemError;
-  }
-
-  int access =
-    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
-  ncclResult_t regRet =
-    wrap_ibv_reg_dmabuf_mr(&gpuFlush->gpuMr, pd, 0, regLen, (uint64_t)gpuAddr,
-                           gpuFlush->dmabufFd, access);
-  if (regRet != ncclSuccess) {
-    close(gpuFlush->dmabufFd);
-    gpuFlush->dmabufFd = -1;
-    return regRet;
-  }
-  return ncclSuccess;
-}
 
 #define NCCL_CTS_QP_SLOT_INVALID 0xFF
 enum ncclIbChannelType {
@@ -1524,10 +1499,21 @@ ib_recv:
     if (rComm->flushEnabled) {
       if (rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering()) {
 #if defined(HIP_UNCACHED_MEMORY)
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocUncached), ret, fail);
+        const unsigned int gpuFlushFlags = hipDeviceMallocUncached;
 #else
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocFinegrained), ret, fail);
+        const unsigned int gpuFlushFlags = hipDeviceMallocFinegrained;
 #endif
+        // RCCL: allocate the GDR flush buffer directly via HIP (never cuMem/VMM)
+        // so hsa_amd_portable_export_dmabuf can export it. cuMem/VMM allocations
+        // fail to export through the HSA portable exporter on some ROCm/NIC stacks.
+        CUDACHECKGOTO(
+          hipExtMallocWithFlags((void**)&rCommDev->gpuFlush.gpuFlushGpuMem,
+                                sizeof(int), gpuFlushFlags),
+          ret, fail);
+        CUDACHECKGOTO(hipMemset(rCommDev->gpuFlush.gpuFlushGpuMem, 0,
+                                sizeof(int)),
+                      ret, fail);
+
         if (useDmaBuf) {
           uint64_t exportOffset = 0;
           void *aligned_ptr = NULL;
@@ -1651,7 +1637,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {
         if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr));
+          CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
           commDev->gpuFlush.gpuFlushGpuMem = nullptr;
           if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
           commDev->gpuFlush.gpuMr = nullptr;

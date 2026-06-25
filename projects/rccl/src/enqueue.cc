@@ -3350,22 +3350,9 @@ static ncclResult_t rmaTaskAppend(
       return ncclInvalidArgument;
     }
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    // RCCL: decode peerWin like register path; shadow pool for sym/IPC.
-    bool useShadowPool = comm->symmetricSupport || comm->devrState.ceSize > 1;
-    if (useShadowPool) {
-      struct ncclWindow_vidmem* peerWinDevHost = NULL;
-      NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
-      peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
-    } else {
-      // hostRmaSupport path: handle is already a host pointer (type-punned in ncclDevrWindowRegisterInGroup)
-      peerWinHost = reinterpret_cast<struct ncclDevrWindow*>(info->peerWin);
-    }
-#else
     struct ncclWindow_vidmem* peerWinDevHost = NULL;
     NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
     peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
-#endif
 
     // Validate source buffer and window
     if (srcBuff == NULL) {
