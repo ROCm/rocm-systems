@@ -41,7 +41,7 @@ SKIP_FILE_PATTERNS = [
 EQUATION_KEYS = {"value", "avg", "min", "max", "peak"}
 
 # Literal string values that should not be parsed as equations
-LITERAL_VALUES = {"N/A", "None", "null", "true", "false"}
+LITERAL_VALUES = {"N/A", "None", "null", "true", "false", "Peak (Empirical)"}
 
 # Aggregation functions where constants should be factored out
 AGGREGATION_FUNCTIONS = {"SUM", "MIN", "MAX", "AVG"}
@@ -159,7 +159,7 @@ class Tokenizer:
                 self._advance()
                 tokens.append(Token(TokenType.COMMA, ",", start_pos))
             else:
-                self._advance()
+                raise ValueError(f"Unknown character '{ch}' at position {start_pos}")
 
         tokens.append(Token(TokenType.EOF, "", self.pos))
         return tokens
@@ -227,7 +227,13 @@ class Parser:
         return self._advance()
 
     def parse(self) -> ASTNode:
-        return self._parse_additive()
+        ast = self._parse_additive()
+        if self._current().type != TokenType.EOF:
+            curr = self._current()
+            raise ValueError(
+                f"Unexpected token after expression: {curr.type} at pos {curr.pos}"
+            )
+        return ast
 
     def _parse_additive(self) -> ASTNode:
         left = self._parse_multiplicative()
@@ -345,7 +351,11 @@ def _serialize_ast(
     if isinstance(node, VariableNode):
         return node.name
     if isinstance(node, UnaryOpNode):
-        return f"{node.op}{_serialize_ast(node.operand, node.op, False)}"
+        operand_str = _serialize_ast(node.operand, node.op, False)
+        # Parenthesize binary operands to preserve semantics: -(a + b) not -a + b
+        if isinstance(node.operand, BinaryOpNode):
+            operand_str = f"({operand_str})"
+        return f"{node.op}{operand_str}"
 
     if isinstance(node, BinaryOpNode):
         left = _serialize_ast(node.left, node.op, False)
