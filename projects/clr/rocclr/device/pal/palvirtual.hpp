@@ -46,7 +46,7 @@ struct AqlPacketMgmt : public amd::EmbeddedObject {
   static constexpr uint32_t kAqlPacketsListSize = 4 * Ki;
   AqlPacketMgmt(const Device& dev);
 
-#if defined(WITH_HSA_DEVICE) && defined(AMD_QUEUE_HAS_V2)
+#if defined(WITH_HSA_DEVICE)
   amd_queue_v2_t amd_queue_{};
 #else
   amd_queue_t amd_queue_{};
