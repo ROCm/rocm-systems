@@ -1103,6 +1103,43 @@ operator+= (T &lhs, int rhs)
   return lhs = lhs + rhs;
 }
 
+namespace utils
+{
+
+/* Build the "A | B | C" string representation of the flag set FLAGS,
+   converting each individual bit to string with ONE_FLAG_TO_STRING.
+   When FLAGS has no bit set, ONE_FLAG_TO_STRING is called once with
+   the zero value so that its "none" case is rendered.  */
+
+template <typename T, typename OneFlagToString>
+std::string
+flags_to_string (T flags, OneFlagToString one_flag_to_string)
+{
+  static_assert (is_flag_v<T>,
+                 "flags_to_string requires an is_flag-enabled type");
+
+  if (!flags)
+    return one_flag_to_string (flags);
+
+  std::string str;
+  /* The is_flag types provide operator! but no conversion to bool,
+     so test for "any bit set" with !!.  */
+  while (!!flags)
+    {
+      T one_flag = flags ^ (flags & (flags - 1));
+
+      if (!str.empty ())
+        str += " | ";
+      str += one_flag_to_string (one_flag);
+
+      flags ^= one_flag;
+    }
+
+  return str;
+}
+
+} /* namespace utils */
+
 /* Enable bitwise operations for amd_dbgapi_exceptions_t.  */
 template <> struct is_flag<amd_dbgapi_exceptions_t> : std::true_type
 {
