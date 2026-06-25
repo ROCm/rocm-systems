@@ -7,7 +7,7 @@
 /// @details This test intentionally creates an HSA code-object reader from the
 /// original gfx950 ELF bytes. It does not call BinaryTranslator directly. The
 /// expected execution path is:
-///   1. ROCR loads librocjitsu.so from HSA_TOOLS_LIB during hsa_init().
+///   1. ROCR loads librocjitsu_hooks.so from HSA_TOOLS_LIB during hsa_init().
 ///   2. The hook records the gfx950 reader bytes.
 ///   3. hsa_executable_load_agent_code_object() is intercepted and translated
 ///      to the RJ_DBT_TARGET_ISA selected by the test environment.
@@ -158,7 +158,7 @@ TEST(HsaHooksTest, TranslateGfx950Mfma16x16ThroughToolsLib) {
                             << "; seen GPU ISAs: " << join_seen_isas(gpu_target.seen_gpu_isas);
   ASSERT_NE(cpu.handle, 0u);
 
-  // Pass the original gfx950 ELF to ROCR. librocjitsu.so must perform the
+  // Pass the original gfx950 ELF to ROCR. librocjitsu_hooks.so must perform the
   // same gfx950->gfx1201 MFMA lowering that HsaTranslateTest exercises directly.
   hsa_code_object_reader_t reader{};
   auto st = hsa_code_object_reader_create_from_memory(co->image_data(), co->image_size(), &reader);

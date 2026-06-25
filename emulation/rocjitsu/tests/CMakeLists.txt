@@ -384,7 +384,7 @@ if(HSA_RUNTIME64)
             hsa_hooks_test
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(hsa_hooks_test device_kernels rocjitsu_shared)
+        add_dependencies(hsa_hooks_test device_kernels rocjitsu_hooks)
         rj_configure_target(hsa_hooks_test TEST)
 
         if(HAS_RDNA4_GPU)
@@ -408,7 +408,7 @@ if(HSA_RUNTIME64)
                 PROPERTIES
                     TIMEOUT 60
                     ENVIRONMENT
-                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_shared>;RJ_DBT_TARGET_ISA=gfx1201;RJ_DBT_LOG=1"
+                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_hooks>;RJ_DBT_TARGET_ISA=gfx1201;RJ_DBT_LOG=1"
             )
         endif()
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects in-place, before they are loaded into device memory, to inject code at chosen anchor instructions. Patched code objects can be loaded by either the simulated KMD (`SimulatedDriver`) or — eventually — by real ROCR via the HSA tools layer (`HSA_TOOLS_LIB=librocjitsu.so`). DBI itself is target-agnostic at the layer boundary; per-ISA differences are confined to the instruction builder and decoder.
+The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects in-place, before they are loaded into device memory, to inject code at chosen anchor instructions. Patched code objects can be loaded by either the simulated KMD (`SimulatedDriver`) or — eventually — by real ROCR via the HSA tools layer (`HSA_TOOLS_LIB=librocjitsu_hooks.so`). DBI itself is target-agnostic at the layer boundary; per-ISA differences are confined to the instruction builder and decoder.
 
 This document describes the DBI subsystem as currently implemented. The first end-to-end slice — an *inline-nop* trampoline at a single anchor — is in tree. The broader instrumentation framework (probe-call bodies, multi-site instrumentation with per-site failure tolerance, predicate-based anchor selection, EXEC-policy management, `AfterInst` / `BlockEntry` / `BlockExit` kinds, layout/negotiation between the builder and the orchestrator) is still future work and is tracked in `dbt_dbi_plan.md`.
 

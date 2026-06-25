@@ -217,10 +217,6 @@ add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
-target_sources(
-    rocjitsu_shared
-    PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/hooks/rj_hsa_dbt_hooks.cpp
-)
 target_link_libraries(
     rocjitsu_shared
     PRIVATE
@@ -294,7 +290,10 @@ install(
 )
 
 # Libraries: lib/
-install(TARGETS rocjitsu_shared LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(
+    TARGETS rocjitsu_shared rocjitsu_hooks
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
