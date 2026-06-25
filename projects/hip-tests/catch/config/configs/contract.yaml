@@ -285,3 +285,18 @@ contract:
   Contract_ArrayMemory_ArrayGetInfo_ReturnsDescriptorIfAvailable:
     <<: *level_0
     tags: [array_memory]
+  Contract_ManagedMemory_MallocManaged_ReturnsUsablePointer:
+    <<: *level_0
+    tags: [managed_memory]
+  Contract_ManagedMemory_HostWriteDeviceRead_RoundTripsAfterSynchronize:
+    <<: *level_0
+    tags: [managed_memory]
+  Contract_ManagedMemory_DeviceWriteHostRead_RoundTripsAfterSynchronize:
+    <<: *level_0
+    tags: [managed_memory]
+  Contract_ManagedMemory_FreeManagedPointer_Succeeds:
+    <<: *level_0
+    tags: [managed_memory]
+  Contract_ManagedMemory_PrefetchAsync_SucceedsWhenSupported:
+    <<: *level_0
+    tags: [managed_memory]
