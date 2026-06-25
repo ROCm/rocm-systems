@@ -2278,7 +2278,9 @@ static ncclResult_t parseRomeSystem(struct ncclTopoSystem* system, struct rcclRo
     for (n = 0; n < romeTopo->nGpus; n++) {
       romeTopo->connMatrix[i*romeTopo->nGpus+n] = 0;
       struct ncclTopoLinkList *path = node->paths[GPU] + gpu_scores[n].g;
-      if (path->type != LINK_NVL) continue;
+      // Only count direct XGMI links: since NCCL 2.30, GPU->GPU routes via DEV nodes, so direct is
+      // count==3 and indirect count==4. Counting indirect breaks Rome matching on sparse topos.
+      if (path->type != LINK_NVL || path->count > 3) continue;
       romeTopo->connMatrix[i*romeTopo->nGpus+n] = path->bw/ncclTopoXGMISpeed(node->gpu.gcn);
       count ++;
     }
