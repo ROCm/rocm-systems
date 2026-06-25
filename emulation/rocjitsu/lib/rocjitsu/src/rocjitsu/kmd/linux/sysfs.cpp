@@ -12,10 +12,14 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
+#include <cerrno>
+#include <charconv>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <unistd.h>
@@ -28,23 +32,61 @@ namespace fs = std::filesystem;
 
 namespace {
 
-std::string make_runtime_temp_dir(const char *prefix) {
+/// @brief Create a process-tagged scratch directory under the XDG runtime root.
+/// @details Replaces raw mkdtemp("/tmp/...") so synthetic sysfs trees live under
+/// rpc_default_runtime_dir() (tmpfs, reaped at logout) and carry the owning PID
+/// in their name (rocjitsu_<kind>_<pid>_XXXXXX) so reap_stale_sysfs_dirs() can
+/// remove the trees an earlier SIGKILL/crash orphaned. Returns empty on failure.
+std::string make_tagged_dir(const char *kind) {
   std::error_code ec;
-  fs::path base = rpc_default_runtime_dir();
-  fs::create_directories(base, ec);
-  if (ec)
-    return {};
+  std::string root = rpc_default_runtime_dir();
+  // Errors from create_directories are intentionally not checked here: if the root
+  // could not be created, mkdtemp below fails and returns empty, which both callers
+  // already treat as "no synthetic tree" via an empty-string early return.
+  fs::create_directories(root, ec);
+  std::string tmpl = root + "/rocjitsu_" + kind + "_" + std::to_string(getpid()) + "_XXXXXX";
+  std::vector<char> buf(tmpl.begin(), tmpl.end());
+  buf.push_back('\0');
+  char *dir = mkdtemp(buf.data());
+  return dir ? std::string(dir) : std::string{};
+}
 
-  // Synthetic sysfs/DRM trees are process-owned and removed by Sysfs::cleanup().
-  // Place them under the rocjitsu runtime directory so crashes leave state in a
-  // known per-user location instead of scattering entries directly under /tmp.
-  std::string tmpl = (base / (std::string(prefix) + "_XXXXXX")).string();
-  std::vector<char> tmpl_buffer(tmpl.begin(), tmpl.end());
-  tmpl_buffer.push_back('\0');
-  char *dir = mkdtemp(tmpl_buffer.data());
-  if (!dir)
-    return {};
-  return dir;
+/// @brief Remove orphaned rocjitsu_{drm,topology}_<pid>_* dirs of dead processes.
+/// @details RAII cleanup (Sysfs::cleanup) only fires on graceful teardown; a
+/// SIGKILL/OOM/crash leaks the scratch tree forever. This sweeps the runtime
+/// root once per process, deleting any tagged dir whose embedded PID is no
+/// longer alive (kill(pid, 0) == ESRCH). The live process's own dirs are kept.
+void reap_stale_sysfs_dirs() {
+  // Advance the iterator with an error_code (not the throwing operator++): another
+  // rocjitsu process sharing this runtime root may remove_all an entry concurrently,
+  // and a throw here would escape std::call_once and abort topology generation on a
+  // best-effort cleanup path. Best-effort — any filesystem error just ends the scan.
+  std::error_code ec;
+  std::string root = rpc_default_runtime_dir();
+  fs::directory_iterator it(root, ec);
+  const fs::directory_iterator end;
+  for (; !ec && it != end; it.increment(ec)) {
+    const auto &entry = *it;
+    if (!entry.is_directory(ec))
+      continue;
+    std::string name = entry.path().filename().string();
+    if (name.rfind("rocjitsu_drm_", 0) != 0 && name.rfind("rocjitsu_topology_", 0) != 0)
+      continue;
+    // Extract the PID between the last two underscores: <prefix>_<pid>_<suffix>.
+    auto suffix_us = name.rfind('_');
+    if (suffix_us == std::string::npos || suffix_us == 0)
+      continue;
+    auto pid_us = name.rfind('_', suffix_us - 1);
+    if (pid_us == std::string::npos)
+      continue;
+    std::string pid_str = name.substr(pid_us + 1, suffix_us - pid_us - 1);
+    pid_t pid = 0;
+    auto [ptr, perr] = std::from_chars(pid_str.data(), pid_str.data() + pid_str.size(), pid);
+    if (perr != std::errc{} || ptr != pid_str.data() + pid_str.size() || pid <= 0)
+      continue;
+    if (kill(pid, 0) == -1 && errno == ESRCH)
+      fs::remove_all(entry.path(), ec);
+  }
 }
 
 /// @brief Debug-related topology bits derived from a GPU's GFXIP version.
@@ -144,15 +186,21 @@ uint32_t default_non_debug_capability() {
 
 Sysfs::~Sysfs() { cleanup(); }
 
-Sysfs::Sysfs(Sysfs &&other) noexcept : topology_dir_(std::move(other.topology_dir_)) {
+Sysfs::Sysfs(Sysfs &&other) noexcept
+    : topology_dir_(std::move(other.topology_dir_)), drm_dir_(std::move(other.drm_dir_)) {
+  // Clear both owned-tree paths in the moved-from object so its cleanup() cannot
+  // remove_all a tree this object now owns.
   other.topology_dir_.clear();
+  other.drm_dir_.clear();
 }
 
 Sysfs &Sysfs::operator=(Sysfs &&other) noexcept {
   if (this != &other) {
     cleanup();
     topology_dir_ = std::move(other.topology_dir_);
+    drm_dir_ = std::move(other.drm_dir_);
     other.topology_dir_.clear();
+    other.drm_dir_.clear();
   }
   return *this;
 }
@@ -463,10 +511,9 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 }
 
 void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
-  std::string dir = make_runtime_temp_dir("rocjitsu_drm");
-  if (dir.empty())
+  drm_dir_ = make_tagged_dir("drm");
+  if (drm_dir_.empty())
     return;
-  drm_dir_ = std::move(dir);
 
   for (size_t i = 0; i < gpus.size(); ++i) {
     auto &gpu = gpus[i];
@@ -522,11 +569,13 @@ std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<Gp
 std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
   cleanup();
 
-  std::string dir = make_runtime_temp_dir("rocjitsu_topology");
-  if (dir.empty())
+  static std::once_flag reap_once;
+  std::call_once(reap_once, reap_stale_sysfs_dirs);
+
+  topology_dir_ = make_tagged_dir("topology");
+  if (topology_dir_.empty())
     return {};
 
-  topology_dir_ = std::move(dir);
   if (!gpus.empty())
     gpu_info_ = gpus[0];
 
