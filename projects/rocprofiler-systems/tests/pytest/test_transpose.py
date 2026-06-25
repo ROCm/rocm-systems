@@ -138,6 +138,11 @@ class TestTranspose(RocprofsysTest):
         "ROCPROFSYS_SAMPLING_REALTIME": "ON",
         "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "300",
         "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
+        # Diagnostic branch override: disable inline queue interposition to test
+        # whether the CI-only transpose-sampling timeout is the QI signal-pool
+        # deadlock. Injected via the test env dict so it actually reaches the
+        # instrumented child (ROCPROFILER_* is stripped from inherited env).
+        "ROCPROFILER_QUEUE_INTERPOSITION": "0",
     }
 
     @pytest.mark.parametrize(
