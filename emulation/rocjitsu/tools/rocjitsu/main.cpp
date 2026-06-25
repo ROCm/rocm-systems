@@ -34,7 +34,15 @@
 
 using namespace rocjitsu;
 
-static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
+static pid_t peer_pid_for_socket(int fd) {
+  struct ucred cred {};
+  socklen_t len = sizeof(cred);
+  if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0 && cred.pid > 0)
+    return cred.pid;
+  return 0;
+}
+
+static void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token stop) {
   uint32_t process_id = 0;
   bool connected = true;
 
@@ -45,7 +53,7 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
 
     switch (hdr.opcode) {
     case RPC_HANDSHAKE: {
-      auto open_rc = rj_vm_device_open(vm, &process_id);
+      auto open_rc = rj_vm_device_open(vm, client_pid, &process_id);
       if (open_rc != ROCJITSU_STATUS_SUCCESS) {
         RpcHeader resp{};
         resp.request_id = hdr.request_id;
@@ -252,9 +260,10 @@ static int run_daemon_server(const char *config_path) {
     if (client < 0)
       break;
 
+    pid_t peer_pid = peer_pid_for_socket(client);
     std::lock_guard<std::mutex> lock(client_threads_mutex);
     active_client_fds.push_back(client);
-    client_threads.emplace_back(handle_client, client, vm, stop_source.get_token());
+    client_threads.emplace_back(handle_client, client, vm, peer_pid, stop_source.get_token());
   }
 
   stop_source.request_stop();

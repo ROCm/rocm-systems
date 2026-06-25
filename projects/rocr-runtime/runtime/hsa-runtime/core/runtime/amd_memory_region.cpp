@@ -150,11 +150,11 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   // Skip the per-region cap on Windows/DXG so over-commit requests can
   // reach WDDM; system memory still enforces the cap.
-  const bool is_dxg = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
+  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
   if (IsSystem() && (size > max_sysmem_alloc_size_)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
-  if (!IsSystem() && !is_dxg && (size > max_single_alloc_size_)) {
+  if (!IsSystem() && !is_windxg && (size > max_single_alloc_size_)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 

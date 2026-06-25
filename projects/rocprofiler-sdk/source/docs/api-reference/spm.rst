@@ -7,7 +7,7 @@
 ROCprofiler-SDK Streaming Performance Monitor method
 ===================================
 
-Streaming Performance Monitor (SPM) sampling is a profiling method that samples hardware performance counters at regular intervals. This provides a granual insight into behavior of kernel during its execution.
+Streaming Performance Monitor (SPM) sampling is a profiling method that samples hardware performance counters at regular intervals. This provides a granular insight into behavior of kernel during its execution.
 .. warning::
 
     Risk acknowledgment: The SPM feature is under development and might not be completely stable. Use this beta feature cautiously. It may affect your system's stability and performance. Proceed at your own risk.
