@@ -3515,23 +3515,24 @@ const _: () = {
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct AmdsmiNicFwT {
+pub struct AmdsmiNicFwEntryT {
     pub name: [::std::os::raw::c_char; 256usize],
     pub version: [::std::os::raw::c_char; 256usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiNicFwT"][::std::mem::size_of::<AmdsmiNicFwT>() - 512usize];
-    ["Alignment of AmdsmiNicFwT"][::std::mem::align_of::<AmdsmiNicFwT>() - 1usize];
-    ["Offset of field: AmdsmiNicFwT::name"][::std::mem::offset_of!(AmdsmiNicFwT, name) - 0usize];
-    ["Offset of field: AmdsmiNicFwT::version"]
-        [::std::mem::offset_of!(AmdsmiNicFwT, version) - 256usize];
+    ["Size of AmdsmiNicFwEntryT"][::std::mem::size_of::<AmdsmiNicFwEntryT>() - 512usize];
+    ["Alignment of AmdsmiNicFwEntryT"][::std::mem::align_of::<AmdsmiNicFwEntryT>() - 1usize];
+    ["Offset of field: AmdsmiNicFwEntryT::name"]
+        [::std::mem::offset_of!(AmdsmiNicFwEntryT, name) - 0usize];
+    ["Offset of field: AmdsmiNicFwEntryT::version"]
+        [::std::mem::offset_of!(AmdsmiNicFwEntryT, version) - 256usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiNicFwInfoT {
     pub num_fw: u32,
-    pub fw: [AmdsmiNicFwT; 16usize],
+    pub fw: [AmdsmiNicFwEntryT; 16usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -4258,14 +4259,9 @@ extern "C" {
 extern "C" {
     pub fn amdsmi_clean_gpu_local_data(processor_handle: AmdsmiProcessorHandle) -> AmdsmiStatusT;
 }
-impl AmdsmiFabricTelemetryCategoryT {
-    pub const AmdsmiFabricTelemetryCategoryInvalid: AmdsmiFabricTelemetryCategoryT =
-        AmdsmiFabricTelemetryCategoryT::AmdsmiFabricTelemetryCategoryUnknown;
-}
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiFabricTelemetryCategoryT {
-    AmdsmiFabricTelemetryCategoryUnknown = 4294967295,
     AmdsmiFabricTelemetryCategoryUaloe = 0,
     AmdsmiFabricTelemetryCategorySwitch = 1,
     AmdsmiFabricTelemetryCategoryCrypto = 2,
@@ -4274,6 +4270,7 @@ pub enum AmdsmiFabricTelemetryCategoryT {
     AmdsmiFabricTelemetryCategoryDerivedUaloe = 5,
     AmdsmiFabricTelemetryCategoryDerivedNetport = 6,
     AmdsmiFabricTelemetryCategoryMax = 7,
+    AmdsmiFabricTelemetryCategoryInvalid = 4294967295,
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -4392,7 +4389,10 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
-    pub fn amdsmi_fabric_telem_id_to_string(telem_id: u64) -> *const ::std::os::raw::c_char;
+    pub fn amdsmi_fabric_telem_id_to_string(
+        telem_id: u64,
+        telem_name: *mut *const ::std::os::raw::c_char,
+    ) -> AmdsmiStatusT;
 }
 extern "C" {
     pub fn amdsmi_free_fabric_telemetry(
@@ -4410,7 +4410,7 @@ pub enum AmdsmiFabricSizeConstantsT {
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiFabricTypeT {
     AmdsmiFabricTypeUaloe = 0,
-    AmdsmiFabricTypeUallink = 1,
+    AmdsmiFabricTypeUalink = 1,
     AmdsmiFabricTypeUnknown = 2,
 }
 #[repr(u32)]
@@ -4508,7 +4508,7 @@ const _: () = {
 #[derive(Copy, Clone)]
 pub struct AmdsmiFabricInfoT {
     pub bdf: AmdsmiBdfT,
-    pub fabric_info: AmdsmiFabricInfoVerT,
+    pub info: AmdsmiFabricInfoVerT,
     pub reserved: [u32; 15usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
@@ -4517,8 +4517,8 @@ const _: () = {
     ["Alignment of AmdsmiFabricInfoT"][::std::mem::align_of::<AmdsmiFabricInfoT>() - 8usize];
     ["Offset of field: AmdsmiFabricInfoT::bdf"]
         [::std::mem::offset_of!(AmdsmiFabricInfoT, bdf) - 0usize];
-    ["Offset of field: AmdsmiFabricInfoT::fabric_info"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoT, fabric_info) - 8usize];
+    ["Offset of field: AmdsmiFabricInfoT::info"]
+        [::std::mem::offset_of!(AmdsmiFabricInfoT, info) - 8usize];
     ["Offset of field: AmdsmiFabricInfoT::reserved"]
         [::std::mem::offset_of!(AmdsmiFabricInfoT, reserved) - 256usize];
 };

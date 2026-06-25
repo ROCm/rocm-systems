@@ -122,8 +122,8 @@ void TestFabricRead::Run(void) {
                        "(no UALoE sysfs content); BDF may still be valid"
                     << std::endl;
         }
-        const auto& v1 = fabric_info.fabric_info.fabric_version.v1;
-        std::cout << "\t\tversion:        " << fabric_info.fabric_info.version << "\n"
+        const auto& v1 = fabric_info.info.fabric_version.v1;
+        std::cout << "\t\tversion:        " << fabric_info.info.version << "\n"
                   << "\t\taccelerator_id: " << v1.accelerator_id << "\n"
                   << "\t\tfabric_type:    " << v1.fabric_type << "\n"
                   << "\t\tbandwidth:      " << v1.bandwidth << " Mb/s" << "\n"
@@ -176,6 +176,7 @@ void TestFabricRead::Run(void) {
     CHK_ERR_ASRT(err)
 
     IF_VERB(STANDARD) {
+      const char* name;
       // Walk datasets and print a sample of telemetry items
       for (uint32_t cat = 0; cat < AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX; ++cat) {
         if (!tel->datasets[cat]) continue;
@@ -192,7 +193,8 @@ void TestFabricRead::Run(void) {
           // ── amdsmi_fabric_telem_id_to_string ─────────────────────────────
           for (uint32_t item = 0; item < in.item_count; ++item) {
             const auto& it = in.items[item];
-            const char* name = amdsmi_fabric_telem_id_to_string(it.id);
+            err = amdsmi_fabric_telem_id_to_string(it.id, &name);
+            CHK_ERR_ASRT(err)
             std::cout << "\t\t    [" << item << "] id=0x" << std::hex << it.id << std::dec
                       << "  name=" << (name ? name : "NULL") << "  value=" << it.value << "\n";
 

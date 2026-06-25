@@ -7031,7 +7031,7 @@ def amdsmi_get_fabric_telemetry_data(
                 for item_idx in range(inst.item_count):
                     item = inst.items[item_idx]
                     telem_id = item.id
-                    name_ptr = amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(telem_id)
+                    _check_res(amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(telem_id, name_ptr))
                     # Handle both c_char_p (string) and POINTER(c_char) (pointer) return types
                     if name_ptr:
                         if isinstance(name_ptr, bytes):
@@ -7081,8 +7081,8 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    info = amdsmi_wrapper.amdsmi_fabric_info_t()
-    ret = amdsmi_wrapper.amdsmi_get_gpu_fabric_info(processor_handle, ctypes.byref(info))
+    fabric_info = amdsmi_wrapper.amdsmi_fabric_info_t()
+    ret = amdsmi_wrapper.amdsmi_get_gpu_fabric_info(processor_handle, ctypes.byref(fabric_info))
     if ret == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
         raise AmdSmiRetryException()
     if ret == amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT:
@@ -7090,10 +7090,10 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     if ret not in (amdsmi_wrapper.AMDSMI_STATUS_SUCCESS, amdsmi_wrapper.AMDSMI_STATUS_NO_DATA):
         raise AmdSmiLibraryException(ret)
 
-    v1 = info.fabric_info.fabric_version.v1
+    v1 = fabric_info.info.fabric_version.v1
     return {
-        "bdf": _format_bdf(info.bdf),
-        "version": info.fabric_info.version,
+        "bdf": _format_bdf(fabric_info.bdf),
+        "version": fabric_info.info.version,
         "accelerator_id": v1.accelerator_id,
         "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
         "bandwidth": v1.bandwidth,
