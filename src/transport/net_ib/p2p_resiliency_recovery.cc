@@ -18,8 +18,6 @@ NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgTimeout, "IB_RESILIENCY_PORT_RECOVERY
 NCCL_PARAM(IbResiliencyPortRecoveryAckTimeout, "IB_RESILIENCY_PORT_RECOVERY_ACK_TIMEOUT", 5000); // In milliseconds
 NCCL_PARAM(IbResiliencyPortRecoveryAttemptsMax, "IB_RESILIENCY_PORT_RECOVERY_ATTEMPTS_MAX", 5);
 
-extern int64_t ncclParamIbPkey();
-
 // Used to convert milliseconds to nanoseconds
 #define MSEC_TO_NSEC 1000000ULL
 
@@ -371,7 +369,7 @@ ncclResult_t ncclIbPortRecoverySenderQpsCreate(struct ncclIbResiliency* resCtx,
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = sendCommDev->base.pkeyIndex;
     initAttr->portNum = ibDev->portNum;
     // Recovery QPs on the sender side do not require any remote permissions.
     initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE;
@@ -456,7 +454,7 @@ ncclResult_t ncclIbPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = recvCommDev->base.pkeyIndex;
     initAttr->portNum = ibDev->portNum;
     // Recovery QPs on the receiver side do not require any remote permissions.
     // Sender is expected to only use RDMA Send with Immediate operations

@@ -14,7 +14,6 @@ NCCL_PARAM(IbResiliencyPortFailover, "IB_RESILIENCY_PORT_FAILOVER", 0);
 NCCL_PARAM(IbResiliencyPortFailoverMaxAttempts, "IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS", 1);
 NCCL_PARAM(IbResiliencyPortFailoverProbeDelay, "IB_RESILIENCY_PORT_FAILOVER_PROBE_DELAY", 10); // In milliseconds
 
-extern int64_t ncclParamIbPkey();
 extern int64_t ncclParamIbRetryCnt();
 extern int64_t ncclParamIbTimeout();
 
@@ -888,7 +887,7 @@ ncclResult_t ncclIbResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = sendCommDev->base.pkeyIndex;
     initAttr->portNum = ibDev->portNum;
     // Probing QPs on the sender side do not require any remote permissions.
     initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE;
@@ -978,7 +977,7 @@ ncclResult_t ncclIbResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = recvCommDev->base.pkeyIndex;
     initAttr->portNum = ibDev->portNum;
     // On the receiver side, probing QPs do not need to send/receive any messages.
     // They are only used as targets of RDMA Read operations.

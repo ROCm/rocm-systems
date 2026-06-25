@@ -326,6 +326,45 @@ Values accepted
 ^^^^^^^^^^^^^^^
 The default value is 2.
 
+NCCL_IB_PKEY
+------------
+(since 2.1.4)
+
+The ``NCCL_IB_PKEY`` variable selects the InfiniBand partition key (PKey) used by
+NCCL's queue pairs by its **index** into the local port's PKey table.
+
+On a partitioned fabric the subnet manager may place the same PKey at a different
+table index on different hosts, so a fixed index is not necessarily portable
+across the fabric. In that case, select the partition by value with
+``NCCL_IB_PKEY_VALUE`` instead.
+
+For more information, see the InfiniBand specification Volume 1
+or vendor documentation.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default value is 0 (the first entry of the PKey table).
+
+NCCL_IB_PKEY_VALUE
+------------------
+(since 2.31)
+
+The ``NCCL_IB_PKEY_VALUE`` variable selects the InfiniBand partition key (PKey)
+by its **value** (for example ``0x8111``) rather than by its table index. At
+connection setup NCCL scans the local port's PKey table with ``ibv_query_pkey()``
+and resolves the value to the matching index, so the same setting is portable
+across hosts even when the subnet manager places the PKey at different indices.
+The membership bit (``0x8000``) is masked out during the comparison, so full and
+limited members of a partition both match.
+
+When both ``NCCL_IB_PKEY_VALUE`` and ``NCCL_IB_PKEY`` are set,
+``NCCL_IB_PKEY_VALUE`` takes precedence. If the requested value is not present in
+the local PKey table, NCCL fails the connection with a warning.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default value is -1 (unset), in which case the ``NCCL_IB_PKEY`` index is used.
+
 NCCL_IB_SL
 ----------
 (since 2.1.4)

@@ -60,7 +60,8 @@ NCCL_PARAM(GinErrorQuerySec, "GIN_ERROR_QUERY_SEC", 10);
 NCCL_PARAM(GinIbOooAll, "GIN_IB_OOO_OPT", 0);
 extern int64_t ncclParamIbTimeout();
 extern int64_t ncclParamIbRetryCnt();
-extern int64_t ncclParamIbPkey();
+extern ncclResult_t ncclIbGetPkeyIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                       int* pkeyIndex);
 extern int64_t ncclParamIbSl();
 extern int64_t ncclParamIbPciRelaxedOrdering();
 extern int64_t ncclParamIbDataDirect();
@@ -342,6 +343,7 @@ struct gdaki_context {
   struct ibv_port_attr port_attr;
   uint8_t port_num;
   int gid_index;
+  int pkey_index;
 
   bool needCompanion;
   uint32_t qp_rq_size;
@@ -524,7 +526,7 @@ static ncclResult_t gdakiConnectQp(struct gdaki_context* ctx, struct doca_gpu_ve
                 destroy_verbs_qp_attr);
   DOCACHECKGOTO(doca_verbs_qp_attr_set_ah_attr(verbs_qp_attr, ctx->ah), status, destroy_verbs_qp_attr);
   DOCACHECKGOTO(doca_verbs_qp_attr_set_dest_qp_num(verbs_qp_attr, exch_info->qpn), status, destroy_verbs_qp_attr);
-  DOCACHECKGOTO(doca_verbs_qp_attr_set_pkey_index(verbs_qp_attr, ncclParamIbPkey()), status, destroy_verbs_qp_attr);
+  DOCACHECKGOTO(doca_verbs_qp_attr_set_pkey_index(verbs_qp_attr, ctx->pkey_index), status, destroy_verbs_qp_attr);
 
   DOCACHECKGOTO(doca_verbs_qp_modify(gqp->qp, verbs_qp_attr,
                                      DOCA_VERBS_QP_ATTR_NEXT_STATE | DOCA_VERBS_QP_ATTR_ALLOW_REMOTE_WRITE |
@@ -708,6 +710,10 @@ ncclResult_t ncclGinGdakiCreateContext(void* collComm, ncclGinConfig_t* config, 
   NCCLCHECKGOTO(cComm->getGidIndex(cComm->ib.context, gdaki_ctx->port_num, &gdaki_ctx->port_attr, &ib_gid_index),
                 status, out);
   gdaki_ctx->gid_index = ib_gid_index;
+
+  NCCLCHECKGOTO(ncclIbGetPkeyIndex(cComm->ib.context, gdaki_ctx->port_num, &gdaki_ctx->port_attr,
+                                   &gdaki_ctx->pkey_index),
+                status, out);
 
   NCCLCHECKGOTO(wrap_ibv_query_gid(cComm->ib.context, 1, ib_gid_index, &gdaki_ctx->rgid), status, out);
 

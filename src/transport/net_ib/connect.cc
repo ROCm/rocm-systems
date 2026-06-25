@@ -16,6 +16,7 @@ NCCL_PARAM(IbRoceVersionNum, "IB_ROCE_VERSION_NUM", 2);
 NCCL_PARAM(IbTimeout, "IB_TIMEOUT", 20);
 NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbPkey, "IB_PKEY", 0);
+NCCL_PARAM(IbPkeyValue, "IB_PKEY_VALUE", -1);
 NCCL_PARAM(IbUseInline, "IB_USE_INLINE", 0);
 NCCL_PARAM(IbSl, "IB_SL", -1);
 NCCL_PARAM(IbTc, "IB_TC", -1);
@@ -74,6 +75,8 @@ ncclResult_t ncclIbInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
   }
 
   NCCLCHECK(wrap_ibv_create_cq(&base->cq, ibDev->context, cqSize, cq_context, NULL, 0));
+
+  NCCLCHECK(ncclIbGetPkeyIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr, &base->pkeyIndex));
 
   return ncclSuccess;
 }
@@ -323,6 +326,34 @@ ncclResult_t ncclIbGetGidIndex(struct ibv_context* context, uint8_t portNum, str
 
   return ncclSuccess;
 }
+
+// Resolve NCCL_IB_PKEY_VALUE to a PKey-table index, else fall back to the NCCL_IB_PKEY index.
+// ibv_query_pkey() returns network byte order with the MSB as the membership bit, so compare low 15 bits.
+ncclResult_t ncclIbGetPkeyIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                int* pkeyIndex) {
+  int64_t pkeyValue = ncclParamIbPkeyValue();
+  if (pkeyValue < 0) {
+    *pkeyIndex = ncclParamIbPkey();
+    return ncclSuccess;
+  }
+  if (ncclParamIbPkey() != 0) {
+    INFO(NCCL_NET | NCCL_ENV, "NET/IB: NCCL_IB_PKEY_VALUE=0x%x takes precedence over NCCL_IB_PKEY index %d",
+         (unsigned)pkeyValue, (int)ncclParamIbPkey());
+  }
+  uint16_t target = (uint16_t)(pkeyValue & 0x7fff);
+  for (int index = 0; index < portAttr->pkey_tbl_len; index++) {
+    uint16_t pkey = 0;
+    NCCLCHECK(wrap_ibv_query_pkey(context, portNum, index, &pkey));
+    if ((uint16_t)(ntohs(pkey) & 0x7fff) == target) {
+      *pkeyIndex = index;
+      return ncclSuccess;
+    }
+  }
+  WARN("NET/IB: NCCL_IB_PKEY_VALUE=0x%x not found in PKey table (pkey_tbl_len=%d, port=%d)", (unsigned)pkeyValue,
+       portAttr->pkey_tbl_len, portNum);
+  return ncclInvalidUsage;
+}
+
 ncclResult_t ncclIbQpInit(struct ncclIbQp* qp) {
   struct ncclIbQpInitAttr* initAttr = &qp->initAttr;
   struct ibv_qp_attr qpAttr;
@@ -675,7 +706,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     INFO(NCCL_NET,
          "NET/IB: %s: QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p oooRq=%d",
          __func__, ibDev->portNum, commDev->base.ibDevN, ncclIbDevs[commDev->base.ibDevN].devName, ncclNIbDevs,
-         ncclNMergedIbDevs, localQp->qp->qp_num, (uint16_t)ncclParamIbPkey(), commDev->base.pd, qpCreateAttrs.oooRq);
+         ncclNMergedIbDevs, localQp->qp->qp_num, (uint16_t)commDev->base.pkeyIndex, commDev->base.pd,
+         qpCreateAttrs.oooRq);
     localQp->devIndex = devIndex;
 
     // Populate the metadata that will be delivered to the remote peer
@@ -685,7 +717,7 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = commDev->base.pkeyIndex;
     initAttr->portNum = ibDev->portNum;
     initAttr->qpAccessFlags = IBV_ACCESS_REMOTE_WRITE;
     NCCLCHECK(ncclIbQpInit(localQp));
@@ -1215,7 +1247,8 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     INFO(NCCL_NET,
          "NET/IB: %s: QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p oooRq=%d",
          __func__, ibDev->portNum, rCommDev->base.ibDevN, ncclIbDevs[rCommDev->base.ibDevN].devName, ncclNIbDevs,
-         ncclNMergedIbDevs, localQp->qp->qp_num, (uint16_t)ncclParamIbPkey(), rCommDev->base.pd, qpCreateAttrs.oooRq);
+         ncclNMergedIbDevs, localQp->qp->qp_num, (uint16_t)rCommDev->base.pkeyIndex, rCommDev->base.pd,
+         qpCreateAttrs.oooRq);
 
     localQpInfo->qpn = localQp->qp->qp_num;
     localQpInfo->devIndex = localQp->devIndex;
@@ -1223,7 +1256,7 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = rCommDev->base.pkeyIndex;
     initAttr->portNum = ibDev->portNum;
     // Remote Atomic operations are used for GIN! REMOTE_READ is required for GIN Get (RDMA READ).
     initAttr->qpAccessFlags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ;
@@ -1311,11 +1344,11 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
          __func__, ibDev->portNum, rCommDev->base.ibDevN, ncclIbDevs[rCommDev->base.ibDevN].devName, ncclNIbDevs,
-         ncclNMergedIbDevs, flushQp->qp->qp_num, (uint16_t)ncclParamIbPkey(), rCommDev->base.pd);
+         ncclNMergedIbDevs, flushQp->qp->qp_num, (uint16_t)rCommDev->base.pkeyIndex, rCommDev->base.pd);
 
     struct ncclIbQpInitAttr* initAttr = &flushQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = rCommDev->base.pkeyIndex;
     initAttr->portNum = ibDev->portNum;
     initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ;
     NCCLCHECK(ncclIbQpInit(flushQp));

@@ -175,6 +175,11 @@ ncclResult_t wrap_ibv_query_gid(struct ibv_context* context, uint8_t port_num, i
                           "ibv_query_gid");
 }
 
+ncclResult_t wrap_ibv_query_pkey(struct ibv_context* context, uint8_t port_num, int index, uint16_t* pkey) {
+  IBV_INT_CHECK_RET_ERRNO(ibvSymbols, ibv_internal_query_pkey, ibv_internal_query_pkey(context, port_num, index, pkey),
+                          0, "ibv_query_pkey");
+}
+
 ncclResult_t wrap_ibv_query_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask,
                                struct ibv_qp_init_attr* init_attr) {
   IBV_INT_CHECK_RET_ERRNO(ibvSymbols, ibv_internal_query_qp, ibv_internal_query_qp(qp, attr, attr_mask, init_attr), 0,

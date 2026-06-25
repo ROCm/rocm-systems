@@ -255,6 +255,8 @@ struct ncclIbNetCommDevBase {
   struct ibv_cq* cq;
   uint64_t pad[2];
   struct ncclIbGidInfo gidInfo;
+  // Resolved once at device init and reused by every QP (like the GID index above).
+  int pkeyIndex;
 };
 
 struct ncclIbSendFifo {
@@ -679,6 +681,8 @@ ncclResult_t ncclIbDmaBufSupport(int dev);
 void ncclIbAddEvent(struct ncclIbRequest* req, int devIndex);
 ncclResult_t ncclIbGetGidIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
                                int* gidIndex);
+ncclResult_t ncclIbGetPkeyIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                int* pkeyIndex);
 ncclResult_t ncclIbGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
 ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r);
 
