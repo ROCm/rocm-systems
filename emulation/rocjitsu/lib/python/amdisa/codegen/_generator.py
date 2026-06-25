@@ -5605,6 +5605,10 @@ class CodeGenerator:
                         _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(
                             _enc_upper
                         )
+                        _uses_full_dpp_write_mask = self.isa_spec.arch_name in (
+                            'cdna3',
+                            'cdna4',
+                        )
                         _has_dpp_encoding = (
                             _dpp_struct is not None
                             or _dpp8_struct is not None
@@ -5624,7 +5628,7 @@ class CodeGenerator:
                             )
                             _dpp_preamble = ''
                             if _is_vopc:
-                                if self.isa_spec.arch_name == 'cdna3':
+                                if _uses_full_dpp_write_mask:
                                     _dpp_preamble += (
                                         '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
                                         '  uint64_t dpp_write_mask_ = ~0ULL;\n'
@@ -5786,7 +5790,7 @@ class CodeGenerator:
                                     '  }\n'
                                 )
                             else:
-                                if self.isa_spec.arch_name == 'cdna3':
+                                if _uses_full_dpp_write_mask:
                                     _dpp_cleanup += (
                                         '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
                                         '    uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(\n'

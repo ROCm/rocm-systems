@@ -787,6 +787,37 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp():
     assert 'src0.clear_delegate();' in body
 
 
+def test_cdna4_generated_dpp_cleanup_uses_full_write_mask():
+    import pathlib
+
+    arch_root = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+        / 'cdna4'
+    )
+
+    vop1 = (arch_root / 'vop1.cpp').read_text()
+    vopc = (arch_root / 'vopc.cpp').read_text()
+
+    start = vop1.index('void VMovB32Vop1::execute_impl')
+    end = vop1.index('VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1', start)
+    body = vop1[start:end]
+    assert 'amdgpu::dpp::dpp_write_mask(' in body
+    assert 'dpp_bound_ctrl_' in body
+
+    start = vopc.index('void VCmpEqU32Vopc::execute_impl')
+    end = vopc.index('VCmpLeU32Vopc::VCmpLeU32Vopc', start)
+    body = vopc[start:end]
+    assert 'amdgpu::dpp::dpp_write_mask(' in body
+    assert 'dpp_bound_ctrl_' in body
+
+
 def test_generated_vop3_dot2_true16_uses_true16_helpers():
     import pathlib
 
