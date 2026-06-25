@@ -1102,23 +1102,65 @@ HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags) {
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
-    					HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
-						HsaMemoryMapFlags flags)
+						HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
+						HsaMemoryMapFlags flags, HSAuint32 NodeId)
 {
 	CHECK_KFD_OPEN();
 	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
     if (!drmhandle) return HSAKMT_STATUS_ERROR;
 
-    int ret = amdgpu_bo_va_op(drmhandle, offset, size, addr,
-                      		  MapDrmPerm(flags), AMDGPU_VA_OP_MAP);
+	int drm_fd = -1;
+	uint32_t vm_timeline_syncobj = 0;
+	uint64_t vm_timeline_seqnum = 0;
+
+	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, NodeId,
+				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	uint32_t gem_handle = 0;
+	int ret = amdgpu_bo_export(drmhandle, amdgpu_bo_handle_type_kms, &gem_handle);
 	if (ret)
 		return HSAKMT_STATUS_ERROR;
+	
+
+	struct drm_amdgpu_gem_va va;
+	memset(&va, 0, sizeof(va));
+	va.handle                      = gem_handle;
+	va.operation                   = AMDGPU_VA_OP_MAP;
+	va.flags                       = MapDrmPerm(flags);
+	va.va_address                  = addr;
+	va.offset_in_bo                = offset;
+	va.map_size                    = size;
+	va.vm_timeline_syncobj_out     = vm_timeline_syncobj;
+	va.vm_timeline_point           = vm_timeline_seqnum;
+
+	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_GEM_VA, &va, sizeof(va));
+	if (ret) {
+		pr_err("[%s] DRM_AMDGPU_GEM_VA MAP failed: %d\n", __func__, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	// Wait on timeline syncobj to indicate page table update completion
+	struct drm_syncobj_timeline_wait tw;
+	memset(&tw, 0, sizeof(tw));
+	tw.handles = (uintptr_t)&vm_timeline_syncobj;
+	tw.points = (uintptr_t)&vm_timeline_seqnum;
+	tw.count_handles = 1;
+	tw.timeout_nsec = INT64_MAX;
+	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
+
+	if (ret) {
+		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after MAP: %d\n", __func__, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
-    					HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+						HSAuint64 offset, HSAuint64 size, HSAuint64 addr, HSAuint32 NodeId)
 {
 	CHECK_KFD_OPEN();
 	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
@@ -1126,10 +1168,51 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 	if (!drmhandle)
     	return HSAKMT_STATUS_ERROR;
 
-    int ret = amdgpu_bo_va_op(drmhandle, offset, size, addr, 0,
-							  AMDGPU_VA_OP_UNMAP);
+	int drm_fd = -1;
+	uint32_t vm_timeline_syncobj = 0;
+	uint64_t vm_timeline_seqnum = 0;
+
+	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, NodeId,
+				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	uint32_t gem_handle = 0;
+	int ret = amdgpu_bo_export(drmhandle, amdgpu_bo_handle_type_kms, &gem_handle);
 	if (ret)
 		return HSAKMT_STATUS_ERROR;
+
+	struct drm_amdgpu_gem_va va;
+	memset(&va, 0, sizeof(va));
+	va.handle                  = gem_handle;
+	va.operation               = AMDGPU_VA_OP_UNMAP;
+	va.flags                   = 0;
+	va.va_address              = addr;
+	va.offset_in_bo            = offset;
+	va.map_size                = size;
+	va.vm_timeline_syncobj_out = vm_timeline_syncobj;
+	va.vm_timeline_point       = vm_timeline_seqnum;
+
+	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_GEM_VA, &va, sizeof(va));
+	if (ret) {
+		pr_err("[%s] DRM_AMDGPU_GEM_VA UNMAP failed: %d\n", __func__, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	// Wait on timeline syncobj to indicate page table update completion
+	struct drm_syncobj_timeline_wait tw;
+	memset(&tw, 0, sizeof(tw));
+	tw.handles = (uintptr_t)&vm_timeline_syncobj;
+	tw.points = (uintptr_t)&vm_timeline_seqnum;
+	tw.count_handles = 1;
+	tw.timeout_nsec = INT64_MAX;
+	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
+
+	if (ret) {
+		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after UNMAP: %d\n", __func__, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
 
 	return HSAKMT_STATUS_SUCCESS;
 }

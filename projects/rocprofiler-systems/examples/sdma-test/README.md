@@ -6,7 +6,7 @@ This example benchmarks SDMA (System DMA) engine performance by measuring bandwi
 
 ## Source Files
 
-- `sdma_test.cpp` - Implements transfer benchmarking with `hipMemcpyAsync`, CLI argument parsing with size suffix support (K/M/G), bandwidth calculation, and signal handling for graceful shutdown in infinite mode.
+- `sdma-test.cpp` - Implements transfer benchmarking with `hipMemcpyAsync`, CLI argument parsing with size suffix support (K/M/G), bandwidth calculation, and signal handling for graceful shutdown in infinite mode.
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ This example benchmarks SDMA (System DMA) engine performance by measuring bandwi
 **Standalone build:**
 
 ```bash
-cmake -B <build_dir> -S <project_root>/examples/sdma_test -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake -B <build_dir> -S <project_root>/examples/sdma-test -DCMAKE_PREFIX_PATH=/opt/rocm
 cmake --build <build_dir>
 ```
 
@@ -26,20 +26,20 @@ cmake --build <build_dir>
 
 ```bash
 cmake -B <build_dir> -S <project_root>/examples/ -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build <build_dir> --target sdma_test
+cmake --build <build_dir> --target sdma-test
 ```
 
 ## Running
 
 ```bash
 # Default: 512 MB, 10 iterations, 10 copies/iteration, device 0
-./sdma_test
+./sdma-test
 
 # Custom: 1 GB transfers, 5 iterations
-./sdma_test -s 1024 -n 5
+./sdma-test -s 1024 -n 5
 
 # Infinite mode (Ctrl+C to stop)
-./sdma_test -s 256 -n 0
+./sdma-test -s 256 -n 0
 ```
 
 **Flags:**
@@ -54,7 +54,7 @@ cmake --build <build_dir> --target sdma_test
 ## Profiling with rocprofiler-systems
 
 ```bash
-rocprof-sys-run -- ./sdma_test -s 256 -n 5
+rocprof-sys-run -- ./sdma-test -s 256 -n 5
 ```
 
 ### Recommended Configuration
@@ -63,6 +63,7 @@ rocprof-sys-run -- ./sdma_test -s 256 -n 5
 | ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API and memory copy operations |
 | `ROCPROFSYS_ROCM_EVENTS` | `SQ_WAVES,GRBM_COUNT` | Sample GPU hardware counters |
+| `ROCPROFSYS_AMD_SMI_METRICS` | `sdma_usage` | Collect SDMA engine usage via AMD-SMI |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace for timeline analysis |
 
 To capture SDMA-specific metrics:
@@ -70,6 +71,7 @@ To capture SDMA-specific metrics:
 ```bash
 rocprof-sys-run \
     -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,memory_copy \
+    -e ROCPROFSYS_AMD_SMI_METRICS=sdma_usage \
     -e ROCPROFSYS_TRACE=true \
-    -- ./sdma_test -s 512 -n 5
+    -- ./sdma-test -s 512 -n 5
 ```

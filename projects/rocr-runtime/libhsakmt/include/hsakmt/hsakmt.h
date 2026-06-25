@@ -1380,7 +1380,8 @@ hsaKmtMemoryVaMap(
     HSAuint64 offset,
     HSAuint64 size,
     HSAuint64 addr,
-    HsaMemoryMapFlags flags
+    HsaMemoryMapFlags flags,
+    HSAuint32 NodeId
 );
 
 HSAKMT_STATUS
@@ -1389,7 +1390,8 @@ hsaKmtMemoryVaUnmap(
     HsaMemoryObjectHandle Handle,
     HSAuint64 offset,
     HSAuint64 size,
-    HSAuint64 addr
+    HSAuint64 addr,
+    HSAuint32 NodeId
 );
 
 HSAKMT_STATUS

@@ -17,8 +17,8 @@ if(BUILD_TESTS)
   endif()
 
   if (ENABLE_CODE_COVERAGE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
-    set(HIPCC_COMPILE_FLAGS "${HIPCC_COMPILE_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
+    add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
+    add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     # Allow ProcessIsolatedTestRunner.cpp to call __llvm_profile_write_file()
     # explicitly before _exit() so child-process coverage data is flushed.
     add_compile_definitions(RCCL_TEST_CODE_COVERAGE=1)
@@ -261,6 +261,7 @@ if(BUILD_TESTS)
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
+      graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -269,8 +270,9 @@ if(BUILD_TESTS)
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
 
-    # NetDevsPolicyTests loads a topology XML fixture from the source tree
-    # (tools/topo_expl/models). Expose the test source dir so it can build the path.
+    # NetDevsPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
+    # from the source tree (tools/topo_expl/models). Expose the test source dir
+    # so they can build the path.
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   endif()

@@ -63,6 +63,12 @@
 #include <rocprofiler-register/rocprofiler-register.h>
 #endif
 
+#if defined(SANITIZER_AMDGPU)
+// ASan runtime: drains the allocator quarantine. Forward-declared to avoid
+// depending on the sanitizer interface headers.
+extern "C" void __sanitizer_purge_allocator(void);
+#endif
+
 #include "core/common/shared.h"
 #include "core/inc/amd_core_dump.hpp"
 #include "core/inc/amd_cpu_agent.h"
@@ -157,6 +163,14 @@ hsa_status_t Runtime::Release() {
         callback.first(&system_shutdown_event, callback.second);
       }
     }
+
+#if defined(SANITIZER_AMDGPU)
+    // Drain the sanitizer quarantine before Unload() frees and unmaps device
+    // memory. Otherwise device allocations still quarantined here become
+    // dangling chunks in the sanitizer's process-global device allocator.
+    __sanitizer_purge_allocator();
+#endif
+
     // Release all registered memory, then unload backends
     runtime_singleton_->Unload();
   }
@@ -1601,6 +1615,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
           HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(it->second.thunk_bo));
         }
         it->second.thunk_bo = res.buf_handle;
+        it->second.thunk_node_id = agent->node_id();
       } else {
         HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
       }
@@ -1624,7 +1639,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   bool isFragment = false;
   uint32_t fragOffset = 0;
 
-  auto fixFragment = [&](HsaMemoryObjectHandle new_thunk_bo) {
+  auto fixFragment = [&](HsaMemoryObjectHandle new_thunk_bo, HSAuint32 node_id = -1) {
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
       len = Min(len, importSize - fragOffset);
@@ -1639,6 +1654,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
         HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(it->second.thunk_bo));
       }
       it->second.thunk_bo = new_thunk_bo;
+      it->second.thunk_node_id = node_id;
     }
   };
 
@@ -1718,13 +1734,14 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     if (status != HSAKMT_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
+    HSAuint32 gpu_node_id = allocation_map_[importAddress].thunk_node_id;
     status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
-                                           reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_RW));
+                                           reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_RW, gpu_node_id));
     if (status != HSAKMT_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
     importAddress = cpuPtr;
-    fixFragment(bo);
+    fixFragment(bo, gpu_node_id);
 
     // Remove the stale intermediate entry created by IPCClientImport.
     // The canonical entry now lives at cpuPtr (set by fixFragment above).
@@ -1765,9 +1782,10 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
     if (it != allocation_map_.end()) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (it->second.thunk_bo) {
+        HSAuint32 gpu_node_id = it->second.thunk_node_id;
         HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0,
                                                                static_cast<HSAuint64>(it->second.size),
-                                                               reinterpret_cast<HSAuint64>(ptr)));
+                                                               reinterpret_cast<HSAuint64>(ptr), gpu_node_id));
         if (status != HSAKMT_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
@@ -3335,8 +3353,11 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
       }
       case HSA_AMD_SVM_ATTRIB_ACCESS_QUERY: {
         if (kmtIndices[i] == -1) {
+          // CPU agent access is stored as a flag, not as an attribute
           if (attribs[attribs.size() - 1].value & HSA_SVM_FLAG_HOST_ACCESS)
             attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE;
+          else
+            attrib = HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS;
         } else {
           switch (attribs[kmtIndices[i]].type) {
             case HSA_SVM_ATTR_ACCESS:
@@ -4015,11 +4036,11 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   if (memHandle->imported && memHandle->is_fabric_handle) {
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareType::FABRIC_HANDLE,
-        &memHandle->driver_handle.fabric_handle);
+        &memHandle->driver_handle);
   } else {
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareType::DMABUF_FD,
-        &memHandle->driver_handle.dmabuf_fd);
+        &memHandle->driver_handle);
   }
   if (status != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(status, "Failed to import memory");
@@ -4027,9 +4048,8 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-#if defined(__linux__)
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
-#endif
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) assert(!"Unimplemented");
+
     /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
     bool result = rocr::os::UncommitMemory(va, size);
     assert(result && "Failed to remap VA to anonymous");
@@ -4044,12 +4064,11 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-#if defined(__linux__)
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
-#endif
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+
     auto agentOwner = mappedHandle->mem_handle->agentOwner();
     int mmap_fd = -1;
-    /* Do not check the return value of GetDeviceFd. We do not need mmap_fd so it is valid for mmap_fd to be -1*/
+    /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it is valid for mmap_fd to be -1*/
     agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd);
 
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
@@ -4057,7 +4076,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
       return HSA_STATUS_ERROR;
     }
   } else {
-    hsa_status_t status = targetAgent->driver().Map(driver_handle, va, mappedHandle->offset, size, perms);
+    hsa_status_t status = targetAgent->driver().Map(driver_handle, va, mappedHandle->offset, size, perms, targetAgent->node_id());
     if (status != HSA_STATUS_SUCCESS) return status;
   }
   permissions = perms;
@@ -4067,9 +4086,8 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
-#if defined(__linux__)
-      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
-#endif
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+
       hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
       if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) {
         return HSA_STATUS_ERROR;
@@ -4077,8 +4095,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
       permissions = perms;
     }
   } else {
-    return targetAgent->driver().Unmap(
-        driver_handle, va, mappedHandle->offset, mappedHandle->size);
+    return targetAgent->driver().Unmap(driver_handle, va, mappedHandle->offset, mappedHandle->size, targetAgent->node_id());
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -4088,9 +4105,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
   : mem_handle(mem_handle), address_handle(address_handle), offset(offset),
     size(size) {
   /* Create a CPU mapping with PROT_NONE */
-  #if defined(__linux__)
-  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
-  #endif
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return;
 
   if (!mem_handle->imported) {
     /*
@@ -4147,6 +4162,11 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0 && region != nullptr)
     agentOwner()->driver().DestroyMemoryHandle(&driver_handle);
+
+  if (driver_handle.dmabuf_fd >= 0) {
+    os::DmaBufClose(driver_handle.dmabuf_fd);
+    driver_handle.dmabuf_fd = -1;
+  }
 }
 
 
@@ -4155,6 +4175,32 @@ hsa_status_t
 Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
                                    const hsa_amd_memory_access_desc_t *desc,
                                    const size_t desc_cnt) {
+  MemoryHandle *memHandle = mappedHandle.mem_handle;
+
+  /*
+   * For locally-created shareable handles CreateShareableHandle leaves dmabuf_fd as -1 to avoid
+   * holding an fd open for the lifetime of the handle. Export it lazily here so the target agents
+   * can import the memory below, then close it again before returning.
+   */
+  bool created_dmabuf_fd = false;
+  if (!memHandle->imported && memHandle->driver_handle.dmabuf_fd == -1) {
+    Agent *ownerAgent = memHandle->agentOwner();
+    int dmabuf_fd = -1;
+    hsa_status_t status = ownerAgent->driver().ExportMemoryHandle(
+        *ownerAgent, memHandle->driver_handle, ShareType::DMABUF_FD, 0, &dmabuf_fd);
+    if (status != HSA_STATUS_SUCCESS)
+      return status;
+    memHandle->driver_handle.dmabuf_fd = dmabuf_fd;
+    created_dmabuf_fd = true;
+  }
+
+  MAKE_SCOPE_GUARD([&]() {
+    if (created_dmabuf_fd) {
+      os::DmaBufClose(memHandle->driver_handle.dmabuf_fd);
+      memHandle->driver_handle.dmabuf_fd = -1;
+    }
+  });
+
   for (int i = 0; i < desc_cnt; i++) {
     Agent *targetAgent = Agent::Convert(desc[i].agent_handle);
 

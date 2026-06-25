@@ -246,8 +246,9 @@ public:
   /// @param[out] handle handle to the imported memory; @p handle->size is set to the
   ///             imported allocation size in bytes
   /// @param[in] type @ref ShareType to import
-  /// @param[in] import_handle input handle; @p int* for @p DMABUF_FD,
-  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
+  /// @param[in] import_handle input handle; @p DriverMemoryHandle* whose
+  ///             @p dmabuf_fd field is read for @p DMABUF_FD and whose
+  ///             @p fabric_handle field is read for @p FABRIC_HANDLE
   /// @param[in] mem address of existing buffer, used to bypass import
   virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
                                           ShareType type, void* import_handle,
@@ -265,9 +266,10 @@ public:
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
   /// @param[out] perms new permissions
+  /// @param[in] node_id driver node id of the target GPU
   virtual hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem,
                            size_t offset, size_t size,
-                           hsa_access_permission_t perms) = 0;
+                           hsa_access_permission_t perms, uint32_t node_id) = 0;
 
   /// @brief Unmaps the memory associated with the handle.
   ///
@@ -275,8 +277,9 @@ public:
   /// @param[in] mem virtual address associated with the handle
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
+  /// @param[in] node_id driver node id of the target GPU
   virtual hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem,
-                             size_t offset, size_t size) = 0;
+                             size_t offset, size_t size, uint32_t node_id) = 0;
 
   /// @brief Maps the virtual address to the physical address and creates a handle to share this
   /// mapping.
