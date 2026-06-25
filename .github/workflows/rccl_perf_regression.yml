@@ -52,6 +52,7 @@ concurrency:
 
 env:
   RCCL_CI_ROOT: /it-share/rccl-ci
+  SLURM_RESERVATION: rccl_dev
 
 jobs:
   perf-gate:
