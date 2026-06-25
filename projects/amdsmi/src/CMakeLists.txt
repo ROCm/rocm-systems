@@ -192,6 +192,12 @@ if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
     )
     target_link_options(${AMD_SMI} PRIVATE "LINKER:--version-script=${VERSION_SCRIPT}")
     set_property(TARGET ${AMD_SMI} APPEND PROPERTY LINK_DEPENDS "${VERSION_SCRIPT}")
+    # Bind amd_smi's internal calls to its own embedded rsmi_init /
+    # rsmi_is_P2P_accessible at link time. Without this, dlopen'ing
+    # librocm_smi64.so.1 with RTLD_GLOBAL first (as rocm_sdk/TheRock does on
+    # `import torch`) interposes those calls and breaks device discovery
+    # (rocm-systems#7643). Symbols stay exported for external use.
+    target_link_options(${AMD_SMI} PRIVATE "LINKER:-Bsymbolic-functions")
 endif()
 
 # Add UALOE compile flags for netlink dependencies (e.g. -I.../libnl3 for
