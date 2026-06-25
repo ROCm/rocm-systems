@@ -619,7 +619,7 @@ void __global__ reduceKernel(T* output,
                              unsigned long long* extraMasks,
                              AggregationType* aggType)
 {
-  int tid = __lane_id();
+  int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
   int laneId = tid % warpSize;
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<TileSize>(mygroup);
@@ -657,7 +657,7 @@ void __global__ reduceKernelCoalesced(T* output,
                                       unsigned long long* extraMasks,
                                       AggregationType* aggType)
 {
-  int tid = __lane_id();
+  int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
   int laneId = tid % warpSize;
 
   for (int i = 0; i < kNumReduces; i++) {
@@ -1095,7 +1095,9 @@ __global__ void applyScanFunctor(ArrayContainer<NumElems>** result,
   auto mytile = cg::tiled_partition<NumElems>(mygroup);
   __shared__ ArrayContainer<NumElems> input;
   Functor op;
-  unsigned int laneId = __lane_id();
+  unsigned int tid = threadIdx.x +
+                     threadIdx.y * blockDim.x +
+                     threadIdx.z * blockDim.x * blockDim.y;
 
   if (threadIdx.x < NumElems) {
     input[threadIdx.x] = threadIdx.x;
@@ -1106,10 +1108,10 @@ __global__ void applyScanFunctor(ArrayContainer<NumElems>** result,
   if (threadIdx.x < NumElems) {
     switch (*aggType) {
     case AggregationType::InclusiveScan:
-      *(result[laneId]) = cg::inclusive_scan(mytile, input, op);
+      *(result[tid]) = cg::inclusive_scan(mytile, input, op);
       break;
     case AggregationType::ExclusiveScan:
-      *(result[laneId]) = cg::exclusive_scan(mytile, input, op);
+      *(result[tid]) = cg::exclusive_scan(mytile, input, op);
       break;
     default:
       assert(false && "AggregationType not supported");

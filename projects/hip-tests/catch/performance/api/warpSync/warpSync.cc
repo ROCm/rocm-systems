@@ -97,7 +97,8 @@ __global__ void reduceAtomics(T* __restrict__ output, const T* __restrict__ inpu
 
   __syncthreads();
 
-  uint lane = __lane_id();
+  uint lane = (threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y) %
+              warpSize;
 
   if (mask & (1ull << lane)) op(&result[numWarp], input[idx]);
 
@@ -111,8 +112,10 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
                              unsigned long long mask) {
   int idx = threadIdx.x + blockIdx.x * kBlockDim;
   T result;
+  int laneId = (threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y) %
+               warpSize;
 
-  if (mask & (1ull << __lane_id())) {
+  if (mask & (1ull << laneId)) {
     if constexpr (std::is_same<Op<T>, std::plus<T>>::value)
       result = __reduce_add_sync(mask, input[idx]);
     else if constexpr (std::is_same<Op<T>, MinOp<T>>::value)
