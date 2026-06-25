@@ -42,6 +42,7 @@ class ProfiledExecutionPluginGroup : public ExecutionPluginGroup {
 public:
   ProfiledExecutionPluginGroup() : start_time_(Clock::now()) {}
 
+  bool has_hooks() const override { return true; }
   bool requires_serial_execution() const override { return true; }
 
   void onInit() {
