@@ -236,6 +236,7 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ArgCheckTests.cpp
+      NChannelsPerNetPeerTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       NetSocketTests.cpp
@@ -250,6 +251,15 @@ if(BUILD_TESTS)
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+
+    # Hide the test executable's own symbols so it does NOT interpose
+    # librccl.so's weak alloc.h template/global symbols (e.g.
+    # ncclCudaHostCallocDebug<>, ncclDebugLevel) at load time. Without this,
+    # those interposed-but-mismatched definitions corrupt the heap during a
+    # full ncclCommInit* in this binary. The test still imports librccl's
+    # internal (Debug-visible) symbols normally.
+    target_compile_options(rccl-UnitTestsFixturesDebug PRIVATE
+      -fvisibility=hidden -fvisibility-inlines-hidden)
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
