@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
@@ -770,6 +771,37 @@ TEST(DppPermuteTest, RowXmask) {
   EXPECT_EQ(dpp_permute(0x151, 3, 64, oob), 2);
 }
 
+TEST(DppPermuteTest, RowBroadcasts) {
+  using namespace amdgpu::dpp;
+  bool oob = false;
+
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 16, 64, oob), 15);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 31, 64, oob), 15);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 48, 64, oob), 47);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 63, 64, oob), 47);
+  EXPECT_FALSE(oob);
+
+  oob = false;
+  dpp_permute(ROW_BCAST15, 15, 64, oob);
+  EXPECT_TRUE(oob);
+  oob = false;
+  dpp_permute(ROW_BCAST15, 47, 64, oob);
+  EXPECT_TRUE(oob);
+
+  oob = false;
+  EXPECT_EQ(dpp_permute(ROW_BCAST31, 32, 64, oob), 31);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST31, 63, 64, oob), 31);
+  EXPECT_FALSE(oob);
+
+  oob = false;
+  dpp_permute(ROW_BCAST31, 31, 64, oob);
+  EXPECT_TRUE(oob);
+}
+
 TEST(DppPermuteTest, Dpp8SelectsWithinGroupsOfEight) {
   using namespace amdgpu::dpp;
   const uint32_t lane_sel = (7u << 0u) | (0u << 3u) | (3u << 6u) | (2u << 9u) | (5u << 12u) |
@@ -817,6 +849,73 @@ TEST(DppPermuteTest, DppRead) {
   // Unmasked lane in row 1: lane 17 reads from lane 16.
   val = dpp_read(src, 17, 64, 0x111, 0xF, 0xF, 1, 999);
   EXPECT_EQ(val, 160u); // src[16] = 160
+}
+
+TEST(DppPermuteTest, WriteMaskHonorsBoundCtrlAndBroadcastValidity) {
+  using namespace amdgpu::dpp;
+
+  EXPECT_FALSE(dpp_lane_write_enabled(0, 64, ROW_SHR1, 0xF, 0xF, 0));
+  EXPECT_TRUE(dpp_lane_write_enabled(0, 64, ROW_SHR1, 0xF, 0xF, 1));
+  EXPECT_TRUE(dpp_lane_write_enabled(1, 64, ROW_SHR1, 0xF, 0xF, 0));
+
+  EXPECT_FALSE(dpp_lane_write_enabled(15, 64, ROW_BCAST15, 0xF, 0xF, 0));
+  EXPECT_TRUE(dpp_lane_write_enabled(16, 64, ROW_BCAST15, 0xF, 0xF, 0));
+  EXPECT_FALSE(dpp_lane_write_enabled(31, 64, ROW_BCAST31, 0xF, 0xF, 0));
+  EXPECT_TRUE(dpp_lane_write_enabled(32, 64, ROW_BCAST31, 0xF, 0xF, 0));
+
+  EXPECT_FALSE(dpp_lane_write_enabled(16, 64, ROW_BCAST15, 0xD, 0xF, 0));
+  EXPECT_FALSE(dpp_lane_write_enabled(20, 64, ROW_BCAST15, 0xF, 0xD, 0));
+
+  uint64_t mask = dpp_write_mask(64, ROW_BCAST31, 0xF, 0xF, 0);
+  EXPECT_EQ(mask, 0xFFFFFFFF00000000ULL);
+}
+
+TEST(DppPermuteTest, Cdna4GeneratedVop1UsesSharedRowBroadcast) {
+  amdgpu::GpuMemory mem("cdna4_dpp_broadcast_mem");
+  amdgpu::L2Cache l2("cdna4_dpp_broadcast_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_dpp_broadcast_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  wf->set_exec(~0ULL);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vbase + kSrc, lane, 0x1000u + lane);
+    cu->write_vgpr(vbase + kDst, lane, 0xDEAD0000u + lane);
+  }
+
+  cdna4::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  cdna4::VMovB32Vop1 inst(reinterpret_cast<const cdna4::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 15), 0u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 16), 0x100Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 31), 0x100Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 32), 0u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 48), 0x102Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x102Fu);
 }
 
 // ---------------------------------------------------------------------------

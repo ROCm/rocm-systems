@@ -5609,20 +5609,31 @@ class CodeGenerator:
                             )
                             _dpp_preamble = ''
                             if _is_vopc:
-                                _dpp_preamble += (
-                                    '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
-                                    '  uint64_t dpp_write_mask_ = ~0ULL;\n'
-                                    '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                    '    dpp_write_mask_ = 0;\n'
-                                    '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                    '      uint32_t row = ln / 16;\n'
-                                    '      uint32_t bank = (ln % 16) / 4;\n'
-                                    '      if ((dpp_row_mask_ & (1u << row)) &&\n'
-                                    '          (dpp_bank_mask_ & (1u << bank)))\n'
-                                    '        dpp_write_mask_ |= (1ULL << ln);\n'
-                                    '    }\n'
-                                    '  }\n'
-                                )
+                                if self.isa_spec.arch_name == 'cdna3':
+                                    _dpp_preamble += (
+                                        '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
+                                        '  uint64_t dpp_write_mask_ = ~0ULL;\n'
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                        '    dpp_write_mask_ = amdgpu::dpp::dpp_write_mask(\n'
+                                        '        wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,\n'
+                                        '        dpp_bound_ctrl_);\n'
+                                        '  }\n'
+                                    )
+                                else:
+                                    _dpp_preamble += (
+                                        '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
+                                        '  uint64_t dpp_write_mask_ = ~0ULL;\n'
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                        '    dpp_write_mask_ = 0;\n'
+                                        '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                        '      uint32_t row = ln / 16;\n'
+                                        '      uint32_t bank = (ln % 16) / 4;\n'
+                                        '      if ((dpp_row_mask_ & (1u << row)) &&\n'
+                                        '          (dpp_bank_mask_ & (1u << bank)))\n'
+                                        '        dpp_write_mask_ |= (1ULL << ln);\n'
+                                        '    }\n'
+                                        '  }\n'
+                                    )
                             elif not _is_vopc:
                                 if _has_sdwa_encoding:
                                     _dpp_preamble += (
@@ -5760,27 +5771,45 @@ class CodeGenerator:
                                     '  }\n'
                                 )
                             else:
-                                _dpp_cleanup += (
-                                    '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                    '    uint64_t dpp_write_mask = 0;\n'
-                                    '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                    '      uint32_t row = ln / 16;\n'
-                                    '      uint32_t bank = (ln % 16) / 4;\n'
-                                    '      if ((dpp_row_mask_ & (1u << row)) &&\n'
-                                    '          (dpp_bank_mask_ & (1u << bank)))\n'
-                                    '        dpp_write_mask |= (1ULL << ln);\n'
-                                    '    }\n'
-                                    '    if (dpp_write_mask != ~0ULL) {\n'
-                                    '      uint64_t ex = wf.exec();\n'
-                                    '      uint32_t vb = wf.vgpr_alloc().base;\n'
-                                    '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                    '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
-                                    f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
-                                    '              sdwa_old_dst_[ln]);\n'
-                                    '      }\n'
-                                    '    }\n'
-                                    '  }\n'
-                                )
+                                if self.isa_spec.arch_name == 'cdna3':
+                                    _dpp_cleanup += (
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                        '    uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(\n'
+                                        '        wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,\n'
+                                        '        dpp_bound_ctrl_);\n'
+                                        '    if (dpp_write_mask != ~0ULL) {\n'
+                                        '      uint64_t ex = wf.exec();\n'
+                                        '      uint32_t vb = wf.vgpr_alloc().base;\n'
+                                        '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                        '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
+                                        f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
+                                        '              sdwa_old_dst_[ln]);\n'
+                                        '      }\n'
+                                        '    }\n'
+                                        '  }\n'
+                                    )
+                                else:
+                                    _dpp_cleanup += (
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                        '    uint64_t dpp_write_mask = 0;\n'
+                                        '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                        '      uint32_t row = ln / 16;\n'
+                                        '      uint32_t bank = (ln % 16) / 4;\n'
+                                        '      if ((dpp_row_mask_ & (1u << row)) &&\n'
+                                        '          (dpp_bank_mask_ & (1u << bank)))\n'
+                                        '        dpp_write_mask |= (1ULL << ln);\n'
+                                        '    }\n'
+                                        '    if (dpp_write_mask != ~0ULL) {\n'
+                                        '      uint64_t ex = wf.exec();\n'
+                                        '      uint32_t vb = wf.vgpr_alloc().base;\n'
+                                        '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                        '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
+                                        f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
+                                        '              sdwa_old_dst_[ln]);\n'
+                                        '      }\n'
+                                        '    }\n'
+                                        '  }\n'
+                                    )
                             if _src0_name:
                                 _dpp_cleanup += f'  {_src0_name}.clear_delegate();\n'
                             if _src1_name:

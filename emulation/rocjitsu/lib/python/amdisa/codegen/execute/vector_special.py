@@ -116,7 +116,8 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
     D.u64 = S0.u32 * S1.u32 + S2.u64 (unsigned)
 
     Sources S0 and S1 are 32-bit; the accumulator S2 and result D are
-    64-bit VGPR pairs.
+    64-bit VGPR pairs. The unsigned SDST-encoded form also writes the per-lane
+    carry-out mask to SDST.
     """
     writes_carry = len(dst) > 1
     L = []
