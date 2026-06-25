@@ -33,9 +33,18 @@
  *    - HIP_VERSION >= 6.4
  */
 HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_AQLCapture) {
-  hipCtx_t ctx;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
+
+  // StreamWaitValue / SignalMemory not supported on all backends (e.g. Windows PAL)
+  int waitValueSupport = 0;
+  auto attrErr = hipDeviceGetAttribute(&waitValueSupport,
+                                       hipDeviceAttributeCanUseStreamWaitValue, 0);
+  if (attrErr != hipSuccess || waitValueSupport == 0) {
+    HIP_SKIP_TEST("hipStreamWaitValue is not supported on this device.");
+  }
+
+  hipCtx_t ctx;
   HIP_CHECK(hipCtxCreate(&ctx, 0, device));
 
   // Allocate signal memory required for wait-value operations on AMD
