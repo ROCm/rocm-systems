@@ -177,14 +177,7 @@ function(enable_sanitizer_python_launcher out_var)
     set(_launcher ${THEROCK_SANITIZER_LAUNCHER} ${${out_var}})
     sanitizer_runtime_env(_sanitizer_env ON)
     if(_sanitizer_env)
-        list(
-            PREPEND
-            _launcher
-            "${CMAKE_COMMAND}"
-            -E
-            env
-            ${_sanitizer_env}
-        )
+        list(PREPEND _launcher "${CMAKE_COMMAND}" -E env ${_sanitizer_env})
     endif()
     set(${out_var} "${_launcher}" PARENT_SCOPE)
 endfunction()
