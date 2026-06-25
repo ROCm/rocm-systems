@@ -23,7 +23,7 @@ namespace concepts
  */
 template <typename F>
 concept factory = ::rocprofsys::backends::concepts::backend_factory<F> &&
-                  requires(typename F::backend_t sess) {
+                  requires(typename F::backend_t& sess) {
                       { sess.initialize() };
                       { sess.shutdown() };
                       { sess.get_lib_version() };
@@ -31,7 +31,7 @@ concept factory = ::rocprofsys::backends::concepts::backend_factory<F> &&
                   }
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
                   &&
-                  requires(typename F::backend_t sess) {
+                  requires(typename F::backend_t& sess) {
                       { sess.enumerate_nic_handles() };
                   }
 #endif

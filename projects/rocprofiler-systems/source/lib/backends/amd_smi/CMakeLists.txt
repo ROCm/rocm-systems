@@ -22,4 +22,6 @@ if(ROCPROFSYS_BUILD_AINIC)
     )
 endif()
 
-add_subdirectory(tests)
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Must be first: normalizes ROCPROFSYS_BUILD_AINIC against the installed AMD SMI
-// version before any header (e.g. provider.hpp) gates code on that macro.
+// Must be first: defines AINIC_SUPPORTED based on the installed AMD SMI version
+// and ROCPROFSYS_USE_AINIC before any header gates code on that macro.
 #include "backends/amd_smi/ainic_feature.hpp"
 
 #include "library/pmc/collectors/common/collector_slice.hpp"
