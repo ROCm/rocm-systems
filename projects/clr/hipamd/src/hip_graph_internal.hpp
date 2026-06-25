@@ -1204,6 +1204,26 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   SyncPlan sync_plan_;
 
   void BuildSyncPlan();
+
+  // ---- Same-queue any-order overlap (Approach A: collapse) ----------------
+  // Collapses the *fully-captured* (compute-queue) segments of each device onto
+  // one reserved stream and recovers overlap on capable hardware by clearing the
+  // AQL barrier bit on the head dispatch packet of independent same-level
+  // segments. Segments that contain any uncaptured node (SDMA copies, host
+  // callbacks, events, mem-alloc/free, cooperative kernels) or a child graph are
+  // NOT collapsed: they keep dedicated streams so cross-engine / cross-stream
+  // concurrency and their signal-based ordering are preserved. Set once in
+  // Init(); guards every mutation so the pass is a no-op otherwise.
+  bool anyorder_enabled_ = false;
+  void ApplySameQueueOverlapPolicy();
+  // True for ISAs whose CP honors out-of-order same-queue dispatch when the
+  // barrier bit is clear (gfx1250 / gfx12.5+).
+  static bool DeviceHonorsSameQueueAnyOrder(int dev_id);
+  // A segment can be collapsed onto the shared compute queue only if it emits
+  // purely compute-queue AQL packets: no child graph and every node captures.
+  // Anything else (SDMA copy, host, event, mem-alloc/free, coop kernel) must
+  // keep a dedicated stream so its engine/sync semantics are not serialized.
+  static bool SegmentIsCollapsible(const Segment& seg);
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {

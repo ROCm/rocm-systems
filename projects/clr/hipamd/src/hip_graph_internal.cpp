@@ -432,6 +432,162 @@ void Graph::ResolveSegmentDependencies() {
 }
 
 // ================================================================================================
+// Helpers for the same-queue any-order overlap pass. AQL packet headers are
+// 16-bit little-endian: byte 0 holds the 8-bit packet type, bit 8 (byte 1,
+// bit 0) is the barrier bit, and byte 2 is the AMD vendor format for
+// VENDOR_SPECIFIC packets. We edit the raw bytes directly to avoid pulling in
+// HSA header dependencies here.
+namespace {
+constexpr uint8_t kAqlTypeVendorSpecific = 0;  // HSA_PACKET_TYPE_VENDOR_SPECIFIC
+constexpr uint8_t kAqlTypeKernelDispatch = 2;  // HSA_PACKET_TYPE_KERNEL_DISPATCH
+constexpr uint8_t kAmdFormatExtDispatch = 3;   // AMD_AQL_FORMAT_KERNEL_DISPATCH (ext)
+constexpr uint8_t kBarrierBitMask = 0x01;      // bit 8 lives in byte 1, bit 0
+
+// A dispatch is either a plain kernel-dispatch packet or an AMD vendor-specific
+// extended dispatch. Barrier-AND / other packet types return false so prepended
+// cross-queue sync packets are never disturbed.
+bool packetIsDispatch(const uint8_t* pkt) {
+  switch (pkt[0]) {
+    case kAqlTypeKernelDispatch:
+      return true;
+    case kAqlTypeVendorSpecific:
+      return pkt[2] == kAmdFormatExtDispatch;
+    default:
+      return false;
+  }
+}
+
+// Force the barrier bit of a dispatch packet to `barrier`; no-op otherwise.
+// Writing the bit explicitly (rather than only clearing) keeps the overlap pass
+// idempotent across repeated instantiation / node updates.
+void writeDispatchBarrierBit(uint8_t* pkt, bool barrier) {
+  if (!packetIsDispatch(pkt)) {
+    return;
+  }
+  if (barrier) {
+    pkt[1] |= kBarrierBitMask;
+  } else {
+    pkt[1] &= static_cast<uint8_t>(~kBarrierBitMask);
+  }
+}
+}  // namespace
+
+// ================================================================================================
+bool GraphExec::DeviceHonorsSameQueueAnyOrder(int dev_id) {
+  if (dev_id < 0 || dev_id >= static_cast<int>(g_devices.size())) {
+    return false;
+  }
+  const amd::Device* device = g_devices[dev_id]->devices()[0];
+  const uint32_t major = device->isa().versionMajor();
+  const uint32_t minor = device->isa().versionMinor();
+  // gfx1250 (gfx12.5+) retires same-queue dispatches out-of-order
+  // when the barrier bit is clear; other ISAs serialize regardless and keep it.
+  // gfx950 is intentionally excluded until its support is confirmed.
+  return major == 12 && minor >= 5;
+}
+
+// ================================================================================================
+bool GraphExec::SegmentIsCollapsible(const Segment& seg) {
+  // Child-graph segments recurse into their own GraphExec, which makes its own
+  // collapse decision; never fold them onto the parent's compute queue.
+  if (seg.child_graph_ptr != nullptr) {
+    return false;
+  }
+  if (seg.nodes.empty()) {
+    return false;
+  }
+  // Every node must produce compute-queue AQL packets. Any uncaptured node
+  // (SDMA copy, host callback, event record/wait, mem-alloc/free, cooperative
+  // kernel) runs on a different engine or via the stream's command path and
+  // would be serialized by collapsing onto the shared compute queue.
+  for (Node node : seg.nodes) {
+    if (node == nullptr || !node->GraphCaptureEnabled()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ================================================================================================
+// Clear the AQL barrier bit on the head kernel of independent same-level
+// segments so a collapsed single-queue graph still overlaps on capable HW.
+// Single forward pass; the bit is written explicitly per head packet so calling
+// this again after BuildSyncPlan or a node update reproduces the same result.
+void GraphExec::ApplySameQueueOverlapPolicy() {
+  if (!anyorder_enabled_) {
+    return;
+  }
+
+  // First dispatch packet of a segment, skipping any prepended sync packets.
+  auto headDispatch = [](SegmentBatch& sb) -> uint8_t* {
+    for (auto& batch : sb.packet_batches) {
+      for (uint8_t* pkt : batch.dispatchPackets) {
+        if (packetIsDispatch(pkt)) {
+          return pkt;
+        }
+      }
+    }
+    return nullptr;
+  };
+
+  // A segment whose head depends on work on a *different* queue is gated by a
+  // prepended BARRIER_AND / embedded dep_signal; its head must keep barrier=1.
+  auto dependsOffQueue = [&](const Segment& seg) {
+    for (int dep : seg.segment_ids_dependencies) {
+      if (dep >= 0 && dep < static_cast<int>(segments_.size())) {
+        const Segment& prev = segments_[dep];
+        if (prev.dev_id != seg.dev_id || prev.stream_id != seg.stream_id) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  for (int level = 0; level <= max_dependency_level_; ++level) {
+    auto lit = segments_per_level_.find(level);
+    if (lit == segments_per_level_.end()) {
+      continue;
+    }
+
+    // Track the first segment seen on each (device, stream) at this level: it
+    // anchors the level boundary and keeps barrier=1 to drain the prior level.
+    std::unordered_set<uint64_t> anchoredQueues;
+
+    for (int seg_id : lit->second) {
+      if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) {
+        continue;
+      }
+      const Segment& seg = segments_[seg_id];
+      // Only the collapsed compute segments (reserved stream 0) on a capable
+      // device participate. Segments with uncaptured nodes live on dedicated
+      // streams and must keep their barrier bits / signal-based ordering, and
+      // non-capable devices in a mixed graph keep theirs too.
+      if (!SegmentIsCollapsible(seg) || !DeviceHonorsSameQueueAnyOrder(seg.dev_id)) {
+        continue;
+      }
+      auto sbIt = segmentBatches_.find(seg_id);
+      if (sbIt == segmentBatches_.end()) {
+        continue;
+      }
+      uint8_t* head = headDispatch(sbIt->second);
+      if (head == nullptr) {
+        continue;
+      }
+
+      const uint64_t queueKey =
+          (static_cast<uint64_t>(static_cast<uint32_t>(seg.dev_id)) << 32) |
+          static_cast<uint32_t>(seg.stream_id);
+      const bool isQueueAnchor = anchoredQueues.insert(queueKey).second;
+
+      // Keep the barrier on the queue anchor and on any cross-queue entry;
+      // clear it on later independent heads so they overlap the anchor.
+      writeDispatchBarrierBit(head, isQueueAnchor || dependsOffQueue(seg));
+    }
+  }
+}
+
+// ================================================================================================
 void GraphExec::BuildSyncPlan() {
   // Clean up any prior barrier packets
   for (auto* p : sync_plan_.barrier_packets) { delete[] p; }
@@ -1172,7 +1328,21 @@ void GraphExec::PrecomputeStreamAssignment() {
     for (int seg_id : it->second) {
       if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
         auto& seg = segments_[seg_id];
-        seg.stream_id = static_cast<int>(dev_idx[seg.dev_id]++ % getPoolSize(seg.dev_id));
+        if (anyorder_enabled_ && DeviceHonorsSameQueueAnyOrder(seg.dev_id)) {
+          // Approach A: collapse captured segments onto reserved stream 0;
+          // route uncaptured segments over the remaining streams (1..pool-1)
+          // so cross-engine / cross-stream concurrency survives the collapse.
+          if (SegmentIsCollapsible(seg)) {
+            seg.stream_id = 0;
+          } else {
+            const size_t pool = getPoolSize(seg.dev_id);
+            seg.stream_id = (pool > 1)
+                ? static_cast<int>(1 + (dev_idx[seg.dev_id]++ % (pool - 1)))
+                : 0;
+          }
+        } else {
+          seg.stream_id = static_cast<int>(dev_idx[seg.dev_id]++ % getPoolSize(seg.dev_id));
+        }
       }
     }
   }
@@ -1213,6 +1383,51 @@ hipError_t GraphExec::Init() {
     if (use_segment_scheduling_) {
       // For packet engine: analyze segments to determine per-device stream requirements
       FindStreamsReqPerDevForSegments();
+
+      // Approach A: collapse the fully-captured (compute-queue) segments of each
+      // device onto a single reserved stream (#0) and recover overlap via the
+      // barrier bit. Segments that contain uncaptured nodes (SDMA copies, host,
+      // events, mem-alloc/free, coop kernels) or child graphs are kept off that
+      // queue so cross-engine / cross-stream concurrency is preserved. Engage
+      // only on hardware that honors out-of-order same-queue dispatch.
+      anyorder_enabled_ = DEBUG_HIP_GRAPH_COLLAPSE_ANYORDER &&
+                          DeviceHonorsSameQueueAnyOrder(instantiateDeviceId_);
+      if (anyorder_enabled_) {
+        // Per device, size the pool as: one reserved stream for the collapsed
+        // compute work (if any) plus the peak number of uncaptured segments at
+        // any single level (so they retain their own streams and overlap).
+        std::unordered_map<int, bool> dev_has_compute;
+        std::unordered_map<int, int> dev_uncaptured_width;
+        for (const auto& [lvl, seg_ids] : segments_per_level_) {
+          std::unordered_map<int, int> uncaptured_at_level;
+          for (int sid : seg_ids) {
+            if (sid < 0 || sid >= static_cast<int>(segments_.size())) {
+              continue;
+            }
+            const Segment& s = segments_[sid];
+            if (SegmentIsCollapsible(s)) {
+              dev_has_compute[s.dev_id] = true;
+            } else {
+              uncaptured_at_level[s.dev_id]++;
+            }
+          }
+          for (const auto& [d, c] : uncaptured_at_level) {
+            dev_uncaptured_width[d] = std::max(dev_uncaptured_width[d], c);
+          }
+        }
+        for (auto& [dev_id, count] : max_streams_dev_) {
+          // Only collapse devices that actually honor same-queue any-order; in a
+          // mixed-ISA multi-device graph the others keep their normal pool.
+          if (!DeviceHonorsSameQueueAnyOrder(dev_id)) {
+            continue;
+          }
+          const int reserved = dev_has_compute[dev_id] ? 1 : 0;
+          count = std::max(1, reserved + dev_uncaptured_width[dev_id]);
+        }
+        ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+                "[hipGraph] Approach A: collapse captured segments onto a reserved "
+                "compute queue per device; uncaptured segments keep own streams");
+      }
     } else {
       // For classic scheduling: use stream-to-device mappings
       FindStreamsReqPerDev();
@@ -1559,6 +1774,11 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
   // prepends barrier packets and generates the patch list
   BuildSyncPlan();
 
+  // Adjust barrier bits for same-queue overlap before the flat buffers are
+  // built below, so rebuildFlatBuffer() snapshots the adjusted headers. No-op
+  // unless collapse + capable HW enabled it in Init().
+  ApplySameQueueOverlapPolicy();
+
   // Build flat buffers once now that all dispatchPackets are finalized
   // (capture populated them, BuildSyncPlan may have prepended/appended barriers).
   // Also build a map from dispatchPacket pointer -> flat buffer pointer so
@@ -1734,6 +1954,12 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
           }
         }
       }
+      // Re-derive the same-queue overlap barrier bits before rebuilding: the
+      // update re-captured this node's packets with the default barrier=1
+      // header. The pass is idempotent for unchanged segments (it rewrites the
+      // same bit value), so only this batch needs a rebuild below.
+      ApplySameQueueOverlapPolicy();
+
       // Rebuild the flat buffer immediately so the next dispatch uses updated packets.
       // The flat buffer always represents the full packet sequence; the dispatch path
       // independently skips it when any nodes are disabled (disabledNodeCount != 0).
