@@ -5,7 +5,7 @@
 
 #include "common/defines.h"
 #include "common/env_vars.hpp"
-#include "common/join.hpp"
+#include <spdlog/fmt/fmt.h>
 #include "logger/debug.hpp"
 
 #include <timemory/utility/filepath.hpp>
@@ -399,7 +399,7 @@ inline void
 remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
            const std::unordered_set<std::string>& original_envs)
 {
-    auto key = join("", env_variable, "=");
+    auto key = fmt::format("{}=", env_variable);
 
     env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
                                   [&key](const std::string& entry) {
@@ -647,7 +647,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     _updated_envs.emplace(updated_value_t{ _env_var });
 
     const auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
-    const auto _key         = join("", _env_var, "=");
+    const auto _key         = fmt::format("{}=", _env_var);
 
     const auto matches_key = [&_key](const std::string& entry) {
         return std::string_view{ entry }.find(_key) == 0;
@@ -656,7 +656,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     auto first = std::find_if(_environ.begin(), _environ.end(), matches_key);
     if(first == _environ.end())
     {
-        _environ.emplace_back(join('=', _env_var, _env_val_str));
+        _environ.emplace_back(fmt::format("{}={}", _env_var, _env_val_str));
         return;
     }
 
@@ -664,7 +664,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     {
         case update_mode::WEAK:
             if(_original_envs.find(*first) == _original_envs.end()) return;
-            *first = join('=', _env_var, _env_val_str);
+            *first = fmt::format("{}={}", _env_var, _env_val_str);
             return;
 
         case update_mode::PREPEND:
@@ -673,13 +673,13 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
             if(first->find(_env_val_str) != std::string::npos) return;
             auto _val = first->substr(_key.size());
             *first    = (_mode == update_mode::PREPEND)
-                            ? join('=', _env_var, join(_join_delim, _env_val_str, _val))
-                            : join('=', _env_var, join(_join_delim, _val, _env_val_str));
+                            ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
+                            : fmt::format("{}={}{}{}", _env_var, _val, _join_delim, _env_val_str);
             return;
         }
 
         case update_mode::REPLACE:
-            *first = join('=', _env_var, _env_val_str);
+            *first = fmt::format("{}={}", _env_var, _env_val_str);
             _environ.erase(std::remove_if(std::next(first), _environ.end(), matches_key),
                            _environ.end());
             return;
@@ -726,7 +726,7 @@ add_torch_library_path(std::vector<std::string>& envp, std::string_view executab
     }
 
     envp.erase(std::remove_if(envp.begin(), envp.end(), is_ld_path), envp.end());
-    envp.emplace_back(join("", ld_prefix, result));
+    envp.emplace_back(fmt::format("{}{}", ld_prefix, result));
 
     updated_envs.emplace(ld_prefix.substr(0, ld_prefix.length() - 1));
 }

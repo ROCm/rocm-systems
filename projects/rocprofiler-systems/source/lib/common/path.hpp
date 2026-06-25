@@ -421,23 +421,23 @@ get_internal_libpath(const std::string& _lib)
     auto _root = get_rocprofsys_root();
     for(const auto* libdir : { "lib", "lib64" })
     {
-        auto _candidate = rocprofsys::common::join('/', _root, libdir, _lib);
+        auto _candidate = fmt::format("{}/{}/{}", _root, libdir, _lib);
         if(exists(_candidate)) return _candidate;
     }
-    return rocprofsys::common::join('/', _root, "lib", _lib);
+    return fmt::format("{}/lib/{}", _root, _lib);
 }
 
 std::string
 get_internal_script_path()
 {
     auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join('/', _root, "libexec", "rocprofiler-systems");
+    return _root + "/libexec/rocprofiler-systems";
 }
 
 std::string
 get_internal_libdir()
 {
-    return rocprofsys::common::join('/', get_rocprofsys_root(), "lib");
+    return get_rocprofsys_root() + "/lib";
 }
 
 }  // namespace path
