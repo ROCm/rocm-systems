@@ -60,6 +60,47 @@ TEST(args_serialization_test, get_args_string_roundtrips_through_parser)
     }
 }
 
+// --- delimiter / escape-character handling ----------------------------------
+
+TEST(args_serialization_test, value_with_delimiter_roundtrips_losslessly)
+{
+    // A value containing the field delimiter ";;" (and a bare ';') must survive the
+    // round-trip byte-identical rather than corrupting the field grammar.
+    function_args_t args{ { 0U, "string", "cmd", "a;;b;c" }, { 1U, "int", "n", "42" } };
+
+    auto parsed = process_arguments_string(get_args_string(args));
+
+    ASSERT_EQ(parsed.size(), 2u);
+    EXPECT_EQ(parsed[0].arg_name, "cmd");
+    EXPECT_EQ(parsed[0].arg_value, "a;;b;c");
+    EXPECT_EQ(parsed[1].arg_name, "n");
+    EXPECT_EQ(parsed[1].arg_value, "42");
+}
+
+TEST(args_serialization_test, percent_and_semicolon_are_escaped_in_wire_format)
+{
+    // '%' is the escape introducer and must itself be escaped (%25) so that a literal
+    // "%3B" in user data does not decode back into a ';'.
+    function_args_t args{ { 0U, "string", "v", "100%;done" } };
+
+    const auto wire = get_args_string(args);
+    EXPECT_EQ(wire, "0;;string;;v;;100%25%3Bdone;;");
+
+    auto parsed = process_arguments_string(wire);
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0].arg_value, "100%;done");
+}
+
+TEST(args_serialization_test, literal_escape_sequence_in_value_roundtrips)
+{
+    // A value that already looks like an escape sequence must not be mis-decoded.
+    function_args_t args{ { 0U, "string", "v", "%3B%25" } };
+
+    auto parsed = process_arguments_string(get_args_string(args));
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0].arg_value, "%3B%25");
+}
+
 // --- instrumentor producer pattern (module_function::operator()) ------------
 
 TEST(args_serialization_test, source_object_present_serializes)
