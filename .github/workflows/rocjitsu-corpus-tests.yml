@@ -94,8 +94,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/06/23.
-          ref: 34a1241bb374307d24c5aee93c9fbd2279c1b04b
+          # Last updated on 2026/06/25.
+          ref: 3998d8edc92c87fd26d000d06c9af51f518d7439
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -243,6 +243,8 @@ jobs:
           done
 
           targets=(
+            "gfx942 amdgpu_cdna3_kmd.json fuzz_gfx942.json"
+            "gfx950 amdgpu_cdna4_kmd.json fuzz_gfx950.json"
             "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json fuzz_gfx1201.json"
           )
           for target in "${targets[@]}"; do
@@ -253,7 +255,7 @@ jobs:
               --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
               -- pytest \
               --fuzz-target-config-files="${ROCJITSU_SOURCE_DIR}/tests/corpus/${corpus_config}" \
-              --timeout 60 \
+              --timeout 15 \
               tests/test_fuzz_targets.py
             echo "::endgroup::"
           done
