@@ -135,6 +135,16 @@ void InterruptSignal::StoreRelease(hsa_signal_value_t value) {
   SetEvent();
 }
 
+void InterruptSignal::SilentStoreRelaxed(hsa_signal_value_t value) {
+  atomic::Store(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  // Intentionally skip SetEvent() - silent stores don't wake waiters
+}
+
+void InterruptSignal::SilentStoreRelease(hsa_signal_value_t value) {
+  atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  // Intentionally skip SetEvent() - silent stores don't wake waiters
+}
+
 hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition,
                                                hsa_signal_value_t compare_value,
                                                uint64_t timeout,
@@ -155,7 +165,9 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
     core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
 
   while (true) {
-    if (!IsValid()) return 0;
+    if (!IsValid()) {
+      return 0;
+    }
 
     int64_t value = atomic::Load(&signal_.value, std::memory_order_relaxed);
 
@@ -172,7 +184,6 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
 
     if (wait_hint == HSA_WAIT_STATE_ACTIVE) {
       if (g_use_mwaitx) {
-        // Short timeout for active waiting
         timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 1000, true);
       }
       continue;
@@ -180,7 +191,6 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
 
     if (now - start_time < kMaxElapsed) {
       if (g_use_mwaitx) {
-        // Longer timeout with timer for passive waiting
         timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
       }
       continue;

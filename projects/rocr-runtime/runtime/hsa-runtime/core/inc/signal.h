@@ -127,13 +127,13 @@ inline bool CheckSignalCondition(int64_t value, hsa_signal_condition_t condition
                                hsa_signal_value_t compare_value) {
   switch (condition) {
     case HSA_SIGNAL_CONDITION_EQ:
-      return value == compare_value;
+      return (value == compare_value);
     case HSA_SIGNAL_CONDITION_NE:
-      return value != compare_value;
+      return (value != compare_value);
     case HSA_SIGNAL_CONDITION_GTE:
-      return value >= compare_value;
+      return (value >= compare_value);
     case HSA_SIGNAL_CONDITION_LT:
-      return value < compare_value;
+      return (value < compare_value);
     default:
       return false;
   }
@@ -353,6 +353,9 @@ class Signal {
 
   virtual void StoreRelaxed(hsa_signal_value_t value) = 0;
   virtual void StoreRelease(hsa_signal_value_t value) = 0;
+
+  virtual void SilentStoreRelaxed(hsa_signal_value_t value) = 0;
+  virtual void SilentStoreRelease(hsa_signal_value_t value) = 0;
 
   virtual hsa_signal_value_t WaitRelaxed(hsa_signal_condition_t condition,
                                          hsa_signal_value_t compare_value,

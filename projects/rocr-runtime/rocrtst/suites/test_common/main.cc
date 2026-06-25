@@ -780,6 +780,13 @@ TEST(rocrtstStress, Queue_LoadStore_Write_Index_ConcurrentTest) {
     RunCustomTestEpilog(&Qw);
 }
 
+TEST(rocrtstStress, Signal_Silent_Store_Semantics) {
+    QueueWriteIndexConcurrentTest Qw(false, false, false);
+    if (!RunCustomTestProlog(&Qw)) return;
+    Qw.TestSilentStoreSemantics();
+    RunCustomTestEpilog(&Qw);
+}
+
 TEST(rocrtstPerf, Memory_Async_Copy) {
   MemoryAsyncCopy mac;
   // To do full test, uncomment this:

@@ -235,6 +235,16 @@ void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {
   StoreRelaxed(value);
 }
 
+void AieAqlQueue::SilentStoreRelaxed(hsa_signal_value_t value) {
+  // AIE queue doorbell stores are inherently "silent" - they don't use SetEvent
+  StoreRelaxed(value);
+}
+
+void AieAqlQueue::SilentStoreRelease(hsa_signal_value_t value) {
+  // AIE queue doorbell stores are inherently "silent" - they don't use SetEvent
+  StoreRelease(value);
+}
+
 hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:

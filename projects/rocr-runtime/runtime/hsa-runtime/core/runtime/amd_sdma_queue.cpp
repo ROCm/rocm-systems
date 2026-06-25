@@ -315,5 +315,15 @@ void SdmaQueue::StoreRelease(hsa_signal_value_t value) {
   RingDoorbell(static_cast<uint64_t>(value));
 }
 
+void SdmaQueue::SilentStoreRelaxed(hsa_signal_value_t value) {
+  // SDMA queue doorbell stores are inherently "silent" - they don't use SetEvent
+  StoreRelaxed(value);
+}
+
+void SdmaQueue::SilentStoreRelease(hsa_signal_value_t value) {
+  // SDMA queue doorbell stores are inherently "silent" - they don't use SetEvent
+  StoreRelease(value);
+}
+
 }  // namespace AMD
 }  // namespace rocr

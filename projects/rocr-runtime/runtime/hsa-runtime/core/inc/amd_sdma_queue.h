@@ -125,6 +125,10 @@ class SdmaQueue : public core::Queue, private core::LocalSignal, public core::Do
   void StoreRelaxed(hsa_signal_value_t value) override;
   void StoreRelease(hsa_signal_value_t value) override;
 
+  /// @brief Silent doorbell signal store entry points.
+  void SilentStoreRelaxed(hsa_signal_value_t value) override;
+  void SilentStoreRelease(hsa_signal_value_t value) override;
+
  private:
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;

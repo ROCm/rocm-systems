@@ -50,6 +50,13 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <thread>
+#include <atomic>
+#include <chrono>
+#include <functional>
+#include <pthread.h>
+#include <sys/resource.h>
+#include <iomanip>
 
 #include "suites/stress/queue_write_index_concurrent_tests.h"
 #include "common/base_rocr_utils.h"
@@ -572,6 +579,156 @@ void QueueWriteIndexConcurrentTest::QueueLoadStoreWriteIndexAtomic(void) {
   for (unsigned int i = 0 ; i< gpus.size(); ++i) {
     QueueLoadStoreWriteIndexAtomic(cpus[0], gpus[i]);
   }
+
+  if (verbosity() > 0) {
+    std::cout << "subtest Passed" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+// Helper function to run a signal operation test with a waiter thread
+// Returns the total number of context switches observed by the waiter
+static long RunSignalOperationTest(
+    hsa_agent_t* cpu_agent,
+    int num_operations,
+    std::function<void(hsa_signal_t)> operation_func,
+    hsa_signal_value_t target_value) {
+
+  hsa_status_t err;
+  hsa_signal_t signal;
+  err = hsa_signal_create(0, 1, cpu_agent, &signal);
+  if (err != HSA_STATUS_SUCCESS) {
+    std::cout << "  [ERROR] Failed to create signal" << std::endl;
+    return -1;
+  }
+
+  std::atomic<bool> waiter_ready{false};
+  long total_ctx_switches = 0;
+
+  // Waiter thread that blocks waiting for target value
+  std::thread waiter_thread([&]() {
+    pthread_t waiter_tid = pthread_self();
+    std::cout << "  [WAITER TID: " << waiter_tid << "] Started" << std::endl;
+
+    waiter_ready.store(true, std::memory_order_release);
+
+    struct rusage usage_start, usage_end;
+    getrusage(RUSAGE_THREAD, &usage_start);
+
+    auto start = std::chrono::steady_clock::now();
+    hsa_signal_value_t observed = hsa_signal_wait_relaxed(
+        signal, HSA_SIGNAL_CONDITION_EQ, target_value,
+        5000000000, HSA_WAIT_STATE_BLOCKED);  // 5 second timeout
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    getrusage(RUSAGE_THREAD, &usage_end);
+
+    long voluntary = usage_end.ru_nvcsw - usage_start.ru_nvcsw;
+    long involuntary = usage_end.ru_nivcsw - usage_start.ru_nivcsw;
+    total_ctx_switches = voluntary + involuntary;
+
+    std::cout << "  [WAITER TID: " << waiter_tid << "] Completed after " << elapsed_ms << "ms" << std::endl;
+    std::cout << "    Context switches: " << total_ctx_switches
+              << " (voluntary=" << voluntary << ", involuntary=" << involuntary << ")" << std::endl;
+  });
+
+  // Wait for waiter to be ready
+  while (!waiter_ready.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  // Perform the signal operations from main thread
+  std::cout << "  [MAIN] Starting " << num_operations << " operations..." << std::endl;
+  auto op_start = std::chrono::steady_clock::now();
+
+  for (int i = 0; i < num_operations; ++i) {
+    operation_func(signal);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  auto op_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - op_start).count();
+  std::cout << "  [MAIN] Completed " << num_operations << " operations in " << op_elapsed << "ms" << std::endl;
+
+  // Wake up waiter with final store to target value
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  hsa_signal_store_screlease(signal, target_value);
+
+  waiter_thread.join();
+  hsa_signal_destroy(signal);
+
+  return total_ctx_switches;
+}
+
+void QueueWriteIndexConcurrentTest::TestSilentStoreSemantics(void) {
+  if (verbosity() > 0) {
+    PrintDebugSubtestHeader("Signal Silent Store Test & Performance Comparison");
+  }
+
+  pthread_t main_tid = pthread_self();
+  std::cout << "  [MAIN THREAD TID: " << main_tid << "]" << std::endl;
+
+  // Get CPU agent to use as consumer (forces InterruptSignal creation)
+  hsa_agent_t* cpu_agent_ptr = cpu_device();
+  ASSERT_NE(cpu_agent_ptr, nullptr);
+
+  const int NUM_STORES = 100;
+  const hsa_signal_value_t target_value = 1000;
+
+  std::cout << "\n  ===== TEST 1: Silent Stores (No SetEvent) =====" << std::endl;
+  std::cout << "  Expected: Minimal context switches" << std::endl;
+
+  // Test 1: Silent stores (no SetEvent calls)
+  long silent_ctx_switches = RunSignalOperationTest(
+      cpu_agent_ptr,
+      NUM_STORES,
+      [](hsa_signal_t signal) {
+        static int i = 1;
+        hsa_signal_silent_store_screlease(signal, i++);
+      },
+      target_value);
+
+  std::cout << "\n  TEST 1 RESULTS:" << std::endl;
+  std::cout << "    Total context switches: " << silent_ctx_switches << std::endl;
+
+  // Verify minimal context switches with silent stores
+  EXPECT_LT(silent_ctx_switches, 5)
+      << "Silent stores should have minimal context switches";
+
+  std::cout << "\n  ===== TEST 2: Regular Stores (Always SetEvent) =====" << std::endl;
+  std::cout << "  Expected: High context switches" << std::endl;
+
+  // Test 2: Regular stores (always call SetEvent)
+  long regular_ctx_switches = RunSignalOperationTest(
+      cpu_agent_ptr,
+      NUM_STORES,
+      [](hsa_signal_t signal) {
+        static int i = 1;
+        hsa_signal_store_screlease(signal, i++);
+      },
+      target_value);
+
+  std::cout << "\n  TEST 2 RESULTS:" << std::endl;
+  std::cout << "    Total context switches: " << regular_ctx_switches << std::endl;
+
+  // Verify high context switches with regular stores
+  EXPECT_GT(regular_ctx_switches, 5)
+      << "Regular stores should have many context switches (> 5)";
+
+  // Calculate and print efficiency comparison
+  double efficiency_ratio = (silent_ctx_switches > 0)
+      ? (double)regular_ctx_switches / (double)silent_ctx_switches
+      : 0.0;
+
+  std::cout << "\n  ===== EFFICIENCY COMPARISON =====" << std::endl;
+  std::cout << "  Test 1 (Silent Stores - No SetEvent):   " << silent_ctx_switches
+            << " context switches" << std::endl;
+  std::cout << "  Test 2 (Regular Stores - SetEvent):     " << regular_ctx_switches
+            << " context switches" << std::endl;
+  std::cout << "  Efficiency improvement: " << std::fixed << std::setprecision(1)
+            << efficiency_ratio << "x fewer context switches with silent stores" << std::endl;
+  std::cout << "  ==================================" << std::endl;
 
   if (verbosity() > 0) {
     std::cout << "subtest Passed" << std::endl;

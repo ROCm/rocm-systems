@@ -278,6 +278,22 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
     StoreRelaxed(value);
   }
 
+  /// @brief Update signal value using Relaxed semantics without waking waiters
+  ///
+  /// @param value Value of signal to update with
+  void SilentStoreRelaxed(hsa_signal_value_t value) override {
+    // InterceptQueue doorbell stores are inherently "silent" - they don't use SetEvent
+    StoreRelaxed(value);
+  }
+
+  /// @brief Update signal value using Release semantics without waking waiters
+  ///
+  /// @param value Value of signal to update with
+  void SilentStoreRelease(hsa_signal_value_t value) override {
+    // InterceptQueue doorbell stores are inherently "silent" - they don't use SetEvent
+    StoreRelease(value);
+  }
+
   /// @brief Provide information about the queue
   hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute, void* value) override;
 

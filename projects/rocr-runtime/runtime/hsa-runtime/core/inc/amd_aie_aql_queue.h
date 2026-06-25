@@ -91,6 +91,8 @@ class AieAqlQueue : public core::Queue,
   uint64_t AddWriteIndexAcqRel(uint64_t value) override;
   void StoreRelaxed(hsa_signal_value_t value) override;
   void StoreRelease(hsa_signal_value_t value) override;
+  void SilentStoreRelaxed(hsa_signal_value_t value) override;
+  void SilentStoreRelease(hsa_signal_value_t value) override;
   hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute,
                        void *value) override;
   hsa_status_t GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) override;

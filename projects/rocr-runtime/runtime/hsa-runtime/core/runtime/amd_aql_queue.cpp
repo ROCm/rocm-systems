@@ -497,6 +497,16 @@ void AqlQueue::StoreRelease(hsa_signal_value_t value) {
   StoreRelaxed(value);
 }
 
+void AqlQueue::SilentStoreRelaxed(hsa_signal_value_t value) {
+  // AqlQueue doorbell stores are inherently "silent" - they don't use SetEvent
+  StoreRelaxed(value);
+}
+
+void AqlQueue::SilentStoreRelease(hsa_signal_value_t value) {
+  // AqlQueue doorbell stores are inherently "silent" - they don't use SetEvent
+  StoreRelease(value);
+}
+
 void AqlQueue::GetInfoProperties(uint8_t value[8]) const {
   auto setFlag = [&](uint32_t bit) {
     assert(bit < 8 * 8 && "Flag value exceeds input parameter size");
