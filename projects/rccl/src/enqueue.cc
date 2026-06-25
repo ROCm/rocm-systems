@@ -3438,18 +3438,9 @@ static ncclResult_t rmaTaskAppend(
     }
   }
 
-  // Check if RMA CE needs initialization. CE (Copy-Engine) handles intra-node and
-  // self-targeted ops via IPC/copy. CE init registers the signals window collectively
-  // over the WHOLE comm, so the gate must be comm-uniform or the allgather deadlocks.
-  // RCCL non-sym: self is always CE-accessible (ceRankList always contains self), so
-  // CE is always needed; init unconditionally. Sym path keeps the lsaSize>1 skip.
-#if defined(__HIP_PLATFORM_AMD__)
-  int ceInitActive = comm->symmetricSupport ? (comm->devrState.lsaSize > 1) : 1;
-#else
-  int ceInitActive = comm->devrState.lsaSize > 1;
-#endif
-  if (ceInitActive &&
-      !comm->rmaState.rmaCeState.initialized && ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
+  // Check if RMA CE needs initialization
+  if (!comm->rmaState.rmaCeState.initialized &&
+      ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* ceTask;
     NCCLCHECK(ncclCalloc(&ceTask, 1));
     ceTask->comm = comm;

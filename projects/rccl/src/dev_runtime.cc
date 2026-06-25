@@ -1841,8 +1841,7 @@ ncclResult_t ncclCommWindowRegister_impl(
   // lazy enqueue in rmaTaskAppend, which fires on the first ncclPutSignal/
   // Signal/WaitSignal. ncclRmaCeInit is collective (signals window + bootstrap
   // barrier), so we cannot call it from the non-collective Host API entry point.
-  if ((comm->symmetricSupport ? (comm->devrState.lsaSize > 1) : true) &&
-      !comm->rmaState.rmaCeState.initialized &&
+  if (!comm->rmaState.rmaCeState.initialized &&
       ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* ceTask;
     NCCLCHECKGOTO(ncclCalloc(&ceTask, 1), ret, fail);
