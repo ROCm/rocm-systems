@@ -1270,9 +1270,14 @@ class StaticCommands:
                                             AMDSMIHelpers.SI_Unit.MICRO,
                                         )
                                     )
-                                    freq_dict["frequency_levels"].update(
-                                        {f"Level {level}": {"value": freq, "unit": "MHz"}}
-                                    )
+                                    if self.logger.is_json_format():
+                                        freq_dict["frequency_levels"].update(
+                                            {f"Level {level}": {"value": freq, "unit": "MHz"}}
+                                        )
+                                    else:
+                                        freq_dict["frequency_levels"].update(
+                                            {f"Level {level}": f"{freq} MHz"}
+                                        )
                                 else:
                                     freq_dict["frequency_levels"].update({f"Level {level}": "N/A"})
                         else:

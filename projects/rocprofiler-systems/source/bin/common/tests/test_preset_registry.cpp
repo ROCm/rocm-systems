@@ -3,6 +3,8 @@
 
 #include "common/preset_registry.hpp"
 
+#include "common/env_vars.hpp"
+
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -11,6 +13,7 @@
 #include <string>
 
 using rocprofsys::preset_registry;
+namespace env_vars = rocprofsys::env_vars;
 
 namespace
 {
@@ -104,10 +107,10 @@ TEST_F(preset_registry_test, get_settings_loads_metadata_and_settings)
     auto            settings = registry.get_settings(filepath);
 
     ASSERT_TRUE(settings.has_value());
-    EXPECT_EQ(settings->at("ROCPROFSYS_TRACE"), "true");
-    EXPECT_EQ(settings->at("ROCPROFSYS_PROFILE"), "true");
-    EXPECT_EQ(settings->at("ROCPROFSYS_USE_SAMPLING"), "true");
-    EXPECT_EQ(settings->at("ROCPROFSYS_SAMPLING_FREQ"), "50");
+    EXPECT_EQ(settings->at(std::string{ env_vars::TRACE }), "true");
+    EXPECT_EQ(settings->at(std::string{ env_vars::PROFILE }), "true");
+    EXPECT_EQ(settings->at(std::string{ env_vars::USE_SAMPLING }), "true");
+    EXPECT_EQ(settings->at(std::string{ env_vars::SAMPLING_FREQ }), "50");
 
     // Verify metadata via explain
     std::ostringstream oss;
@@ -127,9 +130,9 @@ TEST_F(preset_registry_test, get_settings_resolves_gpu_domain)
     auto            settings = registry.get_settings(filepath);
 
     ASSERT_TRUE(settings.has_value());
-    EXPECT_EQ(settings->at("ROCPROFSYS_USE_AMD_SMI"), "true");
-    EXPECT_EQ(settings->at("ROCPROFSYS_USE_PROCESS_SAMPLING"), "true");
-    auto metrics = settings->at("ROCPROFSYS_AMD_SMI_METRICS");
+    EXPECT_EQ(settings->at(std::string{ env_vars::USE_AMD_SMI }), "true");
+    EXPECT_EQ(settings->at(std::string{ env_vars::USE_PROCESS_SAMPLING }), "true");
+    auto metrics = settings->at(std::string{ env_vars::AMD_SMI_METRICS });
     EXPECT_NE(metrics.find("temp"), std::string::npos);
     EXPECT_NE(metrics.find("power"), std::string::npos);
 }
@@ -156,11 +159,11 @@ TEST_F(preset_registry_test, explain_finds_by_name)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     bool               found = registry.explain("balanced", "run", oss);
-    ::unsetenv("ROCPROFSYS_PRESET_DIR");
+    ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_TRUE(found);
     EXPECT_NE(oss.str().find("balanced"), std::string::npos);
@@ -170,11 +173,11 @@ TEST_F(preset_registry_test, explain_returns_false_for_unknown_preset)
 {
     temp_dir dir;
 
-    ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     bool               found = registry.explain("nonexistent-preset", "run", oss);
-    ::unsetenv("ROCPROFSYS_PRESET_DIR");
+    ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_FALSE(found);
 }
@@ -184,11 +187,11 @@ TEST_F(preset_registry_test, load_all_from_directory)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     registry.list("run", oss);
-    ::unsetenv("ROCPROFSYS_PRESET_DIR");
+    ::unsetenv(env_vars::PRESET_DIR);
 
     auto output = oss.str();
     EXPECT_NE(output.find("balanced"), std::string::npos);
@@ -239,7 +242,7 @@ TEST_F(preset_registry_test, get_settings_handles_empty_metadata)
     auto            settings = registry.get_settings(filepath);
 
     ASSERT_TRUE(settings.has_value());
-    EXPECT_EQ(settings->at("ROCPROFSYS_TRACE"), "true");
+    EXPECT_EQ(settings->at(std::string{ env_vars::TRACE }), "true");
 }
 
 TEST_F(preset_registry_test, list_output_content)
@@ -247,11 +250,11 @@ TEST_F(preset_registry_test, list_output_content)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     registry.list("run", oss);
-    ::unsetenv("ROCPROFSYS_PRESET_DIR");
+    ::unsetenv(env_vars::PRESET_DIR);
 
     auto output = oss.str();
     EXPECT_NE(output.find("Available Presets:"), std::string::npos);
@@ -264,16 +267,16 @@ TEST_F(preset_registry_test, explain_output_content)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     bool               result = registry.explain("balanced", "run", oss);
-    ::unsetenv("ROCPROFSYS_PRESET_DIR");
+    ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_TRUE(result);
     auto output = oss.str();
     EXPECT_NE(output.find("Preset: balanced"), std::string::npos);
-    EXPECT_NE(output.find("ROCPROFSYS_TRACE"), std::string::npos);
+    EXPECT_NE(output.find(std::string{ env_vars::TRACE }), std::string::npos);
 }
 
 TEST_F(preset_registry_test, explain_return_false_for_missing_preset)
@@ -289,10 +292,10 @@ TEST_F(preset_registry_test, describe_generates_output_tree)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry registry;
     auto            desc = registry.describe("balanced");
-    ::unsetenv("ROCPROFSYS_PRESET_DIR");
+    ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_NE(desc.find("Tracing:"), std::string::npos);
     EXPECT_NE(desc.find("Profiling:"), std::string::npos);

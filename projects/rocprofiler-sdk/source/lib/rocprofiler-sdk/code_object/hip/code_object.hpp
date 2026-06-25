@@ -59,7 +59,8 @@ using isa_names_t                    = std::vector<const std::string*>;
 using kernel_symbol_hip_device_map_t = std::unordered_map<std::string, std::string>;
 using comgr_code_object_vec_t        = std::vector<amd_comgr_code_object_info_t>;
 
-constexpr unsigned HIP_FAT_MAGIC = 0x48495046;  // HIPF
+constexpr unsigned HIP_FAT_MAGIC      = 0x48495046;  // HIPF
+constexpr unsigned HIP_FAT_MAGIC_HIPK = 0x4B504948;  // HIPK
 
 struct hip_register_data
 {
@@ -76,12 +77,28 @@ struct hip_fat_binary_wrapper
     void*        dummy1  = nullptr;
 };
 
+constexpr bool
+is_valid_fat_binary_wrapper(const hip_fat_binary_wrapper& fbwrapper)
+{
+    return (fbwrapper.magic == HIP_FAT_MAGIC || fbwrapper.magic == HIP_FAT_MAGIC_HIPK) &&
+           fbwrapper.version == 1;
+}
+
+constexpr bool
+has_hip_fat_binary_payload(const hip_fat_binary_wrapper& fbwrapper)
+{
+    return fbwrapper.magic == HIP_FAT_MAGIC && fbwrapper.version == 1;
+}
+
 comgr_code_object_vec_t
 get_isa_offsets(hsa_agent_t hsa_agent, const void* fat_bin);
 
 kernel_symbol_hip_device_map_t
 get_kernel_symbol_device_name_map(const amd_comgr_code_object_info_t& isa_offset,
                                   const void*                         fat_bin);
+
+kernel_symbol_hip_device_map_t
+get_kernel_symbol_device_name_map_from_executable(const void* executable, size_t executable_size);
 
 }  // namespace hip
 }  // namespace code_object
