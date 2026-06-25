@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 106
+- Contract tests: 111
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 83
-- Approximate declared API-name coverage: 16.8%
+- Declared HIP runtime APIs directly exercised by contract tests: 91
+- Approximate declared API-name coverage: 18.4%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 
 ## Contract domains
@@ -38,6 +38,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `array_memory` | 4 |
 | `managed_memory` | 5 |
 | `memory_pool` | 6 |
+| `vmm` | 5 |
 
 ## Coverage by API category
 
@@ -50,7 +51,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Stream | 5 | 23 | 21.7% |
 | Runtime / device | 12 | 45 | 26.7% |
 | Kernel launch / function attrs | 1 | 13 | 7.7% |
-| Memory / copy / memset | 28 | 137 | 20.4% |
+| Memory / copy / memset | 36 | 137 | 26.3% |
 | Other runtime APIs | 1 | 56 | 1.8% |
 | Module / library loading | 0 | 29 | 0.0% |
 | Texture / surface | 0 | 44 | 0.0% |
@@ -91,6 +92,19 @@ hipMallocAsync
 hipFreeAsync
 hipMemPoolGetAttribute
 hipMemPoolSetAttribute
+```
+
+### Virtual memory management
+
+```text
+hipMemGetAllocationGranularity
+hipMemAddressReserve
+hipMemAddressFree
+hipMemCreate
+hipMemRelease
+hipMemMap
+hipMemUnmap
+hipMemSetAccess
 ```
 
 ### Runtime / device
@@ -181,7 +195,7 @@ hipOccupancyAvailableDynamicSMemPerBlock
 
 ## Largest remaining gaps
 
-1. Memory surface beyond current basics: 3D copies and 3D arrays, VMM, peer copies, and advanced memory-pool operations (pool create/destroy, access control, trim, and export/import). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, managed allocation with prefetch, and default memory pools with stream-ordered allocation are now covered.
+1. Memory surface beyond current basics: 3D copies and 3D arrays, peer copies, advanced VMM operations (multi-device access descriptors, export/import handles, and protection-mode matrices), and advanced memory-pool operations (pool create/destroy, access control, trim, and export/import). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, managed allocation with prefetch, default memory pools with stream-ordered allocation, and basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access) are now covered.
 2. Texture and surface APIs.
 3. Module, library, and code-loading APIs.
 4. Context and driver-style APIs.
