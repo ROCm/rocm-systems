@@ -63,6 +63,8 @@ include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})
+# Absolute path to the committed mock CPER fixtures (functional/mock_values).
+target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/functional/mock_values")
 target_link_libraries(
     ${TEST}
     ${AMD_SMI_TARGET}
@@ -81,4 +83,15 @@ install(
     FILES amdsmitst.exclude detect_asic_filter.sh
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT}
+)
+
+# CPER mock fixtures, installed next to the test binary so the packaged tests
+# locate them at runtime instead of relying on the build-machine source path.
+# Exclude __pycache__ so a locally-run sanitize_cper.py never leaks a stray .pyc
+# into the package.
+install(
+    DIRECTORY functional/mock_values
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tests
+    COMPONENT ${TESTS_COMPONENT}
+    PATTERN "__pycache__" EXCLUDE
 )

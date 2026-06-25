@@ -82,10 +82,8 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_agents_allow_access)
   GET_ROCR_SYMBOL(hsa_amd_memory_unlock)
   GET_ROCR_SYMBOL(hsa_amd_interop_map_buffer)
-  GET_ROCR_SYMBOL(hsa_amd_interop_map_buffer_with_size)
   GET_ROCR_SYMBOL(hsa_amd_interop_unmap_buffer)
   GET_ROCR_SYMBOL(hsa_amd_image_create)
-  GET_ROCR_SYMBOL(hsa_amd_image_create_v2)
   GET_ROCR_SYMBOL(hsa_amd_pointer_info)
   GET_ROCR_SYMBOL(hsa_amd_ipc_memory_create)
   GET_ROCR_SYMBOL(hsa_amd_ipc_memory_attach)
@@ -101,6 +99,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_svm_attributes_set)
   GET_ROCR_SYMBOL(hsa_amd_svm_attributes_get)
   GET_ROCR_SYMBOL(hsa_amd_svm_prefetch_async)
+  GET_ROCR_SYMBOL(hsa_amd_svm_discard_batch_async)
   GET_ROCR_SYMBOL(hsa_amd_portable_export_dmabuf)
   GET_ROCR_SYMBOL(hsa_amd_portable_close_dmabuf)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve)
@@ -133,7 +132,6 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_ext_sampler_destroy)
   GET_ROCR_SYMBOL(hsa_ext_image_create_with_layout)
   GET_ROCR_SYMBOL(hsa_ext_image_mipmap_array_get_level)
-
   is_ready_ = true;
   return true;
 }

@@ -28,13 +28,6 @@
 #include "device/rocm/rocsignal.hpp"
 #include "platform/sampler.hpp"
 
-#ifdef _WIN32
-#include "device/rocm/rocd3d10interop.hpp"
-#include "device/rocm/rocd3d11interop.hpp"
-#include "platform/interop_d3d10.hpp"
-#include "platform/interop_d3d11.hpp"
-#endif
-
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
 #include "device/rocm/rocurilocator.hpp"
@@ -145,9 +138,8 @@ Device::Device(hsa_agent_t bkendDevice)
       sdma_engine_allocator_(*this),
       cpu_agent_info_(nullptr),
       numHwPipes_(4) {
-  // Initialize queue pools with proper comparators (requires 'this' pointer)
   for (uint i = 0; i < QueuePriority::Total; ++i) {
-    queuePool_.emplace_back(QueueCompare(this));
+    queuePool_.emplace_back();
   }
 
   group_segment_.handle = 0;
@@ -681,17 +673,6 @@ bool Device::create() {
     return false;
   }
   info_.pciDomainID = pci_domain_id;
-
-#ifdef _WIN32
-  // Extract adapter LUID for D3D interop validation
-  hsa_status_t luid_status = Hsa::agent_get_info(
-      bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
-      &deviceLuid_);
-  luidValid_ = luid_status == HSA_STATUS_SUCCESS;
-  if (!luidValid_) {
-    LogWarning("Could not extract LUID from HSA agent - D3D interop may not work correctly");
-  }
-#endif
 
   if (populateOCLDeviceConstants() == false) {
     LogPrintfError("populateOCLDeviceConstants failed for HSA device %s (PCI ID %x)", agent_name,
@@ -1540,14 +1521,16 @@ bool Device::populateOCLDeviceConstants() {
     }
     info_.imageMaxBufferSize_ = (amd::IS_HIP) ? image_max_dim[0] : (1 << 27);
 
-    info_.imagePitchAlignment_ = 256;
-
-    info_.imageBaseAddressAlignment_ = 256;
-
-    info_.bufferFromImageSupport_ = false;
-
     info_.imageSupport_ = (info_.maxReadWriteImageArgs_ > 0) ? true : false;
   }
+
+  // These are properties of the device's linear memory layout, not the image
+  // extension.  They must be set unconditionally so that hipMallocPitch /
+  // hipMalloc3D produce correct pitch alignment even when IMAGE_SUPPORT is
+  // off.  The PAL backend already sets them unconditionally.
+  info_.imagePitchAlignment_ = 256;
+  info_.imageBaseAddressAlignment_ = 256;
+  info_.bufferFromImageSupport_ = false;
 
   // Enable SVM Capabilities of Hsa device. Ensure
   // user has not setup memory to be non-coherent
@@ -1896,69 +1879,30 @@ bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t si
 // ================================================================================================
 bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                 bool validateOnly) {
-  bool success = true;
+  if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
-#ifdef _WIN32
-  // Handle D3D10 device binding
-  if (flags & amd::Context::Flags::D3D10DeviceKhr) {
-    void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
-    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device))) {
-      LogError("Failed D3D10Interop::associateD3D10Device()");
-      success = false;
-    }
+  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+  if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
+    LogError("Failed GlInterop::glAssociate()");
+    return false;
   }
 
-  // Handle D3D11 device binding
-  if (flags & amd::Context::Flags::D3D11DeviceKhr) {
-    void* d3d11Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D11DeviceKhrIdx];
-    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device))) {
-      LogError("Failed D3D11Interop::associateD3D11Device()");
-      success = false;
-    }
-  }
-#endif  // _WIN32
-
-  // Handle GL device binding (existing code)
-  if (flags & amd::Context::Flags::GLDeviceKhr) {
-    void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-    if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
-      LogError("Failed GlInterop::glAssociate()");
-      success = false;
-    }
-  }
-
-  return success;
+  return true;
 }
 
 // ================================================================================================
 bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                   bool validateOnly) {
-  bool success = true;
+  if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
-#ifdef _WIN32
-  // Handle D3D10 device cleanup
-  if (flags & amd::Context::Flags::D3D10DeviceKhr) {
-    D3D10Interop::dissociateD3D10Device(this);
-  }
-
-  // Handle D3D11 device cleanup
-  if (flags & amd::Context::Flags::D3D11DeviceKhr) {
-    D3D11Interop::dissociateD3D11Device(this);
-  }
-#endif  // _WIN32
-
-  // Handle GL device cleanup (existing code)
-  if (flags & amd::Context::Flags::GLDeviceKhr) {
-    void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-    if (glDevice != nullptr) {
-      if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
-        LogWarning("Failed GlInterop::glDissociate()");
-        success = false;
-      }
+  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+  if (glDevice != nullptr) {
+    if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
+      LogWarning("Failed GlInterop::glDissociate()");
+      return false;
     }
   }
-
-  return success;
+  return true;
 }
 
 amd::Memory* Device::findMapTarget(size_t size) const {
@@ -2518,6 +2462,65 @@ bool Device::virtualFree(void* addr) {
   return true;
 }
 
+// ================================================================================================
+// Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
+// non-async hipMemMap/hipMemUnmap entry points (wired up in subsequent
+// commits). No execution() lock and no barrier packet: the HIP layer is
+// responsible for draining access-device queues from the CPU side before
+// calling, and hsa_amd_vmem_{map,unmap} are synchronous w.r.t. the CPU.
+cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+  if (phys == nullptr) {
+    LogError("virtualMap: phys is nullptr");
+    return CL_INVALID_VALUE;
+  }
+
+  amd::Memory* vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
+  if (vaddr_sub_obj == nullptr) {
+    LogError("virtualMap: MapMemObjBookkeeping failed");
+    return CL_INVALID_VALUE;
+  }
+
+  hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
+  opaque_hsa_handle.handle = phys->getUserData().hsa_handle;
+  hsa_status_t hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), size,
+                                          vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError("virtualMap: hsa_amd_vmem_map failed with status: %d", hsa_status);
+    // Roll back the bookkeeping so the sub_obj/MemObjMap doesn't leak.
+    // FinalizeMapMemObjBookkeeping was never called, so MemObjMap doesn't
+    // contain va and the cross-links are not wired. Just tear down the
+    // sub-buffer view directly.
+    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+    vaddr_sub_obj->release();
+    return CL_OUT_OF_HOST_MEMORY;
+  }
+
+  constexpr bool kImportVmmForInterprocess = true;
+  FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+  return CL_SUCCESS;
+}
+
+// ================================================================================================
+cl_int Device::virtualUnmap(void* va, size_t size) {
+  amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
+  if (vaddr_sub_obj == nullptr) {
+    LogPrintfError("virtualUnmap: no sub_obj for va: %p", va);
+    return CL_INVALID_VALUE;
+  }
+
+  hsa_status_t hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), size);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError("virtualUnmap: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
+    return CL_INVALID_VALUE;
+  }
+
+  constexpr bool kDestroyVirtualBuffer = true;
+  constexpr bool kReleaseSubObj = true;
+  UnmapMemObjBookkeeping(vaddr_sub_obj, va, kDestroyVirtualBuffer, kReleaseSubObj);
+  return CL_SUCCESS;
+}
+
+// ================================================================================================
 bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                           VmmLocationType access_location) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
@@ -3854,10 +3857,17 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       // kernel dispatches (not synthetic barriers).
       ps->flags_.done_ = false;
       uint16_t hdr;
-      memcpy(&hdr, raw, sizeof(hdr));
+      memcpy(&hdr, patch.packet, sizeof(hdr));
       uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+      // A kernel dispatch could be a vendor-specific ext-kernel-dispatch
+      // packet, identified by amd_format (byte 2).  Classify it as a dispatch so
+      // the patched last-node completion signal contributes its GPU timing like
+      // every other graph kernel node.
+      const uint8_t amdFormat = patch.packet[2];
       ps->flags_.isPacketDispatch_ =
-          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH);
+          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) ||
+          (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+           amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);

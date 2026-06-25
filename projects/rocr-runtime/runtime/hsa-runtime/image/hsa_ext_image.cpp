@@ -580,8 +580,7 @@ hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
 }
 
 void LoadImage(core::ImageExtTableInternal* image_api,
-               decltype(::hsa_amd_image_create)** interface_api,
-               decltype(::hsa_amd_image_create_v2)** interface_v2_api) {
+               decltype(::hsa_amd_image_create)** interface_api) {
   image_api->hsa_ext_image_get_capability_fn = hsa_ext_image_get_capability;
 
   image_api->hsa_ext_image_data_get_info_fn = hsa_ext_image_data_get_info;
@@ -619,7 +618,6 @@ void LoadImage(core::ImageExtTableInternal* image_api,
   image_api->hsa_ext_image_mipmap_array_get_level_fn = hsa_ext_image_mipmap_array_get_level;
 
   *interface_api = hsa_amd_image_create;
-  *interface_v2_api = hsa_amd_image_create_v2;
 }
 
 void ReleaseImageRsrcs() { ImageRuntime::DestroySingleton(); }

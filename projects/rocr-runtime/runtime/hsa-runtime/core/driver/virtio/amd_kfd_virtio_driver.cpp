@@ -508,7 +508,7 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
     amdgpu_bo_import_result res;
     auto ret = vamdgpu_bo_import(
@@ -533,7 +533,7 @@ hsa_status_t KfdVirtioDriver::DestroyImportedMemoryHandle(core::DriverMemoryHand
 }
 
 hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
-                                  size_t size, hsa_access_permission_t perms) {
+                                  size_t size, hsa_access_permission_t perms, uint32_t node_id) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -546,7 +546,7 @@ hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* 
 }
 
 hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
-                                    size_t size) {
+                                    size_t size, uint32_t node_id) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;

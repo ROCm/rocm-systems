@@ -555,8 +555,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   wsl::thunk::GpuMemoryHandle mem_handle;
 
   ret = import_dmabuf_fd(GraphicsResourceHandle, NodeArray[0], RegisterFlags.ui32.requiresVAddr,
-                         false, &mem_handle, RegisterFlags.ui32.kmtHandle,
-                         GraphicsResourceInfo->SizeHintInBytes);
+                         false, &mem_handle, RegisterFlags.ui32.kmtHandle);
   if (ret != HSAKMT_STATUS_SUCCESS) {
     pr_err("hsaKmtRegisterGraphicsHandleToNodesExt: import_dmabuf_fd failed, "
            "GraphicsResourceHandle: %" PRIu64 ", NodeId: %u\n",
@@ -611,8 +610,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
 
 
 HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
-                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle,
-                               uint64_t size_hint) {
+                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle) {
   CHECK_DXG_OPEN();
 
   *GpuMemHandle = nullptr;
@@ -622,7 +620,6 @@ HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va
   create_info.dmabuf_fd = DMABufFd;
   create_info.flags.alloc_va = alloc_va;
   create_info.flags.kmt_handle_importer = is_kmt_handle ? 1 : 0;
-  create_info.size = size_hint;
 
 #if defined(__linux__)
   if (is_ipc_memfd) {
@@ -1180,9 +1177,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
               HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
-              HsaMemoryMapFlags flags)
+              HsaMemoryMapFlags flags, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
+  (void)NodeId;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
 
@@ -1204,9 +1202,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
-              HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+              HSAuint64 offset, HSAuint64 size, HSAuint64 addr, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
+  (void)NodeId;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
 
@@ -1225,10 +1224,25 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 {
 	CHECK_DXG_OPEN();
-  wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
-  if (!gpu_mem) {
-    return HSAKMT_STATUS_INVALID_HANDLE;
-  }
+	// On DXG, handle cleanup is managed through the DXG memory management path.
+	// Validate the handle and return success.
+	wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+	if (!gpu_mem) {
+		return HSAKMT_STATUS_INVALID_HANDLE;
+	}
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFreePreserveMetadata(HsaMemoryObjectHandle Handle)
+{
+	CHECK_DXG_OPEN();
+	// On DXG, this behaves the same as hsaKmtMemHandleFree since the DXG
+	// implementation doesn't manage metadata separately. Used by IPC exporter
+	// path (IPCCreate) to release handle references without affecting metadata.
+	wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+	if (!gpu_mem) {
+		return HSAKMT_STATUS_INVALID_HANDLE;
+	}
 	return HSAKMT_STATUS_SUCCESS;
 }
 

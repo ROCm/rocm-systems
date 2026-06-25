@@ -374,7 +374,7 @@ class Runtime {
                                      hsa_amd_signal_handler handler, void* arg);
 
   hsa_status_t InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
-                          hsa_interop_map_flag_t flags, size_t size_hint, size_t* size, void** ptr,
+                          hsa_interop_map_flag_t flags, size_t* size, void** ptr,
                           size_t* metadata_size, const void** metadata);
 
   hsa_status_t InteropUnmap(void* ptr);
@@ -594,7 +594,8 @@ class Runtime {
           size_requested(0),
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
-          thunk_bo(nullptr) {}
+          thunk_bo(nullptr),
+          thunk_node_id(-1) {}
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags)
         : region(region_arg),
@@ -602,7 +603,8 @@ class Runtime {
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
-          thunk_bo(nullptr) {}
+          thunk_bo(nullptr),
+          thunk_node_id(-1) {}
 
     struct notifier_t {
       void* ptr;
@@ -617,6 +619,7 @@ class Runtime {
     void* user_ptr;
     std::unique_ptr<std::vector<notifier_t>> notifiers;
     HsaMemoryObjectHandle thunk_bo;
+    HSAuint32 thunk_node_id;
   };
 
   struct AsyncEventsInfo;
@@ -626,7 +629,7 @@ class Runtime {
     void Shutdown();
 
     hsa_signal_t wake;
-    bool exit;
+    std::atomic<bool> exit;
 
     private:
     AsyncEventsInfo* info_;
@@ -985,6 +988,7 @@ class Runtime {
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
+  bool ipc_sock_server_shutdown_in_progress_;
 
   lazy_ptr<AsyncEventsInfo> asyncSignals_;
   lazy_ptr<AsyncEventsInfo> asyncExceptions_;

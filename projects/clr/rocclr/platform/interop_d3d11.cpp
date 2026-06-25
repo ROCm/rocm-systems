@@ -13,6 +13,7 @@
 
 #include <cstring>
 #include <utility>
+
 namespace amd {
 
 size_t D3D11Object::getResourceByteSize() {
@@ -339,9 +340,7 @@ int D3D11Object::initD3D11Object(const Context& amdContext, ID3D11Resource* pRes
 
 bool D3D11Object::copyOrigToShared() {
   // Don't copy if there is no orig
-  if (nullptr == getD3D11ResOrig()) {
-    return true;
-  }
+  if (nullptr == getD3D11ResOrig()) return true;
 
   ID3D11Device* d3dDev;
   pD3D11Res_->GetDevice(&d3dDev);

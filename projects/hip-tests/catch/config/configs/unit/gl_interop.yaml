@@ -96,12 +96,3 @@ gl_interop:
   Unit_hipGL_ContextSwitch_MultipleDestructionCycles: *level_2
   Unit_hipGL_ContextSwitch_DeviceListTypes: *level_2
   Unit_hipGL_ContextSwitch_FirstOperationInitialization: *level_2
-  Unit_GLHIPImageData_Positive_GLWrite_HIPRead_Gradient: *level_2
-  Unit_GLHIPImageData_Positive_GLWrite_HIPRead_SolidColor: *level_2
-  Unit_GLHIPImageData_Positive_HIPWrite_GLRead_SolidColor: *level_2
-  Unit_GLHIPImageData_Positive_HIPWrite_GLRead_UniquePerPixel: *level_2
-  Unit_GLHIPImageData_Positive_Mipmap_GLWrite_HIPRead_PerLevel: *level_2
-  Unit_GLHIPImageData_Positive_Mipmap_HIPWrite_GLRead_HigherLevels: *level_2
-  Unit_GLHIPImageData_Positive_Mipmap_RoundTrip_InvertLevel2: *level_2
-  Unit_GLHIPImageData_Positive_RoundTrip_CoordTransform: *level_2
-  Unit_GLHIPImageData_Positive_RoundTrip_InvertChannels: *level_2
