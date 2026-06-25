@@ -238,7 +238,7 @@ public:
     return base;
   }
 
-  /// @brief Reset LDS allocation (called when all WFs retire).
+  /// @brief Reset LDS allocation when no resident waves or pinned clusters remain.
   void reset_lds_alloc() { next_lds_alloc_ = 0; }
 
   /// @brief Hold LDS allocation state while a workgroup cluster is resident.
@@ -250,7 +250,11 @@ public:
   void pin_lds_until_cluster_retired(uint64_t cluster_key) {
     lds_pinned_clusters_.insert(cluster_key);
   }
+
+  /// @brief Release the LDS allocation pin for a retired workgroup cluster.
   void unpin_lds_for_cluster(uint64_t cluster_key) { lds_pinned_clusters_.erase(cluster_key); }
+
+  /// @brief Return true while any cluster can still receive multicast LDS writes.
   bool lds_allocation_pinned() const { return !lds_pinned_clusters_.empty(); }
 
   /// @brief Flush all per-CU caches and the shared L2 to backing store.

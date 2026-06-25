@@ -332,7 +332,7 @@ TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
 
-  test::AmdExtKernelDispatchPacketForTest ext{};
+  amdgpu::AmdExtKernelDispatchPacket ext{};
   ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
   ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
   ext.setup = 1;
@@ -366,7 +366,7 @@ TEST_P(IsaTest, VendorSpecificExtKernelDispatchReadsDependencySignalFromGpuMemor
   constexpr uint32_t kSignalValueOffset = 8;
   f.mem()->write64(kDepSignal + kSignalValueOffset, 1);
 
-  test::AmdExtKernelDispatchPacketForTest ext{};
+  amdgpu::AmdExtKernelDispatchPacket ext{};
   ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
   ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
   ext.setup = 1;
@@ -432,7 +432,7 @@ TEST(ClusterDispatchTest, ReclaimsLdsBetweenClusterWaves) {
   constexpr uint32_t kSignalValueOffset = 8;
   f.mem()->write64(kSignal + kSignalValueOffset, 1);
 
-  test::AmdExtKernelDispatchPacketForTest ext{};
+  amdgpu::AmdExtKernelDispatchPacket ext{};
   ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
   ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
   ext.setup = 1;
@@ -464,7 +464,7 @@ TEST(ClusterDispatchTest, RejectsExtKernelDispatchWithZeroClusterShape) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
 
-  test::AmdExtKernelDispatchPacketForTest ext{};
+  amdgpu::AmdExtKernelDispatchPacket ext{};
   ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
   ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
   ext.setup = 1;
@@ -491,7 +491,7 @@ TEST(ClusterDispatchTest, RejectsExtKernelDispatchGridOverflow) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
 
-  test::AmdExtKernelDispatchPacketForTest ext{};
+  amdgpu::AmdExtKernelDispatchPacket ext{};
   ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
   ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
   ext.setup = 1;

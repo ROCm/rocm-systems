@@ -3852,6 +3852,8 @@ class CodeGenerator:
             L.append(f'  d->transpose = {sem.transpose_kind};')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
+        if sem.name.startswith('CLUSTER_LOAD_'):
+            L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -3927,27 +3929,20 @@ class CodeGenerator:
             L.append(
                 '  d->cluster_mcast_mask = wf.m0() & amdgpu::kClusterMulticastMask;'
             )
+            L.append('  d->request_force_l1_bypass = true;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
-            '  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.'
-        )
-        L.append(
-            '  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);'
+            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
         )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vdst')};")
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append('    uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);')
-        L.append(
-            '    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +'
-        )
-        L.append(
-            '                                            static_cast<int64_t>(lane_lds_addr) + lds_offset);'
-        )
+        L.append('    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;')
         L.append('  }')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -3973,22 +3968,15 @@ class CodeGenerator:
         L.append('  const auto &lds = cu.lds();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
-            '  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.'
-        )
-        L.append(
-            '  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);'
+            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
         )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vsrc')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(
-            '    uint32_t lds_addr = static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +'
+            '    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);'
         )
-        L.append(
-            '                                           static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) +'
-        )
-        L.append('                                           lds_offset);')
         L.append(f'    lds.read(lds_addr, &d->store_data[lane * {stride}], {stride});')
         L.append('  }')
         L.append('  set_data(std::move(d));')

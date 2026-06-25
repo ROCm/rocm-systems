@@ -24,8 +24,6 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::test {
 
-using AmdExtKernelDispatchPacketForTest = amdgpu::AmdExtKernelDispatchPacket;
-
 /// Simulates what ROCR's user-mode AqlQueue does: manages a ring buffer,
 /// writes AQL packets, and rings the doorbell. Does NOT load kernels --
 /// that's the runtime's job. Tests write kernel descriptors and code
@@ -73,7 +71,7 @@ public:
     cp_->engine()->schedule_event_now(cp_->doorbell_event());
   }
 
-  void submit(const AmdExtKernelDispatchPacketForTest &pkt) {
+  void submit(const amdgpu::AmdExtKernelDispatchPacket &pkt) {
     hsa_kernel_dispatch_packet_t raw{};
     std::memcpy(&raw, &pkt, sizeof(pkt));
     submit(raw);
@@ -100,7 +98,7 @@ public:
   void dispatch_clustered(uint64_t kernel_object, uint32_t cluster_count_x, uint8_t cluster_size_x,
                           uint16_t workgroup_size_x = 64, uint64_t kernarg_addr = 0,
                           uint32_t group_segment_size = 0) {
-    AmdExtKernelDispatchPacketForTest pkt{};
+    amdgpu::AmdExtKernelDispatchPacket pkt{};
     pkt.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
     pkt.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
     pkt.setup = 1;

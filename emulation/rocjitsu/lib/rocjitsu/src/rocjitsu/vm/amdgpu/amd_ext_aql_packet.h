@@ -20,8 +20,14 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::amdgpu {
 
+/// AMD vendor-specific packet format selector for extended kernel dispatch.
 constexpr uint8_t kHsaAmdPacketTypeExtKernelDispatch = 3;
 
+/// @brief AMD vendor-specific extended kernel dispatch packet layout.
+///
+/// @details This mirrors the 64-byte wire packet consumed from an AQL ring for
+/// clustered dispatch. Keep the field order and size stable; tests and runtime
+/// queue code copy this type directly into packet slots.
 struct AmdExtKernelDispatchPacket {
   uint16_t header;
   uint8_t amd_format;

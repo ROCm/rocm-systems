@@ -27,14 +27,14 @@ struct ClusterLdsTarget {
   uint32_t cluster_rank = 0;
 };
 
-/// @brief Fully described LDS multicast writeback produced by an async cluster load.
+/// @brief Fully described LDS writeback request produced by an async cluster load.
 ///
-/// @details The immediate functional backend consumes this synchronously today.
-/// A future timing backend can instead retain the transaction, model delivery
-/// latency/contention, and complete ASYNCCNT only after all target LDS writes
-/// have been delivered. The transaction is the boundary where a future fabric
-/// model can preserve source/target rank, LDS windows, payload, and lane mask
-/// before scheduling per-target delivery events.
+/// @details Each transaction represents one workgroup's participation in a
+/// cluster async-to-LDS operation. The mask still records the selected cluster
+/// ranks, but functional writeback uses the issuing workgroup's own LDS
+/// destination metadata; peers only receive data when they issue their own
+/// matching transaction. A future timing backend can retain these transactions
+/// and use per-lane global addresses to model request coalescing.
 struct ClusterLdsMulticastTransaction {
   uint32_t dispatch_id = 0;
   uint32_t source_wg_id = 0;
@@ -46,6 +46,9 @@ struct ClusterLdsMulticastTransaction {
   uint32_t wf_size = 0;
   uint64_t lane_mask = 0;
   bool per_lane_addr = false;
+  /// Captured for future timing/coalescing backends; the immediate backend only
+  /// needs the participant-owned LDS destination.
+  std::array<uint64_t, 64> per_lane_global_addr = {};
   std::array<uint32_t, 64> per_lane_lds_addr = {};
   std::vector<uint8_t> payload;
   std::vector<ClusterLdsTarget> targets;
@@ -62,29 +65,41 @@ using ClusterLdsMulticastCompletion = std::function<void()>;
 uint32_t remap_cluster_lds_addr(uint32_t source_lds_base, uint32_t target_lds_base,
                                 uint32_t source_lds_addr);
 
-/// @brief Return the target LDS address for a lane in one multicast target.
+/// @brief Return the lane LDS address remapped into one target LDS window.
+///
+/// @details Immediate functional writeback only uses this with the issuing
+/// participant's own target, where the remap is identity. Deferred/timing
+/// backends can reuse it when modeling peer-visible multicast responses.
 uint32_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32_t lane,
                                uint32_t target_lds_base);
+
+/// @brief Return true when the transaction mask selects the issuing workgroup.
+bool cluster_lds_source_rank_selected(const ClusterLdsMulticastTransaction &txn);
 
 ClusterLdsMulticastTransaction
 make_cluster_lds_multicast_transaction(VectorMemState &state, const Wavefront &wf,
                                        std::vector<ClusterLdsTarget> targets);
 
-/// @brief Execution boundary for cluster-load async-to-LDS fan-out.
+/// @brief Execution boundary for one participant's cluster async-to-LDS writeback.
 class ClusterLdsMulticastEngine {
 public:
   virtual ~ClusterLdsMulticastEngine() = default;
 
-  /// @brief Submit one owned multicast transaction.
+  /// @brief Submit one owned participant transaction.
   ///
   /// @details Backends returning Complete must perform all writes before return
   /// and must not invoke complete. Backends returning Deferred take ownership of
-  /// txn and must invoke complete exactly once after all writes are visible.
+  /// txn and must invoke complete exactly once after all participant writes are
+  /// visible.
   virtual ClusterLdsMulticastResult submit(ClusterLdsMulticastTransaction txn,
                                            ClusterLdsMulticastCompletion complete) = 0;
 };
 
-/// @brief Functional backend: immediately writes the multicast payload to target LDS.
+/// @brief Functional backend: immediately writes the issuing participant's own LDS payload.
+///
+/// @details This deliberately does not fan out one requester payload into peer
+/// LDS windows. Peers selected by M0 are eligible participants, but each peer's
+/// LDS destination is taken from that peer's own issued transaction.
 class ImmediateClusterLdsMulticastEngine final : public ClusterLdsMulticastEngine {
 public:
   ClusterLdsMulticastResult submit(ClusterLdsMulticastTransaction txn,

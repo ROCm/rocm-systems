@@ -101,6 +101,10 @@ struct VectorMemState : DynamicInstState {
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
   bool non_temporal = false;
+  // Keep this outside Mtype: cluster loads force only the request-side vector
+  // L1 lookup to miss, while mtype must still preserve the instruction/PTE
+  // cacheability and response policy used by the downstream memory path.
+  bool request_force_l1_bypass = false;
   bool sign_extend = false;
   bool d16_hi = false;                 ///< D16_HI load: write to upper 16 bits, preserve lower 16.
   bool d16_lo = false;                 ///< D16 load: write to lower 16 bits, preserve upper 16.

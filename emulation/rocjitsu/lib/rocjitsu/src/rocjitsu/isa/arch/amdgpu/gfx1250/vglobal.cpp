@@ -2899,8 +2899,7 @@ void GlobalLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -2908,8 +2907,7 @@ void GlobalLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(
-        static_cast<int64_t>(wf.lds_base()) + static_cast<int64_t>(lane_lds_addr) + lds_offset);
+    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
   }
   set_data(std::move(d));
 }
@@ -2944,8 +2942,7 @@ void GlobalLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -2953,8 +2950,7 @@ void GlobalLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(
-        static_cast<int64_t>(wf.lds_base()) + static_cast<int64_t>(lane_lds_addr) + lds_offset);
+    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
   }
   set_data(std::move(d));
 }
@@ -2989,8 +2985,7 @@ void GlobalLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -2998,8 +2993,7 @@ void GlobalLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(
-        static_cast<int64_t>(wf.lds_base()) + static_cast<int64_t>(lane_lds_addr) + lds_offset);
+    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
   }
   set_data(std::move(d));
 }
@@ -3034,8 +3028,7 @@ void GlobalLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -3043,8 +3036,7 @@ void GlobalLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(
-        static_cast<int64_t>(wf.lds_base()) + static_cast<int64_t>(lane_lds_addr) + lds_offset);
+    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
   }
   set_data(std::move(d));
 }
@@ -3077,8 +3069,7 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -3086,9 +3077,7 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr =
-        static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +
-                              static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) + lds_offset);
+    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);
     lds.read(lds_addr, &d->store_data[lane * 1], 1);
   }
   set_data(std::move(d));
@@ -3122,8 +3111,7 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -3131,9 +3119,7 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr =
-        static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +
-                              static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) + lds_offset);
+    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);
     lds.read(lds_addr, &d->store_data[lane * 4], 4);
   }
   set_data(std::move(d));
@@ -3167,8 +3153,7 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -3176,9 +3161,7 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr =
-        static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +
-                              static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) + lds_offset);
+    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);
     lds.read(lds_addr, &d->store_data[lane * 8], 8);
   }
   set_data(std::move(d));
@@ -3212,8 +3195,7 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -3221,9 +3203,7 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr =
-        static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +
-                              static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) + lds_offset);
+    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);
     lds.read(lds_addr, &d->store_data[lane * 16], 16);
   }
   set_data(std::move(d));
@@ -3256,6 +3236,7 @@ void ClusterLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
+  d->request_force_l1_bypass = true;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
@@ -3287,6 +3268,7 @@ void ClusterLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
+  d->request_force_l1_bypass = true;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
@@ -3318,6 +3300,7 @@ void ClusterLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
+  d->request_force_l1_bypass = true;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
@@ -3349,13 +3332,13 @@ void ClusterLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->lds_base = wf.lds_base();
   d->cluster_multicast = true;
   d->cluster_mcast_mask = wf.m0() & amdgpu::kClusterMulticastMask;
+  d->request_force_l1_bypass = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -3363,8 +3346,7 @@ void ClusterLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(
-        static_cast<int64_t>(wf.lds_base()) + static_cast<int64_t>(lane_lds_addr) + lds_offset);
+    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
   }
   set_data(std::move(d));
 }
@@ -3396,13 +3378,13 @@ void ClusterLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->lds_base = wf.lds_base();
   d->cluster_multicast = true;
   d->cluster_mcast_mask = wf.m0() & amdgpu::kClusterMulticastMask;
+  d->request_force_l1_bypass = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -3410,8 +3392,7 @@ void ClusterLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(
-        static_cast<int64_t>(wf.lds_base()) + static_cast<int64_t>(lane_lds_addr) + lds_offset);
+    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
   }
   set_data(std::move(d));
 }
@@ -3443,13 +3424,13 @@ void ClusterLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->lds_base = wf.lds_base();
   d->cluster_multicast = true;
   d->cluster_mcast_mask = wf.m0() & amdgpu::kClusterMulticastMask;
+  d->request_force_l1_bypass = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -3457,8 +3438,7 @@ void ClusterLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(
-        static_cast<int64_t>(wf.lds_base()) + static_cast<int64_t>(lane_lds_addr) + lds_offset);
+    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
   }
   set_data(std::move(d));
 }
@@ -3490,13 +3470,13 @@ void ClusterLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->lds_base = wf.lds_base();
   d->cluster_multicast = true;
   d->cluster_mcast_mask = wf.m0() & amdgpu::kClusterMulticastMask;
+  d->request_force_l1_bypass = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.
-  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -3504,8 +3484,7 @@ void ClusterLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(
-        static_cast<int64_t>(wf.lds_base()) + static_cast<int64_t>(lane_lds_addr) + lds_offset);
+    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
   }
   set_data(std::move(d));
 }
