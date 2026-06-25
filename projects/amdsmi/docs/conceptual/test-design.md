@@ -334,8 +334,11 @@ tests/python/
 │
 ├── unit/                              # No hardware required — pure logic tests only
 │   ├── __init__.py
-│   └── bdf/
-│       └── test_bdf.py                # BDF string parsing and formatting
+│   ├── bdf/
+│   │   └── test_bdf.py                # BDF string parsing and formatting
+│   └── gpu/
+│       ├── test_apu_metrics.py            # APU metrics interface helpers (unit conversions, N/A parity)
+│       └── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly (mock-based, stubs amdsmi)
 │
 ├── functional/                        # Requires live hardware
 │   ├── __init__.py
@@ -431,12 +434,13 @@ of `-k`, skips tests whose id contains the pattern). Run from source by substitu
 /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py --list
 ```
 
-**All unit tests** (no hardware required — currently only `bdf/`):
+**All unit tests** (no hardware required — `bdf/` and `gpu/`):
 
 ```shell
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "bdf" -v
+/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "metric" -v
 ```
 
 **All functional (integration) tests** (live hardware, root may be required):
@@ -566,6 +570,8 @@ The top-level `CMakeLists.txt` wires this in with `add_subdirectory("tests/pytho
 | `unit_tests.py` — BDF class | `unit/bdf/test_bdf.py` |
 | `unit_tests.py` — GPU getters | `unit/gpu/test_{feature}.py` (one file per feature) |
 | `unit_tests.py` — CPU getters | `unit/cpu/test_{feature}.py` (one file per feature) |
+| `unit_tests.py` — APU metrics class | `unit/gpu/test_apu_metrics.py` |
+| `partition_metric_unit_test.py` | `unit/gpu/test_cli_metric_partition.py` |
 | `integration_test.py` — init/shutdown | `functional/system/test_init.py` |
 | `integration_test.py` — GPU setters | `functional/gpu/test_{feature}.py` |
 | `integration_test.py` — CPU setters | `functional/cpu/test_{feature}.py` |
