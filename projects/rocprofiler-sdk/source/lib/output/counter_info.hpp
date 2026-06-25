@@ -101,7 +101,7 @@ struct tool_counter_record_t
     rocprofiler_stream_id_t                      stream_id     = {.handle = 0};
     // Kernel-replay pass index (0-based). All passes of a replayed dispatch share the same
     // dispatch_id, so this is the only field that distinguishes them. 0 for non-replay runs.
-    uint64_t                                     replay_pass   = 0;
+    uint64_t replay_pass = 0;
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const

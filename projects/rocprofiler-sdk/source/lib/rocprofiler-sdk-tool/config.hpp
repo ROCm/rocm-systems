@@ -111,6 +111,10 @@ struct config : output_config
     config& operator=(const config&) = default;
     config& operator=(config&&) noexcept = default;
 
+    // Prototype opt-in: route counter collection through the in-process kernel-replay service
+    // (snapshot/restore between passes) instead of the dispatch counting service. Pass count is
+    // read separately by the SDK via ROCPROFILER_KERNEL_REPLAY_PASSES.
+
     bool   demangle                      = get_env("ROCPROF_DEMANGLE_KERNELS", true);
     bool   truncate                      = get_env("ROCPROF_TRUNCATE_KERNELS", false);
     bool   kernel_trace                  = get_env("ROCPROF_KERNEL_TRACE", false);
@@ -128,10 +132,7 @@ struct config : output_config
     bool   kfd_dropped_events_trace      = get_env("ROCPROF_KFD_DROPPED_EVENTS_TRACE", false);
     bool   scratch_memory_trace          = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
     bool   counter_collection            = get_env("ROCPROF_COUNTER_COLLECTION", false);
-    // Prototype opt-in: route counter collection through the in-process kernel-replay service
-    // (snapshot/restore between passes) instead of the dispatch counting service. Pass count is
-    // read separately by the SDK via ROCPROFILER_KERNEL_REPLAY_PASSES.
-    bool   kernel_replay                 = get_env("ROCPROF_KERNEL_REPLAY", false);
+    bool   kernel_replay                 = get_env("ROCPROF_KERNEL_REPLAY", false); // kernel_replay prototype opt-in:
     bool   hip_runtime_api_trace         = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
     bool   hip_compiler_api_trace        = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
     bool   rccl_api_trace                = get_env("ROCPROF_RCCL_API_TRACE", false);

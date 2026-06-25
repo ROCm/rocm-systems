@@ -27,7 +27,7 @@
 
 namespace rocprofiler
 {
-namespace hsa
+namespace kernel_replay
 {
 // Minimal save/restore of device memory for kernel replay.
 //
@@ -40,7 +40,7 @@ namespace memory_snapshot
 struct mem_block
 {
     void*             gpu_addr = nullptr;  // live device allocation base pointer
-    std::vector<char> host_copy;          // pre-kernel contents held in host memory
+    std::vector<char> host_copy;           // pre-kernel contents held in host memory
 };
 
 class Snapshot
@@ -64,5 +64,5 @@ private:
     std::vector<mem_block> blocks_;
 };
 }  // namespace memory_snapshot
-}  // namespace hsa
+}  // namespace kernel_replay
 }  // namespace rocprofiler
