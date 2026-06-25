@@ -227,6 +227,18 @@ TEST(category_region_serialization, serialize_name_value_pairs_invalid_returns_e
     EXPECT_TRUE(serialize_name_value_pairs(1, 2).empty());    // non-string name slot
 }
 
+// An argument value that itself contains the field delimiter ";;" must not corrupt
+// the wire format: it should round-trip back as a single record whose value is
+// preserved verbatim.
+TEST(category_region_serialization, serialize_name_value_pairs_value_with_delimiter)
+{
+    auto args = parse(serialize_name_value_pairs("path", "a;;b"));
+    ASSERT_EQ(args.size(), 1u);
+    EXPECT_EQ(args[0].arg_number, 0u);
+    EXPECT_EQ(args[0].arg_name, "path");
+    EXPECT_EQ(args[0].arg_value, "a;;b");
+}
+
 // ---------------------------------------------------------------------------------------
 // renumber_serialized_args
 // ---------------------------------------------------------------------------------------
@@ -298,6 +310,19 @@ TEST(category_region_serialization, serialize_annotation_args_variadic)
 TEST(category_region_serialization, serialize_annotation_args_empty)
 {
     EXPECT_TRUE(serialize_annotation_args().empty());
+}
+
+// A gotcha argument value (the path that actually carries arbitrary, caller-controlled
+// data) containing the field delimiter ";;" must round-trip without corrupting the
+// surrounding records.
+TEST(category_region_serialization, serialize_annotation_args_value_with_delimiter)
+{
+    auto args = parse(serialize_annotation_args(std::string{ "a;;b" }, 7));
+    ASSERT_EQ(args.size(), 2u);
+    EXPECT_EQ(args[0].arg_number, 0u);
+    EXPECT_EQ(args[0].arg_value, "a;;b");
+    EXPECT_EQ(args[1].arg_number, 1u);
+    EXPECT_EQ(args[1].arg_value, "7");
 }
 
 // ---------------------------------------------------------------------------------------
@@ -424,6 +449,39 @@ TEST(category_region_cache, append_cache_args_appends_and_renumbers)
     ASSERT_EQ(args.size(), 3u);
     EXPECT_EQ(args[0].arg_number, 0u);
     EXPECT_EQ(args[0].arg_name, "a");
+    EXPECT_EQ(args[1].arg_number, 1u);
+    EXPECT_EQ(args[1].arg_name, "b");
+    EXPECT_EQ(args[2].arg_number, 2u);
+    EXPECT_EQ(args[2].arg_name, "c");
+
+    map_name_to_args.clear();
+}
+
+// A value containing the field delimiter ";;" in the already-serialized first batch
+// must not desync the field counting in next_arg_index / renumber_serialized_args when
+// a second batch is appended: both batches must remain parseable and contiguously
+// numbered.
+TEST(category_region_cache, append_cache_args_renumbers_around_value_with_delimiter)
+{
+    using category_t = rocprofsys::category::host;
+    const char* name = "delim_region";
+    entry_key   key{ name, rocprofsys::trait::name<category_t>::value };
+
+    map_name_to_args.clear();
+    // seed an open entry whose only arg value contains the delimiter (numbered 0)
+    map_name_to_args[key].push_back(
+        pending_cache_entry{ 0, serialize_name_value_pairs("path", "a;;b") });
+
+    // appending must continue the numbering from 1, not reset to 1 because the last
+    // record's idx field was misread
+    append_cache_args<category_t>(name, serialize_name_value_pairs("b", 2, "c", 3));
+
+    ASSERT_FALSE(map_name_to_args[key].empty());
+    auto args = parse(map_name_to_args[key].back().args);
+    ASSERT_EQ(args.size(), 3u);
+    EXPECT_EQ(args[0].arg_number, 0u);
+    EXPECT_EQ(args[0].arg_name, "path");
+    EXPECT_EQ(args[0].arg_value, "a;;b");
     EXPECT_EQ(args[1].arg_number, 1u);
     EXPECT_EQ(args[1].arg_name, "b");
     EXPECT_EQ(args[2].arg_number, 2u);
