@@ -80,10 +80,12 @@ class PCSamplingProfile:
         if not (self._profiler == "rocprofiler-sdk" and self._native_tool_path):
             return
         workload_dir = Path(self._workload_dir)
-        for pattern in ("*_ps_file_results.json", "*_code_obj_info.json"):
-            for artifact in workload_dir.glob(pattern):
-                if artifact.is_file():
-                    artifact.unlink(missing_ok=True)
+        ps_file_results = workload_dir / "ps_file_results.json"
+        if ps_file_results.is_file():
+            ps_file_results.unlink(missing_ok=True)
+        for artifact in workload_dir.glob("*_code_obj_info.json"):
+            if artifact.is_file():
+                artifact.unlink(missing_ok=True)
         code_obj_sources = workload_dir / "code_obj_sources"
         if code_obj_sources.exists():
             shutil.rmtree(code_obj_sources, ignore_errors=True)

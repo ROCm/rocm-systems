@@ -235,7 +235,7 @@ def test_cleanup_native_artifacts(
     """Native artifacts are purged iff native_tool_path is set."""
     patch_console(monkeypatch, MODULE, "debug")
 
-    results = tmp_path / "1234_ps_file_results.json"
+    results = tmp_path / "ps_file_results.json"
     results.touch()
     code_obj_info = tmp_path / "1234_code_obj_info.json"
     code_obj_info.touch()
