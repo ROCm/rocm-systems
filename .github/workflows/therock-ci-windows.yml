@@ -10,6 +10,15 @@ on:
       package_version:
         type: string
         required: true
+      amdgpu_families:
+        type: string
+        default: "gfx1151"
+      test_runs_on:
+        type: string
+        default: "windows-gfx1151-gpu-rocm"
+      build_runs_on:
+        type: string
+        default: "azure-windows-scale-rocm"
 
 permissions:
   contents: read
@@ -17,7 +26,7 @@ permissions:
 jobs:
   therock-build-windows:
     name: Build Windows Packages
-    runs-on: azure-windows-scale-rocm
+    runs-on: ${{ inputs.build_runs_on }}
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
@@ -30,9 +39,7 @@ jobs:
       BUILD_DIR: B:\build
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
-      # TODO(geomin12): Add matrix of families
-      # To get a fast signal of windows building for TheRock, adding gfx1151
-      AMDGPU_FAMILIES: "gfx1151"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -42,7 +49,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 300c0928ffba5ceb555db6ef59f4948210fe5b78 # 2026-06-17
+          ref: f1e3fc2311fde45bf3e17b0e3349200be9caa4b4 # 2026-06-23
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -158,6 +165,6 @@ jobs:
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
-      amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
-      test_runs_on: "windows-gfx1151-gpu-rocm"
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "windows"

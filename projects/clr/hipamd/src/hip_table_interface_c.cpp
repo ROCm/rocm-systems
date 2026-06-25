@@ -5,6 +5,7 @@
  */
 
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include "hip_internal.hpp"
 namespace hip {
 const HipDispatchTable* GetHipDispatchTable();
 const HipCompilerDispatchTable* GetHipCompilerDispatchTable();
@@ -20,7 +21,7 @@ template <> hipError_t HandleException<hipError_t>();
 #endif  // !_WIN32
 
 #define TRY try {
-#define CATCH } catch(...) { return hip::HandleException<hipError_t>(); }
+#define CATCH } catch(...) { HIP_RETURN(hip::HandleException<hipError_t>()); }
 
 DllExport hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                                               uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
