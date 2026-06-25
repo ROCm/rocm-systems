@@ -50,7 +50,7 @@ class Rec(object):
 # Edit this region for introducing new algos etc
 
 reductions = ["AllReduce","ReduceScatter"]
-all_reds = ["sum"]
+all_reds = ["sum", "avg"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
 gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaSTMC"]
 
@@ -67,10 +67,12 @@ coll_to_lower = {
 }
 
 red_to_ncclDevRedOp = {
-  "sum": "ncclDevSum"
+  "sum": "ncclDevSum",
+  "avg": "ncclDevSumPostDiv"
 }
 red_to_Func = {
-  "sum": "FuncSum"
+  "sum": "FuncSum",
+  "avg": "FuncSumPostDiv"
 }
 
 ty_to_ncclDataType = {
@@ -94,8 +96,15 @@ def enumerate_kernels():
   for red in all_reds:
     for ty in all_tys:
       for algo in ["AGxLL_R","RSxLD_AGxST"]:
+        # AllReduce implements sum only; skip avg (matches upstream).
+        if red == "avg":
+          continue
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
       for algo in ["LL","LD"]:
+        # ReduceScatter emits sum and avg for every float type.
+        yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
+      # Multi-node GIN ReduceScatter; non-multicast only (no NVLS/multimem on ROCm).
+      for algo in ["RailA2A_LsaLD"]:
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 
 def required_cuda(k):
@@ -123,6 +132,9 @@ def kernel_fdep(k):
 
 def kernel_fname(k):
   if k.coll in reductions:
+    # GIN algos compile a heavier device path; keep them in a separate TU.
+    if k.algo in gin_algos:
+      return paste('_', coll_to_lower[k.coll], 'gin', k.red, k.ty) + '.cpp'
     if k.algo in ldmc_algos and k.ty.startswith('f8'):
       return paste('_', coll_to_lower[k.coll], k.red, k.ty, k.algo) + '.cpp'
     else:
@@ -204,7 +216,11 @@ for (fname, coll), ks in kernels_by_file.items():
     print("-- Generating %s" % os.path.join(gensrc, fname))
     emitln(f, '#include "sym_kernels.h"')
     emitln(f, '#include "symmetric/kernel.h"')
-    emitln(f, '#include "symmetric/{coll}.h"'.format(coll=coll_to_lower[coll]))
+    # GIN instantiation TUs need the *_gin.h header for the RailA2A/RailRing defs.
+    if ks and all(k.algo in gin_algos for k in ks):
+      emitln(f, '#include "symmetric/{coll}_gin.h"'.format(coll=coll_to_lower[coll]))
+    else:
+      emitln(f, '#include "symmetric/{coll}.h"'.format(coll=coll_to_lower[coll]))
     for k in ks:
       emitln(f, instantiate(k))
 

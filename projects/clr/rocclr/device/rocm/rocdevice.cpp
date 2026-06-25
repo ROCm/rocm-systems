@@ -138,9 +138,8 @@ Device::Device(hsa_agent_t bkendDevice)
       sdma_engine_allocator_(*this),
       cpu_agent_info_(nullptr),
       numHwPipes_(4) {
-  // Initialize queue pools with proper comparators (requires 'this' pointer)
   for (uint i = 0; i < QueuePriority::Total; ++i) {
-    queuePool_.emplace_back(QueueCompare(this));
+    queuePool_.emplace_back();
   }
 
   group_segment_.handle = 0;
@@ -1522,14 +1521,16 @@ bool Device::populateOCLDeviceConstants() {
     }
     info_.imageMaxBufferSize_ = (amd::IS_HIP) ? image_max_dim[0] : (1 << 27);
 
-    info_.imagePitchAlignment_ = 256;
-
-    info_.imageBaseAddressAlignment_ = 256;
-
-    info_.bufferFromImageSupport_ = false;
-
     info_.imageSupport_ = (info_.maxReadWriteImageArgs_ > 0) ? true : false;
   }
+
+  // These are properties of the device's linear memory layout, not the image
+  // extension.  They must be set unconditionally so that hipMallocPitch /
+  // hipMalloc3D produce correct pitch alignment even when IMAGE_SUPPORT is
+  // off.  The PAL backend already sets them unconditionally.
+  info_.imagePitchAlignment_ = 256;
+  info_.imageBaseAddressAlignment_ = 256;
+  info_.bufferFromImageSupport_ = false;
 
   // Enable SVM Capabilities of Hsa device. Ensure
   // user has not setup memory to be non-coherent
@@ -3857,10 +3858,17 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       // kernel dispatches (not synthetic barriers).
       ps->flags_.done_ = false;
       uint16_t hdr;
-      memcpy(&hdr, raw, sizeof(hdr));
+      memcpy(&hdr, patch.packet, sizeof(hdr));
       uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+      // A kernel dispatch could be a vendor-specific ext-kernel-dispatch
+      // packet, identified by amd_format (byte 2).  Classify it as a dispatch so
+      // the patched last-node completion signal contributes its GPU timing like
+      // every other graph kernel node.
+      const uint8_t amdFormat = patch.packet[2];
       ps->flags_.isPacketDispatch_ =
-          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH);
+          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) ||
+          (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+           amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);

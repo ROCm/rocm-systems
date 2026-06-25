@@ -44,28 +44,24 @@ if(AIS_INSTALL_EXAMPLES)
     # The CMakeLists.txt files in the examples tree use our build
     # flags and infrastructure so we can ensure they are well-vetted
     # and these can't be installed.
-
-    # aiscp
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/examples/aiscp/CMakeLists.install.cmake"
-        "examples/aiscp/CMakeLists.txt"
-        @ONLY
+    set(AIS_EXAMPLE_DIRS
+        aiscp
+        api
+        common
+        basics
+        async
     )
-    install(FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/examples/aiscp/CMakeLists.txt"
-        DESTINATION "share/doc/${CMAKE_PROJECT_NAME}/examples/aiscp/"
-    )
-
-    # API examples
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/examples/api/CMakeLists.install.in"
-        "examples/api/CMakeLists.txt"
-        @ONLY
-    )
-    install(FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/examples/api/CMakeLists.txt"
-        DESTINATION "share/doc/${CMAKE_PROJECT_NAME}/examples/api/"
-    )
+    foreach(example_dir ${AIS_EXAMPLE_DIRS})
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/examples/${example_dir}/CMakeLists.install.cmake"
+            "examples/${example_dir}/CMakeLists.txt"
+            @ONLY
+        )
+        install(FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/examples/${example_dir}/CMakeLists.txt"
+            DESTINATION "share/doc/${CMAKE_PROJECT_NAME}/examples/${example_dir}/"
+        )
+    endforeach()
 endif()
 
 # When we have RELEASE/DEV builds set up, we can split

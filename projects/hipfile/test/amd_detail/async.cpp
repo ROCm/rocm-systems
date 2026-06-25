@@ -26,7 +26,10 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -36,9 +39,12 @@
 #include <string>
 #include <system_error>
 #include <sys/types.h>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <variant>
+
+using namespace std::chrono_literals;
 
 // Put tests inside the macros to suppress the global constructor
 // warnings
@@ -57,14 +63,10 @@ using ::testing::Throw;
 using ::testing::Values;
 using ::testing::WithParamInterface;
 
-// Wrap a `new T[n]` allocation in a shared_ptr<void> with a deleter that
-// uses delete[], avoiding the alloc-dealloc-mismatch with shared_ptr<void>'s
-// default deleter.
-template <typename T>
 static std::shared_ptr<void>
-make_shared_array(std::size_t n)
+make_shared_void(std::size_t num_bytes)
 {
-    return std::shared_ptr<void>(new T[n], [](void *p) { delete[] static_cast<T *>(p); });
+    return std::static_pointer_cast<void>(std::make_shared<std::byte[]>(num_bytes));
 }
 
 struct HipFileAsyncOp : public Test {
@@ -155,8 +157,8 @@ TEST_F(HipFileAsyncOp, AsyncOpFallback_new_uses_pinned_host_memory)
     hoff_t  file_offset       = 0;
     hoff_t  buffer_offset     = 0;
     ssize_t bytes_transferred = 0;
-    auto    op_data           = make_shared_array<uint8_t>(sizeof(AsyncOpFallback));
-    auto    bounce_buffer     = make_shared_array<uint8_t>(size);
+    auto    op_data           = make_shared_void(sizeof(AsyncOpFallback));
+    auto    bounce_buffer     = make_shared_void(size);
     EXPECT_CALL(mhip, hipHostMalloc).WillOnce(Return(op_data.get())).WillOnce(Return(bounce_buffer.get()));
     EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(bounce_buffer.get()), _));
     EXPECT_CALL(mhip, hipHostFree(Eq(bounce_buffer.get())));
@@ -171,8 +173,8 @@ TEST_F(HipFileAsyncOp, AsyncOpFallbackLimitsMaxIoSize)
     hoff_t  file_offset       = 0;
     hoff_t  buffer_offset     = 0;
     ssize_t bytes_transferred = 0;
-    auto    op_data           = make_shared_array<uint8_t>(sizeof(AsyncOpFallback));
-    auto    bounce_buffer     = make_shared_array<uint8_t>(1_KiB);
+    auto    op_data           = make_shared_void(sizeof(AsyncOpFallback));
+    auto    bounce_buffer     = make_shared_void(1_KiB);
     EXPECT_CALL(mhip, hipHostMalloc(hipFile::getMaxRwCount(), _)).WillOnce(Return(bounce_buffer.get()));
     EXPECT_CALL(mhip, hipHostMalloc(sizeof(AsyncOpFallback), _)).WillOnce(Return(op_data.get()));
     EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(bounce_buffer.get()), _));
@@ -189,7 +191,7 @@ TEST_F(HipFileAsyncOp, AsyncOpFallback_new_failure_throws_bad_alloc)
     hoff_t  file_offset       = 0;
     hoff_t  buffer_offset     = 0;
     ssize_t bytes_transferred = 0;
-    auto    op_data           = make_shared_array<uint8_t>(sizeof(AsyncOpFallback));
+    auto    op_data           = make_shared_void(sizeof(AsyncOpFallback));
     EXPECT_CALL(mhip, hipHostMalloc).WillOnce(Throw(Hip::RuntimeError(hipErrorOutOfMemory)));
     EXPECT_THROW(std::shared_ptr<AsyncOpFallback>(new AsyncOpFallback{IoType::Read, file, buffer, stream,
                                                                       &size, &file_offset, &buffer_offset,
@@ -203,7 +205,7 @@ TEST_F(HipFileAsyncOp, AsyncOpFallback_bounce_alloc_failure_throws)
     hoff_t  file_offset       = 0;
     hoff_t  buffer_offset     = 0;
     ssize_t bytes_transferred = 0;
-    auto    op_data           = make_shared_array<uint8_t>(sizeof(AsyncOpFallback));
+    auto    op_data           = make_shared_void(sizeof(AsyncOpFallback));
     EXPECT_CALL(mhip, hipHostMalloc)
         .WillOnce(Return(op_data.get()))
         .WillOnce(Throw(Hip::RuntimeError(hipErrorOutOfMemory)));
@@ -220,8 +222,8 @@ TEST_F(HipFileAsyncOp, AsyncOpFallback_bounce_buffer_deleter_failure_calls_syslo
     hoff_t  file_offset       = 0;
     hoff_t  buffer_offset     = 0;
     ssize_t bytes_transferred = 0;
-    auto    op_data           = make_shared_array<uint8_t>(sizeof(AsyncOpFallback));
-    auto    bounce_buffer     = make_shared_array<uint8_t>(size);
+    auto    op_data           = make_shared_void(sizeof(AsyncOpFallback));
+    auto    bounce_buffer     = make_shared_void(size);
     EXPECT_CALL(mhip, hipHostMalloc).WillOnce(Return(op_data.get())).WillOnce(Return(bounce_buffer.get()));
     EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(bounce_buffer.get()), _));
     EXPECT_CALL(mhip, hipHostFree(Eq(bounce_buffer.get())))
@@ -238,8 +240,8 @@ TEST_F(HipFileAsyncOp, AsyncOpFallback_delete_failure_calls_syslog)
     hoff_t  file_offset       = 0;
     hoff_t  buffer_offset     = 0;
     ssize_t bytes_transferred = 0;
-    auto    op_data           = make_shared_array<uint8_t>(sizeof(AsyncOpFallback));
-    auto    bounce_buffer     = make_shared_array<uint8_t>(size);
+    auto    op_data           = make_shared_void(sizeof(AsyncOpFallback));
+    auto    bounce_buffer     = make_shared_void(size);
     EXPECT_CALL(mhip, hipHostMalloc).WillOnce(Return(op_data.get())).WillOnce(Return(bounce_buffer.get()));
     EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(bounce_buffer.get()), _));
     EXPECT_CALL(mhip, hipHostFree(Eq(bounce_buffer.get())));
@@ -251,7 +253,7 @@ TEST_F(HipFileAsyncOp, AsyncOpFallback_delete_failure_calls_syslog)
 }
 
 struct HipFileAsyncOpFallbackMethods : public HipFileAsyncOp {
-    HipFileAsyncOpFallbackMethods() : bounce_buffer{make_shared_array<uint8_t>(size)}
+    HipFileAsyncOpFallbackMethods() : bounce_buffer{make_shared_void(size)}
     {
         //  make_shared uses placement new, which will not use hipHostMalloc/hipHostFree for
         //  AsyncOpFallback
@@ -488,12 +490,6 @@ TEST_P(FallbackAsyncIO, mismatchingGpuIdsThrows)
 
 TEST_P(FallbackAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
 {
-    /* This test will log some errors about async operations being outstanding and being unable to free
-     * memory. The outstanding operations occur because async_io_cleanup is not run. Some memory is unable to
-     * be freed, due to being alloced with malloc, and attempted to be freed with hipHostFree.  This happens
-     * because we mock the allocation of the pinned memory, but the mocks are destructed before the
-     * AsyncOpFallback destructor runs, so we can't mock the deallocation of the pinned memory.
-     */
     EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(1024 * 1024));
     EXPECT_CALL(*mbuffer, getGpuId).Times(AnyNumber()).WillRepeatedly(Return(0));
     EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<hipStream_t>(0xBADBADBB)));
@@ -511,8 +507,8 @@ TEST_P(FallbackAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
         .WillOnce(Return(reinterpret_cast<void *>(0xDEBBBBBB)));
     EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(op_data), _))
         .WillOnce(Return(reinterpret_cast<void *>(0xDE000000)));
-    // EXPECT_CALL(mhip, hipHostFree(Eq(bounce_buffer.get())));
-    // EXPECT_CALL(mhip, hipHostFree(Eq(op_data.get())));
+    EXPECT_CALL(mhip, hipHostFree(Eq(bounce_buffer))).WillOnce([](void *ptr) { free(ptr); });
+    EXPECT_CALL(mhip, hipHostFree(Eq(op_data))).WillOnce([](void *ptr) { free(ptr); });
     EXPECT_CALL(mhip, hipDeviceGetAttribute).WillOnce(Return(1024));
     EXPECT_CALL(*mstream, getLock);
     EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
@@ -522,6 +518,10 @@ TEST_P(FallbackAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
     EXPECT_THROW(Fallback().async_io(io_type, mfile, mbuffer, &size, &file_offset, &buffer_offset,
                                      &bytes_written, mstream),
                  Hip::RuntimeError);
+    // Call to allow destruction of the op and bounce buffer
+    async_io_cleanup(op_data);
+    // Sleep to allow cleanup thread to destruct op
+    std::this_thread::sleep_for(500ms);
 }
 
 INSTANTIATE_TEST_SUITE_P(FallbackAsyncIOSuite, FallbackAsyncIO,
@@ -536,8 +536,8 @@ struct AsyncIoOp : public ::testing::Test {
     }
     void SetUp() override
     {
-        op_data       = make_shared_array<uint8_t>(sizeof(AsyncOpFallback));
-        bounce_buffer = make_shared_array<uint8_t>(size);
+        op_data       = make_shared_void(sizeof(AsyncOpFallback));
+        bounce_buffer = make_shared_void(size);
         EXPECT_CALL(mhip, hipHostMalloc)
             .WillOnce(Return(op_data.get()))
             .WillOnce(Return(bounce_buffer.get()));

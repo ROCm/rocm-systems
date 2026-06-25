@@ -1177,9 +1177,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
               HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
-              HsaMemoryMapFlags flags)
+              HsaMemoryMapFlags flags, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
+  (void)NodeId;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
 
@@ -1201,9 +1202,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
-              HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+              HSAuint64 offset, HSAuint64 size, HSAuint64 addr, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
+  (void)NodeId;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
 
@@ -1222,10 +1224,25 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 {
 	CHECK_DXG_OPEN();
-  wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
-  if (!gpu_mem) {
-    return HSAKMT_STATUS_INVALID_HANDLE;
-  }
+	// On DXG, handle cleanup is managed through the DXG memory management path.
+	// Validate the handle and return success.
+	wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+	if (!gpu_mem) {
+		return HSAKMT_STATUS_INVALID_HANDLE;
+	}
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFreePreserveMetadata(HsaMemoryObjectHandle Handle)
+{
+	CHECK_DXG_OPEN();
+	// On DXG, this behaves the same as hsaKmtMemHandleFree since the DXG
+	// implementation doesn't manage metadata separately. Used by IPC exporter
+	// path (IPCCreate) to release handle references without affecting metadata.
+	wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+	if (!gpu_mem) {
+		return HSAKMT_STATUS_INVALID_HANDLE;
+	}
 	return HSAKMT_STATUS_SUCCESS;
 }
 
