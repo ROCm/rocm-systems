@@ -78,6 +78,7 @@ target_sources(
     host_rma_tester.cpp
     tile_broadcast_tester.cpp
     tile_allgather_tester.cpp
+    tile_reduce_tester.cpp
 )
 
 ###############################################################################

@@ -74,6 +74,7 @@
 #include "tile_rma_tester.hpp"
 #include "tile_broadcast_tester.hpp"
 #include "tile_allgather_tester.hpp"
+#include "tile_reduce_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
@@ -860,6 +861,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Allgather Workgroup-Collective";
       testers.push_back(new TileAllgatherTester(args));
       break;
+    case TileReduceTestType:
+      test_name = "Tile Reduce";
+      testers.push_back(new TileReduceTester(args));
+      break;
+    case TileReduceWaveTestType:
+      test_name = "Tile Reduce Wave-Collective";
+      testers.push_back(new TileReduceTester(args));
+      break;
+    case TileReduceWGTestType:
+      test_name = "Tile Reduce Workgroup-Collective";
+      testers.push_back(new TileReduceTester(args));
+      break;
     default:
       test_name = "Empty";
       break;
@@ -1021,6 +1034,9 @@ bool Tester::peLaunchesKernel() {
     case TileAllgatherTestType:
     case TileAllgatherWaveTestType:
     case TileAllgatherWGTestType:
+    case TileReduceTestType:
+    case TileReduceWaveTestType:
+    case TileReduceWGTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:
