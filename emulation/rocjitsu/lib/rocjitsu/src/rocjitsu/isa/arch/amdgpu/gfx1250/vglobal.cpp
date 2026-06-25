@@ -3077,6 +3077,8 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
+  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.
+  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -3084,7 +3086,9 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);
+    uint32_t lds_addr =
+        static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +
+                              static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) + lds_offset);
     lds.read(lds_addr, &d->store_data[lane * 1], 1);
   }
   set_data(std::move(d));
@@ -3118,6 +3122,8 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
+  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.
+  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -3125,7 +3131,9 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);
+    uint32_t lds_addr =
+        static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +
+                              static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) + lds_offset);
     lds.read(lds_addr, &d->store_data[lane * 4], 4);
   }
   set_data(std::move(d));
@@ -3159,6 +3167,8 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
+  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.
+  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -3166,7 +3176,9 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);
+    uint32_t lds_addr =
+        static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +
+                              static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) + lds_offset);
     lds.read(lds_addr, &d->store_data[lane * 8], 8);
   }
   set_data(std::move(d));
@@ -3200,6 +3212,8 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
+  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.
+  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -3207,7 +3221,9 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);
+    uint32_t lds_addr =
+        static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +
+                              static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) + lds_offset);
     lds.read(lds_addr, &d->store_data[lane * 16], 16);
   }
   set_data(std::move(d));

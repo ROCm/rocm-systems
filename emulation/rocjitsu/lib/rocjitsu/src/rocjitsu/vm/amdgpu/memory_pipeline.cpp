@@ -19,6 +19,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <format>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -55,11 +57,32 @@ std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavef
   return targets;
 }
 
+void write_lds_dst_load_direct(const VectorMemState &d, ComputeUnitCore &cu,
+                               uint32_t per_lane_bytes) {
+  for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+    if ((d.lane_mask & (1ULL << lane)) == 0)
+      continue;
+    uint32_t data_offset = lane * per_lane_bytes;
+    if (data_offset + per_lane_bytes > d.response_data.size()) {
+      throw std::runtime_error(std::format(
+          "LDS-destination load payload too small: lane={} offset={} bytes={} payload={}", lane,
+          data_offset, per_lane_bytes, d.response_data.size()));
+    }
+    uint32_t lds_addr =
+        d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+    cu.lds().write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+  }
+}
+
 MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
                                              MemoryAccessDeferredCompletion complete) {
   uint32_t per_lane_bytes = d.num_elems * d.elem_size;
-  auto targets = resolve_lds_write_targets(d, wf, cu);
-  size_t target_count = targets.size();
+  std::vector<ClusterLdsTarget> targets;
+  size_t target_count = 1;
+  if (d.cluster_multicast) {
+    targets = resolve_lds_write_targets(d, wf, cu);
+    target_count = targets.size();
+  }
 
   // Per-lane LDS-dst buffer load trace.
   util::Logger::vm([&](auto &os) {
@@ -80,6 +103,11 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
       os << std::format(" L{}:@{:#x}->lds[{:#x}]={:#x}", ln, d.per_lane_addr[ln], lds_addr, v);
     }
   });
+
+  if (!d.cluster_multicast) {
+    write_lds_dst_load_direct(d, cu, per_lane_bytes);
+    return MemoryAccessCompletion::Complete;
+  }
 
   auto txn = make_cluster_lds_multicast_transaction(d, wf, std::move(targets));
   auto result = cu.cluster_lds_multicast_engine().submit(std::move(txn), std::move(complete));

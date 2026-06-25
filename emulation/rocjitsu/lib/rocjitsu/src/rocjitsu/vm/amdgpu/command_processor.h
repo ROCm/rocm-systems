@@ -27,6 +27,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
+#include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
 #include "simdojo/sim/component.h"
 
@@ -288,10 +289,6 @@ private:
 
   void doorbell_poll_loop(std::stop_token stop);
   std::jthread doorbell_thread_;
-
-  static uint64_t wg_key(uint32_t dispatch_id, uint32_t wg_id) {
-    return (uint64_t(dispatch_id) << 32) | wg_id;
-  }
 };
 
 } // namespace amdgpu

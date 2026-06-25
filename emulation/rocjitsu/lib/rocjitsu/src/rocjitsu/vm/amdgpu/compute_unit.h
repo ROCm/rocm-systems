@@ -21,6 +21,7 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
+#include "rocjitsu/vm/amdgpu/workgroup_key.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
@@ -515,9 +516,6 @@ protected:
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
   CommandProcessor *cp_ = nullptr;
 
-  static uint64_t wg_key(uint32_t dispatch_id, uint32_t wg_id) {
-    return (uint64_t(dispatch_id) << 32) | wg_id;
-  }
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
   uint64_t shared_aperture_base_ = 0;

@@ -3972,13 +3972,23 @@ class CodeGenerator:
         L.append('  auto &cu = wf.cu();')
         L.append('  const auto &lds = cu.lds();')
         L.append('  uint64_t exec = wf.exec();')
+        L.append(
+            '  // VGLOBAL async-from-LDS applies ioffset to both destination and LDS source.'
+        )
+        L.append(
+            '  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);'
+        )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vsrc')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(
-            '    uint32_t lds_addr = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);'
+            '    uint32_t lds_addr = static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +'
         )
+        L.append(
+            '                                           static_cast<int64_t>(cu.read_vgpr(lds_addr_base, lane)) +'
+        )
+        L.append('                                           lds_offset);')
         L.append(f'    lds.read(lds_addr, &d->store_data[lane * {stride}], {stride});')
         L.append('  }')
         L.append('  set_data(std::move(d));')

@@ -661,6 +661,7 @@ CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint
 
   const auto &src = src_it->second;
   const uint32_t self_mask = cluster_multicast_rank_mask(src.cluster_rank);
+  // Defensive for direct helper callers; the issue path handles mask 0 locally.
   if (mcast_mask == 0 || (src.cluster_size <= 1 && (mcast_mask & self_mask) != 0)) {
     targets.push_back({src.cu, wg_id, src.lds_base, src.cluster_rank});
     return targets;

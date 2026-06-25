@@ -8,6 +8,8 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <cassert>
+#include <cstdint>
 #include <format>
 #include <stdexcept>
 #include <utility>
@@ -33,8 +35,11 @@ uint32_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32
 }
 
 ClusterLdsMulticastTransaction
-make_cluster_lds_multicast_transaction(const VectorMemState &state, const Wavefront &wf,
+make_cluster_lds_multicast_transaction(VectorMemState &state, const Wavefront &wf,
                                        std::vector<ClusterLdsTarget> targets) {
+  assert(state.cluster_multicast && "cluster LDS multicast transaction requires cluster_multicast");
+  assert(state.lds_base == wf.lds_base() &&
+         "cluster LDS multicast source base must be the source WG allocation base");
   ClusterLdsMulticastTransaction txn{};
   txn.dispatch_id = wf.dispatch_id();
   txn.source_wg_id = wf.wg_id();
@@ -47,7 +52,7 @@ make_cluster_lds_multicast_transaction(const VectorMemState &state, const Wavefr
   txn.lane_mask = state.lane_mask;
   txn.per_lane_addr = state.lds_per_lane_addr;
   txn.per_lane_lds_addr = state.per_lane_lds_addr;
-  txn.payload = state.response_data;
+  txn.payload = std::move(state.response_data);
   txn.targets = std::move(targets);
   return txn;
 }
@@ -69,6 +74,12 @@ ImmediateClusterLdsMulticastEngine::submit(ClusterLdsMulticastTransaction txn,
             data_offset, txn.bytes_per_lane, txn.payload.size()));
       }
       uint32_t lds_addr = cluster_lds_lane_addr(txn, lane, target.lds_base);
+      if (uint64_t(lds_addr) + txn.bytes_per_lane > lds.size_bytes()) {
+        throw std::runtime_error(std::format(
+            "cluster LDS multicast target address out of range: lane={} target_wg={} addr={:#x} "
+            "bytes={} lds_size={}",
+            lane, target.wg_id, lds_addr, txn.bytes_per_lane, lds.size_bytes()));
+      }
       for (uint32_t b = 0; b < txn.bytes_per_lane; ++b)
         lds.write8(lds_addr + b, txn.payload[data_offset + b]);
     }

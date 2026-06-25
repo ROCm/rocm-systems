@@ -1341,6 +1341,49 @@ TEST(Gfx1250ExecutionTest, ClusterLoadsDecodeAndPopulateVectorMemState) {
   }
 }
 
+TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsAppliesIoffsetToLdsSource) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobalBase = 0x190000u;
+  constexpr uint32_t kLane0Value = 0x12345678u;
+  constexpr uint32_t kLane1Value = 0xabcdef01u;
+  constexpr uint32_t kIoffset = 8;
+  write_wave_sgpr(*cu, *wf, 0, static_cast<uint32_t>(kGlobalBase));
+  write_wave_sgpr(*cu, *wf, 1, static_cast<uint32_t>(kGlobalBase >> 32));
+
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base, 0, 0);
+  cu->write_vgpr(vgpr_base, 1, 16);
+  cu->lds().write32(wf->lds_base() + kIoffset, kLane0Value);
+  cu->lds().write32(wf->lds_base() + 16 + kIoffset, kLane1Value);
+
+  auto inst =
+      decode_gfx1250({0xEE190000u, 0x00000000u, 0x00000800u}, "global_store_async_from_lds_b32");
+  ASSERT_NE(inst, nullptr);
+  inst->execute(*inst, wf);
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->tag(), amdgpu::GLOBAL_MEM);
+  EXPECT_FALSE(state->is_load);
+  EXPECT_EQ(state->wait_counter_type, amdgpu::WaitCounterType::ASYNCCNT);
+  EXPECT_EQ(state->lane_mask, 0x3u);
+  EXPECT_EQ(state->per_lane_addr[0], kGlobalBase + kIoffset);
+  EXPECT_EQ(state->per_lane_addr[1], kGlobalBase + 16 + kIoffset);
+  ASSERT_GE(state->store_data.size(), 8u);
+
+  uint32_t lane0_value = 0;
+  uint32_t lane1_value = 0;
+  std::memcpy(&lane0_value, &state->store_data[0], sizeof(lane0_value));
+  std::memcpy(&lane1_value, &state->store_data[4], sizeof(lane1_value));
+  EXPECT_EQ(lane0_value, kLane0Value);
+  EXPECT_EQ(lane1_value, kLane1Value);
+}
+
 TEST(Gfx1250ExecutionTest, DispatchEntryClusterMathCoversMultiDimensionalShapes) {
   amdgpu::DispatchEntry entry{};
   entry.grid_wgs_x = 4;
@@ -1381,7 +1424,6 @@ TEST(Gfx1250ExecutionTest, DispatchEntryClusterMathCoversMultiDimensionalShapes)
   entry.cluster_size_y = 1;
   entry.cluster_size_z = 1;
   EXPECT_FALSE(entry.cluster_grid_is_complete());
-  EXPECT_THROW((void)entry.cluster_peer_local_wg_id(2, 1), std::logic_error);
 }
 
 TEST(Gfx1250ExecutionTest, ClusterLdsMulticastTransactionCapturesRemapState) {
@@ -1399,6 +1441,7 @@ TEST(Gfx1250ExecutionTest, ClusterLdsMulticastTransactionCapturesRemapState) {
   state.wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
   state.lds_base = wf->lds_base();
   state.lds_per_lane_addr = true;
+  state.cluster_multicast = true;
   state.cluster_mcast_mask = 0xa;
   state.wf_size = 32;
   state.lane_mask = 0x3;
@@ -1472,6 +1515,25 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsUndersizedPa
   EXPECT_THROW((void)engine.submit(std::move(txn), []() {}), std::runtime_error);
 }
 
+TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsOutOfRangeTarget) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+
+  amdgpu::ClusterLdsMulticastTransaction txn{};
+  txn.source_lds_base = 0;
+  txn.bytes_per_lane = 4;
+  txn.wf_size = 1;
+  txn.lane_mask = 0x1;
+  txn.per_lane_addr = true;
+  txn.per_lane_lds_addr[0] = 0;
+  txn.payload.resize(4);
+  txn.targets = {{cu, /*wg_id=*/0, static_cast<uint32_t>(cu->lds().size_bytes()) - 2,
+                  /*cluster_rank=*/0}};
+
+  amdgpu::ImmediateClusterLdsMulticastEngine engine;
+  EXPECT_THROW((void)engine.submit(std::move(txn), []() {}), std::runtime_error);
+}
+
 TEST(Gfx1250ExecutionTest, ClusterLdsPinPreventsAllocatorReuseUntilClusterCompletes) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
@@ -1486,7 +1548,7 @@ TEST(Gfx1250ExecutionTest, ClusterLdsPinPreventsAllocatorReuseUntilClusterComple
   EXPECT_EQ(cu->allocate_lds(257), 0u);
 }
 
-TEST(Gfx1250ExecutionTest, DeferredClusterLdsMulticastHoldsAsyncCounterUntilCallback) {
+TEST(Gfx1250ExecutionTest, OrdinaryLdsDstLoadWritesDirectlyAndCompletesAsyncCounter) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kGfx1250ScalarSlots, 32);
@@ -1520,19 +1582,9 @@ TEST(Gfx1250ExecutionTest, DeferredClusterLdsMulticastHoldsAsyncCounterUntilCall
   amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
   pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
 
-  EXPECT_EQ(wf->wait_counters().asynccnt, 1u);
-  ASSERT_TRUE(static_cast<bool>(deferred_engine.completion));
-  EXPECT_EQ(deferred_engine.txn.wait_counter_type, amdgpu::WaitCounterType::ASYNCCNT);
-  EXPECT_EQ(deferred_engine.txn.bytes_per_lane, 4u);
-  ASSERT_EQ(deferred_engine.txn.targets.size(), 1u);
-  EXPECT_EQ(deferred_engine.txn.targets[0].cu, cu);
-  EXPECT_EQ(deferred_engine.txn.payload.size(), 32u * sizeof(kLoadedValue));
-  uint32_t payload_value = 0;
-  std::memcpy(&payload_value, deferred_engine.txn.payload.data(), sizeof(payload_value));
-  EXPECT_EQ(payload_value, kLoadedValue);
-
-  deferred_engine.completion();
   EXPECT_EQ(wf->wait_counters().asynccnt, 0u);
+  EXPECT_FALSE(static_cast<bool>(deferred_engine.completion));
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0x20), kLoadedValue);
   cu->set_cluster_lds_multicast_engine(nullptr);
 }
 

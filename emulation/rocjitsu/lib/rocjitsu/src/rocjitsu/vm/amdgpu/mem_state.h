@@ -108,8 +108,9 @@ struct VectorMemState : DynamicInstState {
   bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
-  /// multicast it must be the source WG allocation base; per-lane destination
-  /// offsets are carried in per_lane_lds_addr.
+  /// multicast this must be exactly Wavefront::lds_base(), the source WG
+  /// allocation base; per-lane destination offsets are carried in
+  /// per_lane_lds_addr.
   uint32_t lds_base = 0;
   bool lds_per_lane_addr = false; ///< Use per_lane_lds_addr for LDS destination addresses.
   std::array<uint32_t, 64> per_lane_lds_addr = {};

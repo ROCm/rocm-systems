@@ -51,7 +51,7 @@ struct ClusterLdsMulticastTransaction {
   std::vector<ClusterLdsTarget> targets;
 };
 
-enum class ClusterLdsMulticastResult {
+enum class [[nodiscard]] ClusterLdsMulticastResult {
   Complete,
   Deferred,
 };
@@ -67,7 +67,7 @@ uint32_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32
                                uint32_t target_lds_base);
 
 ClusterLdsMulticastTransaction
-make_cluster_lds_multicast_transaction(const VectorMemState &state, const Wavefront &wf,
+make_cluster_lds_multicast_transaction(VectorMemState &state, const Wavefront &wf,
                                        std::vector<ClusterLdsTarget> targets);
 
 /// @brief Execution boundary for cluster-load async-to-LDS fan-out.

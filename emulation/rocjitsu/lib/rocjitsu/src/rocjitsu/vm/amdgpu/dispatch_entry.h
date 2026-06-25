@@ -12,9 +12,9 @@
 /// independently. Completion signals fire when all WGs of a dispatch finish,
 /// in per-queue submission order.
 
+#include <cassert>
 #include <cstdint>
 #include <deque>
-#include <stdexcept>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -141,8 +141,8 @@ struct DispatchEntry {
   }
 
   uint32_t cluster_peer_local_wg_id(uint32_t local_wg_id, uint32_t rank) const {
-    if (!cluster_grid_is_complete())
-      throw std::logic_error("cluster peer math requires full clusters in every grid dimension");
+    assert(cluster_grid_is_complete() &&
+           "cluster peer math requires full clusters in every grid dimension");
     WorkgroupCoord base = local_wg_coord(cluster_base_local_wg_id(local_wg_id));
     uint32_t sx = cluster_size_x == 0 ? 1 : cluster_size_x;
     uint32_t sy = cluster_size_y == 0 ? 1 : cluster_size_y;

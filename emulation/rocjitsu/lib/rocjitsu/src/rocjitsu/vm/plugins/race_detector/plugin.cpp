@@ -18,6 +18,8 @@
 
 namespace rocjitsu::plugins::race_detector {
 
+namespace {
+
 void warn_cluster_peer_writes_ignored_once() {
   static std::once_flag warned;
   std::call_once(warned, [] {
@@ -25,6 +27,8 @@ void warn_cluster_peer_writes_ignored_once() {
         "race detector does not model cluster LDS multicast peer writes; peer writes are ignored");
   });
 }
+
+} // namespace
 
 std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detector) {
   auto make = [&](auto eid) -> MarkedPc {

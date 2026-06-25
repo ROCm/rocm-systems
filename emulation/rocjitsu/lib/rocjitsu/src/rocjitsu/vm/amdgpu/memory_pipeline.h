@@ -25,7 +25,7 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
-enum class MemoryAccessCompletion {
+enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,
   Deferred,
 };
