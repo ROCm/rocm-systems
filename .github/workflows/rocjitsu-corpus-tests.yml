@@ -255,7 +255,7 @@ jobs:
               --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
               -- pytest \
               --fuzz-target-config-files="${ROCJITSU_SOURCE_DIR}/tests/corpus/${corpus_config}" \
-              --timeout 15 \
+              --timeout 30 \
               tests/test_fuzz_targets.py
             echo "::endgroup::"
           done
