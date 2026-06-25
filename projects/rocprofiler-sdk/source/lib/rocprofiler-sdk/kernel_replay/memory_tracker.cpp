@@ -31,7 +31,7 @@
 
 namespace rocprofiler
 {
-namespace hsa
+namespace kernel_replay
 {
 namespace memory_tracker
 {
@@ -103,10 +103,11 @@ memory_free_wrapper(void* ptr)
 }
 }  // namespace
 
-void
+bool
 set_tracking_enabled(bool enabled)
 {
     tracking_flag().store(enabled, std::memory_order_relaxed);
+    return tracking_flag().load();
 }
 
 bool
@@ -137,7 +138,7 @@ snap_inventory()
 }
 
 void
-update_table(hsa_core_table_t* table)
+update_table(hsa::hsa_core_table_t* table)
 {
     if(!table) return;
 
@@ -148,7 +149,7 @@ update_table(hsa_core_table_t* table)
 }
 
 void
-update_table(hsa_amd_ext_table_t* table)
+update_table(hsa::hsa_amd_ext_table_t* table)
 {
     if(!table) return;
 
@@ -158,5 +159,5 @@ update_table(hsa_amd_ext_table_t* table)
     table->hsa_amd_memory_pool_free_fn     = pool_free_wrapper;
 }
 }  // namespace memory_tracker
-}  // namespace hsa
+}  // namespace kernel_replay
 }  // namespace rocprofiler

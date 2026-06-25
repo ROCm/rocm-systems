@@ -45,8 +45,8 @@ rocprofiler_configure_kernel_replay_counting_service(
 
     if(ctx->kernel_replay) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-
-     // TODO[amd-vkale]: an optimization but should we allow kernel replay  without counter collection? Could be useful for warmups of replay.  <-- Mythreya and Vivek's question
+    // TODO[amd-vkale]: an optimization but should we allow kernel replay  without counter
+    // collection? Could be useful for warmups of replay.  <-- Mythreya and Vivek's question
     if(ctx->dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
     auto st = rocprofiler::counters::configure_callback_dispatch(context_id,
@@ -62,7 +62,7 @@ rocprofiler_configure_kernel_replay_counting_service(
     // Turn on the memory tracker so allocation/free hooks begin populating the inventory that
     // snap/restore consumes. Until this point the installed hooks are a single relaxed atomic load
     // past the chained call.
-    rocprofiler::hsa::memory_tracker::set_tracking_enabled(true);
+    rocprofiler::kernel_replay::memory_tracker::set_tracking_enabled(true);
 
     return ROCPROFILER_STATUS_SUCCESS;
 }

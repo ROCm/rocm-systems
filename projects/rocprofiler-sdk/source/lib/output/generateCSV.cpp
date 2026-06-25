@@ -603,29 +603,16 @@ generate_csv(const output_config&                    cfg,
         std::optional<tool::csv_output_file> ofs_opt;
         if constexpr(with_replay_pass)
         {
-            ofs_opt.emplace(cfg,
-                            domain_type::COUNTER_COLLECTION,
-                            tool::csv::counter_collection_replay_csv_encoder{},
-                            std::array<std::string_view, 20>{"Correlation_Id",
-                                                             "Dispatch_Id",
-                                                             "Replay_Pass",
-                                                             "Agent_Id",
-                                                             "Queue_Id",
-                                                             "Process_Id",
-                                                             "Thread_Id",
-                                                             "Grid_Size",
-                                                             "Kernel_Id",
-                                                             "Kernel_Name",
-                                                             "Workgroup_Size",
-                                                             "LDS_Block_Size",
-                                                             "Scratch_Size",
-                                                             "VGPR_Count",
-                                                             "Accum_VGPR_Count",
-                                                             "SGPR_Count",
-                                                             "Counter_Name",
-                                                             "Counter_Value",
-                                                             "Start_Timestamp",
-                                                             "End_Timestamp"});
+            ofs_opt.emplace(
+                cfg,
+                domain_type::COUNTER_COLLECTION,
+                tool::csv::counter_collection_replay_csv_encoder{},
+                std::array<std::string_view, 20>{
+                    "Correlation_Id", "Dispatch_Id",   "Replay_Pass",      "Agent_Id",
+                    "Queue_Id",       "Process_Id",    "Thread_Id",        "Grid_Size",
+                    "Kernel_Id",      "Kernel_Name",   "Workgroup_Size",   "LDS_Block_Size",
+                    "Scratch_Size",   "VGPR_Count",    "Accum_VGPR_Count", "SGPR_Count",
+                    "Counter_Name",   "Counter_Value", "Start_Timestamp",  "End_Timestamp"});
         }
         else
         {
@@ -672,8 +659,8 @@ generate_csv(const output_config&                    cfg,
 
                 const auto& correlation_id = record.dispatch_data.correlation_id;
                 const auto* kernel_info    = tool_metadata.get_kernel_symbol(kernel_id);
-                auto        lds_block_size_v =
-                    (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
+                auto lds_block_size_v = (kernel_info->group_segment_size + (lds_block_size - 1)) &
+                                        ~(lds_block_size - 1);
 
                 auto row_ss = std::stringstream{};
                 for(auto& [counter_id, counter_value] : counter_id_value)

@@ -111,22 +111,22 @@ struct config : output_config
     config& operator=(const config&) = default;
     config& operator=(config&&) noexcept = default;
 
-    bool   demangle                      = get_env("ROCPROF_DEMANGLE_KERNELS", true);
-    bool   truncate                      = get_env("ROCPROF_TRUNCATE_KERNELS", false);
-    bool   kernel_trace                  = get_env("ROCPROF_KERNEL_TRACE", false);
-    bool   hsa_core_api_trace            = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
-    bool   hsa_amd_ext_api_trace         = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
-    bool   hsa_image_ext_api_trace       = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
-    bool   hsa_finalizer_ext_api_trace   = get_env("ROCPROF_HSA_FINALIZER_EXT_API_TRACE", false);
-    bool   marker_api_trace              = get_env("ROCPROF_MARKER_API_TRACE", false);
-    bool   memory_copy_trace             = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
-    bool   memory_allocation_trace       = get_env("ROCPROF_MEMORY_ALLOCATION_TRACE", false);
-    bool   kfd_page_migration_trace      = get_env("ROCPROF_KFD_PAGE_MIGRATION_TRACE", false);
-    bool   kfd_page_mapping_trace        = get_env("ROCPROF_KFD_PAGE_MAPPING_TRACE", false);
-    bool   kfd_queue_trace               = get_env("ROCPROF_KFD_QUEUE_TRACE", false);
-    bool   kfd_dropped_events_trace      = get_env("ROCPROF_KFD_DROPPED_EVENTS_TRACE", false);
-    bool   scratch_memory_trace          = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
-    bool   counter_collection            = get_env("ROCPROF_COUNTER_COLLECTION", false);
+    bool demangle                    = get_env("ROCPROF_DEMANGLE_KERNELS", true);
+    bool truncate                    = get_env("ROCPROF_TRUNCATE_KERNELS", false);
+    bool kernel_trace                = get_env("ROCPROF_KERNEL_TRACE", false);
+    bool hsa_core_api_trace          = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
+    bool hsa_amd_ext_api_trace       = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
+    bool hsa_image_ext_api_trace     = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
+    bool hsa_finalizer_ext_api_trace = get_env("ROCPROF_HSA_FINALIZER_EXT_API_TRACE", false);
+    bool marker_api_trace            = get_env("ROCPROF_MARKER_API_TRACE", false);
+    bool memory_copy_trace           = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
+    bool memory_allocation_trace     = get_env("ROCPROF_MEMORY_ALLOCATION_TRACE", false);
+    bool kfd_page_migration_trace    = get_env("ROCPROF_KFD_PAGE_MIGRATION_TRACE", false);
+    bool kfd_page_mapping_trace      = get_env("ROCPROF_KFD_PAGE_MAPPING_TRACE", false);
+    bool kfd_queue_trace             = get_env("ROCPROF_KFD_QUEUE_TRACE", false);
+    bool kfd_dropped_events_trace    = get_env("ROCPROF_KFD_DROPPED_EVENTS_TRACE", false);
+    bool scratch_memory_trace        = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
+    bool counter_collection          = get_env("ROCPROF_COUNTER_COLLECTION", false);
     // Prototype opt-in: route counter collection through the in-process kernel-replay service
     // (snapshot/restore between passes) instead of the dispatch counting service. Pass count is
     // read separately by the SDK via ROCPROFILER_KERNEL_REPLAY_PASSES.

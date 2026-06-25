@@ -99,20 +99,20 @@ struct csv_encoder
     }
 };
 
-using api_csv_encoder                      = csv_encoder<7>;
-using agent_info_csv_encoder               = csv_encoder<53>;
-using counter_collection_csv_encoder       = csv_encoder<19>;
+using api_csv_encoder                       = csv_encoder<7>;
+using agent_info_csv_encoder                = csv_encoder<53>;
+using counter_collection_csv_encoder        = csv_encoder<19>;
 using counter_collection_replay_csv_encoder = csv_encoder<20>;
-using memory_allocation_csv_encoder        = csv_encoder<8>;
-using marker_csv_encoder                   = csv_encoder<7>;
-using list_basic_metrics_csv_encoder       = csv_encoder<5>;
-using list_derived_metrics_csv_encoder     = csv_encoder<5>;
-using scratch_memory_encoder               = csv_encoder<9>;
-using stats_csv_encoder                    = csv_encoder<8>;
-using pc_sampling_host_trap_csv_encoder    = csv_encoder<6>;
-using kernel_trace_with_stream_csv_encoder = csv_encoder<22>;
-using memory_copy_with_stream_csv_encoder  = csv_encoder<8>;
-using pc_sampling_stochastic_csv_encoder   = csv_encoder<10>;
+using memory_allocation_csv_encoder         = csv_encoder<8>;
+using marker_csv_encoder                    = csv_encoder<7>;
+using list_basic_metrics_csv_encoder        = csv_encoder<5>;
+using list_derived_metrics_csv_encoder      = csv_encoder<5>;
+using scratch_memory_encoder                = csv_encoder<9>;
+using stats_csv_encoder                     = csv_encoder<8>;
+using pc_sampling_host_trap_csv_encoder     = csv_encoder<6>;
+using kernel_trace_with_stream_csv_encoder  = csv_encoder<22>;
+using memory_copy_with_stream_csv_encoder   = csv_encoder<8>;
+using pc_sampling_stochastic_csv_encoder    = csv_encoder<10>;
 }  // namespace csv
 }  // namespace tool
 }  // namespace rocprofiler

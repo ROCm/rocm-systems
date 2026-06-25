@@ -29,7 +29,7 @@
 
 namespace rocprofiler
 {
-namespace hsa
+namespace kernel_replay
 {
 // Minimal inventory of live device allocations used by kernel-replay snap/restore.
 //
@@ -44,7 +44,7 @@ namespace memory_tracker
 using alloc_map_t = std::unordered_map<void*, size_t>;
 
 // Enable/disable inventory population. Disabled by default until a replay context is configured.
-void
+bool
 set_tracking_enabled(bool enabled);
 
 bool
@@ -62,9 +62,10 @@ snap_inventory();
 
 // Install inventory wrappers on top of the existing table function pointers.
 void
-update_table(hsa_core_table_t* table);
+update_table(hsa::hsa_core_table_t* table);
+
 void
-update_table(hsa_amd_ext_table_t* table);
+update_table(hsa::hsa_amd_ext_table_t* table);
 }  // namespace memory_tracker
-}  // namespace hsa
+}  // namespace kernel_replay
 }  // namespace rocprofiler

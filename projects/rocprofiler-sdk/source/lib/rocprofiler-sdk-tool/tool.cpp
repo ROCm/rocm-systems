@@ -1806,18 +1806,18 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     counter_record.thread_id     = user_data.value;
 
     // Kernel-replay prototype: passes of a replayed dispatch all share the same dispatch_id and
-    // arrive sequentially as each pass completes, so the Nth invocation for a dispatch_id is pass N.
-    // Only track when replay is enabled to avoid unbounded map growth on normal runs.
+    // arrive sequentially as each pass completes, so the Nth invocation for a dispatch_id is pass
+    // N. Only track when replay is enabled to avoid unbounded map growth on normal runs.
     if(tool::get_config().kernel_replay)
     {
-        static std::mutex                            replay_pass_mutex;
+        static std::mutex                             replay_pass_mutex;
         static std::unordered_map<uint64_t, uint64_t> replay_pass_counts;
-        auto _dispatch_id = dispatch_data.dispatch_info.dispatch_id;
-        auto _lock        = std::lock_guard<std::mutex>{replay_pass_mutex};
+        auto _dispatch_id          = dispatch_data.dispatch_info.dispatch_id;
+        auto _lock                 = std::lock_guard<std::mutex>{replay_pass_mutex};
         counter_record.replay_pass = replay_pass_counts[_dispatch_id]++;
     }
 
-    auto serialized_records      = std::vector<tool::tool_counter_value_t>{};
+    auto serialized_records = std::vector<tool::tool_counter_value_t>{};
     serialized_records.reserve(record_count);
 
     for(size_t count = 0; count < record_count; ++count)

@@ -2062,7 +2062,9 @@ def run(app_args, args, **kwargs):
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
     if getattr(args, "kernel_replay", None) and not args.pmc:
-        fatal_error("--kernel-replay requires --pmc (it routes counter collection through replay)")
+        fatal_error(
+            "--kernel-replay requires --pmc (it routes counter collection through replay)"
+        )
 
     if getattr(args, "kernel_replay", None):
         # Route counter collection through the in-process kernel-replay service (consumed by the
