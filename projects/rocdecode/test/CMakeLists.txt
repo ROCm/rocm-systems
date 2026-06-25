@@ -163,11 +163,18 @@ if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
   endif()
 endif()
 
-# Helper macro: apply TheRock VA environment to a test when building via TheRock
-macro(set_therock_env TEST_NAME)
+# Helper macro: apply test environment (ASAN preload and/or TheRock VA libs)
+macro(set_test_env TEST_NAME)
   if(USING_THE_ROCK)
     set_property(TEST ${TEST_NAME} PROPERTY ENVIRONMENT "${THEROCK_ENV}")
+  elseif(ASAN_PRELOAD)
+    set_property(TEST ${TEST_NAME} PROPERTY ENVIRONMENT "LD_PRELOAD=${ASAN_PRELOAD}")
   endif()
+endmacro()
+
+# Keep old name for compatibility
+macro(set_therock_env TEST_NAME)
+  set_test_env(${TEST_NAME})
 endmacro()
 
 # Option to enable extended tests
@@ -185,6 +192,7 @@ add_test(
             --test-command "videodecoderaw"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.265
 )
+set_test_env(video_decodeRaw-HEVC)
 
 # 2 - videoDecodeRaw AVC
 add_test(
@@ -198,6 +206,7 @@ add_test(
             --test-command "videodecoderaw"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.264
 )
+set_test_env(video_decodeRaw-AVC)
 
 # 3 - videoDecodeRaw AV1
 add_test(
@@ -211,6 +220,7 @@ add_test(
             --test-command "videodecoderaw"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.ivf
 )
+set_test_env(video_decodeRaw-AV1)
 
 # 4 - videoDecodeRaw VP9
 add_test(
@@ -224,6 +234,7 @@ add_test(
             --test-command "videodecoderaw"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
 )
+set_test_env(video_decodeRaw-VP9)
 
 # 5 - rocdecDecode
 add_test(
@@ -237,6 +248,7 @@ add_test(
             --test-command "rocdecdecode"
             -i ${ROCM_PATH}/share/rocdecode/frames
 )
+set_test_env(rocdec_Decode-HEVC)
 
 # 6 - rocDecodeNegativeApiTests
 add_test(
@@ -249,6 +261,7 @@ add_test(
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "rocdecodenegativetest"
 )
+set_test_env(rocDecode_Negative_API_Tests)
 
 if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   # 7 - videoDecode HEVC
