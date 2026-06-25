@@ -182,6 +182,7 @@ int main() {
         std::cout << "\t\t\tSuccessfully retrieved Fabric telemetry data" << std::endl;
 
         // Display telemetry information
+        const char* telem_name;
         for (int cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE;
              cat < static_cast<int>(AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX); cat++) {
           auto category = static_cast<amdsmi_fabric_telemetry_category_t>(cat);
@@ -201,9 +202,13 @@ int main() {
               // Display items for this instance
               for (uint32_t item_idx = 0; item_idx < instance->item_count; item_idx++) {
                 auto& item = instance->items[item_idx];
+                ret = amdsmi_fabric_telem_id_to_string(item.id, &telem_name);
+                if (ret != AMDSMI_STATUS_SUCCESS) {
+                  std::cout << "\t\t\t\t\tWarning: Failed to retrieve Fabric name: " << ret
+                            << std::endl;
+                }
                 std::cout << "\t\t\t\t\t\tItem " << item_idx << ": "
-                          << "ID=0x" << std::hex << item.id << std::dec << "("
-                          << amdsmi_fabric_telem_id_to_string(item.id) << ")"
+                          << "ID=0x" << std::hex << item.id << std::dec << "(" << telem_name << ")"
                           << ", Value=" << item.value << std::endl;
               }
             }
@@ -245,33 +250,31 @@ int main() {
         }
         std::cout << "\t\t\tFabric info data: " << "\n";
         std::cout << "\t\t\t\t** BDF: " << bdf_to_str(fabric_info.bdf) << "\n";
-        std::cout << "\t\t\t\t** Fabric Version: " << fabric_info.fabric_info.version << "\n";
-        std::cout << "\t\t\t\t** Fabric Type: "
-                  << fabric_info.fabric_info.fabric_version.v1.fabric_type << "\n";
+        std::cout << "\t\t\t\t** Fabric Version: " << fabric_info.info.version << "\n";
+        std::cout << "\t\t\t\t** Fabric Type: " << fabric_info.info.fabric_version.v1.fabric_type
+                  << "\n";
         std::cout << "\t\t\t\t** Accelerator ID: "
-                  << fabric_info.fabric_info.fabric_version.v1.accelerator_id << "\n";
-        std::cout << "\t\t\t\t** Bandwidth: " << fabric_info.fabric_info.fabric_version.v1.bandwidth
+                  << fabric_info.info.fabric_version.v1.accelerator_id << "\n";
+        std::cout << "\t\t\t\t** Bandwidth: " << fabric_info.info.fabric_version.v1.bandwidth
                   << "\n";
-        std::cout << "\t\t\t\t** Latency: " << fabric_info.fabric_info.fabric_version.v1.latency
-                  << "\n";
+        std::cout << "\t\t\t\t** Latency: " << fabric_info.info.fabric_version.v1.latency << "\n";
         std::cout << "\t\t\t\t** PPOD ID: "
-                  << ppod_id_to_str(fabric_info.fabric_info.fabric_version.v1.ppod_id) << "\n";
-        std::cout << "\t\t\t\t** PPOD Size: " << fabric_info.fabric_info.fabric_version.v1.ppod_size
+                  << ppod_id_to_str(fabric_info.info.fabric_version.v1.ppod_id) << "\n";
+        std::cout << "\t\t\t\t** PPOD Size: " << fabric_info.info.fabric_version.v1.ppod_size
                   << "\n";
-        std::cout << "\t\t\t\t** VPOD ID: " << fabric_info.fabric_info.fabric_version.v1.vpod_id
-                  << "\n";
-        std::cout << "\t\t\t\t** VPOD Size: " << fabric_info.fabric_info.fabric_version.v1.vpod_size
+        std::cout << "\t\t\t\t** VPOD ID: " << fabric_info.info.fabric_version.v1.vpod_id << "\n";
+        std::cout << "\t\t\t\t** VPOD Size: " << fabric_info.info.fabric_version.v1.vpod_size
                   << "\n";
         print_array_grid(std::cout, "\t\t\t\t", "VPOD Active Accelerators",
-                         fabric_info.fabric_info.fabric_version.v1.vpod_active_accelerators,
+                         fabric_info.info.fabric_version.v1.vpod_active_accelerators,
                          AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE, MAX_COLUMNS_PER_GRID);
         print_array_grid(std::cout, "\t\t\t\t", "Local Accelerators",
-                         fabric_info.fabric_info.fabric_version.v1.local_accelerators,
+                         fabric_info.info.fabric_version.v1.local_accelerators,
                          AMDSMI_FABRIC_MAX_LOCAL_GPUS, MAX_COLUMNS_PER_GRID);
-        std::cout << "\t\t\t\t** Address Mode: "
-                  << fabric_info.fabric_info.fabric_version.v1.addr_mode << "\n";
+        std::cout << "\t\t\t\t** Address Mode: " << fabric_info.info.fabric_version.v1.addr_mode
+                  << "\n";
         std::cout << "\t\t\t\t** Accelerator State: "
-                  << fabric_info.fabric_info.fabric_version.v1.accel_state << "\n";
+                  << fabric_info.info.fabric_version.v1.accel_state << "\n";
         std::cout << "\n";
       }
     }

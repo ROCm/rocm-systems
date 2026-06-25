@@ -246,15 +246,6 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
-// Deprecation targets: kept for source/ABI compatibility, slated for removal.
-#define AMDSMI_MAX_VF_COUNT 32               //!< Maximum virtual functions supported
-#define AMDSMI_MAX_DRIVER_NUM 2              //!< Maximum drivers supported
-#define AMDSMI_DFC_FW_NUMBER_OF_ENTRIES 9    //!< DFC firmware entries supported
-#define AMDSMI_MAX_WHITE_LIST_ELEMENTS 16    //!< Max white list elements for device access control
-#define AMDSMI_MAX_BLACK_LIST_ELEMENTS 64    //!< Max black list elements for device access control
-#define AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS 8  //!< Max Trusted Application white list elements
-#define AMDSMI_MAX_ERR_RECORDS 10            //!< Maximum error records that can be stored
-#define AMDSMI_MAX_PROFILE_COUNT 16          //!< Maximum profiles supported
 #define AMDSMI_PF_INDEX (AMDSMI_MAX_VF_COUNT - 1)
 #define AMDSMI_MAX_DRIVER_INFO_RSVD 64
 // Deprecation target: kept for ABI compatibility; prefer AMDSMI_FABRIC_PPOD_ID_SIZE.
@@ -3017,7 +3008,7 @@ typedef struct {
 typedef struct {
   char name[AMDSMI_MAX_STRING_LENGTH];
   char version[AMDSMI_MAX_STRING_LENGTH];
-} amdsmi_nic_fw_t;
+} amdsmi_nic_fw_entry_t;
 
 /**
  * @brief NIC firmware information collection
@@ -3026,7 +3017,7 @@ typedef struct {
  */
 typedef struct {
   uint32_t num_fw;
-  amdsmi_nic_fw_t fw[AMDSMI_MAX_NIC_FW];
+  amdsmi_nic_fw_entry_t fw[AMDSMI_MAX_NIC_FW];
 } amdsmi_nic_fw_info_t;
 
 /**
@@ -5587,16 +5578,15 @@ amdsmi_status_t amdsmi_clean_gpu_local_data(amdsmi_processor_handle processor_ha
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef enum {
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN = 0xFFFFFFFF,  //!< Unknown telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE = 0,             //!< UALOE telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH = 1,            //!< Switch telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO = 2,            //!< Crypto telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC = 3,               //!< PFC telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4,           //!< Network Port telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5,     //!< Derived UALOE telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6,   //!< Derived Network Port telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7,               //!< Maximum number of categories
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID = 0xFFFFFFFF   //!< Unknown telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE = 0,            //!< UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH = 1,           //!< Switch telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO = 2,           //!< Crypto telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC = 3,              //!< PFC telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4,          //!< Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5,    //!< Derived UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6,  //!< Derived Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7,              //!< Maximum number of categories
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID = 0xFFFFFFFF  //!< Unknown telemetry
 } amdsmi_fabric_telemetry_category_t;
 
 /**
@@ -5748,10 +5738,11 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
  *
  *  @param[in] telem_id The telemetry item ID for which the name is requested
  *
- *  @return const char* | Pointer to string containing the telemetry item name,
- *  or UNKNOWN if the category or telemetry ID is not recognized
+ *  @param[in] telem_name The telemetry item name
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
+amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** telem_name);
 
 /**
  *  @brief Free Fabric telemetry storage
@@ -5789,7 +5780,7 @@ typedef enum {
  */
 typedef enum {
   AMDSMI_FABRIC_TYPE_UALOE,
-  AMDSMI_FABRIC_TYPE_UALLINK,
+  AMDSMI_FABRIC_TYPE_UALINK,
   AMDSMI_FABRIC_TYPE_UNKNOWN
 } amdsmi_fabric_type_t;
 
@@ -5854,9 +5845,9 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  amdsmi_bdf_t bdf;                      //!< BDF (Bus, Device, Function) of the Fabric device
-  amdsmi_fabric_info_ver_t fabric_info;  //!< Fabric information structure (version 1)
-  uint32_t reserved[15];                 //!< Reserved for future use
+  amdsmi_bdf_t bdf;               //!< BDF (Bus, Device, Function) of the Fabric device
+  amdsmi_fabric_info_ver_t info;  //!< Fabric information structure (version 1)
+  uint32_t reserved[15];          //!< Reserved for future use
 } amdsmi_fabric_info_t;
 
 /**
