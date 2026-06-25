@@ -633,10 +633,6 @@ void GDABackend::buffer_unregister_all() {
   Backend::buffer_unregister_all();
 }
 
-void GDABackend::reset_backend_stats() {
-  assert(false);
-}
-
 void GDABackend::accumulate_default_host_ctx_stats() {
   globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
 }

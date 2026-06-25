@@ -194,7 +194,7 @@ void Backend::dump_stats() {
     if (val) { append("  %-30s %llu\n", name, static_cast<unsigned long long>(val)); ++n_printed; }
   };
 
-  static_assert(NUM_STATS == 67,
+  static_assert(NUM_STATS == 68,
     "rocshmem_stats enum changed; update dump_stats device section");
   const auto& device_stats{globalStats};
   uint64_t device_total = 0;
@@ -272,7 +272,7 @@ void Backend::dump_stats() {
     LOG_INFO("%s", buf);
   }
 
-  static_assert(NUM_HOST_STATS == 38,
+  static_assert(NUM_HOST_STATS == 39,
     "rocshmem_host_stats enum changed; update dump_stats host section");
   const auto& host_stats{globalHostStats};
   uint64_t host_total = 0;
