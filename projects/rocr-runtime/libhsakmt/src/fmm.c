@@ -43,6 +43,7 @@
 #include <numaif.h>
 #include "rbtree.h"
 #include <amdgpu.h>
+#include "xf86drm.h"
 
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -211,6 +212,8 @@ typedef struct {
 	uint32_t usable_peer_id_num;
 	uint32_t *usable_peer_id_array;
 	int drm_render_minor;
+	uint32_t drm_vm_timeline_syncobj;   /* per GPU global timeline syncobj */
+	uint64_t drm_vm_timeline_seqnum;    /* per GPU global sequence number */
 } gpu_mem_t;
 
 enum svm_aperture_type {
@@ -2958,6 +2961,13 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].gpuvm_aperture.ops = &reserved_aperture_ops;
 			pthread_mutex_init(&gpu_mem[gpu_mem_count].gpuvm_aperture.fmm_mutex, NULL);
 
+			/* Create timeline syncobj for this GPU device */
+			gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj = 0;
+			gpu_mem[gpu_mem_count].drm_vm_timeline_seqnum = 0;
+			if (drmSyncobjCreate(fd, 0, &gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj))
+                pr_warn("Failed to create VM timeline syncobj for GPU 0x%x\n",
+                    props.KFDGpuID);
+
 			gpu_mem_count++;
 		}
 	}
@@ -3194,13 +3204,43 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 	fmm_ctx->all_gpu_id_array_size = 0;
 
 	if (fmm_ctx->gpu_mem) {
-		while (fmm_ctx->gpu_mem_count-- > 0)
+		while (fmm_ctx->gpu_mem_count-- > 0) {
+			/* Destroy timeline syncobj for this GPU */
+			if (fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].drm_vm_timeline_syncobj)
+                drmSyncobjDestroy(
+                    fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].drm_render_fd,
+                    fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].drm_vm_timeline_syncobj);
+
 			free(fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].usable_peer_id_array);
+		}
 		free(fmm_ctx->gpu_mem);
 		fmm_ctx->gpu_mem = NULL;
 		fmm_ctx->first_gpu_mem = NULL;
 	}
 	fmm_ctx->gpu_mem_count = 0;
+}
+
+HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
+			HSAuint32 node_id, int *drm_render_fd,
+			uint32_t *vm_timeline_syncobj, uint64_t *vm_timeline_point)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	int32_t index = gpu_mem_find_by_node_id(fmm_ctx, node_id);
+
+	if (index < 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	if (drm_render_fd)
+		*drm_render_fd = fmm_ctx->gpu_mem[index].drm_render_fd;
+	if (vm_timeline_syncobj)
+		*vm_timeline_syncobj = fmm_ctx->gpu_mem[index].drm_vm_timeline_syncobj;
+	
+	if (vm_timeline_point)
+		*vm_timeline_point = __atomic_add_fetch(
+			&fmm_ctx->gpu_mem[index].drm_vm_timeline_seqnum, 1,
+			__ATOMIC_SEQ_CST);
+
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
@@ -4726,22 +4766,35 @@ void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx)
 	fmm_clear_aperture(&fmm_ctx->svm.apertures[SVM_COHERENT]);
 
 	if (fmm_ctx->dgpu_shared_aperture_limit) {
-		/* Use the same dgpu range as the parent. If failed, then set
-		 * hsakmt_is_dgpu_mem_init to false. Later on dgpu_mem_init will try
-		 * to get a new range
-		 */
-		map_addr = mmap(fmm_ctx->dgpu_shared_aperture_base,
-			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit)-
-			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1, PROT_NONE,
-			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
+		HSAuint64 dgpu_size =
+			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit) -
+			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1;
 
-		if (map_addr == MAP_FAILED) {
-			munmap(fmm_ctx->dgpu_shared_aperture_base,
-				   (HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit) -
-				   (HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1);
-
+		if (hsakmt_use_model) {
+			/* In model mode, hsaKmtCloseKFDCtx frees the fmm context
+			 * after this call, so the "remap-and-keep" path used for
+			 * fork() inheritance would leak the SVM reservation and
+			 * make the next hsa_init in the same process fail to
+			 * reserve SVM address space. Release it instead.
+			 */
+			munmap(fmm_ctx->dgpu_shared_aperture_base, dgpu_size);
 			fmm_ctx->dgpu_shared_aperture_base = NULL;
 			fmm_ctx->dgpu_shared_aperture_limit = NULL;
+		} else {
+			/* Use the same dgpu range as the parent. If failed, then set
+			 * hsakmt_is_dgpu_mem_init to false. Later on dgpu_mem_init will try
+			 * to get a new range
+			 */
+			map_addr = mmap(fmm_ctx->dgpu_shared_aperture_base,
+				dgpu_size, PROT_NONE,
+				MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
+
+			if (map_addr == MAP_FAILED) {
+				munmap(fmm_ctx->dgpu_shared_aperture_base, dgpu_size);
+
+				fmm_ctx->dgpu_shared_aperture_base = NULL;
+				fmm_ctx->dgpu_shared_aperture_limit = NULL;
+			}
 		}
 	}
 

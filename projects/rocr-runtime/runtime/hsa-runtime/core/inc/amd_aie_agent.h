@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2022-2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -40,8 +40,6 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-// AMD specific HSA backend.
-
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 
@@ -51,6 +49,7 @@
 namespace rocr {
 namespace AMD {
 
+/// @brief Class to represent an AIE device.
 class AieAgent : public core::Agent {
 public:
  /// @brief AIE agent constructor.
@@ -62,7 +61,8 @@ public:
 
  hsa_status_t VisitRegion(bool include_peer,
                           hsa_status_t (*callback)(hsa_region_t region, void* data),
-                          void* data) const;
+                          void* data) const override;
+
  hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
                             void* data) const override;
 
@@ -74,7 +74,8 @@ public:
 
  hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
- // @brief Override from core::Agent.
+ core::Agent* GetNearestCpuAgent() const override;
+
  void InitDerivedCuid() override;
 
  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
@@ -83,7 +84,6 @@ public:
                           bool metadata_queue,
                           core::Queue** queue) override;
 
- /// @brief Override from core::Agent.
  const std::vector<const core::Isa*>& supported_isas() const override { return supported_isas_; }
 
  const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override { return regions_; }
@@ -94,14 +94,16 @@ public:
    return system_allocator_;
  }
 
-  /// @brief Getter for the AIE system deallocator.
-  const std::function<void(void*)>& system_deallocator() const { return system_deallocator_; }
+ /// @brief Getter for the AIE system deallocator.
+ const std::function<void(void*)>& system_deallocator() const { return system_deallocator_; }
 
-  const HsaNodeProperties& properties() const { return node_props_; }
+ /// @brief Getter for the AIE node properties.
+ const HsaNodeProperties& properties() const { return node_props_; }
 
 private:
   /// @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
+
   /// @brief Setup the memory allocators used by this agent.
   void InitAllocators();
 

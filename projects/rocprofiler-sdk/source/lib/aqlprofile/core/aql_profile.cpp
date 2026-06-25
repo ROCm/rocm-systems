@@ -27,6 +27,7 @@
 
 #include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/common/environment.hpp"
 #include "lib/aqlprofile/pm4/cmd_builder.h"
 #include "lib/aqlprofile/pm4/pmc_builder.h"
 #include "lib/aqlprofile/pm4/spm_builder.h"
@@ -182,16 +183,16 @@ bool                     Pm4Factory::concurrent_create_mode_ = false;
 bool                     Pm4Factory::spm_kfd_mode_           = false;
 Pm4Factory::mutex_t      Pm4Factory::mutex_;
 Pm4Factory::instances_t* Pm4Factory::instances_ = nullptr;
-bool                     read_api_enabled       = true;
 
-CONSTRUCTOR_API void
-constructor()
+// Lazy initialization to avoid reading env in constructor context
+static bool
+is_read_api_enabled()
 {
-    const char* read_api_enabled_str = getenv("AQLPROFILE_READ_API");
-    if(read_api_enabled_str != nullptr)
-    {
-        if(atoi(read_api_enabled_str) == 0) read_api_enabled = false;
-    }
+    static const bool enabled = []() {
+        auto value = rocprofiler::common::get_env("AQLPROFILE_READ_API", "1");
+        return std::atoi(value.c_str()) != 0;
+    }();
+    return enabled;
 }
 
 DESTRUCTOR_API void
@@ -269,7 +270,7 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
 
             // Generate read commands
             auto data_size = pmc_builder->Read(&commands, countersVec, profile->output_buffer.ptr);
-            if(!aql_profile::read_api_enabled) commands.Clear();
+            if(!aql_profile::is_read_api_enabled()) commands.Clear();
             cmd_buffer_mgr.SetRdSize(commands.Size());
 
             // Copy generated read commands
@@ -285,7 +286,7 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
             cmd_buffer_mgr.SetPreSize(commands.Size());
 
             // Generate stop commands
-            if(!aql_profile::read_api_enabled)
+            if(!aql_profile::is_read_api_enabled())
                 pmc_builder->Read(&commands, countersVec, profile->output_buffer.ptr);
             pmc_builder->Stop(&commands, countersVec);
 
@@ -404,8 +405,8 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
             }
             else
             {
-                const char* sz_sampling_rate = getenv("AQLPROFILE_SPM_SAMPLE_RATE");
-                if(sz_sampling_rate != nullptr) trace_config.sampleRate = atoi(sz_sampling_rate);
+                auto env_val = rocprofiler::common::get_env_optional("AQLPROFILE_SPM_SAMPLE_RATE");
+                if(env_val) trace_config.sampleRate = std::atoi(env_val->c_str());
 
                 pm4_builder::SpmBuilder* spm_builder = pm4_factory->GetSpmBuilder();
                 // Generate start commands
@@ -486,7 +487,7 @@ PUBLIC_API hsa_status_t
 hsa_ven_amd_aqlprofile_read(const hsa_ven_amd_aqlprofile_profile_t* profile,
                             aql_profile::packet_t*                  aql_read_packet)
 {
-    if(!aql_profile::read_api_enabled) return HSA_STATUS_ERROR;
+    if(!aql_profile::is_read_api_enabled()) return HSA_STATUS_ERROR;
     try
     {
         // Populate read aql packet
@@ -1021,11 +1022,9 @@ hsa_ven_amd_aqlprofile_att_marker(hsa_ven_amd_aqlprofile_profile_t*           pr
 extern "C" BOOL WINAPI
 DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/)
 {
-    switch(fdwReason)
+    if(fdwReason == DLL_PROCESS_DETACH)
     {
-        case DLL_PROCESS_ATTACH: aql_profile::constructor(); break;
-        case DLL_PROCESS_DETACH: aql_profile::destructor(); break;
-        default: break;
+        aql_profile::destructor();
     }
     return TRUE;
 }

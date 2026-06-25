@@ -108,6 +108,17 @@ class SymmetricHeap {
   void malloc(void** ptr, size_t size) { single_heap_.malloc(ptr, size); }
 
   /**
+   * @brief Allocates aligned heap memory and returns ptr to caller
+   *
+   * @param[in,out] ptr        A pointer to memory handle
+   * @param[in]     alignment  Required pointer alignment in bytes (power of 2)
+   * @param[in]     size       Number of bytes requested
+   */
+  void malign(void** ptr, size_t alignment, size_t size) {
+    single_heap_.malign(ptr, alignment, size);
+  }
+
+  /**
    * @brief Frees previously allocated network visible memory
    *
    * @param[in] Handle of previously allocated memory

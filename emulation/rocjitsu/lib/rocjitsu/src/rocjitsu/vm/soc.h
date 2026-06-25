@@ -11,11 +11,12 @@
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
-#include "rocjitsu/vm/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
 
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -54,8 +55,17 @@ public:
     set_weight(0);
   }
 
+  uint32_t gpu_id() const { return gpu_id_; }
+
   void add_xcd(amdgpu::Xcd *xcd) { xcds_.push_back(xcd); }
   void add_iod(amdgpu::Iod *iod) { iods_.push_back(iod); }
+
+  /// @brief Set flat-address-space aperture boundaries on all CUs via the SPI hierarchy.
+  void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
+                     uint64_t private_limit) {
+    for (auto *xcd : xcds_)
+      xcd->set_apertures(shared_base, shared_limit, private_base, private_limit);
+  }
   void set_memory(amdgpu::GpuMemory *m); // Defined in soc.cpp.
 
   /// @brief Wire L2 → HBM backing store links (call after engine build).
@@ -87,16 +97,39 @@ public:
   /// @returns Const reference to the vector of XCD pointers.
   const std::vector<amdgpu::Xcd *> &xcds() const { return xcds_; }
 
-  /// @brief Return the command processor for this device.
+  /// @brief MES-like round-robin queue assignment across XCD command processors.
   ///
-  /// @details In amdkfd, a gpu_id identifies the whole device, not an individual XCD.
-  /// The SoC owns the topology and is the right place to decide which CP serves
-  /// the device. For single-XCD SoCs this is xcd(0)'s CP; a future multi-XCD
-  /// implementation would return a MES dispatcher instead.
+  /// @details On real MI300X hardware, the MES firmware distributes HW queues
+  /// across XCDs. This method emulates that behavior with round-robin assignment.
+  /// Each call returns the next XCD's CP in rotation.
   ///
-  /// @returns Pointer to the primary CommandProcessor, or nullptr if no XCDs.
-  amdgpu::CommandProcessor *command_processor() {
-    return xcds_.empty() ? nullptr : xcds_[0]->command_processor();
+  /// @returns Pointer to the next CommandProcessor in rotation, or nullptr if no XCDs.
+  amdgpu::CommandProcessor *assign_queue_cp() {
+    if (xcds_.empty())
+      return nullptr;
+    uint32_t idx = next_xcd_assignment_++ % static_cast<uint32_t>(xcds_.size());
+    return xcds_[idx]->command_processor();
+  }
+
+  /// @brief Apply a function to all XCD command processors.
+  ///
+  /// @details Used for broadcast operations (setting callbacks, flushing, etc.)
+  /// that must reach every CP on the device.
+  template <typename Fn> void for_each_cp(Fn &&fn) {
+    for (auto *xcd_ptr : xcds_)
+      if (auto *cp = xcd_ptr->command_processor())
+        fn(cp);
+  }
+
+  bool has_active_wfs_for_process(uint32_t process_id) const {
+    for (auto *xcd_ptr : xcds_) {
+      if (auto *cp = xcd_ptr->command_processor()) {
+        for (auto *cu : cp->compute_units())
+          if (cu->has_active_wfs_for_process(process_id))
+            return true;
+      }
+    }
+    return false;
   }
 
   /// @brief Return the number of I/O Dies.
@@ -127,7 +160,16 @@ public:
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
+  void run_to_idle();
+
+  const std::vector<amdgpu::ComputeUnitCore *> &all_cus();
+
+  ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
+
 private:
+  static inline std::atomic<uint32_t> next_gpu_id_{0};
+  uint32_t gpu_id_ = next_gpu_id_++;
+  std::atomic<uint32_t> next_xcd_assignment_{0};
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   std::vector<amdgpu::Xcd *> xcds_;
@@ -135,6 +177,7 @@ private:
   amdgpu::GpuMemory *memory_ = nullptr;
   std::unique_ptr<amdgpu::HbmController> hbm_standalone_; ///< Used when num_iods == 0.
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
+  std::vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
 };
 
 } // namespace rocjitsu

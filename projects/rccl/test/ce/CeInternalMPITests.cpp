@@ -34,6 +34,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
 ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int nRanks);
 void         ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
 ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm,
+                                  struct ncclCeCollArgs* args,
                                   struct ncclCeBatchOpsParams* params,
                                   hipStream_t stream);
 
@@ -54,7 +55,7 @@ protected:
         MPITestBase::SetUp();
 
         if(!isCeDispatchConfigured())
-            GTEST_SKIP() << "CE requires ROCm >= 7.12 or 7.0.2.x, "
+            GTEST_SKIP() << "CE not configured: need CE_BATCH_ASYNC_SUPPORTED build + "
                             "NCCL_CTA_POLICY=2, NCCL_LOCAL_REGISTER=0, NCCL_CUMEM_ENABLE=1";
 
         // Set debug env vars before ncclCommInitRank so the communicator picks them up.
@@ -384,7 +385,8 @@ TEST_F(CeInternalMPITest, SeqNumWrapAroundCollective)
 TEST_F(CeInternalMPITest, LaunchEmptyBatchSucceeds)
 {
     ncclCeBatchOpsParams params{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()), ncclSuccess);
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 }
 
@@ -425,7 +427,8 @@ TEST_F(CeInternalMPITest, LaunchFourOpsSucceeds)
     }
     params.numOps = kOps;
 
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()), ncclSuccess);
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
     ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 
     for(int i = 0; i < kOps; ++i)
@@ -455,7 +458,10 @@ TEST(CeInternalNeg, CeImplementedReturnsFalseForUnsupported)
 TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
 {
     if(!isCeDriverSupported())
-        GTEST_SKIP() << "CE not supported on this driver (need >= 7.12 or 7.0.2.x)";
+        GTEST_SKIP() << "CE not available (binary not compiled with CE_BATCH_ASYNC_SUPPORTED)";
+    if(!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE not supported on this runtime driver "
+                        "(need ROCm >= 7.12 or 7.0.2.x backport [70051831, 70060000))";
 
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAllGather, ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAll,  ncclDevSum, ncclFloat32));
@@ -532,13 +538,14 @@ TEST_F(CeFaultInjTest, LaunchBatchOpsErrorPropagates)
     }
     params.numOps = kOps;
 
+    ncclCeCollArgs collArgs{};
     ASSERT_EQ(ncclCeFaultSet(ceComm, CE_FAULT_LAUNCH_OP), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
               ncclSystemError)
         << "Expected ncclSystemError when CE_FAULT_LAUNCH_OP is armed";
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
               ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
@@ -583,7 +590,8 @@ TEST_F(CeFaultInjTest, MultipleFaultsArmedAndCleared)
 
     ncclCeBatchOpsParams emptyParams{};
     emptyParams.numOps = 1; // non-zero to bypass the early-out
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &emptyParams, getActiveStream()),
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &emptyParams, getActiveStream()),
               ncclSystemError);
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);

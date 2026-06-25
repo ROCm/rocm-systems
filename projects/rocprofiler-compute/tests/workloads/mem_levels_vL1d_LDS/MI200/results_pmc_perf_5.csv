@@ -1,0 +1,4 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+2,0001fa83-ab1b-7b1b-a512-78bf1bf1eecd,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8497900772494104,8497900772514264,0,SQ_WAVE_CYCLES,20421200.0
+2,0001fa83-ab1b-7b1b-a512-78bf1bf1eecd,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8497900772713145,8497900772729945,0,SQ_WAVE_CYCLES,18512230.0
+2,0001fa83-ab1b-7b1b-a512-78bf1bf1eecd,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8497900772883226,8497900772899706,0,SQ_WAVE_CYCLES,17739620.0

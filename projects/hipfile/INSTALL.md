@@ -2,7 +2,7 @@
 
 ## Quick Install Guide
 
-hipFile depends on ROCm 7.2.x or greater. TheRock technology preview releases (e.g. 7.9) may not be based on the 7.2 release and may not support hipFile. Install ROCm and amdgpu-dkms, as described in the [ROCm quick start installation guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html).
+hipFile depends on ROCm 7.2.x or greater. TheRock technology preview release 7.13 and newer also supports hipFile. Please note that these steps are based on ROCm 7.2. Install ROCm and amdgpu-dkms, as described in the [ROCm quick start installation guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html).
 
 On Ubuntu 24.04, the installation process is as follows. First, install a couple of needed packages.
 
@@ -10,13 +10,7 @@ On Ubuntu 24.04, the installation process is as follows. First, install a couple
 sudo apt install libmount-dev wget
 ```
 
-Then, install the nightly hipFile packages.
-
-```
-wget https://github.com/ROCm/hipFile/releases/download/nightly/hipfile_0.2.0.70200-nightly.9999.24.04_amd64.deb
-wget https://github.com/ROCm/hipFile/releases/download/nightly/hipfile-dev_0.2.0.70200-nightly.9999.24.04_amd64.deb
-sudo dpkg -i hipfile-dev_0.2.0.70200-nightly.9999.24.04_amd64.deb hipfile_0.2.0.70200-nightly.9999.24.04_amd64.deb
-```
+Then, download & install the nightly hipFile packages from the [nightly ROCm package repository](https://rocm.nightlies.amd.com/deb/).
 
 We can verify that the HIP libraries and kernel support AIS by running ais-check.
 
@@ -51,7 +45,7 @@ sudo chown "$USER": /mnt/ext4/"$USER"
 Now, we can download and compile the aiscp test program.
 
 ```
-wget https://raw.githubusercontent.com/ROCm/hipFile/refs/heads/develop/examples/aiscp/aiscp.cpp
+wget https://raw.githubusercontent.com/ROCm/rocm-systems/refs/heads/develop/projects/hipfile/examples/aiscp/aiscp.cpp
 amdclang++ -D__HIP_PLATFORM_AMD__ -L/opt/rocm/lib -I/opt/rocm/include -lamdhip64 -lhipfile aiscp.cpp -o aiscp
 ```
 
@@ -99,7 +93,7 @@ sudo systemctl reboot
 
 #### Build Tools
 * CMake >= 3.21
-* C++ >= 17 (tested w/ clang++ & g++, we don't use GNU extensions)
+* C++ >= 20 (tested w/ clang++ & g++, we don't use GNU extensions)
 * The `ais-check` tool requires Python >= 3.6
 * The hipFile Python bindings require Python >= 3.10
 
@@ -110,9 +104,6 @@ sudo systemctl reboot
 * amdgpu-dkms >= 30.20.1
 
 #### Other Packages
-* Boost.Program\_options
-    * `libboost-program-options-dev` (Debian/Ubuntu)
-    * `libboost-program-options-devel` (RHEL/Fedora/openSUSE)
 * libmount
     * `libmount-dev` (Debian/Ubuntu)
     * `libmount-devel` (RHEL/Fedora/openSUSE)
@@ -129,6 +120,7 @@ Options
 |------|-------|-------|
 |AIS\_BUILD\_DOCS|OFF|Build API documentation (requires Doxygen)|
 |AIS\_INSTALL\_EXAMPLES|ON|Install example programs|
+|AIS\_INSTALL\_TESTS|OFF|Install a relocatable unit-test tree (run with `ctest --test-dir <prefix>/share/hipfile/test`)|
 |AIS\_USE\_CLANG\_TIDY|OFF|Run the `clang-tidy` tool (clang only)|
 |AIS\_USE\_CODE\_COVERAGE|OFF|Generate code coverage information when tests are run (clang only)|
 |AIS\_USE\_IWYU|OFF|Run the `include-what-you-use` tool (clang only)|

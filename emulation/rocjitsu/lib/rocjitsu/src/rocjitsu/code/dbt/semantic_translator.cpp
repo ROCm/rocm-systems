@@ -22,6 +22,8 @@ namespace {
                                                                          rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     return semantic_expand_rules_cdna4_to_rdna4();
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+    return semantic_expand_rules_cdna4_to_cdna3();
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
     return semantic_expand_rules_cdna4_to_rdna3();
   return {};
@@ -32,17 +34,18 @@ namespace {
 SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host)
     : expand_rules_(semantic_expand_rules_for(guest, host)), host_arch_(host) {}
 
-std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
-                                                           const LivenessAnalysis &liveness) const {
+ExpandResult SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
+                                                  const LivenessAnalysis &liveness,
+                                                  TranslationContext &context) const {
   const uint16_t eid = inst.encoding_id();
   const uint16_t op = inst.opcode();
   TranslationRule key{eid, op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
   auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);
   if (it != expand_rules_.end() && it->src_encoding_id == eid && it->src_opcode == op &&
       it->expand_fn)
-    return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness,
+    return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness, context,
                          it->guest_layout, it->host_layout);
-  return {};
+  return ExpandResult::not_handled();
 }
 
 } // namespace rocjitsu

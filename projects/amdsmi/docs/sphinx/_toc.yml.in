@@ -19,31 +19,29 @@ subtrees:
 - caption: How to
   entries:
   - file: how-to/amdsmi-cpp-lib.md
-    title: C++ library usage
+    title: C/C++ library usage
   - file: how-to/amdsmi-py-lib.md
     title: Python library usage
   - file: how-to/amdsmi-go-lib.md
     title: Go library usage
   - file: how-to/amdsmi-cli-tool.md
     title: CLI tool usage
+  - file: how-to/amdsmi-nic-integration.md
+    title: AI NIC integration
   - file: how-to/setup-docker-container.md
     title: Use AMD SMI in a Docker container
 
 - caption: Reference
   entries:
-  - file: reference/amdsmi-cpp-api.md
-    title: C++ API
+  - file: reference/amdsmi-cpp-api/index.md
+    title: C/C++ API
     entries:
-    - file: doxygen/docBin/html/topics
-      title: Modules
-    - file: doxygen/docBin/html/files
-      title: Files
-    - file: doxygen/docBin/html/globals
-      title: Globals
-    - file: doxygen/docBin/html/annotated
-      title: Data structures
-    - file: doxygen/docBin/html/functions_data_fields
-      title: Data fields
+    - file: reference/amdsmi-cpp-api/functions.md
+      title: Functions
+    - file: reference/amdsmi-cpp-api/types.md
+      title: Types
+    - file: reference/amdsmi-cpp-api/defines.md
+      title: Defines
   - file: reference/amdsmi-py-api.md
     title: Python API
   - file: reference/amdsmi-go-api.md
@@ -53,6 +51,10 @@ subtrees:
 
 - caption: Conceptual
   entries:
+  - file: conceptual/partition.md
+    title: GPU partitioning
+  - file: conceptual/gpu-reset-behavior.md
+    title: GPU reset behavior
   - file: conceptual/gpu-violations.md
   - file: conceptual/perf-determinism.md
     title: Performance determinism

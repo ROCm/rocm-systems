@@ -11,6 +11,7 @@
 #include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 #include "lib/common/static_object.hpp"
+#include "lib/common/environment.hpp"
 
 #include <thread>
 #include <condition_variable>
@@ -177,8 +178,9 @@ is_virtualization_enabled()
 bool
 is_agent_supported_for_spm(const AgentInfo* agentInfo)
 {
-    const char* env_val = getenv("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
-    if(env_val && *env_val != '0' && *env_val != '\0') return true;
+    // Check value, not just presence (must be non-empty and non-zero to override)
+    auto env_val = rocprofiler::common::get_env_optional("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
+    if(env_val && !env_val->empty() && env_val->front() != '0') return true;
 
     // if the device is gfx90a, then spm is not supported
     if(strncmp(agentInfo->gfxip, "gfx90a", 6) == 0)
@@ -484,7 +486,8 @@ aqlprofile_spm_stop(aqlprofile_handle_t handle)
 PUBLIC_API void
 aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
-    aqlprofile::spm::spm_state_map()->remove(handle);
+    if(auto* map = rocprofiler::common::static_object<aqlprofile::spm::SpmStateMap>::get())
+        map->remove(handle);
 }
 
 struct consumer_thread_handle_t
@@ -521,7 +524,7 @@ producer(std::shared_ptr<spm_state_t> s)
         args.size_copied = 0;
         args.dest_buf    = s->prod_buf;
         // s->stop_prod_thread should be set after SPM End() sequence is submitted, this is the
-        // handshake protocal between app/library and aqlprofile.
+        // handshake protocol between app/library and aqlprofile.
         // If s->stop_prod_thread is set in current loop, producer thread will exit after all
         // SPM counters are drained (args.size_copied == 0) which could be at least one
         // HsaSpmSetDestBuffer() call or maybe more than one.
