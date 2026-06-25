@@ -70,7 +70,7 @@ static int ginGdaBootstrapAllgather(void *ctx, void *buf, size_t perRankSize) {
 
 static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   const char *gin_type = getenv("NCCL_GIN_TYPE");
-  if (gin_type && atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
+  if (!gin_type || atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     return ncclInternalError;
   if (rocshmem_gin_probe_devices() <= 0)
     return ncclInternalError;
