@@ -537,6 +537,15 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities) {
   StreamGuard stream_guard(Streams::created);
 
   auto alloc_type = GENERATE(LinearAllocs::hipMalloc, LinearAllocs::hipMallocManaged);
+
+  // Managed allocation aborts via HIP_CHECK on hardware without managed memory
+  // support, so skip that generation rather than crashing the run.
+  if (alloc_type == LinearAllocs::hipMallocManaged &&
+      !DeviceAttributesSupport(device, hipDeviceAttributeManagedMemory,
+                               hipDeviceAttributeConcurrentManagedAccess)) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+  }
+
   LinearAllocGuard<int> memory(alloc_type, kTestBufferBytes);
 
   std::array<void*, 1> managed_ptrs = {memory.ptr()};
@@ -552,7 +561,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities) {
       managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(), locations.data(),
       location_indices.data(), locations.size(), flags, stream_guard.stream());
 
-  auto required_attr = (alloc_type == LinearAllocs::malloc)
+  auto required_attr = (alloc_type == LinearAllocs::hipMalloc)
                            ? hipDeviceAttributePageableMemoryAccess
                            : hipDeviceAttributeConcurrentManagedAccess;
 
