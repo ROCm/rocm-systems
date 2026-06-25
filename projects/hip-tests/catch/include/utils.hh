@@ -173,14 +173,14 @@ inline void LaunchDelayKernel(const std::chrono::milliseconds interval, const hi
 // GPU-side Delay kernel does. Prefer this in synchronization tests that only
 // need the stream to stay un-drained for a controlled time.
 inline void DelayHostCallback(void* user_data) {
-  const auto ms = reinterpret_cast<intptr_t>(user_data);
+  const auto ms = reinterpret_cast<int64_t>(user_data);
   std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
 inline void LaunchDelayHostFunc(const std::chrono::milliseconds interval,
                                 const hipStream_t stream = nullptr) {
   HIPCHECK(hipLaunchHostFunc(stream, DelayHostCallback,
-                             reinterpret_cast<void*>(static_cast<intptr_t>(interval.count()))));
+                             reinterpret_cast<void*>(interval.count())));
 }
 
 template <typename... Attributes>
