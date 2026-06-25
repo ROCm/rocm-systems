@@ -1027,7 +1027,15 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   NCCLCHECKGOTO(ncclCommRegister(comm, userPtr, userSize, &localRegHandle), ret, fail);
 
   if (!comm->symmetricSupport) {
-    if (comm->hostRmaSupport) {
+    // The public entry point (ncclCommWindowRegister) returns a NULL window
+    // before queuing a task when neither symmetric nor host-RMA is supported,
+    // so reaching here with !symmetricSupport implies host-RMA support.
+    if (!comm->hostRmaSupport) {
+      WARN("ncclDevrWindowRegisterInGroup: reached with neither symmetric nor host-RMA support");
+      ret = ncclInternalError;
+      goto fail_locReg;
+    }
+    {
       INFO(NCCL_INIT, "ncclDevrWindowRegisterInGroup: proxy path userPtr=%p size=%zu", userPtr, userSize);
       struct ncclDevrWindow* win = (struct ncclDevrWindow*)malloc(sizeof(struct ncclDevrWindow));
       if (win == nullptr) { ret = ncclSystemError; goto fail_locReg; }
@@ -1056,11 +1064,9 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
     fail_locReg_proxywin:
       free(win);
       goto fail_locReg;
-    } else {
-      *outWinDev = reinterpret_cast<struct ncclWindow_vidmem*>(localRegHandle);
-      return ncclSuccess;
     }
   }
+
   if (winFlags & NCCL_WIN_COLL_SYMMETRIC) {
     // Defer symmetric kernel init until at least one window with that flag exists.
     NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail);
@@ -1538,6 +1544,18 @@ ncclResult_t ncclCommWindowRegister_impl(
     struct ncclComm* comm, void* userPtr, size_t userSize,
     struct ncclWindow_vidmem** outWinDev, int winFlags
   ) {
+  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+  NCCLCHECK(PtrCheck(outWinDev, __func__, "win"));
+  *outWinDev = nullptr;
+  if (userPtr == nullptr || userSize == 0) {
+    WARN("%s: invalid pointer %p / size %zu", __func__, userPtr, userSize);
+    return ncclInvalidArgument;
+  }
+
+  if (!comm->symmetricSupport && !comm->hostRmaSupport) {
+    return ncclSuccess;
+  }
+
   ncclResult_t ret = ncclSuccess;
   int saveDev;
   struct ncclDevrRegTask* task;
@@ -1576,28 +1594,32 @@ ncclResult_t ncclCommWindowDeregister_impl(struct ncclComm* comm, struct ncclWin
   if (winDev == nullptr) goto exit;
 
   if (!comm->symmetricSupport) {
-    if (comm->hostRmaSupport) {
-      struct ncclDevrWindow* win = reinterpret_cast<struct ncclDevrWindow*>(winDev);
-      struct ncclDevrState* devr = &comm->devrState;
-      int winIdx = -1;
-      for (int i = 0; i < devr->winSortedCount; i++) {
-        if (devr->winSorted[i].win == win) {
-          winIdx = i;
-          break;
-        }
-      }
-      if (winIdx < 0) {
-        WARN("ncclCommWindowDeregister: window %p is not registered (already deregistered?)", (void*)winDev);
-        ret = ncclInvalidArgument;
-        goto exit;
-      }
-      NCCLCHECKGOTO(ncclRmaProxyDeregister(comm, win->rmaHostWins), ret, fail);
-      NCCLCHECKGOTO(ncclCommDeregister(comm, win->localRegHandle), ret, fail);
-      listRemove(devr->winSorted, &devr->winSortedCount, winIdx);
-      free(win);
-    } else {
-      NCCLCHECKGOTO(ncclCommDeregister(comm, winDev), ret, fail);
+    // A non-symmetric window can only have come from the host-RMA proxy path:
+    // ncclCommWindowRegister returns a NULL window when neither symmetric nor
+    // host-RMA is supported, so a non-NULL winDev here implies host-RMA support.
+    if (!comm->hostRmaSupport) {
+      WARN("ncclCommWindowDeregister: window %p on comm with neither symmetric nor host-RMA support", (void*)winDev);
+      ret = ncclInternalError;
+      goto exit;
     }
+    struct ncclDevrWindow* win = reinterpret_cast<struct ncclDevrWindow*>(winDev);
+    struct ncclDevrState* devr = &comm->devrState;
+    int winIdx = -1;
+    for (int i = 0; i < devr->winSortedCount; i++) {
+      if (devr->winSorted[i].win == win) {
+        winIdx = i;
+        break;
+      }
+    }
+    if (winIdx < 0) {
+      WARN("ncclCommWindowDeregister: window %p is not registered (already deregistered?)", (void*)winDev);
+      ret = ncclInvalidArgument;
+      goto exit;
+    }
+    NCCLCHECKGOTO(ncclRmaProxyDeregister(comm, win->rmaHostWins), ret, fail);
+    NCCLCHECKGOTO(ncclCommDeregister(comm, win->localRegHandle), ret, fail);
+    listRemove(devr->winSorted, &devr->winSortedCount, winIdx);
+    free(win);
     goto exit;
   }
   CUDACHECKGOTO(cudaGetDevice(&saveDev), ret, fail);
