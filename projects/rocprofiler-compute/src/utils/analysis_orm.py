@@ -334,10 +334,7 @@ class Database:
 
     @staticmethod
     def _sanitize_for_json(value: object) -> object:
-        """Recursively replace non-finite floats (NaN, Inf) with None.
-
-        json.dumps emits bare NaN/Infinity tokens that are invalid JSON.
-        """
+        """Recursively replace non-finite floats (NaN, Inf) with None for valid JSON."""
         if isinstance(value, dict):
             return {key: Database._sanitize_for_json(v) for key, v in value.items()}
         if isinstance(value, (list, tuple)):
