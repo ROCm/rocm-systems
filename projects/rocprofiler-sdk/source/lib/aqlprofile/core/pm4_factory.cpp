@@ -79,6 +79,25 @@ RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info)
     memcpy(int_agent_info.gfxip,
            agent_info->agent_gfxip,
            (len >= sizeof(int_agent_info.gfxip) ? sizeof(int_agent_info.gfxip) - 1 : len));
+
+    // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
+    //       after CU mask support is added to agent_info
+    // TODO: gfx1250 defines 1WGP = 1CU, different from other RDNA products.
+    //       Patch it to be WGP = 2CU to reuse profiler logic
+    if(!strncmp(int_agent_info.name, "gfx1250", 7))
+    {
+        int_agent_info.cu_num      = agent_info->se_num * agent_info->shader_arrays_per_se * 9 * 2;
+        int_agent_info.xcc_per_aid = 4;
+    }
+    else if(!strncmp(int_agent_info.name, "gfx94", 5) || !strncmp(int_agent_info.name, "gfx95", 5))
+    {
+        int_agent_info.xcc_per_aid = 2;
+    }
+    else
+    {
+        int_agent_info.xcc_per_aid = 1;
+    }
+
     get_cache().add(agent_id.handle, int_agent_info);
     return agent_id;
 }

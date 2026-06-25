@@ -15,11 +15,39 @@ from rocm_kpack.artifact_splitter import (
     ArtifactSplitter,
     FileClassificationVisitor,
     ExtractedKernel,
+    base_arch,
 )
 from rocm_kpack.artifact_utils import read_artifact_manifest, write_artifact_manifest
 from rocm_kpack.database_handlers import MIOpenHandler, RocBLASHandler
 from rocm_kpack.tools.split_artifacts import batch_split, parse_artifact_name
 from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
+
+
+class TestBaseArch:
+    """Unit tests for base_arch() feature-suffix normalization."""
+
+    @pytest.mark.parametrize(
+        "arch,expected",
+        [
+            # Bare base arch is unchanged.
+            ("gfx90a", "gfx90a"),
+            ("gfx942", "gfx942"),
+            # Tensile hyphen form (kernel-database filenames).
+            ("gfx90a-xnack-", "gfx90a"),
+            ("gfx90a-xnack+", "gfx90a"),
+            # ELF colon form (--gpu-targets / bundle ids).
+            ("gfx942:xnack+", "gfx942"),
+            ("gfx942:sramecc+:xnack-", "gfx942"),
+            # sramecc must also collapse, in both forms (review request: do not
+            # assume xnack is the only feature).
+            ("gfx90a-sramecc-", "gfx90a"),
+            ("gfx90a-sramecc+", "gfx90a"),
+            # Multiple hyphen-form features in one id.
+            ("gfx90a-sramecc+-xnack-", "gfx90a"),
+        ],
+    )
+    def test_strips_known_features(self, arch, expected):
+        assert base_arch(arch) == expected
 
 
 class TestArtifactSplitterIntegration:
@@ -996,4 +1024,165 @@ class TestArtifactSplitterIntegration:
         )
         assert not (output_dir / "miopen_lib_gfx90a").exists(), (
             "gfx90a per-arch directory should not exist when filtered out"
+        )
+
+    def test_gpu_targets_keeps_xnack_variant_database_files(self, toolchain, tmp_path):
+        """
+        Regression test for ROCM-25535.
+
+        Tensile encodes xnack variants with a hyphen (gfx90a-xnack-), but
+        gpu_targets and the shard key are the bare base arch (gfx90a). The
+        variants must collapse onto the base shard instead of being dropped.
+        """
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefix = "math-libs/BLAS/rocBLAS/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        lib_dir = input_dir / prefix / "lib" / "rocblas" / "library"
+        lib_dir.mkdir(parents=True)
+
+        # In-scope base arch: a bare .dat plus both xnack feature variants.
+        (lib_dir / "TensileLibrary_lazy_gfx90a.dat").write_text("mock gfx90a dat")
+        (lib_dir / "TensileLibrary_lazy_gfx90a-xnack-.hsaco").write_text(
+            "mock gfx90a xnack- kernels"
+        )
+        (lib_dir / "TensileLibrary_lazy_gfx90a-xnack+.hsaco").write_text(
+            "mock gfx90a xnack+ kernels"
+        )
+        # Out-of-scope arch, also with an xnack variant.
+        (lib_dir / "TensileLibrary_lazy_gfx1100.dat").write_text("mock gfx1100 dat")
+        (lib_dir / "TensileLibrary_lazy_gfx1100-xnack-.hsaco").write_text(
+            "mock gfx1100 xnack- kernels"
+        )
+
+        output_dir = tmp_path / "output"
+
+        splitter = ArtifactSplitter(
+            artifact_prefix="rocblas_lib",
+            toolchain=toolchain,
+            database_handlers=[RocBLASHandler()],
+            verbose=True,
+            gpu_targets=["gfx90a"],
+        )
+        splitter.split(input_dir, output_dir)
+
+        gfx90a_dir = output_dir / "rocblas_lib_gfx90a"
+        assert gfx90a_dir.exists(), "gfx90a per-arch directory should exist"
+
+        rel = prefix + "/lib/rocblas/library"
+        # The bare .dat AND both xnack-variant kernels collapse onto gfx90a.
+        dat = gfx90a_dir / rel / "TensileLibrary_lazy_gfx90a.dat"
+        xnack_minus = gfx90a_dir / rel / "TensileLibrary_lazy_gfx90a-xnack-.hsaco"
+        xnack_plus = gfx90a_dir / rel / "TensileLibrary_lazy_gfx90a-xnack+.hsaco"
+        assert dat.exists(), "bare gfx90a .dat should be in the gfx90a shard"
+        assert xnack_minus.exists(), "gfx90a-xnack- kernel must collapse onto gfx90a"
+        assert xnack_plus.exists(), "gfx90a-xnack+ kernel must collapse onto gfx90a"
+
+        # No spurious 'gfx90a-xnack-' shard should be created.
+        assert not (output_dir / "rocblas_lib_gfx90a-xnack-").exists()
+
+        # xnack variants must not leak into the generic artifact.
+        generic_dir = output_dir / "rocblas_lib_generic"
+        generic_xnack = generic_dir / rel / "TensileLibrary_lazy_gfx90a-xnack-.hsaco"
+        assert not generic_xnack.exists(), "per-arch kernels should not be in generic"
+
+        # Out-of-scope arch (and its xnack variant) is filtered out entirely.
+        assert not (output_dir / "rocblas_lib_gfx1100").exists()
+        generic_1100 = generic_dir / rel / "TensileLibrary_lazy_gfx1100-xnack-.hsaco"
+        assert not generic_1100.exists(), "filtered gfx1100 kernels should not be kept"
+
+    def test_gpu_targets_filters_fat_binary_kernels(self, toolchain, tmp_path):
+        """
+        Test that gpu_targets filters code objects extracted from fat binaries.
+
+        When a fat binary contains code objects for multiple architectures
+        (e.g., gfx906 and gfx1100), only the architectures in gpu_targets
+        should produce kpack artifacts. Without this filter, a cross-arch
+        build can produce spurious per-arch kpack artifacts.
+        """
+        # Set up a fake prefix with a placeholder binary
+        prefix = "math-libs/BLAS/rocSOLVER/stage"
+        prefix_path = tmp_path / prefix
+        lib_dir = prefix_path / "lib"
+        lib_dir.mkdir(parents=True)
+
+        fat_binary = lib_dir / "librocsolver.so.0"
+        fat_binary.write_text("placeholder")
+
+        # Create mock unbundled code objects for two architectures
+        mock_dest_dir = tmp_path / "unbundled"
+        mock_dest_dir.mkdir()
+        mock_targets = [
+            ("hipv4-amdgcn-amd-amdhsa--gfx906", "gfx906.hsaco"),
+            ("hipv4-amdgcn-amd-amdhsa--gfx1100", "gfx1100.hsaco"),
+        ]
+        for _, fname in mock_targets:
+            (mock_dest_dir / fname).write_bytes(b"\x00" * 100)
+
+        mock_unbundled = type(
+            "MockUnbundled",
+            (),
+            {
+                "target_list": mock_targets,
+                "dest_dir": mock_dest_dir,
+                "__enter__": lambda s: s,
+                "__exit__": lambda s, *a: None,
+            },
+        )()
+
+        with patch(
+            "rocm_kpack.artifact_splitter.BundledBinary"
+        ) as MockBinary:
+            MockBinary.return_value.unbundle.return_value = mock_unbundled
+
+            # With gpu_targets=["gfx1100"], only gfx1100 kernels should appear
+            splitter = ArtifactSplitter(
+                artifact_prefix="blas_lib",
+                toolchain=toolchain,
+                database_handlers=[],
+                verbose=True,
+                gpu_targets=["gfx1100"],
+            )
+            result_filtered = splitter.process_fat_binaries(
+                [fat_binary], prefix, prefix_path
+            )
+
+            # Recreate mock files consumed by the first call
+            for _, fname in mock_targets:
+                (mock_dest_dir / fname).write_bytes(b"\x00" * 100)
+
+            # Without gpu_targets, both architectures should appear
+            splitter_all = ArtifactSplitter(
+                artifact_prefix="blas_lib",
+                toolchain=toolchain,
+                database_handlers=[],
+                verbose=True,
+                gpu_targets=None,
+            )
+            result_unfiltered = splitter_all.process_fat_binaries(
+                [fat_binary], prefix, prefix_path
+            )
+
+        # Filtered: only targeted architecture should be present
+        assert "gfx1100" in result_filtered, (
+            "gfx1100 should be in filtered results (in gpu_targets)"
+        )
+        assert len(result_filtered["gfx1100"]) == 1, (
+            "gfx1100 kernel should be preserved intact"
+        )
+        assert result_filtered["gfx1100"][0].kernel_data == b"\x00" * 100, (
+            "gfx1100 kernel data should be unchanged by filtering"
+        )
+        assert "gfx906" not in result_filtered, (
+            "gfx906 should not be in filtered results (not in gpu_targets)"
+        )
+
+        # Unfiltered: all architectures should be present
+        assert "gfx1100" in result_unfiltered, (
+            "gfx1100 should be in unfiltered results"
+        )
+        assert "gfx906" in result_unfiltered, (
+            "gfx906 should be in unfiltered results"
         )

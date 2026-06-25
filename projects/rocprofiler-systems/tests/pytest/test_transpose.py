@@ -27,7 +27,6 @@ from conftest import RocprofsysTest
 pytestmark = [
     pytest.mark.transpose,
     pytest.mark.gpu,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
     pytest.mark.rocm,
 ]
 
@@ -98,7 +97,7 @@ def rocprofiler_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.mark.mpi_optional("transpose")
 class TestTranspose(RocprofsysTest):
-    REWRITE_ARGS = [
+    BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -106,7 +105,7 @@ class TestTranspose(RocprofsysTest):
         "-E",
         "uniform_int_distribution",
     ]
-    RUNTIME_ARGS = [
+    RUNTIME_INSTRUMENT_ARGS = [
         "-e",
         "-v",
         "1",
@@ -119,7 +118,7 @@ class TestTranspose(RocprofsysTest):
         "uniform_int_distribution",
     ]
     TWO_KERNELS_RUN_ARGS = ["1", "2", "2"]
-    LOOPS_REWRITE_ARGS = [
+    LOOPS_BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -145,25 +144,20 @@ class TestTranspose(RocprofsysTest):
         [
             "baseline",
             "binary_rewrite",
-            pytest.param(
-                "runtime_instrument",
-                marks=pytest.mark.ci_disable(
-                    "all"
-                ),  # TODO: Deprecate once TheRock switches to CTest
-            ),
+            "runtime_instrument",
             "sys_run",
         ],
     )
-    def test(self, mode, transpose_env, num_processes):
+    def test(self, mode, transpose_env):
         result = self.run_test(
             mode,
             "transpose",
             env=transpose_env,
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
         )
         self.assert_regex(result)
         if mode != "baseline":
@@ -171,7 +165,7 @@ class TestTranspose(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("transpose_env")
-    def test_sampling(self, transpose_env, transpose_rules, num_processes):
+    def test_sampling(self, transpose_env, transpose_rules):
         env = transpose_env.copy()
         env.update(self.SAMPLING_ENV)
         result = self.run_test(
@@ -181,7 +175,7 @@ class TestTranspose(RocprofsysTest):
             run_args=self.SAMPLING_RUN_ARGS,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
         )
         self.assert_regex(result)
         self.assert_perfetto(
@@ -216,14 +210,14 @@ class TestTranspose(RocprofsysTest):
             mode,
             "transpose",
             env=transpose_env,
-            rewrite_args=self.LOOPS_REWRITE_ARGS,
+            binary_rewrite_args=self.LOOPS_BINARY_REWRITE_ARGS,
             run_args=self.LOOPS_RUN_ARGS,
             check_target_arch=True,
         )
         self.assert_regex(
             result,
             mode,
-            rewrite_fail_regex=["0 instrumented loops in procedure transpose"],
+            binary_rewrite_fail_regex=["0 instrumented loops in procedure transpose"],
         )
 
     @pytest.mark.timeout(120)
@@ -258,7 +252,7 @@ class TestTranspose(RocprofsysTest):
             pytest.param("group-by-stream", marks=pytest.mark.group_by_stream),
         ],
     )
-    def test_hip_stream(self, mode, type, num_processes):
+    def test_hip_stream(self, mode, type):
         if type == "group-by-queue":
             env = {"ROCPROFSYS_ROCM_GROUP_BY_QUEUE": "YES"}
         else:
@@ -270,7 +264,7 @@ class TestTranspose(RocprofsysTest):
             env=env,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
         )
         self.assert_regex(result)
 
@@ -285,19 +279,19 @@ class TestTranspose(RocprofsysTest):
 @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
 @pytest.mark.class_name("transpose-rocprofiler")
 class TestTransposeROCProfiler(RocprofsysTest):
-    REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("rocprofiler_env")
-    def test(self, mode, rocprofiler_env, gpu_info, num_processes, rocprofiler_rules):
+    def test(self, mode, rocprofiler_env, gpu_info, rocprofiler_rules):
         result = self.run_test(
             mode,
             "transpose",
             env=rocprofiler_env,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
-            rewrite_args=self.REWRITE_ARGS,
+            num_procs=2,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
         )
         self.assert_regex(result)
         # Counter file device ID depends on GPU topology, search across IDs 0-9
@@ -332,23 +326,25 @@ class TestTransposeROCProfiler(RocprofsysTest):
 @pytest.mark.mpi_optional("transpose")
 @pytest.mark.rocprofiler
 @pytest.mark.class_name("transpose-gpu-perf-counters")
+@pytest.mark.timeout(120)
 class TestTransposeGPUPerfCounters(RocprofsysTest):
-
     @pytest.mark.rocpd("gpu_perf_counter_env")
     def test(
         self,
         gpu_perf_counter_env,
         gpu_info,
-        num_processes,
         validation_rules_dir,
     ):
+        if "gfx1151" in gpu_info.architectures:
+            pytest.skip("transpose GPU perf counter test skipped on gfx1151")
+
         result = self.run_test(
             "sampling",
             "transpose",
             env=gpu_perf_counter_env,
             check_target_arch=True,
-            timeout=120,
-            mpi_ranks=num_processes,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(result)
         self.assert_perfetto(

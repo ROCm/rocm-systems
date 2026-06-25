@@ -365,7 +365,7 @@ class Wire_E_GLVS(RectFrame):
             self.x_min + self.text_x_offset,
             self.y_max - 12.0,
             format_text(
-                key="Wt",
+                key="Wr",
                 value=self.vl1_wr,
                 key_step_prec_leftalign=6,
                 value_step_prec_rightalign=4.0,
@@ -867,7 +867,7 @@ class Wire_L2_Fabric(RectFrame):
             ),
         )
         canvas.text(
-            self.x_min + self.text_x_offset - 2, self.y_max - 7.0, "--------------->"
+            self.x_min + self.text_x_offset - 2, self.y_max - 7.0, "<-------------->"
         )
 
 
@@ -1263,90 +1263,9 @@ class MemChart:
         block_hbm.draw(canvas)
 
 
-def plot_mem_chart(arch: str, normal_unit: str, metric_dict: dict[str, Any]) -> str:
-    # TODO: verify metrics dict for given arch first
-
+def plot_mem_chart(normal_unit: str, metric_dict: dict[str, Any]) -> str:
     canvas = Canvas(width=234, height=42, xmax=234, ymax=42)
     mc = MemChart(0, 0, 233, 41)
     mc.draw(canvas, normal_unit, metric_dict)
 
     return canvas.plot()
-
-
-if __name__ == "__main__":
-    # TODO: unit test should be moved to tests/*
-    # Unit test
-    metric_dict = {}
-    metric_dict["Wavefront Occupancy"] = 1
-    metric_dict["Wave Life"] = 2
-
-    metric_dict["SALU"] = 3
-    metric_dict["SMEM"] = 4
-    metric_dict["VALU"] = 5
-    metric_dict["Matrix Ops"] = 6
-    metric_dict["VMEM"] = 7
-    metric_dict["LDS"] = 8
-    metric_dict["GWS"] = 9
-    metric_dict["BR"] = 10
-
-    metric_dict["Active CUs"] = 11
-    metric_dict["Num CUs"] = 12
-    metric_dict["VGPR"] = 13
-    metric_dict["SGPR"] = 14
-    metric_dict["LDS Allocation"] = 15
-    metric_dict["Scratch Allocation"] = 16
-    metric_dict["Wavefronts"] = 17
-    metric_dict["Workgroups"] = 18
-
-    metric_dict["LDS Req"] = 19
-    metric_dict["LDS Util"] = 20
-    metric_dict["LDS Latency"] = 21
-
-    metric_dict["VL1 Rd"] = 22
-    metric_dict["VL1 Wr"] = 23
-    metric_dict["VL1 Atomic"] = 24
-
-    metric_dict["VL1 Hit"] = 25
-    metric_dict["VL1 Lat"] = 26
-    metric_dict["VL1 Coalesce"] = 27
-    metric_dict["VL1 Stall"] = 28
-
-    metric_dict["sL1D Rd"] = 29
-    metric_dict["sL1D Hit"] = 30
-    metric_dict["sL1D Lat"] = 31
-
-    metric_dict["IL1 Fetch"] = 32
-    metric_dict["IL1 Hit"] = 33
-    metric_dict["IL1 Lat"] = 34
-    metric_dict["IL1_L2 Rd"] = 34
-
-    metric_dict["VL1_L2 Rd"] = 36
-    metric_dict["VL1_L2 Wr"] = 37
-    metric_dict["VL1_L2 Atomic"] = 38
-
-    metric_dict["sL1D_L2 Rd"] = 39
-    metric_dict["sL1D_L2 Wr"] = 40
-    metric_dict["sL1D_L2 Atomic"] = 41
-    metric_dict["IL1_L2 Rd"] = 42
-
-    metric_dict["L2 Hit"] = 43
-    metric_dict["L2 Rd"] = 44
-    metric_dict["L2 Wr"] = 45
-    metric_dict["L2 Atomic"] = 46
-    metric_dict["L2 Rd Lat"] = 47
-    metric_dict["L2 Wr Lat"] = 48
-
-    metric_dict["Fabric_L2 Rd"] = 49
-    metric_dict["Fabric_L2 Wr"] = 50
-    metric_dict["Fabric_L2 Atomic"] = 51
-
-    metric_dict["Fabric Rd Lat"] = 52
-    metric_dict["Fabric Wr Lat"] = 53
-    metric_dict["Fabric Atomic Lat"] = 54
-
-    metric_dict["HBM Rd"] = 55
-    metric_dict["HBM Wr"] = 56
-
-    arch = ""
-    normal_unit = "per_kernel"
-    print(plot_mem_chart(arch, normal_unit, metric_dict))

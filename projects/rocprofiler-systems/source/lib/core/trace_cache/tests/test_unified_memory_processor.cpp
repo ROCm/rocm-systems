@@ -4,7 +4,9 @@
 // Unit tests for unified_memory_processor_t using synthetic agents and a
 // recording output sink.
 
+#include "common/env_vars.hpp"
 #include "common/tests/filesystem.hpp"
+#include "core/categories.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "unified_memory_test_helpers.hpp"
 #include <cstdint>
@@ -40,6 +42,8 @@ using rocprofsys::trace_cache::test::make_kfd_page_migrate_sample;
 using rocprofsys::trace_cache::test::make_kfd_page_migrate_sample_raw_args;
 
 using ::testing::HasSubstr;
+
+namespace env_vars = rocprofsys::env_vars;
 
 namespace
 {
@@ -87,6 +91,33 @@ struct ScopedOutputPath
         tim::settings::output_path() = std::move(desired);
     }
     ~ScopedOutputPath() { tim::settings::output_path() = previous; }
+};
+
+struct ScopedEnv
+{
+    explicit ScopedEnv(std::string name, std::string desired)
+    : env_name(std::move(name))
+    {
+        const auto* current = getenv(env_name.c_str());
+        if(current != nullptr)
+        {
+            previous = current;
+            had_env  = true;
+        }
+        setenv(env_name.c_str(), desired.c_str(), 1);
+    }
+
+    ~ScopedEnv()
+    {
+        if(had_env)
+            setenv(env_name.c_str(), previous.c_str(), 1);
+        else
+            unsetenv(env_name.c_str());
+    }
+
+    std::string env_name;
+    std::string previous;
+    bool        had_env = false;
 };
 
 class UnifiedMemoryProcessorTest : public ::testing::Test
@@ -209,7 +240,7 @@ TEST(MigrationStats, ArithmeticAndSentinels)
     EXPECT_EQ(s.max_size_bytes, 0u);
     EXPECT_EQ(s.min_size_bytes, std::numeric_limits<std::uint64_t>::max());  // sentinel
     EXPECT_DOUBLE_EQ(s.avg_size_bytes(), 0.0);
-    EXPECT_DOUBLE_EQ(s.bandwidth_gbps(), 0.0);  // zero-division guard
+    EXPECT_DOUBLE_EQ(s.migration_throughput_gbps(), 0.0);  // zero-division guard
 
     s.add_migration(/*size=*/1000, /*duration_ns=*/100);
     s.add_migration(/*size=*/3000, /*duration_ns=*/300);
@@ -220,7 +251,18 @@ TEST(MigrationStats, ArithmeticAndSentinels)
     EXPECT_EQ(s.min_size_bytes, 1000u);
     EXPECT_EQ(s.max_size_bytes, 3000u);
     EXPECT_DOUBLE_EQ(s.avg_size_bytes(), 2000.0);
-    EXPECT_DOUBLE_EQ(s.bandwidth_gbps(), 10.0);  // 4000 bytes / 400 ns = 10 GB/s
+    EXPECT_DOUBLE_EQ(s.migration_throughput_gbps(),
+                     10.0);  // 4000 bytes / 400 ns = 10 GB/s
+}
+
+TEST(UnifiedMemoryCategory, MigrationThroughputNameAndCompatibilityAlias)
+{
+    using category_type = tim::category::unified_memory_migration_throughput;
+
+    EXPECT_STREQ(tim::trait::name<category_type>::value,
+                 "unified_memory_migration_throughput");
+    EXPECT_EQ(rocprofsys::category_enum_id<category_type>::value,
+              ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_MIGRATION_THROUGHPUT);
 }
 
 TEST_F(UnifiedMemoryProcessorTest, JsonSchemaAlwaysEmitsAllDirections)
@@ -242,7 +284,7 @@ TEST_F(UnifiedMemoryProcessorTest, JsonSchemaAlwaysEmitsAllDirections)
         ASSERT_TRUE(migrations.contains(dir)) << "missing direction key: " << dir;
         for(const char* k :
             { "count", "total_size_bytes", "min_size_bytes", "max_size_bytes",
-              "avg_size_bytes", "total_time_ns", "bandwidth_gbps" })
+              "avg_size_bytes", "total_time_ns", "migration_throughput_gbps" })
         {
             EXPECT_TRUE(migrations[dir].contains(k)) << dir << " missing stat: " << k;
         }
@@ -388,6 +430,84 @@ TEST_F(UnifiedMemoryProcessorTest, PidSuffixedPathsRegistered)
             EXPECT_THAT(e.path, ::testing::EndsWith(".json"));
             saw_json = true;
         }
+    }
+    EXPECT_TRUE(saw_txt) << "text file not registered";
+    EXPECT_TRUE(saw_json) << "json file not registered";
+}
+
+TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath)
+{
+    auto explicit_dir = tmp_dir + "/ump-explicit";
+    ASSERT_FALSE(test_common::fs::exists(explicit_dir));
+    ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, explicit_dir };
+    rebuild_processor();
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    bool saw_txt  = false;
+    bool saw_json = false;
+    for(const auto& e : registered_files())
+    {
+        EXPECT_THAT(e.path, ::testing::HasSubstr(explicit_dir));
+        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        if(e.format == output_format::text) saw_txt = true;
+        if(e.format == output_format::json) saw_json = true;
+    }
+    EXPECT_TRUE(saw_txt) << "text file not registered";
+    EXPECT_TRUE(saw_json) << "json file not registered";
+}
+
+TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
+{
+    const auto  relative_dir = std::string{ "ump-relative" };
+    const auto* pwd          = getenv("PWD");
+    const auto  base_dir =
+        (pwd != nullptr) ? test_common::fs::path{ pwd } : test_common::fs::current_path();
+    const auto expected_dir = (base_dir / relative_dir).string();
+    test_common::fs::remove_all(expected_dir);
+    ASSERT_FALSE(test_common::fs::exists(expected_dir));
+    ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, relative_dir };
+    rebuild_processor();
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    bool saw_txt  = false;
+    bool saw_json = false;
+    for(const auto& e : registered_files())
+    {
+        EXPECT_THAT(e.path, ::testing::HasSubstr(expected_dir));
+        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        if(e.format == output_format::text) saw_txt = true;
+        if(e.format == output_format::json) saw_json = true;
+    }
+    EXPECT_TRUE(saw_txt) << "text file not registered";
+    EXPECT_TRUE(saw_json) << "json file not registered";
+
+    test_common::fs::remove_all(expected_dir);
+}
+
+TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathCreatesNestedDirectories)
+{
+    auto nested_dir = tmp_dir + "/ump-nested/a/b/c";
+    ASSERT_FALSE(test_common::fs::exists(nested_dir));
+    ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, nested_dir };
+    rebuild_processor();
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    EXPECT_TRUE(test_common::fs::exists(nested_dir)) << "nested dir not created";
+
+    bool saw_txt  = false;
+    bool saw_json = false;
+    for(const auto& e : registered_files())
+    {
+        EXPECT_THAT(e.path, ::testing::HasSubstr(nested_dir));
+        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        if(e.format == output_format::text) saw_txt = true;
+        if(e.format == output_format::json) saw_json = true;
     }
     EXPECT_TRUE(saw_txt) << "text file not registered";
     EXPECT_TRUE(saw_json) << "json file not registered";

@@ -51,7 +51,6 @@ def find_tool(name: str, required: bool = True) -> Optional[str]:
 
 def run_gcovr(
     *,
-    gcovr_cmd: str,
     gcov_cmd: str,
     source_dir: Path,
     build_dir: Path,
@@ -64,8 +63,9 @@ def run_gcovr(
     xml_path = output_dir / f"{label}.xml"
     html_path = output_dir / f"{label}.html"
 
+    gcovr_cmd = [sys.executable, "-m", "gcovr"]
     cmd = [
-        gcovr_cmd,
+        *gcovr_cmd,
         "--root",
         str(source_dir),
         "--gcov-executable",
@@ -73,6 +73,8 @@ def run_gcovr(
         "--exclude-unreachable-branches",
         "--exclude-throw-branches",
         "--gcov-ignore-parse-errors",
+        "--merge-lines",
+        "--merge-mode-functions=merge-use-line-max",
         "-s",
         "-p",
         "--json",
@@ -115,9 +117,26 @@ def compute_file_coverage(data: dict) -> list[dict]:
         if not lines:
             continue
 
-        covered = sum(1 for l in lines if l.get("count", 0) > 0)
-        total = len(lines)
+        line_counts: dict[int, int] = {}
+        for line in lines:
+            ln = line.get("line_number", 0)
+            count = line.get("count", 0)
+            if ln not in line_counts or count > line_counts[ln]:
+                line_counts[ln] = count
+
+        covered = sum(1 for c in line_counts.values() if c > 0)
+        total = len(line_counts)
         pct = (covered / total * 100) if total > 0 else 0.0
+
+        func_by_line: dict[int, bool] = {}
+        for func in file_data.get("functions", []):
+            lineno = func.get("lineno", 0)
+            ran = func.get("execution_count", 0) > 0
+            func_by_line[lineno] = func_by_line.get(lineno, False) or ran
+
+        func_covered = sum(1 for v in func_by_line.values() if v)
+        func_total = len(func_by_line)
+        func_pct = (func_covered / func_total * 100) if func_total > 0 else 0.0
 
         files.append(
             {
@@ -125,6 +144,9 @@ def compute_file_coverage(data: dict) -> list[dict]:
                 "covered_lines": covered,
                 "total_lines": total,
                 "coverage_pct": pct,
+                "covered_functions": func_covered,
+                "total_functions": func_total,
+                "function_pct": func_pct,
             }
         )
 
@@ -135,11 +157,19 @@ def compute_totals(file_coverages: list[dict]) -> dict:
     total_covered = sum(f["covered_lines"] for f in file_coverages)
     total_lines = sum(f["total_lines"] for f in file_coverages)
     pct = (total_covered / total_lines * 100) if total_lines > 0 else 0.0
+
+    total_func_covered = sum(f.get("covered_functions", 0) for f in file_coverages)
+    total_funcs = sum(f.get("total_functions", 0) for f in file_coverages)
+    func_pct = (total_func_covered / total_funcs * 100) if total_funcs > 0 else 0.0
+
     return {
         "covered_lines": total_covered,
         "total_lines": total_lines,
         "coverage_pct": pct,
         "file_count": len(file_coverages),
+        "covered_functions": total_func_covered,
+        "total_functions": total_funcs,
+        "function_pct": func_pct,
     }
 
 
@@ -172,10 +202,14 @@ def generate_markdown(
         emoji = "📈" if delta >= 0 else "📉"
         delta_str = f" ({emoji} {sign}{delta:.2f}% vs base)"
 
-    lines.append(f"**Overall**: {coverage_bar(totals['coverage_pct'])}{delta_str}")
     lines.append(
-        f"**Lines**: {totals['covered_lines']:,} / {totals['total_lines']:,} "
+        f"**Lines**: {coverage_bar(totals['coverage_pct'])}{delta_str} "
+        f"— {totals['covered_lines']:,}/{totals['total_lines']:,} "
         f"across {totals['file_count']} files"
+    )
+    lines.append(
+        f"**Functions**: {coverage_bar(totals['function_pct'])} "
+        f"— {totals['covered_functions']:,}/{totals['total_functions']:,}"
     )
     lines.append("")
 
@@ -192,14 +226,18 @@ def generate_markdown(
             lines.append(f"<details>")
             lines.append(f"<summary>{group_label} ({len(group_files)} files)</summary>")
             lines.append("")
-            lines.append("| Coverage | Lines | File |")
-            lines.append("|----------|-------|------|")
+            lines.append("| Lines | Functions | File |")
+            lines.append("|-------|-----------|------|")
             for f in group_files:
                 rel = os.path.relpath(f["filename"], source_dir)
-                pct = f["coverage_pct"]
+                func_str = (
+                    f"{f['covered_functions']}/{f['total_functions']}"
+                    if f.get("total_functions", 0) > 0
+                    else "—"
+                )
                 lines.append(
-                    f"| {pct:5.1f}% | "
-                    f"{f['covered_lines']}/{f['total_lines']} | "
+                    f"| {f['coverage_pct']:5.1f}% {f['covered_lines']}/{f['total_lines']} | "
+                    f"{func_str} | "
                     f"`{rel}` |"
                 )
             lines.append("")
@@ -262,12 +300,6 @@ def main():
         help="Baseline coverage JSON for delta comparison",
     )
     parser.add_argument(
-        "--gcovr",
-        type=str,
-        default=None,
-        help="Path to gcovr executable",
-    )
-    parser.add_argument(
         "--gcov",
         type=str,
         default=None,
@@ -279,8 +311,6 @@ def main():
     source_dir = args.source_dir.resolve()
     build_dir = args.build_dir.resolve()
     output_dir = (args.output_dir or source_dir / ".codecov").resolve()
-
-    gcovr_cmd = args.gcovr or find_tool("gcovr")
     gcov_cmd = args.gcov or find_tool("gcov")
 
     gitignore_path = output_dir / ".gitignore"
@@ -292,12 +322,10 @@ def main():
     print(f"Build dir:   {build_dir}")
     print(f"Output dir:  {output_dir}")
     print(f"Label:       {args.label}")
-    print(f"gcovr:       {gcovr_cmd}")
     print(f"gcov:        {gcov_cmd}")
     print()
 
     json_path = run_gcovr(
-        gcovr_cmd=gcovr_cmd,
         gcov_cmd=gcov_cmd,
         source_dir=source_dir,
         build_dir=build_dir,
@@ -332,6 +360,9 @@ def main():
         "coverage_pct": round(totals["coverage_pct"], 2),
         "covered_lines": totals["covered_lines"],
         "total_lines": totals["total_lines"],
+        "function_pct": round(totals["function_pct"], 2),
+        "covered_functions": totals["covered_functions"],
+        "total_functions": totals["total_functions"],
         "file_count": totals["file_count"],
     }
     if baseline_totals:

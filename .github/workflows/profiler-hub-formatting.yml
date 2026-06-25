@@ -1,0 +1,93 @@
+name: profiler-hub Formatting
+run-name: profiler-hub-formatting
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-formatting.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/graphs/**'
+  pull_request:
+    paths:
+      - '.github/workflows/profiler-hub-formatting.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/graphs/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+
+  clang-format:
+    name: C/C++ Formatting (clang-format-18)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            profilers/profiler-hub
+            .github/workflows
+
+      - name: Install clang-format-18
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+
+      - name: Run clang-format
+        working-directory: profilers/profiler-hub
+        run: |
+          set -e
+          mapfile -t FILES < <(find source include tests -type f \
+            \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.cc' \))
+          echo "Checking ${#FILES[@]} files"
+          OUT=$(clang-format-18 -output-replacements-xml "${FILES[@]}")
+          REPLACEMENTS=$(echo "${OUT}" | grep -c '<replacement ' || true)
+          if [ "${REPLACEMENTS}" -ne 0 ]; then
+            echo "::error::Code not formatted. Detected ${REPLACEMENTS} replacements."
+            clang-format-18 -i "${FILES[@]}"
+            git diff
+            exit 1
+          fi
+          echo "All ${#FILES[@]} files are correctly formatted."
+
+  cmake-format:
+    name: CMake Formatting (gersemi)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            profilers/profiler-hub
+            .github/workflows
+
+      - name: Install gersemi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip
+          python3 -m pip install gersemi==0.25.1
+
+      - name: Run gersemi
+        working-directory: profilers/profiler-hub
+        run: |
+          set -e
+          mapfile -t FILES < <(find . -type f \
+            ! -path './build/*' \
+            ! -path './external/*' \
+            ! -path './_deps/*' \
+            \( -name 'CMakeLists.txt' -o -name '*.cmake' -o -name '*.cmake.in' \))
+          echo "Checking ${#FILES[@]} files"
+          if ! gersemi --check "${FILES[@]}"; then
+            echo "::error::CMake files not formatted. Run gersemi -i to fix."
+            gersemi --diff "${FILES[@]}"
+            exit 1
+          fi
+          echo "All ${#FILES[@]} files are correctly formatted."

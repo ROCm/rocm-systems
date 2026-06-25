@@ -1395,6 +1395,9 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
     need_alloc = false;
   }
   if (need_alloc) {
+    if (s->imageSize() > s->memSize()) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
     void* ptr = context_->SegmentAlloc(segment, agent, s->memSize(), s->align(), true);
     if (!ptr) { return HSA_STATUS_ERROR_OUT_OF_RESOURCES; }
     new_seg = std::make_shared<Segment>(this, agent, segment, ptr, s->memSize(), s->vaddr(), s->offset());
@@ -1413,6 +1416,9 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
 hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
                                            loader::Segment *load_segment) {
   assert(data_segment && load_segment);
+  if (data_segment->imageSize() > data_segment->memSize()) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
   load_segment->Copy(data_segment->vaddr(), data_segment->data(),
                      data_segment->imageSize());
 

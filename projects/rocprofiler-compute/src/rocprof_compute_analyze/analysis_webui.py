@@ -120,36 +120,15 @@ class webui_analysis(OmniAnalyze_Base):
 
             run_workload = base_data[base_run]
 
-            if self.pc_sampling_only():
-                run_workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
-                    str(self.dest_dir)
-                )
-                run_workload.raw_pmc = run_workload.raw_pmc.rename(
-                    columns={"Dispatch_Id": "Dispatch_ID"}
-                )
-                # Create multi index dataframe with key pmc_perf
-                run_workload.raw_pmc = pd.concat(
-                    [run_workload.raw_pmc], keys=["pmc_perf"], axis=1
-                )
+            pc_sampling_data = self.load_pc_sampling_tool_data(str(self.dest_dir))
 
-                kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
-                    df_in=run_workload.raw_pmc,
-                    raw_data_dir=str(self.dest_dir),
-                    filter_gpu_ids=run_workload.filter_gpu_ids,
-                    filter_dispatch_ids=run_workload.filter_dispatch_ids,
-                    filter_nodes=self._runs[self.dest_dir].filter_nodes,
-                    time_unit=args.time_unit,
-                    kernel_verbose=args.kernel_verbose,
-                )
-                run_workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
-                run_workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-                parser.load_non_mertrics_table(
+            if self.pc_sampling_only():
+                self.build_pc_sampling_only_workload(
                     run_workload,
                     self.dest_dir,
                     args,
-                )
-                parser.nullify_unevaluated_metric_values(
-                    run_workload,
+                    pc_sampling_data,
+                    filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 )
             else:
                 # Generate original raw df
@@ -171,6 +150,7 @@ class webui_analysis(OmniAnalyze_Base):
                     run_workload.raw_pmc = self.iteration_multiplex_impute_counters(
                         run_workload.raw_pmc,
                         policy=self._profiling_config["iteration_multiplexing"],
+                        workload_dir=Path(self.dest_dir),
                     )
 
                 # Apply filters to workload data
@@ -237,19 +217,24 @@ class webui_analysis(OmniAnalyze_Base):
                     }
 
                 # All filtering will occur here
+                gpu_arch = run_workload.sys_info.iloc[0]["gpu_arch"]
                 parser.load_table_data(
                     workload=run_workload,
                     dir_path=self.dest_dir,
                     is_gui=True,
                     args=args,
-                    config=self._profiling_config,
+                    dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
+                    pc_sampling_tool_data=pc_sampling_data,
                 )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
             # Generate GUI content
             # ~~~~~~~~~~~~~~~~~~~~~~~
             div_children = [
-                get_memchart(panel_configs[300]["data source"], base_data[base_run])
+                get_memchart(
+                    panel_configs.get(300, {}).get("data source"),
+                    base_data[base_run],
+                )
             ]
 
             is_roofline_valid, roofline_error_msg = validate_roofline_csv(
@@ -296,7 +281,6 @@ class webui_analysis(OmniAnalyze_Base):
                     ai_data = calc_ai_analyze(
                         workload=workload,
                         pmc_df=pmc_df,
-                        config=self._profiling_config,
                         arch_config=arch_configs,
                     )
 
@@ -335,6 +319,8 @@ class webui_analysis(OmniAnalyze_Base):
                 # Iterate over each table per section
                 for data_source in panel["data source"]:
                     for t_type, table_config in data_source.items():
+                        if table_config["id"] not in base_data[base_run].dfs:
+                            continue
                         original_df = base_data[base_run].dfs[table_config["id"]]
 
                         # The sys info table need to add index back
@@ -420,33 +406,16 @@ class webui_analysis(OmniAnalyze_Base):
 
         workload = self._runs[self.dest_dir]
 
+        pc_sampling_data = self.load_pc_sampling_tool_data(str(self.dest_dir))
+
         if self.pc_sampling_only():
             console_log(
                 "analysis",
                 "PC sampling only -- skipping counter collection data loading",
             )
-            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
-                str(self.dest_dir)
+            self.build_pc_sampling_only_workload(
+                workload, self.dest_dir, args, pc_sampling_data
             )
-            workload.raw_pmc = workload.raw_pmc.rename(
-                columns={"Dispatch_Id": "Dispatch_ID"}
-            )
-            # Create multi index dataframe with key pmc_perf
-            workload.raw_pmc = pd.concat([workload.raw_pmc], keys=["pmc_perf"], axis=1)
-
-            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
-                df_in=workload.raw_pmc,
-                raw_data_dir=self.dest_dir,
-                filter_gpu_ids=workload.filter_gpu_ids,
-                filter_dispatch_ids=workload.filter_dispatch_ids,
-                filter_nodes=workload.filter_nodes,
-                time_unit=args.time_unit,
-                kernel_verbose=args.kernel_verbose,
-            )
-            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
-            workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-
-            parser.load_non_mertrics_table(workload, self.dest_dir, args)
             self.arch = workload.sys_info.iloc[0]["gpu_arch"]
             return
 
@@ -466,6 +435,7 @@ class webui_analysis(OmniAnalyze_Base):
             workload.raw_pmc = self.iteration_multiplex_impute_counters(
                 workload.raw_pmc,
                 policy=self._profiling_config["iteration_multiplexing"],
+                workload_dir=Path(self.dest_dir),
             )
 
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
@@ -480,7 +450,9 @@ class webui_analysis(OmniAnalyze_Base):
         workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
         # Load remaining non-metric tables (sysinfo, etc.)
-        parser.load_non_mertrics_table(workload, self.dest_dir, args)
+        parser.load_non_mertrics_table(
+            workload, self.dest_dir, args, pc_sampling_tool_data=pc_sampling_data
+        )
         # set architecture
         self.arch = workload.sys_info.iloc[0]["gpu_arch"]
 
