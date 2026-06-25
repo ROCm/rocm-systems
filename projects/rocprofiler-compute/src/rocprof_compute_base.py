@@ -364,13 +364,6 @@ class RocProfCompute:
                     "supported in --tui mode. Please remove --tui or run "
                     "without the torch-operator flags.",
                 )
-            if args.spatial_multiplexing:
-                console_error(
-                    "ml api trace",
-                    "--torch-operator and --list-torch-operators do not yet "
-                    "support multi-node analysis via --spatial-multiplexing. "
-                    "Please remove one of these options.",
-                )
             if args.output_format != "stdout":
                 console_error(
                     "ml api trace",
@@ -390,13 +383,6 @@ class RocProfCompute:
                         "full kernel stats table will be shown regardless "
                         "of the operator filter.",
                     )
-                if args.list_nodes:
-                    console_warning(
-                        "ml api trace",
-                        "--torch-operator is ignored by --list-nodes; the "
-                        "node enumeration does not respect the operator "
-                        "filter.",
-                    )
                 if list_torch_operators:
                     console_warning(
                         "ml api trace",
@@ -406,13 +392,6 @@ class RocProfCompute:
                         "apply the operator filter to the analysis, or drop "
                         "--torch-operator to list all operators.",
                     )
-
-        # Block all filters during spatial-multiplexing
-        if self.__args.spatial_multiplexing:
-            self.__args.gpu_id = None
-            self.__args.gpu_kernel = None
-            self.__args.gpu_dispatch_id = None
-            self.__args.nodes = None
 
     @demarcate
     def handle_list_args(self) -> None:
@@ -754,11 +733,9 @@ class RocProfCompute:
 
     @demarcate
     def run_analysis(self) -> None:
-        # Lazy import pandas and file_io since they are only used in analysis
-        # mode. This keeps analysis deps out of the profile path.
+        # Lazy import pandas since it is only used in analysis mode.
+        # This keeps analysis deps out of the profile path.
         import pandas as pd
-
-        from utils import file_io
 
         self.print_graphic()
         console_log(f"Analysis mode = {self.__analyze_mode}")
@@ -792,16 +769,7 @@ class RocProfCompute:
         for path_list in analyzer.get_args().path:
             base_path = path_list[0] if isinstance(path_list, list) else path_list
 
-            # Determine sysinfo path
-            if (
-                analyzer.get_args().nodes is None
-                and not analyzer.get_args().spatial_multiplexing
-            ):
-                sysinfo_path = base_path
-            else:
-                sysinfo_path = file_io.find_1st_sub_dir(base_path)
-
-            sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
+            sys_info = pd.read_csv(f"{base_path}/sysinfo.csv")
             sys_info_dict = {
                 key: value[0] for key, value in sys_info.to_dict("list").items()
             }

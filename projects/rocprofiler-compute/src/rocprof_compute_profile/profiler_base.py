@@ -206,13 +206,6 @@ class RocProfCompute_Base:
                     "these options."
                 )
 
-            if args.spatial_multiplexing is not None:
-                console_error(
-                    "ML API tracing does not yet support multi-node profiling "
-                    "via --spatial-multiplexing. Please remove one of these "
-                    "options."
-                )
-
         # Each --dispatch token must be a positive integer or a range
         # ('start:end' or 'start-end') with start <= end (1-based indexing).
         if args.dispatch:
