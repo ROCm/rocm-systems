@@ -10,6 +10,7 @@
 #include "common/platform_filter.h"
 #include "common/env_config.h"
 #include <yaml-cpp/yaml.h>
+#include <fnmatch.h>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -216,13 +217,13 @@ bool TestFilterManager::shouldRunTest(const std::string& testName,
 
   const PlatformConfig& pconfig = it->second;
 
-  // 1. Check explicit block list (exclusion overrides inclusion)
-  if (std::find(pconfig.blocked_tests.begin(),
-                pconfig.blocked_tests.end(),
-                testName) != pconfig.blocked_tests.end()) {
-    return skip("Test in blocked list for " +
-                std::string(PlatformDetector::platformName(
-                    currentPlatform_)));
+  // 1. Check explicit block list (exclusion overrides inclusion); supports fnmatch wildcards
+  for (const auto& pattern : pconfig.blocked_tests) {
+    if (fnmatch(pattern.c_str(), testName.c_str(), 0) == 0) {
+      return skip("Test in blocked list for " +
+                  std::string(PlatformDetector::platformName(
+                      currentPlatform_)));
+    }
   }
 
   // 2. Find all groups this test belongs to
