@@ -130,6 +130,7 @@ jobs:
           # Limit thread count to prevent CPU over-subscription during tests
           OPENBLAS_NUM_THREADS: "4"
           OMP_NUM_THREADS: "4"
+          ROCPROFSYS_SAMPLING_REALTIME: "OFF"
         run: |
           ${{ fromJSON(inputs.component).test_script }}
 
