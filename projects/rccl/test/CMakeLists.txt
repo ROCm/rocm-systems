@@ -173,12 +173,14 @@ if(BUILD_TESTS)
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasJsonTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
@@ -251,6 +253,7 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
+      NetDevsPolicyTests.cpp
       NetSocketTests.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
@@ -258,6 +261,7 @@ if(BUILD_TESTS)
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
+      graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -265,6 +269,12 @@ if(BUILD_TESTS)
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+
+    # NetDevsPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
+    # from the source tree (tools/topo_expl/models). Expose the test source dir
+    # so they can build the path.
+    target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
+      RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with

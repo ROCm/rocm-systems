@@ -103,7 +103,9 @@ impl LibSearch<'_> {
             .and_then(|p| p.parent().map(Path::to_path_buf));
 
         // Generic, opt-in: every directory on $LD_LIBRARY_PATH.
-        if self.system_fallbacks && let Some(paths) = non_empty_var("LD_LIBRARY_PATH") {
+        if self.system_fallbacks
+            && let Some(paths) = non_empty_var("LD_LIBRARY_PATH")
+        {
             for entry in std::env::split_paths(&paths) {
                 if !entry.as_os_str().is_empty() {
                     dirs.push(entry);
@@ -237,7 +239,7 @@ fn non_empty_var(key: &str) -> Option<String> {
 /// CLI, which is on `PATH` when a ROCm Python wheel venv is active.
 /// Returns the trimmed `<root>` from `rocm-sdk path --root`, or `None`
 /// if the CLI is unavailable, fails, or prints nothing.
-fn rocm_sdk_root() -> Option<PathBuf> {
+pub fn rocm_sdk_root() -> Option<PathBuf> {
     let out = std::process::Command::new("rocm-sdk")
         .args(["path", "--root"])
         .output()
