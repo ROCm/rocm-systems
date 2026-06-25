@@ -2135,12 +2135,9 @@ ncclResult_t parseChordalRing(struct ncclTopoSystem* system, struct ncclTopoGrap
     int sum = ngpus*(ngpus-1)/2 - node->gpu.dev;
     int count = 0;
     for (int n = 0; n<ngpus; n++) {
-      struct ncclTopoLink* link;
-      for (link = node->links; link->remNode; link++) {
-        if (link->remNode->gpu.dev == n) break;
-      }
-      if (!link->remNode) continue;
-      if (link->type != LINK_NVL) continue;
+      // Direct XGMI neighbor: post NCCL-2.30 a direct GPU->GPU path is GPU-DEV-DEV-GPU (count<=3).
+      struct ncclTopoLinkList* path = node->paths[GPU] + n;
+      if (path->type != LINK_NVL || path->count > 3) continue;
       sum -= system->nodes[GPU].nodes[n].gpu.dev;
       count ++;
     }
