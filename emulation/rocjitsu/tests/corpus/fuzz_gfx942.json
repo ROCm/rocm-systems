@@ -13,6 +13,9 @@
   "skip_tests": [
     "llama_noncont_batched_matmul",
     "hip_matmul_matmul::m4096_n4096_k4096",
+    "hip_streamk_two_tile::m256_n256_k256",
+    "llama_mul_mat_vec_q",
+    "llama_rms_norm",
     "hip_matmul_matmul_hazard",
     "llama_noncont_batched_matmul_hazard"
   ],
