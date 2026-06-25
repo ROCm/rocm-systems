@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """Tests for amdgpu_supports_ais()."""
 
 # pylint: disable=missing-function-docstring

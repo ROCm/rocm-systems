@@ -860,7 +860,7 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
 
     drm_prime_handle import_params = {};
     import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
@@ -888,7 +888,8 @@ hsa_status_t XdnaDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* h
 
 hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,
                              size_t offset, size_t size,
-                             hsa_access_permission_t perms) {
+                             hsa_access_permission_t perms, uint32_t node_id) {
+  (void)node_id;
   // Get fd associated with the handle.
   drm_prime_handle params = {};
   params.handle = handle.handle;
@@ -910,7 +911,8 @@ hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,
 }
 
 hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
-                               size_t offset, size_t size) {
+                               size_t offset, size_t size, uint32_t node_id) {
+  (void)node_id;
   if (munmap(mem, size) != 0) {
     return HSA_STATUS_ERROR;
   }

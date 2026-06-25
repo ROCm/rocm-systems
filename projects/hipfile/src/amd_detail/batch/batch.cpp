@@ -10,12 +10,14 @@
 #include "hipfile.h"
 #include "state.h"
 
+#include <bit>
 #include <cstddef>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -66,18 +68,22 @@ BatchOperation::BatchOperation(std::unique_ptr<const hipFileIOParams_t> params,
         throw std::invalid_argument(msg.str());
     }
 
-    // Check OpCode
-    if (io_params->opcode != hipFileBatchRead && io_params->opcode != hipFileBatchWrite) {
+    // Check OpCode. A C caller may pass a value outside the enum's valid range,
+    // and an lvalue-to-rvalue load of such a value as the enum type is undefined
+    // behavior. Reinterpret the bits as the underlying integer type instead.
+    auto opcode = std::bit_cast<std::underlying_type_t<hipFileOpcode_t>>(io_params->opcode);
+    if (opcode != hipFileBatchRead && opcode != hipFileBatchWrite) {
         std::stringstream msg;
-        msg << "Bad opcode specified. Value: " << io_params->opcode;
+        msg << "Bad opcode specified. Value: " << opcode;
         msg << ". Cookie: " << io_params->cookie;
         throw std::invalid_argument(msg.str());
     }
 
-    // Check Batch Mode
-    if (io_params->mode != hipFileBatch) {
+    // Check Batch Mode (reinterpret the bits as the underlying integer, see above).
+    auto mode = std::bit_cast<std::underlying_type_t<hipFileBatchMode_t>>(io_params->mode);
+    if (mode != hipFileBatch) {
         std::stringstream msg;
-        msg << "Invalid Batch mode specified. Value: " << io_params->mode;
+        msg << "Invalid Batch mode specified. Value: " << mode;
         msg << ". Cookie: " << io_params->cookie;
         throw std::invalid_argument(msg.str());
     }
