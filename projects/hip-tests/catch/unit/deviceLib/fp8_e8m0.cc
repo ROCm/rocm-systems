@@ -43,6 +43,9 @@ void device_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(in_d));
+  HIP_CHECK(hipFree(out_d));
 }
 
 HIP_TEST_CASE(Unit__hip_cvt_bfloat16raw_to_e8m0) {
@@ -130,6 +133,9 @@ void device_cvt_float_to_e8m0(const std::vector<float>& in, std::vector<unsigned
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(in_d));
+  HIP_CHECK(hipFree(out_d));
 }
 
 HIP_TEST_CASE(Unit__hip_cvt_float_to_e8m0) {
@@ -217,6 +223,9 @@ void device_cvt_double_to_e8m0(const std::vector<double>& in, std::vector<unsign
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(in_d));
+  HIP_CHECK(hipFree(out_d));
 }
 
 
@@ -323,6 +332,9 @@ void device_cvt_e8m0_to_bf16raw(const std::vector<unsigned char>& in, std::vecto
   HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(in_d));
+  HIP_CHECK(hipFree(out_d));
 }
 
 HIP_TEST_CASE(Unit__hip_cvt_e8m0_to_bf16raw) {

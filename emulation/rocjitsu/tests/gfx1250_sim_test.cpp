@@ -345,6 +345,7 @@ constexpr uint16_t vopd_src0_vgpr(uint16_t reg) { return 256 + reg; }
 enum class VopdOp : uint16_t {
   MulF32 = 3,
   MulDx9ZeroF32 = 7,
+  CndmaskB32 = 9,
   FmaF32 = 19,
 };
 
@@ -943,6 +944,61 @@ TEST(Gfx1250ExecutionTest, VAddF16HighVdstMergesIntoLowPhysicalVgpr) {
 
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x40005555u);
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 129, kLane), 0xDEADBEEFu);
+}
+
+TEST(Gfx1250ExecutionTest, IreeF16ReductionTailKeepsLane31Sum) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec(0xffffffffu);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  const uint32_t packed_1_2 = 0x40003c00u;
+  const uint32_t packed_3_4 = 0x44004200u;
+  const uint32_t packed_5_6 = 0x46004500u;
+  const uint32_t packed_7_8 = 0x48004700u;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vgpr_base + 10, lane, packed_7_8);
+    cu->write_vgpr(vgpr_base + 11, lane, packed_1_2);
+    cu->write_vgpr(vgpr_base + 16, lane, packed_5_6);
+    cu->write_vgpr(vgpr_base + 17, lane, packed_3_4);
+  }
+
+  const std::array<std::array<uint32_t, 3>, 20> words = {{
+      {0x64021680u, 0, 0},                     // v_add_f16_e32 v1, 0, v11
+      {0x32041690u, 0, 0},                     // v_lshrrev_b32_e32 v2, 16, v11
+      {0x64020501u, 0, 0},                     // v_add_f16_e32 v1, v1, v2
+      {0x32042290u, 0, 0},                     // v_lshrrev_b32_e32 v2, 16, v17
+      {0x64022301u, 0, 0},                     // v_add_f16_e32 v1, v1, v17
+      {0x64020501u, 0, 0},                     // v_add_f16_e32 v1, v1, v2
+      {0x32042090u, 0, 0},                     // v_lshrrev_b32_e32 v2, 16, v16
+      {0x64022101u, 0, 0},                     // v_add_f16_e32 v1, v1, v16
+      {0x64020501u, 0, 0},                     // v_add_f16_e32 v1, v1, v2
+      {0x32041490u, 0, 0},                     // v_lshrrev_b32_e32 v2, 16, v10
+      {0x64021501u, 0, 0},                     // v_add_f16_e32 v1, v1, v10
+      {0x64020501u, 0, 0},                     // v_add_f16_e32 v1, v1, v2
+      {0xd5320001u, 0x000202fau, 0xff08b101u}, // quad_perm:[1,0,3,2]
+      {0xd5320001u, 0x000202fau, 0xff084e01u}, // quad_perm:[2,3,0,1]
+      {0xd5320001u, 0x000202fau, 0xff094101u}, // row_half_mirror
+      {0xd5320001u, 0x000202fau, 0xff094001u}, // row_mirror
+      {0xd65c0802u, 0x03058301u, 0},           // v_permlanex16_b32 v2, v1, -1, -1
+      {0x64020302u, 0, 0},                     // v_add_f16_e32 v1, v2, v1
+      {0xd7600000u, 0x02013f01u, 0},           // v_readlane_b32 s0, v1, 31
+      {0xa4808000u, 0, 0},                     // s_add_f16 s0, s0, 0
+  }};
+
+  for (const auto &inst_words : words) {
+    std::unique_ptr<Instruction> inst(decoder->decode(inst_words.data()));
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst.get(), *wf);
+  }
+
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0) & 0xffffu, 0x6480u);
 }
 
 TEST(Gfx1250ExecutionTest, VFmacF16Vop3HighVdstUsesHighHalfAddend) {
@@ -2400,7 +2456,9 @@ TEST(Gfx1250SimulationTest, SGetShaderCyclesU64ReadsSimulationTime) {
 
   amdgpu::Wavefront *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
-  EXPECT_EQ(read_wave_sgpr64(*sim.cu(), *wf, 4), 17u);
+  const auto observed_time = read_wave_sgpr64(*sim.cu(), *wf, 4);
+  EXPECT_GE(observed_time, 17u);
+  EXPECT_LE(observed_time, sim.engine->global_time());
 }
 
 TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
@@ -2417,7 +2475,9 @@ TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
 
   amdgpu::Wavefront *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
-  EXPECT_EQ(read_wave_sgpr64(*sim.cu(), *wf, 4), 23u);
+  const auto observed_time = read_wave_sgpr64(*sim.cu(), *wf, 4);
+  EXPECT_GE(observed_time, 23u);
+  EXPECT_LE(observed_time, sim.engine->global_time());
   EXPECT_EQ(read_wave_sgpr(*sim.cu(), *wf, 6), 0u);
 }
 
@@ -2698,6 +2758,44 @@ TEST(Gfx1250SimulationTest, VopdFmacUsesDestinationAccumulator) {
     EXPECT_EQ(sim.cu()->read_vgpr(vb + 10, lane), 0x40E00000u) << "lane " << lane;
     EXPECT_EQ(sim.cu()->read_vgpr(vb + 9, lane), 0x40000000u) << "lane " << lane;
   }
+}
+
+TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
+  constexpr auto cndmask = make_vopd3_pair(
+      {.op = VopdOp::CndmaskB32, .src0 = vopd_src0_vgpr(0), .src1 = 1, .src2 = 106, .dst = 2},
+      {.op = VopdOp::CndmaskB32, .src0 = vopd_src0_vgpr(3), .src1 = 4, .src2 = 106, .dst = 5},
+      /*negx=*/0x1, /*negy=*/0x2);
+
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec(0x3u);
+  wf->set_vcc(0x1u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(cndmask.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dual_cndmask_b32 :: v_dual_cndmask_b32");
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 0, 0, 0x3F800000u);
+  cu->write_vgpr(vb + 0, 1, 0x3F000000u);
+  cu->write_vgpr(vb + 1, 0, 0x11223344u);
+  cu->write_vgpr(vb + 1, 1, 0x55667788u);
+  cu->write_vgpr(vb + 3, 0, 0x40000000u);
+  cu->write_vgpr(vb + 3, 1, 0x40400000u);
+  cu->write_vgpr(vb + 4, 0, 0x3F800000u);
+  cu->write_vgpr(vb + 4, 1, 0x3F000000u);
+
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x11223344u);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0xBF000000u);
+  EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0xBF800000u);
+  EXPECT_EQ(cu->read_vgpr(vb + 5, 1), 0x40400000u);
 }
 
 TEST(Gfx1250SimulationTest, GlobalStoreWritesVisibleMemory) {

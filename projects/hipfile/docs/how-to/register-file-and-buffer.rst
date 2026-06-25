@@ -1,15 +1,15 @@
 .. meta::
-  :description: Step-by-step instructions for registering a file and GPU buffer for direct GPU I/O using hipFile.
-  :keywords: hipFile, GPU I/O, hipFileHandleRegister, hipFileBufRegister, O_DIRECT, ROCm, register file, GPU buffer
+   :description: Step-by-step instructions for registering a file and GPU buffer for direct GPU I/O using hipFile.
+   :keywords: hipFile, GPU I/O, hipFileHandleRegister, hipFileBufRegister, O_DIRECT, ROCm, register file, GPU buffer
 
-******************************************
+*******************************************
 Register a file and GPU buffer for GPU I/O
-******************************************
+*******************************************
 
 This guide walks you through registering a file and a GPU memory buffer for direct GPU I/O with hipFile. After registration, you can perform read and write operations directly between storage and GPU memory. Buffer-only semantics (registered versus unregistered device memory) are summarized on :doc:`/reference/hipFile-buffer-registration`.
 
 Prerequisites
-*************
+==============
 
 - hipFile is installed and available on your system.
 - A GPU is available and the HIP runtime is functional.
@@ -20,7 +20,7 @@ Prerequisites
    Using ``O_DIRECT`` when opening files is recommended for optimal performance. If the client fd lacks ``O_DIRECT``, hipFile attempts to reopen the file via ``/proc/self/fd`` with ``O_DIRECT`` before rejecting fastpath selection.
 
 Open a file with ``O_DIRECT``
-*****************************
+=============================
 
 Use the POSIX ``open(2)`` system call to open the file. Include the ``O_DIRECT`` flag to enable direct I/O:
 
@@ -45,7 +45,7 @@ For writable files, use ``O_WRONLY | O_DIRECT`` or ``O_RDWR | O_DIRECT`` as appr
                  S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
 
 Register the file handle
-************************
+===========================
 
 1. Populate a ``hipFileDescr_t`` structure with the file descriptor and handle type:
 
@@ -77,7 +77,7 @@ Register the file handle
       If the hipFile library has not already been initialized, the first call to ``hipFileHandleRegister()`` initializes the library and increments its reference count.
 
 Allocate GPU memory
-*******************
+======================
 
 Allocate a GPU memory buffer using ``hipMalloc()``:
 
@@ -95,7 +95,7 @@ Allocate a GPU memory buffer using ``hipMalloc()``:
    }
 
 Register the GPU buffer
-***********************
+========================
 
 Call ``hipFileBufRegister()`` to register the GPU memory region for use with GPU I/O:
 
@@ -120,7 +120,7 @@ The third parameter is a flags field. Pass ``0`` for default behavior.
 After both the file handle and buffer are registered, you can perform GPU I/O operations such as ``hipFileRead()`` and ``hipFileWrite()``. For a complete worked example, see :doc:`/tutorials/copy-a-file`.
 
 Error handling
-**************
+=================
 
 hipFile API calls return a ``hipFileError_t`` struct containing two fields:
 
@@ -161,7 +161,7 @@ For synchronous I/O functions such as ``hipFileRead()`` and ``hipFileWrite()``, 
 For the complete list of error codes and their descriptions, see the :doc:`/reference/api-errors`.
 
 Teardown
-********
+============
 
 When you are finished with GPU I/O, release all resources in the following order:
 
@@ -190,7 +190,7 @@ When you are finished with GPU I/O, release all resources in the following order
       close(fd);
 
 Complete example
-****************
+================
 
 The following example shows the full registration and teardown workflow:
 

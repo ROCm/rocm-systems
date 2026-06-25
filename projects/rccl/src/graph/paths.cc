@@ -764,6 +764,28 @@ static bool rcclPathOverride(struct ncclTopoSystem* system, uint64_t distance) {
   }
 }
 
+// Rewrite GPU<->NIC paths of type `fromType` to `toType` when the two devices share a PCI domain.
+static void rcclRewriteSameDomainNetPaths(struct ncclTopoSystem* system, int fromType, int toType) {
+  for (int g=0; g<system->nodes[GPU].count; g++) {
+    struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g;
+    int64_t gpuBusId = NCCL_TOPO_ID_LOCAL_ID(gpu->id);
+    int64_t gpuDomain = NCCL_BUSID_DOMAIN(gpuBusId);
+    for (int n=0; n<system->nodes[NET].count; n++) {
+      struct ncclTopoNode* net = system->nodes[NET].nodes+n;
+      // Skip uninitialized/invalid busIds (raw id 0), but allow domain 0000:
+      // it is a valid PCI domain and must still match.
+      if (gpuBusId == 0 || net->net.busId == 0) continue;
+      if (gpuDomain != NCCL_BUSID_DOMAIN(net->net.busId)) continue;
+      if (gpu->paths[NET] && gpu->paths[NET][n].type == fromType) {
+        gpu->paths[NET][n].type = toType;
+        INFO(NCCL_GRAPH, "Rewrote same-domain GPU %d -> NET %d path %d->%d (domain 0x%04lx)", g, n, fromType, toType, (unsigned long)gpuDomain);
+      }
+      if (net->paths[GPU] && net->paths[GPU][g].type == fromType)
+        net->paths[GPU][g].type = toType;
+    }
+  }
+}
+
 NCCL_PARAM(PxnC2c, "PXN_C2C", 0);
 
 ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm* comm) {
@@ -800,6 +822,11 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
   // Set direct paths to NVSwitches.
   for (int n=0; n<system->nodes[NVS].count; n++) {
     NCCLCHECK(ncclTopoSetPaths(system->nodes[NVS].nodes+n, system));
+  }
+
+  if (system->nodes[GPU].count > 0 &&
+      IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) {
+    rcclRewriteSameDomainNetPaths(system, PATH_PHB, PATH_PXB);
   }
 
   // Update path for GPUs when we don't want to / can't use GPU Direct P2P
