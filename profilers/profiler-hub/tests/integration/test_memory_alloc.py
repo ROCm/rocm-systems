@@ -14,6 +14,8 @@ import pytest
 
 from profiler_hub_db import ProfilerHubDb
 
+pytestmark = pytest.mark.timeout(120)
+
 EXPECTED = {
     "type": "ALLOC",
     "level": "SCRATCH",

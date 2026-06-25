@@ -9,6 +9,8 @@ import pytest
 
 from profiler_hub_db import ProfilerHubDb
 
+pytestmark = pytest.mark.timeout(120)
+
 EXPECTED = {
     "dispatch_id": 7,
     "start_timestamp": 1000000,

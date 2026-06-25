@@ -9,6 +9,8 @@ import pytest
 
 from profiler_hub_db import ProfilerHubDb
 
+pytestmark = pytest.mark.timeout(120)
+
 EXPECTED = {
     "value": 1234.5,
     "extdata": "{test data pmc event}",
