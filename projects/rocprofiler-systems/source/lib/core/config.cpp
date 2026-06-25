@@ -163,14 +163,9 @@ const auto strict_config_value_validations = std::array<config_value_validation,
 [[nodiscard]] std::string
 trim_config_value(std::string_view value)
 {
-    auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
-
-    while(!value.empty() && is_space(static_cast<unsigned char>(value.front())))
-        value.remove_prefix(1);
-    while(!value.empty() && is_space(static_cast<unsigned char>(value.back())))
-        value.remove_suffix(1);
-
-    return std::string{ value };
+    auto str = std::string{ value };
+    utility::trim_str(str);
+    return str;
 }
 
 [[nodiscard]] std::string
@@ -358,13 +353,6 @@ validate_config_file_values(const std::string& config_file, const std::string& t
                 trim_config_value(std::string_view{ trimmed_line }.substr(0, split_pos));
             raw_value =
                 trim_config_value(std::string_view{ trimmed_line }.substr(split_pos + 1));
-        }
-
-        if(raw_value.empty())
-        {
-            validate_config_setting_value(key, raw_value,
-                                          get_setting_choices(_config, key));
-            continue;
         }
 
         if(auto comment_pos = raw_value.find('#'); comment_pos != std::string::npos)
@@ -1406,12 +1394,12 @@ configure_settings(bool _init)
     auto _proc      = mproc::get_concurrent_processes(_ppid);
     bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
-    for(auto&& itr : tim::delimit(
+    for(auto&& filename : tim::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
         if(_config->get_suppress_config()) continue;
 
-        const auto expanded_filename = settings::format(itr, _config->get_tag());
+        const auto expanded_filename = settings::format(filename, _config->get_tag());
 
         // Prevent Timemory's read() silently dropping JSON config files without proper
         // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
@@ -1426,9 +1414,9 @@ configure_settings(bool _init)
                             expanded_filename, TIMEMORY_PROJECT_NAME));
         }
 
-        LOG_DEBUG("Reading config file {}", itr);
-        validate_config_file_values(itr, _config->get_tag(), _config);
-        if(_config->read(itr) && _main_proc &&
+        LOG_DEBUG("Reading config file {}", filename);
+        validate_config_file_values(filename, _config->get_tag(), _config);
+        if(_config->read(filename) && _main_proc &&
            ((_config->get<bool>(std::string{ env_vars::CI }) &&
              settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
@@ -2779,7 +2767,9 @@ get_process_sampling_freq()
     static auto _v = get_config()->find(std::string{ env_vars::PROCESS_SAMPLING_FREQ });
     auto        _val =
         std::min<double>(static_cast<tim::tsettings<double>&>(*_v->second).get(), 1000.0);
-    if(_val < 1.0e-9) return std::min<double>(get_sampling_freq(), 100.0);
+
+    constexpr auto effective_zero = 1.0e-9;
+    if(_val < effective_zero) return std::min<double>(get_sampling_freq(), 100.0);
     return _val;
 }
 
