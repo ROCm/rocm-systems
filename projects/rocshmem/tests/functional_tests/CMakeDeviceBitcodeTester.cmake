@@ -51,15 +51,13 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   set(_FULL_ARCH "${GPU_ARCH}")
   foreach(_candidate ${BITCODE_GPU_ARCHS_FULL})
     string(REGEX REPLACE ":.*" "" _candidate_base "${_candidate}")
-    if(_candidate_base STREQUAL GPU_ARCH)
+    if("${_candidate_base}" STREQUAL "${GPU_ARCH}")
       set(_FULL_ARCH "${_candidate}")
       break()
     endif()
   endforeach()
   arch_features_to_target_feature_flags("${_FULL_ARCH}" _CLANG_MATTR_FLAGS)
 
-  # message(status "_MATTR_FLAGS" ${_MATTR_FLAGS})
-  
   # The device API functions (rocshmem_my_pe, rocshmem_putmem, etc.) are plain
   # __device__ functions. When compiled at -O3 independently, LLVM DCEs them
   # because no amdgpu_kernel in the same TU calls them. Compiling at -O0
