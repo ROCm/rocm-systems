@@ -142,7 +142,7 @@ class TestTranspose(RocprofsysTest):
         # CI-only transpose-sampling timeout reports which pool mutex stalls and
         # which thread owns it. Injected via the test env dict because ROCPROFILER_*
         # vars are stripped from the inherited child environment.
-        "ROCPROFILER_DEBUG_POOL_HANG": "1",
+        "ROCPROFILER_DEBUG_POOL_HANG": "0",  # gate OFF: timed_mutex + plain lock() to isolate cause
     }
 
     @pytest.mark.parametrize(
