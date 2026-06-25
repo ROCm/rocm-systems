@@ -143,7 +143,7 @@ inject_barriers(hsa_barrier& barrier, QueueController::queue_map_t& queues)
     for(auto& [hsa_queue, fq] : queues)
     {
         auto complete = barrier.complete();
-        auto _pkt     = barrier.enqueue_packet(fq.get());
+        auto _pkt     = barrier.enqueue_packet(fq->get_id().handle, 0);
         // If barrier is complete, no packets should be generated
         ASSERT_NE(complete, _pkt.has_value());
 
@@ -384,6 +384,93 @@ TEST(hsa_barrier, block_multi)
     {
         usleep(100);
     }
+
+    registration::set_init_status(1);
+    registration::finalize();
+}
+
+// Regression tests: a barrier must not be retired (its signal destroyed/recyclable) while a queue
+// still holds an un-executed transition packet referencing it.
+
+// complete-but-referenced barrier is not safe_to_destroy() until the carrying dispatch runs.
+TEST(hsa_barrier, safe_to_destroy_gated_on_transition_drain)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    auto queues = create_queue_map(1);
+    ASSERT_EQ(queues.size(), 1u);
+    Queue* q = queues.begin()->second.get();
+
+    hsa_barrier::queue_map_ptr_t q_map;
+    for(const auto& [k, v] : queues)
+        q_map[k] = v.get();
+
+    const int64_t qid = q->get_id().handle;
+
+    q->async_started();  // pre-barrier dispatch (id 1) in flight
+
+    hsa_barrier barrier([]() {}, get_api_table());
+    barrier.set_barrier(q_map);
+    ASSERT_FALSE(barrier.complete());
+    ASSERT_FALSE(barrier.safe_to_destroy());
+
+    // carrying dispatch (id 2) gets the transition packet
+    auto pkt = barrier.enqueue_packet(qid, 2);
+    ASSERT_TRUE(pkt.has_value());
+
+    // dispatch 1 completes -> barrier clears, but carrier (id 2) has not run -> not retirable
+    q->async_complete();
+    barrier.register_completion(q);
+    barrier.drain_queue(qid, 1);  // completed(1) < token(2): no-op
+    ASSERT_TRUE(barrier.complete());
+    ASSERT_FALSE(barrier.safe_to_destroy());
+
+    // carrier (id 2) completes -> retirable
+    barrier.drain_queue(qid, 2);
+    ASSERT_TRUE(barrier.safe_to_destroy());
+
+    registration::set_init_status(1);
+    registration::finalize();
+}
+
+// teardown escape: removing an enqueued queue releases the barrier instead of pinning it forever.
+TEST(hsa_barrier, safe_to_destroy_after_enqueued_queue_removed)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    auto queues = create_queue_map(1);
+    ASSERT_EQ(queues.size(), 1u);
+    Queue* q = queues.begin()->second.get();
+
+    hsa_barrier::queue_map_ptr_t q_map;
+    for(const auto& [k, v] : queues)
+        q_map[k] = v.get();
+
+    const int64_t qid = q->get_id().handle;
+
+    q->async_started();
+    hsa_barrier barrier([]() {}, get_api_table());
+    barrier.set_barrier(q_map);
+
+    ASSERT_TRUE(barrier.enqueue_packet(qid, 1).has_value());
+
+    q->async_complete();
+    barrier.register_completion(q);
+    ASSERT_TRUE(barrier.complete());
+    ASSERT_FALSE(barrier.safe_to_destroy());  // transition packet still outstanding
+
+    barrier.remove_queue(q);
+    ASSERT_TRUE(barrier.safe_to_destroy());
 
     registration::set_init_status(1);
     registration::finalize();

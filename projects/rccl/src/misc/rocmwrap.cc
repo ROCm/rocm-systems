@@ -12,22 +12,19 @@
 #include "param.h"
 #include "bootstrap.h"
 
-#include <dlfcn.h>
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <fstream>
 
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
-DECLARE_ROCM_PFN(hsa_amd_portable_export_dmabuf); // DMA-BUF support
+// DMA-BUF feature gate: stays NULL when the platform does not support DMA-BUF.
+// hsa_init/hsa_system_get_info/hsa_status_string are called directly via the
+// hsa-runtime64 library librccl links against (no dlopen/dlsym).
+DECLARE_ROCM_PFN(hsa_amd_portable_export_dmabuf);
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
 RCCL_PARAM(ForceEnableDMABUF, "FORCE_ENABLE_DMABUF", 0);
-/* ROCr Driver functions loaded with dlsym() */
-DECLARE_ROCM_PFN(hsa_init);
-DECLARE_ROCM_PFN(hsa_system_get_info);
-DECLARE_ROCM_PFN(hsa_status_string);
 
-static void *hsaLib;
 static uint16_t version_major, version_minor;
 
 int ncclCudaDriverVersionCache = -1;
@@ -43,6 +40,16 @@ NCCL_PARAM(CuMemHostEnable, "CUMEM_HOST_ENABLE", -1);
 CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 
 static int ncclCuMemSupported = 0;
+
+// cuMem VMM API availability by HIP/driver version.
+#define NCCL_CUMEM_NATIVE_MIN_VERSION   71260540
+#define NCCL_CUMEM_BACKPORT_MIN_VERSION 70051831
+#define NCCL_CUMEM_BACKPORT_MAX_VERSION 70060000
+
+#define NCCL_CUMEM_VERSION_SUPPORTED(version)                  \
+  ((version) >= NCCL_CUMEM_NATIVE_MIN_VERSION ||               \
+   ((version) >= NCCL_CUMEM_BACKPORT_MIN_VERSION &&            \
+    (version) < NCCL_CUMEM_BACKPORT_MAX_VERSION))
 
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
 
@@ -72,10 +79,8 @@ int ncclIsCuMemSupported() {
   }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
   {
-    // 70051831 = ROCm 7.0.2.2 backport build; [70051831, 70060000) covers 7.0.2.x range.
     // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
-    bool cuMemSupported = (cudaDriverVersion >= 71260540) ||
-                          (cudaDriverVersion >= 70051831 && cudaDriverVersion < 70060000);
+    bool cuMemSupported = NCCL_CUMEM_VERSION_SUPPORTED(cudaDriverVersion);
     if (!cuMemSupported) {
       WARN("cuMem support requires HIP_VERSION >= 7.12.60540 (or ROCm 7.0.2.x backport)");
       supported = 0;
@@ -97,8 +102,14 @@ error:
 }
 
 int ncclCuMemEnable() {
+#if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
   int param = ncclParamCuMemEnable();
   return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
+#else
+  if (ncclParamCuMemEnable() > 0)
+    WARN("NCCL_CUMEM_ENABLE=1 is set but cuMem VMM APIs are unavailable in this build (HIP_VERSION=%d); disabling cuMem", HIP_VERSION);
+  return 0;
+#endif
 }
 
 static int ncclCumemHostEnable = -1;
@@ -136,10 +147,12 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuDeviceGet(&currentDev, cudaDev));
       CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
       if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
-      prop.location.type = hipMemLocationTypeHostNuma;
+      // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
+      prop.location.type = hipMemLocationTypeHost;
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.requestedHandleTypes = ncclCuMemHandleType;
-      prop.location.id = cpuNumaNodeId;
+      // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.
+      prop.location.id = 0;  // ignored on the Host path
       CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
       size = 1;
       ALIGN_SIZE(size, granularity);
@@ -169,53 +182,19 @@ static void initOnceFunc() {
   hsa_status_t res;
 
   /*
-   * Load ROCr driver library
+   * The HSA (ROCr) runtime is directly linked into librccl via
+   * hsa-runtime64::hsa-runtime64; its entry points are resolved by the dynamic
+   * loader through librccl's RPATH (the same one that resolves libamdhip64).
+   * No dlopen/dlsym and no library-name string are needed here.
    */
-  char path[1024];
-  char *ncclCudaPath = getenv("RCCL_ROCR_PATH");
-  if (ncclCudaPath == NULL)
-    snprintf(path, 1024, "%s", "libhsa-runtime64.so");
-  else
-    snprintf(path, 1024, "%s%s", ncclCudaPath, "libhsa-runtime64.so");
-
-  hsaLib = dlopen(path, RTLD_LAZY);
-  if (hsaLib == NULL) {
-    WARN("Failed to find ROCm runtime library in %s (RCCL_ROCR_PATH=%s)", ncclCudaPath, ncclCudaPath);
-    goto error;
-  } else {
-    INFO(NCCL_INIT, "Using ROCr runtime at %s%s", path, ncclCudaPath ? " (RCCL_ROCR_PATH set)" : "");
-  }
-
-  /*
-   * Load initial ROCr functions
-   */
-
-  pfn_hsa_init = (PFN_hsa_init) dlsym(hsaLib, "hsa_init");
-  if (pfn_hsa_init == NULL) {
-    WARN("Failed to load ROCr missing symbol hsa_init");
-    goto error;
-  }
-
-  pfn_hsa_system_get_info = (PFN_hsa_system_get_info) dlsym(hsaLib, "hsa_system_get_info");
-  if (pfn_hsa_system_get_info == NULL) {
-    WARN("Failed to load ROCr missing symbol hsa_system_get_info");
-    goto error;
-  }
-
-  pfn_hsa_status_string = (PFN_hsa_status_string) dlsym(hsaLib, "hsa_status_string");
-  if (pfn_hsa_status_string == NULL) {
-    WARN("Failed to load ROCr missing symbol hsa_status_string");
-    goto error;
-  }
-
-  res = pfn_hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version_major);
+  res = hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version_major);
   if (res != 0) {
-    WARN("pfn_hsa_system_get_info failed with %d", res);
+    WARN("hsa_system_get_info failed with %d", res);
     goto error;
   }
-  res = pfn_hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MINOR, &version_minor);
+  res = hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MINOR, &version_minor);
   if (res != 0) {
-    WARN("pfn_hsa_system_get_info failed with %d", res);
+    WARN("hsa_system_get_info failed with %d", res);
     goto error;
   }
 
@@ -249,17 +228,21 @@ static void initOnceFunc() {
   }
 
   // ROCr checks
-  res = pfn_hsa_system_get_info((hsa_system_info_t) 0x204, &dmaBufSupport);
+  res = hsa_system_get_info((hsa_system_info_t) 0x204, &dmaBufSupport);
   if (res != HSA_STATUS_SUCCESS || !dmaBufSupport){
     INFO(NCCL_INIT, "Current version of ROCm does not support dmabuf feature.");
     goto error;
   }
+  else if (hsa_amd_portable_export_dmabuf == nullptr) {
+    // The capability query advertised DMA-BUF, but the weakly-linked entry point
+    // did not resolve (ROCr runtime too old to export it). Disable the feature
+    // cleanly rather than leaving an inconsistent gate.
+    INFO(NCCL_INIT, "ROCr runtime does not export hsa_amd_portable_export_dmabuf; disabling DMA-BUF.");
+    goto error;
+  }
   else {
-    pfn_hsa_amd_portable_export_dmabuf = (PFN_hsa_amd_portable_export_dmabuf) dlsym(hsaLib, "hsa_amd_portable_export_dmabuf");
-    if (pfn_hsa_amd_portable_export_dmabuf == NULL) {
-      WARN("Failed to load ROCr missing symbol hsa_amd_portable_export_dmabuf");
-      goto error;
-    }
+    // Arm the DMA-BUF feature gate with the resolved HSA symbol.
+    pfn_hsa_amd_portable_export_dmabuf = hsa_amd_portable_export_dmabuf;
   }
 
   //check OS kernel support
@@ -378,7 +361,7 @@ static void initOnceFunc() {
    * Multiple calls of hsa_init() will return immediately
    * without making any relevant change
    */
-  pfn_hsa_init();
+  hsa_init();
 
   initResult = ncclSuccess;
   return;

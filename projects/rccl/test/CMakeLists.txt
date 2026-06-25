@@ -8,6 +8,8 @@ if(BUILD_TESTS)
   option(OPENMP_TESTS_ENABLED "Enable OpenMP for unit tests" OFF)
   option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
   option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" OFF)
+  option(ENABLE_HOST_API_TESTS "Build the host-API tests" OFF)
+
 
   message("Building rccl unit tests (Installed in /test/rccl-UnitTests)")
   if(ENABLE_MPI_TESTS)
@@ -17,6 +19,9 @@ if(BUILD_TESTS)
   if (ENABLE_CODE_COVERAGE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
     set(HIPCC_COMPILE_FLAGS "${HIPCC_COMPILE_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
+    # Allow ProcessIsolatedTestRunner.cpp to call __llvm_profile_write_file()
+    # explicitly before _exit() so child-process coverage data is flushed.
+    add_compile_definitions(RCCL_TEST_CODE_COVERAGE=1)
   endif()
 
   find_package(hsa-runtime64 PATHS /opt/rocm )
@@ -118,6 +123,9 @@ if(BUILD_TESTS)
     if(RCCL_HAS_GIN_IB_PROXY)
       list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_GIN_IB_PROXY)
     endif()
+    if(ENABLE_HOST_API_TESTS)
+      list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_ENABLE_HOST_API_TESTS)
+    endif()
   endif()
   list(APPEND RCCL_COMMON_COMPILE_DEFS __HIP_PLATFORM_AMD__)
 
@@ -165,12 +173,14 @@ if(BUILD_TESTS)
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasJsonTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
@@ -213,7 +223,10 @@ if(BUILD_TESTS)
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
+      DdaCollCommonTests.cpp
+      VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/GinDeviceTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -237,14 +250,20 @@ if(BUILD_TESTS)
       ParamTests.cpp
       ArgCheckTests.cpp
       NChannelsPerNetPeerTests.cpp
+      BootstrapBidirTests.cpp
+      DdaIpcEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
+      NetDevsPolicyTests.cpp
       NetSocketTests.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
+      graph/NetDevsPolicyP2pNetTests.cpp
+      graph/TopoTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -260,6 +279,11 @@ if(BUILD_TESTS)
     # internal (Debug-visible) symbols normally.
     target_compile_options(rccl-UnitTestsFixturesDebug PRIVATE
       -fvisibility=hidden -fvisibility-inlines-hidden)
+    # NetDevsPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
+    # from the source tree (tools/topo_expl/models). Expose the test source dir
+    # so they can build the path.
+    target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
+      RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
@@ -308,11 +332,18 @@ if(BUILD_TESTS)
       transport/NetIbMPI/FaultInjectTests.cpp
       transport/GinMPI/GinMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
+      transport/GinDeviceMPITests.cpp
+      WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       RegistrationMPITests.cpp
+      HostApiMPITests.cpp
       mem_manager/SuspendResumeMPITests.cpp
       RevokeMPITests.cpp
+      ce/CeMPITests.cpp
+      ce/CeInternalMPITests.cpp
+      GrowMPITests.cpp
+      GinNcclTimeoutMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
@@ -322,6 +353,10 @@ if(BUILD_TESTS)
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+    if(ENABLE_DEVICE_LINKER)
+      # Mirror the rccl library define so device-linker-specific test expectations compile in.
+      target_compile_definitions(${test_executable} PRIVATE RCCL_DEVICE_LINKER)
+    endif()
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
     if(BUILD_ADDRESS_SANITIZER)
       target_compile_options(${test_executable} PRIVATE -fsanitize=address)

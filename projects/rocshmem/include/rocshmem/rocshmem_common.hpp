@@ -145,7 +145,7 @@ void set_internal_ctx(rocshmem_ctx_t *ctx);
  */
 //TODO: this should remain internal?
 enum class BackendType { GDA_BACKEND, RO_BACKEND, IPC_BACKEND };
-BackendType get_backend_type();
+BackendType rocshmem_query_backend_type();
 
 typedef uint64_t *rocshmem_team_t;
 

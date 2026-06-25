@@ -91,8 +91,12 @@ public:
   std::unique_ptr<DppOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
+  bool sdwa_src0_neg_ = false;
+  bool sdwa_src0_abs_ = false;
   uint32_t sdwa_src1_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src1_sext_ = false;
+  bool sdwa_src1_neg_ = false;
+  bool sdwa_src1_abs_ = false;
   uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD;
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;
@@ -106,6 +110,22 @@ public:
   bool has_sdwa();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
+  uint32_t dpp_ctrl_ = 0;
+  uint32_t dpp_row_mask_ = 0xF;
+  uint32_t dpp_bank_mask_ = 0xF;
+  uint32_t dpp_bound_ctrl_ = 0;
+  std::unique_ptr<DppOperand> dpp_src0_;
+  std::unique_ptr<DppOperand> dpp_src1_;
+  uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
+  bool sdwa_src0_sext_ = false;
+  bool sdwa_src0_neg_ = false;
+  bool sdwa_src0_abs_ = false;
+  uint32_t sdwa_src1_sel_ = amdgpu::sdwa::DWORD;
+  bool sdwa_src1_sext_ = false;
+  bool sdwa_src1_neg_ = false;
+  bool sdwa_src1_abs_ = false;
+  uint32_t sdwa_sdst_ = 106;
+  bool sdwa_sd_ = false;
 };
 
 class Vop2 : public IsaInstruction<Isa> {
@@ -127,8 +147,12 @@ public:
   std::unique_ptr<DppOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
+  bool sdwa_src0_neg_ = false;
+  bool sdwa_src0_abs_ = false;
   uint32_t sdwa_src1_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src1_sext_ = false;
+  bool sdwa_src1_neg_ = false;
+  bool sdwa_src1_abs_ = false;
   uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD;
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;

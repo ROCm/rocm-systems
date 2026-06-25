@@ -82,6 +82,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
 PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
 MATRIX_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
 CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
+CACHE_LEVELS = ["ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
 
 TOP_N = 10
 
@@ -119,12 +120,19 @@ class PlotPoints:
     ai_l1: list[list[float]]
     ai_l2: list[list[float]]
     ai_hbm: list[list[float]]
+    ai_lds: list[list[float]]
     kernelNames: list[str]
 
     @classmethod
     def empty(cls) -> "PlotPoints":
         """Create empty plot points structure."""
-        return cls(ai_l1=[[], []], ai_l2=[[], []], ai_hbm=[[], []], kernelNames=[])
+        return cls(
+            ai_l1=[[], []],
+            ai_l2=[[], []],
+            ai_hbm=[[], []],
+            ai_lds=[[], []],
+            kernelNames=[],
+        )
 
 
 @dataclass
@@ -163,15 +171,6 @@ def get_font() -> dict[str, Union[int, str]]:
     }
 
 
-def get_color(category: str) -> str:
-    color_map = {"ai_l1": "green", "ai_l2": "blue", "ai_hbm": "red"}
-
-    if category not in color_map:
-        raise RuntimeError(f"Invalid category passed to get_color(): {category}")
-
-    return color_map[category]
-
-
 def sanitize_ai_value(value: float) -> float:
     excluded_values = ("", "N/A", np.inf, -np.inf, None)
     return value if value and value not in excluded_values else 0
@@ -191,7 +190,7 @@ def calc_ceilings(
 
     if ai_data:
         max_ai = 0
-        for cache_level in ["ai_l1", "ai_l2", "ai_hbm"]:
+        for cache_level in CACHE_LEVELS:
             if cache_level in ai_data and ai_data[cache_level][0]:
                 cache_max = max(ai_data[cache_level][0])
                 max_ai = max(max_ai, cache_max)
@@ -386,17 +385,18 @@ def calc_ai_analyze(
                 kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
                 kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
 
-        # eval metrics for single kernel only
+        # eval_metric keys off kernel_dfs; extra dfs_expressions entries are ignored.
         eval_metric(
             kernel_dfs,
             kernel_dfs_type,
+            arch_config.dfs_expressions,
             workload.sys_info.iloc[0],
             workload.roofline_peaks,
             kernel_pmc_df,
             debug=False,
         )
 
-        ai_hbm = ai_l2 = ai_l1 = performance = 0
+        ai_hbm = ai_l2 = ai_l1 = ai_lds = performance = 0
 
         if 402 in kernel_dfs:
             for idx, row in kernel_dfs[402].iterrows():
@@ -408,6 +408,8 @@ def calc_ai_analyze(
                     ai_l2 = sanitize_ai_value(value)
                 elif metric == "AI L1":
                     ai_l1 = sanitize_ai_value(value)
+                elif metric == "AI LDS":
+                    ai_lds = sanitize_ai_value(value)
                 elif metric == "Performance (GFLOPs)":
                     performance = sanitize_ai_value(value)
 
@@ -417,6 +419,7 @@ def calc_ai_analyze(
             f"AI_HBM={ai_hbm:.2f}, "
             f"AI_L2={ai_l2:.2f}, "
             f"AI_L1={ai_l1:.2f}, "
+            f"AI_LDS={ai_lds:.2f}, "
             f"Performance={performance:.2e} GFLOP/s",
         )
 
@@ -431,6 +434,9 @@ def calc_ai_analyze(
             if ai_l1 >= 0:
                 plot_points.ai_l1[0].append(ai_l1)
                 plot_points.ai_l1[1].append(performance)
+            if ai_lds >= 0:
+                plot_points.ai_lds[0].append(ai_lds)
+                plot_points.ai_lds[1].append(performance)
 
             plot_points.kernelNames.append(kernel_name)
             console_debug(

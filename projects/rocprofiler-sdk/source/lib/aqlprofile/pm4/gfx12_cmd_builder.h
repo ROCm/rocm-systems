@@ -378,7 +378,7 @@ public:
         uint32_t dword3 = PACKET3_ACQUIRE_MEM__COHER_SIZE((uint32_t(size)));
         uint32_t dword4 = PACKET3_ACQUIRE_MEM__COHER_SIZE_HI((uint32_t(size >> 32)));
 
-        // Specify the poll interval for determing if operation is complete
+        // Specify the poll interval for determining if operation is complete
         uint32_t dword7 = PACKET3_ACQUIRE_MEM__POLL_INTERVAL(0x10);
 
         // Program GCR Control Register. Initialize L2 Cache flush
@@ -522,6 +522,17 @@ public:
                                         const uint32_t* dst_addr,
                                         uint32_t        dw_mask)
     {
+        if(dw_mask == 0x3 && src_reg_addr_hi == src_reg_addr_lo + 1 &&
+           (reinterpret_cast<std::uintptr_t>(dst_addr) % 8) == 0)
+        {
+            BuildCopyRegDataPacket(cmdbuf,
+                                   src_reg_addr_lo,
+                                   dst_addr,
+                                   PACKET3_COPY_DATA__COUNT_SEL__64_BITS_OF_DATA,
+                                   false);
+            return 2;
+        }
+
         uint32_t read_counter = 0;
         if(dw_mask & 0x1)
         {
