@@ -52,8 +52,7 @@ concurrency:
 
 env:
   RCCL_CI_ROOT: /it-share/rccl-ci
-  # SLURM_RESERVATION intentionally unset: runner user lacks reservation access;
-  # node pinning via --nodelist in rccl_ab.sbatch is sufficient
+  SLURM_RESERVATION: rccl_dev
 
 jobs:
   perf-gate:
