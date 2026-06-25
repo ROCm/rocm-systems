@@ -974,7 +974,7 @@ struct Point {
     int x;
     int y;
 
-    __device__ Point operator+(const Point& rhs)
+    __host__ __device__ Point operator+(const Point& rhs) const
     {
       return { x + rhs.x, y + rhs.y };
     }

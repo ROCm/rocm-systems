@@ -534,6 +534,22 @@
           "test_filter": "XmlTest.*"
         },
         {
+          "name": "MemManager_FixturesDebug_CuMem0",
+          "description": "MemManager pure-state, real-HIP, stats and allocator-wiring tests with NCCL_CUMEM_ENABLE=0 (CUMEM-gated subtests self-skip via GTEST_SKIP)",
+          "test_filter": "MemManagerTest.*:MemManagerRealMem.*:MemManagerStatsTest.*:MemManagerAllocator.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        },
+        {
+          "name": "MemManager_FixturesDebug_CuMem1",
+          "description": "MemManager pure-state, real-HIP, stats and allocator-wiring tests with NCCL_CUMEM_ENABLE=1 (exercises CUMEM/VMM allocator-dispatch paths where the runtime supports CUMEM)",
+          "test_filter": "MemManagerTest.*:MemManagerRealMem.*:MemManagerStatsTest.*:MemManagerAllocator.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
           "name": "TopoTest",
           "description": "Topology construction tests",
           "test_filter": "TopoTest.*"
@@ -1520,6 +1536,104 @@
           "description": "Revoke parent then shrink then collective then revoke child then destroy across multiple generations; verifies no leaked resources",
           "test_filter": "RevokeMPITest.RepeatedRevokeShrinkCycles_ResourceCleanup"
         }
+      ]
+    },
+
+    "mem_manager_mpi_cumem0": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "MemManager_AnyRanks_CuMem0",
+          "description": "Bootstrap-coupled internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=0",
+          "test_filter": "MemManagerAnyRanks.*"
+        },
+        {
+          "name": "MemManager_TwoRank_CuMem0",
+          "description": "Two-rank peer export/import internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=0",
+          "test_filter": "MemManagerTwoRank.*"
+        }
+      ]
+    },
+
+    "mem_manager_mpi_cumem1": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "MemManager_AnyRanks_CuMem1",
+          "description": "Bootstrap-coupled internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=1",
+          "test_filter": "MemManagerAnyRanks.*"
+        },
+        {
+          "name": "MemManager_TwoRank_CuMem1",
+          "description": "Two-rank peer export/import internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=1",
+          "test_filter": "MemManagerTwoRank.*"
+        }
+      ]
+    },
+
+    "suspend_resume_public_api_cumem0": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "0"
+      },
+      "tests": [
+        { "name": "SuspendResume_Basic_CuMem0",                "description": "Basic public ncclCommSuspend/Resume cycle, multi-cycle, barrier sync (NCCL_CUMEM_ENABLE=0)",      "test_filter": "SuspendResumeBasic.*" },
+        { "name": "SuspendResume_MemStats_CuMem0",             "description": "ncclCommMemStats before/after Suspend; Total = Persist + Suspend conservation (NCCL_CUMEM_ENABLE=0)", "test_filter": "SuspendResumeMemStats.*" },
+        { "name": "SuspendResume_CollectiveIntegrity_CuMem0",  "description": "AllReduce/P2p auto-mark and rebuild after Suspend/Resume (NCCL_CUMEM_ENABLE=0; CUMEM-only subtests skip via GTEST_SKIP)", "test_filter": "SuspendResumeCollectiveIntegrity.*" },
+        { "name": "SuspendResume_Lifecycle_CuMem0",            "description": "ncclCommDestroy on suspended communicator (NCCL_CUMEM_ENABLE=0)",                                  "test_filter": "SuspendResumeLifecycle.*" },
+        { "name": "SuspendResume_Group_CuMem0",                "description": "Atomic Suspend/Resume inside ncclGroupStart/End (NCCL_CUMEM_ENABLE=0)",                            "test_filter": "SuspendResumeGroup.*" },
+        { "name": "SuspendResume_ArgValidation_CuMem0",        "description": "Argument validation: zero/unknown flags, double-Suspend/Resume (NCCL_CUMEM_ENABLE=0)",            "test_filter": "SuspendResumeArgValidation.*" },
+        { "name": "SuspendResume_MemStatsValidation_CuMem0",   "description": "ncclCommMemStats argument validation (NCCL_CUMEM_ENABLE=0)",                                       "test_filter": "SuspendResumeMemStatsValidation.*" }
+      ]
+    },
+
+    "suspend_resume_public_api_cumem1": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        { "name": "SuspendResume_Basic_CuMem1",                "description": "Basic public ncclCommSuspend/Resume cycle, multi-cycle, barrier sync (NCCL_CUMEM_ENABLE=1)",      "test_filter": "SuspendResumeBasic.*" },
+        { "name": "SuspendResume_MemStats_CuMem1",             "description": "ncclCommMemStats before/after Suspend; Total = Persist + Suspend conservation (NCCL_CUMEM_ENABLE=1)", "test_filter": "SuspendResumeMemStats.*" },
+        { "name": "SuspendResume_CollectiveIntegrity_CuMem1",  "description": "AllReduce/P2p auto-mark and rebuild after Suspend/Resume (NCCL_CUMEM_ENABLE=1; exercises CUMEM path where supported)", "test_filter": "SuspendResumeCollectiveIntegrity.*" },
+        { "name": "SuspendResume_Lifecycle_CuMem1",            "description": "ncclCommDestroy on suspended communicator (NCCL_CUMEM_ENABLE=1)",                                  "test_filter": "SuspendResumeLifecycle.*" },
+        { "name": "SuspendResume_Group_CuMem1",                "description": "Atomic Suspend/Resume inside ncclGroupStart/End (NCCL_CUMEM_ENABLE=1)",                            "test_filter": "SuspendResumeGroup.*" },
+        { "name": "SuspendResume_ArgValidation_CuMem1",        "description": "Argument validation: zero/unknown flags, double-Suspend/Resume (NCCL_CUMEM_ENABLE=1)",            "test_filter": "SuspendResumeArgValidation.*" },
+        { "name": "SuspendResume_MemStatsValidation_CuMem1",   "description": "ncclCommMemStats argument validation (NCCL_CUMEM_ENABLE=1)",                                       "test_filter": "SuspendResumeMemStatsValidation.*" }
       ]
     },
 
@@ -3050,6 +3164,30 @@
       "name": "Revoke MPI Tests - Multi-Node (4-rank, 2-node)",
       "description": "ncclCommRevoke multi-node scenarios: asymmetric shrink across nodes (ring-only topology after revoke) and repeated revoke/shrink generations to verify no leaked resources",
       "config": "revoke_mpi_tests_multinode",
+      "enabled": true
+    },
+    {
+      "name": "MemManager - MPI (Internal API, CUMEM=0)",
+      "description": "Internal ncclCommMemSuspend/Resume on raw VMM, np=2 (MemManagerAnyRanks + MemManagerTwoRank), NCCL_CUMEM_ENABLE=0",
+      "config": "mem_manager_mpi_cumem0",
+      "enabled": true
+    },
+    {
+      "name": "MemManager - MPI (Internal API, CUMEM=1)",
+      "description": "Internal ncclCommMemSuspend/Resume on raw VMM, np=2 (MemManagerAnyRanks + MemManagerTwoRank), NCCL_CUMEM_ENABLE=1",
+      "config": "mem_manager_mpi_cumem1",
+      "enabled": true
+    },
+    {
+      "name": "Suspend/Resume - Public API (CUMEM=0)",
+      "description": "Public ncclCommSuspend/Resume/MemStats end-to-end, NCCL_CUMEM_ENABLE=0 (CUMEM-only subtests skip via GTEST_SKIP)",
+      "config": "suspend_resume_public_api_cumem0",
+      "enabled": true
+    },
+    {
+      "name": "Suspend/Resume - Public API (CUMEM=1)",
+      "description": "Public ncclCommSuspend/Resume/MemStats end-to-end, NCCL_CUMEM_ENABLE=1 (exercises CUMEM path where supported)",
+      "config": "suspend_resume_public_api_cumem1",
       "enabled": true
     },
     {

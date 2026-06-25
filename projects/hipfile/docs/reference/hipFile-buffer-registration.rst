@@ -2,11 +2,11 @@
    :description: hipFile buffer registration
    :keywords: hipFile, ROCm, buffer, device memory, registration
 
-*****************************
+****************************
 hipFile buffer registration
-*****************************
+****************************
 
-Unlike :doc:`file registration <./hipFile-file-registration>`, registering a buffer is optional. 
+Unlike :doc:`file registration <./hipFile-file-registration>`, registering a buffer is optional.
 
 Buffer registration stores the device base pointer and length in bytes in an internal map. During ``hipFileRead()`` and ``hipFileWrite()``, offsets and sizes are validated against the map without requiring HIP pointer lookup. This is useful for situations where the buffer is reused for multiple transfers or when predictable bounds checks are needed.
 
