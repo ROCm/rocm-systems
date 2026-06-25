@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
@@ -916,6 +917,105 @@ TEST(DppPermuteTest, Cdna4GeneratedVop1UsesSharedRowBroadcast) {
   EXPECT_EQ(cu->read_vgpr(vbase + kDst, 32), 0u);
   EXPECT_EQ(cu->read_vgpr(vbase + kDst, 48), 0x102Fu);
   EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x102Fu);
+}
+
+TEST(DppPermuteTest, Cdna4GeneratedVop1DppWriteMaskHonorsBoundCtrl) {
+  amdgpu::GpuMemory mem("cdna4_dpp_write_mask_mem");
+  amdgpu::L2Cache l2("cdna4_dpp_write_mask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_dpp_write_mask_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  wf->set_exec(~0ULL);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vbase + kSrc, lane, 0x1000u + lane);
+    cu->write_vgpr(vbase + kDst, lane, 0xDEAD0000u + lane);
+  }
+
+  cdna4::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  cdna4::VMovB32Vop1 inst(reinterpret_cast<const cdna4::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0xDEAD0000u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 15), 0xDEAD000Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 16), 0x100Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 31), 0x100Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 32), 0xDEAD0020u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 47), 0xDEAD002Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 48), 0x102Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x102Fu);
+}
+
+TEST(DppPermuteTest, Cdna4GeneratedVopcDppWriteMaskHonorsBoundCtrl) {
+  amdgpu::GpuMemory mem("cdna4_dpp_vopc_write_mask_mem");
+  amdgpu::L2Cache l2("cdna4_dpp_vopc_write_mask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_dpp_vopc_write_mask_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  wf->set_exec(~0ULL);
+  wf->set_vcc(0);
+
+  constexpr uint32_t kSrc0 = 4;
+  constexpr uint32_t kSrc1 = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    uint32_t src = 0x1000u + lane;
+    uint32_t cmp = src;
+    if (lane >= 16 && lane < 32)
+      cmp = 0x100Fu;
+    else if (lane >= 48)
+      cmp = 0x102Fu;
+    cu->write_vgpr(vbase + kSrc0, lane, src);
+    cu->write_vgpr(vbase + kSrc1, lane, cmp);
+  }
+
+  cdna4::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc0;
+  // VOPC reads bits [16:9] as vsrc1; those overlap the VOP_DPP op field.
+  raw.op = kSrc1;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  cdna4::VCmpEqU32Vopc inst(reinterpret_cast<const cdna4::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(wf->vcc(), 0xFFFF0000FFFF0000ULL);
 }
 
 // ---------------------------------------------------------------------------
