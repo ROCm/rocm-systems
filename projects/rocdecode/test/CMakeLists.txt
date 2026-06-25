@@ -172,11 +172,6 @@ macro(set_test_env TEST_NAME)
   endif()
 endmacro()
 
-# Keep old name for compatibility
-macro(set_therock_env TEST_NAME)
-  set_test_env(${TEST_NAME})
-endmacro()
-
 # Option to enable extended tests
 option(ENABLE_EXTENDED_TESTS "Enable extended FFmpeg-based tests" OFF)
 
@@ -276,7 +271,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
-  set_therock_env(video_decode-HEVC)
+  set_test_env(video_decode-HEVC)
 
   # 8 - videoDecode AVC
   add_test(
@@ -290,7 +285,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.mp4
   )
-  set_therock_env(video_decode-AVC)
+  set_test_env(video_decode-AVC)
 
   # 9 - videoDecode AV1
   add_test(
@@ -304,7 +299,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
   )
-  set_therock_env(video_decode-AV1)
+  set_test_env(video_decode-AV1)
 
   # 10 - videoDecode VP9
   add_test(
@@ -318,7 +313,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
   )
-  set_therock_env(video_decode-VP9)
+  set_test_env(video_decode-VP9)
 
   # 11 - videoDecodePerf
   add_test(
@@ -332,7 +327,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodeperf"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
-  set_therock_env(video_decodePerf-HEVC)
+  set_test_env(video_decodePerf-HEVC)
 
   # 12 - videoDecodeBatch
   add_test(
@@ -346,7 +341,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodebatch"
             -i ${ROCM_PATH}/share/rocdecode/video/ -t 2
   )
-  set_therock_env(video_decodeBatch)
+  set_test_env(video_decodeBatch)
 
   # 13 - videoDecodeRGB
   add_test(
@@ -360,7 +355,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodergb"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4 -of rgb
   )
-  set_therock_env(video_decodeRGB-HEVC)
+  set_test_env(video_decodeRGB-HEVC)
 
   # 14 - videoDecodeMem
   add_test(
@@ -374,7 +369,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodemem"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
-  set_therock_env(video_decodeMem-HEVC)
+  set_test_env(video_decodeMem-HEVC)
 
   # 15 - videoDecodeRGBResize
   add_test(
@@ -388,7 +383,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodergb"
             -i "${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4" -resize 640x360 -of rgb
   )
-  set_therock_env(video_decodeRGB-Resize)
+  set_test_env(video_decodeRGB-Resize)
 
   if(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
     # 16 - videoDecode Host backend
