@@ -320,6 +320,8 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
     elif export_format == "md":
 
         def _fmt_val_md(v):
+            import math
+            
             if v is None or (isinstance(v, float) and math.isnan(v)):
                 return "nan"
             if isinstance(v, float):
