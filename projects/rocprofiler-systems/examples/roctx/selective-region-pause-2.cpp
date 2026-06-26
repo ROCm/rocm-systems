@@ -25,13 +25,13 @@
 //   CodeBlock_D                                 (outside region — not profiled)
 //
 // Run with filter:
-//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective_region_pause_2
-//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective_region_pause_2
+//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective-region-pause-2
+//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective-region-pause-2
 //   --push-pop
 //
 // Expected: profiling data recorded for {CodeBlock_A, CodeBlock_B, CodeBlock_C}
 
-#include "roctx_example_kernels.hpp"
+#include "roctx-example-kernels.hpp"
 
 DEFINE_KERNEL(CodeBlock_Z, 10)
 DEFINE_KERNEL(CodeBlock_A, 20)
