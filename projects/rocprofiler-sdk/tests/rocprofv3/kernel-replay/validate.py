@@ -157,9 +157,9 @@ def test_every_dispatch_replayed_n_passes(json_data, expected_passes):
     assert passes_by_dispatch, "no dispatches found in counter records"
     want = set(range(expected_passes))
     for dispatch_id, passes in passes_by_dispatch.items():
-        assert passes == want, (
-            f"dispatch {dispatch_id} replay passes={sorted(passes)}, expected {sorted(want)}"
-        )
+        assert (
+            passes == want
+        ), f"dispatch {dispatch_id} replay passes={sorted(passes)}, expected {sorted(want)}"
 
 
 def test_counters_consistent_across_passes(json_data):
@@ -197,9 +197,9 @@ def test_counters_differ_between_kernels(json_data):
             if target in name and target not in per_kernel:
                 per_kernel[target] = _aggregated_named_counters(rec, counter_id_to_name)
 
-    assert "vecAdd" in per_kernel and "saxpy" in per_kernel, (
-        f"need both vecAdd and saxpy counter records; found {sorted(per_kernel)}"
-    )
+    assert (
+        "vecAdd" in per_kernel and "saxpy" in per_kernel
+    ), f"need both vecAdd and saxpy counter records; found {sorted(per_kernel)}"
     vecadd, saxpy = per_kernel["vecAdd"], per_kernel["saxpy"]
     shared = set(vecadd) & set(saxpy)
     assert shared, "no shared counters between vecAdd and saxpy to compare"
@@ -213,7 +213,10 @@ def test_counters_differ_between_kernels(json_data):
 def test_replayed_kernels_present(json_data):
     sdk = _sdk(json_data)
     id_to_name = _kernel_id_to_name(sdk)
-    names = {id_to_name.get(int(_dispatch_info(rec)["kernel_id"])) for rec in _counter_records(sdk)}
+    names = {
+        id_to_name.get(int(_dispatch_info(rec)["kernel_id"]))
+        for rec in _counter_records(sdk)
+    }
     assert any(n and "vecAdd" in n for n in names), f"vecAdd not found in {names}"
     assert any(n and "saxpy" in n for n in names), f"saxpy not found in {names}"
 
@@ -230,7 +233,9 @@ def test_expected_counters_present(json_data):
                 seen.add(name)
 
     for counter in EXPECTED_COUNTERS:
-        assert counter in seen, f"counter {counter} not found in collected counters: {sorted(seen)}"
+        assert (
+            counter in seen
+        ), f"counter {counter} not found in collected counters: {sorted(seen)}"
 
 
 def test_launch_dimensions(json_data):
@@ -246,9 +251,9 @@ def test_launch_dimensions(json_data):
                 continue
             grid = int(info["grid_size"]["x"])
             workgroup = int(info["workgroup_size"]["x"])
-            assert _within_tolerance(grid, expected["grid_size"]), (
-                f"{key} grid_size {grid} not within {DIM_TOLERANCE:.0%} of {expected['grid_size']}"
-            )
+            assert _within_tolerance(
+                grid, expected["grid_size"]
+            ), f"{key} grid_size {grid} not within {DIM_TOLERANCE:.0%} of {expected['grid_size']}"
             assert _within_tolerance(workgroup, expected["workgroup_size"]), (
                 f"{key} workgroup_size {workgroup} not within {DIM_TOLERANCE:.0%} of "
                 f"{expected['workgroup_size']}"

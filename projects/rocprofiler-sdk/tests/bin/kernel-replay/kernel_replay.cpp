@@ -38,11 +38,8 @@
         hipError_t _err = (call);                                                                  \
         if(_err != hipSuccess)                                                                     \
         {                                                                                          \
-            fprintf(stderr,                                                                        \
-                    "HIP error '%s' at %s:%d\n",                                                   \
-                    hipGetErrorString(_err),                                                       \
-                    __FILE__,                                                                      \
-                    __LINE__);                                                                     \
+            fprintf(                                                                               \
+                stderr, "HIP error '%s' at %s:%d\n", hipGetErrorString(_err), __FILE__, __LINE__); \
             return EXIT_FAILURE;                                                                   \
         }                                                                                          \
     } while(0)
@@ -106,8 +103,12 @@ run_vecadd(int n, int iters)
         {
             if(!approx_equal(h_c[i], h_a[i] + h_b[i]))
             {
-                fprintf(stderr, "vecAdd mismatch iter %d elem %d: %f != %f\n",
-                        iter, i, h_c[i], h_a[i] + h_b[i]);
+                fprintf(stderr,
+                        "vecAdd mismatch iter %d elem %d: %f != %f\n",
+                        iter,
+                        i,
+                        h_c[i],
+                        h_a[i] + h_b[i]);
                 return EXIT_FAILURE;
             }
         }
@@ -156,8 +157,12 @@ run_saxpy(int n, int iters)
         {
             if(!approx_equal(h_result[i], expected[i]))
             {
-                fprintf(stderr, "saxpy mismatch iter %d elem %d: %f != %f\n",
-                        iter, i, h_result[i], expected[i]);
+                fprintf(stderr,
+                        "saxpy mismatch iter %d elem %d: %f != %f\n",
+                        iter,
+                        i,
+                        h_result[i],
+                        expected[i]);
                 return EXIT_FAILURE;
             }
         }
