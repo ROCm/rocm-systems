@@ -11,7 +11,7 @@ from conftest import RocprofsysTest
 
 pytestmark = [
     pytest.mark.overflow,
-    pytest.mark.perf_event_paranoid(2),
+    pytest.mark.perf_event_usable,
 ]
 
 # =============================================================================

@@ -11,9 +11,7 @@ from pathlib import Path
 import shutil
 from conftest import RocprofsysTest
 
-pytestmark = [
-    pytest.mark.rocprof_config,
-]
+pytestmark = [pytest.mark.rocprof_config]
 
 
 # =============================================================================

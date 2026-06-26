@@ -9,7 +9,7 @@
 #   1. Create/reuse a venv.
 #   2. Install torch + the ROCm SDK (which ships rocjitsu) from the
 #      gfx950-dcgpu nightly index.
-#   4. Run tiny_torch.py via `mirage run --profile rocjitsu-MI350X` with
+#   4. Run tiny_torch.py via `mirage run --profile mi350x` with
 #      the venv's python3, and assert it prints `tiny_torch_ok`.
 #
 # Env knobs:
@@ -22,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIRAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FIXTURE="$MIRAGE_DIR/tests/fixtures/ml/tiny_torch.py"
-PROFILE="rocjitsu-MI350X"
+PROFILE="mi350x"
 
 VENV="${VENV:-$MIRAGE_DIR/.venv-mi350}"
 INDEX_URL="${INDEX_URL:-https://rocm.nightlies.amd.com/v2/gfx950-dcgpu/}"

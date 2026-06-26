@@ -59,7 +59,6 @@ public:
 
         metrics out{};
         convert_power(raw, out);
-        convert_temperature(raw, out);
         convert_activity(raw, out);
         convert_xcp(raw, out);
         convert_xgmi(raw, out);
@@ -74,6 +73,30 @@ public:
         check(amdsmi_get_gpu_memory_usage(m_handle, AMDSMI_MEM_TYPE_VRAM, &usage),
               "get_memory_usage");
         return usage;
+    }
+
+    // amdsmi_get_temp_metric() returns the same std::int64_t as SMI API.
+    // Not narrowed or reinterpreted at this boundary to std::uint32_t
+    // (including sub-zero °C if the stack ever reports it).
+    // Failures are non-success statuses -> std::runtime_error via check().
+    [[nodiscard]] std::int64_t get_temperature(
+        amdsmi_temperature_type_t sensor_type) const
+    {
+        std::int64_t temperature = 0;
+        check(amdsmi_get_temp_metric(m_handle, sensor_type, AMDSMI_TEMP_CURRENT,
+                                     &temperature),
+              "get_temp_metric");
+        return temperature;
+    }
+
+    [[nodiscard]] std::int64_t get_hotspot_temperature() const
+    {
+        return get_temperature(AMDSMI_TEMPERATURE_TYPE_HOTSPOT);
+    }
+
+    [[nodiscard]] std::int64_t get_edge_temperature() const
+    {
+        return get_temperature(AMDSMI_TEMPERATURE_TYPE_EDGE);
     }
 
     [[nodiscard]] std::uint64_t get_raw_sdma_usage() const
@@ -216,12 +239,6 @@ private:
     {
         out.current_socket_power = raw.current_socket_power;
         out.average_socket_power = raw.average_socket_power;
-    }
-
-    static void convert_temperature(const amdsmi_gpu_metrics_t& raw, metrics& out)
-    {
-        out.hotspot_temperature = raw.temperature_hotspot;
-        out.edge_temperature    = raw.temperature_edge;
     }
 
     static void convert_activity(const amdsmi_gpu_metrics_t& raw, metrics& out)

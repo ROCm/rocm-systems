@@ -11,7 +11,7 @@ from conftest import RocprofsysTest
 
 pytestmark = [
     pytest.mark.annotate,
-    pytest.mark.perf_event_paranoid(2),
+    pytest.mark.perf_event_usable,
     pytest.mark.papi,
 ]
 
@@ -21,7 +21,14 @@ pytestmark = [
 
 
 @pytest.fixture
-def annotate_env() -> dict[str, str]:
+def annotate_papi_condition(rocprof_config) -> bool:
+    """Check if PAPI is available and usable."""
+    caps = rocprof_config.capabilities
+    return caps.papi_availability and caps.perf_events_usable
+
+
+@pytest.fixture
+def annotate_env(annotate_papi_condition) -> dict[str, str]:
     """Environment variables for Annotate tests."""
     env = {
         "ROCPROFSYS_TRACE_LEGACY": "ON",

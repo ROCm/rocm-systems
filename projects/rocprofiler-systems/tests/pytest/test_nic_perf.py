@@ -12,7 +12,7 @@ from conftest import RocprofsysTest
 
 pytestmark = [
     pytest.mark.nic_perf,
-    pytest.mark.papi_nic,
+    pytest.mark.nic,
     pytest.mark.perf_event_paranoid(2),
 ]
 
