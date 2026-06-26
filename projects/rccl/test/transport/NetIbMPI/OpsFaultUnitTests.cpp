@@ -244,5 +244,36 @@ TEST(OpsFaultUnit, ShimPostSendErrnoAndForward) {
     EXPECT_EQ(ncclIbOpsFaultRemove(&fake.ctx), ncclSuccess);
 }
 
+// =============================================================================
+// Test: ShimPostRecvErrnoAndForward
+//
+// Symmetric to ShimPostSendErrnoAndForward for the post_recv shim.
+//
+// Verifies: when armed the shim returns the injected errno and sets *bad_wr
+//           (tolerating bad_wr == NULL); when disarmed it forwards to the real op.
+// Requires: installed fake context.
+// =============================================================================
+TEST(OpsFaultUnit, ShimPostRecvErrnoAndForward) {
+    resetCounters();
+    FakeCtx fake(/*qpNum=*/201);
+    ASSERT_EQ(ncclIbOpsFaultInstall(&fake.ctx), ncclSuccess);
+    ASSERT_EQ(ncclIbOpsFaultArmPostRecv(&fake.ctx, 201, kEagain), ncclSuccess);
+
+    struct ibv_recv_wr wr; memset(&wr, 0, sizeof(wr));
+    struct ibv_recv_wr* bad = nullptr;
+
+    EXPECT_EQ(fake.ctx.ops.post_recv(&fake.qp, &wr, &bad), kEagain);
+    EXPECT_EQ(bad, &wr);
+    EXPECT_EQ(g_realPostRecvCalls, 0);
+
+    EXPECT_EQ(fake.ctx.ops.post_recv(&fake.qp, &wr, nullptr), kEagain);
+
+    ASSERT_EQ(ncclIbOpsFaultArmPostRecv(&fake.ctx, 201, 0), ncclSuccess);
+    EXPECT_EQ(fake.ctx.ops.post_recv(&fake.qp, &wr, &bad), 0);
+    EXPECT_EQ(g_realPostRecvCalls, 1);
+
+    EXPECT_EQ(ncclIbOpsFaultRemove(&fake.ctx), ncclSuccess);
+}
+
 
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
