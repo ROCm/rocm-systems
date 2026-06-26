@@ -351,6 +351,9 @@ memory:
     # Does not play well with ASAN
     disabled: [asan]
     tags: []
+  Unit_hipMemcpy_DynamicQueueChurn_StagedCopies:
+    <<: *level_2
+    tags: [multigpu, transfer]
   Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
     <<: *level_2
     # disabling due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
@@ -394,6 +397,9 @@ memory:
     <<: *level_2
     # Tests behaviour after free which throws off the sanitizer
     disabled: [asan]
+  Unit_hipHostRegister_DuplicateAndDisjoint:
+    <<: *level_2
+    tags: [alloc]
   Unit_hipHostRegister_Capture:
     <<: *level_2
     tags: [alloc]
@@ -804,6 +810,7 @@ memory:
   Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
   Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
   Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_swap_cp: *level_2
   Unit_hipMemcpyBatchAsync_NegativeTsts:
     <<: *level_2
     tags: [transfer]
@@ -1941,6 +1948,30 @@ memory:
   Unit_hipMemPrefetchBatchAsync_MultiDevice:
     <<: *level_2
     tags: [query]
+  Unit_hipMemDiscardBatchAsync_NegativeTests:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemDiscardBatchAsync_SingleDiscard: *level_2
+  Unit_hipMemDiscardBatchAsync_MultipleDiscards: *level_2
+  Unit_hipMemDiscardBatchAsync_LargeCount: *level_2
+  Unit_hipMemDiscardBatchAsync_DiscardThenPrefetch: *level_2
+  Unit_hipMemDiscardBatchAsync_StreamOrdering: *level_2
+  Unit_hipMemDiscardBatchAsync_SubrangeDiscard: *level_2
+  Unit_hipMemDiscardBatchAsync_SamePointerTwice: *level_2
+  Unit_hipMemDiscardBatchAsync_MinimalSize: *level_2
+  Unit_hipMemDiscardBatchAsync_DrvApiParity: *level_2
+  Unit_hipMemDiscardBatchAsync_ContentAfterDiscard: *level_2
+  Unit_hipMemDiscardBatchAsync_PageableDeviceMemory: *level_2
+  Unit_hipMemDiscardBatchAsync_PageableSystemMemory: *level_2
+  Unit_hipMemDiscardBatchAsync_PageableMixedBatch: *level_2
+  Unit_hipMemDiscardAndPrefetchBatchAsync_NegativeTests:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer: *level_2
+  Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice: *level_2
+  Unit_hipMemDiscardAndPrefetchBatchAsync_ParitySeparateCalls: *level_2
+  Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity: *level_2
+  Unit_hipDrvMemDiscardAndPrefetchBatchAsync_SingleBuffer: *level_2
   Unit_hipMemGetInfo_FreeLessThanTotal:
     <<: *level_2
     tags: [query]
@@ -2208,7 +2239,8 @@ memory:
   Unit_hipStreamAttachMemAsync_Negative_Parameters:
     <<: *level_2
     # Below tests soft hang in stress test on 13/09/23
-    disabled: [amd_wsl]
+    # Asan test disabled temporarily until PR #5287 is merged
+    disabled: [amd_wsl, asan]
     tags: [query]
   Unit_hipMemGetAddressRange_Positive:
     <<: *level_2

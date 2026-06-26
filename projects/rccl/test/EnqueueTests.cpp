@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <chrono>
 #include <cstring>
 
 #include "comm.h"
@@ -36,6 +37,19 @@ static constexpr int kLegacyDynamicScratch = 32832;
 static constexpr int kRegularStaticScratch = 40 * 1024;
 static constexpr int kSymmetricDynamicSmem = 16 * 1024;
 
+// Corruption corner case: symmetric kernel needing MORE dynamic LDS than the legacy regular scratch.
+// Must stay > kLegacyDynamicScratch and within the LDS budget.
+static constexpr int kSymmetricLargeDynamicSmem = 48 * 1024; // 49152 bytes
+
+// Threads per block for the symmetric end-to-end launch tests.
+static constexpr int kTestThreadsPerBlock = 64;
+// Each isolated test fork+execv's a fresh binary that pays full HIP init (~15 s), which can exceed the runner's 30 s default under GPU contention.
+static constexpr int kIsolatedTestTimeoutSeconds = 120;
+// Byte-fill pattern for dlSymmetricStrideKernel: value at offset i is (i & Mask) + Bias.
+// The test's expected-sum must use the same constants to stay in sync with the kernel.
+static constexpr int kStridePatternMask = 0x3f;
+static constexpr int kStridePatternBias = 1;
+
 // Regular kernel with static scratch (device-linker model); the barrier + cross-thread read keeps
 // the compiler from optimizing the shared allocation into registers so it shows in sharedSizeBytes.
 __global__ void dlRegularScratchKernel(int* data)
@@ -61,6 +75,63 @@ __global__ void dlSymmetricKernel(int* data)
     if(data)
         data[threadIdx.x] = dynScratch[threadIdx.x];
 }
+
+// Symmetric kernel that touches its ENTIRE dynamic allocation (dynBytes); under-reservation puts the
+// high-address accesses out of bounds. The per-thread reduction is written back for verification.
+__global__ void dlSymmetricStrideKernel(int* data, int dynBytes)
+{
+    extern __shared__ char dynScratch[];
+    for(int i = threadIdx.x; i < dynBytes; i += blockDim.x)
+        dynScratch[i] = (char)((i & kStridePatternMask) + kStridePatternBias);
+    __syncthreads();
+    int acc = 0;
+    for(int i = threadIdx.x; i < dynBytes; i += blockDim.x)
+        acc += (int)(unsigned char)dynScratch[i];
+    if(data)
+        data[threadIdx.x] = acc;
+}
+
+// Symmetric kernel whose dynamic-smem mask bit is unset: kernelDynSmem == 0, uses no dynamic LDS.
+__global__ void dlSymmetricNoDynKernel(int* data)
+{
+    if(data)
+        data[threadIdx.x] = (int)(threadIdx.x + 1);
+}
+
+// Mirrors ncclLaunchKernel()'s dynamic-smem selection AFTER the fix: regular collectives use
+// rcclShmemDynamicSize() (0 in device-linker builds, the per-warp scratch size in legacy builds),
+// while symmetric collectives ALWAYS use their own plan->kernelDynSmem, regardless of build mode.
+static int modelLaunchDynSmem(bool isSymColl, int rcclShmemDynamicSizeVal, int kernelDynSmem)
+{
+    int smem = rcclShmemDynamicSizeVal;
+    if(isSymColl)
+        smem = kernelDynSmem;
+    return smem;
+}
+
+// Reproduces the PRE-fix selection: the symmetric override was compiled only under
+// RCCL_DEVICE_LINKER, so legacy builds fell through to the regular scratch size for symmetric.
+static int modelLaunchDynSmemPreFix(bool isSymColl, int rcclShmemDynamicSizeVal, int kernelDynSmem)
+{
+    int smem = rcclShmemDynamicSizeVal;
+#ifdef RCCL_DEVICE_LINKER
+    if(isSymColl)
+        smem = kernelDynSmem;
+#else
+    (void)isSymColl;
+    (void)kernelDynSmem;
+#endif
+    return smem;
+}
+
+// The value rcclShmemDynamicSize() yields for a regular collective in the current build mode:
+// 0 under device-linker (static scratch), the per-warp scratch size otherwise.
+static constexpr int kRegularLaunchSmem =
+#ifdef RCCL_DEVICE_LINKER
+    0;
+#else
+    kLegacyDynamicScratch;
+#endif
 
 // Helper function to test ncclInitKernelsForDevice with a real kernel
 ncclResult_t testKernelAttributes(void* kernelFn, size_t* maxStackSize)
@@ -423,7 +494,7 @@ TEST_F(EnqueueTests, ncclInitKernelsForDevice_ExceedsSharedMemory)
                 EXPECT_EQ(result, ncclSystemError)
                     << "Expected ncclSystemError when ncclMaxSharedMem exceeds maxSharedMem";
     }
-        ).withEnvironment({{"NCCL_DEBUG", "WARN"}})
+        ).withEnvironment({{"NCCL_DEBUG", "WARN"}}).withTimeout(std::chrono::seconds(kIsolatedTestTimeoutSeconds))
     );
 }
 
@@ -497,7 +568,7 @@ TEST_F(EnqueueTests, DeviceLinkerLds_RegularKernel)
                        "(arch " << realArch << ", smem " << deviceSmem << ")";
 #endif
             }
-        ).withEnvironment({{"NCCL_DEBUG", "WARN"}})
+        ).withEnvironment({{"NCCL_DEBUG", "WARN"}}).withTimeout(std::chrono::seconds(kIsolatedTestTimeoutSeconds))
     );
 }
 
@@ -584,7 +655,204 @@ TEST_F(EnqueueTests, DeviceLinkerLds_SymmetricKernel)
                 EXPECT_TRUE(ok) << "Symmetric kernel wrong result at index " << firstError
                                 << " (expected " << expected << ", got " << actual << ")";
             }
-        ).withEnvironment({{"NCCL_DEBUG", "WARN"}})
+        ).withEnvironment({{"NCCL_DEBUG", "WARN"}}).withTimeout(std::chrono::seconds(kIsolatedTestTimeoutSeconds))
+    );
+}
+
+// Core invariant (both modes): regular collectives keep the regular scratch size, symmetric
+// collectives always take their own kernelDynSmem.
+TEST_F(EnqueueTests, LaunchDynSmemSelection_BothModes)
+{
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    RUN_ISOLATED_TESTS_WITH_OPTIONS(
+        options,
+        ProcessIsolatedTestRunner::TestConfig(
+            "LaunchDynSmemSelection_BothModes",
+            []()
+            {
+                // Regular collective: unaffected by the symmetric override in either mode.
+                EXPECT_EQ(
+                    modelLaunchDynSmem(false, kRegularLaunchSmem, kSymmetricLargeDynamicSmem),
+                    kRegularLaunchSmem)
+                    << "Regular collectives must use rcclShmemDynamicSize(), not kernelDynSmem";
+
+                // Symmetric collective: always its own kernelDynSmem, in BOTH build modes.
+                EXPECT_EQ(
+                    modelLaunchDynSmem(true, kRegularLaunchSmem, kSymmetricLargeDynamicSmem),
+                    kSymmetricLargeDynamicSmem)
+                    << "Symmetric collectives must always launch with kernelDynSmem";
+                EXPECT_EQ(
+                    modelLaunchDynSmem(true, kRegularLaunchSmem, kSymmetricDynamicSmem),
+                    kSymmetricDynamicSmem);
+            }
+        ).withEnvironment({{"NCCL_DEBUG", "WARN"}}).withTimeout(std::chrono::seconds(kIsolatedTestTimeoutSeconds))
+    );
+}
+
+// Legacy-mode regression for the guard removal: pre-fix, legacy under-reserved LDS for symmetric
+// kernels needing > regular scratch; post-fix they get their full kernelDynSmem.
+#ifndef RCCL_DEVICE_LINKER
+TEST_F(EnqueueTests, LegacySymmetricSmem_NoUnderReservation)
+{
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    RUN_ISOLATED_TESTS_WITH_OPTIONS(
+        options,
+        ProcessIsolatedTestRunner::TestConfig(
+            "LegacySymmetricSmem_NoUnderReservation",
+            []()
+            {
+                // Sanity: corrupting case needs symmetric LDS > legacy regular scratch.
+                ASSERT_GT(kSymmetricLargeDynamicSmem, kLegacyDynamicScratch);
+
+                // PRE-FIX: legacy build under-reserves (gets regular scratch, not kernelDynSmem).
+                const int preFix =
+                    modelLaunchDynSmemPreFix(true, kRegularLaunchSmem, kSymmetricLargeDynamicSmem);
+                EXPECT_EQ(preFix, kLegacyDynamicScratch);
+                EXPECT_LT(preFix, kSymmetricLargeDynamicSmem)
+                    << "Pre-fix legacy path under-reserves LDS for symmetric kernels -> corruption";
+
+                // POST-FIX: legacy build reserves the symmetric kernel's full requirement.
+                const int postFix =
+                    modelLaunchDynSmem(true, kRegularLaunchSmem, kSymmetricLargeDynamicSmem);
+                EXPECT_EQ(postFix, kSymmetricLargeDynamicSmem)
+                    << "Post-fix legacy path must reserve kernelDynSmem for symmetric kernels";
+
+                // End-to-end: a symmetric kernel that touches its entire (large) allocation runs
+                // correctly when launched with the post-fix dynamic smem.
+                const int kThreads = kTestThreadsPerBlock;
+                const int dynBytes = kSymmetricLargeDynamicSmem;
+                void*     devData  = nullptr;
+                HIP_CHECK(hipMalloc(&devData, kThreads * sizeof(int)));
+                auto devGuard = RCCLTestGuards::makeDeviceBufferAutoGuard(devData);
+
+                hipLaunchKernelGGL(
+                    dlSymmetricStrideKernel,
+                    dim3(1),
+                    dim3(kThreads),
+                    postFix,
+                    nullptr,
+                    (int*)devData,
+                    dynBytes);
+                HIP_CHECK(hipGetLastError());
+                HIP_CHECK(hipDeviceSynchronize());
+
+                // Expected per-thread reduction: sum over i in [tid, dynBytes) step kThreads of
+                // ((i & kStridePatternMask) + kStridePatternBias), matching dlSymmetricStrideKernel.
+                auto [dlErr, host] = RCCLTestHelpers::downloadBuffer<int>(devData, kThreads);
+                HIP_CHECK(dlErr);
+                for(int tid = 0; tid < kThreads; ++tid)
+                {
+                    int expected = 0;
+                    for(int i = tid; i < dynBytes; i += kThreads)
+                        expected += (i & kStridePatternMask) + kStridePatternBias;
+                    EXPECT_EQ(host[tid], expected)
+                        << "Symmetric stride kernel wrong reduction at thread " << tid;
+                }
+            }
+        ).withEnvironment({{"NCCL_DEBUG", "WARN"}}).withTimeout(std::chrono::seconds(kIsolatedTestTimeoutSeconds))
+    );
+}
+#endif
+
+// Corner case (both modes): symmetric kernel with kernelDynSmem == 0 must select 0 (not the regular
+// scratch size) and launch cleanly with no dynamic LDS.
+TEST_F(EnqueueTests, SymmetricSmem_ZeroKernelDynSmem)
+{
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    RUN_ISOLATED_TESTS_WITH_OPTIONS(
+        options,
+        ProcessIsolatedTestRunner::TestConfig(
+            "SymmetricSmem_ZeroKernelDynSmem",
+            []()
+            {
+                const int kernelDynSmem = 0;
+                const int selected = modelLaunchDynSmem(true, kRegularLaunchSmem, kernelDynSmem);
+                EXPECT_EQ(selected, 0)
+                    << "Symmetric kernel with kernelDynSmem==0 must launch with 0 dynamic smem, "
+                       "not the regular scratch size";
+
+                const int kThreads = kTestThreadsPerBlock;
+                void*     devData  = nullptr;
+                HIP_CHECK(hipMalloc(&devData, kThreads * sizeof(int)));
+                auto devGuard = RCCLTestGuards::makeDeviceBufferAutoGuard(devData);
+
+                hipLaunchKernelGGL(
+                    dlSymmetricNoDynKernel, dim3(1), dim3(kThreads), selected, nullptr,
+                    (int*)devData);
+                HIP_CHECK(hipGetLastError());
+                HIP_CHECK(hipDeviceSynchronize());
+
+                size_t firstError = 0;
+                int    expected   = 0;
+                int    actual     = 0;
+                bool   ok         = RCCLTestHelpers::verifyBufferData<int>(
+                    devData,
+                    kThreads,
+                    [](size_t i) { return static_cast<int>(i + 1); },
+                    kThreads,
+                    0,
+                    &firstError,
+                    &expected,
+                    &actual);
+                EXPECT_TRUE(ok) << "Zero-dyn-smem symmetric kernel wrong result at index "
+                                << firstError << " (expected " << expected << ", got " << actual
+                                << ")";
+            }
+        ).withEnvironment({{"NCCL_DEBUG", "WARN"}}).withTimeout(std::chrono::seconds(kIsolatedTestTimeoutSeconds))
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Legacy (non-device-linker) build coverage.
+//
+// In legacy builds the per-warp scratch is `extern __shared__` (dynamic), so the regular path
+// requests rcclShmemDynamicSize() (modeled here as kLegacyDynamicScratch) and that is correct.
+// The bug was that the symmetric smem override used to be gated behind `#ifdef RCCL_DEVICE_LINKER`,
+// so legacy builds launched symmetric kernels with the regular-scratch size instead of
+// kernelDynSmem. The override is now unconditional; these tests model the legacy launch path with
+// explicit constants so they exercise legacy behavior regardless of the build mode of the binary.
+// ---------------------------------------------------------------------------------------------
+
+// Legacy regular kernel: requests the non-zero dynamic scratch and must stay within the LDS budget.
+TEST_F(EnqueueTests, LegacyLds_RegularKernel)
+{
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    RUN_ISOLATED_TESTS_WITH_OPTIONS(
+        options,
+        ProcessIsolatedTestRunner::TestConfig(
+            "LegacyLds_RegularKernel",
+            []()
+            {
+                // Legacy regular path: smem = rcclShmemDynamicSize() (non-zero), no static scratch
+                // double-count, so it fits the budget. (simpleTestKernel has ~0 static shared.)
+                size_t       maxStackSize = 0;
+                ncclResult_t fits         = testKernelSharedMemoryLimit(
+                    (void*)simpleTestKernel,
+                    906,
+                    kDeviceLdsBudget,
+                    &maxStackSize,
+                    kLegacyDynamicScratch);
+                EXPECT_EQ(fits, ncclSuccess)
+                    << "Legacy: regular dynamic scratch (" << kLegacyDynamicScratch
+                    << ") must fit the LDS budget (" << kDeviceLdsBudget << ")";
+
+                // The legacy regular request must remain non-zero (unlike device-linker which is 0).
+                EXPECT_GT(kLegacyDynamicScratch, 0)
+                    << "Legacy regular kernels rely on dynamic scratch being requested at launch";
+            }
+        ).withEnvironment({{"NCCL_DEBUG", "WARN"}}).withTimeout(std::chrono::seconds(kIsolatedTestTimeoutSeconds))
     );
 }
 

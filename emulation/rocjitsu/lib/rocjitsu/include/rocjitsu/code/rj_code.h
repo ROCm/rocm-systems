@@ -98,6 +98,8 @@ RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
 
 /// @brief GPU target identifiers.
 typedef enum rj_code_target_id_t {
+  /// @brief gfx90a target ID (CDNA2).
+  ROCJITSU_CODE_TARGET_GFX90A,
   /// @brief gfx942 target ID (CDNA3).
   ROCJITSU_CODE_TARGET_GFX942,
   /// @brief gfx950 target ID (CDNA4).

@@ -28,7 +28,12 @@
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+#include <net/if.h>
 #include <sstream>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -197,14 +202,16 @@ CuidNic::get_hardware_fingerprint(uint64_t &fingerprint) const {
 }
 
 amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id &id) const {
+  bool temp = false;
   if (geteuid() != 0) {
-    return AMDCUID_STATUS_PERMISSION_DENIED;
+    temp = true;
   }
 
   // attempt to read the CUID from the file first
   std::string cuid_file_path = CuidUtilities::priv_cuid_file();
   CuidFile primary_file(cuid_file_path, false);
   primary_file.load();
+  std::vector<CuidFileEntry> entries = primary_file.get_entries();
 
   CuidFileEntry entry;
   amdcuid_status_t status =
@@ -218,14 +225,22 @@ amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id &id) const {
   uint64_t fingerprint = 0;
   status = get_hardware_fingerprint(fingerprint);
   if (status != AMDCUID_STATUS_SUCCESS) {
-    std::memset(&id, 0, sizeof(id));
-    return status;
+    std::string bdf;
+    status = this->get_bdf(bdf);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      return status;
+    }
+    status = CuidUtilities::make_fallback_fingerprint(bdf, fingerprint);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      return status;
+    }
+    temp = true;
   }
 
   status = CuidUtilities::generate_primary_cuid(
       fingerprint, 0, m_info.header.fields.nic.revision_id,
       m_info.header.fields.nic.device_id, m_info.header.fields.nic.vendor_id,
-      static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NIC), &id);
+      static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NIC), &id, temp);
   if (status != AMDCUID_STATUS_SUCCESS) {
     std::memset(&id, 0, sizeof(id));
     return status;
@@ -273,11 +288,43 @@ amdcuid_status_t CuidNic::get_device_path(std::string &path) const {
 }
 
 amdcuid_status_t CuidNic::get_mac_address(std::string &mac_address) const {
-  std::string mac_path = m_info.network_interface + "/address";
-  mac_address = CuidUtilities::read_sysfs_file(mac_path);
+  // Extract interface name from the sysfs path (e.g. /sys/class/net/eth0 ->
+  // eth0)
+  std::string iface = m_info.network_interface;
+  size_t last_slash = iface.rfind('/');
+  if (last_slash != std::string::npos)
+    iface = iface.substr(last_slash + 1);
 
-  if (mac_address.empty()) {
+  if (iface.empty() || iface.size() >= IFNAMSIZ)
+    return AMDCUID_STATUS_UNSUPPORTED;
+
+  int fd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (fd < 0)
+    return AMDCUID_STATUS_UNSUPPORTED;
+
+  struct ethtool_perm_addr *epaddr =
+      reinterpret_cast<struct ethtool_perm_addr *>(
+          new uint8_t[sizeof(struct ethtool_perm_addr) + ETH_ALEN]);
+  epaddr->cmd = ETHTOOL_GPERMADDR;
+  epaddr->size = ETH_ALEN;
+
+  struct ifreq ifr = {};
+  strncpy(ifr.ifr_name, iface.c_str(), IFNAMSIZ - 1);
+  ifr.ifr_data = reinterpret_cast<char *>(epaddr);
+
+  if (ioctl(fd, SIOCETHTOOL, &ifr) < 0) {
+    close(fd);
+    delete[] reinterpret_cast<uint8_t *>(epaddr);
     return AMDCUID_STATUS_UNSUPPORTED;
   }
+  close(fd);
+
+  char buf[18];
+  snprintf(buf, sizeof(buf), "%02x:%02x:%02x:%02x:%02x:%02x", epaddr->data[0],
+           epaddr->data[1], epaddr->data[2], epaddr->data[3], epaddr->data[4],
+           epaddr->data[5]);
+  delete[] reinterpret_cast<uint8_t *>(epaddr);
+
+  mac_address = buf;
   return AMDCUID_STATUS_SUCCESS;
 }

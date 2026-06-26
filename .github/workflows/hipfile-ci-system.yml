@@ -6,6 +6,8 @@ env:
   AIS_INPUT_HIPFILE_PKG_DEV_FILENAME: ${{ inputs.ais_hipfile_pkg_dev_filename }}
   AIS_INPUT_HIPFILE_PKG_FILENAME: ${{ inputs.ais_hipfile_pkg_filename }}
   AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
+  AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
   AIS_MOUNT_PATH: /mnt/ais/ext4
@@ -37,6 +39,14 @@ on:
       ci_image:
         required: true
         type: string
+      cxx_compiler:
+        description: "C++ compiler the build artifacts were built with"
+        required: true
+        type: string
+      cxx_standard:
+        description: "C++ standard the build artifacts were built with"
+        required: true
+        type: number
       platform:
         required: true
         type: string
@@ -55,12 +65,14 @@ jobs:
     runs-on: [AIS]
     steps:
       - name: Set early AIS CI environment variables
-        run: echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
+        run: |
+          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
+          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
       - name: Fetching hipFile repository...
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           path: rocm-systems
@@ -78,7 +90,7 @@ jobs:
       - name: Download hipFile build directory
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: hipfile-build-dir-${{ inputs.platform }}
+          name: hipfile-build-dir-${{ inputs.platform }}-${{ inputs.rocm_version }}-${{ inputs.cxx_compiler }}-cxx${{ inputs.cxx_standard }}
           path: ${{ github.workspace }}/hipfile-build-dir
       - name: Authenticating to GitHub Container Registry
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
@@ -165,7 +177,7 @@ jobs:
           docker cp \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/. \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile"
-      - name: Run hipFile system tests for the AMD platform (amdclang++)
+      - name: Run hipFile system tests for the AMD platform
         run: |
           docker exec \
             -t \
@@ -174,7 +186,7 @@ jobs:
             /bin/bash -c '
               ctest -V -L "system" --parallel
             '
-      - name: Stress tests for hipFile targeting the AMD platform (amdclang++)
+      - name: Stress tests for hipFile targeting the AMD platform
         run: |
           docker exec \
             -t \
@@ -258,7 +270,7 @@ jobs:
 #          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}" >> "${GITHUB_ENV}"
 #      # hipFile repo needed for //util directory
 #      - name: Fetching hipFile repository...
-#        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+#        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 #        with:
 #          fetch-depth: 0
 #          path: rocm-systems
