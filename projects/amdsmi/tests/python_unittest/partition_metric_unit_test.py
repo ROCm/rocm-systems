@@ -42,10 +42,14 @@ import sys
 import types
 import unittest
 
+import common
+
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 METRIC_PATH = os.path.normpath(
-    os.path.join(THIS_DIR, "..", "..", "amdsmi_cli", "subcommands", "metric.py")
+    os.path.join(
+        THIS_DIR, "..", "..", "..", "..", "libexec", "amdsmi_cli", "subcommands", "metric.py"
+    )
 )
 
 
@@ -346,5 +350,51 @@ class PartitionClockMetricTest(unittest.TestCase):
         self.assertEqual(clocks["socclks_mid"]["mid_1"], "650 MHz")
 
 
+class _ConciseTestResult(unittest.TextTestResult):
+    """Test result that prints test method names without the class name."""
+
+    def getDescription(self, test):
+        doc_first_line = test.shortDescription()
+        if doc_first_line:
+            return doc_first_line
+        return str(test).split()[0].split(".")[-1]
+
+
+class _ConciseTestRunner(common.GTestSummaryRunner):
+    """Test runner with concise test names, always showing individual results.
+
+    Unlike integration tests that self-report via print_func_name(), mock-based
+    tests rely on the runner to display test names, so we always use verbosity=2
+    regardless of the user's -v/-q flags.
+    """
+
+    resultclass = _ConciseTestResult
+
+    def __init__(self, stream=None, **kwargs):
+        kwargs.pop("verbosity", None)
+        super().__init__(stream=stream, verbosity=2, **kwargs)
+
+
 if __name__ == "__main__":
-    unittest.main()
+    verbose = common.VERBOSITY_NORMAL
+    if "-q" in sys.argv or "--quiet" in sys.argv:
+        verbose = common.VERBOSITY_QUIET
+    elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
+        verbose = common.VERBOSITY_VERBOSE
+
+    if "-h" in sys.argv or "--help" in sys.argv:
+        common.print_unittest_help()
+        common.print_amdsmi_path_help()
+        sys.exit(0)
+
+    if "-l" in sys.argv or "--list" in sys.argv:
+        common.print_tests(__name__)
+        sys.exit(0)
+
+    if verbose > common.VERBOSITY_QUIET:
+        print("AMD SMI Partition Metric Unit Tests\n")
+        print("Running tests...\n")
+
+    runner = _ConciseTestRunner(stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose))
+    common.expand_glob_k_arg(globals())
+    unittest.main(testRunner=runner)
