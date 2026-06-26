@@ -345,3 +345,12 @@ contract:
   Contract_Copy3D_Free3DAllocation_Succeeds:
     <<: *level_0
     tags: [copy3d]
+  Contract_Array3D_Malloc3DArray_ReturnsUsableArray:
+    <<: *level_0
+    tags: [array3d]
+  Contract_Array3D_Memcpy3DToArrayAndBack_RoundTripsBytes:
+    <<: *level_0
+    tags: [array3d]
+  Contract_Array3D_FreeArray_Succeeds:
+    <<: *level_0
+    tags: [array3d]
