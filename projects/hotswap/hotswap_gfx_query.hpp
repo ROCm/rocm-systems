@@ -33,10 +33,10 @@ struct AgentGfxRevision {
 // "amdgcn-amd-amdhsa--gfx1250:sramecc+:xnack-"), or an empty string on failure.
 std::string get_agent_isa_name(hsa_agent_t agent);
 
-// Extracts the gfx target (e.g. "gfx1250") from a full HSA ISA name. Returns an
-// empty string when no gfx target is present. The returned token stops at the
-// first non-alphanumeric character so feature suffixes (":sramecc+", etc.) are
-// dropped.
+// Extracts the gfx target (e.g. "gfx1250" or "gfx12-5-generic") from a full
+// HSA ISA name. Returns an empty string when no gfx target is present. The
+// returned token preserves hyphenated processor names and stops before feature
+// suffixes (":sramecc+", etc.).
 std::string extract_gfx_target(const std::string &isa_name);
 
 // Queries the agent's gfx target and ASIC revision via the HSA runtime. The
@@ -53,9 +53,13 @@ void reset_gfx_revision_cache();
 // successfully queried).
 bool gate_allows_hotswap(const AgentGfxRevision &gfx);
 
-// Entry trampolines are a separate, opt-in rewrite that applies to gfx1250
-// regardless of stepping when AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES is enabled.
+// Entry trampolines are a separate, opt-in rewrite that applies to the gfx12.5
+// family (gfx125* and gfx12-5-generic) when
+// AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES is enabled.
 bool gate_allows_entry_trampolines(const AgentGfxRevision &gfx);
+
+// True when a parsed gfx target is in the COMGR entry-trampoline family.
+bool is_gfx12_5_entry_trampoline_target(const std::string &gfx_target);
 
 // Combined activation policy for libhsa-hotswap.so.
 bool gate_allows_hotswap_rewrite(const AgentGfxRevision &gfx,

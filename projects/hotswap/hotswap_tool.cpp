@@ -47,6 +47,7 @@ using rocr::hotswap::extract_gfx_target;
 using rocr::hotswap::gate_allows_hotswap;
 using rocr::hotswap::gate_allows_hotswap_rewrite;
 using rocr::hotswap::get_agent_isa_name;
+using rocr::hotswap::is_gfx12_5_entry_trampoline_target;
 using rocr::hotswap::query_agent_gfx_revision;
 
 using ByteVec = std::shared_ptr<std::vector<uint8_t>>;
@@ -266,11 +267,11 @@ hsa_status_t load_rewritten_reader(hsa_executable_t executable,
 
 hsa_status_t try_retarget_and_load(hsa_executable_t executable,
                                    hsa_agent_t agent,
-                                   hsa_code_object_reader_t code_object_reader,
                                    const char *options,
                                    hsa_loaded_code_object_t *loaded_code_object,
                                    const ByteVec &local_bytes,
-                                   const AgentGfxRevision &gfx) {
+                                   const AgentGfxRevision &gfx,
+                                   bool entry_trampolines) {
   // Source ISA from the code object, target ISA from the running GPU.
   std::string source_isa = rocr::hotswap::GetCodeObjectIsaName(
       local_bytes->data(), local_bytes->size());
@@ -282,8 +283,17 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable,
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
-  if (extract_gfx_target(source_isa) == "gfx1250" &&
-      extract_gfx_target(target_isa) == "gfx1250") {
+  std::string source_gfx = extract_gfx_target(source_isa);
+  std::string target_gfx = extract_gfx_target(target_isa);
+  if (entry_trampolines && source_gfx != target_gfx &&
+      (source_gfx == "gfx12-5-generic" || target_gfx == "gfx12-5-generic") &&
+      is_gfx12_5_entry_trampoline_target(source_gfx) &&
+      is_gfx12_5_entry_trampoline_target(target_gfx)) {
+    target_isa = source_isa;
+    target_gfx = source_gfx;
+  }
+
+  if (source_gfx == "gfx1250" && target_gfx == "gfx1250") {
     source_isa = add_gfx1250_stepping_feature(source_isa, true);
     target_isa =
         add_gfx1250_stepping_feature(target_isa, !gate_allows_hotswap(gfx));
@@ -347,8 +357,8 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     }
 
     const hsa_status_t status =
-        try_retarget_and_load(executable, agent, code_object_reader, options,
-                              loaded_code_object, local_bytes, gfx);
+        try_retarget_and_load(executable, agent, options, loaded_code_object,
+                              local_bytes, gfx, entry_trampolines);
     if (status == HSA_STATUS_SUCCESS) {
       return status;
     }

@@ -6,7 +6,7 @@
 //
 // This test includes hotswap_tool.cpp directly so it can drive the wrapped HSA
 // API-table entry points without a GPU or a real HSA runtime. The original HSA
-// functions and COMGR retarget call are replaced with stubs below.
+// functions and HotSwap COMGR calls are replaced with stubs below.
 //
 //===----------------------------------------------------------------------===//
 
@@ -61,6 +61,32 @@ FakeEnv g_env;
 #include "../hotswap_tool.cpp"
 
 namespace rocr::hotswap {
+
+std::string GetCodeObjectIsaName(const void *elf_data, size_t elf_size) {
+  if (!elf_data || elf_size == 0) {
+    return {};
+  }
+
+  constexpr char IsaPrefix[] = "amdgcn-amd-amdhsa--";
+  const char *begin = static_cast<const char *>(elf_data);
+  const char *end = begin + elf_size;
+  const char *match = std::search(begin, end, IsaPrefix,
+                                  IsaPrefix + sizeof(IsaPrefix) - 1);
+  if (match == end) {
+    return {};
+  }
+
+  const char *limit = match;
+  while (limit != end) {
+    const char c = *limit;
+    if (c == '\0' || c == '\'' || c == '"' || c == '\n' || c == '\r' ||
+        c == ' ' || c == '\t') {
+      break;
+    }
+    ++limit;
+  }
+  return std::string(match, limit);
+}
 
 int RetargetCodeObject(const void *elf_data, size_t elf_size,
                        const char *source_isa, const char *target_isa,
@@ -139,6 +165,9 @@ namespace {
 
 constexpr const char *kGfx1250Isa = "amdgcn-amd-amdhsa--gfx1250";
 constexpr const char *kGfx942Isa = "amdgcn-amd-amdhsa--gfx942";
+constexpr const char *kGfx1251Isa = "amdgcn-amd-amdhsa--gfx1251";
+constexpr const char *kGfx12_5GenericIsa =
+    "amdgcn-amd-amdhsa--gfx12-5-generic";
 constexpr const char *kGfx1250B0Isa =
     "amdgcn-amd-amdhsa--gfx1250:gfx1250-b0-specific+";
 constexpr const char *kGfx1250A0Isa =
@@ -188,47 +217,9 @@ void reset_state() {
   g_env = FakeEnv{};
 }
 
-size_t align4(size_t value) { return (value + 3) & ~size_t{3}; }
-
 std::vector<uint8_t> make_code_object(const std::string &isa) {
-  constexpr size_t EhdrOff = 0;
-  constexpr size_t PhdrOff = sizeof(Elf64_Ehdr);
-  constexpr size_t NoteOff = 0x100;
   const std::string metadata = "---\namdhsa.target: '" + isa + "'\n";
-  constexpr char Name[] = "AMD";
-  const size_t NameSize = sizeof(Name);
-  const size_t DescSize = metadata.size();
-  const size_t NoteSize = sizeof(Elf64_Nhdr) + align4(NameSize) + align4(DescSize);
-  std::vector<uint8_t> elf(NoteOff + NoteSize, 0);
-
-  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(elf.data() + EhdrOff);
-  std::memcpy(ehdr->e_ident, ELFMAG, SELFMAG);
-  ehdr->e_ident[EI_CLASS] = ELFCLASS64;
-  ehdr->e_ident[EI_DATA] = ELFDATA2LSB;
-  ehdr->e_ident[EI_VERSION] = EV_CURRENT;
-  ehdr->e_type = ET_DYN;
-  ehdr->e_machine = EM_AMDGPU;
-  ehdr->e_version = EV_CURRENT;
-  ehdr->e_phoff = PhdrOff;
-  ehdr->e_ehsize = sizeof(Elf64_Ehdr);
-  ehdr->e_phentsize = sizeof(Elf64_Phdr);
-  ehdr->e_phnum = 1;
-
-  auto *phdr = reinterpret_cast<Elf64_Phdr *>(elf.data() + PhdrOff);
-  phdr->p_type = PT_NOTE;
-  phdr->p_offset = NoteOff;
-  phdr->p_filesz = NoteSize;
-
-  auto *nhdr = reinterpret_cast<Elf64_Nhdr *>(elf.data() + NoteOff);
-  nhdr->n_namesz = NameSize;
-  nhdr->n_descsz = DescSize;
-  nhdr->n_type = 32; // NT_AMDGPU_METADATA
-
-  size_t cursor = NoteOff + sizeof(Elf64_Nhdr);
-  std::memcpy(elf.data() + cursor, Name, NameSize);
-  cursor += align4(NameSize);
-  std::memcpy(elf.data() + cursor, metadata.data(), metadata.size());
-  return elf;
+  return std::vector<uint8_t>(metadata.begin(), metadata.end());
 }
 
 hsa_status_t HSA_API fake_reader_create_from_memory(
@@ -325,14 +316,15 @@ void test_OnLoadInstallsWrappers() {
         "load entry point is wrapped");
 }
 
-void test_ReadElfIsaNoteFindsMetadata() {
-  std::printf("TEST ReadElfIsaNoteFindsMetadata...\n");
+void test_GetCodeObjectIsaNameFindsMetadata() {
+  std::printf("TEST GetCodeObjectIsaNameFindsMetadata...\n");
   reset_state();
   std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
-  check(read_elf_isa_note(elf.data(), elf.size()) == kGfx1250Isa,
-        "valid AMDGPU metadata note yields ISA");
+  check(rocr::hotswap::GetCodeObjectIsaName(elf.data(), elf.size()) ==
+            kGfx1250Isa,
+        "metadata payload yields ISA");
   const uint8_t not_elf[] = {0x7f, 'E', 'L', 'F'};
-  check(read_elf_isa_note(not_elf, sizeof(not_elf)).empty(),
+  check(rocr::hotswap::GetCodeObjectIsaName(not_elf, sizeof(not_elf)).empty(),
         "malformed ELF yields empty ISA");
 }
 
@@ -386,6 +378,60 @@ void test_FlagOneRetargetsB0ToB0() {
         "rewritten ELF is retained after successful load");
 }
 
+void test_FlagOneRetargetsGfx125FamilyWithoutSteppingSuffix() {
+  std::printf("TEST FlagOneRetargetsGfx125FamilyWithoutSteppingSuffix...\n");
+  reset_state();
+  set_entry_trampoline_env("1");
+  g_env.agent_isa = kGfx1251Isa;
+  g_env.asic_revision = 1;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx1251Isa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 1, "flag 1 routes gfx1251 through COMGR");
+  check(g_env.retarget_source_isa == kGfx1251Isa,
+        "gfx1251 source ISA is not tagged with gfx1250 stepping feature");
+  check(g_env.retarget_target_isa == kGfx1251Isa,
+        "gfx1251 target ISA is not tagged with gfx1250 stepping feature");
+}
+
+void test_FlagOneRetargetsGfx12_5GenericWithoutSteppingSuffix() {
+  std::printf("TEST FlagOneRetargetsGfx12_5GenericWithoutSteppingSuffix...\n");
+  reset_state();
+  set_entry_trampoline_env("1");
+  g_env.agent_isa = kGfx12_5GenericIsa;
+  g_env.asic_revision = 1;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx12_5GenericIsa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 1,
+        "flag 1 routes gfx12-5-generic through COMGR");
+  check(g_env.retarget_source_isa == kGfx12_5GenericIsa,
+        "generic source ISA is not tagged with gfx1250 stepping feature");
+  check(g_env.retarget_target_isa == kGfx12_5GenericIsa,
+        "generic target ISA is not tagged with gfx1250 stepping feature");
+}
+
+void test_FlagOneRetargetsGenericSourceOnConcreteGfx125Agent() {
+  std::printf(
+      "TEST FlagOneRetargetsGenericSourceOnConcreteGfx125Agent...\n");
+  reset_state();
+  set_entry_trampoline_env("1");
+  g_env.agent_isa = kGfx1251Isa;
+  g_env.asic_revision = 1;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx12_5GenericIsa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 1,
+        "flag 1 routes generic source on concrete gfx125 agent through COMGR");
+  check(g_env.retarget_source_isa == kGfx12_5GenericIsa,
+        "generic source ISA is preserved");
+  check(g_env.retarget_target_isa == kGfx12_5GenericIsa,
+        "generic target ISA is preserved to avoid processor retargeting");
+}
+
 void test_A0RetargetsWithoutFlag() {
   std::printf("TEST A0RetargetsWithoutFlag...\n");
   reset_state();
@@ -418,8 +464,8 @@ void test_FlagOneRetargetsUnknownRevisionAsB0Target() {
         "unknown revision is treated as non-A0 for target suffix");
 }
 
-void test_FlagOneBlocksNonGfx1250() {
-  std::printf("TEST FlagOneBlocksNonGfx1250...\n");
+void test_FlagOneBlocksNonGfx12_5() {
+  std::printf("TEST FlagOneBlocksNonGfx12_5...\n");
   reset_state();
   set_entry_trampoline_env("1");
   g_env.agent_isa = kGfx942Isa;
@@ -429,9 +475,9 @@ void test_FlagOneBlocksNonGfx1250() {
   const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
   check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
   check(g_env.retarget_calls == 0,
-        "entry trampoline flag does not enable non-gfx1250 rewrite");
+        "entry trampoline flag does not enable non-gfx12.5 rewrite");
   check(g_env.last_loaded_reader == reader.handle,
-        "non-gfx1250 uses original reader");
+        "non-gfx12.5 uses original reader");
 }
 
 void test_RetargetFailureFallsBackToOriginalReader() {
@@ -501,13 +547,16 @@ void test_FileReaderPathKeepsFileBackedReaderAlive() {
 
 int main() {
   test_OnLoadInstallsWrappers();
-  test_ReadElfIsaNoteFindsMetadata();
+  test_GetCodeObjectIsaNameFindsMetadata();
   test_FlagUnsetLoadsOriginalForNonA0Gfx1250();
   test_FlagZeroLoadsOriginalForNonA0Gfx1250();
   test_FlagOneRetargetsB0ToB0();
+  test_FlagOneRetargetsGfx125FamilyWithoutSteppingSuffix();
+  test_FlagOneRetargetsGfx12_5GenericWithoutSteppingSuffix();
+  test_FlagOneRetargetsGenericSourceOnConcreteGfx125Agent();
   test_A0RetargetsWithoutFlag();
   test_FlagOneRetargetsUnknownRevisionAsB0Target();
-  test_FlagOneBlocksNonGfx1250();
+  test_FlagOneBlocksNonGfx12_5();
   test_RetargetFailureFallsBackToOriginalReader();
 #ifndef _WIN32
   test_FileReaderPathKeepsFileBackedReaderAlive();

@@ -51,7 +51,9 @@ std::string extract_gfx_target(const std::string &isa_name) {
   if (pos == std::string::npos)
     return {};
   auto end = std::find_if_not(isa_name.begin() + pos, isa_name.end(),
-                              [](unsigned char c) { return std::isalnum(c); });
+                              [](unsigned char c) {
+                                return std::isalnum(c) || c == '-' || c == '_';
+                              });
   return isa_name.substr(pos, end - isa_name.begin() - pos);
 }
 
@@ -59,6 +61,13 @@ namespace {
 std::mutex g_cache_mutex;
 std::unordered_map<uint64_t, AgentGfxRevision> g_cache;
 } // namespace
+
+bool is_gfx12_5_entry_trampoline_target(const std::string &gfx_target) {
+  constexpr char Gfx125Prefix[] = "gfx125";
+  return gfx_target == "gfx12-5-generic" ||
+         (gfx_target.size() > sizeof(Gfx125Prefix) - 1 &&
+          gfx_target.rfind(Gfx125Prefix, 0) == 0);
+}
 
 AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent) {
   {
@@ -103,7 +112,7 @@ bool gate_allows_hotswap(const AgentGfxRevision &gfx) {
 }
 
 bool gate_allows_entry_trampolines(const AgentGfxRevision &gfx) {
-  return gfx.gfx_target == "gfx1250";
+  return is_gfx12_5_entry_trampoline_target(gfx.gfx_target);
 }
 
 bool gate_allows_hotswap_rewrite(const AgentGfxRevision &gfx,

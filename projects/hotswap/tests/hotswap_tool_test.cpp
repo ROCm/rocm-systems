@@ -140,6 +140,9 @@ const char *kGfx1250IsaWithFeatures =
     "amdgcn-amd-amdhsa--gfx1250:sramecc+:xnack-";
 const char *kGfx942Isa = "amdgcn-amd-amdhsa--gfx942";
 const char *kGfx1251Isa = "amdgcn-amd-amdhsa--gfx1251";
+const char *kGfx12_5GenericIsa = "amdgcn-amd-amdhsa--gfx12-5-generic";
+const char *kGfx12_5GenericIsaWithFeatures =
+    "amdgcn-amd-amdhsa--gfx12-5-generic:sramecc+";
 
 // The gate applied in hotswap_load_agent_code_object() is the shared
 // rocr::hotswap::gate_allows_hotswap(), exercised directly below so the tests
@@ -191,6 +194,20 @@ void test_NearMissTargetBlocks() {
   run("gate blocks gfx1251 (exact match)", gate_allows_hotswap(g) == false);
 }
 
+// Hyphenated generic processor names must be preserved while stripping feature
+// suffixes; otherwise the gfx12.5 trampoline gate would see only "gfx12".
+void test_Gfx12_5GenericFeatureSuffixParsed() {
+  printf("TEST Gfx12_5GenericFeatureSuffixParsed...\n");
+  reset_env();
+  g_env.isa_name = kGfx12_5GenericIsaWithFeatures;
+  g_env.asic_revision = 0;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  run("feature suffix stripped -> gfx12-5-generic",
+      g.gfx_target == "gfx12-5-generic");
+  run("default B0/A0 gate blocks gfx12-5-generic",
+      gate_allows_hotswap(g) == false);
+}
+
 // gfx1250 but a non-A0 stepping -> gate blocks.
 void test_Gfx1250NonA0Blocks() {
   printf("TEST Gfx1250NonA0Blocks...\n");
@@ -216,9 +233,38 @@ void test_EntryTrampolineFlagAllowsGfx1250NonA0() {
       gate_allows_hotswap_rewrite(g, true) == true);
 }
 
+// The explicit trampoline gate covers the broader gfx125* family, while the
+// default B0/A0 patch gate remains exact gfx1250 A0 only.
+void test_EntryTrampolineFlagAllowsGfx125Family() {
+  printf("TEST EntryTrampolineFlagAllowsGfx125Family...\n");
+  reset_env();
+  g_env.isa_name = kGfx1251Isa;
+  g_env.asic_revision = 1;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  run("default gate blocks gfx1251",
+      gate_allows_hotswap_rewrite(g, false) == false);
+  run("trampoline gate allows gfx1251",
+      gate_allows_hotswap_rewrite(g, true) == true);
+}
+
+// COMGR's entry-trampoline pass also accepts the gfx12.5 generic processor
+// name, so the HSA tool must route that target when explicitly requested.
+void test_EntryTrampolineFlagAllowsGfx12_5Generic() {
+  printf("TEST EntryTrampolineFlagAllowsGfx12_5Generic...\n");
+  reset_env();
+  g_env.isa_name = kGfx12_5GenericIsa;
+  g_env.asic_revision = 1;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  run("default gate blocks gfx12-5-generic",
+      gate_allows_hotswap_rewrite(g, false) == false);
+  run("trampoline gate allows gfx12-5-generic",
+      gate_allows_hotswap_rewrite(g, true) == true);
+}
+
 // If ASIC revision cannot be queried, the explicit trampoline flag can still
-// route gfx1250 through COMGR. The target is treated as non-A0 for B0/A0 patch
-// selection so the trampoline pass does not imply A0-specific fixes.
+// route gfx12.5 targets through COMGR. The exact gfx1250 target is treated as
+// non-A0 for B0/A0 patch selection so the trampoline pass does not imply
+// A0-specific fixes.
 void test_EntryTrampolineFlagAllowsGfx1250UnknownRevision() {
   printf("TEST EntryTrampolineFlagAllowsGfx1250UnknownRevision...\n");
   reset_env();
@@ -231,7 +277,7 @@ void test_EntryTrampolineFlagAllowsGfx1250UnknownRevision() {
       gate_allows_hotswap_rewrite(g, true) == true);
 }
 
-// The trampoline flag is not a global rewrite enable; non-gfx1250 targets still
+// The trampoline flag is not a global rewrite enable; non-gfx12.5 targets still
 // load unchanged.
 void test_EntryTrampolineFlagBlocksOtherTargets() {
   printf("TEST EntryTrampolineFlagBlocksOtherTargets...\n");
@@ -316,8 +362,11 @@ int main() {
   test_Gfx1250FeatureSuffixParsed();
   test_NonGfx1250Blocks();
   test_NearMissTargetBlocks();
+  test_Gfx12_5GenericFeatureSuffixParsed();
   test_Gfx1250NonA0Blocks();
   test_EntryTrampolineFlagAllowsGfx1250NonA0();
+  test_EntryTrampolineFlagAllowsGfx125Family();
+  test_EntryTrampolineFlagAllowsGfx12_5Generic();
   test_EntryTrampolineFlagAllowsGfx1250UnknownRevision();
   test_EntryTrampolineFlagBlocksOtherTargets();
   test_AddGfx1250SteppingFeature();
