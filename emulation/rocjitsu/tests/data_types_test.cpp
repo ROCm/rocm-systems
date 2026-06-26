@@ -230,6 +230,32 @@ TEST(Fp8E4M3Fnuz, BlockMatchesScalar) {
   }
 }
 
+TEST(Fp8E4M3Fnuz, RneNarrow) {
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(std::numeric_limits<float>::quiet_NaN()), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(std::numeric_limits<float>::infinity()), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(-std::numeric_limits<float>::infinity()), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(0.0f), 0x00);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(-0.0f), 0x00);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(1.0f), 0x40);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(240.0f), 0x7F);
+
+  float largest_denorm = util::fp8_e4m3_fnuz_to_f32(0x07);
+  float smallest_normal = util::fp8_e4m3_fnuz_to_f32(0x08);
+  float midpoint = (largest_denorm + smallest_normal) / 2.0f;
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(midpoint + 1e-9f), 0x08);
+}
+
+TEST(Fp8E4M3Fnuz, SrNarrow) {
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(1.0f, 0), 0x40);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(std::numeric_limits<float>::infinity(), 0), 0x7F);
+
+  for (uint8_t code = 1; code < 8; ++code) {
+    float val = util::fp8_e4m3_fnuz_to_f32(code);
+    EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(val, 0), code) << "code=" << int(code);
+  }
+}
+
 TEST(Fp8E4M3, RneNarrow) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(std::numeric_limits<float>::quiet_NaN()), 0x7F);
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(std::numeric_limits<float>::infinity()), 0x7E);
@@ -396,6 +422,27 @@ TEST(Bf8E5M2Fnuz, BlockMatchesScalar) {
       EXPECT_TRUE(std::isnan(dst[i])) << "i=" << i;
     else
       EXPECT_EQ(dst[i], scalar) << "i=" << i;
+  }
+}
+
+TEST(Bf8E5M2Fnuz, RneNarrow) {
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(std::numeric_limits<float>::quiet_NaN()), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(std::numeric_limits<float>::infinity()), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(-std::numeric_limits<float>::infinity()), 0xFF);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(0.0f), 0x00);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(-0.0f), 0x00);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(1.0f), 0x40);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(57344.0f), 0x7F);
+}
+
+TEST(Bf8E5M2Fnuz, SrNarrow) {
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(1.0f, 0), 0x40);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(std::numeric_limits<float>::infinity(), 0), 0x7F);
+
+  for (uint8_t code = 1; code < 4; ++code) {
+    float val = util::bf8_e5m2_fnuz_to_f32(code);
+    EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(val, 0), code) << "code=" << int(code);
   }
 }
 

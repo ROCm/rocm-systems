@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.sema_ast import (
     ExecModel,
     SemaBlock,
@@ -122,6 +123,7 @@ class LoweringContext:
     true16_src_raw: str | None = None
     fp8_byte_select: str | None = None
     fp8_decode_e5m3_select: str | None = None
+    arch_name: str = ''
     vector_sgpr_once: bool = False
     clear_false_lane_mask_writes: bool = True
 
@@ -1706,19 +1708,31 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         arg = args[0]
         if ctx.fp8_byte_select is not None:
             arg = f'(({arg} >> (({ctx.fp8_byte_select}) * 8u)) & 0xFFu)'
+        fp8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::fp8_e4m3_to_f32')
+        bf8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::bf8_e5m2_to_f32')
         if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
             return (
                 f'std::bit_cast<uint32_t>(({ctx.fp8_decode_e5m3_select}) ? '
                 f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
-                f'util::fp8_e4m3_to_f32(static_cast<uint8_t>({arg})))'
+                f'{fp8_decode_fn}(static_cast<uint8_t>({arg})))'
             )
         if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f16_fp8':
             return (
                 f'static_cast<uint32_t>(util::f32_to_f16(({ctx.fp8_decode_e5m3_select}) ? '
                 f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
-                f'util::fp8_e4m3_to_f32(static_cast<uint8_t>({arg}))))'
+                f'{fp8_decode_fn}(static_cast<uint8_t>({arg}))))'
             )
-        return _INLINE_UNARY_OPS[callee].format(arg)
+        if callee == 'cvt_f32_fp8':
+            return (
+                f'std::bit_cast<uint32_t>({fp8_decode_fn}(static_cast<uint8_t>({arg})))'
+            )
+        if callee == 'cvt_f32_bf8':
+            return (
+                f'std::bit_cast<uint32_t>({bf8_decode_fn}(static_cast<uint8_t>({arg})))'
+            )
+        if callee == 'cvt_f16_fp8':
+            return f'static_cast<uint32_t>(util::f32_to_f16({fp8_decode_fn}(static_cast<uint8_t>({arg}))))'
+        return f'static_cast<uint32_t>(util::f32_to_f16({bf8_decode_fn}(static_cast<uint8_t>({arg}))))'
 
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])

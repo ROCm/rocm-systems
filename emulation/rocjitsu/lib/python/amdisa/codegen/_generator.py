@@ -2436,7 +2436,11 @@ class CodeGenerator:
                     src_reg_classes,
                     dst_reg_classes,
                 )
-                lctx = LoweringContext(exec_model=sema_block.pragma, operand_map=omap)
+                lctx = LoweringContext(
+                    exec_model=sema_block.pragma,
+                    operand_map=omap,
+                    arch_name=self.isa_spec.arch_name,
+                )
                 if cls == 'vector_cmp':
                     # V_CMP writes a fresh wave mask initialized to zero, so false
                     # lanes can remain clear without emitting redundant bit clears.
@@ -3192,7 +3196,9 @@ class CodeGenerator:
             'vector_pack_b32_f16',
         ):
             if cls == 'vector_cvt_scale':
-                return gen_vector_cvt_scale(dst_ops, src_ops, cls, op)
+                return gen_vector_cvt_scale(
+                    dst_ops, src_ops, cls, op, self.isa_spec.arch_name
+                )
             opsel = '0u'
             if is_vop3:
                 inst_fields = getattr(self, '_current_inst_fields', set())
@@ -3214,6 +3220,7 @@ class CodeGenerator:
                 op,
                 opsel=opsel,
                 fp8_format_select=fp8_format_select,
+                arch_name=self.isa_spec.arch_name,
             )
 
         # ----- VOP3P: packed / dot / mix / MFMA -----
@@ -5605,9 +5612,8 @@ class CodeGenerator:
                         _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(
                             _enc_upper
                         )
-                        _uses_full_dpp_write_mask = self.isa_spec.arch_name in (
-                            'cdna3',
-                            'cdna4',
+                        _uses_full_dpp_write_mask = (
+                            self.isa_spec.arch_name in _CDNA_ARCHES
                         )
                         _has_dpp_encoding = (
                             _dpp_struct is not None
@@ -5623,36 +5629,59 @@ class CodeGenerator:
                                 _src_inputs[1] if len(_src_inputs) > 1 else None
                             )
                             _is_vopc = enc.enc_name.upper() == 'ENC_VOPC'
+                            _is_cmpx_vopc = (
+                                _is_vopc
+                                and sem
+                                and sem.semantic_class
+                                in (
+                                    'vector_cmpx',
+                                    'vector_cmpx_class',
+                                )
+                            )
                             _dst_reg_expr = self._e32_true16_dst_reg_expr(
                                 inst, enc.enc_name
                             )
                             _dpp_preamble = ''
-                            if _is_vopc:
+
+                            def _dpp_write_mask_lines(
+                                var_name: str, *, declare: bool = False
+                            ) -> str:
+                                prefix = (
+                                    f'uint64_t {var_name} = '
+                                    if declare
+                                    else f'{var_name} = '
+                                )
                                 if _uses_full_dpp_write_mask:
-                                    _dpp_preamble += (
-                                        '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
-                                        '  uint64_t dpp_write_mask_ = ~0ULL;\n'
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                        '    dpp_write_mask_ = amdgpu::dpp::dpp_write_mask(\n'
+                                    return (
+                                        f'    {prefix}amdgpu::dpp::dpp_write_mask(\n'
                                         '        wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,\n'
                                         '        dpp_bound_ctrl_);\n'
-                                        '  }\n'
                                     )
-                                else:
-                                    _dpp_preamble += (
-                                        '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
-                                        '  uint64_t dpp_write_mask_ = ~0ULL;\n'
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                        '    dpp_write_mask_ = 0;\n'
-                                        '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                        '      uint32_t row = ln / 16;\n'
-                                        '      uint32_t bank = (ln % 16) / 4;\n'
-                                        '      if ((dpp_row_mask_ & (1u << row)) &&\n'
-                                        '          (dpp_bank_mask_ & (1u << bank)))\n'
-                                        '        dpp_write_mask_ |= (1ULL << ln);\n'
-                                        '    }\n'
-                                        '  }\n'
-                                    )
+                                return (
+                                    f'    {prefix}0;\n'
+                                    '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                    '      uint32_t row = ln / 16;\n'
+                                    '      uint32_t bank = (ln % 16) / 4;\n'
+                                    '      if ((dpp_row_mask_ & (1u << row)) &&\n'
+                                    '          (dpp_bank_mask_ & (1u << bank)))\n'
+                                    f'        {var_name} |= (1ULL << ln);\n'
+                                    '    }\n'
+                                )
+
+                            if _is_vopc:
+                                _dpp_old_exec_line = (
+                                    '  uint64_t dpp_old_exec_ = wf.exec();\n'
+                                    if _is_cmpx_vopc
+                                    else ''
+                                )
+                                _dpp_preamble += (
+                                    '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
+                                    f'{_dpp_old_exec_line}'
+                                    '  uint64_t dpp_write_mask_ = ~0ULL;\n'
+                                    '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                    f'{_dpp_write_mask_lines("dpp_write_mask_")}'
+                                    '  }\n'
+                                )
                             elif not _is_vopc:
                                 if _has_sdwa_encoding:
                                     _dpp_preamble += (
@@ -5775,11 +5804,20 @@ class CodeGenerator:
                         _dpp_cleanup = ''
                         if _has_dpp_encoding:
                             if _is_vopc:
+                                _dpp_cmpx_exec_merge = (
+                                    '    uint64_t new_exec = wf.exec();\n'
+                                    '    uint64_t merged_exec = (new_exec & dpp_write_mask_) |\n'
+                                    '                           (dpp_old_exec_ & ~dpp_write_mask_);\n'
+                                    '    wf.set_exec(merged_exec);\n'
+                                    if _is_cmpx_vopc
+                                    else ''
+                                )
                                 _dpp_cleanup += (
                                     '  if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {\n'
                                     '    uint64_t new_vcc = wf.vcc();\n'
                                     '    uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);\n'
                                     '    wf.set_vcc(merged);\n'
+                                    f'{_dpp_cmpx_exec_merge}'
                                     '  }\n'
                                     '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {\n'
                                     '    uint64_t cmp_result = wf.vcc();\n'
@@ -5790,45 +5828,20 @@ class CodeGenerator:
                                     '  }\n'
                                 )
                             else:
-                                if _uses_full_dpp_write_mask:
-                                    _dpp_cleanup += (
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                        '    uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(\n'
-                                        '        wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,\n'
-                                        '        dpp_bound_ctrl_);\n'
-                                        '    if (dpp_write_mask != ~0ULL) {\n'
-                                        '      uint64_t ex = wf.exec();\n'
-                                        '      uint32_t vb = wf.vgpr_alloc().base;\n'
-                                        '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                        '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
-                                        f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
-                                        '              sdwa_old_dst_[ln]);\n'
-                                        '      }\n'
-                                        '    }\n'
-                                        '  }\n'
-                                    )
-                                else:
-                                    _dpp_cleanup += (
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                        '    uint64_t dpp_write_mask = 0;\n'
-                                        '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                        '      uint32_t row = ln / 16;\n'
-                                        '      uint32_t bank = (ln % 16) / 4;\n'
-                                        '      if ((dpp_row_mask_ & (1u << row)) &&\n'
-                                        '          (dpp_bank_mask_ & (1u << bank)))\n'
-                                        '        dpp_write_mask |= (1ULL << ln);\n'
-                                        '    }\n'
-                                        '    if (dpp_write_mask != ~0ULL) {\n'
-                                        '      uint64_t ex = wf.exec();\n'
-                                        '      uint32_t vb = wf.vgpr_alloc().base;\n'
-                                        '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                        '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
-                                        f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
-                                        '              sdwa_old_dst_[ln]);\n'
-                                        '      }\n'
-                                        '    }\n'
-                                        '  }\n'
-                                    )
+                                _dpp_cleanup += (
+                                    '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                    f'{_dpp_write_mask_lines("dpp_write_mask", declare=True)}'
+                                    '    if (dpp_write_mask != ~0ULL) {\n'
+                                    '      uint64_t ex = wf.exec();\n'
+                                    '      uint32_t vb = wf.vgpr_alloc().base;\n'
+                                    '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                    '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
+                                    f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
+                                    '              sdwa_old_dst_[ln]);\n'
+                                    '      }\n'
+                                    '    }\n'
+                                    '  }\n'
+                                )
                             if _src0_name:
                                 _dpp_cleanup += f'  {_src0_name}.clear_delegate();\n'
                             if _src1_name:
