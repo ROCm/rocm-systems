@@ -65,7 +65,8 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
   uint64_t cached_page = UINT64_MAX;
   Mtype cached_mtype = inst_mtype;
 
-  if (!has_page_mtypes && !non_temporal && (inst_mtype == Mtype::RW || inst_mtype == Mtype::WB)) {
+  if (!has_page_mtypes && !non_temporal && !request_l1_bypass &&
+      (inst_mtype == Mtype::RW || inst_mtype == Mtype::WB)) {
     uint32_t copied = 0;
     while (copied < size) {
       const uint64_t ea = addr + copied;
