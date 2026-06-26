@@ -332,5 +332,76 @@ TEST(OpsFaultUnit, ShimPollCqRewriteAndForward) {
     EXPECT_EQ(ncclIbOpsFaultRemove(&fake2.ctx), ncclSuccess);
 }
 
+// =============================================================================
+// Test: ShimPollCqSynthesizeIdle
+//
+// When the real poll_cq returns 0 and an armed QP requested idle injection, the
+// shim fabricates one error WC. Covers the specific-qp_num key, the context-wide
+// ANY key (qp_num selector branch), and finite/unlimited budget behavior.
+//
+// Verifies: an idle poll synthesizes a WC for the armed QP; ANY uses qp_num 0;
+//           unlimited keeps firing; finite fires once then stops.
+// Requires: installed fake context with idle injection armed.
+// =============================================================================
+TEST(OpsFaultUnit, ShimPollCqSynthesizeIdle) {
+    resetCounters();
+    struct ibv_wc wc[2];
+
+    // (a) Specific qp_num: synthesized WC carries that qp_num.
+    {
+        FakeCtx fake(/*qpNum=*/203);
+        ASSERT_EQ(ncclIbOpsFaultInstall(&fake.ctx), ncclSuccess);
+        ASSERT_EQ(ncclIbOpsFaultArmPollCq(&fake.ctx, 203, kWcRemAccess, /*count=*/1, /*idle=*/true),
+                  ncclSuccess);
+        g_pollReturn = 0;  // idle
+        EXPECT_EQ(fake.ctx.ops.poll_cq(&fake.cq, 2, wc), 1);
+        EXPECT_EQ((int)wc[0].status, kWcRemAccess);
+        EXPECT_EQ(wc[0].qp_num, 203u);
+        EXPECT_EQ(ncclIbOpsFaultRemove(&fake.ctx), ncclSuccess);
+    }
+
+    // (b) ANY key: synthesized WC uses qp_num 0 (ANY -> 0 selector branch).
+    {
+        FakeCtx fake(/*qpNum=*/204);
+        ASSERT_EQ(ncclIbOpsFaultInstall(&fake.ctx), ncclSuccess);
+        ASSERT_EQ(ncclIbOpsFaultArmPollCq(&fake.ctx, NCCL_IB_OPS_FAULT_QP_ANY, kWcFlushErr,
+                                          /*count=*/1, /*idle=*/true), ncclSuccess);
+        g_pollReturn = 0;
+        EXPECT_EQ(fake.ctx.ops.poll_cq(&fake.cq, 2, wc), 1);
+        EXPECT_EQ((int)wc[0].status, kWcFlushErr);
+        EXPECT_EQ(wc[0].qp_num, 0u);
+        EXPECT_EQ(ncclIbOpsFaultRemove(&fake.ctx), ncclSuccess);
+    }
+
+    // (c) Unlimited budget: idle synthesize keeps firing every poll (the
+    //     pollInjectCount>0 decrement is skipped for count<0).
+    {
+        FakeCtx fake(/*qpNum=*/205);
+        ASSERT_EQ(ncclIbOpsFaultInstall(&fake.ctx), ncclSuccess);
+        ASSERT_EQ(ncclIbOpsFaultArmPollCq(&fake.ctx, 205, kWcRemAccess, /*count=*/-1, /*idle=*/true),
+                  ncclSuccess);
+        g_pollReturn = 0;
+        EXPECT_EQ(fake.ctx.ops.poll_cq(&fake.cq, 2, wc), 1);
+        EXPECT_EQ((int)wc[0].status, kWcRemAccess);
+        // Fires again - unlimited budget is not consumed.
+        EXPECT_EQ(fake.ctx.ops.poll_cq(&fake.cq, 2, wc), 1);
+        EXPECT_EQ((int)wc[0].status, kWcRemAccess);
+        EXPECT_EQ(ncclIbOpsFaultRemove(&fake.ctx), ncclSuccess);
+    }
+
+    // (d) Finite budget exhausts: synthesize fires once, then the spent entry
+    //     (pollInjectCount==0) is skipped and the idle poll returns 0.
+    {
+        FakeCtx fake(/*qpNum=*/206);
+        ASSERT_EQ(ncclIbOpsFaultInstall(&fake.ctx), ncclSuccess);
+        ASSERT_EQ(ncclIbOpsFaultArmPollCq(&fake.ctx, 206, kWcRemAccess, /*count=*/1, /*idle=*/true),
+                  ncclSuccess);
+        g_pollReturn = 0;
+        EXPECT_EQ(fake.ctx.ops.poll_cq(&fake.cq, 2, wc), 1);  // fires
+        EXPECT_EQ(fake.ctx.ops.poll_cq(&fake.cq, 2, wc), 0);  // budget spent -> no synth
+        EXPECT_EQ(ncclIbOpsFaultRemove(&fake.ctx), ncclSuccess);
+    }
+}
+
 
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
