@@ -116,9 +116,10 @@ void IPCBackend::init() {
 
   rocshmem_collective_init();
 
-  setup_fence_buffer();
-
   teams_init();
+
+  /* Fence is carved last; its size is not 8-byte aligned (see setup_fence_buffer). */
+  setup_fence_buffer();
 
   setup_team_world();
 
@@ -420,9 +421,13 @@ void IPCBackend::setup_wrk_sync_buffers() {
                            ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
 
   /**
-   * Size of fence array
-  */
+   * Size of fence array: the only region not sized as a multiple of 8
+   * (4*num_pes), so it is carved last (see init()).
+   */
   wrk_sync_pool_size_ += sizeof(int) * num_pes;
+
+  /* Worst-case padding for the alignment guards in the carve functions. */
+  wrk_sync_pool_size_ += 2 * (alignof(long) - 1);
 
   /**
    * Allocate a buffer of size wrk_sync_pool_size_, using fine-grained
@@ -492,8 +497,10 @@ void IPCBackend::cleanup_wrk_sync_buffer() {
 
 void IPCBackend::setup_fence_buffer() {
   /*
-  * Allocate memory for fence
-  */
+   * Carved last: sizeof(int) * num_pes is 4-mod-8 for odd num_pes, so keeping
+   * it last preserves 8-byte alignment of the atomic regions before it. Do not
+   * carve further pool regions after this without restoring alignment.
+   */
   fence_pool = reinterpret_cast<int *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(int) * num_pes;
 }
@@ -505,6 +512,8 @@ void IPCBackend::rocshmem_collective_init() {
   size_t one_sync_size_bytes {sizeof(*barrier_sync)};
   size_t sync_size_bytes {one_sync_size_bytes * ROCSHMEM_BARRIER_SYNC_SIZE};
 
+  /* Guard: barrier_sync is accessed with 64-bit atomics; keep it 8-byte aligned. */
+  wrk_sync_pool_top_ = __builtin_align_up(wrk_sync_pool_top_, alignof(long));
   barrier_sync = reinterpret_cast<int64_t*>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sync_size_bytes;
 
@@ -532,6 +541,8 @@ void IPCBackend::teams_init() {
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
+  /* Guard: the pSync pools are accessed with 64-bit atomics; keep them 8-byte aligned. */
+  wrk_sync_pool_top_ = __builtin_align_up(wrk_sync_pool_top_, alignof(long));
   barrier_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE
                             * max_num_teams;
