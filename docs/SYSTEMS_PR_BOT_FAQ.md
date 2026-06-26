@@ -1,4 +1,4 @@
-# Systems PR Bot — Policy FAQ Doc
+# Systems PR Bot — Policy FAQ Document
 
 **Systems PR Bot** is an automated Pull Request (PR) gatekeeper.
 On every Pull Request, it runs a set of policy checks — branch naming,
