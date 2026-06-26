@@ -1,0 +1,122 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+// The University of Illinois/NCSA
+// Open Source License (NCSA)
+//
+// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+//
+// Developed by:
+//
+//                 AMD Research and AMD HSA Software Development
+//
+//                 Advanced Micro Devices, Inc.
+//
+//                 www.amd.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal with the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+//  - Redistributions of source code must retain the above copyright notice,
+//    this list of conditions and the following disclaimers.
+//  - Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimers in
+//    the documentation and/or other materials provided with the distribution.
+//  - Neither the names of Advanced Micro Devices, Inc,
+//    nor the names of its contributors may be used to endorse or promote
+//    products derived from this Software without specific prior written
+//    permission.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS WITH THE SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+#ifndef HSA_RUNTIME_CORE_INC_INTERCEPT_QUEUE_LOGIC_H_
+#define HSA_RUNTIME_CORE_INC_INTERCEPT_QUEUE_LOGIC_H_
+
+#include <cstdint>
+
+// Pure (side-effect-free) decision logic for InterceptQueue, factored out of
+// InterceptQueue::Submit so it can be unit tested without the HSA runtime, a real
+// queue, or a GPU. This is where the retry/overflow hardening lives, so the unit
+// tests here are the regression coverage for that fix.
+namespace rocr {
+namespace core {
+namespace intercept_queue_logic {
+
+// Whether a retry barrier is still outstanding (i.e. guaranteed to deliver a future
+// async wake). The read index alone is not sufficient: it can lag arbitrarily, so
+// retry_index > read may still hold for a barrier that has already completed. Gating
+// on retry_outstanding (set on insertion, cleared on the retry completion wake) avoids
+// suppressing a needed replacement barrier and stranding a non-empty overflow buffer.
+inline bool RetryPending(bool retry_outstanding, uint64_t retry_index, uint64_t read_index) {
+  return retry_outstanding && retry_index > read_index;
+}
+
+struct SubmitPlan {
+  // Number of (non-marker) packets to copy to the wrapped queue this iteration.
+  uint64_t submitted_count;
+  // Whether a fresh retry barrier must be inserted to drain the remaining packets.
+  bool insert_retry_barrier;
+};
+
+// Decide how many packets fit now and whether a retry barrier is needed, given a
+// snapshot of the wrapped queue. write/read are loaded non-atomically by the caller
+// and the packet processor advances read concurrently, so read can transiently appear
+// ahead of the stale write; computing size - (write - read) directly would underflow
+// and overcommit submitted_count, walking the copy loop past the end of packets[].
+// In-flight is therefore clamped to [0, qsize] (a transient read > write is treated as
+// "queue full"), free_slots reservations are saturating, and submitted_count is clamped
+// to the available non-marker packets.
+inline SubmitPlan PlanSubmit(uint64_t write, uint64_t read, uint64_t qsize, uint64_t count,
+                             uint64_t marker_count, bool pending_retry_point,
+                             bool overflow_nonempty) {
+  uint64_t inflight = (write >= read) ? (write - read) : qsize;
+  if (inflight > qsize) inflight = qsize;
+  uint64_t free_slots = qsize - inflight;
+
+  const uint64_t non_marker = count - marker_count;
+  uint64_t submitted_count = non_marker;
+
+  if (submitted_count >= qsize) {
+    // Cannot fit all at once; submit what fits, reserving a slot for the retry
+    // barrier if one is not already present. Saturating so free_slots == 0 does not
+    // underflow.
+    uint64_t reserve = pending_retry_point ? 0 : 1;
+    submitted_count = (free_slots > reserve) ? (free_slots - reserve) : 0;
+  } else if (free_slots < submitted_count + (pending_retry_point ? 0 : 1)) {
+    // Out of space for the whole rewrite: prefer all-or-nothing, but when draining
+    // overflow submit as much as fits to keep making progress.
+    if (overflow_nonempty && free_slots > (pending_retry_point ? 1 : 2)) {
+      submitted_count = free_slots - (pending_retry_point ? 0 : 1);
+    } else {
+      submitted_count = 0;
+    }
+  }
+
+  // packets[] has exactly non_marker non-marker entries; never copy more than that.
+  if (submitted_count > non_marker) submitted_count = non_marker;
+
+  // A replacement retry barrier is needed only when packets remain unsubmitted, none
+  // is already pending, and there is a free slot to hold it (the completion-aware
+  // pending check means a completed-but-unread barrier may still occupy its slot).
+  const bool insert_retry_barrier =
+      submitted_count < non_marker && !pending_retry_point && free_slots >= 1;
+
+  return SubmitPlan{submitted_count, insert_retry_barrier};
+}
+
+}  // namespace intercept_queue_logic
+}  // namespace core
+}  // namespace rocr
+
+#endif  // HSA_RUNTIME_CORE_INC_INTERCEPT_QUEUE_LOGIC_H_

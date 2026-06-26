@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "core/inc/intercept_queue.h"
+#include "core/inc/intercept_queue_logic.h"
 #include "core/inc/amd_aql_queue.h"
 #include "core/inc/default_signal.h"
 #include "core/util/utils.h"
@@ -112,9 +113,10 @@ bool InterceptQueue::IsPendingRetryPoint(uint64_t wrapped_current_read_index) co
   // Augment the read-index proxy with retry_outstanding_: the read index can lag
   // arbitrarily, so retry_index_ > read may still hold for an already-completed
   // barrier. Without this the replacement barrier is suppressed and a non-empty
-  // overflow_ is stranded with no wakeup (the counter-collection hang).
-  return retry_outstanding_.load(std::memory_order_acquire) &&
-         retry_index_ > wrapped_current_read_index;
+  // overflow_ is stranded with no wakeup (the counter-collection hang). See
+  // intercept_queue_logic::RetryPending (unit tested).
+  return intercept_queue_logic::RetryPending(retry_outstanding_.load(std::memory_order_acquire),
+                                             retry_index_, wrapped_current_read_index);
 }
 
 InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
@@ -269,56 +271,20 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
   while (true) {
     uint64_t write = wrapped->LoadWriteIndexRelaxed();
     uint64_t read = wrapped->LoadReadIndexRelaxed();
-    // write/read are loaded non-atomically; read can transiently exceed the stale
-    // write, making size - (write - read) underflow and overcommit submitted_count
-    // (OOB ring copy). Clamp in-flight to [0, size] (transient read>write => full).
-    // Do NOT spin here: Submit() holds lock_, so spinning would starve the producer.
-    uint64_t qsize = wrapped->amd_queue_.hsa_queue.size;
-    uint64_t inflight = (write >= read) ? (write - read) : qsize;
-    if (inflight > qsize) inflight = qsize;
-    uint64_t free_slots = qsize - inflight;
     bool pending_retry_point = IsPendingRetryPoint(read);
 
-    uint64_t submitted_count = count - marker_count;
+    // Pure slot-accounting decision (overflow/underflow hardening lives here and is
+    // unit tested in intercept_queue_logic_test). write/read were loaded
+    // non-atomically, so a transient read > write is handled inside PlanSubmit.
+    const auto plan = intercept_queue_logic::PlanSubmit(
+        write, read, wrapped->amd_queue_.hsa_queue.size, count, marker_count, pending_retry_point,
+        !overflow_.empty());
+    uint64_t submitted_count = plan.submitted_count;
 
-    // If the number of packets is greater than the wrapped queue size, then we
-    // can never submit them all at once. So submit what will fit, leaving one
-    // slot free for the retry barrier packet if it is not already on the
-    // queue.
-    if (submitted_count >= wrapped->amd_queue_.hsa_queue.size) {
-      uint64_t reserve = pending_retry_point ? 0 : 1;
-      // Saturating: free_slots can be 0 (queue full / transient read>write), so do
-      // not underflow when reserving a slot for the retry barrier.
-      submitted_count = (free_slots > reserve) ? (free_slots - reserve) : 0;
-    }
-
-    // Prefer to either submit all the packets, or none of the packets. This
-    // ensures that all the packets of a rewrite will be on the queue at the
-    // same time. This may be desirable for some rewrites. So if out of space
-    // defer packet insertion. Always make sure there is a free slot available
-    // for the retry barrier packet if there is not already one present.
-    else if (free_slots < submitted_count + (pending_retry_point ? 0 : 1)) {
-      // If we're in overflow processing (retry mechanism) and still can't fit all packets,
-      // submit as many as possible to make progress and avoid infinite retry loops
-      if (!overflow_.empty() && free_slots > (pending_retry_point ? 1 : 2)) {
-        submitted_count = free_slots - (pending_retry_point ? 0 : 1);
-      } else {
-        submitted_count = 0;
-      }
-    }
-
-    // Defensive clamp: packets[] has exactly (count - marker_count) non-marker
-    // entries; never copy more than that (guards the ring copy against OOB).
-    if (submitted_count > (count - marker_count)) submitted_count = count - marker_count;
-
-    // If we are not submitting all the packets, we need to ensure there is a
-    // retry packet to cause the remaining packets to be submitted. If there is
-    // not already a pending retry point add one.
-    if (submitted_count < (count - marker_count) && !pending_retry_point && free_slots >= 1) {
-      // free_slots >= 1 is now part of the guard: completion-aware IsPendingRetryPoint
-      // can report !pending while a completed-but-unread barrier still holds its slot,
-      // so the old "!pending implies a free slot" invariant no longer holds. If the
-      // queue is momentarily full we skip insertion; the in-progress drain retries.
+    // If we are not submitting all the packets, ensure there is a retry barrier to
+    // cause the remaining packets to be submitted (PlanSubmit also requires a free
+    // slot, since a completed-but-unread barrier may still occupy its slot).
+    if (plan.insert_retry_barrier) {
       uint64_t barrier = wrapped->AddWriteIndexRelaxed(1);
       assert(barrier == write &&
              "Packet intercept error: wrapped queue has been updated by another thread.\n");
