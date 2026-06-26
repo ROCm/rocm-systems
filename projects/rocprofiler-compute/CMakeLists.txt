@@ -60,6 +60,10 @@ include(utils.cmake)
 # Must run before asan_build_dependencies.cmake, whose pthread guard reads the
 # ENABLE_SANITIZER that this module resolves.
 include(cmake/sanitizers.cmake)
+include(cmake/hip_arch.cmake)
+
+resolve_hip_architectures()
+
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/asan_build_dependencies.cmake)
 
 set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
@@ -159,6 +163,7 @@ option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
 set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 if(${ENABLE_TESTS})
     enable_language("C" "HIP")
+    warn_if_using_implicit_hip_architecture()
     add_subdirectory(tests)
 endif()
 message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
