@@ -130,11 +130,11 @@ concept wrapper_policy =
  *  - Manage global lifecycle (initialize / shutdown / version).
  *  - Enumerate processor handles.
  *  - Forward per-device raw calls (taking an explicit handle) so
- *    @c backend_proxy<Backend> can call through the shared session.
+ *    @c device<Backend> can call through the shared session.
  *
- * Error checking and type conversion live in backend_proxy, not here.
+ * Error checking and type conversion live in device, not here.
  *
- * @tparam Wrapper  Raw AMD SMI C API policy (e.g. wrapper).
+ * @tparam Wrapper  Raw AMD SMI C API policy (e.g. @c wrapper).
  */
 template <wrapper_policy Wrapper>
 class backend
@@ -222,6 +222,17 @@ public:
 
     // ── Per-device forwarding ─────────────────────────────────────────────────
     // Each method throws std::runtime_error on AMD SMI failure.
+    //
+    // NOTE: adding a new per-device method requires coordinated changes in 9 places:
+    //   wrapper.hpp            – raw C-API forwarder
+    //   wrapper_gpu_queries    – extend concept (backend.hpp)
+    //   backend<Wrapper>       – add throwing forwarder here
+    //   session_gpu_queries    – extend concept (device.hpp)
+    //   device<Backend>        – add domain-converting method (device.hpp)
+    //   gpu_backend_contract   – extend collector concept (collectors/gpu/device.hpp)
+    //   collector device       – add method (collectors/gpu/device.hpp)
+    //   mock_wrapper.hpp       – add stub
+    //   mock_gpu_backend.hpp   – add stub
 
     [[nodiscard]] gpu_metrics_t get_metrics_info(processor_handle h) const
     {
