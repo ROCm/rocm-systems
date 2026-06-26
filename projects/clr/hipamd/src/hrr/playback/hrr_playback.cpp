@@ -1007,6 +1007,9 @@ int main(int argc, char** argv) {
   printf("[HRR] %s\n", ok ? "PASS" : "FAIL");
 
   // Cleanup.
+  for (auto& [rec, gexec] : ctx.graph_exec_map) (void)hipGraphExecDestroy(gexec);
+  for (auto& [rec, graph] : ctx.graph_map)      (void)hipGraphDestroy(graph);
+
   // alloc_map mixes device and host allocations; each must be released with the
   // matching API. Dispatch on AllocEntry::kind:
   //   Device         -> hipFree

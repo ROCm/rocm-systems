@@ -534,6 +534,22 @@
           "test_filter": "XmlTest.*"
         },
         {
+          "name": "MemManager_FixturesDebug_CuMem0",
+          "description": "MemManager pure-state, real-HIP, stats and allocator-wiring tests with NCCL_CUMEM_ENABLE=0 (CUMEM-gated subtests self-skip via GTEST_SKIP)",
+          "test_filter": "MemManagerTest.*:MemManagerRealMem.*:MemManagerStatsTest.*:MemManagerAllocator.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        },
+        {
+          "name": "MemManager_FixturesDebug_CuMem1",
+          "description": "MemManager pure-state, real-HIP, stats and allocator-wiring tests with NCCL_CUMEM_ENABLE=1 (exercises CUMEM/VMM allocator-dispatch paths where the runtime supports CUMEM)",
+          "test_filter": "MemManagerTest.*:MemManagerRealMem.*:MemManagerStatsTest.*:MemManagerAllocator.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
           "name": "TopoTest",
           "description": "Topology construction tests",
           "test_filter": "TopoTest.*"
@@ -1520,6 +1536,104 @@
           "description": "Revoke parent then shrink then collective then revoke child then destroy across multiple generations; verifies no leaked resources",
           "test_filter": "RevokeMPITest.RepeatedRevokeShrinkCycles_ResourceCleanup"
         }
+      ]
+    },
+
+    "mem_manager_mpi_cumem0": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "MemManager_AnyRanks_CuMem0",
+          "description": "Bootstrap-coupled internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=0",
+          "test_filter": "MemManagerAnyRanks.*"
+        },
+        {
+          "name": "MemManager_TwoRank_CuMem0",
+          "description": "Two-rank peer export/import internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=0",
+          "test_filter": "MemManagerTwoRank.*"
+        }
+      ]
+    },
+
+    "mem_manager_mpi_cumem1": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "MemManager_AnyRanks_CuMem1",
+          "description": "Bootstrap-coupled internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=1",
+          "test_filter": "MemManagerAnyRanks.*"
+        },
+        {
+          "name": "MemManager_TwoRank_CuMem1",
+          "description": "Two-rank peer export/import internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=1",
+          "test_filter": "MemManagerTwoRank.*"
+        }
+      ]
+    },
+
+    "suspend_resume_public_api_cumem0": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "0"
+      },
+      "tests": [
+        { "name": "SuspendResume_Basic_CuMem0",                "description": "Basic public ncclCommSuspend/Resume cycle, multi-cycle, barrier sync (NCCL_CUMEM_ENABLE=0)",      "test_filter": "SuspendResumeBasic.*" },
+        { "name": "SuspendResume_MemStats_CuMem0",             "description": "ncclCommMemStats before/after Suspend; Total = Persist + Suspend conservation (NCCL_CUMEM_ENABLE=0)", "test_filter": "SuspendResumeMemStats.*" },
+        { "name": "SuspendResume_CollectiveIntegrity_CuMem0",  "description": "AllReduce/P2p auto-mark and rebuild after Suspend/Resume (NCCL_CUMEM_ENABLE=0; CUMEM-only subtests skip via GTEST_SKIP)", "test_filter": "SuspendResumeCollectiveIntegrity.*" },
+        { "name": "SuspendResume_Lifecycle_CuMem0",            "description": "ncclCommDestroy on suspended communicator (NCCL_CUMEM_ENABLE=0)",                                  "test_filter": "SuspendResumeLifecycle.*" },
+        { "name": "SuspendResume_Group_CuMem0",                "description": "Atomic Suspend/Resume inside ncclGroupStart/End (NCCL_CUMEM_ENABLE=0)",                            "test_filter": "SuspendResumeGroup.*" },
+        { "name": "SuspendResume_ArgValidation_CuMem0",        "description": "Argument validation: zero/unknown flags, double-Suspend/Resume (NCCL_CUMEM_ENABLE=0)",            "test_filter": "SuspendResumeArgValidation.*" },
+        { "name": "SuspendResume_MemStatsValidation_CuMem0",   "description": "ncclCommMemStats argument validation (NCCL_CUMEM_ENABLE=0)",                                       "test_filter": "SuspendResumeMemStatsValidation.*" }
+      ]
+    },
+
+    "suspend_resume_public_api_cumem1": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        { "name": "SuspendResume_Basic_CuMem1",                "description": "Basic public ncclCommSuspend/Resume cycle, multi-cycle, barrier sync (NCCL_CUMEM_ENABLE=1)",      "test_filter": "SuspendResumeBasic.*" },
+        { "name": "SuspendResume_MemStats_CuMem1",             "description": "ncclCommMemStats before/after Suspend; Total = Persist + Suspend conservation (NCCL_CUMEM_ENABLE=1)", "test_filter": "SuspendResumeMemStats.*" },
+        { "name": "SuspendResume_CollectiveIntegrity_CuMem1",  "description": "AllReduce/P2p auto-mark and rebuild after Suspend/Resume (NCCL_CUMEM_ENABLE=1; exercises CUMEM path where supported)", "test_filter": "SuspendResumeCollectiveIntegrity.*" },
+        { "name": "SuspendResume_Lifecycle_CuMem1",            "description": "ncclCommDestroy on suspended communicator (NCCL_CUMEM_ENABLE=1)",                                  "test_filter": "SuspendResumeLifecycle.*" },
+        { "name": "SuspendResume_Group_CuMem1",                "description": "Atomic Suspend/Resume inside ncclGroupStart/End (NCCL_CUMEM_ENABLE=1)",                            "test_filter": "SuspendResumeGroup.*" },
+        { "name": "SuspendResume_ArgValidation_CuMem1",        "description": "Argument validation: zero/unknown flags, double-Suspend/Resume (NCCL_CUMEM_ENABLE=1)",            "test_filter": "SuspendResumeArgValidation.*" },
+        { "name": "SuspendResume_MemStatsValidation_CuMem1",   "description": "ncclCommMemStats argument validation (NCCL_CUMEM_ENABLE=1)",                                       "test_filter": "SuspendResumeMemStatsValidation.*" }
       ]
     },
 
@@ -2660,6 +2774,137 @@
         { "name": "DeviceAPI_GIN_D3_NoDmabuf", "description": "GIN device-API alltoall, symmetric window + multimem depth 3 (-R 2 -D 3), NCCL_DMABUF_ENABLE NOT set", "command_args": "-R 2 -D 3" },
         { "name": "DeviceAPI_GIN_D4_NoDmabuf", "description": "GIN device-API alltoall, symmetric window + multimem depth 4 (-R 2 -D 4), NCCL_DMABUF_ENABLE NOT set", "command_args": "-R 2 -D 4" }
       ]
+    },
+    "gin_device_mpi": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_DeviceMPI_AllTests",
+          "description": "GIN proxy device-side MPI tests over IB across two nodes",
+          "test_filter": "GinMPIDeviceTests.*",
+          "timeout": 600
+        },
+        {
+          "name": "GIN_MultiContext_NonPowerOf2",
+          "description": "Multi-context GIN with a non-power-of-2 context count (NCCL_GIN_NCONTEXTS=3)",
+          "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "3"
+          }
+        },
+        {
+          "name": "GIN_RailConnection_Create",
+          "description": "RAIL GIN connection type; requires rail-only mode (NCCL_CROSS_NIC=0)",
+          "test_filter": "GinMPIDeviceTests.RailConnection_Create",
+          "env_variables": {
+            "NCCL_CROSS_NIC": "0"
+          }
+        }
+      ]
+    },
+    "gin_barrier_session": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_BarrierSession_LsaOnly",
+          "description": "ncclBarrierSession LSA-only: intra-node symmetric-memory barrier (no GIN), with 2 ranks/node so the LSA team is non-trivial",
+          "test_filter": "GinMPIDeviceTests.BarrierSession_LsaOnly"
+        },
+        {
+          "name": "GIN_BarrierSession_Hybrid",
+          "description": "ncclBarrierSession hybrid: inner LSA composed with outer rail-GIN barrier; the rail arm crosses nodes",
+          "test_filter": "GinMPIDeviceTests.BarrierSession_Hybrid",
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
+        }
+      ]
+    },
+    "gin_reducescatter_sym": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_ReduceScatter_Symmetric",
+          "description": "Symmetric-memory ReduceScatter (RailA2A_LsaLD) sum + avg; requires >=2 ranks/node across >=2 nodes",
+          "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric*"
+        }
+      ]
+    },
+    "gin_negative": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_Disable_Error",
+          "description": "Negative path: ncclDevCommCreate must reject GIN bring-up when NCCL_GIN_ENABLE=0",
+          "test_filter": "GinMPIDeviceTests.Disable_Error",
+          "env_variables": {
+            "NCCL_GIN_ENABLE": "0"
+          }
+        },
+        {
+          "name": "GIN_Invalid_SignalPool",
+          "description": "Oversized GIN signal pool is silently clamped; basic put round-trip still works",
+          "test_filter": "GinMPIDeviceTests.Invalid_SignalPool",
+          "env_variables": {
+            "NCCL_GIN_SIGNAL_POOL_SIZE": "0x40000000"
+          }
+        },
+        {
+          "name": "GIN_Invalid_CounterPool",
+          "description": "Oversized GIN counter pool is silently clamped; basic put round-trip still works",
+          "test_filter": "GinMPIDeviceTests.Invalid_CounterPool",
+          "env_variables": {
+            "NCCL_GIN_COUNTER_POOL_SIZE": "0x40000000"
+          }
+        }
+      ]
     }
   },
   "test_suites": [
@@ -2919,6 +3164,30 @@
       "name": "Revoke MPI Tests - Multi-Node (4-rank, 2-node)",
       "description": "ncclCommRevoke multi-node scenarios: asymmetric shrink across nodes (ring-only topology after revoke) and repeated revoke/shrink generations to verify no leaked resources",
       "config": "revoke_mpi_tests_multinode",
+      "enabled": true
+    },
+    {
+      "name": "MemManager - MPI (Internal API, CUMEM=0)",
+      "description": "Internal ncclCommMemSuspend/Resume on raw VMM, np=2 (MemManagerAnyRanks + MemManagerTwoRank), NCCL_CUMEM_ENABLE=0",
+      "config": "mem_manager_mpi_cumem0",
+      "enabled": true
+    },
+    {
+      "name": "MemManager - MPI (Internal API, CUMEM=1)",
+      "description": "Internal ncclCommMemSuspend/Resume on raw VMM, np=2 (MemManagerAnyRanks + MemManagerTwoRank), NCCL_CUMEM_ENABLE=1",
+      "config": "mem_manager_mpi_cumem1",
+      "enabled": true
+    },
+    {
+      "name": "Suspend/Resume - Public API (CUMEM=0)",
+      "description": "Public ncclCommSuspend/Resume/MemStats end-to-end, NCCL_CUMEM_ENABLE=0 (CUMEM-only subtests skip via GTEST_SKIP)",
+      "config": "suspend_resume_public_api_cumem0",
+      "enabled": true
+    },
+    {
+      "name": "Suspend/Resume - Public API (CUMEM=1)",
+      "description": "Public ncclCommSuspend/Resume/MemStats end-to-end, NCCL_CUMEM_ENABLE=1 (exercises CUMEM path where supported)",
+      "config": "suspend_resume_public_api_cumem1",
       "enabled": true
     },
     {
@@ -3207,6 +3476,30 @@
       "name": "rccl-tests - Device API - GIN",
       "description": "GIN device-API alltoall sweeping multimem depth (rccl-tests -R 2 -D 3 / -D 4) with GIN env (NCCL_DMABUF_ENABLE, NCCL_GIN_TYPE=2, HSA_NO_SCRATCH_RECLAIM, NCCL_ENV_PLUGIN=none, RCCL_ENABLE_INTRANET). Requires rccl-tests built with --enable-device-api.",
       "config": "device_api_gin",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Proxy Tests",
+      "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall) over IB across two nodes",
+      "config": "gin_device_mpi",
+      "enabled": true
+    },
+    {
+      "name": "GIN BarrierSession - LSA + Hybrid",
+      "description": "ncclBarrierSession LSA-only and hybrid LSA+GIN barrier with 2 ranks/node",
+      "config": "gin_barrier_session",
+      "enabled": true
+    },
+    {
+      "name": "GIN ReduceScatter - Symmetric",
+      "description": "Symmetric-memory ReduceScatter (RailA2A_LsaLD) sum + avg with 2 ranks/node across 2 nodes",
+      "config": "gin_reducescatter_sym",
+      "enabled": true
+    },
+    {
+      "name": "GIN Negative / Pool Limits",
+      "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
+      "config": "gin_negative",
       "enabled": true
     }
   ]

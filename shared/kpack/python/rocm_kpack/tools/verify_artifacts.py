@@ -4,7 +4,7 @@
 Tool for verifying split artifacts meet expected invariants.
 
 This tool validates that artifact splitting produced correct output:
-- Fat binaries converted to host-only (PROGBITS -> NOBITS)
+- Fat binaries transformed for kpack (device sections stripped/zero-paged)
 - Architecture separation is correct
 - Kpack archives are valid
 - Manifest files are present and valid
@@ -12,6 +12,7 @@ This tool validates that artifact splitting produced correct output:
 
 import argparse
 import re
+import struct
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +20,21 @@ from typing import Optional
 
 import msgpack
 
-from rocm_kpack.binutils import Toolchain, has_section, get_section_type
+from rocm_kpack.binutils import Toolchain
+from rocm_kpack.coff.kpack_transform import (
+    HIPF_MAGIC as COFF_HIPF_MAGIC,
+    HIPK_MAGIC as COFF_HIPK_MAGIC,
+    WRAPPER_SIZE as COFF_WRAPPER_SIZE,
+)
+from rocm_kpack.coff.surgery import CoffSurgery
+from rocm_kpack.elf.kpack_transform import (
+    HIPF_MAGIC as ELF_HIPF_MAGIC,
+    HIPK_MAGIC as ELF_HIPK_MAGIC,
+    WRAPPER_SIZE as ELF_WRAPPER_SIZE,
+)
+from rocm_kpack.elf.surgery import ElfSurgery
+from rocm_kpack.elf.types import SHT_NOBITS, SHT_PROGBITS
+from rocm_kpack.format_detect import detect_binary_format, UnsupportedBinaryFormat
 
 
 @dataclass
@@ -30,6 +45,21 @@ class VerificationResult:
     passed: bool
     message: str
     details: list[str]
+
+
+@dataclass
+class FatBinaryInspection:
+    """Generic-artifact fat binary conversion state."""
+
+    binary_format: str
+    fatbin_section: str
+    section_state: str
+    has_kpack_ref: bool
+    hipf_magic: int
+    hipk_magic: int
+    wrapper_magics: list[int]
+    wrapper_error: Optional[str] = None
+    inspection_error: Optional[str] = None
 
 
 class ArtifactVerifier:
@@ -128,7 +158,7 @@ class ArtifactVerifier:
         )
 
     def _check_fat_binary_conversion(self, artifacts: list[Path]) -> None:
-        """Verify fat binaries were converted to host-only (PROGBITS -> NOBITS)."""
+        """Verify generic fat binaries were converted to kpack host binaries."""
         print("CHECK: Fat Binary Conversion")
         print("-" * 70)
 
@@ -147,55 +177,56 @@ class ArtifactVerifier:
             return
 
         for artifact in generic_artifacts:
-            # Find all .so files
-            so_files = list(artifact.glob("**/*.so*"))
-            # Filter to actual files (not symlinks)
-            so_files = [f for f in so_files if f.is_file() and not f.is_symlink()]
+            artifact_files = [
+                f for f in artifact.rglob("*") if f.is_file() and not f.is_symlink()
+            ]
 
             converted_binaries = []
             host_only_binaries = []
             failed_binaries = []
 
-            for so_file in so_files:
-                file_size = so_file.stat().st_size
+            for binary_path in artifact_files:
+                file_size = binary_path.stat().st_size
                 size_mb = file_size / (1024 * 1024)
-                rel_path = so_file.relative_to(artifact)
+                rel_path = binary_path.relative_to(artifact)
 
-                # Check if has .hip_fatbin section
-                section_info = self._get_hip_fatbin_section(so_file)
-                if section_info is None:
-                    host_only_binaries.append((rel_path, size_mb))
+                inspection, is_binary = self._inspect_fat_binary_conversion(
+                    binary_path
+                )
+                if inspection is None:
+                    if is_binary:
+                        host_only_binaries.append((rel_path, size_mb))
                     continue
 
-                section_type, section_size = section_info
-
-                if section_type == "PROGBITS":
-                    failed_binaries.append(
-                        (rel_path, size_mb, "Still has PROGBITS .hip_fatbin")
-                    )
+                failures = self._fat_binary_conversion_failures(inspection)
+                if failures:
+                    failed_binaries.append((rel_path, size_mb, "; ".join(failures)))
                     all_passed = False
-                elif section_type == "NOBITS":
-                    # Check for .rocm_kpack_ref marker
-                    has_marker = self._has_kpack_ref(so_file)
-                    if has_marker:
-                        converted_binaries.append((rel_path, size_mb))
-                    else:
-                        failed_binaries.append(
-                            (rel_path, size_mb, "NOBITS but missing .rocm_kpack_ref")
+                else:
+                    converted_binaries.append(
+                        (
+                            rel_path,
+                            size_mb,
+                            inspection.binary_format,
+                            inspection.section_state,
                         )
-                        all_passed = False
+                    )
 
             # Print summary
             details.append(
-                f"  Summary: {len(converted_binaries)} converted, {len(host_only_binaries)} host-only, {len(failed_binaries)} failed"
+                f"  Summary: {len(converted_binaries)} kpack-transformed, {len(host_only_binaries)} host-only, {len(failed_binaries)} failed"
             )
             details.append("")
 
             # Print converted binaries
             if converted_binaries:
-                details.append("  Converted (fat → host-only):")
-                for path, size in sorted(converted_binaries):
-                    details.append(f"    ✓ {path} ({size:.1f}M)")
+                details.append("  Kpack-transformed fat binaries:")
+                for path, size, binary_format, section_state in sorted(
+                    converted_binaries
+                ):
+                    details.append(
+                        f"    ✓ {path} ({size:.1f}M, {binary_format}, {section_state})"
+                    )
                 details.append("")
 
             # Print host-only binaries
@@ -207,15 +238,15 @@ class ArtifactVerifier:
 
             # Print failures
             if failed_binaries:
-                details.append("  Failed conversions:")
+                details.append("  Failed kpack transformations:")
                 for path, size, reason in sorted(failed_binaries):
                     details.append(f"    ✗ {path} ({size:.1f}M) - {reason}")
                 details.append("")
 
         if all_passed:
-            print("✓ All fat binaries correctly converted to NOBITS\n")
+            print("✓ All fat binaries are kpack-transformed\n")
         else:
-            print("✗ Some binaries still have PROGBITS .hip_fatbin sections\n")
+            print("✗ Some binaries are not kpack-transformed\n")
             self.errors += 1
 
         for detail in details:
@@ -226,9 +257,9 @@ class ArtifactVerifier:
             VerificationResult(
                 "Fat Binary Conversion",
                 all_passed,
-                "All fat binaries converted"
+                "All fat binaries are kpack-transformed"
                 if all_passed
-                else "Some binaries not converted",
+                else "Some binaries are not kpack-transformed",
                 details,
             )
         )
@@ -415,19 +446,210 @@ class ArtifactVerifier:
             )
         )
 
-    def _get_hip_fatbin_section(self, binary_path: Path) -> Optional[tuple[str, int]]:
-        """Get .hip_fatbin section type and size. Returns None if no section."""
-        section_type = get_section_type(
-            binary_path, ".hip_fatbin", toolchain=self.toolchain
-        )
-        if section_type is None:
-            return None
-        # Size is not critical for verification, just need to know type
-        return (section_type, 0)
+    def _inspect_fat_binary_conversion(
+        self, binary_path: Path
+    ) -> tuple[Optional[FatBinaryInspection], bool]:
+        """Inspect a generic artifact file. Returns (inspection, is_binary)."""
+        try:
+            binary_format = detect_binary_format(binary_path)
+        except UnsupportedBinaryFormat:
+            return None, False
+        except Exception as e:
+            if self.verbose:
+                print(f"  Skipping unreadable binary {binary_path}: {e}")
+            return None, False
 
-    def _has_kpack_ref(self, binary_path: Path) -> bool:
-        """Check if binary has .rocm_kpack_ref section."""
-        return has_section(binary_path, ".rocm_kpack_ref", toolchain=self.toolchain)
+        try:
+            if binary_format == "elf":
+                surgery = ElfSurgery.load(binary_path)
+                fatbin = surgery.find_section(".hip_fatbin")
+                if fatbin is None:
+                    return None, True
+
+                wrapper_magics, wrapper_error = self._read_wrapper_magics(
+                    surgery, ".hipFatBinSegment", ELF_WRAPPER_SIZE
+                )
+                return (
+                    FatBinaryInspection(
+                        binary_format="ELF",
+                        fatbin_section=".hip_fatbin",
+                        section_state=self._elf_section_state(
+                            fatbin.header.sh_type
+                        ),
+                        has_kpack_ref=surgery.find_section(".rocm_kpack_ref")
+                        is not None,
+                        hipf_magic=ELF_HIPF_MAGIC,
+                        hipk_magic=ELF_HIPK_MAGIC,
+                        wrapper_magics=wrapper_magics,
+                        wrapper_error=wrapper_error,
+                    ),
+                    True,
+                )
+
+            surgery = CoffSurgery.load(binary_path)
+            fatbin = surgery.find_section(".hip_fat")
+            if fatbin is None:
+                return None, True
+
+            wrapper_magics, wrapper_error = self._read_wrapper_magics(
+                surgery, ".hipFatB", COFF_WRAPPER_SIZE
+            )
+            return (
+                FatBinaryInspection(
+                    binary_format="COFF",
+                    fatbin_section=".hip_fat",
+                    section_state=self._coff_section_state(fatbin),
+                    has_kpack_ref=surgery.find_section(".kpackrf") is not None,
+                    hipf_magic=COFF_HIPF_MAGIC,
+                    hipk_magic=COFF_HIPK_MAGIC,
+                    wrapper_magics=wrapper_magics,
+                    wrapper_error=wrapper_error,
+                ),
+                True,
+            )
+        except Exception as e:
+            if self.verbose:
+                print(f"  Failed to inspect binary {binary_path}: {e}")
+            return self._failed_binary_inspection(binary_format, e), True
+
+    def _failed_binary_inspection(
+        self, binary_format: str, error: Exception
+    ) -> FatBinaryInspection:
+        """Create a failing inspection result for an unreadable ELF/COFF binary."""
+        if binary_format == "elf":
+            return FatBinaryInspection(
+                binary_format="ELF",
+                fatbin_section=".hip_fatbin",
+                section_state="unreadable",
+                has_kpack_ref=False,
+                hipf_magic=ELF_HIPF_MAGIC,
+                hipk_magic=ELF_HIPK_MAGIC,
+                wrapper_magics=[],
+                inspection_error=f"failed to inspect ELF binary: {error}",
+            )
+
+        return FatBinaryInspection(
+            binary_format="COFF",
+            fatbin_section=".hip_fat",
+            section_state="unreadable",
+            has_kpack_ref=False,
+            hipf_magic=COFF_HIPF_MAGIC,
+            hipk_magic=COFF_HIPK_MAGIC,
+            wrapper_magics=[],
+            inspection_error=f"failed to inspect COFF binary: {error}",
+        )
+
+    def _read_wrapper_magics(
+        self, surgery, section_name: str, wrapper_size: int
+    ) -> tuple[list[int], Optional[str]]:
+        """Read HIP fat binary wrapper magic values from a wrapper section."""
+        section = surgery.find_section(section_name)
+        if section is None:
+            return [], f"missing {section_name} wrapper section"
+
+        try:
+            section_data = surgery.get_section_content(section)
+        except ValueError as e:
+            return [], str(e)
+
+        logical_size = getattr(section, "virtual_size", None)
+        if logical_size is not None:
+            section_data = section_data[:logical_size]
+
+        if len(section_data) % wrapper_size != 0:
+            return (
+                [],
+                f"{section_name} size {len(section_data)} is not a multiple "
+                f"of wrapper size {wrapper_size}",
+            )
+
+        return (
+            [
+                struct.unpack_from("<I", section_data, offset)[0]
+                for offset in range(0, len(section_data), wrapper_size)
+            ],
+            None,
+        )
+
+    def _fat_binary_conversion_failures(
+        self, inspection: FatBinaryInspection
+    ) -> list[str]:
+        """Return conversion failures for a generic artifact fat binary."""
+        if inspection.inspection_error:
+            return [inspection.inspection_error]
+
+        failures = []
+
+        if (
+            inspection.binary_format == "ELF"
+            and inspection.section_state != "NOBITS"
+        ):
+            failures.append(
+                f"still has {inspection.section_state} {inspection.fatbin_section}"
+            )
+        elif (
+            inspection.binary_format == "COFF"
+            and inspection.section_state.startswith("unstripped")
+        ):
+            failures.append(
+                f"still has {inspection.section_state} {inspection.fatbin_section}"
+            )
+
+        if not inspection.has_kpack_ref:
+            marker = (
+                ".rocm_kpack_ref"
+                if inspection.binary_format == "ELF"
+                else ".kpackrf"
+            )
+            failures.append(f"missing {marker} marker")
+
+        if inspection.wrapper_error:
+            failures.append(inspection.wrapper_error)
+        elif not inspection.wrapper_magics:
+            failures.append("no HIP fat binary wrappers found")
+        else:
+            hipf_count = sum(
+                1
+                for magic in inspection.wrapper_magics
+                if magic == inspection.hipf_magic
+            )
+            if hipf_count:
+                failures.append(f"{hipf_count} wrapper(s) still use HIPF magic")
+
+            unexpected = [
+                magic
+                for magic in inspection.wrapper_magics
+                if magic not in (inspection.hipf_magic, inspection.hipk_magic)
+            ]
+            if unexpected:
+                formatted = ", ".join(f"0x{magic:08x}" for magic in unexpected)
+                failures.append(f"unexpected wrapper magic value(s): {formatted}")
+
+        return failures
+
+    def _elf_section_state(self, section_type: int) -> str:
+        """Return a readable ELF section state."""
+        if section_type == SHT_NOBITS:
+            return "NOBITS"
+        if section_type == SHT_PROGBITS:
+            return "PROGBITS"
+        return f"type {section_type}"
+
+    def _coff_section_state(self, fatbin_section) -> str:
+        """Return a readable COFF fatbin section state."""
+        if fatbin_section.raw_size == 0:
+            return "zero-paged (raw-size=0)"
+        if fatbin_section.raw_size < fatbin_section.virtual_size:
+            return (
+                "partially zero-paged "
+                f"(raw-size={fatbin_section.raw_size}, "
+                f"virtual-size={fatbin_section.virtual_size})"
+            )
+        return (
+            "unstripped "
+            f"(raw-size={fatbin_section.raw_size}, "
+            f"virtual-size={fatbin_section.virtual_size})"
+        )
 
     def _fail(self, check_name: str, message: str) -> None:
         """Record a failed check."""
@@ -469,7 +691,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 This tool validates that artifact splitting produced correct output:
-  - Fat binaries converted to host-only (PROGBITS -> NOBITS)
+  - Fat binaries transformed for kpack
   - Architecture separation is correct
   - Kpack archives are valid
   - Manifest files are present

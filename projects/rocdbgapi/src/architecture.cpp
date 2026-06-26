@@ -7387,8 +7387,8 @@ gfx12_architecture_t::cwsr_record_t::group_ids () const
   coordinates[0] = ttmp9;
   if (ttmp8 & ttmp8_grid_yz_valid)
     {
-      coordinates[1] = ttmp7 & utils::bit_mask<uint32_t> (0, 15);
-      coordinates[2] = (ttmp7 & utils::bit_mask<uint32_t> (16, 31)) >> 16;
+      coordinates[1] = utils::bit_extract (ttmp7, 0, 15);
+      coordinates[2] = utils::bit_extract (ttmp7, 16, 31);
     }
 
   return coordinates;
@@ -7407,7 +7407,7 @@ gfx12_architecture_t::cwsr_record_t::position_in_group () const
 
   agent ().read_agent_memory (ttmp8_address, &ttmp8);
 
-  return utils::narrow<uint32_t> ((ttmp8 & utils::bit_mask (25, 29)) >> 25);
+  return utils::bit_extract (ttmp8, 25, 29);
 }
 
 size_t

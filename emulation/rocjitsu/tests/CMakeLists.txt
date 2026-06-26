@@ -45,6 +45,7 @@ add_executable(
     simdojo_sim_test.cpp
     simulated_driver_test.cpp
     decode_smoke_test.cpp
+    smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     transcendental_test.cpp
     analysis/liveness_test.cpp
@@ -425,12 +426,13 @@ if(HSA_RUNTIME64)
             )
         endif()
 
+        set(RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE cdna4_to_cdna3_dispatch_test)
         add_executable(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             dbt/cdna4_to_cdna3_dispatch_test.cpp
         )
         target_include_directories(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
@@ -438,7 +440,7 @@ if(HSA_RUNTIME64)
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE
                 ${RJ_OBJECT_LIBS}
                 util
@@ -447,85 +449,59 @@ if(HSA_RUNTIME64)
                 GTest::gtest_main
         )
         target_link_options(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
         )
         target_compile_definitions(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(cdna4_to_cdna3_dispatch_test device_kernels)
-        rj_configure_target(cdna4_to_cdna3_dispatch_test TEST)
+        add_dependencies(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} device_kernels)
+        rj_configure_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} TEST)
 
-        add_test(
-            NAME "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates"
-            COMMAND
-                cdna4_to_cdna3_dispatch_test
-                --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        set(RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS
+            DynamicCopyLoopTranslates
+            TritonDynamicMatmulTranslates
+            TritonBufferAsyncMatmulTranslates
+            TritonFlashAttentionNoAsyncTranslates
+            TritonFlashAttentionBufferAsyncTranslates
         )
-        set_tests_properties(
-            "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates"
-            PROPERTIES TIMEOUT 120
-        )
-
-        if(HAS_CDNA3_GPU)
+        foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS)
             add_test(
-                NAME "Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun"
+                NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
                 COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun
+                    ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
             set_tests_properties(
-                "Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.${_test_name}"
                 PROPERTIES TIMEOUT 120
             )
+        endforeach()
+
+        if(HAS_CDNA3_GPU)
+            set(RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS
+                DynamicCopyLoopDispatchAndRun
+                TritonDynamicMatmulDispatchAndRun
+                TritonBufferAsyncMatmulDispatchAndRun
+                TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
+                TritonFlashAttentionNoAsyncDispatchAndRun
+                TritonFlashAttentionBufferAsyncDispatchAndRun
+            )
+            foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS)
+                add_test(
+                    NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
+                    COMMAND
+                        ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+                        --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                )
+                set_tests_properties(
+                    "Cdna4ToCdna3DispatchTest.${_test_name}"
+                    PROPERTIES TIMEOUT 120
+                )
+            endforeach()
             message(
                 STATUS
                 "CDNA4->CDNA3 dispatch tests enabled (CDNA3 GPU detected)"
@@ -618,6 +594,7 @@ find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
 if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
+    set(RJ_HIP_SANITIZER_FLAGS ${RJ_SANITIZER_COMPILE_OPTIONS})
 
     # Helper: build a HIP test binary with hipcc + gtest.
     function(rj_add_hip_test TEST_NAME)
@@ -635,9 +612,11 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
                 ${HIPCC_EXECUTABLE} --offload-arch=${ARG_ARCH} -std=c++20
-                -isystem ${GTEST_INC} -I${CMAKE_CURRENT_SOURCE_DIR}
-                -L${GTEST_LIB_DIR} -lgtest -lpthread ${ARG_EXTRA_LIBS}
-                -Wl,-rpath,${GTEST_LIB_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
+                ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
+                -I${CMAKE_CURRENT_SOURCE_DIR} -L${GTEST_LIB_DIR} -lgtest
+                -lpthread ${ARG_EXTRA_LIBS} -Wl,-rpath,${GTEST_LIB_DIR}
+                -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} -o ${HIP_TEST_BIN}
+                ${HIP_TEST_SRC}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
             COMMENT "Building ${TEST_NAME} with hipcc (${ARG_ARCH})"
             VERBATIM
@@ -854,7 +833,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         OUTPUT ${CVT_NARROW_BIN}
         COMMAND
             ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20
-            -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
+            ${RJ_HIP_SANITIZER_FLAGS} -I${CMAKE_SOURCE_DIR}/lib/util/include -o
+            ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
         COMMENT "Building hip_cvt_narrow_test with hipcc (gfx950)"

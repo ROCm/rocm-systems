@@ -9,6 +9,7 @@ This module provides functionality to split TheRock build artifacts into:
 """
 
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Set
@@ -33,6 +34,18 @@ def strip_target_features(target: str) -> str:
     """Strip GPU target feature flags (e.g. 'gfx942:sramecc+:xnack-' -> 'gfx942')."""
     colon_pos = target.find(":")
     return target[:colon_pos] if colon_pos >= 0 else target
+
+
+# Known LLVM AMDGPU target features that ride on a base arch, in either the
+# colon form (gfx942:xnack+) or the Tensile kernel-filename hyphen form
+# (gfx90a-xnack-). Normalizing the hyphen form to colon lets one colon-split
+# drop every feature variant regardless of how many features are present.
+_HYPHEN_FEATURE_RE = re.compile(r"-(xnack|sramecc)")
+
+
+def base_arch(arch: str) -> str:
+    """Strip known feature suffixes in colon or hyphen form (e.g. 'gfx90a-xnack-' -> 'gfx90a')."""
+    return strip_target_features(_HYPHEN_FEATURE_RE.sub(r":\1", arch))
 
 
 @dataclass
@@ -103,6 +116,10 @@ class FileClassificationVisitor:
         for handler in self.database_handlers:
             arch = handler.detect(file_path, prefix_path)
             if arch:
+                # detect() returns the Tensile hyphen form ('gfx90a-xnack-');
+                # collapse onto the bare base arch used by gpu_targets and the
+                # shard key so xnack variants are not dropped (ROCM-25535).
+                arch = base_arch(arch)
                 if self.gpu_targets is not None and arch not in self.gpu_targets:
                     if self.verbose:
                         print(
@@ -235,7 +252,7 @@ class ArtifactSplitter:
         self.database_handlers = database_handlers or []
         self.verbose = verbose
         self.gpu_targets: Optional[Set[str]] = (
-            {strip_target_features(t) for t in gpu_targets} if gpu_targets else None
+            {base_arch(t) for t in gpu_targets} if gpu_targets else None
         )
 
     def compute_kpack_search_pattern(self, binary_path: Path, prefix_root: Path) -> str:
@@ -780,6 +797,21 @@ class ArtifactSplitter:
         if all_kernels_by_arch:
             kpack_info_by_arch = self.create_kpack_files(
                 all_kernels_by_arch, output_dir
+            )
+
+        if (
+            fat_binaries_by_prefix
+            and self.gpu_targets is not None
+            and not kpack_info_by_arch
+        ):
+            target_list = ", ".join(sorted(self.gpu_targets))
+            fat_binary_count = sum(
+                len(paths) for paths in fat_binaries_by_prefix.values()
+            )
+            raise RuntimeError(
+                f"Found {fat_binary_count} fat binaries, but no device code objects "
+                f"matched --gpu-targets ({target_list}). Refusing to emit an "
+                "untransformed generic artifact."
             )
 
         # Phase 6: Inject kpack references and strip device code from fat binaries
