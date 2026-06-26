@@ -609,18 +609,29 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
     if (gfxip == 1250) scanner = &quick_scan::scan_mi400;
 
-    ntokens = scanner(buf, offset_begin, raw.data(), raw.size());
+    const uint8_t* scan_buf = buf;
+    uint64_t scan_size = offset_begin;
+    uint64_t scan_header_skip = 0;
+    if (gfxip == 9 && chunk_index == 0)
+    {
+        if (offset_begin < sizeof(uint64_t)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+        scan_buf += sizeof(uint64_t);
+        scan_size -= sizeof(uint64_t);
+        scan_header_skip = sizeof(uint64_t);
+    }
+
+    ntokens = scanner(scan_buf, scan_size, raw.data(), raw.size());
     while (ntokens == raw.size())
     {
         raw.resize(raw.size() * 2);
-        ntokens = scanner(buf, offset_begin, raw.data(), raw.size());
+        ntokens = scanner(scan_buf, scan_size, raw.data(), raw.size());
     }
 #else
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 #endif
 
     if (gfxip == 9)
-        process_events_gfx9<false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
+        process_events_gfx9<false>(temp, raw, static_cast<int>(ntokens), scan_header_skip, nullptr, nullptr);
     else if (gfxip != 0)
         process_events_gfx12<false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
 

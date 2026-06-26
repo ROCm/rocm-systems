@@ -170,9 +170,10 @@ union header_type
 
     std::stringstream print() const
     {
-        return std::stringstream{} << "TT Version:" << version << "DWGP:" << DWGP << " DSIMD:" << DSIMD
-                                   << " DSA:" << DSA << " NSA:" << NSA << " UCF:" << UCF << "DPRate:" << DPRate
-                                   << " WSM:" << WSM;
+        std::stringstream ss;
+        ss << "TT Version:" << version << "DWGP:" << DWGP << " DSIMD:" << DSIMD << " DSA:" << DSA << " NSA:" << NSA
+           << " UCF:" << UCF << "DPRate:" << DPRate << " WSM:" << WSM;
+        return ss;
     }
     const char* typestr() const { return "HEADER"; };
 };
