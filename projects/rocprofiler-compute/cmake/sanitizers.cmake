@@ -17,13 +17,23 @@ function(resolve_sanitizer)
     # Empty string is omitted by variable expansion, so add it explicitly.
     set(sanitizer_valid "" ${therock_sanitizer_valid} "UBSAN")
 
+    # Human-readable forms for the error messages, derived from the lists so they
+    # cannot drift. Drop the empty-string placeholder.
+    set(therock_sanitizer_display ${therock_sanitizer_valid})
+    list(REMOVE_ITEM therock_sanitizer_display "")
+    list(JOIN therock_sanitizer_display ", " therock_sanitizer_display)
+
+    set(sanitizer_display ${sanitizer_valid})
+    list(REMOVE_ITEM sanitizer_display "")
+    list(JOIN sanitizer_display ", " sanitizer_display)
+
     if(
         DEFINED THEROCK_SANITIZER
         AND NOT THEROCK_SANITIZER IN_LIST therock_sanitizer_valid
     )
         message(
             FATAL_ERROR
-            "THEROCK_SANITIZER='${THEROCK_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
+            "THEROCK_SANITIZER='${THEROCK_SANITIZER}' is not one of: ${therock_sanitizer_display}"
         )
     endif()
 
@@ -63,7 +73,7 @@ function(resolve_sanitizer)
     if(NOT ENABLE_SANITIZER IN_LIST sanitizer_valid)
         message(
             FATAL_ERROR
-            "ENABLE_SANITIZER='${ENABLE_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN, UBSAN"
+            "ENABLE_SANITIZER='${ENABLE_SANITIZER}' is not one of: ${sanitizer_display}"
         )
     endif()
 
