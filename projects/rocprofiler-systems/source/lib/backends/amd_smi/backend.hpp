@@ -264,22 +264,19 @@ public:
         return false;
     }
 
-    [[nodiscard]] std::vector<typename Wrapper::proc_info_t> get_gpu_process_list(
-        processor_handle h) const
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    [[nodiscard]] std::vector<proc_info_t> get_gpu_process_list(processor_handle h) const
     {
-        if constexpr(sdma_supported)
-        {
-            std::uint32_t count = 0;
-            check_status(m_amdsmi.get_gpu_process_list(h, &count, nullptr),
-                         "amdsmi_get_gpu_process_list (count)");
-            if(count == 0) return {};
-            std::vector<typename Wrapper::proc_info_t> procs(count);
-            check_status(m_amdsmi.get_gpu_process_list(h, &count, procs.data()),
-                         "amdsmi_get_gpu_process_list (data)");
-            return procs;
-        }
-        return {};
+        std::uint32_t count = 0;
+        check_status(m_amdsmi.get_gpu_process_list(h, &count, nullptr),
+                     "amdsmi_get_gpu_process_list (count)");
+        if(count == 0) return {};
+        std::vector<proc_info_t> procs(count);
+        check_status(m_amdsmi.get_gpu_process_list(h, &count, procs.data()),
+                     "amdsmi_get_gpu_process_list (data)");
+        return procs;
     }
+#endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     void get_nic_asic_info(processor_handle h, nic_asic_info_t* out) const
