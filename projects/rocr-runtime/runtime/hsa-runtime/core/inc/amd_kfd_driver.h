@@ -108,8 +108,7 @@ public:
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                              uint32_t* first_gws) const override;
   hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                  core::ShareType type, uint32_t flags, void* export_handle,
-                                  uint64_t* export_offset = nullptr) override;
+                                  core::ShareType type, void* export_handle) override;
   hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
                                   core::ShareType type, void* import_handle,
                                   void* mem = nullptr) override;
@@ -159,6 +158,27 @@ public:
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
  private:
+  /// @brief Flags for @ref ExportMemoryHandleImpl.
+  enum ExportMemoryFlags : uint32_t {
+    EXPORT_MEMORY_FLAGS_NONE = 0,
+    /// Export a KFD allocation via @c hsaKmtExportDMABufHandle. @p handle.handle is the
+    /// allocation address and @p handle.size is the allocation size. @p export_offset is required.
+    EXPORT_MEMORY_FLAGS_KFD_DMABUF = 1,
+  };
+
+  /// @brief Internal export implementation supporting KFD-specific flags and offset.
+  ///
+  /// @param[in] agent agent that owns the memory
+  /// @param[in] handle driver memory handle to export
+  /// @param[in] type @ref core::ShareType to export
+  /// @param[in] flags @ref ExportMemoryFlags
+  /// @param[out] export_handle output handle; @p int* for @p DMABUF_FD,
+  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
+  /// @param[out] export_offset allocation offset; required when @p EXPORT_MEMORY_FLAGS_KFD_DMABUF
+  ///             is set in @p flags
+  hsa_status_t ExportMemoryHandleImpl(const core::Agent& agent,
+                                      const core::DriverMemoryHandle& handle, core::ShareType type,
+                                      uint32_t flags, void* export_handle, uint64_t* export_offset);
 
   /// @brief Query for user preference and use that to determine Xnack mode
   /// of ROCm system. Return true if Xnack mode is ON or false if OFF. Xnack

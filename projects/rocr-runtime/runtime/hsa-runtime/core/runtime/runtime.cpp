@@ -4240,7 +4240,7 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
     Agent *exportAgent = memHandle->drmAgent();
     int dmabuf_fd = -1;
     hsa_status_t status = exportAgent->driver().ExportMemoryHandle(
-        *exportAgent, memHandle->driver_handle, ShareType::DMABUF_FD, 0, &dmabuf_fd);
+        *exportAgent, memHandle->driver_handle, ShareType::DMABUF_FD, &dmabuf_fd);
     if (status != HSA_STATUS_SUCCESS)
       return status;
     memHandle->driver_handle.dmabuf_fd = dmabuf_fd;
@@ -4454,8 +4454,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   auto agentOwner = memoryHandle->drmAgent();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
-                                                 ShareType::DMABUF_FD,
-                                                 0, dmabuf_fd);
+                                                 ShareType::DMABUF_FD, dmabuf_fd);
 }
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
@@ -4485,8 +4484,7 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
   auto agentOwner = memoryHandle->region->owner();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
-                                                 ShareType::FABRIC_HANDLE,
-                                                 0, fabric_handle);
+                                                 ShareType::FABRIC_HANDLE, fabric_handle);
 }
 
 hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
