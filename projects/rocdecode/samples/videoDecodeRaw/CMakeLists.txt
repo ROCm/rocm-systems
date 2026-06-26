@@ -85,7 +85,7 @@ if(HIP_FOUND AND rocdecode_FOUND AND (WIN32 OR rocprofiler-register_FOUND))
         set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
     endif()
     if(WIN32)
-        add_compile_definitions(NOMINMAX)
+        add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
     endif()
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} videodecoderaw.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)

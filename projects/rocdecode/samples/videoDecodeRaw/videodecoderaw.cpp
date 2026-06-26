@@ -246,7 +246,6 @@ int main(int argc, char **argv) {
         uint8_t *pframe = nullptr;
         int64_t pts = 0;
         OutputSurfaceInfo *surf_info;
-        uint32_t width, height;
         double total_dec_time = 0;
         bool first_frame = true;
         // initialize reconfigure params: the following is configured to dump to output which is relevant for this sample
@@ -291,7 +290,7 @@ int main(int argc, char **argv) {
             total_dec_time += time_per_decode;
             n_frame += n_frame_returned;
             n_pic_decoded += decoded_pics;
-            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+            if (num_decoded_frames && num_decoded_frames <= static_cast<uint32_t>(n_frame)) {
                 break;
             }
 

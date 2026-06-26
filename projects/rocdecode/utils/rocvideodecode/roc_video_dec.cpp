@@ -339,7 +339,7 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     // AV1 has max width/height of sequence in sequence header
     if (codec_id_ == rocDecVideoCodec_AV1 && p_video_format->seqhdr_data_length > 0) {
         // dont overwrite if it is already set from cmdline or reconfig.txt
-        if (!(max_width_ > p_video_format->coded_width || max_height_ > p_video_format->coded_height)) {
+        if (!(max_width_ > static_cast<int>(p_video_format->coded_width) || max_height_ > static_cast<int>(p_video_format->coded_height))) {
             RocdecVideoFormatEx *vidFormatEx = (RocdecVideoFormatEx *)p_video_format;
             max_width_ = vidFormatEx->max_width;
             max_height_ = vidFormatEx->max_height;
@@ -863,7 +863,7 @@ int RocVideoDecoder::DecodeFrame(const uint8_t *data, size_t size, int pkt_flags
     decoded_pic_cnt_ = 0;
     RocdecSourceDataPacket packet = { 0 };
     packet.payload = data;
-    packet.payload_size = size;
+    packet.payload_size = static_cast<uint32_t>(size);
     packet.flags = pkt_flags | ROCDEC_PKT_TIMESTAMP;
     packet.pts = pts;
     if (!data || size == 0) {
@@ -1019,7 +1019,7 @@ void RocVideoDecoder::SaveFrameToFile(std::string output_file_name, void *surf_m
             } else {
                 uint32_t width = surf_info->output_width * surf_info->bytes_per_pixel;
                 if (surf_info->bit_depth <= 16) {
-                    for (int i = 0; i < surf_info->output_height; i++) {
+                    for (uint32_t i = 0; i < surf_info->output_height; i++) {
                         fwrite(tmp_hst_ptr, 1, width, fp_out_);
                         tmp_hst_ptr += output_stride;
                     }
@@ -1029,7 +1029,7 @@ void RocVideoDecoder::SaveFrameToFile(std::string output_file_name, void *surf_m
                         uv_hst_ptr += (num_chroma_planes_ == 1) ? (((disp_rect_.top + crop_rect_.top) >> 1) * surf_info->output_pitch) + ((disp_rect_.left + crop_rect_.left) * surf_info->bytes_per_pixel):
                         ((disp_rect_.top + crop_rect_.top) * surf_info->output_pitch) + ((disp_rect_.left + crop_rect_.left) * surf_info->bytes_per_pixel);
                     }
-                    for (int i = 0; i < chroma_height_; i++) {
+                    for (uint32_t i = 0; i < static_cast<uint32_t>(chroma_height_); i++) {
                         fwrite(uv_hst_ptr, 1, width, fp_out_);
                         uv_hst_ptr += output_stride;
                     }
@@ -1038,7 +1038,7 @@ void RocVideoDecoder::SaveFrameToFile(std::string output_file_name, void *surf_m
                         if (surf_info->mem_type == OUT_SURFACE_MEM_DEV_INTERNAL) {
                             uv_hst_ptr += ((disp_rect_.top + crop_rect_.top) * surf_info->output_pitch) + ((disp_rect_.left + crop_rect_.left) * surf_info->bytes_per_pixel);
                         }
-                        for (int i = 0; i < chroma_height_; i++) {
+                        for (uint32_t i = 0; i < static_cast<uint32_t>(chroma_height_); i++) {
                             fwrite(uv_hst_ptr, 1, width, fp_out_);
                             uv_hst_ptr += output_stride;
                         }
