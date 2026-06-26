@@ -352,39 +352,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--triton-trace",
-        dest="triton_trace",
-        required=False,
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Triton trace",
-        help=(
-            "\t\t\tTriton Trace, maps Triton kernels to performance counters.\n"
-            "\t\t\tShould be used only when profiling Triton/Inductor "
-            "applications.\n"
-            "\t\t\tCan be combined with --torch-trace."
-        ),
-    )
-    profile_group.add_argument(
-        "--ml-api-trace",
-        dest="ml_api_trace",
-        required=False,
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="ML API trace",
-        help=(
-            "\t\t\tML API Trace, enables tracing for all supported framework backends."
-        ),
-    )
-    profile_group.add_argument(
         "-k",
         "--kernel",
         type=str,
@@ -588,6 +555,40 @@ Examples:
     # Experimental Features
     ## ----------------------------
 
+    profile_group.add_argument(
+        "--triton-trace",
+        dest="triton_trace",
+        required=False,
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Triton trace",
+        help=(
+            "\t\t\tTriton Trace, maps Triton kernels to performance counters.\n"
+            "\t\t\tUse when profiling Triton kernels, including those generated\n"
+            "\t\t\tby torch.compile / Inductor.\n"
+            "\t\t\tCan be combined with --torch-trace."
+        ),
+    )
+    profile_group.add_argument(
+        "--ml-api-trace",
+        dest="ml_api_trace",
+        required=False,
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="ML API trace",
+        help=(
+            "\t\t\tML API Trace, enables tracing for all supported machine\n"
+            "\t\t\tlearning framework backends (e.g. PyTorch, Triton)."
+        ),
+    )
     profile_group.add_argument(
         "--membw-analysis",
         dest="membw_analysis",
