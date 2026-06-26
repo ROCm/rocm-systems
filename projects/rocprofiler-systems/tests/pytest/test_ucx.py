@@ -11,7 +11,7 @@ all subsequent tests in this module are skipped.
 
 from __future__ import annotations
 import pytest
-from conftest import RocprofsysTest
+from conftest import MERGED_PERFETTO_FILE, RocprofsysTest
 
 # UCX tests require MPI examples since UCX is MPI's transport layer
 pytestmark = [
@@ -138,7 +138,7 @@ class TestUCX(RocprofsysTest):
         if mode == "sys_run":
             self.assert_perfetto(
                 result,
-                perfetto_file="merged.proto",
+                perfetto_file=MERGED_PERFETTO_FILE,
                 categories=["ucx"],
                 counter_names=["UCX Comm Recv", "UCX Comm Send"],
             )
@@ -174,7 +174,7 @@ class TestUCX(RocprofsysTest):
         if mode == "sys_run":
             self.assert_perfetto(
                 result,
-                perfetto_file="merged.proto",
+                perfetto_file=MERGED_PERFETTO_FILE,
                 categories=["ucx"],
                 counter_names=["UCX Comm Recv", "UCX Comm Send"],
             )

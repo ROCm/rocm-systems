@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: MIT
 
 """
-Unit tests for GPU-specific test counter selection.
+Unit tests for pytest helper behavior.
 """
 
 from __future__ import annotations
 import pytest
+import conftest as pytest_config
 from conftest import RocprofsysTest
 from rocprofsys import GPUInfo
 
@@ -69,3 +70,97 @@ class TestGPUInfo(RocprofsysTest):
 
         assert gpu_info.rocm_events_for_test == "SQ_WAVES"
         assert gpu_info.counter_names == ["SQ_WAVES"]
+
+
+@pytest.mark.class_name("perfetto-merge")
+class TestPerfettoMergeRecovery(RocprofsysTest):
+    def test_recover_merged_perfetto_trace_runs_merge_script(self, tmp_path, monkeypatch):
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        merged_trace = output_dir / "merged.proto"
+        rank_trace = output_dir / "perfetto-trace-0.proto"
+        rank_trace.write_text("rank trace")
+
+        script_dir = tmp_path / "scripts"
+        script_dir.mkdir()
+        merge_script = script_dir / "rocprof-sys-merge-output.sh"
+        merge_script.write_text(
+            "#!/bin/sh\n" 'cat "$1"/perfetto-trace-0.proto > "$1"/merged.proto\n'
+        )
+        merge_script.chmod(0o755)
+
+        monkeypatch.setenv("ROCPROFSYS_SCRIPT_PATH", str(script_dir))
+        monkeypatch.setattr(pytest_config.time, "sleep", lambda _: None)
+
+        result = pytest_config._recover_merged_perfetto_trace(merged_trace, tmp_path)
+
+        assert result.ok
+        assert merged_trace.read_text() == "rank trace"
+        assert "returncode=0" in result.message
+
+    def test_recover_merged_perfetto_trace_skips_non_merged_trace(self, tmp_path):
+        result = pytest_config._recover_merged_perfetto_trace(
+            tmp_path / "perfetto-trace-0.proto", tmp_path
+        )
+
+        assert not result.ok
+        assert "not merged.proto" in result.message
+
+    def test_recover_merged_perfetto_trace_requires_rank_traces(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(pytest_config.time, "sleep", lambda _: None)
+
+        result = pytest_config._recover_merged_perfetto_trace(
+            tmp_path / "merged.proto", tmp_path
+        )
+
+        assert not result.ok
+        assert "no perfetto-trace-*.proto files found" in result.message
+
+    def test_recover_merged_perfetto_trace_handles_merge_timeout(
+        self, tmp_path, monkeypatch
+    ):
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        (output_dir / "perfetto-trace-0.proto").write_text("rank trace")
+
+        script_dir = tmp_path / "scripts"
+        script_dir.mkdir()
+        merge_script = script_dir / "rocprof-sys-merge-output.sh"
+        merge_script.write_text("#!/bin/sh\nsleep 10\n")
+        merge_script.chmod(0o755)
+
+        monkeypatch.setenv("ROCPROFSYS_SCRIPT_PATH", str(script_dir))
+        monkeypatch.setattr(pytest_config.time, "sleep", lambda _: None)
+        monkeypatch.setattr(pytest_config, "_MERGE_SCRIPT_TIMEOUT_S", 0.01)
+
+        result = pytest_config._recover_merged_perfetto_trace(
+            output_dir / "merged.proto", tmp_path
+        )
+
+        assert not result.ok
+        assert "timed out" in result.message
+
+    def test_recover_merged_perfetto_trace_reports_merge_failure(
+        self, tmp_path, monkeypatch
+    ):
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        (output_dir / "perfetto-trace-0.proto").write_text("rank trace")
+
+        script_dir = tmp_path / "scripts"
+        script_dir.mkdir()
+        merge_script = script_dir / "rocprof-sys-merge-output.sh"
+        merge_script.write_text("#!/bin/sh\nexit 3\n")
+        merge_script.chmod(0o755)
+
+        monkeypatch.setenv("ROCPROFSYS_SCRIPT_PATH", str(script_dir))
+        monkeypatch.setattr(pytest_config.time, "sleep", lambda _: None)
+
+        result = pytest_config._recover_merged_perfetto_trace(
+            output_dir / "merged.proto", tmp_path
+        )
+
+        assert not result.ok
+        assert "returncode=3" in result.message
