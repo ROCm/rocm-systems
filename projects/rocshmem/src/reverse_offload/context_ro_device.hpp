@@ -193,6 +193,13 @@ class ROContext : public Context {
   __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
+  template <typename T>
+  __device__ int fcollect_wave(rocshmem_team_t team, T *dest, const T *source,
+                               int nelems);
+
+  __device__ int fcollectmem_wave(rocshmem_team_t team, void *dest,
+                                  const void *source, int nelems);
+
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);
 

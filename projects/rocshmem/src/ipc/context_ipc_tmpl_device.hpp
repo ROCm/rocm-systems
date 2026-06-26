@@ -582,13 +582,13 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void IPCContext::fcollect(rocshmem_team_t team, T *dst,
+__device__ void IPCContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  fcollect_linear(team, dst, src, nelems);
+  fcollect_linear_wg(team, dst, src, nelems);
 }
 
 template <typename T>
-__device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
+__device__ void IPCContext::fcollect_linear_wg(rocshmem_team_t team, T *dst,
                                             const T *src, int nelems) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
@@ -609,6 +609,17 @@ __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
   }
   // wait until everyone has obtained their designated data
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync);
+}
+
+template <typename T>
+__device__ int IPCContext::fcollect_wave(rocshmem_team_t team, T *dst,
+                                     const T *src, int nelems) {
+  if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
+  
+  fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
+
+  return ROCSHMEM_SUCCESS;
 }
 
 // Block/wave functions

@@ -741,6 +741,16 @@ __device__ inline int ROContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_te
 // Rooted SUM Reduction operations
 // Rooted MAX Reduction operations
 // Rooted MIN Reduction operations
+
+template <typename T>
+__device__ int ROContext::fcollect_wave([[maybe_unused]] rocshmem_team_t team,
+                                        [[maybe_unused]] T *dest,
+                                        [[maybe_unused]] const T *source,
+                                        [[maybe_unused]] int nelems) {
+  LOGD_WARN("fcollect_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_REVERSE_OFFLOAD_RO_NET_GPU_TEMPLATES_HPP_

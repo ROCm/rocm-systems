@@ -543,4 +543,43 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   sync_wave(team);
 }
 
+__device__ int GDAContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
+                                     const void *src, int nelems) {
+  if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
+
+  fcollectmem_linear_wave(team, dst, src, nelems);
+
+  return ROCSHMEM_SUCCESS;
+}
+
+__device__ void GDAContext::fcollectmem_linear_wave(rocshmem_team_t team, void *dst,
+    const void *src, int nelems) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->num_pes;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+  // Have each PE put their designated data to the other PEs
+  for (int j = 0; j < pe_size; j++) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    internal_putmem_nbi_wave(reinterpret_cast<char *>(dst) + my_pe_in_team * nelems, src,
+      nelems, dest_pe, dest_pe, wf_info);
+  }
+
+  if (is_thread_zero_in_block()) {
+    // Iterate through 0th qp of each PE
+    for (int j = 0; j < pe_size; j++) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].quiet(wf_info);
+    }
+  }
+  // wait until everyone has obtained their designated data
+  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+}
+
 }  // namespace rocshmem
