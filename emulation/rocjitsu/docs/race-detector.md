@@ -58,7 +58,7 @@ int main() {
 
 Compile it with `hipcc` or `amdclang++`. The `--offload-arch` must match the
 emulated GPU, which depends on the config file you pass to rocjitsu (e.g.
-`amdgpu_cdna4.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
+`gfx950_cdna4.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
 higher — the emulator does not currently support unoptimized (`-O0`) GPU code
 objects. `hipcc` defaults to `-O3` so this isn't an issue there.
 
@@ -70,7 +70,7 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 Run it under the emulator with `RJ_RACE=1` to enable the race detector:
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/amdgpu_cdna4.json -- /tmp/race_example
+RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- /tmp/race_example
 ```
 
 You should see output:
@@ -95,8 +95,8 @@ Replace the binary path with your application. This works with any ROCm workload
 launchers like `torchrun`, etc.
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/amdgpu_cdna4.json -- ./my_app
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/amdgpu_cdna4.json -- python my_script.py
+RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- ./my_app
+RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- python my_script.py
 ```
 
 To capture reports to a file instead of stderr, set `RJ_SINKS=file` and
@@ -104,7 +104,7 @@ To capture reports to a file instead of stderr, set `RJ_SINKS=file` and
 
 ```bash
 RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  build/tools/rocjitsu/rocjitsu --config configs/amdgpu_cdna4.json -- ./my_app
+  build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
 
