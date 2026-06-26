@@ -368,14 +368,6 @@ class RocProfCompute:
                     "supported in --tui mode. Please remove --tui or run "
                     "without the operator flags.",
                 )
-            if args.spatial_multiplexing:
-                console_error(
-                    "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) do not yet "
-                    "support multi-node analysis via --spatial-multiplexing. "
-                    "Please remove one of these options.",
-                )
             if args.output_format != "stdout":
                 console_error(
                     "ml api trace",
@@ -394,13 +386,6 @@ class RocProfCompute:
                         "Operator filters are ignored by --list-stats; the "
                         "full kernel stats table will be shown regardless "
                         "of the operator filter.",
-                    )
-                if args.list_nodes:
-                    console_warning(
-                        "ml api trace",
-                        "Operator filters are ignored by --list-nodes; the "
-                        "node enumeration does not respect the operator "
-                        "filter.",
                     )
                 if operator_listing:
                     console_warning(
