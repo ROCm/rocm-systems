@@ -191,9 +191,15 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
     return ncclSuccess;
   }
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#else
-  // This will always fail when using NCCL_CUMEM_ENABLE=1
+  // Probe whether legacy IPC (hipIpcGetMemHandle / cudaIpcGetMemHandle) is
+  // usable in this environment. On NVIDIA this was originally a WSL workaround;
+  // on AMD/HIP the same call fails in multi-process containers (e.g. Kubernetes
+  // with the AMD GPU device plugin) where hipIpcGetMemHandle returns
+  // "invalid argument" on device allocations even with hostIPC and adequate
+  // /dev/shm. Without this probe, p2pSendSetup unconditionally calls
+  // ncclP2pAllocateShareableBuffer -> hipIpcGetMemHandle and crashes instead
+  // of gracefully falling back to SHM transport.
+  // See: https://github.com/ROCm/rocm-systems/issues/2779
   if (p2p != 0 && !ncclCuMemEnable()) {
     // Cached result of the legacyIPC detection
     static int legacyIPC = -1;
@@ -201,19 +207,17 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
       *ret = legacyIPC;
       return ncclSuccess;
     }
-    // Check that legacy IPC support is available (WSL WAR)
     char *dummy;
     cudaIpcMemHandle_t ipc;
     NCCLCHECK(ncclCudaMalloc(&dummy, CUDA_IPC_MIN, comm->memManager, ncclMemOffload));
     if (!CUDASUCCESS(cudaIpcGetMemHandle(&ipc, dummy))) {
-      INFO(NCCL_INIT|NCCL_P2P,"Legacy IPC not supported");
+      INFO(NCCL_INIT|NCCL_P2P,"Legacy IPC not supported, falling back to SHM transport");
       *ret = 0;
     }
     NCCLCHECK(ncclCudaFree(dummy, comm->memManager));
     legacyIPC = *ret;
     return ncclSuccess;
   }
-#endif
 
   if (p2p == 0) {
     INFO(NCCL_INIT|NCCL_P2P,"Could not enable P2P between dev %d(=%lx) and dev %d(=%lx)",
