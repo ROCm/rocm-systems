@@ -62,6 +62,12 @@ __host__ void IPCHostContext::get_nbi(T *dest, const T *source, size_t nelems, i
 
 template <typename T>
 __host__ void IPCHostContext::amo_add(void *dst, T value, int pe) {
+  if (is_ipc_non_mpi()) {
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8,
+                  "amo_add: only 32-bit and 64-bit types supported");
+    ipc_amo_fadd(static_cast<T *>(shmem_ptr(dst, pe)), value, false);
+    return;
+  }
   host_interface->amo_add(dst, value, pe, context_window_info);
 }
 
@@ -72,11 +78,21 @@ __host__ void IPCHostContext::amo_cas(void *dst, T value, T cond, int pe) {
 
 template <typename T>
 __host__ T IPCHostContext::amo_fetch_add(void *dst, T value, int pe) {
+  if (is_ipc_non_mpi()) {
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8,
+                  "amo_fetch_add: only 32-bit and 64-bit types supported");
+    return ipc_amo_fadd(static_cast<T *>(shmem_ptr(dst, pe)), value);
+  }
   return host_interface->amo_fetch_add(dst, value, pe, context_window_info);
 }
 
 template <typename T>
 __host__ T IPCHostContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
+  if (is_ipc_non_mpi()) {
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8,
+                  "amo_fetch_cas: only 32-bit and 64-bit types supported");
+    return ipc_amo_fcas(static_cast<T *>(shmem_ptr(dst, pe)), cond, value);
+  }
   return host_interface->amo_fetch_cas(dst, value, cond, pe, context_window_info);
 }
 

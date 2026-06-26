@@ -18,9 +18,10 @@
 /// then optional clamp to [0, 1]) and differ only in (a) the per-source f16
 /// widening shape selected by `op_sel_hi` + `op_sel_hi_2` (widen f16 half to
 /// f32 vs read raw f32) and the f16-half pick selected by `op_sel`, and
-/// (b) the destination narrowing shape (f32 / f16-lo / f16-hi). VOP3P does
-/// not carry abs or omod; only `neg` (per-source xor of the sign bit) and
-/// `clamp` (saturate result to [0, 1]) apply.
+/// (b) the destination narrowing shape (f32 / f16-lo / f16-hi). The field
+/// named `neg_hi` in the shared VOP3P layout carries per-source abs for this
+/// mix-family encoding, `neg` applies per-source sign xor, and `clamp`
+/// saturates the result to [0, 1].
 ///
 /// The test covers every per-source neg combination, several op_sel /
 /// op_sel_hi patterns (so all four widen-modes per source are exercised),
@@ -192,17 +193,19 @@ const std::array<uint32_t, 16> kSrcB_f16 = kSrcA_f16;
 const std::array<uint32_t, 16> kSrcC_f16 = kSrcA_f16;
 
 // Modifier combinations swept per op. (neg, op_sel, op_sel_hi, op_sel_hi_2,
-// clamp). op_sel only matters when the matching op_sel_hi[i] bit is set.
-// Eight neg patterns × handful of op_sel / widen-mode combos × clamp on/off.
+// clamp, abs). op_sel only matters when the matching op_sel_hi[i] bit is set.
+// Eight neg patterns × handful of op_sel / widen-mode combos × clamp on/off,
+// plus abs-only and abs+neg cases.
 struct ModCombo {
   uint32_t neg;         // bit0=src0, bit1=src1, bit2=src2
   uint32_t op_sel;      // bit0=src0 lo/hi, bit1=src1 lo/hi, bit2=src2 lo/hi
   uint32_t op_sel_hi;   // bit0=src0 widen, bit1=src1 widen
   uint32_t op_sel_hi_2; // 0/1: src2 widen
   uint32_t clamp;       // 0/1
+  uint32_t abs = 0;     // bit0=src0, bit1=src1, bit2=src2
 };
 
-constexpr std::array<ModCombo, 32> kModCombos = {{
+constexpr std::array<ModCombo, 36> kModCombos = {{
     // All-defaults: read every src as raw f32, no neg, no clamp.
     {0b000, 0b000, 0b00, 0, 0},
     // Per-source neg.
@@ -249,6 +252,11 @@ constexpr std::array<ModCombo, 32> kModCombos = {{
     {0b011, 0b010, 0b11, 1, 1},
     {0b110, 0b110, 0b10, 1, 1},
     {0b101, 0b101, 0b01, 1, 1},
+    // Mix-family abs modifiers are encoded in the shared field named neg_hi.
+    {0b000, 0b000, 0b00, 0, 0, 0b001},
+    {0b000, 0b000, 0b00, 0, 0, 0b110},
+    {0b101, 0b000, 0b00, 0, 0, 0b101},
+    {0b011, 0b111, 0b11, 1, 1, 0b111},
 }};
 
 template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
@@ -337,10 +345,10 @@ void check_combo(uint32_t opcode, const ModCombo &mc, uint64_t exec, uint32_t ds
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     if constexpr (ArchTag == 0) {
-      vop3p_encode_rdna3(opcode, kDstVgpr, /*neg_hi=*/0, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
+      vop3p_encode_rdna3(opcode, kDstVgpr, /*neg_hi=*/mc.abs, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
                          /*src0=*/256, /*src1=*/257, /*src2=*/258, mc.op_sel_hi, mc.neg, words);
     } else {
-      vop3p_encode_cdna4(opcode, kDstVgpr, /*neg_hi=*/0, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
+      vop3p_encode_cdna4(opcode, kDstVgpr, /*neg_hi=*/mc.abs, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
                          /*src0=*/256, /*src1=*/257, /*src2=*/258, mc.op_sel_hi, mc.neg, words);
     }
     Instruction *inst = fx.decoder->decode(words);

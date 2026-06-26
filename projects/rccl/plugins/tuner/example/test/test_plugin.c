@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <stdarg.h>
+#include <pthread.h>
 
 
 // Include NCCL tuner header (which includes common.h and err.h)
@@ -879,6 +880,95 @@ int test_tuner_constants() {
   TEST_PASS();
 }
 
+// Test 16: Concurrent config loading (thread-safety regression)
+//
+// loadConfig() used strtok(), whose parser state is a process-wide static.
+// Concurrent loads (single-process multi-GPU init) clobber it, so some ranks
+// parse a PARTIAL config set -> ranks disagree on the algorithm -> deadlock.
+// Many threads load the same config at once; each MUST see the full set.
+//   - BEFORE FIX (strtok):   partial counts -> FAILS.
+//   - AFTER FIX  (strtok_r): all configs    -> PASSES.
+#define CONCURRENT_THREADS 16
+#define CONCURRENT_ITERS 50
+#define CONCURRENT_EXPECTED_CONFIGS 12
+
+typedef struct {
+  int observed;   // numConfigs this thread loaded (written only by this thread)
+} ConcurrentArg;
+
+static void* concurrent_load_thread(void* p) {
+  ConcurrentArg* arg = (ConcurrentArg*)p;
+  void* context = NULL;
+  // Pass NULL logger so concurrent threads don't share the test's logger state;
+  // we only care about whether loadConfig() parsed the file completely.
+  ncclResult_t result = pluginInit(&context, 0, 8, 1, NULL, NULL, NULL);
+  if (result == ncclSuccess && context != NULL) {
+    arg->observed = ((TunerContext*)context)->numConfigs;
+    pluginFinalize(context);
+  } else {
+    arg->observed = -1;
+  }
+  return NULL;
+}
+
+int test_concurrent_config_loading() {
+  // 12 fully-specified, valid configs (10 fields each).
+  const char* test_config =
+    "allreduce,0,1024,tree,ll,1,1,8,-1,-1\n"
+    "allreduce,1025,4096,ring,ll,2,1,8,-1,-1\n"
+    "allreduce,4097,16384,tree,ll128,4,1,8,-1,-1\n"
+    "allreduce,16385,65536,ring,ll128,8,1,8,-1,-1\n"
+    "broadcast,0,1024,tree,simple,1,1,8,-1,-1\n"
+    "broadcast,1025,4096,ring,simple,2,1,8,-1,-1\n"
+    "reduce,0,1024,tree,ll,1,1,8,-1,-1\n"
+    "reduce,1025,4096,ring,ll,2,1,8,-1,-1\n"
+    "allgather,0,1024,ring,simple,4,1,8,-1,-1\n"
+    "allgather,1025,4096,ring,ll128,8,1,8,-1,-1\n"
+    "reducescatter,0,1024,ring,simple,4,1,8,-1,-1\n"
+    "reducescatter,1025,4096,ring,ll128,8,1,8,-1,-1\n";
+
+  create_test_config("test_concurrent.conf", test_config);
+  setenv("NCCL_TUNER_CONFIG_FILE", "test_concurrent.conf", 1);
+
+  int failures = 0;
+  for (int iter = 0; iter < CONCURRENT_ITERS && failures == 0; iter++) {
+    pthread_t threads[CONCURRENT_THREADS];
+    ConcurrentArg args[CONCURRENT_THREADS];
+
+    for (int i = 0; i < CONCURRENT_THREADS; i++) {
+      args[i].observed = 0;
+      if (pthread_create(&threads[i], NULL, concurrent_load_thread, &args[i]) != 0) {
+        printf("FAIL: %s - pthread_create failed\n", __func__);
+        // Join already-created threads before bailing out.
+        for (int j = 0; j < i; j++) pthread_join(threads[j], NULL);
+        unlink("test_concurrent.conf");
+        unsetenv("NCCL_TUNER_CONFIG_FILE");
+        return 0;
+      }
+    }
+
+    for (int i = 0; i < CONCURRENT_THREADS; i++) {
+      pthread_join(threads[i], NULL);
+    }
+
+    for (int i = 0; i < CONCURRENT_THREADS; i++) {
+      if (args[i].observed != CONCURRENT_EXPECTED_CONFIGS) {
+        printf("  iter %d thread %d loaded %d/%d configs (partial parse -> CSV strtok race)\n",
+               iter, i, args[i].observed, CONCURRENT_EXPECTED_CONFIGS);
+        failures++;
+      }
+    }
+  }
+
+  unlink("test_concurrent.conf");
+  unsetenv("NCCL_TUNER_CONFIG_FILE");
+
+  TEST_ASSERT(failures == 0,
+              "Concurrent loads must each parse the full config set "
+              "(regression: csv parser must use strtok_r, not strtok)");
+  TEST_PASS();
+}
+
 // Test runner function pointer type
 typedef int (*TestFunction)(void);
 
@@ -906,6 +996,7 @@ TestCase test_cases[] = {
   {"empty-config", test_empty_config, "Empty configuration file handling"},
   {"nvl-domain", test_nvl_domain_info, "NVL domain info handling"},
   {"constants", test_tuner_constants, "Tuner constants initialization"},
+  {"concurrent", test_concurrent_config_loading, "Concurrent config loading thread-safety (strtok_r regression)"},
   {NULL, NULL, NULL} // End marker
 };
 

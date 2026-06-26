@@ -12,10 +12,7 @@ import pytest
 import os
 from conftest import RocprofsysTest
 
-pytestmark = [
-    pytest.mark.rocprof_binary,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
-]
+pytestmark = [pytest.mark.rocprof_binary]
 
 # ============================================================================
 # Avail format consistency data
@@ -84,6 +81,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_UCX": "domains.parallel.runtimes.ucx",
     # --- Output ---
     "ROCPROFSYS_OUTPUT_PATH": "output.path",
+    "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH": "output.unified_memory_output_path",
     "ROCPROFSYS_TIME_OUTPUT": "output.time_output",
     "ROCPROFSYS_FILE_OUTPUT": "output.file_output",
     "ROCPROFSYS_USE_ROCPD": "output.rocpd_output",
@@ -476,7 +474,6 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
     def test_regex_negation(self):
         pass_regex = [
             r"ENVIRONMENT VARIABLE,[\s\S]*"
-            r"ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK,[\s\S]*"
             r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*"
             r"ROCPROFSYS_USE_PID,"
         ]

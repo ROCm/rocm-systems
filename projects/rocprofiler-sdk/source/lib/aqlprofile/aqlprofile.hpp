@@ -37,7 +37,16 @@
 #undef ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE
 
 #if ROCPROFILER_EXTERNAL_AQLPROFILE == 0
-#    include "lib/aqlprofile/util/hsa_rsrc_factory.h"
+extern "C" struct HsaApiTable;
+
+namespace rocprofiler
+{
+namespace aqlprofile
+{
+void
+hsa_rsrc_factory_init(::HsaApiTable* table);
+}
+}  // namespace rocprofiler
 #else
 
 extern "C" struct HsaApiTable;

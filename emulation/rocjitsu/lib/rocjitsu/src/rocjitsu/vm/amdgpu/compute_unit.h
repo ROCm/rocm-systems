@@ -8,8 +8,10 @@
 #define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -19,6 +21,7 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
+#include "rocjitsu/vm/amdgpu/workgroup_key.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
@@ -29,6 +32,7 @@
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/simulation.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -36,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -146,6 +151,23 @@ public:
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
 
+  /// @brief Return the command processor that owns this CU's dispatch stream.
+  CommandProcessor *command_processor() { return cp_; }
+
+  /// @brief Override the cluster LDS multicast backend.
+  ///
+  /// @details Passing nullptr restores the immediate functional backend. Timed
+  /// models can install a shared fabric object here without changing the ISA
+  /// execution path that produces multicast transactions.
+  void set_cluster_lds_multicast_engine(ClusterLdsMulticastEngine *engine) {
+    cluster_lds_multicast_engine_ = engine ? engine : &default_cluster_lds_multicast_engine_;
+  }
+
+  /// @brief Return the active cluster LDS multicast backend.
+  ClusterLdsMulticastEngine &cluster_lds_multicast_engine() {
+    return *cluster_lds_multicast_engine_;
+  }
+
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so retire_halted_wfs() can detect WG completion.
@@ -216,8 +238,24 @@ public:
     return base;
   }
 
-  /// @brief Reset LDS allocation (called when all WFs retire).
+  /// @brief Reset LDS allocation when no resident waves or pinned clusters remain.
   void reset_lds_alloc() { next_lds_alloc_ = 0; }
+
+  /// @brief Hold LDS allocation state while a workgroup cluster is resident.
+  ///
+  /// @details Cluster multicast can target peer workgroups after the source WG
+  /// halts. Keep the per-CU LDS allocator pinned until the whole peer cluster
+  /// completes so a later WG cannot reuse LDS while peer multicast writes are
+  /// still possible, but larger dispatches can reclaim LDS between clusters.
+  void pin_lds_until_cluster_retired(uint64_t cluster_key) {
+    lds_pinned_clusters_.insert(cluster_key);
+  }
+
+  /// @brief Release the LDS allocation pin for a retired workgroup cluster.
+  void unpin_lds_for_cluster(uint64_t cluster_key) { lds_pinned_clusters_.erase(cluster_key); }
+
+  /// @brief Return true while any cluster can still receive multicast LDS writes.
+  bool lds_allocation_pinned() const { return !lds_pinned_clusters_.empty(); }
 
   /// @brief Flush all per-CU caches and the shared L2 to backing store.
   ///
@@ -370,6 +408,9 @@ public:
   /// @returns Mutable pointer to the raw VGPR data.
   virtual uint8_t *vgpr_data(uint32_t base) = 0;
 
+  /// @brief Number of physical VGPR registers in one allocation block.
+  virtual uint32_t vgpr_allocation_block_size() const = 0;
+
   /// @brief Typed view of a single VGPR as the file's @c simdojo::VectorReg.
   /// @details The abstract CU exposes the VGPR file only as a byte pointer
   /// (@c vgpr_data), which erases the wavefront-size template parameter. The
@@ -469,16 +510,16 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   Lds lds_;
+  ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
+  ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
   uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
+  std::unordered_set<uint64_t> lds_pinned_clusters_;
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
   CommandProcessor *cp_ = nullptr;
 
-  static uint64_t wg_key(uint32_t dispatch_id, uint32_t wg_id) {
-    return (uint64_t(dispatch_id) << 32) | wg_id;
-  }
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
   uint64_t shared_aperture_base_ = 0;
@@ -562,8 +603,16 @@ public:
   IsaExecComputeUnit(std::string name, const ComputeUnitCore::Config &config, GpuMemory *memory,
                      L2Cache *l2)
       : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE) {
-    vgpr_file_.init(config.num_wf_slots * config.vgprs_per_wf, config.vgprs_per_wf);
-    vgpr_to_wave_.resize(config.num_wf_slots * config.vgprs_per_wf, nullptr);
+    static_assert(!HasAccVgpr<Isa> || Isa::MAX_VGPRS_PER_WF == ACC_VGPR_OFFSET,
+                  "AccVGPR allocation base must match execution-side addressing");
+    // AccVGPR operands are addressed after the normal VGPR bank in the same
+    // physical file, so acc0 lives at base + ACC_VGPR_OFFSET.
+    constexpr uint32_t accvgpr_physical_base = ACC_VGPR_OFFSET;
+    constexpr uint32_t accvgpr_physical_limit =
+        Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : accvgpr_physical_base + Isa::MAX_ACC_VGPRS_PER_WF;
+    vgprs_per_block_ = std::max(config.vgprs_per_wf, accvgpr_physical_limit);
+    vgpr_file_.init(config.num_wf_slots * vgprs_per_block_, vgprs_per_block_);
+    vgpr_to_wave_.resize(config.num_wf_slots * vgprs_per_block_, nullptr);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
@@ -613,6 +662,10 @@ protected:
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
 
+public:
+  uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
+
+protected:
   /// @brief Execute one instruction on the given wavefront.
   ///
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
@@ -621,6 +674,7 @@ protected:
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
   std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
+  uint32_t vgprs_per_block_ = 0;
 };
 
 } // namespace amdgpu

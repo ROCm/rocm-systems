@@ -41,7 +41,16 @@
 ################################################################################
 
 
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.25)
+
+# The binary-only wkmi.lib is compiled with /MT so ROCR must follow suit.
+# Otherwise, the default is /MD and the library cannot be linked.
+# If the linkage of wkmi.lib is ever changed to /MD, this must be updated
+# or deleted.
+# Must come before project and after cmake_minimum_required
+if(WIN32)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 # Set the project name
 project("rocr")
@@ -221,9 +230,9 @@ set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/RadeonOpenCompute/ROCR-Runtime")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/Binary/postinst.in DEBIAN/Binary/postinst @ONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/Binary/prerm.in DEBIAN/Binary/prerm @ONLY)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/preinst DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/DEBIAN)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEB/Binary/postinst.in DEBIAN/Binary/postinst @ONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEB/Binary/prerm.in DEBIAN/Binary/prerm @ONLY)
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/DEB/preinst DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/DEBIAN)
 set (CPACK_DEBIAN_BINARY_PACKAGE_CONTROL_EXTRA "DEBIAN/preinst;DEBIAN/Binary/postinst;DEBIAN/Binary/prerm")
 # Needed since some packages still say they need hsakmt-roct
 set(CPACK_DEBIAN_DEV_PACKAGE_REPLACES "hsakmt-roct,hsakmt-roct-dev,hsa-ext-rocr-dev")

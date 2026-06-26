@@ -37,6 +37,11 @@ extern "C"
     /// starts an instrumentation region
     void rocprofsys_push_trace(const char*) ROCPROFSYS_PUBLIC_API;
 
+    /// starts an instrumentation region that carries serialized arguments
+    /// serialized arguments are of the form:
+    /// <arg_number>;;<arg_type>;;<arg_name>;;<arg_value>;;
+    void rocprofsys_push_trace_with_args(const char*, const char*) ROCPROFSYS_PUBLIC_API;
+
     /// stops an instrumentation region
     void rocprofsys_pop_trace(const char*) ROCPROFSYS_PUBLIC_API;
 
@@ -85,6 +90,8 @@ extern "C"
     void rocprofsys_set_env_hidden(const char*, const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_set_mpi_hidden(bool, bool) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_trace_hidden(const char*) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_push_trace_with_args_hidden(const char*,
+                                                const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_pop_trace_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_flush_pending_region_cache_hidden() ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_region_hidden(const char*) ROCPROFSYS_HIDDEN_API;

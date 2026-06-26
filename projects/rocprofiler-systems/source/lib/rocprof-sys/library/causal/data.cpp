@@ -7,6 +7,8 @@
 #include "binary/binary_info.hpp"
 #include "binary/link_map.hpp"
 #include "binary/scope_filter.hpp"
+#include "common/env_vars.hpp"
+#include "common/units.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
@@ -27,7 +29,6 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/procfs/maps.hpp>
@@ -59,7 +60,7 @@ using random_engine_t    = std::mt19937_64;
 using progress_bundles_t = component_bundle_cache<component::progress_point>;
 
 auto speedup_seeds     = std::vector<size_t>{};
-auto speedup_divisions = get_env<std::uint16_t>("ROCPROFSYS_CAUSAL_SPEEDUP_DIVISIONS", 5);
+auto speedup_divisions = get_env<std::uint16_t>(env_vars::CAUSAL_SPEEDUP_DIVISIONS, 5);
 auto speedup_dist      = []() {
     size_t                     _n = std::max<size_t>(1, 100 / speedup_divisions);
     std::vector<std::uint16_t> _v(_n, std::uint16_t{ 0 });
@@ -92,9 +93,9 @@ auto&
 get_engine()
 {
     static auto _seed = []() -> hash_value_t {
-        auto _seed_v =
-            config::get_setting_value<std::uint64_t>("ROCPROFSYS_CAUSAL_RANDOM_SEED")
-                .value_or(0);
+        auto _seed_v = config::get_setting_value<std::uint64_t>(
+                           std::string{ env_vars::CAUSAL_RANDOM_SEED })
+                           .value_or(0);
         if(_seed_v == 0) _seed_v = std::random_device{}();
         return _seed_v;
     }();
@@ -134,7 +135,8 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
                                   "( main\\(|^main$|^main\\.cold$)" });
 
     bool _use_default_excludes =
-        config::get_setting_value<bool>("ROCPROFSYS_CAUSAL_FUNCTION_EXCLUDE_DEFAULTS")
+        config::get_setting_value<bool>(
+            std::string{ env_vars::CAUSAL_FUNCTION_EXCLUDE_DEFAULTS })
             .value_or(true);
 
     if(_use_default_excludes && _scopes.count(sf::FUNCTION_FILTER) > 0)
@@ -481,9 +483,11 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     std::this_thread::sleep_for(std::chrono::milliseconds{ 10 });
 
     double _delay_sec =
-        config::get_setting_value<double>("ROCPROFSYS_CAUSAL_DELAY").value_or(0.0);
+        config::get_setting_value<double>(std::string{ env_vars::CAUSAL_DELAY })
+            .value_or(0.0);
     double _duration_sec =
-        config::get_setting_value<double>("ROCPROFSYS_CAUSAL_DURATION").value_or(0.0);
+        config::get_setting_value<double>(std::string{ env_vars::CAUSAL_DURATION })
+            .value_or(0.0);
     auto _duration_nsec = duration_nsec_t{ _duration_sec * units::sec };
 
     if(_delay_sec > 0.0)
@@ -617,8 +621,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 // if launched via rocprof-sys-causal, allow end-to-end runs that do not
                 // start experiments
                 auto _omni_causal_launcher =
-                    get_env<std::string>("ROCPROFSYS_LAUNCHER", "") ==
-                    "rocprof-sys-causal";
+                    get_env<std::string>(env_vars::LAUNCHER, "") == "rocprof-sys-causal";
 
                 if(!(get_causal_end_to_end() && _omni_causal_launcher))
                 {

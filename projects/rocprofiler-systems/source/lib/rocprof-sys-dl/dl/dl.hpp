@@ -51,6 +51,8 @@ extern "C"
     void rocprofsys_set_mpi(bool use, bool attached) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_set_instrumented(int) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_push_trace(const char* name) ROCPROFSYS_PUBLIC_API;
+    void rocprofsys_push_trace_with_args(const char* name,
+                                         const char* args) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_pop_trace(const char* name) ROCPROFSYS_PUBLIC_API;
     int  rocprofsys_push_region(const char*) ROCPROFSYS_PUBLIC_API;
     int  rocprofsys_pop_region(const char*) ROCPROFSYS_PUBLIC_API;
