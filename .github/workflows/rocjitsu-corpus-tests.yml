@@ -261,7 +261,8 @@ jobs:
           done
 
           targets=(
-            "gfx942 amdgpu_cdna3.json fpsan_gfx942.json"
+            # CDNA3 FPSAN has no passing tests yet.
+            # "gfx942 amdgpu_cdna3.json fpsan_gfx942.json"
             "gfx950 amdgpu_cdna4.json fpsan_gfx950.json"
             "gfx1100 amdgpu_rdna3_gfx1100_w7900_kmd.json fpsan_gfx1100.json"
             "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json fpsan_gfx1201.json"

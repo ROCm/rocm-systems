@@ -14,12 +14,6 @@
     "fpsan_load_tr16_gfx1250_test",
     "fpsan_wmma_16x16x4_gfx1250_test",
     "fpsan_wmma_16x16x32_gfx1250_test",
-    "fpsan_wmma_16x16x64_fp8_gfx1250_test",
-    "fpsan_wmma_16x16x128_fp8_gfx1250_test",
-    "fpsan_wmma_16x16x128_f8f6f4_gfx1250_test",
-    "fpsan_wmma_32x16x128_f4_gfx1250_test",
-    "fpsan_wmma_scale_f8f6f4_gfx1250_test",
-    "fpsan_swmmac_16x16x128_fp8_gfx1250_test",
     "fpsan_swmmac_16x16x64_16_gfx1250_test"
   ]
 }

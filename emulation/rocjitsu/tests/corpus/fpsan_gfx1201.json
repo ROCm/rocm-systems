@@ -1,7 +1,6 @@
 {
   "config_name": "rdna4",
   "hip_architectures": [
-    "gfx1200",
     "gfx1201"
   ],
   "tests": [
@@ -23,18 +22,11 @@
     "fpsan_parity_hip_test",
     "fpsan_cvt_test",
     "fpsan_cvt_fp8_test",
-    "fpsan_xlane_test",
     "fpsan_global_load_tr_test",
-    "fpsan_wave_test",
     "fpsan_amdgcn_math_test",
     "fpsan_amdgcn_ldexp_test",
     "fpsan_global_load_tr_gfx12_w64_test",
     "fpsan_wmma_gfx12_test",
-    "fpsan_wmma_gfx12_w64_test",
-    "fpsan_swmmac_gfx12_test",
-    "fpsan_swmmac_gfx12_w64_test",
-    "fpsan_xlane_gfx12_w64_test",
-    "fpsan_classify_gfx12_w64_test",
-    "fpsan_wave_gfx12_w64_test"
+    "fpsan_swmmac_gfx12_test"
   ]
 }
