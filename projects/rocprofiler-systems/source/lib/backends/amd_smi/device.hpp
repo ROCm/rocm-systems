@@ -25,37 +25,20 @@ using gpu::MAX_NUM_XGMI_LINKS;
 using gpu::metrics;
 using gpu::populate_if_supported;
 
-// SDMA process-list methods — only required when the wrapper declares sdma_supported.
 template <typename T>
-concept sdma_session_contract = requires {
-    typename T::proc_info_t;
-} && requires(T sess, typename T::processor_handle ph) {
-    { sess.probe_sdma_support(ph) } -> std::convertible_to<bool>;
-    {
-        sess.get_gpu_process_list(ph)
-    } -> std::same_as<std::vector<typename T::proc_info_t>>;
+concept session_types = requires {
+    typename T::processor_handle;
+    typename T::asic_info_t;
+    typename T::gpu_metrics_t;
+    typename T::memory_type_t;
+    typename T::temperature_type_t;
+    typename T::temperature_metric_t;
+    { T::sdma_supported } -> std::convertible_to<bool>;
+    { T::ainic_feature_gate } -> std::convertible_to<bool>;
 };
 
-/**
- * @brief Concept that a Backend session type passed to device must satisfy.
- *
- * Enumerates every expression device<T> evaluates on its session pointer,
- * so a missing method is caught at the template boundary rather than deep inside
- * the template body.
- */
 template <typename T>
-concept backend_session_contract =
-    // ── Required type aliases ─────────────────────────────────────────────────
-    requires {
-        typename T::processor_handle;
-        typename T::asic_info_t;
-        typename T::gpu_metrics_t;
-        typename T::memory_type_t;
-        typename T::temperature_type_t;
-        typename T::temperature_metric_t;
-        { T::sdma_supported } -> std::convertible_to<bool>;
-    } &&
-    // ── Per-device GPU calls (always required) ────────────────────────────────
+concept session_gpu_queries =
     requires(T sess, typename T::processor_handle ph, typename T::asic_info_t* aip,
              typename T::memory_type_t mt, std::uint64_t* u64p,
              typename T::temperature_type_t tt, typename T::temperature_metric_t tm) {
@@ -71,17 +54,32 @@ concept backend_session_contract =
         { sess.get_metrics_info(ph) } -> std::convertible_to<typename T::gpu_metrics_t>;
         { sess.get_memory_usage(ph, mt, u64p) };
         { sess.get_temp_metric(ph, tt, tm) } -> std::convertible_to<std::int64_t>;
-    } &&
-    // ── SDMA methods — only required when sdma_supported == true ─────────────
-    (!T::sdma_supported || sdma_session_contract<T>)
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    &&
-    requires {
-        typename T::nic_asic_info_t;
-        typename T::nic_port_info_t;
-        typename T::nic_rdma_devices_info_t;
-        typename T::nic_stat_t;
-    } &&
+    };
+
+template <typename T>
+concept sdma_session_types = requires { typename T::proc_info_t; };
+
+template <typename T>
+concept sdma_session_queries = requires(T sess, typename T::processor_handle ph) {
+    { sess.probe_sdma_support(ph) } -> std::convertible_to<bool>;
+    {
+        sess.get_gpu_process_list(ph)
+    } -> std::same_as<std::vector<typename T::proc_info_t>>;
+};
+
+template <typename T>
+concept sdma_session_contract = sdma_session_types<T> && sdma_session_queries<T>;
+
+template <typename T>
+concept nic_session_types = requires {
+    typename T::nic_asic_info_t;
+    typename T::nic_port_info_t;
+    typename T::nic_rdma_devices_info_t;
+    typename T::nic_stat_t;
+};
+
+template <typename T>
+concept nic_session_queries =
     requires(T sess, typename T::processor_handle ph, typename T::nic_asic_info_t* nap,
              typename T::nic_port_info_t* npp, typename T::nic_rdma_devices_info_t* ndp,
              std::uint8_t port_idx, std::uint32_t* cp, typename T::nic_stat_t* nsp) {
@@ -89,9 +87,22 @@ concept backend_session_contract =
         { sess.get_nic_port_info(ph, npp) };
         { sess.get_nic_rdma_dev_info(ph, ndp) };
         { sess.get_nic_rdma_port_statistics(ph, port_idx, cp, nsp) };
-    }
-#endif
-;
+    };
+
+template <typename T>
+concept nic_session_contract = nic_session_types<T> && nic_session_queries<T>;
+
+/**
+ * @brief Concept that a Backend session type passed to device must satisfy.
+ *
+ * Enumerates every expression device<T> evaluates on its session pointer,
+ * so a missing method is caught at the template boundary rather than deep inside
+ * the template body.
+ */
+template <typename T>
+concept backend_session_contract = session_types<T> && session_gpu_queries<T> &&
+                                   (!T::sdma_supported || sdma_session_contract<T>) &&
+                                   (!T::ainic_feature_gate || nic_session_contract<T>);
 
 /**
  * @brief Per-device proxy — bridges a shared backend session to one device handle.

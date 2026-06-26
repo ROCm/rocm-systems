@@ -44,6 +44,7 @@ concept wrapper_types = requires {
     typename T::temperature_type_t;
     typename T::temperature_metric_t;
     { T::sdma_supported } -> std::convertible_to<bool>;
+    { T::ainic_feature_gate } -> std::convertible_to<bool>;
 };
 
 template <typename T>
@@ -89,8 +90,6 @@ concept wrapper_gpu_queries =
         } -> std::convertible_to<typename T::status_t>;
     };
 
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-
 template <typename T>
 concept nic_wrapper_types = requires {
     typename T::processor_type;
@@ -115,17 +114,12 @@ concept nic_wrapper_queries =
         } -> std::convertible_to<typename T::status_t>;
     };
 
-#endif
-
 template <typename T>
 concept wrapper_policy =
     wrapper_types<T> && wrapper_constants<T> && wrapper_lifecycle<T> &&
     wrapper_enumeration<T> && wrapper_gpu_queries<T> &&
-    (!T::sdma_supported || sdma_wrapper_contract<T>)
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    && nic_wrapper_types<T> && nic_wrapper_queries<T>
-#endif
-    ;
+    (!T::sdma_supported || sdma_wrapper_contract<T>) &&
+    (!T::ainic_feature_gate || (nic_wrapper_types<T> && nic_wrapper_queries<T>) );
 
 /**
  * @brief Session-level smart wrapper around an AMD SMI backend policy.
@@ -147,7 +141,8 @@ class backend
 {
 public:
     // ── Constexpr feature flags — forwarded from Wrapper ─────────────────────
-    static constexpr bool sdma_supported = Wrapper::sdma_supported;
+    static constexpr bool sdma_supported     = Wrapper::sdma_supported;
+    static constexpr bool ainic_feature_gate = Wrapper::ainic_feature_gate;
 
     // ── Type aliases — forwarded from Wrapper ─────────────────────────────────
     using status_t             = typename Wrapper::status_t;

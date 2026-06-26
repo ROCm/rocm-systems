@@ -60,7 +60,10 @@ public:
 
     static constexpr processor_type NIC_PROCESSOR_TYPE = AMDSMI_PROCESSOR_TYPE_AMD_NIC;
 
-    static constexpr init_flags_t INIT_AMD_NICS = AMDSMI_INIT_AMD_NICS;
+    static constexpr init_flags_t INIT_AMD_NICS      = AMDSMI_INIT_AMD_NICS;
+    static constexpr bool         ainic_feature_gate = true;
+#else
+    static constexpr bool ainic_feature_gate = false;
 #endif
 
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
