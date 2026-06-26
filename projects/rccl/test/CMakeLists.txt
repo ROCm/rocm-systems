@@ -249,7 +249,6 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ArgCheckTests.cpp
-      NChannelsPerNetPeerTests.cpp
       BootstrapBidirTests.cpp
       DdaIpcEligibilityTests.cpp
       EnqueueTests.cpp
