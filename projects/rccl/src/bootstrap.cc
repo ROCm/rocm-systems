@@ -148,11 +148,13 @@ static inline bool bootstrapNetEnabledEffective(int nranks) {
 // overhead must be amortised over enough ranks. Defaults are documented above.
 //
 // Exposed (non-static) so test/BootstrapBidirTests.cpp can verify the env-var contract.
-// The visibility("hidden") attribute keeps the symbol off librccl.so's exported
-// dynsym table even in BUILD_TESTS=ON Debug builds (which globally relax visibility
-// to let tests link against internal helpers). Defense-in-depth on top of the
-// production -fvisibility=hidden flag — see src/CMakeLists.txt visibility block.
-__attribute__((visibility("hidden")))
+// Visibility follows the global -fvisibility flag (see src/CMakeLists.txt): production
+// and Release/non-Debug test builds compile with -fvisibility=hidden, so the symbol
+// stays off librccl.so's exported dynsym table. The BUILD_TESTS + Debug configuration
+// switches to -fvisibility=default precisely so rccl-UnitTestsFixturesDebug can link
+// against internal helpers like this one — do NOT pin an explicit visibility("hidden")
+// here, as the attribute overrides the command-line flag and breaks that link step
+// (ld.lld: undefined hidden symbol: bootstrapBidirEnabled).
 bool bootstrapBidirEnabled(int nranks, int kind) {
   if (nranks < 3) return false;
   bool netOn = bootstrapNetEnabledEffective(nranks);
@@ -428,16 +430,6 @@ struct extInfo {
 #define NET_HANDLE(h, rank)    ((h) + (rank * NCCL_NET_HANDLE_MAXSIZE))
 #define BOOTSTRAP_HANDLE(h, i) ((struct ncclBootstrapHandle*)((char*)h + i * NCCL_UNIQUE_ID_BYTES))
 
-#include <sys/resource.h>
-
-static ncclResult_t setFilesLimit() {
-  struct rlimit filesLimit;
-  SYSCHECK(getrlimit(RLIMIT_NOFILE, &filesLimit), "getrlimit");
-  filesLimit.rlim_cur = filesLimit.rlim_max;
-  SYSCHECK(setrlimit(RLIMIT_NOFILE, &filesLimit), "setrlimit");
-  return ncclSuccess;
-}
-
 // Bootstrap-side accept wrapper. ncclSocketAccept's default behavior
 // (retryOnBadMagic=true) loops internally on bad-magic events, which can
 // monopolize CPU and starve legitimate peer connects when a non-NCCL TCP
@@ -490,7 +482,7 @@ static void* bootstrapRoot(void* rargs) {
   memset(&zeroAddress, 0, sizeof(union ncclSocketAddress));
   memset(&zeroHandle, 0, NCCL_NET_HANDLE_MAXSIZE);
   memset(&zeroInfo, 0, sizeof(struct ringConnectInfo));
-  setFilesLimit();
+  ncclOsSetFilesLimit();
 
   TRACE(NCCL_BOOTSTRAP, "BEGIN");
   BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_ROOT_WAIT]);
@@ -1432,7 +1424,7 @@ static ncclResult_t socketConnect(void* commState, int peer, int tag, struct ncc
   ncclResult_t ret = ncclSuccess;
   struct bootstrapState* state = (struct bootstrapState*)commState;
 
-  struct socketAckInfo ack = (struct socketAckInfo){.rank = state->rank, .tag = tag};
+  struct socketAckInfo ack = (struct socketAckInfo){ state->rank, tag };
   NCCLCHECKGOTO(ncclSocketInit(sock, state->peerP2pAddresses + peer, state->magic, ncclSocketTypeBootstrap, state->abortFlag), ret, fail);
   NCCLCHECKGOTO(ncclSocketConnect(sock), ret, fail);
   NCCLCHECKGOTO(socketSend(sock, &ack, sizeof(struct socketAckInfo)), ret, fail);

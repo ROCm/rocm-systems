@@ -262,7 +262,7 @@ parse:
         DIRECTORY: '*'
         TARGET: '*'
         SOURCE: '*'
-    pytest_discover_tests:
+    rocprofiler_sdk_pytest_discover_tests:
       flags:
         - STRIP_PARAM_BRACKETS
         - INCLUDE_FILE_PATH
@@ -291,6 +291,7 @@ parse:
         PASS_REGULAR_EXPRESSION: '*'
         FAIL_REGULAR_EXPRESSION: '*'
         SKIP_REGULAR_EXPRESSION: '*'
+        PYTHON_EXECUTABLE: '*'
     rocprofiler_add_unit_test:
       flags:
         - WILL_FAIL

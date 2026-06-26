@@ -104,7 +104,7 @@ public:
                                   std::vector<HsaCacheProperties>& cache_props) const override;
   hsa_status_t AllocateMemory(const core::MemoryRegion &mem_region,
                               core::MemoryRegion::AllocateFlags alloc_flags,
-                              void **mem, size_t size,
+                              void **mem, size_t size,/* uint64_t* mmap_offset, */
                               uint32_t node_id) override;
   hsa_status_t FreeMemory(void *mem, size_t size) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
@@ -135,19 +135,20 @@ public:
                               uint32_t* queue_cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                              uint32_t* first_gws) const override;
-  hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
-                            size_t *offset) override;
-  hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent, core::ShareableHandle* handle,
-                            void* mem) override;
-  hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) override;
-  hsa_status_t Map(core::ShareableHandle handle, void *mem, size_t offset,
-                   size_t size, hsa_access_permission_t perms) override;
-  hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
-                     size_t size) override;
+  hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
+                                  core::ShareType type, uint32_t flags, void* export_handle,
+                                  uint64_t* export_offset = nullptr) override;
+  hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
+                                  core::ShareType type, void* import_handle,
+                                  void* mem = nullptr) override;
+  hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) override;
+  hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
+                   size_t size, hsa_access_permission_t perms, uint32_t node_id) override;
+  hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
+                     size_t size, uint32_t node_id) override;
   hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
-                                     core::ShareableHandle* handle, uint64_t* offset, int* drm_fd,
-                                     uint64_t* drm_fd_offset) override;
-  hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) override;
+                                     core::DriverMemoryHandle* handle, uint64_t* offset) override;
+  hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;
 
   /// @brief Submits packets to the driver for execution.
   ///
@@ -170,6 +171,7 @@ public:
   hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                               const void* buffer_base, uint64_t buffer_base_size) const override;
   hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const override;
+  hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const override;
   hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const override;
   hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const override;
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const override;

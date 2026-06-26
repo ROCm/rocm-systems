@@ -5,7 +5,6 @@ set(TRANSPORT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/net_socket.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/p2p.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/net.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/coll_net.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/shm.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/generic.cc

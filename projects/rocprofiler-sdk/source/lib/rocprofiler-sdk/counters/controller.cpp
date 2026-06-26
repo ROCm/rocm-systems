@@ -39,7 +39,7 @@ namespace counters
 {
 CounterController::CounterController()
 {
-    // Pre-read metrics map file to catch faliures during initial setup.
+    // Pre-read metrics map file to catch failures during initial setup.
     rocprofiler::counters::loadMetrics();
     rocprofiler::counters::check_installed_firmware_restrictions();
 }

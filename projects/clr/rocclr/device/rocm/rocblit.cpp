@@ -603,13 +603,13 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& dstMem,
                                           address srcAddr, address dstAddr,
                                           hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const {
-  if (&srcMem.dev() == &dstMem.dev()) {
-    // Same device -- detect agents from memory access type
-    srcAgent = srcMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
-    dstAgent = dstMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
+  // Use agents stored in memory objects during creation
+  srcAgent = srcMem.getOwningAgent();
+  dstAgent = dstMem.getOwningAgent();
 
-    // IPC/VMM-imported buffers: the runtime doesn't know the real owning agent,
-    // so query pointer_info to resolve the true agent.
+  // Handle invalid agent (shouldn't happen if create() properly initialized)
+  if (srcAgent.handle == 0) {
+    srcAgent = srcMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
     if (static_cast<const amd::Memory*>(srcMem.owner())->ipcShared() ||
         static_cast<const amd::Memory*>(srcMem.owner())->vmmImported()) {
       hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
@@ -617,18 +617,21 @@ inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& ds
           Hsa::pointer_info(const_cast<address>(srcAddr), &info, nullptr, nullptr, nullptr)) {
         srcAgent = info.agentOwner;
       }
+    } else {
+        srcAgent = srcMem.isHostMemDirectAccess() ? srcMem.dev().getCpuAgent() : srcMem.dev().getBackendDevice();
     }
+  }
+  if (dstAgent.handle == 0) {
+    dstAgent = dstMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
     if (static_cast<const amd::Memory*>(dstMem.owner())->ipcShared() ||
         static_cast<const amd::Memory*>(dstMem.owner())->vmmImported()) {
       hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
       if (HSA_STATUS_SUCCESS == Hsa::pointer_info(dstAddr, &info, nullptr, nullptr, nullptr)) {
         dstAgent = info.agentOwner;
       }
+    } else {
+        dstAgent = dstMem.isHostMemDirectAccess() ? dstMem.dev().getCpuAgent() : dstMem.dev().getBackendDevice();
     }
-  } else {
-    // Different devices -- use each memory's device backend agent
-    srcAgent = srcMem.dev().getBackendDevice();
-    dstAgent = dstMem.dev().getBackendDevice();
   }
 }
 
@@ -2842,6 +2845,20 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
     if (!hsaCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
+      // Swap ops cannot fall back to shader copy (it only does one-directional
+      // copy, not a bidirectional swap). Fail the entire batch if any swap op
+      // was in the SDMA batch that failed.
+      bool hasSwap = false;
+      for (const auto& op : p2pCopyOps) {
+        if (op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
+          hasSwap = true;
+          break;
+        }
+      }
+      if (hasSwap) {
+        LogError("KernelBlitManager::copyBufferBatch: SDMA batch with swap ops failed");
+        return false;
+      }
       LogWarning(
           "KernelBlitManager::copyBufferBatch: Batch copy failed, falling back to copyBuffer");
       d2dCopyOps.insert(d2dCopyOps.end(), p2pCopyOps.begin(), p2pCopyOps.end());

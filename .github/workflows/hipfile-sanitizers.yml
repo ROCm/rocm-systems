@@ -1,0 +1,139 @@
+name: hipfile-sanitizers
+run-name: Run sanitizer-instrumented unit tests on hipFile
+
+env:
+  AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
+
+on:
+  workflow_call:
+    inputs:
+      ci_image:
+        description: "Full CI image name & tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  sanitizers:
+    name: ${{ matrix.sanitizer.name }}
+    # Runs on the self-hosted AIS runner where the system tests run. The job is
+    # only compile + unit tests today, but this runner is the controlled host
+    # we intend to eventually run the full ASAN/TSAN CI on.
+    runs-on: [ubuntu-24.04]
+    strategy:
+      fail-fast: false
+      matrix:
+        # ASAN bundles address/leak/UB/integer/etc.; TSAN is mutually exclusive
+        # with it, so each runs as its own matrix leg with the appropriate flag.
+        sanitizer:
+          - name: asan
+            cmake_flag: -DAIS_USE_SANITIZERS=ON
+          - name: tsan
+            cmake_flag: -DAIS_USE_THREAD_SANITIZER=ON
+    steps:
+      - name: Set AIS CI container name
+        # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
+        run: |
+          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
+      - name: Compute container name
+        run: |
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${{ matrix.sanitizer.name }}" >> "${GITHUB_ENV}"
+      # NOTE: TSAN (and occasionally ASAN) can abort at startup with an
+      # "unexpected memory mapping" error on kernels configured with 32 mmap
+      # randomization bits. The fix is to lower the ASLR entropy on the runner
+      # *host* (e.g. `sysctl -w vm.mmap_rnd_bits=28`); vm.* sysctls are not
+      # namespaced, so the host value is what the container sees. We can't do
+      # that here because this self-hosted runner does not grant the workflow
+      # passwordless sudo, so the runner host must be configured out-of-band.
+      # If the sanitizer jobs start failing with mmap mapping errors, that host
+      # configuration is the first thing to check.
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          path: rocm-systems
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - name: Authenticating to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Starting Docker Container
+        run: |
+          docker run \
+            -dt \
+            --rm \
+            --pull always \
+            -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
+            --name "${AIS_CONTAINER_NAME}" \
+            "${AIS_INPUT_CI_IMAGE}"
+      - name: Make copy of the code repository and create build directories
+        # Single quotes necessary to ensure string/command substitutions happen
+        # in the container and not on the host.
+        run: |
+          docker exec \
+            -t \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cp -R /mnt/ais /ais
+              mkdir -p /ais/build/hipfile
+            '
+      - name: Generate build files for hipFile with ${{ matrix.sanitizer.name }} enabled
+        # The sanitizers are clang-only, so the compiler is fixed to amdclang++.
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_CXX_COMPILER=amdclang++ \
+                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_PLATFORM=amd \
+                ${{ matrix.sanitizer.cmake_flag }} \
+                ../../rocm-systems/projects/hipfile
+            '
+      - name: Build hipFile with ${{ matrix.sanitizer.name }}
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake --build . --parallel
+            '
+      - name: Run unit tests under ${{ matrix.sanitizer.name }}
+        # Sanitizer findings abort the offending test, failing the suite. Only
+        # the unit tests are run; system/stress tests are out of scope here.
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              ctest -V -L "unit" --parallel
+            '
+      - name: Cleanup & Stop the Docker container
+        if: ${{ always() }}
+        run: |
+          if docker inspect "${AIS_CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker stop "${AIS_CONTAINER_NAME}"
+          else
+            echo "Container ${AIS_CONTAINER_NAME} does not exist; skipping stop"
+          fi
+      - name: Cleanup self-hosted runner workspace
+        if: ${{ always() }}
+        shell: bash
+        # ${VAR:?} aborts if GITHUB_WORKSPACE is unset/empty, so a missing value
+        # can never let the glob expand to `/*` and wipe the persistent runner.
+        run: |
+          shopt -s dotglob
+          rm -rf "${GITHUB_WORKSPACE:?}"/*

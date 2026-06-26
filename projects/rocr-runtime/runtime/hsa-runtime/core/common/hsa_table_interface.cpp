@@ -1194,6 +1194,13 @@ hsa_status_t HSA_API hsa_amd_queue_set_priority(hsa_queue_t* queue,
 }
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_queue_create(hsa_agent_t agent,
+                                          hsa_amd_queue_create_desc_t* descs,
+                                          uint32_t num_descs) {
+  return amdExtTable->hsa_amd_queue_create_fn(agent, descs, num_descs);
+}
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_register_deallocation_callback(void* ptr,
                                                     hsa_amd_deallocation_callback_t callback,
                                                     void* user_data) {
@@ -1326,6 +1333,17 @@ hsa_status_t HSA_API hsa_amd_vmem_import_shareable_handle(int dmabuf_fd,
 hsa_status_t HSA_API hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* handle,
                                                       void* addr) {
   return amdExtTable->hsa_amd_vmem_retain_alloc_handle_fn(handle, addr);
+}
+
+hsa_status_t HSA_API hsa_amd_vmem_export_fabric_handle(hsa_fabric_handle_t *fabric_handle,
+                                                       hsa_amd_vmem_alloc_handle_t handle,
+                                                       uint64_t flags) {
+  return amdExtTable->hsa_amd_vmem_export_fabric_handle_fn(fabric_handle, handle, flags);
+}
+
+hsa_status_t HSA_API hsa_amd_vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t* handle) {
+  return amdExtTable->hsa_amd_vmem_import_fabric_handle_fn(fabric_handle, handle);
 }
 
 hsa_status_t HSA_API hsa_amd_vmem_get_alloc_properties_from_handle(

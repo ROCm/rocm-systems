@@ -33,7 +33,8 @@ std::unique_ptr<SQTTParser> AnalyseBinary_GFX9_internal(
     uint64_t buffersize,
     int target_cu,
     class Stitcher& stitch,
-    bool double_buffer
+    bool double_buffer,
+    bool is_mi350
 );
 
 // Note: ToPcV2 is defined in segment_test.cpp
@@ -362,5 +363,5 @@ TEST(AnalyseBinaryTest, Gfx9PositiveTargetCu)
     Stitcher stitch(mock, noop_cb, nullptr);
     uint8_t buf[64] = {0};
     CppReturnInfo info;
-    EXPECT_NE(AnalyseBinary_GFX9_internal(info, buf, sizeof(buf), 0, stitch, false), nullptr);
+    EXPECT_NE(AnalyseBinary_GFX9_internal(info, buf, sizeof(buf), 0, stitch, false, false), nullptr);
 }
