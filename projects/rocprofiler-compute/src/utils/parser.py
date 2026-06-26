@@ -474,8 +474,8 @@ def load_pc_sampling_data_per_kernel(
         )
         return pd.DataFrame()
 
-    # num_rows of 0 (or None) means show all rows; argparse rejects negatives.
-    if num_rows:
+    # num_rows of 0 or None (or a negative passed programmatically) shows all.
+    if num_rows and num_rows > 0:
         df_sorted = df_sorted.head(num_rows)
 
     df_sorted["offset"] = df_sorted["offset"].apply(hex)

@@ -800,6 +800,7 @@ Examples:
         dest="pc_sampling_sorting_type",
         default="count",
         type=str,
+        choices=["offset", "count"],
         help="\t\tSet the sorting type of pc sampling: "
         "offset or count (DEFAULT: count).",
     )
