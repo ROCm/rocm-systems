@@ -156,6 +156,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"s_clause", {0xBF850000U, 0x00000000U}},
     {"s_delay_alu", {0xBF870000U, 0x00000000U}},
     {"s_wait_alu", {0xBF880000U, 0x00000000U}},
+    {"s_waitcnt", {0xBF890000U, 0x00000000U}},
     {"s_wait_idle", {0xBF8A0000U, 0x00000000U}},
     {"s_wait_event", {0xBF8B0000U, 0x00000000U}},
     {"s_trap", {0xBF900000U, 0x00000000U}},
@@ -1542,7 +1543,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"global_atomic_ordered_add_b64", {0xEE1CC000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1521;
+inline constexpr size_t NUM_ENCODINGS = 1522;
 
 } // namespace rocjitsu::rdna4::test_data
 

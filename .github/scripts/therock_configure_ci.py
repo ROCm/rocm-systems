@@ -10,7 +10,9 @@ and some workflow_dispatch invocations do not require SUBTREES.
 import fnmatch
 import json
 import logging
+from pathlib import Path
 import subprocess
+import sys
 from therock_matrix import (
     subtree_to_project_map,
     project_map,
@@ -20,6 +22,11 @@ from therock_matrix import (
 import time
 from typing import Mapping, Optional, Iterable
 import os
+
+# Add TheRock's github_actions to path for shared utilities
+THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
+sys.path.insert(0, str(THEROCK_ACTIONS_PATH))
+from amdgpu_family_matrix import get_build_runner_labels, select_weighted_label
 
 logging.basicConfig(level=logging.INFO)
 
@@ -354,9 +361,27 @@ def retrieve_projects(args):
     ]
 
 
+def select_build_runner(platform: str) -> str:
+    """Select a build runner label based on platform and build variant."""
+    build_runner_labels = get_build_runner_labels()
+    if platform not in build_runner_labels:
+        # Platform not configured for weighted selection, return default
+        print(f"  No build runner config for platform {platform}, using default")
+        return ""
+
+    platform_config = build_runner_labels[platform]
+
+    labels_config = platform_config["default"]
+    context_name = f"build-runner ({platform})"
+
+    return select_weighted_label(labels_config, context_name)
+
+
 def run(args):
+    platform = args.get("platform")
     project_to_run = retrieve_projects(args)
-    outputs = {"projects": json.dumps(project_to_run)}
+    build_runs_on = select_build_runner(platform)
+    outputs = {"projects": json.dumps(project_to_run), "build_runs_on": build_runs_on}
 
     # Determine if RCCL CI should run (only relevant for Linux platform)
     if args.get("platform") == "linux":
