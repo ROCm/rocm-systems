@@ -146,12 +146,13 @@ set(TEST_host_int_amo_fadd 127)
 set(TEST_host_int_amo_fcswap 128)
 set(TEST_host_amo_all_pes 129)
 set(TEST_host_amo_self 130)
-set(TEST_tile_broadcast 131)
-set(TEST_tile_broadcast_wave 132)
-set(TEST_tile_broadcast_wg 133)
-set(TEST_tile_allgather 134)
-set(TEST_tile_allgather_wave 135)
-set(TEST_tile_allgather_wg 136)
+set(TEST_host_amo_add 131)
+set(TEST_tile_broadcast 132)
+set(TEST_tile_broadcast_wave 133)
+set(TEST_tile_broadcast_wg 134)
+set(TEST_tile_allgather 135)
+set(TEST_tile_allgather_wave 136)
+set(TEST_tile_allgather_wg 137)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -1292,6 +1293,8 @@ function(add_host_tests)
             ENV_VARS "ROCSHMEM_TEST_UUID=1")
         add_rocshmem_functional_test(NAME host_int_amo_fcswap RANKS 2 WORKGROUPS 1 THREADS 1
             ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_amo_add    RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1;ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2")
     end_test_group()
 
     # Explicit-context put/get - need slot 1 available for the explicit ctx

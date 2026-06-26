@@ -121,18 +121,19 @@ static inline const char* formatVirtualPipePrefix(char* buf, size_t bufLen, cons
 
 static inline void logAqlDispatchPacket(const Device& dev, const hsa_queue_t* queue,
                                         uint16_t header, const hsa_kernel_dispatch_packet_t* pkt,
-                                        uint64_t wptr) {
+                                        uint64_t wptr, amd::CommandQueue::Priority priority) {
   char buf[32];
   const char* prefix = formatVirtualPipePrefix(buf, sizeof(buf), dev, queue);
   const uint64_t rptr = Hsa::queue_load_read_index_relaxed(queue);
+
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
-          "SWq=0x%zx, HWq=0x%zx, id=%d,%s Dispatch Header = "
+          "SWq=0x%zx, HWq=0x%zx, id=%d, priority=%d,%s Dispatch Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
           "setup=%d, grid=[%u, %u, %u], workgroup=[%u, %u, %u], "
           "private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
           "kernarg_address=0x%zx, completion_signal=0x%zx, "
           "rptr=%" PRIu64 ", wptr=%" PRIu64,
-          queue, queue->base_address, queue->id, prefix, header,
+          queue, queue->base_address, queue->id, static_cast<int>(priority), prefix, header,
           extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
           extractAqlBits(header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
           extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
@@ -148,18 +149,19 @@ static inline void logAqlDispatchPacket(const Device& dev, const hsa_queue_t* qu
 
 static inline void logAqlDispatchPacketExtended(
     const Device& dev, const hsa_queue_t* queue, uint16_t header,
-    const hsa_amd_ext_kernel_dispatch_packet_t* pkt, uint64_t wptr) {
+    const hsa_amd_ext_kernel_dispatch_packet_t* pkt, uint64_t wptr, amd::CommandQueue::Priority priority) {
   char buf[32];
   const char* prefix = formatVirtualPipePrefix(buf, sizeof(buf), dev, queue);
   const uint64_t rptr = Hsa::queue_load_read_index_relaxed(queue);
+
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
-          "SWq=0x%zx, HWq=0x%zx, id=%d,%s Dispatch Header = "
+          "SWq=0x%zx, HWq=0x%zx, id=%d, priority=%d,%s Dispatch Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
           "setup=%d, cluster_count=[%u, %u, %u], cluster_size=[%u, %u, %u], "
           "workgroup=[%u, %u, %u], private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
           "kernarg_address=0x%zx, dep_signal=0x%zx, completion_signal=0x%zx, "
           "rptr=%" PRIu64 ", wptr=%" PRIu64,
-          queue, queue->base_address, queue->id, prefix, header,
+          queue, queue->base_address, queue->id, static_cast<int>(priority), prefix, header,
           extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
           extractAqlBits(header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
           extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
@@ -175,18 +177,19 @@ static inline void logAqlDispatchPacketExtended(
 
 static inline void logAqlBarrierPacket(const Device& dev, const hsa_queue_t* queue,
                                        uint16_t header, const hsa_barrier_and_packet_t* pkt,
-                                       uint64_t wptr) {
+                                       uint64_t wptr, amd::CommandQueue::Priority priority) {
   char buf[32];
   const char* prefix = formatVirtualPipePrefix(buf, sizeof(buf), dev, queue);
   const uint64_t rptr = Hsa::queue_load_read_index_relaxed(queue);
+
   uint16_t pktType = extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
   const char* typeStr = (pktType == HSA_PACKET_TYPE_BARRIER_OR) ? "Barrier-OR" : "Barrier-AND";
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
-          "SWq=0x%zx, HWq=0x%zx, id=%d,%s %s Header = "
+          "SWq=0x%zx, HWq=0x%zx, id=%d, priority=%d,%s %s Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
           "dep_signal=[0x%zx, 0x%zx, 0x%zx, 0x%zx, 0x%zx], "
           "completion_signal=0x%zx, rptr=%" PRIu64 ", wptr=%" PRIu64,
-          queue, queue->base_address, queue->id, prefix, typeStr, header,
+          queue, queue->base_address, queue->id, static_cast<int>(priority), prefix, typeStr, header,
           pktType,
           extractAqlBits(header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
           extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
@@ -202,16 +205,17 @@ static inline void logAqlBarrierPacket(const Device& dev, const hsa_queue_t* que
 static inline void logAqlBarrierValuePacket(const Device& dev, const hsa_queue_t* queue,
                                             uint16_t header,
                                             const hsa_amd_barrier_value_packet_t* pkt,
-                                            uint64_t wptr) {
+                                            uint64_t wptr, amd::CommandQueue::Priority priority) {
   char buf[32];
   const char* prefix = formatVirtualPipePrefix(buf, sizeof(buf), dev, queue);
   const uint64_t rptr = Hsa::queue_load_read_index_relaxed(queue);
+
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
-          "SWq=0x%zx, HWq=0x%zx, id=%d,%s BarrierValue Header = 0x%x AmdFormat = 0x%x "
+          "SWq=0x%zx, HWq=0x%zx, id=%d, priority=%d,%s BarrierValue Header = 0x%x AmdFormat = 0x%x "
           "(type=%d, barrier=%d, acquire=%d, release=%d), "
           "signal=0x%zx, value=0x%llx, mask=0x%llx, cond=%s, "
           "completion_signal=0x%zx, rptr=%" PRIu64 ", wptr=%" PRIu64,
-          queue, queue->base_address, queue->id, prefix,
+          queue, queue->base_address, queue->id, static_cast<int>(priority), prefix,
           header, HSA_AMD_PACKET_TYPE_BARRIER_VALUE,
           extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
           extractAqlBits(header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
@@ -396,8 +400,22 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
   signal->flags_.done_ = true;
 }
 
+// True while this thread is executing inside HsaAmdSignalHandler (the ROCr
+// async-events thread). Device::releaseQueue uses it to defer the blocking
+// queue_destroy off this thread and avoid a self-deadlock.
+namespace {
+thread_local bool tls_in_async_handler = false;
+struct AsyncHandlerScope {
+  AsyncHandlerScope() { tls_in_async_handler = true; }
+  ~AsyncHandlerScope() { tls_in_async_handler = false; }
+};
+}  // namespace
+
+bool InAsyncSignalHandler() { return tls_in_async_handler; }
+
 // ================================================================================================
 bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
+  AsyncHandlerScope async_scope;
   Timestamp* ts = reinterpret_cast<Timestamp*>(arg);
 
   VirtualGPU* const gpu = ts->gpu();
@@ -1358,15 +1376,15 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   if (header != 0) {
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
-  // Gate the entire dispatch-packet logging path on the log level.
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     if (dev().settings().ext_dispatch_packet_) {
       logAqlDispatchPacketExtended(
           roc_device_, gpu_queue_, header,
-          reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet), index);
+          reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet), index, priority_);
     } else {
       logAqlDispatchPacket(roc_device_, gpu_queue_, header,
-                           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet), index);
+                           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet), index,
+                           priority_);
     }
   }
   // Optimization for native AQL path in Windows has problems with PM4 emulation,
@@ -1601,11 +1619,12 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
           // emitted opportunistically regardless of the global ext_dispatch_packet_
           // setting, so the base helper would misread their fields.
           if (isBaseKernelDispatch) {
-            logAqlDispatchPacket(roc_device_, gpu_queue_, hdr, slot, slotIdx);
+            logAqlDispatchPacket(roc_device_, gpu_queue_, hdr, slot, slotIdx, priority_);
           } else {
             logAqlDispatchPacketExtended(
                 roc_device_, gpu_queue_, hdr,
-                reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(slot), slotIdx);
+                reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(slot), slotIdx,
+                priority_);
           }
         } else if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
                     IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
@@ -1628,7 +1647,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
                   "Graph ShaderName :%s, device id : %u", tag, dev().index());
           // Tag is shown in the "Graph ShaderName" line above; don't repeat it as
           // the packet prefix.
-          logAqlBarrierPacket(roc_device_, gpu_queue_, hdr, bpkt, slotIdx);
+          logAqlBarrierPacket(roc_device_, gpu_queue_, hdr, bpkt, slotIdx, priority_);
         }
       }
     }
@@ -1755,7 +1774,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
-    logAqlBarrierPacket(roc_device_, gpu_queue_, packetHeader, &barrier_packet_, index);
+    logAqlBarrierPacket(roc_device_, gpu_queue_, packetHeader, &barrier_packet_, index, priority_);
   }
 
   // Clear dependent signals for the next packet
@@ -1832,7 +1851,8 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
-    logAqlBarrierValuePacket(roc_device_, gpu_queue_, packetHeader, &barrier_value_packet_, index);
+    logAqlBarrierValuePacket(roc_device_, gpu_queue_, packetHeader, &barrier_value_packet_, index,
+                             priority_);
   }
   // Clear dependent signals for the next packet
   barrier_value_packet_.signal = hsa_signal_t{};
