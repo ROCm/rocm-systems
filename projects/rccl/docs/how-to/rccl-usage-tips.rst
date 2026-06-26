@@ -281,6 +281,8 @@ memory was freed, and later resumes it:
    uint64_t suspendable = 0, suspended = 0;
 
    NCCLCHECK(ncclCommMemStats(comm, ncclStatGpuMemSuspend, &suspendable));
+   // suspendable is bytes of GPU memory Suspend can release; 0 means none right
+   // now. This query is informational; Suspend does not require suspendable > 0
 
    // Release dynamic GPU memory held by the communicator.
    NCCLCHECK(ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
@@ -293,8 +295,9 @@ memory was freed, and later resumes it:
    // Reacquire the resources before using the communicator again.
    NCCLCHECK(ncclCommResume(comm));
 
-To suspend or resume several communicators atomically, wrap the calls in
-``ncclGroupStart`` and ``ncclGroupEnd``:
+To suspend or resume several communicators together, wrap the calls in
+``ncclGroupStart`` and ``ncclGroupEnd`` 
+(see :ref:`communicator-suspend-resume`):
 
 .. code-block:: cpp
 

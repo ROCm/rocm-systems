@@ -44,8 +44,9 @@ memory management (VMM) support enabled through ``NCCL_CUMEM_ENABLE``. Without
 it, ``ncclCommSuspend`` and ``ncclCommResume`` succeed but do not release GPU
 memory. See :ref:`suspend-resume` for the full list of prerequisites.
 
-To suspend or resume several communicators atomically, wrap the calls in
-``ncclGroupStart`` and ``ncclGroupEnd``.
+Use ``ncclGroupStart`` and ``ncclGroupEnd`` when suspending or resuming multiple
+communicators from one thread. Requests run at ``ncclGroupEnd`` after all ranks
+of each affected communicator synchronize.
 
 .. doxygendefine:: NCCL_SUSPEND_MEM
 
