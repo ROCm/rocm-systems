@@ -20,7 +20,10 @@ from pathlib import Path
 
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu]
+pytestmark = [
+    pytest.mark.sdma,
+    pytest.mark.gpu,
+]
 
 
 @pytest.fixture

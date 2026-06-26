@@ -86,9 +86,6 @@ ROCPROFSYS_RUNNER_CLASSES = {
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_NAMES = list(ROCPROFSYS_RUNNER_CLASSES.keys())
 
-# rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
-KFD_MIN_SDK_VERSION: tuple[int, int, int] = (1, 2, 2)
-
 # ============================================================================
 #
 # Pytest Hooks (Placed in the general order they are called)
@@ -191,10 +188,6 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "mpi: mark test as requiring MPI",
-    )
-    config.addinivalue_line(
-        "markers",
-        "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
     config.addinivalue_line(
         "markers",
@@ -327,7 +320,6 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "rocprofiler: mark test as using ROCProfiler counters"
     )
-    config.addinivalue_line("markers", "slow: mark test as slow running")
     config.addinivalue_line("markers", "loops: mark test as testing loop instrumentation")
 
     # Can be described using generic desc below
@@ -368,7 +360,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "caller_include",
         "causal",
         "causal_e2e",
-        "papi",
         "code_coverage",
         "lulesh",
         "unit_tests",
