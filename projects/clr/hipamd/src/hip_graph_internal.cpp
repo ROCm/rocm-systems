@@ -1269,6 +1269,36 @@ struct GraphLaunchCleanup {
 // ================================================================================================
 // GraphExecClassic — PAL/Windows path: simple topological enqueue, no AQL capture.
 // ================================================================================================
+hipError_t GraphExecClassic::ScheduleOneNode(GraphNode* node, hip::Stream* stream) {
+  node->SetStream(stream);
+  return node->CreateCommand(node->GetQueue());
+}
+
+// ================================================================================================
+hipError_t GraphExecClassic::ScheduleNodes(hip::Stream* stream) {
+  hipError_t status = hipSuccess;
+  for (auto node : topoOrder_) {
+    hipError_t s = ScheduleOneNode(node, stream);
+    if (s != hipSuccess) {
+      status = s;
+    }
+  }
+  return status;
+}
+
+// ================================================================================================
+void GraphExecClassic::RunOneNode(GraphNode* node, hip::Stream* stream) {
+  node->EnqueueCommands(stream);
+}
+
+// ================================================================================================
+void GraphExecClassic::RunNodes(hip::Stream* stream) {
+  for (auto node : topoOrder_) {
+    RunOneNode(node, stream);
+  }
+}
+
+// ================================================================================================
 hipError_t GraphExecClassic::Init() {
   if (!TopologicalOrder()) {
     return hipErrorInvalidValue;
@@ -1302,15 +1332,8 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
     }
   }
 
-  // Classic topological walk: create and enqueue each node's commands in order.
-  for (auto node : topoOrder_) {
-    node->SetStream(launch_stream);
-    hipError_t s = node->CreateCommand(node->GetQueue());
-    if (s != hipSuccess) {
-      status = s;
-    }
-    node->EnqueueCommands(launch_stream);
-  }
+  status = ScheduleNodes(launch_stream);
+  RunNodes(launch_stream);
 
   // Enqueue a lightweight marker to carry the launch-complete callback.
   auto* marker = new amd::Marker(*launch_stream, kMarkerDisableFlush, {});

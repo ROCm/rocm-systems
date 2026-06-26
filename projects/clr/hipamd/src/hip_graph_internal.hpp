@@ -1022,6 +1022,15 @@ class GraphExecClassic : public GraphExecBase {
   hipError_t Init() override;
   hipError_t Run(hip::Stream* launch_stream) override;
 
+  //! Schedule a single node: assign stream and create its commands.
+  hipError_t ScheduleOneNode(GraphNode* node, hip::Stream* stream);
+  //! Schedule all nodes in topological order.
+  hipError_t ScheduleNodes(hip::Stream* stream);
+  //! Enqueue a single node's already-created commands onto the stream.
+  void RunOneNode(GraphNode* node, hip::Stream* stream);
+  //! Enqueue all nodes in topological order.
+  void RunNodes(hip::Stream* stream);
+
  protected:
   bool repeatLaunch_ = false;
 };
