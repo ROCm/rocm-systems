@@ -359,14 +359,7 @@ validate_config_file_values(const std::string& config_file, const std::string& t
             raw_value =
                 trim_config_value(std::string_view{ raw_value }.substr(0, comment_pos));
 
-        if(raw_value.empty())
-        {
-            validate_config_setting_value(key, raw_value,
-                                          get_setting_choices(_config, key));
-            continue;
-        }
-
-        if(has_config_value_reference(raw_value)) continue;
+        if(!raw_value.empty() && has_config_value_reference(raw_value)) continue;
 
         try
         {

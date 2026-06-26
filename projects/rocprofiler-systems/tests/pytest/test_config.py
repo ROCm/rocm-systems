@@ -13,7 +13,6 @@ from conftest import RocprofsysTest
 
 pytestmark = [
     pytest.mark.rocprof_config,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
 ]
 
 MINIMAL_RUNTIME_ENV = {
@@ -150,31 +149,19 @@ class TestConfig(RocprofsysTest):
             use_abort_fail_regex=False,
         )
 
-    @pytest.mark.parametrize("env_overrides, pass_regex", INVALID_TYPED_VALUE_CASES)
-    def test_invalid_typed_environment_values(
-        self, config_target, env_overrides, pass_regex
+    @pytest.mark.parametrize("source", ["environment", "config"])
+    @pytest.mark.parametrize("values, pass_regex", INVALID_TYPED_VALUE_CASES)
+    def test_invalid_typed_values(
+        self, config_target, create_config_file, source, values, pass_regex
     ):
-        """Test that invalid strongly typed environment values fail clearly."""
+        """Test invalid strongly typed values fail clearly via env and config file."""
         env = MINIMAL_RUNTIME_ENV.copy()
-        env.update(env_overrides)
-
-        result = self.run_invalid_config_test(config_target, env)
-
-        self.assert_regex(
-            result,
-            pass_regex=[pass_regex],
-            use_abort_fail_regex=False,
-        )
-
-    @pytest.mark.parametrize("config_env, pass_regex", INVALID_TYPED_VALUE_CASES)
-    def test_invalid_typed_config_values(
-        self, config_target, create_config_file, config_env, pass_regex
-    ):
-        """Test that invalid strongly typed config-file values fail clearly."""
-        config_name = f"invalid_{next(iter(config_env)).lower()}.cfg"
-        config_file = create_config_file(config_env, config_name, skip_filter=True)
-        env = MINIMAL_RUNTIME_ENV.copy()
-        env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
+        if source == "environment":
+            env.update(values)
+        else:
+            config_name = f"invalid_{next(iter(values)).lower()}.cfg"
+            config_file = create_config_file(values, config_name, skip_filter=True)
+            env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
 
         result = self.run_invalid_config_test(config_target, env)
 
@@ -209,46 +196,26 @@ class TestConfig(RocprofsysTest):
             use_abort_fail_regex=False,
         )
 
+    @pytest.mark.parametrize("source", ["environment", "config"])
     @pytest.mark.parametrize(
-        "env_overrides, fail_regex", VALID_NON_BOOLEAN_TYPED_VALUE_CASES
+        "values, absent_regex", VALID_NON_BOOLEAN_TYPED_VALUE_CASES
     )
-    def test_valid_non_boolean_environment_values_are_not_rejected(
-        self, config_target, create_config_file, env_overrides, fail_regex
+    def test_valid_non_boolean_values_are_not_rejected(
+        self, config_target, create_config_file, source, values, absent_regex
     ):
-        """Test valid non-boolean environment values pass strict validation."""
-        config_file = create_config_file(
-            {"ROCPROFSYS_TRACE": "maybe"},
-            f"valid_env_{next(iter(env_overrides)).lower()}.cfg",
-            skip_filter=True,
-        )
+        """Test valid non-boolean values pass strict validation via env and config."""
+        config_values = {"ROCPROFSYS_TRACE": "maybe"}
         env = MINIMAL_RUNTIME_ENV.copy()
-        env.update(env_overrides)
-        env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
+        if source == "environment":
+            env.update(values)
+        else:
+            config_values.update(values)
 
-        result = self.run_invalid_config_test(config_target, env)
-
-        self.assert_regex(
-            result,
-            pass_regex=[r"[Ii]nvalid value.*ROCPROFSYS_TRACE"],
-            fail_regex=[fail_regex],
-            use_abort_fail_regex=False,
-        )
-
-    @pytest.mark.parametrize(
-        "config_env, fail_regex", VALID_NON_BOOLEAN_TYPED_VALUE_CASES
-    )
-    def test_valid_non_boolean_config_values_are_not_rejected(
-        self, config_target, create_config_file, config_env, fail_regex
-    ):
-        """Test valid non-boolean config-file values pass strict validation."""
-        config_values = config_env.copy()
-        config_values["ROCPROFSYS_TRACE"] = "maybe"
         config_file = create_config_file(
             config_values,
-            f"valid_config_{next(iter(config_env)).lower()}.cfg",
+            f"valid_{source}_{next(iter(values)).lower()}.cfg",
             skip_filter=True,
         )
-        env = MINIMAL_RUNTIME_ENV.copy()
         env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
 
         result = self.run_invalid_config_test(config_target, env)
@@ -256,11 +223,11 @@ class TestConfig(RocprofsysTest):
         self.assert_regex(
             result,
             pass_regex=[r"[Ii]nvalid value.*ROCPROFSYS_TRACE"],
-            fail_regex=[fail_regex],
+            fail_regex=[absent_regex],
             use_abort_fail_regex=False,
         )
 
-    def test_config_file_variable_boolean_value_is_not_rejected(
+    def test_variable_boolean_value_is_not_rejected(
         self, config_target, create_config_file
     ):
         """Test config variable references survive strict raw pre-validation."""
