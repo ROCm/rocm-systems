@@ -9,6 +9,10 @@ message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 ## Include common cmake modules
 include(utils)
 
+# BUILD_PYTHON_WHEEL is declared at the project root (CMakeLists.txt)
+# so a single -D switch propagates to every subdirectory regardless of
+# the order add_subdirectory() calls run in. Do NOT redeclare it here.
+
 set(SO_VERSION_GIT_TAG_PREFIX "amdsmi_so_ver")
 
 set(SRC_DIR "amd_smi")
@@ -208,12 +212,77 @@ endif()
 set_property(TARGET ${AMD_SMI} PROPERTY SOVERSION "${MAJOR}")
 set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
 
+## If the library is a release, strip the target library
+if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+    if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
+        if(TARGET ${AMD_SMI})
+            add_custom_command(TARGET ${AMD_SMI} POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${AMD_SMI}>)
+        endif()
+    endif()
+endif()
+
+## Create Python-specific library if BUILD_PYTHON_WHEEL is enabled
+if(BUILD_PYTHON_WHEEL)
+    add_library(${AMD_SMI}_python ${SRC_LIST} ${INC_LIST})
+    target_link_libraries(
+        ${AMD_SMI}_python
+        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
+    )
+    target_link_directories(${AMD_SMI}_python PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)
+    # Apply the same UALOE netlink compile flags (e.g. -I.../libnl3 for
+    # <netlink/*.h> and -DUALOE_NETLINK) that the other amd_smi targets receive;
+    # this target is created after the shared _AMD_SMI_ALL_TARGETS loop above and
+    # would otherwise miss them, breaking the ualoe_lib netlink sources.
+    if(UALOE_COMPILE_FLAGS)
+        separate_arguments(UALOE_FLAGS_PYTHON NATIVE_COMMAND "${UALOE_COMPILE_FLAGS}")
+        target_compile_options(${AMD_SMI}_python PRIVATE ${UALOE_FLAGS_PYTHON})
+    endif()
+    target_include_directories(
+        ${AMD_SMI}_python
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../
+            ${PROJECT_SOURCE_DIR}/rocm_smi/include
+            ${PROJECT_SOURCE_DIR}/common/shared_mutex
+            ${RAS_DECODE_INC_DIR}
+            ${DRM_INCLUDE_DIRS}
+            ${DRM_AMDGPU_INCLUDE_DIRS}
+            ${NIC_INCLUDE_DIRS}
+            ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc
+            ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface
+            ${UALOE_INCLUDE_DIR}
+    )
+    target_include_directories(
+        ${AMD_SMI}_python
+        PUBLIC
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    )
+    set_property(TARGET ${AMD_SMI}_python PROPERTY SOVERSION "${MAJOR}")
+    set_property(TARGET ${AMD_SMI}_python PROPERTY VERSION "${SO_VERSION_STRING}")
+    set_target_properties(${AMD_SMI}_python PROPERTIES OUTPUT_NAME "amd_smi_python")
+    # -Bsymbolic-functions binds this library's own amdsmi_* calls internally at
+    # link time. Without it, when another loaded module already exports the same
+    # amdsmi_*@AMDSMI_1 symbols (e.g. PyTorch's bundled libamd_smi.so), the
+    # dynamic linker interposes our internal calls onto that other, separately
+    # initialized copy -- so amdsmi_init() runs against our state while
+    # enumeration reads the other lib's, returning 0 sockets/processors.
+    target_link_options(
+        ${AMD_SMI}_python
+        PRIVATE "LINKER:--version-script=${VERSION_SCRIPT}" "LINKER:-Bsymbolic-functions"
+    )
+    set_property(TARGET ${AMD_SMI}_python APPEND PROPERTY LINK_DEPENDS "${VERSION_SCRIPT}")
+    ## Strip the wheel-shipped library in Release so the published wheel does
+    ## not carry DWARF debug symbols (mirrors the system-library strip above).
+    if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+        add_custom_command(TARGET ${AMD_SMI}_python POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${AMD_SMI}_python>)
+    endif()
+endif()
 ## Add the install directives for the runtime library.
 set(_INSTALL_TARGETS ${AMD_SMI} amdsminic)
 if(BUILD_BOTH_LIBS)
     list(APPEND _INSTALL_TARGETS ${AMD_SMI}_static)
 endif()
-
 install(
     TARGETS ${_INSTALL_TARGETS}
     EXPORT amd_smiTargets
