@@ -125,7 +125,11 @@ ncclResult_t ncclAllToAllDdaIpc(
     ncclDataType_t datatype,
     ncclComm* comm,
     cudaStream_t stream) {
-  
+
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 &&
+      datatype != ncclBfloat16) {
+    return ncclInvalidArgument;
+  }
   int typeSize = ncclTypeSize(datatype);
   return ncclAllToAllDdaIpcTyped<int8_t>(
         sendbuff, recvbuff, count * typeSize, comm, stream);

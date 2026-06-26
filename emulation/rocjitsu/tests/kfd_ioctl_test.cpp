@@ -309,4 +309,33 @@ TEST_F(KfdIoctlTest, RuntimeEnableAndDisable) {
   EXPECT_EQ(args.capabilities_mask, 0u);
 }
 
+// Models the interposer's fd lifecycle: the primary KFD fd plus every dup each
+// hold one open reference, so the process must survive until the LAST fd is
+// closed, not the first. retain_local_open() is what the interposer calls when
+// it tracks a dup; close() is what it calls per fd close.
+TEST_F(KfdIoctlTest, OpenRefcountSurvivesDupThenPrimaryClose) {
+  // SetUp() already performed the primary open().
+  EXPECT_EQ(driver_->local_open_ref_count(), 1u);
+
+  // Two dups of the KFD fd.
+  driver_->retain_local_open();
+  driver_->retain_local_open();
+  EXPECT_EQ(driver_->local_open_ref_count(), 3u);
+
+  // Closing the primary fd first must NOT tear the process down.
+  driver_->close();
+  EXPECT_EQ(driver_->local_open_ref_count(), 2u);
+
+  // Closing the first dup: still alive.
+  driver_->close();
+  EXPECT_EQ(driver_->local_open_ref_count(), 1u);
+
+  // Closing the last dup: now the process is destroyed.
+  driver_->close();
+  EXPECT_EQ(driver_->local_open_ref_count(), 0u);
+
+  // Re-open so the fixture's TearDown close() is balanced.
+  ASSERT_GE(driver_->open(), 0);
+}
+
 } // namespace

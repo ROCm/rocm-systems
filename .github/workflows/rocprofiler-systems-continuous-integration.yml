@@ -146,11 +146,14 @@ jobs:
         run: |
           set -e
           mkdir ${{ env.ROCM_PATH }}
-          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
+          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
           tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}
-          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
+
+      - name: Output TheRock Manifest
+        run: |
+          cat ${{ env.ROCM_PATH }}/share/therock/therock_manifest.json
 
       - name: Install Python Test Dependencies
         timeout-minutes: 10

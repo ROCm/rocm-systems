@@ -77,6 +77,15 @@ struct callback_status {
 static callback_status notifiers[2];
 static hsa_amd_memory_pool_t pool;
 
+#ifdef ROCRTST_ASAN
+// ASAN defers the real free (and thus the notifier) via its quarantine; drain
+// it so callbacks have run before we check them.
+extern "C" void __sanitizer_purge_allocator(void);
+static inline void DrainAsanQuarantine() { __sanitizer_purge_allocator(); }
+#else
+static inline void DrainAsanQuarantine() {}
+#endif
+
 #define REGISTER(ptr, callback, i)                                                                 \
   do {                                                                                             \
     notifiers[i].callback_status = 0;                                                              \
@@ -94,8 +103,12 @@ static void call(void* ptr, void* user) {
 static void doublefree(void* ptr, void* user) {
   call(ptr, user);
 
+#ifndef ROCRTST_ASAN
+  // Skip under ASAN: this runs during a quarantine drain, where a second free
+  // trips the sanitizer's own double-free report before ROCr can return.
   hsa_status_t status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_ERROR_INVALID_ALLOCATION, status) << "Double free did not return an error.";
+#endif
 }
 
 static void recursive(void* ptr, void* user) {
@@ -106,7 +119,11 @@ static void recursive(void* ptr, void* user) {
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory allocation failure.";
   REGISTER(ptr, call, 1);
   hsa_amd_memory_pool_free(ptr);
+#ifndef ROCRTST_ASAN
+  // Skip under ASAN: the inner free can't be drained re-entrantly from within
+  // a drain, so its notifier fires later (at the next drain/teardown).
   ASSERT_EQ(1, notifiers[1].callback_status) << "Callback not executed.";
+#endif
 }
 
 DeallocationNotifierTest::DeallocationNotifierTest() : TestBase() {
@@ -187,6 +204,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr, call, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Re-allocate, free.  No callback should be invoked.
@@ -203,6 +221,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER((char*)ptr + 1024, call, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Allocate, Register, Deregister, Free.  No callback should be invoked.
@@ -222,6 +241,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER((char*)ptr + 1024, call, 1);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
   ASSERT_EQ(1, notifiers[1].callback_status) << "Callback not executed.";
 
@@ -242,6 +262,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr, call, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Allocate multiple fragments, register, free.  Free order should be respected by callbacks.
@@ -252,10 +273,12 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr0, call, 1);
   status = hsa_amd_memory_pool_free(ptr0);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[1].callback_status) << "Callback not executed.";
   ASSERT_EQ(0, notifiers[0].callback_status) << "Callback executed improperly.";
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Allocate, register, free, with double free in callback.  Callbacks should not be able to free
@@ -265,6 +288,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr, doublefree, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Allocate, register, free, with allocate, register, free in callback.  Callbacks should nest and
@@ -274,5 +298,6 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr, recursive, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 }
