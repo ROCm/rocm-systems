@@ -190,5 +190,25 @@ TEST(OpsFaultUnit, NullCtxRejected) {
     EXPECT_EQ(ncclIbOpsFaultClear(nullptr),                           ncclInvalidArgument);
 }
 
+// =============================================================================
+// Test: ArmOnUnregisteredCtxRejected
+//
+// Exercises the registry-miss (find == end) guard on each entry for a context
+// that was never installed.
+//
+// Verifies: Arm* return ncclInvalidArgument and Clear returns ncclSuccess (no-op)
+//           on an unregistered context.
+// Requires: a fake context with valid ops that is never installed.
+// =============================================================================
+TEST(OpsFaultUnit, ArmOnUnregisteredCtxRejected) {
+    FakeCtx fake(/*qpNum=*/102);  // valid ops, but never Install'd
+
+    EXPECT_EQ(ncclIbOpsFaultArmPostSend(&fake.ctx, 0, kEagain),          ncclInvalidArgument);
+    EXPECT_EQ(ncclIbOpsFaultArmPostRecv(&fake.ctx, 0, kEagain),          ncclInvalidArgument);
+    EXPECT_EQ(ncclIbOpsFaultArmPollCq(&fake.ctx, 0, kWcFlushErr, -1, false), ncclInvalidArgument);
+    // Clear on an unregistered context is a benign no-op.
+    EXPECT_EQ(ncclIbOpsFaultClear(&fake.ctx), ncclSuccess);
+}
+
 
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
