@@ -173,5 +173,22 @@ TEST(OpsFaultUnit, InstallNullOpsSkipped) {
     }
 }
 
+// =============================================================================
+// Test: NullCtxRejected
+//
+// Every inner API validates its context argument.
+//
+// Verifies: each entry point returns ncclInvalidArgument on a NULL ctx.
+// Requires: no setup.
+// =============================================================================
+TEST(OpsFaultUnit, NullCtxRejected) {
+    EXPECT_EQ(ncclIbOpsFaultInstall(nullptr),                         ncclInvalidArgument);
+    EXPECT_EQ(ncclIbOpsFaultRemove(nullptr),                          ncclInvalidArgument);
+    EXPECT_EQ(ncclIbOpsFaultArmPostSend(nullptr, 0, kEagain),         ncclInvalidArgument);
+    EXPECT_EQ(ncclIbOpsFaultArmPostRecv(nullptr, 0, kEagain),         ncclInvalidArgument);
+    EXPECT_EQ(ncclIbOpsFaultArmPollCq(nullptr, 0, kWcFlushErr, -1, false), ncclInvalidArgument);
+    EXPECT_EQ(ncclIbOpsFaultClear(nullptr),                           ncclInvalidArgument);
+}
+
 
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
