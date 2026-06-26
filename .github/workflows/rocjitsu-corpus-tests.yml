@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/06/23.
-        default: "34a1241bb374307d24c5aee93c9fbd2279c1b04b"
+        # Last updated on 2026/06/25.
+        default: "3998d8edc92c87fd26d000d06c9af51f518d7439"
         required: true
 
 concurrency:
@@ -87,14 +87,15 @@ jobs:
           sparse-checkout: |
             emulation/rocjitsu
             .github
+            shared/machine-readable-isa/isa
 
       - name: Checkout rocjitsu corpus
         if: matrix.name == 'release'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/06/23.
-          ref: 34a1241bb374307d24c5aee93c9fbd2279c1b04b
+          # Last updated on 2026/06/25.
+          ref: 3998d8edc92c87fd26d000d06c9af51f518d7439
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -207,6 +208,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      - name: Run amdisa tests
+        if: matrix.name == 'release'
+        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        run: |
+          cd lib/python && pip install -e . && pytest amdisa/tests
+
       - name: Run corpus tests
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
@@ -236,17 +243,19 @@ jobs:
           done
 
           targets=(
-            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json fuzz_gfx1201.json"
+            "gfx942 amdgpu_cdna3_kmd.json external_kernel_gfx942.json 15"
+            "gfx950 amdgpu_cdna4_kmd.json external_kernel_gfx950.json 15"
+            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json external_kernel_gfx1201.json 60"
           )
           for target in "${targets[@]}"; do
-            read -r name rocjitsu_config corpus_config <<< "${target}"
+            read -r name rocjitsu_config corpus_config timeout <<< "${target}"
             echo "::group::pytest (${name})"
             ROCM_PATH=`rocm-sdk path --root` \
               rocjitsu \
               --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
               -- pytest \
               --fuzz-target-config-files="${ROCJITSU_SOURCE_DIR}/tests/corpus/${corpus_config}" \
-              --timeout 60 \
+              --timeout "${timeout}" \
               tests/test_fuzz_targets.py
             echo "::endgroup::"
           done

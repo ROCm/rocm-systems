@@ -791,7 +791,8 @@ def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe():
     body = execute_shared[start:end]
 
     assert 'ROCJITSU_TRY_SIMD_DOTC_F16(false);' in body
-    assert 'float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));' in body
+    assert 'uint32_t acc = inst.vdst.read_lane(wf, lane);' in body
+    assert 'float facc = std::bit_cast<float>(acc);' in body
     assert 'facc += a0 * b0 + a1 * b1;' in body
     assert 'throw util::UnimplementedInst' not in body
 
