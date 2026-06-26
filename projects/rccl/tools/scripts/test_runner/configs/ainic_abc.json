@@ -1,12 +1,13 @@
 {
   "system_configurations": {
     "name": "RCCL-AINIC-ABC",
-    "description": "AINIC test plan for Surya. Group A: NetIbMPI + GIN component/unit tests (2 nodes x 1 GPU = 2 ranks). Group B: NCCL_NET plugin x knobs sweep on rccl-tests perf (2 nodes x 8 GPU = 16 ranks), including out-of-the-box autodetect. Group C: IONIC hardware counter validation. Run on the AINIC cluster with --system ainic."
+    "description": "AINIC A/B/C test plan. Group A: NetIbMPI + GIN component/unit tests (2 nodes x 1 GPU = 2 ranks). Group B: NCCL_NET plugin x knobs sweep on rccl-tests perf (2 nodes x 8 GPU = 16 ranks), including out-of-the-box autodetect. Group C: IONIC hardware counter validation. Run on the AINIC cluster with --system ainic."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
     "rocm_path": "${ROCM_PATH:-/opt/rocm}",
-    "mpi_path": "${MPI_PATH}"
+    "mpi_path": "${MPI_PATH}",
+    "test_binary_dir": "${RCCL_TESTS_DIR:-$WORKDIR/rccl-tests}/build"
   },
   "auto_detect_hosts": true,
   "mpi_args": {
@@ -33,12 +34,10 @@
     "enabled": true,
     "source_dir": "${RCCL_TESTS_DIR:-$WORKDIR/rccl-tests}",
     "install_script": "install.sh",
-    "install_flags": ["--mpi", "MPI_HOME=${MPI_PATH}"]
+    "install_flags": ["--mpi"]
   },
 
   "test_configurations": {
-
-    "_comment_group_a": "=== GROUP A: component / unit tests (rccl-UnitTestsMPI). 2 nodes x 1 GPU = 2 ranks. ===",
 
     "a_base": {
       "is_gtest": true,
@@ -206,8 +205,6 @@
       ]
     },
 
-    "_comment_group_b": "=== GROUP B: NCCL_NET plugin x knobs sweep on rccl-tests perf. 2 nodes x 8 GPU = 16 ranks. ===",
-
     "b_base": {
       "_comment": "Sweep base. command_args here (-e 8G) is inherited by the allreduce tests, which are healthy to 8G. The alltoall tests OVERRIDE command_args to -e 128M because CAST/ROCM-IB alltoall >=256M hits a real RCCL bug (IbCastCompletionEventProcess: expected 'recv' got 'Unused' -> internal error); the 8G alltoall repro lives in the disabled b_large_alltoall_repro suite. NCCL_IB_MERGE_NICS=0 isolates per-NIC behavior; do NOT set NCCL_NET_FORCE_MERGE in the ainic profile together with this (force-merge + merge-disabled => fatal 'Could not force merge NICs'). Validated on g27/g28 (job 9439).",
       "is_gtest": false,
@@ -312,7 +309,7 @@
 
     "b7a_pure_autodetect": {
       "extends": "b_base",
-      "_comment": "B7a: pure PCI autodetect. NCCL_NET omitted; RCCL_AINIC_ROCE must ALSO be absent. The runner cannot unset a profile var via '', so run this config WITHOUT '--system ainic' (or with a profile that does not set RCCL_AINIC_ROCE) so detection is purely PCI-based (0x1dd8:0x10) and libionic.so auto-loads.",
+      "_comment": "B7a: pure PCI autodetect. DISABLED: --system ainic always sets RCCL_AINIC_ROCE=1 via the profile and cannot be unset per-test, so this would duplicate B7. Run manually without --system ainic to test pure PCI detection (0x1dd8:0x10).",
       "tests": [
         { "name": "B7a_alltoall_pure_autodetect", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "Pure PCI autodetect (0x1dd8:0x10); libionic.so auto-loads. Capped at 128M (CAST alltoall >=256M repro: b_large_alltoall_repro)." },
         { "name": "B7a_allreduce_pure_autodetect", "binary": "all_reduce_perf", "description": "Pure PCI autodetect allreduce." }
@@ -355,8 +352,6 @@
       ]
     },
 
-    "_comment_group_c": "=== GROUP C: IONIC hardware counter validation. ===",
-
     "c_counters": {
       "is_gtest": false,
       "num_ranks": 16,
@@ -393,7 +388,7 @@
     { "name": "B5. ROCM-IB / CTS on (repro)",        "config": "b5_rocmib_ctson",   "enabled": false },
     { "name": "B6. CAST WRR / CTS on",               "config": "b6_cast_wrr_ctson", "enabled": true },
     { "name": "B7. Autodetect (out-of-box)",         "config": "b7_autodetect",     "enabled": true },
-    { "name": "B7a. Pure PCI autodetect",            "config": "b7a_pure_autodetect","enabled": true },
+    { "name": "B7a. Pure PCI autodetect",            "config": "b7a_pure_autodetect","enabled": false },
     { "name": "B7b. Autodetect off (fallback)",      "config": "b7b_autodetect_off","enabled": true },
     { "name": "B8. ROCM-IB / no CTS offload",        "config": "b8_no_cts_offload", "enabled": true },
     { "name": "B-large. alltoall >=256M repro",      "config": "b_large_alltoall_repro", "enabled": false },

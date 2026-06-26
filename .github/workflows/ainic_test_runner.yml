@@ -26,9 +26,9 @@ on:
       mpi_path:
         description: 'MPI install path (MPI_PATH)'
         required: false
-        default: '/apps/shared/rccl_sanity/pulsar/default/ubuntu22/rocm7.2.0/ompi_build'
-      rccl_home:
-        description: 'Pre-built RCCL install path (RCCL_HOME)'
+        default: '/it-share/ompi-5.0.8'
+      rccl_build_dir:
+        description: 'Pre-built RCCL lib path (RCCL_BUILD_DIR for test_runner)'
         required: false
         default: '/it-share/rccl-ci/rccl-rocm720'
       test_suites:
@@ -54,8 +54,8 @@ env:
   RCCL_CI_ROOT: /it-share/rccl-ci
   TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
   DEFAULT_WORKDIR: /it-share/rccl-ci/rocm-systems
-  DEFAULT_MPI_PATH: /apps/shared/rccl_sanity/pulsar/default/ubuntu22/rocm7.2.0/ompi_build
-  DEFAULT_RCCL_HOME: /it-share/rccl-ci/rccl-rocm720
+  DEFAULT_MPI_PATH: /it-share/ompi-5.0.8
+  DEFAULT_RCCL_BUILD_DIR: /it-share/rccl-ci/rccl-rocm720
 
 jobs:
   ainic-test-runner:
@@ -72,7 +72,7 @@ jobs:
         env:
           WORKDIR: ${{ github.event.inputs.workdir || env.DEFAULT_WORKDIR }}
           MPI_PATH: ${{ github.event.inputs.mpi_path || env.DEFAULT_MPI_PATH }}
-          RCCL_HOME: ${{ github.event.inputs.rccl_home || env.DEFAULT_RCCL_HOME }}
+          RCCL_BUILD_DIR: ${{ github.event.inputs.rccl_build_dir || env.DEFAULT_RCCL_BUILD_DIR }}
           RCCL_AINIC_ROCE: '1'
           IONIC_LOCKFREE: 'all'
           NCCL_IB_HCA: 'ionic_0,ionic_1,ionic_2,ionic_3,ionic_4,ionic_5,ionic_6,ionic_7'
@@ -94,7 +94,6 @@ jobs:
           python3 test_runner.py \
             --config configs/ainic_abc.json \
             --system ainic \
-            --output "${RUNNER_TEMP}/ainic_out" \
             "${SUITE_ARGS[@]}" \
             2>&1 | tee "${RUNNER_TEMP}/ainic_run.log"
 
@@ -103,11 +102,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ainic-test-report
-          # The runner streams its summary to stdout (captured here); detailed
-          # logs/reports land under ${WORKDIR}/rccl_test_artifacts_*.
-          path: |
-            ${{ runner.temp }}/ainic_run.log
-            ${{ runner.temp }}/ainic_out
+          path: ${{ runner.temp }}/ainic_run.log
           if-no-files-found: ignore
 
       - name: Print summary
