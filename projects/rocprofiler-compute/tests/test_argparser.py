@@ -7,6 +7,7 @@ Unit tests for rocprof-compute general CLI options.
 
 import argparse
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from common import SUPPORTED_ARCHS
@@ -113,3 +114,31 @@ def test_config_dir_requires_value(capsys):
         build_args(["--config-dir"])
     assert exc.value.code == 2
     assert "--config-dir" in capsys.readouterr().err
+
+
+def test_pc_sampling_analyze_options():
+    """Defaults, overrides, and validation for the analyze PC sampling options."""
+    defaults = build_args(["analyze"])
+    assert defaults.pc_sampling_sorting_type == "count"
+    assert defaults.pc_sampling_rows == 10
+
+    overrides = build_args([
+        "analyze",
+        "--pc-sampling-sorting-type",
+        "offset",
+        "--pc-sampling-rows",
+        "25",
+    ])
+    assert overrides.pc_sampling_sorting_type == "offset"
+    assert overrides.pc_sampling_rows == 25
+
+    # 0 is allowed and means "show all rows".
+    assert build_args(["analyze", "--pc-sampling-rows", "0"]).pc_sampling_rows == 0
+
+    # Negative row counts trigger an argparse error.
+    with patch.object(
+        argparse.ArgumentParser, "error", side_effect=SystemExit(2)
+    ) as mock_error:
+        with pytest.raises(SystemExit):
+            build_args(["analyze", "--pc-sampling-rows", "-1"])
+    mock_error.assert_called_once()
