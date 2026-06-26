@@ -1001,6 +1001,11 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
 
   virtual hipError_t Init() = 0;
   virtual hipError_t Run(hip::Stream* stream) = 0;
+  // AQL packet update — no-op on the classic path (PAL has no AQL capture).
+  virtual hipError_t UpdateAQLPacket(hip::GraphNode* node) { return hipSuccess; }
+  virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
+    return hipSuccess;
+  }
 
  protected:
   uint64_t flags_ = 0;
@@ -1062,9 +1067,9 @@ class GraphExecSegmented : public GraphExecBase {
   hipError_t Run(hip::Stream* stream) override;
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
-  hipError_t UpdateAQLPacket(hip::GraphNode* node);
+  hipError_t UpdateAQLPacket(hip::GraphNode* node) override;
   // Handle packetBatches_ updates when nodes are enabled/disabled
-  hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled);
+  hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) override;
   // Kernel arg manager is for the entire graph.
   // Child graph also shares the same kernel arg manager object. some apps have 100's of
   // child graph nodes and each child graph has only one node.
