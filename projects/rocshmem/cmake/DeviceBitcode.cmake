@@ -23,7 +23,7 @@ if(NOT LLVM_CLANG OR NOT LLVM_LINK)
   return()
 endif()
 
-# Strip feature suffixes (gfx942:sramecc+:xnack- -> gfx942) and deduplicate.
+# Strip feature suffixes (gfx942:sramecc+:xnack- → gfx942) and deduplicate.
 function(strip_arch_features targets_list out_var)
   set(_result "")
   foreach(_t ${targets_list})

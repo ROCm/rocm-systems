@@ -70,15 +70,11 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   # bodies. After linking with the kernel (which provides callers), a final
   # opt -O3 pass over the merged BC optimizes everything together.
 
-  # Device sources: -O3 front-end IR, no LLVM DCE passes.
-  set(_TESTER_DEVICE_FLAGS "")
-  foreach(_f ${BITCODE_COMPILE_FLAGS_BASE})
-    list(APPEND _TESTER_DEVICE_FLAGS "${_f}")
-  endforeach()
+  # Device sources: suppress LLVM passes so DCE doesn't eliminate __device__
+  # functions that have no callers within the same TU. The kernel BC is compiled
+  # at plain -O3 (it has an amdgpu_kernel entry point, so nothing gets DCE'd).
+  set(_TESTER_DEVICE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE})
   list(APPEND _TESTER_DEVICE_FLAGS -Xclang -disable-llvm-passes)
-
-  # Kernel: plain -O3 (only amdgpu_kernel entries, no library DCE concern).
-  set(_TESTER_KERNEL_FLAGS ${BITCODE_COMPILE_FLAGS_BASE})
 
   # Compile the kernel and each device source into tester-private BCs.
   set(_TESTER_BCS "")
@@ -86,7 +82,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   add_custom_command(
     OUTPUT ${KERNEL_BC}
     COMMAND ${LLVM_CLANG}
-      ${_TESTER_KERNEL_FLAGS}
+      ${BITCODE_COMPILE_FLAGS_BASE}
       --offload-arch=${GPU_ARCH}
       -c ${CMAKE_CURRENT_SOURCE_DIR}/device_bitcode_tester_kernel.hip
       -o ${KERNEL_BC}
