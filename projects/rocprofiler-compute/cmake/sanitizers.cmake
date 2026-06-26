@@ -155,8 +155,12 @@ endfunction()
 
 # Build the per-mode sanitizer runtime ENV for a ctest entry.
 #
-# suppress_leaks=ON keeps CPython arena/module leaks from failing the Python leg.
-# suppress_leaks=OFF keeps leak detection enabled for native gtests.
+# suppress_leaks=ON keeps CPython arena/module leaks from failing the pytest
+# entries when they run under the TheRock-driven sanitizer flow
+# (THEROCK_SANITIZER + enable_sanitizer_python_launcher). The standalone
+# sanitizer CI does not run those entries.
+# suppress_leaks=OFF keeps leak detection enabled for native gtests, which is
+# what the standalone sanitizer CI runs.
 function(sanitizer_runtime_env out_var suppress_leaks)
     set(_env "")
     if(ENABLE_SANITIZER STREQUAL "ASAN" OR ENABLE_SANITIZER STREQUAL "HOST_ASAN")
