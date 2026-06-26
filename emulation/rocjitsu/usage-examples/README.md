@@ -50,7 +50,57 @@ Each example is self-contained with:
 
 ## Quick Start
 
-### First Time Setup
+### Option 1: Docker Setup (Recommended for Beginners)
+
+The easiest way to get started is using the provided Docker setup script:
+
+```bash
+# Navigate to rocjitsu directory
+cd emulation/rocjitsu
+
+# Run the Docker setup script
+./setup_rocjitsu_docker.sh
+```
+
+**What this script does:**
+1. Pulls the `rocm/pytorch:latest` Docker image (includes ROCm, hipcc, and PyTorch)
+2. Checks if the image already contains rocjitsu (or builds it from source)
+3. Creates a persistent Docker container named `rocjitsu-dev`
+4. Mounts your workspace at `/workspace` in the container
+5. Compiles `hip_vector_add_test` example
+6. Runs tests to verify everything works
+7. Provides helpful commands for future use
+
+**After setup, run examples in Docker:**
+
+```bash
+# Enter the Docker container
+docker exec -it rocjitsu-dev bash
+
+# Inside container, navigate to examples
+cd /workspace/emulation/rocjitsu/usage-examples/01-vector-add-basic
+
+# Build and run
+make
+make run
+```
+
+**The container persists across sessions:**
+```bash
+# Stop the container
+docker stop rocjitsu-dev
+
+# Start it again later
+docker start rocjitsu-dev
+docker exec -it rocjitsu-dev bash
+
+# Remove when done
+docker rm -f rocjitsu-dev
+```
+
+### Option 2: Native Setup
+
+If you prefer to build and run natively (without Docker):
 
 ```bash
 # 1. Build rocjitsu
@@ -90,6 +140,12 @@ make help
 
 ## Requirements
 
+### Using Docker (Recommended)
+- Docker Desktop or Docker Engine
+- `setup_rocjitsu_docker.sh` script (included in `emulation/rocjitsu/`)
+- Everything else (ROCm, hipcc, PyTorch) is included in the Docker image
+
+### Native Setup
 - CMake 3.22+
 - C++20 compiler (GCC 13+ or Clang 16+)
 - ROCm installation (for HIP examples)
@@ -198,6 +254,27 @@ make run CONFIG=../../configs/amdgpu_cdna3_kmd.json
 
 ## Troubleshooting
 
+### Docker-specific issues
+
+```bash
+# Docker not found
+# Solution: Install Docker Desktop or ensure docker is in PATH
+export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
+
+# Container already exists
+# The script will reuse existing container - no action needed
+# To start fresh:
+docker rm -f rocjitsu-dev
+./setup_rocjitsu_docker.sh
+
+# Permission issues on Windows
+# Run the script in Git Bash or WSL, not cmd.exe or PowerShell
+
+# Enter container for debugging
+docker exec -it rocjitsu-dev bash
+cd /workspace/emulation/rocjitsu
+```
+
 ### Example won't build
 
 ```bash
@@ -209,6 +286,10 @@ ls ../../build/tools/rocjitsu/rocjitsu
 
 # Check Makefile paths
 make help
+
+# In Docker, ensure you're in the container
+docker exec -it rocjitsu-dev bash
+cd /workspace/emulation/rocjitsu/usage-examples
 ```
 
 ### Example crashes
