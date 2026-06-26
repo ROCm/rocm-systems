@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 111
+- Contract tests: 118
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 91
-- Approximate declared API-name coverage: 18.4%
+- Declared HIP runtime APIs directly exercised by contract tests: 94
+- Approximate declared API-name coverage: 19.0%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 
 ## Contract domains
@@ -39,6 +39,8 @@ The percentages below are approximate API-name coverage against declarations par
 | `managed_memory` | 5 |
 | `memory_pool` | 6 |
 | `vmm` | 5 |
+| `copy3d` | 4 |
+| `array3d` | 3 |
 
 ## Coverage by API category
 
@@ -51,7 +53,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Stream | 5 | 23 | 21.7% |
 | Runtime / device | 12 | 45 | 26.7% |
 | Kernel launch / function attrs | 1 | 13 | 7.7% |
-| Memory / copy / memset | 36 | 137 | 26.3% |
+| Memory / copy / memset | 39 | 137 | 28.5% |
 | Other runtime APIs | 1 | 56 | 1.8% |
 | Module / library loading | 0 | 29 | 0.0% |
 | Texture / surface | 0 | 44 | 0.0% |
@@ -81,10 +83,13 @@ hipHostGetDevicePointer
 hipHostGetFlags
 hipMallocPitch
 hipMemcpy2D
+hipMalloc3D
+hipMemcpy3D
 hipMallocArray
 hipFreeArray
 hipMemcpy2DToArray
 hipMemcpy2DFromArray
+hipMalloc3DArray
 hipArrayGetInfo
 hipMallocManaged
 hipMemPrefetchAsync
@@ -195,7 +200,7 @@ hipOccupancyAvailableDynamicSMemPerBlock
 
 ## Largest remaining gaps
 
-1. Memory surface beyond current basics: 3D copies and 3D arrays, peer copies, advanced VMM operations (multi-device access descriptors, export/import handles, and protection-mode matrices), and advanced memory-pool operations (pool create/destroy, access control, trim, and export/import). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, managed allocation with prefetch, default memory pools with stream-ordered allocation, and basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access) are now covered.
+1. Memory surface beyond current basics: peer copies, advanced VMM operations (multi-device access descriptors, export/import handles, and protection-mode matrices), and advanced memory-pool operations (pool create/destroy, access control, trim, and export/import). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, 3D pitched allocation with host-device 3D copies, 3D array allocation with 3D copy-to/from-array, managed allocation with prefetch, default memory pools with stream-ordered allocation, and basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access) are now covered.
 2. Texture and surface APIs.
 3. Module, library, and code-loading APIs.
 4. Context and driver-style APIs.
