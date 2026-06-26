@@ -77,8 +77,7 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
     return static_cast<int>(status);
   }
 
-  status =
-      amd_comgr_set_data(input, elf_size, static_cast<const char *>(elf_data));
+  status = amd_comgr_set_data(input, elf_size, static_cast<const char *>(elf_data));
   if (status != AMD_COMGR_STATUS_SUCCESS) {
     fprintf(stderr, "hotswap: failed to set COMGR input data\n");
     amd_comgr_release_data(input);
@@ -116,8 +115,8 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
     return -1;
   }
 
-  status =
-      amd_comgr_get_data(output, &output_size, static_cast<char *>(output_buf));
+  status = amd_comgr_get_data(output, &output_size,
+                              static_cast<char *>(output_buf));
   amd_comgr_release_data(output);
 
   if (status != AMD_COMGR_STATUS_SUCCESS) {

@@ -5,7 +5,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Portable helpers for discovering an agent's gfx target and ASIC revision via
-// the HSA runtime (HSA_AMD_AGENT_INFO_ASIC_REVISION).
+// the HSA runtime (HSA_AMD_AGENT_INFO_ASIC_REVISION). 
 //
 //===----------------------------------------------------------------------===//
 
@@ -45,7 +45,7 @@ std::string extract_gfx_target(const std::string &isa_name);
 // gate_allows_hotswap() (below) to decide whether to act.
 AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent);
 
-// Clears the per-agent-handle cache used by query_agent_gfx_revision().
+// Clears the per-agent-handle cache used by query_agent_gfx_revision(). 
 void reset_gfx_revision_cache();
 
 // HotSwap's default activation policy: B0-to-A0 rewriting is performed only

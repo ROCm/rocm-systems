@@ -33,7 +33,7 @@
 
 // The agent's gfx target and ASIC revision are read through the HSA runtime
 // (HSA_AMD_AGENT_INFO_ASIC_REVISION) in hotswap_gfx_query.{hpp,cpp}, which is
-// portable across Linux and Windows.
+// portable across Linux and Windows. 
 
 #define HSA_HOTSWAP_EXPORT __attribute__((visibility("default")))
 
@@ -100,9 +100,8 @@ CoreApiTable *g_core_table = nullptr;
 
 decltype(hsa_code_object_reader_create_from_memory)
     *g_orig_reader_create_from_memory = nullptr;
-decltype(
-    hsa_code_object_reader_create_from_file) *g_orig_reader_create_from_file =
-    nullptr;
+decltype(hsa_code_object_reader_create_from_file)
+    *g_orig_reader_create_from_file = nullptr;
 decltype(hsa_code_object_reader_destroy) *g_orig_reader_destroy = nullptr;
 decltype(hsa_executable_load_agent_code_object) *g_orig_load_agent_code_object =
     nullptr;
@@ -226,8 +225,7 @@ hotswap_reader_destroy(hsa_code_object_reader_t code_object_reader) {
   return g_orig_reader_destroy(code_object_reader);
 }
 
-hsa_status_t load_original_reader(hsa_executable_t executable,
-                                  hsa_agent_t agent,
+hsa_status_t load_original_reader(hsa_executable_t executable, hsa_agent_t agent,
                                   hsa_code_object_reader_t code_object_reader,
                                   const char *options,
                                   hsa_loaded_code_object_t *loaded_code_object,
@@ -240,14 +238,14 @@ hsa_status_t load_original_reader(hsa_executable_t executable,
   return status;
 }
 
-hsa_status_t load_rewritten_reader(hsa_executable_t executable,
-                                   hsa_agent_t agent, const char *options,
+hsa_status_t load_rewritten_reader(hsa_executable_t executable, hsa_agent_t agent,
+                                   const char *options,
                                    hsa_loaded_code_object_t *loaded_code_object,
                                    void *out_elf, size_t out_elf_size) {
   OwnedElf owned_elf(out_elf, &std::free);
   hsa_code_object_reader_t new_reader = {};
-  hsa_status_t status = g_orig_reader_create_from_memory(
-      owned_elf.get(), out_elf_size, &new_reader);
+  hsa_status_t status =
+      g_orig_reader_create_from_memory(owned_elf.get(), out_elf_size, &new_reader);
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
@@ -265,8 +263,7 @@ hsa_status_t load_rewritten_reader(hsa_executable_t executable,
   return status;
 }
 
-hsa_status_t try_retarget_and_load(hsa_executable_t executable,
-                                   hsa_agent_t agent,
+hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agent,
                                    const char *options,
                                    hsa_loaded_code_object_t *loaded_code_object,
                                    const ByteVec &local_bytes,
@@ -276,7 +273,6 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable,
   std::string source_isa = rocr::hotswap::GetCodeObjectIsaName(
       local_bytes->data(), local_bytes->size());
   std::string target_isa = get_agent_isa_name(agent);
-
   if (source_isa.empty() || target_isa.empty()) {
     HOTSWAP_LOG("hotswap: rewrite SKIP empty isa (src='%s' tgt='%s' size=%zu)\n",
                 source_isa.c_str(), target_isa.c_str(), local_bytes->size());
@@ -349,16 +345,15 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     const bool entry_trampolines = entry_trampolines_requested();
     if (!gate_allows_hotswap_rewrite(gfx, entry_trampolines)) {
       HOTSWAP_LOG("hotswap: gate BLOCKED (gfx=%s rev=%u valid=%d)\n",
-                  gfx.gfx_target.c_str(), gfx.asic_revision,
-                  gfx.revision_valid);
+                  gfx.gfx_target.c_str(), gfx.asic_revision, gfx.revision_valid);
       return load_original_reader(executable, agent, code_object_reader,
                                   options, loaded_code_object,
                                   reader_from_file);
     }
 
-    const hsa_status_t status =
-        try_retarget_and_load(executable, agent, options, loaded_code_object,
-                              local_bytes, gfx, entry_trampolines);
+    const hsa_status_t status = try_retarget_and_load(
+        executable, agent, options, loaded_code_object, local_bytes, gfx,
+        entry_trampolines);
     if (status == HSA_STATUS_SUCCESS) {
       return status;
     }

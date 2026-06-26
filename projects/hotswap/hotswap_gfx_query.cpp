@@ -18,30 +18,27 @@ namespace rocr::hotswap {
 std::string get_agent_isa_name(hsa_agent_t agent) {
   std::string name;
 
-  hsa_agent_iterate_isas(
-      agent,
-      [](hsa_isa_t isa, void *data) -> hsa_status_t {
-        uint32_t len = 0;
-        if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
-            HSA_STATUS_SUCCESS)
-          return HSA_STATUS_ERROR;
+  hsa_agent_iterate_isas(agent, [](hsa_isa_t isa, void *data) -> hsa_status_t {
+    uint32_t len = 0;
+    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
+        HSA_STATUS_SUCCESS)
+      return HSA_STATUS_ERROR;
 
-        auto &out = *static_cast<std::string *>(data);
-        out.resize(len);
+    auto &out = *static_cast<std::string *>(data);
+    out.resize(len);
 
-        if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, out.data()) !=
-            HSA_STATUS_SUCCESS) {
-          out.clear();
-          return HSA_STATUS_ERROR;
-        }
+    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, out.data()) !=
+        HSA_STATUS_SUCCESS) {
+      out.clear();
+      return HSA_STATUS_ERROR;
+    }
 
-        // HSA returns null-terminated length; trim it.
-        if (!out.empty() && out.back() == '\0')
-          out.pop_back();
+    // HSA returns null-terminated length; trim it.
+    if (!out.empty() && out.back() == '\0')
+      out.pop_back();
 
-        return HSA_STATUS_INFO_BREAK; // only need the first ISA
-      },
-      &name);
+    return HSA_STATUS_INFO_BREAK; // only need the first ISA
+  }, &name);
 
   return name;
 }
@@ -51,9 +48,7 @@ std::string extract_gfx_target(const std::string &isa_name) {
   if (pos == std::string::npos)
     return {};
   auto end = std::find_if_not(isa_name.begin() + pos, isa_name.end(),
-                              [](unsigned char c) {
-                                return std::isalnum(c) || c == '-' || c == '_';
-                              });
+                              [](unsigned char c) { return std::isalnum(c) || c == '-' || c == '_'; });
   return isa_name.substr(pos, end - isa_name.begin() - pos);
 }
 
