@@ -932,6 +932,7 @@ class Graph {
  private:
   friend class GraphExecBase;
   friend class GraphExecSegmented;
+  friend class GraphExecClassic;
   std::vector<Node> vertices_;
   const Graph* pOriginalGraph_ = nullptr;
   //!< graphUserObj_.second stores refcount owned by this graph for user object,
@@ -1108,10 +1109,18 @@ class GraphExecSegmented : public GraphExecBase {
   void FindStreamsReqPerDevForSegments();
   //! Round-robin stream assignment: spreads parallel segments evenly per dependency level
   void RoundRobinStreamAssignment();
-  //! DFS stream assignment: preserves chain continuity for linear chains of segments
+  //! DFS stream assignment: preserves chain continuity across segment DAG branches
   void DFSStreamAssignment();
-  //! Select stream assignment algorithm based on graph complexity (0=Hybrid, 1=RR, 2=DFS)
+  //! Select stream assignment algorithm based on graph complexity
   void SelectStreamAssignment();
+  //! Recompute each segment's needs_completion_signal flag from its current
+  //! stream assignment. Called after the initial assignment and again if
+  //! BuildSyncPlan's collapse pass reassigns segments to a single stream.
+  void ComputeCompletionSignalFlags();
+  //! Barrier-ROI heuristic: decide whether the segment graph should be collapsed
+  //! onto a single stream because the cross-stream barriers multi-stream would
+  //! cost outweigh the work that could actually overlap. Returns true to collapse.
+  bool ShouldCollapseToSingleStream() const;
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;

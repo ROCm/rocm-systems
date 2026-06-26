@@ -248,6 +248,11 @@ release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 0,                          \
         "Segment scheduling mode (segmented path only): "                      \
         "0=Hybrid/auto, 1=Round-robin, 2=DFS")                                \
+release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
+        "Min overlappable work (in occupancy passes) per unit of cross-stream "\
+        "sync (barrier packets + completion signals) to keep a graph "         \
+        "multi-stream; below this ratio it collapses to a single stream. "     \
+        "0 = off.")                                                            \
 release(bool, DEBUG_HIP_GRAPH_CLASSIC_PATH, false,                            \
         "Force GraphExecClassic (classic topological path) regardless of "    \
         "GPU_ENABLE_PAL, for testing on Linux")                                \
