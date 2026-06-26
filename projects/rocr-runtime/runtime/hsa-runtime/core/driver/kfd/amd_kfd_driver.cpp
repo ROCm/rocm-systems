@@ -485,7 +485,6 @@ hsa_status_t KfdDriver::ExportMemoryHandleImpl(const core::Agent& agent,
       return HSA_STATUS_SUCCESS;
     }
 #endif
-    (void)export_offset;
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
 
     HsaHandleExportDesc desc = {};
@@ -504,7 +503,6 @@ hsa_status_t KfdDriver::ExportMemoryHandleImpl(const core::Agent& agent,
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
-    (void)export_offset;
 #if !defined(__linux__)
     assert(!"Unimplemented!");
     return HSA_STATUS_ERROR;
