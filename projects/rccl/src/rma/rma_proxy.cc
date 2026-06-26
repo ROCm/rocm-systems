@@ -200,10 +200,18 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
 static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclGin_t* ginComm, struct ncclRmaProxyCtx* rmaProxyCtx) {
   // The clean up in case of failure will be done by the ncclRmaProxyDestroyContext function invoked by the caller.
   size_t signalsBufSize = (comm->nRanks + 1) * sizeof(uint64_t);
+
+  // RCCL: Strip DMA-BUF like ncclRmaProxyCtxAlloc: cpuAccessSignals may be
+  // host memory (GDRCopy off), whose dmabuf export fails (INVALID_AGENT).
+  ncclNetProperties_t props_tmp = rmaProxyCtx->props;
+  if (rcclParamRmaProxyUseDMABUF() == 0) {
+    props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+  }
+
   // Allocate the CPU-accessible signal for graph capture and then register the memory region with the GIN plugin.
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->cpuAccessSignals, &rmaProxyCtx->cpuAccessSignalsDev,
                                   comm->nRanks + 1, 0, &rmaProxyCtx->cpuAccessSignalsGdrHandle, comm->memManager));
-  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->cpuAccessSignalsDev, signalsBufSize,
+  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, props_tmp, rmaProxyCtx->cpuAccessSignalsDev, signalsBufSize,
                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
                                  &rmaProxyCtx->cpuAccessSignalsMhandle, &rmaProxyCtx->cpuAccessSignalsGinHandle));
   // Allocate the host buffer to track the expected values of the signals

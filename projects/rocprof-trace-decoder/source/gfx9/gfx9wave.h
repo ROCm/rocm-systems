@@ -79,7 +79,10 @@ public:
 class MISQTTParser : public SQTTParser
 {
 public:
-    MISQTTParser(int tg_cu, bool _double_buffer) : target_cu(tg_cu), double_buffer(_double_buffer){};
+    MISQTTParser(int tg_cu, bool _double_buffer, bool is_mi350) : target_cu(tg_cu), double_buffer(_double_buffer)
+    {
+        csregister.tt_version = is_mi350 ? 1 : 0;
+    };
     ~MISQTTParser() override{};
 
     void sqtt_simd_analysis(CppReturnInfo& info, class TokenGenerator& generator, class Stitcher& stitch) override;

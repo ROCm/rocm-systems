@@ -4672,6 +4672,10 @@ rocprofiler-sdk:
             - gfx1201
           block: SQ
           event: 50
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 128
     - name: SQ_INSTS_VALU_ADD_F16
       description: The number of VALU (Vector ALU) ADD/SUB instructions on float16. For maximum 
         performance lower precision floating point ops are preferred to higher precision ones. The 
@@ -11738,6 +11742,14 @@ rocprofiler-sdk:
             - gfx950
           block: TD
           event: 29
+    - name: TX_VCA_VCA_BUSY
+      description: Cycles VCA block is busy. Perf_windowing not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 184
     - name: TOTAL_16_OPS
       description: The number of 16 bits OPS executed
       properties: []

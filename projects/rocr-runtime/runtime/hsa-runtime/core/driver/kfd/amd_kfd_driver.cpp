@@ -379,10 +379,10 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
-    const bool is_dxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
+    const bool is_windxg =
+        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
     const bool require_pinning =
-        !is_dxg &&
+        !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
          m_region.IsScratch());
 
@@ -540,7 +540,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
   switch (type) {
   case core::ShareType::DMABUF_FD: {
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
-    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
 
     HsaHandleImportDesc desc = {};
     desc.device_handle = gpu_agent.libThunkDev();
@@ -564,7 +564,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     return HSA_STATUS_ERROR;
 #endif
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
-    const auto fabric_handle = *static_cast<const hsa_fabric_handle_t*>(import_handle);
+    const auto fabric_handle = static_cast<const core::DriverMemoryHandle*>(import_handle)->fabric_handle;
 
     HsaHandleImportDesc desc = {};
     desc.device_handle = gpu_agent.libThunkDev();
@@ -626,8 +626,9 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 
   /*
    * On Linux, export via KFD first (EXPORT_MEMORY_FLAGS_KFD_DMABUF) so the KFD section of the
-   * AMDGPU driver has a BO entry, then import into DRM. Re-export from DRM for the shareable fd.
-   * On Windows, KFD export and DRM export are equivalent.
+   * AMDGPU driver has a BO entry, then import into DRM. The shareable dmabuf_fd itself is created
+   * lazily when access is set (see Runtime::VMemorySetAccessPerHandle), so it is not re-exported
+   * here. On Windows, KFD export and DRM export are equivalent.
    */
 
   core::DriverMemoryHandle kfd_alloc = {};
@@ -639,9 +640,12 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return HSA_STATUS_ERROR;
   }
 
+  core::DriverMemoryHandle source_handle = {};
+  source_handle.dmabuf_fd = source_fd;
+
   core::DriverMemoryHandle targetHandle = {};
   hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareType::DMABUF_FD,
-                                        &source_fd, mem);
+                                        &source_handle, mem);
 #if defined(__linux__)
   rocr::os::DmaBufClose(source_fd);
 #endif
@@ -649,22 +653,13 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return ret;
   assert(targetHandle.size == size);
 
-  int shareable_fd = source_fd;
 #if defined(__linux__)
-  // Re-export from DRM; the KFD fd was transient and is already closed.
-  ret = ExportMemoryHandle(agent, targetHandle, core::ShareType::DMABUF_FD, 0,
-                           &shareable_fd);
-  if (ret != HSA_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    return ret;
-  }
   /*
    * We converted mem into a driver handle. The driver handle will keep the reference count
    * inside the KMD so we can free the original KFD allocation.
    */
   if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
     DestroyMemoryHandle(&targetHandle);
-    rocr::os::DmaBufClose(shareable_fd);
     return HSA_STATUS_ERROR;
   }
 #endif
@@ -673,12 +668,15 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
   if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
     DestroyMemoryHandle(&targetHandle);
-    rocr::os::DmaBufClose(shareable_fd);
     return HSA_STATUS_ERROR;
   }
 
   handle->handle = targetHandle.handle;
-  handle->dmabuf_fd = shareable_fd;
+  /*
+   * Do not hold a shareable dmabuf_fd open for the lifetime of the handle. It is created lazily
+   * (and closed again) when access is set in Runtime::VMemorySetAccessPerHandle.
+   */
+  handle->dmabuf_fd = -1;
   handle->size = size;
   return HSA_STATUS_SUCCESS;
 }
@@ -686,6 +684,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   if (handle->dmabuf_fd >= 0) {
     hsa_status_t status = rocr::os::DmaBufClose(handle->dmabuf_fd);
+    handle->dmabuf_fd = -1;
     if (status != HSA_STATUS_SUCCESS) return status;
   }
 
