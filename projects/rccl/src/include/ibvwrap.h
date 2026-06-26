@@ -67,6 +67,27 @@ ncclResult_t wrap_ibv_destroy_qp(struct ibv_qp *qp);
 ncclResult_t wrap_ibv_query_ece(struct ibv_qp *qp, struct ibv_ece *ece, int* supported);
 ncclResult_t wrap_ibv_set_ece(struct ibv_qp *qp, struct ibv_ece *ece, int* supported);
 
+static inline ncclResult_t wrap_ibv_create_ah(struct ibv_ah **ret, struct ibv_pd *pd, struct ibv_ah_attr *attr) {
+  struct ibv_ah *ah = pd->context->ops.create_ah(pd, attr);
+  if (ah == NULL) {
+    WARN("Call to ibv_create_ah() failed");
+    return ncclSystemError;
+  }
+  ah->context = pd->context;
+  ah->pd = pd;
+  *ret = ah;
+  return ncclSuccess;
+}
+
+static inline ncclResult_t wrap_ibv_destroy_ah(struct ibv_ah *ah) {
+  int ret = ah->context->ops.destroy_ah(ah); /*returns 0 on success, or the value of errno on failure*/
+  if (ret != IBV_SUCCESS) {
+    WARN("ibv_destroy_ah() failed with error %s", strerror(ret));
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+
 static inline ncclResult_t wrap_ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) {
   int ret = qp->context->ops.post_send(qp, wr, bad_wr); /*returns 0 on success, or the value of errno on failure (which indicates the failure reason)*/
   if (ret != IBV_SUCCESS) {
