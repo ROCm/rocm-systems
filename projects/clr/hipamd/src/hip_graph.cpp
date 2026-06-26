@@ -29,7 +29,7 @@ inline hipError_t ihipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream) 
     return hipErrorInvalidValue;
   }
   getStreamPerThread(stream);
-  if (!hip::GraphExec::isGraphExecValid(reinterpret_cast<hip::GraphExec*>(graphExec))) {
+  if (!hip::GraphExecBase::isGraphExecValid(reinterpret_cast<hip::GraphExecBase*>(graphExec))) {
     return hipErrorInvalidValue;
   }
   return hipSuccess;
@@ -1595,7 +1595,29 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
       }
     }
   }
-  *pGraphExec = new hip::GraphExec(flags);
+
+  // PAL/Windows uses the classic topological path; Linux/ROCm uses the segmented AQL path.
+  if (GPU_ENABLE_PAL != 0) {
+    auto* classicExec = new hip::GraphExecClassic(flags);
+    graph->clone(classicExec, true);
+    // Classic path only needs a topological ordering of nodes; no segment scheduling.
+    if (!classicExec->TopologicalOrder()) {
+      delete classicExec;
+      return hipErrorInvalidValue;
+    }
+    graph->SetGraphInstantiated(true);
+    hipError_t initStatus = classicExec->Init();
+    if (initStatus != hipSuccess) {
+      delete classicExec;
+      return initStatus;
+    }
+    // Return via the GraphExec alias (= GraphExecSegmented) — safe because hip_graph.cpp
+    // only uses the virtual Run/Init interface and the shared-base statics through this pointer.
+    *pGraphExec = reinterpret_cast<hip::GraphExec*>(classicExec);
+    return hipSuccess;
+  }
+
+  *pGraphExec = new hip::GraphExecSegmented(flags);
   graph->clone(*pGraphExec, true);
 
   hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodesIntoBatches();
@@ -1693,12 +1715,12 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
   if (pGraphExec == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  hip::GraphExec* ge = reinterpret_cast<hip::GraphExec*>(pGraphExec);
+  auto* ge = reinterpret_cast<hip::GraphExecBase*>(pGraphExec);
   {
     // Erase from the set before releasing, so that concurrent
     // hipDeviceGraphMemTrim cannot retain a dangling pointer.
-    std::scoped_lock lock(GraphExec::graphExecSetLock_);
-    GraphExec::graphExecSet_.erase(ge);
+    std::scoped_lock lock(hip::GraphExecBase::graphExecSetLock_);
+    hip::GraphExecBase::graphExecSet_.erase(ge);
   }
   ge->release();
   HIP_RETURN(hipSuccess);
@@ -3003,14 +3025,14 @@ hipError_t hipDeviceGraphMemTrim(int device) {
   }
   auto* pool = g_devices[device]->GetGraphMemoryPool();
 
-  // Acquire exclusive lock — blocks new GraphExec::Run() retain calls.
-  std::unique_lock<std::shared_mutex> trim_lock(hip::GraphExec::graphExecTrimLock_);
+  // Acquire exclusive lock — blocks new GraphExecBase::Run() retain calls.
+  std::unique_lock<std::shared_mutex> trim_lock(hip::GraphExecBase::graphExecTrimLock_);
 
-  std::vector<hip::GraphExec*> retained_graph_execs;
+  std::vector<hip::GraphExecBase*> retained_graph_execs;
   // Phase 1: Snapshot eligible graph execs under graphExecSetLock_ and retain them.
   {
-    std::scoped_lock lock(hip::GraphExec::graphExecSetLock_);
-    for (auto* ge : hip::GraphExec::graphExecSet_) {
+    std::scoped_lock lock(hip::GraphExecBase::graphExecSetLock_);
+    for (auto* ge : hip::GraphExecBase::graphExecSet_) {
       if (ge->Device() != g_devices[device]) {
         continue;
       }

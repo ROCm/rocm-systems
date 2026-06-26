@@ -31,7 +31,9 @@ typedef struct ihipExtKernelEvents {
 namespace hip {
 class Graph;
 class GraphNode;
-class GraphExec;
+class GraphExecBase;
+class GraphExecClassic;
+class GraphExecSegmented;
 class UserObject;
 class GraphKernelNode;
 typedef GraphNode* Node;
@@ -488,7 +490,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
  protected:
   // Declare Graph and GraphExec as friends of node for simpler access to GraphNode fields
   friend class Graph;
-  friend class GraphExec;
+  friend class GraphExecBase;
+  friend class GraphExecSegmented;
   hip::Stream* stream_ = nullptr;
   unsigned int id_;
   hipGraphNodeType type_;
@@ -927,7 +930,8 @@ class Graph {
   std::unordered_map<Node, Node> clonedNodes_;
 
  private:
-  friend class GraphExec;
+  friend class GraphExecBase;
+  friend class GraphExecSegmented;
   std::vector<Node> vertices_;
   const Graph* pOriginalGraph_ = nullptr;
   //!< graphUserObj_.second stores refcount owned by this graph for user object,
@@ -960,26 +964,72 @@ class Graph {
   std::vector<Batch> batches_;
 };
 
-class GraphExec : public amd::ReferenceCountedObject, public Graph {
+// ================================================================================================
+// GraphExecBase — shared statics and interface for all graph-exec variants.
+// GraphExecClassic (PAL/Windows) and GraphExecSegmented (Linux/ROCm) inherit from this.
+class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
  public:
-  static std::unordered_set<GraphExec*> graphExecSet_;
+  static std::unordered_set<GraphExecBase*> graphExecSet_;
   static std::recursive_mutex graphExecSetLock_;
   static std::recursive_mutex graphExecStreamCreateLock_;
   static std::shared_mutex graphExecTrimLock_;
-  bool graph_dumped_ = false;
-  GraphExec(uint64_t flags = 0)
+
+  GraphExecBase(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
     std::scoped_lock lock(graphExecSetLock_);
     graphExecSet_.insert(this);
   }
 
-  ~GraphExec() {
-    {
-      std::scoped_lock lock(graphExecSetLock_);
-      // GraphExecSet is normally erased in hipGraphExecDestroy() before release(), but child graph
-      // nodes (which inherit GraphExec) are destroyed via delete and never go through that path.
-      graphExecSet_.erase(this);
-    }
+  ~GraphExecBase() {
+    std::scoped_lock lock(graphExecSetLock_);
+    // Normally erased in hipGraphExecDestroy(), but child graph nodes use delete directly.
+    graphExecSet_.erase(this);
+  }
+
+  static bool isGraphExecValid(GraphExecBase* pGraphExec);
+  // Completion callback shared by both paths: releases the launch reference.
+  static void OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data);
+
+  Node GetClonedNode(Node node) {
+    auto it = clonedNodes_.find(node);
+    return (it != clonedNodes_.end()) ? it->second : nullptr;
+  }
+
+  std::vector<Node>& GetNodes() { return topoOrder_; }
+  uint64_t GetFlags() const { return flags_; }
+  bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+
+  virtual hipError_t Init() = 0;
+  virtual hipError_t Run(hip::Stream* stream) = 0;
+
+ protected:
+  uint64_t flags_ = 0;
+};
+
+// ================================================================================================
+// GraphExecClassic — PAL/Windows path. No segment scheduling, no AQL packet capture.
+// Uses a simple topological-order walk over nodes for both instantiation and launch.
+class GraphExecClassic : public GraphExecBase {
+ public:
+  GraphExecClassic(uint64_t flags = 0) : GraphExecBase(flags) {}
+  ~GraphExecClassic() = default;
+
+  hipError_t Init() override;
+  hipError_t Run(hip::Stream* launch_stream) override;
+
+ protected:
+  bool repeatLaunch_ = false;
+};
+
+// ================================================================================================
+// GraphExecSegmented — Linux/ROCm path. Segment scheduling, AQL packet capture, multi-stream.
+class GraphExecSegmented : public GraphExecBase {
+  friend class GraphExecBase;  // allows OnLaunchComplete to access signalManager_
+ public:
+  bool graph_dumped_ = false;
+  GraphExecSegmented(uint64_t flags = 0) : GraphExecBase(flags) {}
+
+  ~GraphExecSegmented() {
     for (auto& streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
@@ -1002,43 +1052,26 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     segmentBatches_.clear();
   }
 
-  Node GetClonedNode(Node node) {
-    Node clonedNode;
-    if (clonedNodes_.find(node) == clonedNodes_.end()) {
-      return nullptr;
-    } else {
-      clonedNode = clonedNodes_[node];
-    }
-    return clonedNode;
-  }
-
   //! Check if kernel node has hidden heap
   bool HasHiddenHeap() const { return hasHiddenHeap_; }
   //! Graph has nodes that require hidden heap.
   void SetHiddenHeap() { hasHiddenHeap_ = true; }
 
-  //! Check executable graphs validity
-  static bool isGraphExecValid(GraphExec* pGraphExec);
-  std::vector<Node>& GetNodes() { return topoOrder_; }
-  uint64_t GetFlags() const { return flags_; }
-  hipError_t Init();
+  hipError_t Init() override;
   hipError_t CreateStreams(uint32_t num_streams, int devId = 0);
-  hipError_t Run(hip::Stream* stream);
+  hipError_t Run(hip::Stream* stream) override;
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
   hipError_t UpdateAQLPacket(hip::GraphNode* node);
   // Handle packetBatches_ updates when nodes are enabled/disabled
   hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled);
-  // Kenrel arg manger is for the entire graph.
+  // Kernel arg manager is for the entire graph.
   // Child graph also shares the same kernel arg manager object. some apps have 100's of
   // child graph nodes and each child graph has only one node.
   void SetKernelArgManager(GraphKernelArgManager* kernArgManager) {
     kernArgManager_ = kernArgManager;
   }
   GraphKernelArgManager* GetKernelArgManager() { return kernArgManager_; }
-  // Completion callback for a graph launch: re-arms and returns the launch's
-  // pooled signals, then drops the launch's reference on the GraphExec.
-  static void OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data);
   hipError_t CaptureAndFormPacketsForGraph();
   void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
 
@@ -1054,7 +1087,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
                             amd::AccumulateCommand* accumulate);
 
-  bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
   //! Update streams for the graph execution with launch stream from application
   void UpdateStreams(hip::Stream* launch_stream);
   //! Find the number of streams required per device for packet engine mode
@@ -1064,7 +1096,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void RoundRobinStreamAssignment();
   //! DFS stream assignment: preserves chain continuity for linear chains of segments
   void DFSStreamAssignment();
-  //! Select stream assignment algorithm based on graph complexity
+  //! Select stream assignment algorithm based on graph complexity (0=Hybrid, 1=RR, 2=DFS)
   void SelectStreamAssignment();
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
@@ -1074,7 +1106,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
  protected:
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
-  uint64_t flags_ = 0;
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
   GraphSignalManager* signalManager_ = nullptr;      //!< HW event signal pool for graph launches.
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
@@ -1181,16 +1212,19 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void BuildSyncPlan();
 };
 
-class ChildGraphNode : public GraphNode, public GraphExec {
+// Backward-compatible alias: code that refers to GraphExec gets GraphExecSegmented.
+using GraphExec = GraphExecSegmented;
+
+class ChildGraphNode : public GraphNode, public GraphExecSegmented {
  protected:
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
-  ChildGraphNode(const ChildGraphNode& rhs) : GraphNode(rhs), GraphExec() {
+  ChildGraphNode(const ChildGraphNode& rhs) : GraphNode(rhs), GraphExecSegmented() {
     rhs.Graph::clone(this);
     graphCaptureStatus_ = rhs.graphCaptureStatus_;
   }
 
  public:
-  ChildGraphNode(Graph* g) : GraphNode(hipGraphNodeTypeGraph, "solid", "rectangle"), GraphExec() {
+  ChildGraphNode(Graph* g) : GraphNode(hipGraphNodeTypeGraph, "solid", "rectangle"), GraphExecSegmented() {
     g->clone(this);
     graphCaptureStatus_ = false;
   }
