@@ -49,22 +49,25 @@
 
 namespace
 {
-constexpr int kBlock = 256;
+// Each kernel grid-stride loops so all n elements are processed regardless of the (fixed) launch
+// size; the fixed dims keep the dispatch's Grid_Size / Workgroup_Size deterministic for validation.
 
 // VecAdd: simple element-wise add into a separate output buffer.
 __global__ void
 vecAdd(const float* __restrict__ a, const float* __restrict__ b, float* __restrict__ c, int n)
 {
-    int i = blockDim.x * blockIdx.x + threadIdx.x;
-    if(i < n) c[i] = a[i] + b[i];
+    const int stride = blockDim.x * gridDim.x;
+    for(int i = blockDim.x * blockIdx.x + threadIdx.x; i < n; i += stride)
+        c[i] = a[i] + b[i];
 }
 
 // SAXPY: in-place read-write kernel (y is both read and written).
 __global__ void
 saxpy(float alpha, const float* __restrict__ x, float* __restrict__ y, int n)
 {
-    int i = blockDim.x * blockIdx.x + threadIdx.x;
-    if(i < n) y[i] = alpha * x[i] + y[i];
+    const int stride = blockDim.x * gridDim.x;
+    for(int i = blockDim.x * blockIdx.x + threadIdx.x; i < n; i += stride)
+        y[i] = alpha * x[i] + y[i];
 }
 
 bool
@@ -92,10 +95,9 @@ run_vecadd(int n, int iters)
     HIP_CHECK(hipMemcpy(d_a, h_a.data(), bytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_b, h_b.data(), bytes, hipMemcpyHostToDevice));
 
-    const int blocks = (n + kBlock - 1) / kBlock;
     for(int iter = 0; iter < iters; ++iter)
     {
-        vecAdd<<<blocks, kBlock>>>(d_a, d_b, d_c, n);
+        vecAdd<<<1024, 1024>>>(d_a, d_b, d_c, n);
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -138,10 +140,9 @@ run_saxpy(int n, int iters)
     HIP_CHECK(hipMemcpy(d_x, h_x.data(), bytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_y, h_y.data(), bytes, hipMemcpyHostToDevice));
 
-    const int blocks = (n + kBlock - 1) / kBlock;
     for(int iter = 0; iter < iters; ++iter)
     {
-        saxpy<<<blocks, kBlock>>>(alpha, d_x, d_y, n);
+        saxpy<<<512, 512>>>(alpha, d_x, d_y, n);
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
