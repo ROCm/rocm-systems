@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/06/25.
-        default: "3998d8edc92c87fd26d000d06c9af51f518d7439"
+        # Last updated on 2026/06/26.
+        default: "9661a80073abfff688fda5a970bfa9de24de2ead"
         required: true
 
 concurrency:
@@ -94,8 +94,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/06/25.
-          ref: 3998d8edc92c87fd26d000d06c9af51f518d7439
+          # Last updated on 2026/06/26.
+          ref: 9661a80073abfff688fda5a970bfa9de24de2ead
           path: rocjitsu-test-corpus
 
       - name: Set up Python
