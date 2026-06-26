@@ -128,6 +128,15 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
 }
 
+void Vop1::implicit_uses(RegisterSet &uses) const {
+  bool sdwa_preserve =
+      sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
+  bool dpp_partial =
+      inst_.src0 == amdgpu::SRC_DPP && (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF);
+  if (sdwa_preserve || dpp_partial)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(inst_.vdst), 1});
+}
+
 bool Vop1::default_encoding() {
   return inst_.src0 != 250 && inst_.src0 != 255 && inst_.src0 != 249;
 }
@@ -166,6 +175,15 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
+}
+
+void Vop2::implicit_uses(RegisterSet &uses) const {
+  bool sdwa_preserve =
+      sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
+  bool dpp_partial =
+      inst_.src0 == amdgpu::SRC_DPP && (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF);
+  if (sdwa_preserve || dpp_partial)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(inst_.vdst), 1});
 }
 
 bool Vop2::default_encoding() {
