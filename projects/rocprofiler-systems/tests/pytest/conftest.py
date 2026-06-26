@@ -194,26 +194,6 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
-        "oshrun_min_version(version): mark test as requiring minimum OpenSHMEM version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "amdsmi_min_version(version): mark test as requiring minimum AMD-SMI version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "amdgpu_min_version(version): mark test as requiring minimum amdgpu driver version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "amd_smi_min_version(version): mark test as requiring minimum amd_smi version",
-    )
-    config.addinivalue_line(
-        "markers",
-        "amdgpu_min_version(version): mark test as requiring minimum amdgpu driver version",
-    )
-    config.addinivalue_line(
-        "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
     config.addinivalue_line(
@@ -235,6 +215,18 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "rocm_min_version(version): mark test as requiring minimum ROCm version",
+    )
+    config.addinivalue_line(
+        "markers",
+        "sdk_min_version(version): mark test as requiring minimum ROCProfiler SDK version",
+    )
+    config.addinivalue_line(
+        "markers",
+        "amdsmi_min_version(version): mark test as requiring minimum amd_smi version",
+    )
+    config.addinivalue_line(
+        "markers",
+        "amdgpu_min_version(version): mark test as requiring minimum amdgpu driver version",
     )
     config.addinivalue_line(
         "markers",
@@ -283,10 +275,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "ainic: mark test as requiring AI NIC support "
         "(amd-smi static must report NETDEV entries)",
-    )
-    config.addinivalue_line(
-        "markers",
-        "sdk_min_version(version): mark test as requiring minimum ROCProfiler SDK version",
     )
     config.addinivalue_line(
         "markers",
@@ -689,6 +677,34 @@ def _test_has_marker(item: pytest.Item, marker: str, has_args: bool = False):
     return False
 
 
+# Helper for min_version_marker_check functions
+def _min_version_marker_check(
+    item: pytest.Item,
+    marker: str,
+    get_version: Callable[[], Optional[tuple[int, ...]]],
+    label: str,
+    components: int,
+    not_found_label: Optional[str] = None,  # defaults to `label`
+) -> None:
+    if not _test_has_marker(item, marker, has_args=True):
+        return
+    req_version = item.get_closest_marker(marker).args[0]
+    system_version = get_version()
+    if system_version is None:
+        item.add_marker(
+            pytest.mark.skip(reason=f"{not_found_label or label} version not found")
+        )
+        return
+    min_parts = req_version.split(".")
+    min_tuple = tuple(int(p) for p in (min_parts + ["0"] * components)[:components])
+    if system_version < min_tuple:
+        item.add_marker(
+            pytest.mark.skip(
+                reason=f"{label} {'.'.join(map(str, system_version))} < required {req_version}"
+            )
+        )
+
+
 def gpu_marker_check(item: pytest.Item) -> None:
     if _test_has_marker(item, "gpu") and not get_gpu_info().available:
         item.add_marker(pytest.mark.skip(reason="No valid GPU available"))
@@ -765,37 +781,57 @@ def shmem_marker_check(item: pytest.Item) -> None:
 
 
 def oshrun_min_version_marker_check(item: pytest.Item) -> None:
-    if _test_has_marker(item, "oshrun_min_version", has_args=True):
-        req_version = item.get_closest_marker("oshrun_min_version").args[0]
-        system_version = get_rocprof_config().capabilities.oshrun_version
-        if system_version is None:
-            item.add_marker(pytest.mark.skip(reason="OpenSHMEM version not found"))
-        else:
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"oshrun version {'.'.join(map(str, system_version))} < required {req_version}"
-                    )
-                )
+    _min_version_marker_check(
+        item,
+        "oshrun_min_version",
+        lambda: get_rocprof_config().capabilities.oshrun_version,
+        label="oshrun version",
+        components=2,
+        not_found_label="OpenSHMEM",
+    )
 
 
 def rocm_min_version_marker_check(item: pytest.Item) -> None:
-    if _test_has_marker(item, "rocm_min_version", has_args=True):
-        req_version = item.get_closest_marker("rocm_min_version").args[0]
-        system_version = get_rocprof_config().rocm_version
-        if system_version is None:
-            item.add_marker(pytest.mark.skip(reason="ROCm version not found"))
-        else:
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
-                    )
-                )
+    _min_version_marker_check(
+        item,
+        "rocm_min_version",
+        lambda: get_rocprof_config().rocm_version,
+        label="ROCm",
+        components=3,
+    )
+
+
+def sdk_min_version_marker_check(item: pytest.Item) -> None:
+    _min_version_marker_check(
+        item,
+        "sdk_min_version",
+        lambda: get_rocprof_config().capabilities.rocprofiler_sdk_version,
+        label="ROCProfiler SDK version",
+        components=3,
+        not_found_label="ROCProfiler SDK",
+    )
+
+
+def amdsmi_min_version_marker_check(item: pytest.Item) -> None:
+    _min_version_marker_check(
+        item,
+        "amdsmi_min_version",
+        lambda: get_rocprof_config().capabilities.amdsmi_version,
+        label="AMD-SMI version",
+        components=2,
+        not_found_label="AMD-SMI",
+    )
+
+
+def amdgpu_min_version_marker_check(item: pytest.Item) -> None:
+    _min_version_marker_check(
+        item,
+        "amdgpu_min_version",
+        lambda: get_rocprof_config().capabilities.amdgpu_version,
+        label="amdgpu version",
+        components=3,
+        not_found_label="amdgpu",
+    )
 
 
 def python_marker_check(item: pytest.Item) -> None:
@@ -844,12 +880,17 @@ def perf_event_paranoid_marker_check(item: pytest.Item) -> None:
                 pytest.mark.skip(reason=f"perf_event_paranoid <= {level} required")
             )
 
+
 def perf_events_usable_marker_check(item: pytest.Item) -> None:
     if (
         _test_has_marker(item, "perf_events_usable")
         and not get_rocprof_config().capabilities.perf_events_usable
     ):
-        item.add_marker(pytest.mark.skip(reason="Requires either perf_event_paranoid <= 2 or CAP_SYS_ADMIN to be available"))
+        item.add_marker(
+            pytest.mark.skip(
+                reason="Requires either perf_event_paranoid <= 2 or CAP_SYS_ADMIN to be available"
+            )
+        )
 
 
 def cap_sys_admin_marker_check(item: pytest.Item) -> None:
@@ -889,58 +930,11 @@ def ainic_marker_check(item: pytest.Item) -> None:
         _test_has_marker(item, "ainic")
         and get_rocprof_config().capabilities.ai_nic_devices == []
     ):
-        item.add_marker(pytest.mark.skip(reason="No AI NIC devices found (amd-smi static reports no NETDEV entries)"))
-
-
-def sdk_min_version_marker_check(item: pytest.Item) -> None:
-    if _test_has_marker(item, "sdk_min_version", has_args=True):
-        req_version = item.get_closest_marker("sdk_min_version").args[0]
-        system_version = get_rocprof_config().capabilities.rocprofiler_sdk_version
-        if system_version is None:
-            item.add_marker(pytest.mark.skip(reason="ROCProfiler SDK version not found"))
-        else:
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"ROCProfiler SDK version {'.'.join(map(str, system_version))} < required {req_version}"
-                    )
-                )
-
-
-def amdsmi_min_version_marker_check(item: pytest.Item) -> None:
-    if _test_has_marker(item, "amdsmi_min_version", has_args=True):
-        req_version = item.get_closest_marker("amdsmi_min_version").args[0]
-        system_version = get_rocprof_config().capabilities.amdsmi_version
-        if system_version is None:
-            item.add_marker(pytest.mark.skip(reason="AMD-SMI version not found"))
-        else:
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"AMD-SMI version {'.'.join(map(str, system_version))} < required {req_version}"
-                    )
-                )
-
-
-def amdgpu_min_version_marker_check(item: pytest.Item) -> None:
-    if _test_has_marker(item, "amdgpu_min_version", has_args=True):
-        req_version = item.get_closest_marker("amdgpu_min_version").args[0]
-        system_version = get_rocprof_config().capabilities.amdgpu_version
-        if system_version is None:
-            item.add_marker(pytest.mark.skip(reason="amdgpu version not found"))
-        else:
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0", "0"])[:3])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"amdgpu version {'.'.join(map(str, system_version))} < required {req_version}"
-                    )
-                )
+        item.add_marker(
+            pytest.mark.skip(
+                reason="No AI NIC devices found (amd-smi static reports no NETDEV entries)"
+            )
+        )
 
 
 def docker_marker_check(item: pytest.Item) -> None:
