@@ -2,6 +2,12 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
+## rocDecode 1.8.1 for ROCm 7.14
+
+### Added
+
+* Invalid video size handling for AVC/HEVC.
+
 ## rocDecode 1.8.0 for ROCm 7.13
 
 ### Added
@@ -13,7 +19,6 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Logging improvement: Moved debug logging from a compile-time switch to the runtime logger level controlled by ROCDEC_LOG_LEVEL (debug = 4).
 * Feature: support for user set output surface format.
 * Graceful handling of VUI syntax errors for AVC and HEVC.
-* Invalid video size handling for AVC/HEVC.
 
 ### Changed
 
