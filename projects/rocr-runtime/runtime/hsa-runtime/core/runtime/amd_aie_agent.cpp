@@ -295,7 +295,8 @@ hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  auto aql_queue(new AieAqlQueue(shared_queue, this, size, node_id(), flags));
+  auto aql_queue(
+      new AieAqlQueue(shared_queue, this, size, node_id(), event_callback, data, flags));
   if (aql_queue == nullptr) {
     core::Runtime::runtime_singleton_->system_deallocator()(shared_queue);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
