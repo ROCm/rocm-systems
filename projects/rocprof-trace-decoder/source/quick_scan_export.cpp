@@ -425,6 +425,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     {
         uint64_t header_word = load_header_word(data);
         gfxip = extract_gfxip(header_word);
+        if (gfxip > 9) local.tt_version = mi400::header_type{.raw = header_word}.version;
 
         auto decoder = HandleData::get_write_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;

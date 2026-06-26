@@ -141,7 +141,7 @@ jobs:
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               cp -R /mnt/ais /ais
-              mkdir -p /ais/build/hipfile
+              mkdir -p /ais/build/hipfile /ais/build/hipfile-release
             '
       - name: Generate build files for hipFile targeting the AMD platform (${{ inputs.cxx_compiler }})
         # ${SLES_BUILD_ID} is mentioned for all platforms to match current ROCm build implementation.
@@ -188,6 +188,47 @@ jobs:
           docker exec \
             -t \
             -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              ctest -V -L "unit" --parallel
+            '
+      # Release build for signal only: configure, build, and unit-test in a
+      # separate directory. The Debug build above remains the one that is
+      # packaged, install-tested, and handed to the downstream system tests.
+      # Packaging/coverage for Release is intentionally out of scope here.
+      - name: Generate Release build files for hipFile (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
+            -t \
+            -w /ais/build/hipfile-release \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
+                -DAIS_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
+                -DCMAKE_CXX_FLAGS="-Werror" \
+                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_PLATFORM=amd \
+                -DROCM_VERSION="${ROCM_VERSION}" \
+                -DAIS_CAPABLE_DIR=/mnt/ais-fs \
+                ../../rocm-systems/projects/hipfile
+            '
+      - name: Build hipFile Release for the AMD platform (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile-release \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake --build . --parallel
+            '
+      - name: Test hipFile Release for the AMD platform (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile-release \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               ctest -V -L "unit" --parallel
@@ -359,7 +400,7 @@ jobs:
             -w /ais/build \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              rm -rf hipfile
+              rm -rf hipfile hipfile-release
             '
       - name: Cleanup & Stop the Docker container
         if: ${{ always() }}
