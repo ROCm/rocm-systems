@@ -29,6 +29,7 @@ The first domains are:
 - `managed_memory`: managed allocation, visibility, free, and prefetch contracts
 - `memory_pool`: default memory pool, release-threshold, and stream-ordered allocation contracts
 - `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
+- `copy3d`: 3D pitched allocation and host-device 3D copy contracts
 
 Some domains are capability-gated. For example, `array_memory` skips on devices without image/array support, and `pitched_memory` skips on runtime paths where `hipMallocPitch` reports out of memory for tiny allocations. These skips indicate an unsupported local capability, not a contract failure.
 

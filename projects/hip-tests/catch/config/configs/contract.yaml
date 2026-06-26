@@ -333,3 +333,15 @@ contract:
   Contract_Vmm_SetAccess_AllowsRoundTripWhenSupported:
     <<: *level_0
     tags: [vmm]
+  Contract_Copy3D_Malloc3D_ReturnsPitchedPtr:
+    <<: *level_0
+    tags: [copy3d]
+  Contract_Copy3D_Memcpy3D_HostDeviceRoundTripsExtent:
+    <<: *level_0
+    tags: [copy3d]
+  Contract_Copy3D_Memcpy3D_SingleSliceRoundTripsBytes:
+    <<: *level_0
+    tags: [copy3d]
+  Contract_Copy3D_Free3DAllocation_Succeeds:
+    <<: *level_0
+    tags: [copy3d]
