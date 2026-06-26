@@ -23,17 +23,17 @@ set(rocprofv3-validate-env
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
 
-# Collect a counter for each dispatch via in-process kernel replay: every dispatch is replayed 3
-# times with device memory restored between passes. The kernel-replay app verifies its own results,
-# so a broken restore fails this generate step.
+# Collect a counter for each dispatch via in-process kernel replay: every dispatch is
+# replayed 3 times with device memory restored between passes. The kernel-replay app
+# verifies its own results, so a broken restore fails this generate step.
 set(REPLAY_PASSES 3)
 
 add_test(
     NAME rocprofv3-test-kernel-replay-generate
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU --kernel-replay
-        --kernel-replay-passes ${REPLAY_PASSES} --output-format csv json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out --
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU
+        --kernel-replay --kernel-replay-passes ${REPLAY_PASSES} --output-format csv json
+        -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out --
         $<TARGET_FILE:kernel-replay> 1048576 1)
 
 set_tests_properties(
@@ -49,12 +49,14 @@ set_tests_properties(
                FIXTURES_SETUP
                rocprofv3-test-kernel-replay-data)
 
-# Validate replay structure: each dispatch replayed 3 times with identical counter values per pass.
+# Validate replay structure: each dispatch replayed 3 times with identical counter values
+# per pass.
 add_test(
     NAME rocprofv3-test-kernel-replay-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes ${REPLAY_PASSES})
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes
+        ${REPLAY_PASSES})
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-validate
