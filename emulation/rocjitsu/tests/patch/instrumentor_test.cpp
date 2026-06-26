@@ -236,24 +236,81 @@ TEST(Validator, RejectsForceFullExec) {
   EXPECT_FALSE(err.empty());
 }
 
-TEST(Validator, RejectsDenylistedMnemonic) {
+// PC-reading / PC-writing instructions (e.g., s_getpc and s_setpc) cannot
+// currently be relocated because they depend on the VA, which will change
+// when the instruction is relocated. Until these are properly handled,
+// the validator must reject instructions with the PC_OPERAND flag.
+TEST(Validator, RejectsPcOperandAnchor) {
   static constexpr uint32_t kRaw = 0xCAFEBABEu;
   auto text = dummy_text();
   InstrumentationPoint pt;
 
-  // PC-relative semantics that may not surface in flags / branch_offset_bytes.
-  // Includes gfx1250's renamed _i64 family (s_getpc_b64 -> s_get_pc_i64, etc.);
-  // s_rfe_b64 / s_rfe_i64 exercise the s_rfe_ prefix match.
-  for (const char *m :
-       {"s_getpc_b64", "s_call_b64", "s_setpc_b64", "s_swappc_b64", "s_rfe_b64", "s_get_pc_i64",
-        "s_call_i64", "s_set_pc_i64", "s_swap_pc_i64", "s_rfe_i64"}) {
-    TestInstruction anchor(m, 4, /*flags=*/0, std::nullopt, &kRaw);
-    std::string err;
-    EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
-        << "mnemonic " << m << " should be rejected";
-    EXPECT_FALSE(err.empty());
-  }
+  TestInstruction anchor("opaque_pc_reader", 4, /*flags=*/PC_OPERAND, std::nullopt, &kRaw);
+  std::string err;
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(err.empty());
+
+  // An 8-byte PC_OPERAND anchor is rejected too (size is independent of the flag).
+  TestInstruction anchor8("opaque_pc_reader", 8, /*flags=*/PC_OPERAND, std::nullopt, &kRaw);
+  std::string err8;
+  EXPECT_FALSE(
+      validate_anchor(anchor8, 0, dummy_text(16), pt, ROCJITSU_CODE_ARCH_CDNA4, &err8).has_value());
 }
+
+//==============================================================================
+// Section 1b: PC_OPERAND end-to-end (real decode)
+//==============================================================================
+
+// Decode real AMDGPU encodings and assert the structural PC_OPERAND flag is set
+// for PC-reading/writing instructions and clear for an ordinary one. This proves
+// the ISA codegen actually marks the flag, and that the validator rejects the
+// decoded anchors without any mnemonic matching. Covers a CDNA target and
+// gfx1250, whose mnemonics are s_getpc_b64 and s_get_pc_i64) but whose
+// OPR_PC operand is unchanged.
+namespace {
+struct PcDecodeCase {
+  rj_code_arch_t arch;
+  const char *arch_name;
+  std::array<uint32_t, 2> words;
+  const char *mnemonic;
+  bool expect_pc_operand;
+};
+} // namespace
+
+class PcOperandDecodeTest : public ::testing::TestWithParam<PcDecodeCase> {};
+
+TEST_P(PcOperandDecodeTest, FlagMatchesAndValidatorAgrees) {
+  const PcDecodeCase &tc = GetParam();
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr) << "no decoder for " << tc.arch_name;
+  std::unique_ptr<Instruction> inst(decoder->decode(tc.words.data()));
+  ASSERT_NE(inst, nullptr) << "decode failed for " << tc.mnemonic << " on " << tc.arch_name;
+
+  EXPECT_EQ(inst->is_pc_operand(), tc.expect_pc_operand)
+      << tc.mnemonic << " on " << tc.arch_name << ": PC_OPERAND flag mismatch";
+
+  // The validator's verdict must follow the flag: PC_OPERAND anchors rejected,
+  // ordinary ones accepted. Use a .text big enough for the (4- or 8-byte) inst.
+  const auto size = static_cast<size_t>(inst->size());
+  std::vector<uint8_t> text(size + 8, 0xCCu);
+  std::string err;
+  const bool ok = is_relocatable_anchor(*inst, 0, text, tc.arch, &err);
+  EXPECT_EQ(ok, !tc.expect_pc_operand) << tc.mnemonic << " on " << tc.arch_name;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PcOperand, PcOperandDecodeTest,
+    ::testing::Values(
+        // CDNA4: s_getpc reads PC, s_rfe writes PC; s_mov_b32 touches neither.
+        PcDecodeCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", {0xBE801C00U, 0U}, "s_getpc_b64", true},
+        PcDecodeCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", {0xBE801F00U, 0U}, "s_rfe_b64", true},
+        PcDecodeCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", {0xBE800000U, 0U}, "s_mov_b32", false},
+        // gfx1250: s_get_pc_i64 reads, s_rfe_i64 writes; s_mov_b32 neither.
+        PcDecodeCase{
+            ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", {0xBE804700U, 0U}, "s_get_pc_i64", true},
+        PcDecodeCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", {0xBE804A00U, 0U}, "s_rfe_i64", true},
+        PcDecodeCase{
+            ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", {0xBE800000U, 0U}, "s_mov_b32", false}));
 
 // Instruction::size() is a signed int; the `size != 4 && size != 8` check must
 // reject negative sizes (which decoders never emit in practice) rather than let

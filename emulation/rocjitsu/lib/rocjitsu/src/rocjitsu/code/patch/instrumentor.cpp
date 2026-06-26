@@ -14,9 +14,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
-#include <array>
 #include <cstring>
-#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -24,32 +22,6 @@
 namespace rocjitsu {
 
 namespace {
-
-// PC-reading / PC-relative instructions to reject as anchors: relocating any of
-// them into a trampoline changes the PC value they read (s_getpc) or the target
-// they branch to. s_getpc and the s_rfe_ family carry no control-flow flag or
-// branch_offset_bytes, so validate_anchor's flag/offset checks miss them and the
-// denylist is the only thing that catches them. The s_call / s_setpc / s_swappc
-// entries are already rejected upstream by their INDIRECT_BRANCH / INDIRECT_CALL
-// flags and are listed only as defense-in-depth. gfx1250 renames the whole
-// family from *_b64 to *_i64 (e.g. s_getpc_b64 -> s_get_pc_i64), so both
-// spellings are listed; the s_rfe_ prefix match below covers s_rfe_b64,
-// s_rfe_i64, and s_rfe_restore_b64.
-constexpr std::array<std::string_view, 8> kPcRelativeDenylist = {
-    "s_getpc_b64",  "s_call_b64", "s_setpc_b64",  "s_swappc_b64",
-    "s_get_pc_i64", "s_call_i64", "s_set_pc_i64", "s_swap_pc_i64",
-};
-
-constexpr std::string_view kRfePrefix = "s_rfe_";
-
-[[nodiscard]] bool is_denylisted_mnemonic(std::string_view mnemonic) {
-  for (auto m : kPcRelativeDenylist)
-    if (mnemonic == m)
-      return true;
-  if (mnemonic.size() >= kRfePrefix.size() && mnemonic.substr(0, kRfePrefix.size()) == kRfePrefix)
-    return true;
-  return false;
-}
 
 // Per-site result of Instrumentor::patch's preflight: the chosen trampoline
 // offset and the concrete bytes we'll splice in once all preflights succeed.
@@ -96,8 +68,11 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
     report(error_out, "anchor instruction has a PC-relative branch offset");
     return false;
   }
-  if (is_denylisted_mnemonic(anchor.mnemonic())) {
-    report(error_out, "anchor mnemonic is in the PC-relative denylist");
+  // Reject instructions that read or write the program counter (the ISA spec
+  // gives them an OPR_PC operand). Relocating their bytes into a trampoline
+  // would change the PC value they read or the target they compute.
+  if (anchor.is_pc_operand()) {
+    report(error_out, "anchor instruction reads or writes the program counter");
     return false;
   }
   return true;

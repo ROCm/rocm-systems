@@ -120,9 +120,11 @@ Rules enforced:
 - `anchor.size()` is 4 or 8 and fits inside `text_bytes` (subtraction-based bounds check; resists overflow when `anchor_offset` is huge).
 - `anchor.raw_encoding()` is non-null.
 - `anchor` is not a branch / cond branch / indirect branch / indirect call / program terminator, and `branch_offset_bytes()` is `nullopt`.
-- `anchor.mnemonic()` is not on the small PC-relative denylist (`s_getpc_b64`, `s_call_b64`, `s_setpc_b64`, `s_swappc_b64`, `s_rfe_*`) — these may not surface as flag bits on every ISA.
+- `anchor.is_pc_operand()` is false — i.e. the instruction does not read or write the program counter (`s_getpc` / `s_setpc` / `s_swappc` / `s_call` / `s_addpc`, the `s_rfe` family, and `s_cbranch_g_fork`/`join`). Relocating such an instruction's bytes would change the PC value it reads or the target it computes.
 
-`arch` is accepted now so a future ISA-specific denylist can grow without an API change.
+The PC check uses the `PC_OPERAND` `InstFlag`, a structural property set in the ISA layer from the MR ISA spec's implicit `OPR_PC` operand (captured by the `amdisa` parser as `Instruction.has_pc_operand` and emitted into the generated per-ISA constructors). `s_call` / `s_setpc` / `s_swappc` are additionally caught by their `INDIRECT_BRANCH` / `INDIRECT_CALL` flags above. PC-relative *branches* are deliberately **not** `PC_OPERAND` — they carry a label operand, not `OPR_PC`, and are handled by the branch/`branch_offset_bytes()` rules instead.
+
+`arch` is accepted now so a future ISA-specific check can grow without an API change.
 
 ### `validate_anchor(anchor, anchor_offset, text_bytes, pt, arch, error_out)`
 

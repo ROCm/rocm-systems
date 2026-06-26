@@ -150,10 +150,10 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///   - anchor.raw_encoding() is non-null.
 ///   - anchor is not a branch/cond branch/indirect branch/indirect call/
 ///     program terminator, and branch_offset_bytes() is nullopt.
-///   - anchor.mnemonic() is not in the small PC-relative denylist
-///     (s_getpc_b64, s_call_b64, s_setpc_b64, s_swappc_b64, s_rfe_*).
+///   - anchor does not read or write the program counter, i.e. is_pc_operand()
+///     is false.
 ///
-/// @p arch is accepted now so a future denylist can grow ISA-specific entries
+/// @p arch is accepted now so a future check can grow ISA-specific behavior
 /// without an API change; today's checks are uniform across all AMDGPU ISAs.
 [[nodiscard]] bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
                                          std::span<const uint8_t> text_bytes, rj_code_arch_t arch,
