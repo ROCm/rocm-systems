@@ -1,0 +1,10 @@
+{
+  "config_name": "cdna3",
+  "hip_architectures": [
+    "gfx942"
+  ],
+  "tests": [
+    "fpsan_mfma_cdna3_test",
+    "fpsan_smfmac_cdna3_test"
+  ]
+}

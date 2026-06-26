@@ -259,3 +259,23 @@ jobs:
               tests/test_fuzz_targets.py
             echo "::endgroup::"
           done
+
+          targets=(
+            "gfx942 amdgpu_cdna3.json fpsan_gfx942.json"
+            "gfx950 amdgpu_cdna4.json fpsan_gfx950.json"
+            "gfx1100 amdgpu_rdna3_gfx1100_w7900_kmd.json fpsan_gfx1100.json"
+            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json fpsan_gfx1201.json"
+            "gfx1250 amdgpu_gfx1250.json fpsan_gfx1250.json"
+          )
+          for target in "${targets[@]}"; do
+            read -r name rocjitsu_config fpsan_config <<< "${target}"
+            echo "::group::fpsan ctest (${name})"
+            ROCM_PATH=`rocm-sdk path --root` \
+              rocjitsu \
+              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
+              -- \
+              tests/run_fpsan_ctest.sh \
+              --config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${fpsan_config}" \
+              --timeout 15
+            echo "::endgroup::"
+          done
