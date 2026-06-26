@@ -1195,6 +1195,52 @@ TEST(BuildStandaloneApiTest, ReplaysGfx9CodeObjectAndDispatchContextFromCutTrace
     expect_gfx9_dispatch_payload(sink.dispatches.front());
 }
 
+TEST(BuildStandaloneApiTest, DoesNotCopyGfx9ChunkHeaderIntoStandalonePayload)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    const auto trace = make_gfx9_dispatch_trace();
+
+    HandleGuard handle;
+    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+
+    auto build_from = [&](uint64_t offset_begin)
+    {
+        uint64_t standalone_size = trace.data.size() + 512;
+        std::vector<uint8_t> standalone(standalone_size);
+        EXPECT_EQ(
+            rocprof_trace_decoder_build_standalone(
+                handle.value,
+                0,
+                trace.data.data(),
+                trace.data.size(),
+                offset_begin,
+                trace.data.size(),
+                standalone.data(),
+                &standalone_size
+            ),
+            ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+        );
+        standalone.resize(standalone_size);
+        return standalone;
+    };
+
+    auto from_chunk_start = build_from(0);
+    auto from_payload_start = build_from(sizeof(uint64_t));
+    EXPECT_EQ(from_chunk_start, from_payload_start);
+
+    RecordSink sink;
+    ASSERT_EQ(
+        rocprof_trace_decoder_quick_scan(
+            handle.value, 0, from_chunk_start.data(), from_chunk_start.size(), collect_records, &sink
+        ),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    ASSERT_EQ(sink.events.size(), 1u);
+    ASSERT_EQ(sink.dispatches.size(), 1u);
+    expect_gfx9_dispatch_payload(sink.dispatches.front());
+}
+
 TEST(BuildStandaloneApiTest, ReportsValidationAndUnsupportedStatuses)
 {
     if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
