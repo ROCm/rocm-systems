@@ -1371,8 +1371,22 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
 
   // Check cluster size against device maximum
   const auto& deviceInfo = hip::getCurrentDevice()->devices()[0]->info();
+  uint64_t requestedClusterSize;
+
+  if (__builtin_mul_overflow(clusterDims.x,
+                             clusterDims.y,
+                             &requestedClusterSize)) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
+  if (__builtin_mul_overflow(requestedClusterSize,
+                             clusterDims.z,
+                             &requestedClusterSize)) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
   if (deviceInfo.clusterMaxSize_ > 0 &&
-      clusterDims.x * clusterDims.y * clusterDims.z > deviceInfo.clusterMaxSize_) {
+      requestedClusterSize > deviceInfo.clusterMaxSize_) {
     HIP_RETURN(hipErrorInvalidClusterSize);
   }
 
