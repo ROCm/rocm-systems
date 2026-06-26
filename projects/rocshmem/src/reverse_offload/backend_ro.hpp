@@ -163,6 +163,9 @@ class ROBackend : public Backend {
    * @copydoc Backend::accumulate_ctx_device_stats()
    */
   void accumulate_ctx_device_stats() override;
+  /**
+   * @copydoc Backend::accumulate_default_host_ctx_stats()
+   */
   void accumulate_default_host_ctx_stats() override;
 
   /**
