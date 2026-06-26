@@ -156,8 +156,9 @@ pandas.
 ## Phasing and Acceptance
 
 Phase order: A (remove CSV) -> B (`profiling_data` boundary) -> C (backend
-execution) -> D (`analysis_data` boundary), plus follow-ups. Once Phase A lands,
-B, C, and D have no hard ordering dependency on each other.
+execution) -> D (`analysis_data` boundary), plus follow-ups (e.g. A-2, removing
+the now-dead `--join-type` option). Once Phase A lands, B, C, and D have no hard
+ordering dependency on each other.
 
 ## Phase A: Remove the CSV Profile Backend
 
@@ -278,6 +279,44 @@ of the runtime flow. Removing the format choice includes removing:
 So Phase A is a small *path* change but a large *code* deletion where it collapses two
 storage formats into one and removes the dead csv machinery (and its tests) that
 only existed to serve the second format.
+
+### What removing `--format-rocprof-output` does and does not change
+
+Removing the `--format-rocprof-output` flag removes the user's ability to
+*choose* a storage format; it does not remove the recorded format. Profile mode
+still writes `format_rocprof_output: rocpd` into `profiling_config.yaml`, now
+sourced from a single `_PROFILE_OUTPUT_FORMAT` constant instead of a CLI value.
+This is deliberate and forward-aligned with the boundary:
+
+- It is the discriminator analyze uses to reject legacy csv workload directories
+  (`format_rocprof_output: csv`) with a clear error instead of misreading them as
+  rocpd.
+- It is the field Phase B's `get_reader` keys on to select a reader
+  implementation (see [Data Ownership](#data-ownership): `profiling_config.yaml`
+  is *read* by `get_reader` to select the impl, it is not owned data).
+
+Centralizing the value in `_PROFILE_OUTPUT_FORMAT` keeps the `"rocpd"` literal
+out of the call sites that read and write it (no scattered magic strings). So
+`format_rocprof_output: rocpd` is expected to stay in newly written workload
+configs, and `_PROFILE_OUTPUT_FORMAT` stays. The two committed csv-format test
+fixtures (`vcopy/MI350`, `no_roof/MI350`) are intentionally left as legacy
+workloads that analyze now rejects.
+
+### Phase A-2: Remove the now-dead `--join-type` option
+
+`--join-type {kernel,grid}` only ever fed the csv-format wide merge in
+`join_prof` (it chose whether rocprof runs joined by kernel name or by kernel
+name + grid size). With that merge removed in Phase A the flag is dead: nothing
+in `src/` reads it, and `grid` vs `kernel` now produce identical output. It
+survives only as an orphaned CLI flag in `argparser.py`, still serialized into
+`profiling_config.yaml` via `vars(args)`.
+
+Removing it is a small follow-up to Phase A rather than part of the csv-output
+removal itself, because it also deletes user-facing surface, the dedicated
+`join_type_grid` / `join_type_kernel` golden workloads, their integration tests,
+and the `--join-type` references in the profile-mode docs. Tracked here so the
+cleanup is not lost: remove the flag, its golden workloads and tests, and its
+doc references.
 
 ## Phase B: The Profiling Data Boundary
 
