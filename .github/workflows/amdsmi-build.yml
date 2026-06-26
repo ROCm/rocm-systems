@@ -192,6 +192,7 @@ jobs:
           cd /opt/rocm/share/amd_smi/tests/python_unittest
           ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
           ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
+          python3 test_abi_compat.py -v > "$RESULTS_DIR/abi_compat_output.txt" 2>&1
           if [ -f ./perf_tests.py ]; then
             ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
           else
@@ -221,6 +222,10 @@ jobs:
       - name: Perf Test Results
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
+
+      - name: ABI Compat Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/abi_compat_output.txt || echo "No ABI compat results"
 
       - name: Example DRM Test Results
         if: always()

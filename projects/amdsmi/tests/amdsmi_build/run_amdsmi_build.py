@@ -873,15 +873,31 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
         symlink_path.symlink_to(rocm_binary)
         print(f"Linked {symlink_path} -> {rocm_binary}")
 
-    # Verify installation: CLI version + Python import/init/shutdown under
-    # the SYSTEM python. The system package installs amdsmi/ to the path
-    # /usr/bin/python3 searches (see py-interface/CMakeLists.txt). The
-    # test must use /usr/bin/python3 explicitly -- some build containers
-    # (notably ubuntu-24.04-bld) put a venv ahead of /usr/bin on PATH,
-    # and that venv has its own sys.path that does NOT include the
-    # system dist-packages. Falls back to plain `python3` if /usr/bin/python3
-    # is absent.
-    system_python = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else "python3"
+    # Verify installation: CLI version + Python import/init/shutdown under the
+    # interpreter the module was actually installed for. The system package
+    # installs amdsmi/ into a specific interpreter's site-packages, and the
+    # amd-smi CLI shebang is pinned to that same interpreter (see
+    # py-interface/CMakeLists.txt + amdsmi_cli/CMakeLists.txt). We must verify
+    # against THAT interpreter, not a bare /usr/bin/python3: this harness itself
+    # repoints /usr/bin/python3 via `alternatives` when it has to bootstrap a
+    # newer python on an old base image (e.g. el8's 3.6), so /usr/bin/python3 at
+    # verify time may be a different minor than the one the module landed under.
+    # Derive the interpreter from the installed CLI's shebang so the check
+    # mirrors what a real user's `amd-smi` invocation resolves to. Fall back to
+    # /usr/bin/python3 (then plain python3) if the shebang can't be read.
+    verify_python = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else "python3"
+    try:
+        cli_target = rocm_binary.resolve() if rocm_binary.exists() else None
+        if cli_target and cli_target.exists():
+            first_line = cli_target.read_text(errors="replace").splitlines()[:1]
+            if first_line and first_line[0].startswith("#!"):
+                interp = first_line[0][2:].strip().split()[0]
+                if interp and Path(interp).exists():
+                    verify_python = interp
+    except (OSError, IndexError):
+        pass
+    print(f"Verifying import under interpreter: {verify_python}")
+    system_python = verify_python
     import_smoke = (
         "import amdsmi; "
         "print('amdsmi from:', amdsmi.__file__); "
