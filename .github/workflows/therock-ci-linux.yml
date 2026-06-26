@@ -3,6 +3,15 @@ name: TheRock CI Linux
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        description: >
+          TheRock repository git ref to check out. When a PR targets a
+          release/therock-* branch in rocm-systems, this is set to the same
+          branch name in TheRock (e.g. "release/therock-7.14"). Empty string
+          (default) falls back to the hardcoded pinned commit, which is the
+          normal path for non-release branches.
+        default: ""
       cmake_options:
         type: string
       projects_to_test:
@@ -38,23 +47,23 @@ jobs:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
       options: -v /runner/config:/home/awsconfig/
     strategy:
-      fail-fast: true
-    env:
-      CACHE_DIR: ${{ github.workspace }}/.container-cache
-      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
-      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
-      TEATIME_FORCE_INTERACTIVE: 0
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
-    steps:
-      - name: "Checking out repository for rocm-systems"
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+          fail-fast: true
+      env:
+        CACHE_DIR: ${{ github.workspace }}/.container-cache
+        CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
+        AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+        TEATIME_FORCE_INTERACTIVE: 0
+        AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+      steps:
+        - name: "Checking out repository for rocm-systems"
+          uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - name: Checkout TheRock repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: "ROCm/TheRock"
-          path: "TheRock"
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+        - name: Checkout TheRock repository
+          uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+          with:
+            repository: "ROCm/TheRock"
+            path: "TheRock"
+            ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
 
       - name: Install python deps
         run: |
@@ -143,6 +152,7 @@ jobs:
     if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
+      therock_ref: ${{ inputs.therock_ref }}
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
