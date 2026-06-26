@@ -799,21 +799,6 @@ class ArtifactSplitter:
                 all_kernels_by_arch, output_dir
             )
 
-        if (
-            fat_binaries_by_prefix
-            and self.gpu_targets is not None
-            and not kpack_info_by_arch
-        ):
-            target_list = ", ".join(sorted(self.gpu_targets))
-            fat_binary_count = sum(
-                len(paths) for paths in fat_binaries_by_prefix.values()
-            )
-            raise RuntimeError(
-                f"Found {fat_binary_count} fat binaries, but no device code objects "
-                f"matched --gpu-targets ({target_list}). Refusing to emit an "
-                "untransformed generic artifact."
-            )
-
         # Phase 6: Inject kpack references and strip device code from fat binaries
         if fat_binaries_by_prefix and kpack_info_by_arch:
             generic_artifact_dir = output_dir / f"{self.artifact_prefix}_generic"
