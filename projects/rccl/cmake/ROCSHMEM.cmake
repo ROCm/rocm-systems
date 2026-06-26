@@ -54,7 +54,19 @@ function(add_rocshmem_targets)
 
     set(_rccl_root           "${CMAKE_SOURCE_DIR}")
     set(ROCSHMEM_INSTALL_DIR "${_rccl_root}/ext/rocshmem")
+
+    # NIC-vendor-specific build_configs script. install.sh auto-detects and
+    # forwards -DROCSHMEM_GDA_CONFIG; default to gda_mlx5 for direct CMake use.
+    if(NOT ROCSHMEM_GDA_CONFIG)
+        set(ROCSHMEM_GDA_CONFIG "gda_mlx5")
+    endif()
+    set(_valid_gda_configs "gda_mlx5" "gda_bnxt" "gda_ionic")
+    if(NOT ROCSHMEM_GDA_CONFIG IN_LIST _valid_gda_configs)
+        message(FATAL_ERROR "ROCSHMEM_GDA_CONFIG='${ROCSHMEM_GDA_CONFIG}' is not one of: ${_valid_gda_configs}")
+    endif()
+
     message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
+    message(STATUS "rocSHMEM: GDA backend config = ${ROCSHMEM_GDA_CONFIG}")
 
     ExternalProject_Add(rocshmem_ext
         SOURCE_DIR          "${ROCSHMEM_SOURCE_DIR}"
@@ -71,7 +83,7 @@ function(add_rocshmem_targets)
         CONFIGURE_COMMAND   ""
         BUILD_COMMAND
             ${CMAKE_COMMAND} -E make_directory build
-            && ${CMAKE_COMMAND} -E chdir build bash -lc "../scripts/build_configs/gda_bnxt -DUSE_EXTERNAL_MPI=OFF -DUSE_IPC=ON -DBUILD_EXAMPLES=OFF "
+            && ${CMAKE_COMMAND} -E chdir build bash -lc "../scripts/build_configs/${ROCSHMEM_GDA_CONFIG} -DUSE_EXTERNAL_MPI=OFF -DUSE_IPC=ON -DBUILD_EXAMPLES=OFF "
             && ${CMAKE_COMMAND} -E chdir build ${CMAKE_COMMAND}
                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                 -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>

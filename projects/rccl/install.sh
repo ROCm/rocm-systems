@@ -40,7 +40,7 @@ device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
 build_rocshmem_support=false
-rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
+rocshmem_mono_hash="7093599957a883fe100fd6f3cbe25721d6ca508c"
 custom_cmake_options=""
 
 # #################################################
@@ -105,6 +105,8 @@ function display_help()
     echo "                               Advanced: Specify algo, protocol, redop, and type per collective."
     echo "                                 ONLY_FUNCS=\"AllReduce RING SIMPLE Sum f32|SendRecv\""
     echo "    ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)"
+    echo "    ROCSHMEM_GDA_CONFIG        rocSHMEM build_configs script to use (auto-detected from RDMA NIC vendor"
+    echo "                               if unset). Examples: gda_mlx5, gda_bnxt, gda_ionic"
 }
 
 # #################################################
@@ -203,6 +205,62 @@ check_exit_code( )
     fi
 }
 
+# Pick the rocSHMEM build_configs script (gda_mlx5 / gda_bnxt / gda_ionic)
+# based on the RDMA NIC vendor IDs exposed under /sys/class/infiniband/.
+# Honors $ROCSHMEM_GDA_CONFIG as an explicit override.
+#
+# Sets the global $rocshmem_gda_config on success; exits on ambiguity or
+# failure. Detection is purely sysfs-based — no extra tools required.
+detect_rocshmem_gda_config()
+{
+    # Explicit override always wins.
+    if [[ -n "${ROCSHMEM_GDA_CONFIG}" ]]; then
+        rocshmem_gda_config="${ROCSHMEM_GDA_CONFIG}"
+        echo "  rocSHMEM GDA config (override): ${rocshmem_gda_config}"
+        return 0
+    fi
+
+    local ib_root="/sys/class/infiniband"
+    if [[ ! -d "$ib_root" ]] || [[ -z "$(ls -A "$ib_root" 2>/dev/null)" ]]; then
+        echo "ERROR: No RDMA devices found under ${ib_root}."
+        echo "       Load the RDMA stack or set ROCSHMEM_GDA_CONFIG=<gda_mlx5|gda_bnxt|gda_ionic>."
+        exit 1
+    fi
+
+    # PCI vendor IDs of RDMA NICs we know how to build rocSHMEM for.
+    local -A vendor_to_config=(
+        [0x15b3]="gda_mlx5"   # Mellanox / NVIDIA Networking ConnectX
+        [0x14e4]="gda_bnxt"   # Broadcom NetXtreme-E (bnxt_re)
+        [0x1dd8]="gda_ionic"  # Pensando / AMD Ionic
+    )
+
+    local -A seen=()
+    local dev vendor cfg
+    for dev in "$ib_root"/*/device/vendor; do
+        [[ -r "$dev" ]] || continue
+        vendor=$(cat "$dev" 2>/dev/null)
+        cfg="${vendor_to_config[$vendor]:-}"
+        if [[ -n "$cfg" ]]; then
+            seen[$cfg]=1
+        fi
+    done
+
+    if [[ ${#seen[@]} -eq 0 ]]; then
+        echo "ERROR: RDMA devices present but none have a known vendor (15b3/14e4/1dd8)."
+        echo "       Vendor IDs seen: $(cat ${ib_root}/*/device/vendor 2>/dev/null | sort -u | tr '\n' ' ')"
+        echo "       Set ROCSHMEM_GDA_CONFIG=<config> manually."
+        exit 1
+    elif [[ ${#seen[@]} -gt 1 ]]; then
+        echo "ERROR: Multiple RDMA NIC vendors detected (${!seen[*]})."
+        echo "       rocSHMEM must be built for a single backend."
+        echo "       Set ROCSHMEM_GDA_CONFIG=<config> to disambiguate."
+        exit 1
+    fi
+
+    rocshmem_gda_config="${!seen[*]}"
+    echo "  rocSHMEM GDA config (auto-detected): ${rocshmem_gda_config}"
+}
+
 # Set up a git worktree of the rocm-systems mono-repo so that
 # projects/rocshmem is checked out at a pinned commit hash while the
 # main working tree (which contains rccl at HEAD) stays untouched.
@@ -227,12 +285,29 @@ setup_rocshmem_worktree()
         local current_hash
         current_hash=$(git -C "$worktree_dir" rev-parse HEAD 2>/dev/null)
         if [[ "${current_hash}" == "${pinned_hash}"* ]] || [[ "${pinned_hash}" == "${current_hash}"* ]]; then
-            echo "  Worktree already at the correct hash — reusing."
-            rocshmem_source_dir="${worktree_dir}/projects/rocshmem"
-            return 0
+            # HEAD matches, but the working tree can still be incomplete
+            # (e.g. an earlier sparse `git checkout` was interrupted, or files
+            # were nuked). Sanity-check a directory that MUST exist when the
+            # sparse cone is fully populated; repair in place if not.
+            local sentinel_dir="${worktree_dir}/projects/rocshmem/src/gda"
+            if [[ ! -d "$sentinel_dir" ]]; then
+                echo "  Worktree HEAD matches but working tree is incomplete — repairing..."
+                git -C "$worktree_dir" sparse-checkout reapply 2>/dev/null
+                git -C "$worktree_dir" read-tree -mu HEAD
+                if [[ ! -d "$sentinel_dir" ]]; then
+                    echo "  Repair failed; rebuilding worktree from scratch..."
+                    git -C "$mono_root" worktree remove "$worktree_dir" --force 2>/dev/null || rm -rf "$worktree_dir"
+                fi
+            fi
+            if [[ -d "$worktree_dir" ]]; then
+                echo "  Worktree already at the correct hash — reusing."
+                rocshmem_source_dir="${worktree_dir}/projects/rocshmem"
+                return 0
+            fi
+        else
+            echo "  Removing stale worktree..."
+            git -C "$mono_root" worktree remove "$worktree_dir" --force 2>/dev/null || rm -rf "$worktree_dir"
         fi
-        echo "  Removing stale worktree..."
-        git -C "$mono_root" worktree remove "$worktree_dir" --force 2>/dev/null || rm -rf "$worktree_dir"
     fi
 
     git -C "$mono_root" worktree add --no-checkout "$worktree_dir" "$pinned_hash"
@@ -272,7 +347,9 @@ fi
 # rocSHMEM worktree setup (must run before cd-ing into the build directory)
 # #################################################
 rocshmem_source_dir=""
+rocshmem_gda_config=""
 if [[ "${build_rocshmem_support}" == true ]] && [[ -z "${ROCSHMEM_INSTALL_DIR}" ]]; then
+    detect_rocshmem_gda_config
     setup_rocshmem_worktree
 fi
 
@@ -394,6 +471,14 @@ fi
 
 # Device linker (assembly-extract pipeline, no -fgpu-rdc)
 # Enabled by default; pass -DENABLE_DEVICE_LINKER=OFF when explicitly disabled.
+#
+# rocSHMEM requires -fgpu-rdc: the assembly-extract linker leaves rocSHMEM's
+# device globals (e.g. ROCSHMEM_CTX_DEFAULT) un-unified with RCCL's GDA kernels,
+# so the kernel reads a zero-initialized copy and faults. Force it off here.
+if [[ "${build_rocshmem_support}" == true ]] && [[ "${device_linker}" == true ]]; then
+    echo "rocSHMEM build: forcing -fgpu-rdc (device linker off) for rocSHMEM device-symbol linkage"
+    device_linker=false
+fi
 if [[ "${device_linker}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_LINKER=OFF"
 fi
@@ -416,6 +501,9 @@ if [[ "${build_rocshmem_support}" == true ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
     elif [[ -n "${rocshmem_source_dir}" ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
+        if [[ -n "${rocshmem_gda_config}" ]]; then
+            cmake_common_options="${cmake_common_options} -DROCSHMEM_GDA_CONFIG=${rocshmem_gda_config}"
+        fi
     fi
 else
     cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF"
