@@ -1,0 +1,34 @@
+name: "CI Environment"
+description: >
+  Single source of truth for TheRock CI constants. Resolves the TheRock ref
+  to check out: uses the matching release branch (e.g. "release/therock-7.14")
+  when the workflow is running on a release/therock-* branch, otherwise falls
+  back to the pinned commit SHA below.
+
+outputs:
+  therock-ref:
+    description: "TheRock git ref to check out (branch name or pinned SHA)"
+    value: ${{ steps.resolve.outputs.therock_ref }}
+  docker-image:
+    description: "Docker container image for Linux builds"
+    value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve TheRock ref
+      id: resolve
+      shell: bash
+      run: |
+        # Use base_ref for PRs; ref_name for push/dispatch events.
+        BASE_BRANCH="${{ github.base_ref || github.ref_name }}"
+        if [[ "${BASE_BRANCH}" =~ ^release/therock-.+$ ]]; then
+          # PR targets a release branch — check out the same branch in TheRock.
+          THEROCK_REF="${BASE_BRANCH}"
+        else
+          # Default: use the pinned commit SHA (updated by bump automation).
+          THEROCK_REF="f1e3fc2311fde45bf3e17b0e3349200be9caa4b4" # 2026-06-23
+        fi
+        echo "Resolved TheRock ref: ${THEROCK_REF}"
+        echo "therock_ref=${THEROCK_REF}" >> "$GITHUB_OUTPUT"
+

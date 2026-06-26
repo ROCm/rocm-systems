@@ -53,7 +53,6 @@ jobs:
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
       linux_build_runs_on: ${{ steps.linux_projects.outputs.build_runs_on }}
       windows_build_runs_on: ${{ steps.windows_projects.outputs.build_runs_on }}
-      therock_ref: ${{ steps.therock_ref.outputs.therock_ref }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -62,31 +61,16 @@ jobs:
           sparse-checkout-cone-mode: true
           fetch-depth: 2
 
-      # Determine the TheRock ref to use.
-      # For PRs targeting (or pushes to) release/therock-<version>, pin TheRock
-      # to the corresponding release/<version> branch so CI stays on the right
-      # release line.  For everything else, output an empty string so child
-      # workflows fall back to their own hardcoded default pin.
-      - name: Determine TheRock ref
-        id: therock_ref
-        run: |
-          # Use base_ref for PRs; ref_name for push/dispatch events.
-          BASE_BRANCH="${{ github.base_ref || github.ref_name }}"
-          echo "Base branch: ${BASE_BRANCH}"
-          if [[ "${BASE_BRANCH}" =~ ^release/therock-.+$ ]]; then
-            THEROCK_REF="${BASE_BRANCH}"
-            echo "Release branch detected – using same branch in TheRock: ${THEROCK_REF}"
-          else
-            THEROCK_REF=""   # empty → child workflows use their hardcoded default pin
-          fi
-          echo "therock_ref=${THEROCK_REF}" >> "$GITHUB_OUTPUT"
+      - name: Resolve CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -171,7 +155,6 @@ jobs:
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
     with:
-      therock_ref: ${{ needs.setup.outputs.therock_ref }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       package_version: ${{ needs.setup.outputs.package_version }}
@@ -196,7 +179,6 @@ jobs:
     uses: ./.github/workflows/therock-rccl-ci-linux.yml
     secrets: inherit
     with:
-      therock_ref: ${{ needs.setup.outputs.therock_ref }}
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
       package_version: ${{ needs.setup.outputs.package_version }}
@@ -223,7 +205,6 @@ jobs:
     uses: ./.github/workflows/therock-ci-windows.yml
     secrets: inherit
     with:
-      therock_ref: ${{ needs.setup.outputs.therock_ref }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       package_version: ${{ needs.setup.outputs.package_version }}
