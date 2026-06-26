@@ -537,8 +537,7 @@ class RocProfCompute_Base:
     def __is_native_tool_supported(self, args: argparse.Namespace) -> bool:
         # Native tool is compatible with the rocprofiler-sdk public API for
         # ROCm >= 7.x.x. It is used for both counter collection and PC sampling.
-        # Do not use the native tool in attach mode until multi-tool attach is
-        # figured out.
+        # Do not use the native tool in attach mode.
         return (
             int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
             and not args.attach_pid
