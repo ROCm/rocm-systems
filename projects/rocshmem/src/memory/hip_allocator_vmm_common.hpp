@@ -53,7 +53,7 @@ struct VMMCommonAllocationInfo {
  */
 inline size_t VMMQueryGranularity(hipMemAllocationHandleType handle_type) {
   hipMemAllocationProp prop = {};
-#if HIP_VERSION < 7020000
+#if HIP_VERSION < 70200000
   prop.type = hipMemAllocationTypePinned;
 #else
   prop.type = hipMemAllocationTypeUncached;
@@ -94,7 +94,7 @@ inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandle
   hipMemGenericAllocationHandle_t handle;
   hipMemAllocationProp prop = {};
 
-#if HIP_VERSION < 7020000
+#if HIP_VERSION < 70200000
   prop.type = hipMemAllocationTypePinned;
 #else
   prop.type = hipMemAllocationTypeUncached;

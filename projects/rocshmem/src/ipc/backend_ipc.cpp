@@ -594,21 +594,49 @@ int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
   HIPAllocator *alloc = heap.get_allocator();
 
   /*
-   * Common host-side work: VMM/per-buffer validation, mapping the user's
-   * buffer to a fresh rocSHMEM-owned alias address, capacity/overlap checks,
-   * and recording in symm_buffer_regions (keyed by the alias). The alias is
-   * the address the caller uses for RMA and unregistration; it is also the
-   * local base published into the device translation table.
+   * Registration is collective and exchanges data via symm_allgather below. If
+   * a PE returned early on a local error, it would drop out of those collectives
+   * and either deadlock the remaining PEs or leave the symmetric region
+   * published on some PEs but not others.
+   *
+   * To keep all PEs on the same path, every step that can fail locally records
+   * a success flag, allgathers it, and proceeds only if all PEs succeeded.
+   * Otherwise all PEs roll back their partial state and return an error
+   * together.
+   */
+  auto all_pes_succeeded = [&](int local_success) {
+    std::vector<int> pe_success(num_pes, 0);
+    pe_success[my_pe] = local_success;
+    symm_allgather(pe_success.data(), sizeof(int));
+    for (int i = 0; i < num_pes; i++) {
+      if (!pe_success[i]) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  /*
+   * Stage 1: per-PE host-side setup. Validates the user buffer (VMM/per-buffer
+   * checks), maps it to a rocSHMEM-owned alias, runs capacity/overlap
+   * checks, and records it keyed by the alias. The alias is the address the
+   * caller uses for RMA and unregistration, and the local base published into
+   * the device translation table.
    */
   void *alias = nullptr;
-  if (Backend::buffer_register_symmetric(addr, length, &alias) !=
-      ROCSHMEM_SUCCESS) {
+  int register_ok = (Backend::buffer_register_symmetric(addr, length, &alias) ==
+                     ROCSHMEM_SUCCESS) ? 1 : 0;
+  if (!all_pes_succeeded(register_ok)) {
+    if (register_ok) {
+      Backend::buffer_unregister_symmetric(alias);
+    }
     return ROCSHMEM_ERROR;
   }
 
   /*
    * Symmetric size check: registration is collective, so every PE must call
-   * with the same length. All-gather the sizes and compare.
+   * with the same length. All-gather the sizes and compare. Every PE inspects
+   * the same gathered vector, so a mismatch makes all PEs unwind together.
    */
   {
     std::vector<size_t> sizes(num_pes, 0);
@@ -629,15 +657,23 @@ int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
 
   HIPIpcHandleVec *vec = alloc->AllocateIpcHandleVec(num_pes);
 
-  /* Export an IPC handle for my buffer (the original allocation). */
-  if (alloc->GetIpcHandleFromPtr(addr, length,
-                                 vec->GetHandleVecElem(my_pe)) != hipSuccess) {
+  /*
+   * Stage 2: export this PE's IPC handle for its buffer (the original
+   * allocation). This runs before the collective handle exchange, so its
+   * outcome is made collective to avoid deadlocking the allgather below.
+   */
+  int export_ok = (alloc->GetIpcHandleFromPtr(addr, length,
+                       vec->GetHandleVecElem(my_pe)) == hipSuccess) ? 1 : 0;
+  if (!all_pes_succeeded(export_ok)) {
+    if (export_ok) {
+      (void)alloc->CloseExportedHandle(vec->GetHandleVecElem(my_pe));
+    }
     delete vec;
     Backend::buffer_unregister_symmetric(alias);
     return ROCSHMEM_ERROR;
   }
 
-  /* Preserve my local handle bytes so the export can be released later. */
+  /* Keep this PE's handle bytes so the export can be released later. */
   std::vector<char> local_handle(handle_size);
   std::memcpy(local_handle.data(), vec->GetHandleVecElem(my_pe), handle_size);
 
@@ -645,12 +681,13 @@ int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
   symm_allgather(vec->GetHandleVecElem(0), handle_size);
 
   /*
-   * Build the array of peer-mapped base addresses on the host. The device
-   * reads this array in ipcPeerPtr, so a device-memory copy is published
+   * Stage 3: build the array of peer-mapped base addresses on the host. The
+   * device reads this array in ipcPeerPtr, so a device-memory copy is published
    * below; the host copy is retained for teardown (CloseIpcHandle).
    */
   std::vector<char *> host_peer_bases(num_pes, nullptr);
 
+  int open_ok = 1;
   for (int i = 0; i < num_pes; i++) {
     if (i == my_pe) {
       /* Local accesses through the symmetric address resolve to the alias. */
@@ -659,19 +696,40 @@ int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
     }
     void *p{nullptr};
     if (alloc->OpenIpcHandle(&p, vec->GetHandleVecElem(i)) != hipSuccess) {
-      /* Close the peer mappings opened so far, then unwind. */
+      /* Close the peer mappings this PE opened so far. */
       for (int j = 0; j < i; j++) {
         if (j == my_pe) {
           continue;
         }
         (void)alloc->CloseIpcHandle(host_peer_bases[j]);
+        host_peer_bases[j] = nullptr;
       }
-      (void)alloc->CloseExportedHandle(local_handle.data());
-      delete vec;
-      Backend::buffer_unregister_symmetric(alias);
-      return ROCSHMEM_ERROR;
+      open_ok = 0;
+      break;
     }
     host_peer_bases[i] = reinterpret_cast<char *>(p);
+  }
+
+  /*
+   * Opening peer mappings is the last per-PE step that can fail. There is no
+   * further collective communication, but a per-PE early return would publish
+   * the region on some PEs and not others. Agree on the outcome so all PEs
+   * either keep the region or unwind it.
+   */
+  if (!all_pes_succeeded(open_ok)) {
+    if (open_ok) {
+      /* This PE mapped every peer; close the mappings it opened. */
+      for (int i = 0; i < num_pes; i++) {
+        if (i == my_pe) {
+          continue;
+        }
+        (void)alloc->CloseIpcHandle(host_peer_bases[i]);
+      }
+    }
+    (void)alloc->CloseExportedHandle(local_handle.data());
+    delete vec;
+    Backend::buffer_unregister_symmetric(alias);
+    return ROCSHMEM_ERROR;
   }
 
   delete vec;
