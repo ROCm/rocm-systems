@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "backends/amd_smi/ainic_feature.hpp"
 #include "backends/amd_smi/backend.hpp"
 #include "library/pmc/common/types.hpp"
 
@@ -225,7 +226,11 @@ public:
     : m_backend_api(BackendFactory::create_backend())
     {
         // Initialize AMD SMI backend
-        check_amd_smi_status(m_backend_api->init(),
+        std::uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
+#ifdef AINIC_SUPPORTED
+        init_flags |= AMDSMI_INIT_AMD_NICS;
+#endif
+        check_amd_smi_status(m_backend_api->init(init_flags),
                              "Failed to initialize AMD SMI backend!");
 
         // Get and store version information

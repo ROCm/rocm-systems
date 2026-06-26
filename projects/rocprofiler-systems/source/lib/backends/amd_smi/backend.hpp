@@ -25,10 +25,10 @@ struct backend
 {
     /**
      * @brief Initialize the AMD SMI library.
-     * @param init_flags Initialization flags (default: AMDSMI_INIT_AMD_GPUS).
+     * @param init_flags Initialization flags (e.g. AMDSMI_INIT_AMD_GPUS, AMDSMI_INIT_AMD_NICS).
      * @return AMD SMI status code indicating success or failure.
      */
-    static amdsmi_status_t init(std::uint64_t init_flags = AMDSMI_INIT_AMD_GPUS)
+    static amdsmi_status_t init(std::uint64_t init_flags)
     {
         return amdsmi_init(init_flags);
     }
