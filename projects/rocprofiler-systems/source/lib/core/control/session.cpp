@@ -54,7 +54,8 @@ session::attach(trigger& trig)
     const auto event_scope = trig.event_scope();
 
     std::scoped_lock const lk{ m_votes_mutex };
-    m_votes.push_back(vote_entry{ std::string{ trig.name() }, event_scope, trig.initial_vote() });
+    m_votes.push_back(
+        vote_entry{ std::string{ trig.name() }, event_scope, trig.initial_vote() });
     m_active[static_cast<std::size_t>(event_scope)].store(resolve_locked(event_scope),
                                                           std::memory_order_release);
 }

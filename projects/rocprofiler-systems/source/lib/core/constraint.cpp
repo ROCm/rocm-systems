@@ -62,10 +62,9 @@ get_trace_specs()
 clockid_t
 get_trace_period_clock_id()
 {
-    const auto _str =
-        config::get_setting_value<std::string>(
-            std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
-            .value_or("realtime");
+    const auto _str = config::get_setting_value<std::string>(
+                          std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
+                          .value_or("realtime");
     // "cputime" is the only value that changes runtime behaviour — it routes
     // delay/duration scheduling to clocks::posix(CLOCK_PROCESS_CPUTIME_ID) so
     // windows tick in process CPU time rather than wall-clock time.

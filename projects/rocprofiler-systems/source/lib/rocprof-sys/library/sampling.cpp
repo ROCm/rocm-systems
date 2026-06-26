@@ -982,6 +982,22 @@ unblock_samples()
 }
 
 void
+set_sampler_timers_active(bool enabled)
+{
+    for(std::int64_t i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
+    {
+        auto& _sampler = get_sampler(i);
+        auto& _running = get_sampler_running(i);
+        if(!_sampler || !_running || !*_running) continue;
+
+        if(enabled)
+            _sampler->start();
+        else
+            _sampler->stop();
+    }
+}
+
+void
 block_signals(std::set<int> _signals)
 {
     if(_signals.empty()) _signals = *get_signal_types(threading::get_id());
@@ -1859,6 +1875,7 @@ pause()
     LOG_DEBUG("Pausing sampling...");
     pending_pause_ts.store(tim::get_clock_real_now<std::uint64_t, std::nano>());
     block_samples();
+    set_sampler_timers_active(false);
 }
 
 void
@@ -1880,6 +1897,7 @@ resume()
         pause_intervals.push_back(pause_interval_t{ _pause_ts, _resume_ts });
     }
 
+    set_sampler_timers_active(true);
     unblock_samples();
 }
 

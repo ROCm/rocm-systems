@@ -9,8 +9,9 @@
 
 namespace rocprofsys::control
 {
-using clock_duration   = std::chrono::nanoseconds;
-using clock_time_point = std::chrono::time_point<std::chrono::steady_clock, clock_duration>;
+using clock_duration = std::chrono::nanoseconds;
+using clock_time_point =
+    std::chrono::time_point<std::chrono::steady_clock, clock_duration>;
 
 /// Satisfied by any type that can drive a time_window trigger.
 /// sleep_until returns true when the deadline was reached, false when
