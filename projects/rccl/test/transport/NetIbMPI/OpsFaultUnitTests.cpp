@@ -134,5 +134,44 @@ TEST(OpsFaultUnit, InstallRemoveLifecycle) {
     EXPECT_EQ(ncclIbOpsFaultRemove(&fake.ctx), ncclSuccess);
 }
 
+// =============================================================================
+// Test: InstallNullOpsSkipped
+//
+// Install must refuse to shim a context whose target ops are NULL (it would have
+// nothing to forward to), exercising each arm of the "any target op is NULL"
+// check independently.
+//
+// Verifies: a context with any NULL target op is left unmodified and not
+//           registered (subsequent arm returns ncclInvalidArgument).
+// Requires: fake contexts with selected ops nulled out.
+// =============================================================================
+TEST(OpsFaultUnit, InstallNullOpsSkipped) {
+    resetCounters();
+    FakeCtx fake(/*qpNum=*/101, /*withOps=*/false);  // all three ops NULL
+    ASSERT_EQ(fake.ctx.ops.post_send, nullptr);
+
+    EXPECT_EQ(ncclIbOpsFaultInstall(&fake.ctx), ncclSuccess);
+    // Ops still NULL: install skipped, context not registered.
+    EXPECT_EQ(fake.ctx.ops.post_send, nullptr);
+    // Arming must now fail because the context was not registered.
+    EXPECT_EQ(ncclIbOpsFaultArmPostSend(&fake.ctx, 0, kEagain), ncclInvalidArgument);
+
+    // Cover each arm of the "any target op is NULL" check independently: a
+    // context can have some ops set and others NULL. Each partial-NULL case must
+    // also be skipped (not registered).
+    {  // only post_recv NULL (post_send set -> first arm false, second true)
+        FakeCtx fake2(/*qpNum=*/110);
+        fake2.ctx.ops.post_recv = nullptr;
+        EXPECT_EQ(ncclIbOpsFaultInstall(&fake2.ctx), ncclSuccess);
+        EXPECT_EQ(ncclIbOpsFaultArmPostSend(&fake2.ctx, 0, kEagain), ncclInvalidArgument);
+    }
+    {  // only poll_cq NULL (first two arms false, third true)
+        FakeCtx fake2(/*qpNum=*/111);
+        fake2.ctx.ops.poll_cq = nullptr;
+        EXPECT_EQ(ncclIbOpsFaultInstall(&fake2.ctx), ncclSuccess);
+        EXPECT_EQ(ncclIbOpsFaultArmPostSend(&fake2.ctx, 0, kEagain), ncclInvalidArgument);
+    }
+}
+
 
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
