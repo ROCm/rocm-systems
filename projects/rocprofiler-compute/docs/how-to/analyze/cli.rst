@@ -855,6 +855,5 @@ arguments, ``all``, ``*``, or ``**``):
 
 .. note::
 
-   ``--torch-operator`` and ``--triton-operator`` are mutually exclusive: apply
-   one operator filter per analysis run, and run the analysis separately for
-   each framework.
+   ``--torch-operator`` and ``--triton-operator`` are mutually exclusive; use
+   one operator filter per analysis run.
