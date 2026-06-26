@@ -718,16 +718,14 @@ jobs:
             --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
             -B build
 
-      - &_step-publish-results
-        name: Publish test results
+      - &_step-upload-junit-results
+        name: Upload JUnit test results
         if: always()
-        uses: EnricoMi/publish-unit-test-result-action@v2
+        uses: actions/upload-artifact@v7
         with:
-          files: projects/rocprofiler-systems/build/test-results.xml
-          check_name: "Tests — ${{ matrix.name }}"
-          comment_mode: 'off'
-          check_run: false
-          job_summary: true
+          name: junit-${{ github.job }}-${{ strategy.job-index }}
+          path: projects/rocprofiler-systems/build/test-results.xml
+          if-no-files-found: ignore
 
       - &_step-ccache-stats
         name: ccache stats
@@ -1153,7 +1151,7 @@ jobs:
             --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
             -B build
 
-      - *_step-publish-results
+      - *_step-upload-junit-results
 
       - *_step-ccache-stats
 
@@ -1304,4 +1302,103 @@ jobs:
           ccache -s -v || true
           echo "=== ccache dir size ==="
           du -sh "${CCACHE_DIR}" || true
+
+  publish-test-results:
+    name: Publish test result summary
+    needs: [build, system-deps]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout summary script
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems/scripts/summarize-junit-results.py
+          sparse-checkout-cone-mode: false
+
+      - name: Download JUnit test result artifacts
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          pattern: junit-*
+          path: junit-results
+          merge-multiple: false
+
+      - name: Check for JUnit files
+        id: junit-files
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          files=(junit-results/**/*.xml)
+          echo "count=${#files[@]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Generate test result summary
+        if: steps.junit-files.outputs.count != '0'
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/summarize-junit-results.py \
+            --mode build \
+            --junit-glob 'junit-results/**/*.xml' \
+            --output junit-summary.md \
+            --commit-sha '${{ github.sha }}' \
+            --commit-url '${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}'
+          cat junit-summary.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Update PR test result summary
+        if: github.event_name == 'pull_request' && steps.junit-files.outputs.count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- rocprofiler-systems-ci-summary -->';
+            const start = '<!-- rocprofiler-systems-build-summary:start -->';
+            const end = '<!-- rocprofiler-systems-build-summary:end -->';
+            const sanitizerStart = '<!-- rocprofiler-systems-sanitizer-summary:start -->';
+            const sanitizerEnd = '<!-- rocprofiler-systems-sanitizer-summary:end -->';
+            const section = `${start}\n${fs.readFileSync('junit-summary.md', 'utf8').trim()}\n${end}`;
+
+            function replaceSection(body, sectionStart, sectionEnd, replacement) {
+              const begin = body.indexOf(sectionStart);
+              const finish = body.indexOf(sectionEnd);
+              if (begin !== -1 && finish !== -1 && finish > begin) {
+                return `${body.slice(0, begin)}${replacement}${body.slice(finish + sectionEnd.length)}`;
+              }
+              return `${body.trim()}\n\n${replacement}`;
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const comment = comments.find((item) =>
+              item.user.type === 'Bot' && item.body && item.body.includes(marker)
+            );
+            const emptySanitizerSection = `${sanitizerStart}\n## Sanitizers\n\nSanitizer results have not been reported for this run.\n${sanitizerEnd}`;
+
+            if (comment) {
+              const body = replaceSection(comment.body, start, end, section);
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: comment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: `${marker}\n# rocprofiler-systems CI Summary\n\n${section}\n\n${emptySanitizerSection}`,
+              });
+            }
 
