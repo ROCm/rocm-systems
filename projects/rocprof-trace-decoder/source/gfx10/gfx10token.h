@@ -286,7 +286,7 @@ union misc_type
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "tm:" << tm <<  " fields:0x" << std::hex << fields << std::dec;
+        ss << "tm:" << tm << " fields:0x" << std::hex << fields << std::dec;
         return ss;
     }
     const char* typestr() const { return "MISC"; };

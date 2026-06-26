@@ -22,9 +22,9 @@
 
 #include <algorithm>
 #include <cassert>
+#include <iostream>
 #include <utility>
 #include <vector>
-#include <iostream>
 #include "gfx10wave.h"
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
@@ -40,9 +40,8 @@ typedef gfx10::Token Token;
 
 const bool SQTT_LOGGING = std::getenv("SQTT_LOGGING") ? (*std::getenv("SQTT_LOGGING") != '0') : false;
 
-#define DEBUGPRINT(_d) \
-    if (SQTT_LOGGING)  \
-        std::cout << token.time << " " << _d.typestr() << " - " << _d.print().str() << std::endl;
+#define DEBUGPRINT(_d)                                                                                                 \
+    if (SQTT_LOGGING) std::cout << token.time << " " << _d.typestr() << " - " << _d.print().str() << std::endl;
 
 #define empty_wave_check(waveslot_size)                                                                                \
     if (waveslot_size == 0) { continue; }
