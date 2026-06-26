@@ -3058,7 +3058,7 @@ def test_triton_trace_profile(
 
     found_triton_marker = False
     for marker_file in marker_api_trace_files:
-        with open(marker_file, newline="") as f:
+        with open(marker_file, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             assert reader.fieldnames is not None, f"No columns in {marker_file}"
             assert "Function" in reader.fieldnames, (
