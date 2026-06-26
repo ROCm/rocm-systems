@@ -30,8 +30,12 @@ namespace amdgpu {
 /// @brief VOP1/VOP2 src0 encoding values that indicate a DPP or SDWA suffix.
 constexpr uint32_t SRC_SDWA = 249;
 constexpr uint32_t SRC_DPP = 250;
+constexpr uint32_t SRC_DPP8_LO = 233;
+constexpr uint32_t SRC_DPP8_HI = 234;
 
 namespace dpp {
+
+inline bool is_src_dpp8(uint32_t src0) { return src0 == SRC_DPP8_LO || src0 == SRC_DPP8_HI; }
 
 /// Row size for DPP operations (16 lanes per row).
 constexpr int ROW_SIZE = 16;
@@ -240,6 +244,27 @@ inline void apply_dpp(Operand *&src0, uint32_t dpp_ctrl, uint32_t row_mask, uint
   src0 = storage.get();
 }
 
+inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
+  uint32_t sel = (lane_sel >> ((lane & 7u) * 3u)) & 7u;
+  return (lane & ~7u) | sel;
+}
+
+inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, std::unique_ptr<DppOperand> &storage,
+                       amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint32_t ws = wf.wf_size();
+  uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
+  uint32_t raw[64], result[64];
+  for (uint32_t i = 0; i < ws; ++i)
+    raw[i] = cu.read_vgpr(vbase, i);
+  for (uint32_t lane = 0; lane < ws; ++lane) {
+    uint32_t src_lane = dpp8_src_lane(lane, lane_sel);
+    result[lane] = src_lane < ws ? raw[src_lane] : 0u;
+  }
+  storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
+  src0 = storage.get();
+}
+
 } // namespace dpp
 
 namespace sdwa {
@@ -304,13 +329,14 @@ inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_s
     uint32_t shift = dst_sel * 8;
     uint32_t mask = 0xFFu << shift;
     uint32_t merged = (result & 0xFF) << shift;
+    uint32_t upper_mask = static_cast<uint32_t>(~((uint64_t{1} << (shift + 8)) - 1));
     uint32_t fill;
     if (dst_unused == UNUSED_PRESERVE)
       fill = old_dst & ~mask;
     else if (dst_unused == UNUSED_SEXT && (result & 0x80))
-      fill = ~mask; // sign-extend 1s
+      fill = upper_mask;
     else
-      fill = 0; // zero-pad
+      fill = 0;
     return fill | merged;
   }
 
@@ -318,11 +344,12 @@ inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_s
   uint32_t shift = (dst_sel & 1) * 16;
   uint32_t mask = 0xFFFFu << shift;
   uint32_t merged = (result & 0xFFFF) << shift;
+  uint32_t upper_mask = static_cast<uint32_t>(~((uint64_t{1} << (shift + 16)) - 1));
   uint32_t fill;
   if (dst_unused == UNUSED_PRESERVE)
     fill = old_dst & ~mask;
   else if (dst_unused == UNUSED_SEXT && (result & 0x8000))
-    fill = ~mask;
+    fill = upper_mask;
   else
     fill = 0;
   return fill | merged;

@@ -6,6 +6,7 @@
 #include "library/pmc/collectors/nic/types.hpp"
 #include "logger/debug.hpp"
 
+#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -17,26 +18,37 @@
 namespace rocprofsys::pmc::collectors::nic
 {
 
+// Contract the NIC collector requires of its backend (the data producer).
+template <typename Backend>
+concept nic_backend_contract = requires(const Backend backend, std::uint8_t port) {
+    { backend.get_nic_asic_info() } -> std::same_as<asic_info>;
+    { backend.get_nic_port_info() } -> std::same_as<port_info>;
+    { backend.get_nic_rdma_info() } -> std::same_as<rdma_info>;
+    {
+        backend.get_nic_rdma_port_statistics(port)
+    } -> std::same_as<std::vector<stat_entry>>;
+};
+
 /**
  * @brief NIC device wrapper for collecting RDMA statistics.
  *
- * Wraps a NIC driver and provides methods to query RDMA port statistics
+ * Wraps a NIC backend and provides methods to query RDMA port statistics
  * including bytes, packets, and CNP metrics. Has zero AMD SMI dependency.
  *
- * @tparam Driver The NIC driver type (nic_driver or mock_nic_driver)
+ * @tparam Backend The NIC backend type (nic_backend or mock_nic_backend)
  */
-template <typename Driver>
+template <nic_backend_contract Backend>
 class device
 {
 public:
     /**
      * @brief Construct a NIC device wrapper.
      *
-     * @param driver Shared pointer to the driver instance (owns the handle)
+     * @param backend Shared pointer to the backend instance (owns the handle)
      * @param logical_index Device index for identification
      */
-    device(std::shared_ptr<Driver> driver, size_t logical_index)
-    : m_driver{ std::move(driver) }
+    device(std::shared_ptr<Backend> backend, size_t logical_index)
+    : m_backend{ std::move(backend) }
     , m_index{ logical_index }
     {
         m_is_supported = initialize_device_info();
@@ -66,8 +78,8 @@ public:
     /**
      * @brief Collect current NIC RDMA metrics.
      *
-     * Queries the first RDMA port for statistics and extracts the
-     * 6 RDMA metrics: rx/tx bytes, rx/tx packets, and rx/tx CNP packets.
+     * Queries the first RDMA port for statistics and extracts
+     * all metrics enumerated by METRIC_MAP.
      *
      * @return Collected metrics (zeros if query fails)
      */
@@ -82,7 +94,7 @@ public:
 
         try
         {
-            auto stats = m_driver->get_nic_rdma_port_statistics(0);
+            auto stats = m_backend->get_nic_rdma_port_statistics(0);
 
             static const std::unordered_map<std::string_view, std::uint64_t metrics::*>
                 METRIC_MAP = { { "rx_rdma_ucast_bytes", &metrics::rx_rdma_ucast_bytes },
@@ -90,7 +102,12 @@ public:
                                { "rx_rdma_ucast_pkts", &metrics::rx_rdma_ucast_pkts },
                                { "tx_rdma_ucast_pkts", &metrics::tx_rdma_ucast_pkts },
                                { "rx_rdma_cnp_pkts", &metrics::rx_rdma_cnp_pkts },
-                               { "tx_rdma_cnp_pkts", &metrics::tx_rdma_cnp_pkts } };
+                               { "tx_rdma_cnp_pkts", &metrics::tx_rdma_cnp_pkts },
+                               { "tx_rdma_ack_timeout", &metrics::tx_rdma_ack_timeout },
+                               { "resp_tx_pkt_seq_err", &metrics::resp_tx_pkt_seq_err },
+                               { "req_rx_pkt_seq_err", &metrics::req_rx_pkt_seq_err },
+                               { "req_rx_impl_nak_seq_err",
+                                 &metrics::req_rx_impl_nak_seq_err } };
 
             for(const auto& stat : stats)
             {
@@ -121,7 +138,7 @@ private:
     {
         try
         {
-            auto asic      = m_driver->get_nic_asic_info();
+            auto asic      = m_backend->get_nic_asic_info();
             m_product_name = asic.product_name;
             m_vendor_name  = asic.vendor_name;
         } catch(const std::runtime_error& e)
@@ -131,7 +148,7 @@ private:
 
         try
         {
-            auto port     = m_driver->get_nic_port_info();
+            auto port     = m_backend->get_nic_port_info();
             m_device_name = port.device_name;
         } catch(const std::runtime_error& e)
         {
@@ -140,7 +157,7 @@ private:
 
         try
         {
-            auto rdma         = m_driver->get_nic_rdma_info();
+            auto rdma         = m_backend->get_nic_rdma_info();
             m_rdma_port_count = rdma.port_count;
         } catch(const std::runtime_error& e)
         {
@@ -156,7 +173,7 @@ private:
 
         try
         {
-            auto stats = m_driver->get_nic_rdma_port_statistics(0);
+            auto stats = m_backend->get_nic_rdma_port_statistics(0);
             if(stats.empty())
             {
                 LOG_DEBUG("NIC device [{}] has no RDMA statistics available", m_index);
@@ -176,14 +193,14 @@ private:
         return true;
     }
 
-    std::shared_ptr<Driver> m_driver;
-    enabled_metrics         m_supported_metrics;
-    const size_t            m_index;
-    std::string             m_device_name;
-    std::string             m_product_name;
-    std::string             m_vendor_name;
-    std::uint8_t            m_rdma_port_count = 0;
-    bool                    m_is_supported    = false;
+    std::shared_ptr<Backend> m_backend;
+    enabled_metrics          m_supported_metrics;
+    const size_t             m_index;
+    std::string              m_device_name;
+    std::string              m_product_name;
+    std::string              m_vendor_name;
+    std::uint8_t             m_rdma_port_count = 0;
+    bool                     m_is_supported    = false;
 };
 
 }  // namespace rocprofsys::pmc::collectors::nic

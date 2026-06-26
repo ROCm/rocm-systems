@@ -583,7 +583,7 @@ To set the agent index to relative, use:
 
     rocprofv3 --kernel-trace --agent-index=relative --output-format csv -- <application_path>
 
-Here is the generated ouput file with ``Agent_Id`` as "Agent 7":
+Here is the generated output file with ``Agent_Id`` as "Agent 7":
 
 .. code-block:: shell
 
@@ -598,7 +598,7 @@ To set the agent index to type-relative, use:
 
     rocprofv3 --kernel-trace --agent-index=type-relative --output-format csv -- <application_path>
 
-Here is the generated ouput file with ``Agent_Id`` as "GPU 3":
+Here is the generated output file with ``Agent_Id`` as "GPU 3":
 
 .. code-block:: shell
 

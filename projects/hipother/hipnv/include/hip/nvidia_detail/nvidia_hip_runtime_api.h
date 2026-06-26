@@ -125,6 +125,7 @@ typedef enum hipMemoryAdvise {
 #define hipStreamWaitValueEq CU_STREAM_WAIT_VALUE_EQ
 #define hipStreamWaitValueAnd CU_STREAM_WAIT_VALUE_AND
 #define hipStreamWaitValueNor CU_STREAM_WAIT_VALUE_NOR
+#define hipStreamWriteValueDefault CU_STREAM_WRITE_VALUE_DEFAULT
 
 // hipLibraryPropertyType
 #define hipLibraryPropertyType libraryPropertyType
@@ -367,6 +368,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipHostMallocWriteCombined cudaHostAllocWriteCombined
 #define hipHostMallocCoherent 0x0
 #define hipHostMallocNonCoherent 0x0
+#define hipMallocSignalMemory 0x0
 
 #define hipHostAllocDefault cudaHostAllocDefault
 #define hipHostAllocPortable cudaHostAllocPortable
@@ -1974,6 +1976,9 @@ typedef enum cudaMemLocationType hipMemLocationType;
 #define hipMemHandleTypePosixFileDescriptor cudaMemHandleTypePosixFileDescriptor
 #define hipMemHandleTypeWin32 cudaMemHandleTypeWin32
 #define hipMemHandleTypeWin32Kmt cudaMemHandleTypeWin32Kmt
+#if CUDA_VERSION >= CUDA_12040
+#define hipMemHandleTypeFabric cudaMemHandleTypeFabric
+#endif
 typedef enum cudaMemAllocationType hipMemAllocationType;
 #define hipMemAllocationTypeInvalid cudaMemAllocationTypeInvalid
 #define hipMemAllocationTypePinned cudaMemAllocationTypePinned
@@ -2133,6 +2138,51 @@ inline static hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes
                                                   unsigned long long flags, hipStream_t stream) {
   return hipCUDAErrorTohipError(cudaMemPrefetchBatchAsync(
       dev_ptrs, sizes, count, locations, location_indices, num_locations, flags, stream));
+}
+#endif
+
+#if CUDA_VERSION >= 13020
+inline static hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes,
+                                                 size_t count, unsigned long long flags,
+                                                 hipStream_t stream) {
+  return hipCUDAErrorTohipError(
+      cudaMemDiscardBatchAsync(dev_ptrs, sizes, count, flags, stream));
+}
+
+inline static hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes,
+                                                    size_t count, unsigned long long flags,
+                                                    hipStream_t stream) {
+  return hipCUResultTohipError(
+      cuMemDiscardBatchAsync(dptrs, sizes, count, flags, (CUstream)stream));
+}
+
+inline static hipError_t hipMemDiscardAndPrefetchBatchAsync(
+    void** dptrs, size_t* sizes, size_t count,
+    hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs,
+    size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  return hipCUDAErrorTohipError(
+      cudaMemDiscardAndPrefetchBatchAsync(dptrs, sizes, count, prefetchLocs,
+                                          prefetchLocIdxs, numPrefetchLocs, flags, stream));
+}
+
+inline static hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(
+    hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+    hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs,
+    size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  CUmemLocation* cuLocs = (CUmemLocation*)malloc(numPrefetchLocs * sizeof(CUmemLocation));
+  if (cuLocs == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+  for (size_t i = 0; i < numPrefetchLocs; i++) {
+    cuLocs[i].id = prefetchLocs[i].id;
+    cuLocs[i].type = (CUmemLocationType)prefetchLocs[i].type;
+  }
+  hipError_t err = hipCUResultTohipError(
+      cuMemDiscardAndPrefetchBatchAsync(dptrs, sizes, count, cuLocs,
+                                        prefetchLocIdxs, numPrefetchLocs, flags,
+                                        (CUstream)stream));
+  free(cuLocs);
+  return err;
 }
 #endif
 
@@ -3052,6 +3102,11 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
+#if CUDA_VERSION >= CUDA_12040
+    case hipDeviceAttributeHandleTypeFabricSupported:
+      return hipCUResultTohipError(cuDeviceGetAttribute(
+          pi, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, device));
+#endif
     case hipDeviceAttributeAccessPolicyMaxWindowSize:
       cdattr = cudaDevAttrMaxAccessPolicyWindowSize;
       break;

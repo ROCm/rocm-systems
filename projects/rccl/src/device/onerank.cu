@@ -30,8 +30,8 @@ namespace {
 
     // each block/channel gets a roughly equal segment of 16 byte packs
     constexpr int EltPerPack = 16/sizeof(T);
-    intptr_t i0 = (bid+0)*alignUp(nElts/bn, EltPerPack);
-    intptr_t i1 = (bid+1)*alignUp(nElts/bn, EltPerPack);
+    intptr_t i0 = (bid+0)*alignUp(divUp(nElts, bn), EltPerPack);
+    intptr_t i1 = (bid+1)*alignUp(divUp(nElts, bn), EltPerPack);
     i0 = min(i0, nElts);
     i1 = min(i1, nElts);
 
@@ -54,12 +54,12 @@ namespace {
       void* srcs[2] = {srcPtr, accPtr};
       void* dsts[1] = {dstPtr};
       reduceCopy<COLL_UNROLL, 0, RedOp, T, 0,2,2, 0,1,1, /*PreOpSrcs=*/1>
-        (tid, tn, redOpArg, &redOpArg, true, 2, srcs, 1, dsts, i1-i0);
+        (tid, tn, redOpArg, true, 2, srcs, 1, dsts, i1-i0);
     } else {
       src = (T*)src + i0;
       dst = (T*)dst + i0;
       reduceCopy<COLL_UNROLL, 0, RedOp, T, 0,1,1, 0,1,1, /*PreOpSrcs=*/1>
-        (tid, tn, redOpArg, &redOpArg, true, 1, &src, 1, &dst, i1-i0);
+        (tid, tn, redOpArg, true, 1, &src, 1, &dst, i1-i0);
     }
   }
 }

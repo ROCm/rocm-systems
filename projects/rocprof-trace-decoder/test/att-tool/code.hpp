@@ -35,7 +35,7 @@ namespace att_wrapper
 {
 struct CodeLine
 {
-    using Instruction = rocprofiler::sdk::codeobj::disassembly::Instruction;
+    using Instruction = rocprof_trace_decoder::codeobj::Instruction;
 
     int                          line_number{0};
     int                          type{0};
@@ -49,7 +49,7 @@ struct CodeLine
 
 class CodeFile
 {
-    using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+    using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
 
 public:
     CodeFile() = default;

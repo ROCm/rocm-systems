@@ -446,11 +446,7 @@ def gen_scalar_binop(
             )
             L.append(f'  {dst[0]}.write_scalar64(wf, result);')
         else:
-            L.append('  uint32_t count = s0 & 31u;')
-            L.append('  uint32_t offset = s1 & 31u;')
-            L.append(
-                '  uint32_t result = count == 0 ? 0 : ((1u << count) - 1) << offset;'
-            )
+            L.append('  uint32_t result = ::rocjitsu::amdgpu::bfm_b32(s0, s1);')
             L.append(f'  {dst[0]}.write_scalar(wf, result);')
     elif op == 'bfe':
         return gen_scalar_bfe(dst, src, dtype)
@@ -461,26 +457,55 @@ def gen_scalar_binop(
         )
         L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
         L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
-    elif dtype == 'f32' and op in ('add', 'sub', 'mul', 'min', 'max', 'fma'):
+    elif dtype == 'f32' and op in (
+        'add',
+        'sub',
+        'mul',
+        'min',
+        'max',
+        'min_num',
+        'max_num',
+        'minimum',
+        'maximum',
+        'fma',
+    ):
         fp_op = {
             'add': 'f0 + f1',
             'sub': 'f0 - f1',
             'mul': 'f0 * f1',
             'min': 'std::fmin(f0, f1)',
             'max': 'std::fmax(f0, f1)',
+            'min_num': 'std::fmin(f0, f1)',
+            'max_num': 'std::fmax(f0, f1)',
+            'minimum': '((std::isnan(f0) || std::isnan(f1)) ? std::numeric_limits<float>::quiet_NaN() : (f0 == f1 ? (std::signbit(f0) ? f0 : f1) : (f0 < f1 ? f0 : f1)))',
+            'maximum': '((std::isnan(f0) || std::isnan(f1)) ? std::numeric_limits<float>::quiet_NaN() : (f0 == f1 ? (std::signbit(f0) ? f1 : f0) : (f0 > f1 ? f0 : f1)))',
             'fma': 'std::fma(f0, f1, std::bit_cast<float>(static_cast<uint32_t>(wf.read_scc())))',
         }
         L.append('  float f0 = std::bit_cast<float>(s0);')
         L.append('  float f1 = std::bit_cast<float>(s1);')
         L.append(f'  float fr = {fp_op[op]};')
         L.append(f'  {dst[0]}.write_scalar(wf, std::bit_cast<uint32_t>(fr));')
-    elif dtype == 'f16' and op in ('add', 'sub', 'mul', 'min', 'max'):
+    elif dtype == 'f16' and op in (
+        'add',
+        'sub',
+        'mul',
+        'min',
+        'max',
+        'min_num',
+        'max_num',
+        'minimum',
+        'maximum',
+    ):
         fp_op = {
             'add': 'f0 + f1',
             'sub': 'f0 - f1',
             'mul': 'f0 * f1',
             'min': 'std::fmin(f0, f1)',
             'max': 'std::fmax(f0, f1)',
+            'min_num': 'std::fmin(f0, f1)',
+            'max_num': 'std::fmax(f0, f1)',
+            'minimum': '((std::isnan(f0) || std::isnan(f1)) ? std::numeric_limits<float>::quiet_NaN() : (f0 == f1 ? (std::signbit(f0) ? f0 : f1) : (f0 < f1 ? f0 : f1)))',
+            'maximum': '((std::isnan(f0) || std::isnan(f1)) ? std::numeric_limits<float>::quiet_NaN() : (f0 == f1 ? (std::signbit(f0) ? f1 : f0) : (f0 > f1 ? f0 : f1)))',
         }
         L.append('  float f0 = util::f16_to_f32(static_cast<uint16_t>(s0 & 0xFFFF));')
         L.append('  float f1 = util::f16_to_f32(static_cast<uint16_t>(s1 & 0xFFFF));')
@@ -497,6 +522,16 @@ def gen_scalar_binop(
     elif op == 'pack_hh':
         L.append(
             f'  {dst[0]}.write_scalar(wf, ((s0 >> 16) & 0xFFFFu) | (s1 & 0xFFFF0000u));'
+        )
+    elif op == 'pack_hl':
+        L.append(
+            f'  {dst[0]}.write_scalar(wf, ((s0 >> 16) & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));'
+        )
+    elif op == 'cvt_pkrtz_f16_f32':
+        L.append('  float f0 = std::bit_cast<float>(s0);')
+        L.append('  float f1 = std::bit_cast<float>(s1);')
+        L.append(
+            f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16_rtz(f0)) | (static_cast<uint32_t>(util::f32_to_f16_rtz(f1)) << 16));'
         )
     else:
         # Bitwise / shift ops
@@ -568,6 +603,7 @@ def gen_scalar_bfe(dst: list[str], src: list[str], dtype: str | None) -> str:
         L.append(f'    {dst[0]}.write_scalar64(wf, 0);')
         L.append('    wf.write_scc(false);')
         L.append('  } else {')
+        L.append('    if (offset + width > 64) width = 64 - offset;')
         L.append('    uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1);')
         L.append('    uint64_t extracted = (base >> offset) & mask;')
         if dtype == 'i64':
@@ -585,6 +621,7 @@ def gen_scalar_bfe(dst: list[str], src: list[str], dtype: str | None) -> str:
         L.append(f'    {dst[0]}.write_scalar(wf, 0);')
         L.append('    wf.write_scc(false);')
         L.append('  } else {')
+        L.append('    if (offset + width > 32) width = 32 - offset;')
         L.append('    uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1);')
         L.append('    uint32_t extracted = (base >> offset) & mask;')
         if dtype == 'i32':
@@ -631,6 +668,19 @@ def gen_scalar_cmp(src: list[str], op: str | None, dtype: str | None) -> str:
     elif dtype in ('u64',):
         L.append(f'  uint64_t s0 = {src[0]}.read_scalar64(wf);')
         L.append(f'  uint64_t s1 = {src[1]}.read_scalar64(wf);')
+    elif dtype == 'f64':
+        L.append(f'  double s0 = std::bit_cast<double>({src[0]}.read_scalar64(wf));')
+        L.append(f'  double s1 = std::bit_cast<double>({src[1]}.read_scalar64(wf));')
+    elif dtype == 'f32':
+        L.append(f'  float s0 = std::bit_cast<float>({src[0]}.read_scalar(wf));')
+        L.append(f'  float s1 = std::bit_cast<float>({src[1]}.read_scalar(wf));')
+    elif dtype == 'f16':
+        L.append(
+            f'  float s0 = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_scalar(wf) & 0xFFFF));'
+        )
+        L.append(
+            f'  float s1 = util::f16_to_f32(static_cast<uint16_t>({src[1]}.read_scalar(wf) & 0xFFFF));'
+        )
     else:
         L.append(f'  uint32_t s0 = {src[0]}.read_scalar(wf);')
         L.append(f'  uint32_t s1 = {src[1]}.read_scalar(wf);')
@@ -750,8 +800,8 @@ def gen_scalar_saveexec(dst: list[str], src: list[str], op: str | None) -> str:
         # RDNA3/4 not0/not1 variants
         'and_not0': 'old_exec & ~src',
         'or_not0': 'old_exec | ~src',
-        'and_not1': '~src & ~old_exec',
-        'or_not1': '~src | old_exec',
+        'and_not1': 'src & ~old_exec',
+        'or_not1': 'src | ~old_exec',
     }
     if op not in saveexec_map:
         L.append('  (void)src;')

@@ -48,7 +48,7 @@ namespace envvar {
       "Append modifiers: :noversion, :noenv, :noinfo, :nowarn, :notrace to suppress categories; "
       ":env[:all|:full] to enable/control env variable output; "
       ":color (default) or :nocolor for ANSI colors (e.g. trace:noversion:nocolor, env:full)",
-      types::debug_level::WARN);
+      types::debug_level::ERROR);
   }  // close _base temporarily to define log_flags after debug_level
 
   // Build log_flags from the parsed debug_level and any :modifiers.

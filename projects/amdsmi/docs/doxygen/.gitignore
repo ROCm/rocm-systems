@@ -1,2 +1,3 @@
-docBin/
+_out/
 Doxyfile
+*.bak

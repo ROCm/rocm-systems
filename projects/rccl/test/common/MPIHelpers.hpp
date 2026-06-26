@@ -210,9 +210,12 @@ inline bool isPerRankLoggingEnabled()
 /**
  * @brief Path to the per-rank log file used when RCCL_MPI_LOG_ALL_RANKS=1
  *
- * Matches the filename created by setupRankLogging() (current working directory).
- * The file is shared by all tests in the process unless callers use
- * TestLogAssertionContext::isolate_new_output.
+ * Matches the filename created by setupRankLogging(). The name embeds the
+ * --gtest_filter test label when it identifies a single test
+ * (rccl_test_<Label>_rank_<R>_pid<P>.log) so every rank's file can be matched
+ * to the test that produced it; otherwise it falls back to
+ * rccl_test_rank_<R>_pid<P>.log. The file is shared by all tests in the process
+ * unless callers use TestLogAssertionContext::isolate_new_output.
  */
 std::string getRankLogFilePath(int rank);
 
@@ -378,9 +381,14 @@ struct MpiEnvGuard
             saved = prev;
             if(saved != v)
             {
+#ifdef RCCL_TEST_CHECKS_HPP
+                TEST_INFO("MpiEnvGuard overriding %s: '%s' -> '%s' (will restore on scope exit)",
+                          n, saved.c_str(), v);
+#else
                 fprintf(stderr,
                         "[MpiEnvGuard rank %s] overriding %s: '%s' -> '%s' (will restore on scope exit)\n",
                         getMpiRankStr(), n, saved.c_str(), v);
+#endif
             }
         }
         ::setenv(n, v, /*overwrite=*/1);

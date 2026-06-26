@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "mnnvl.h"
 #include "transport.h"
@@ -42,9 +43,11 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     }
   }
 #endif
-  // Determine our MNNVL domain/clique
+
+  // Determine our MNNVL domain/clique and NVL domain size
   NCCLCHECK(ncclCalloc(&comm->clique.ranks, comm->nRanks));
   comm->clique.id = comm->peerInfo[comm->rank].fabricInfo.cliqueId;
+  comm->nvlDomainSize = 0;
   for (int i = 0; i < comm->nRanks; i++) {
     auto fabricInfo1 = &comm->peerInfo[comm->rank].fabricInfo;
     auto fabricInfo2 = &comm->peerInfo[i].fabricInfo;
@@ -55,17 +58,21 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     memcpy(&uuid0, fabricInfo2->clusterUuid, sizeof(uuid0));
     memcpy(&uuid1, fabricInfo2->clusterUuid + sizeof(uuid0), sizeof(uuid1));
     if ((uuid0 | uuid1) == 0) return ncclSuccess;
-    if ((memcmp(fabricInfo1->clusterUuid, fabricInfo2->clusterUuid, NVML_GPU_FABRIC_UUID_LEN) == 0) &&
-        (fabricInfo1->cliqueId == fabricInfo2->cliqueId)) {
-      if (i == comm->rank) {
-        comm->cliqueRank = comm->clique.size;
+    // Check if same NVL domain (clusterUuid match)
+    if (memcmp(fabricInfo1->clusterUuid, fabricInfo2->clusterUuid, NVML_GPU_FABRIC_UUID_LEN) == 0) {
+      comm->nvlDomainSize++;
+      // Also check if same clique (cliqueId match)
+      if (fabricInfo1->cliqueId == fabricInfo2->cliqueId) {
+        if (i == comm->rank) {
+          comm->cliqueRank = comm->clique.size;
+        }
+        comm->clique.ranks[comm->clique.size++] = i;
       }
-      comm->clique.ranks[comm->clique.size++] = i;
     }
   }
 
-  // No MNNVL clique found
-  if (comm->clique.size <= 1) return ncclSuccess;
+  // ncclCommSplit: clique.size may be 1 while nvlDomainSize > 1; still enable MNNVL.
+  if (comm->clique.size <= 1 && comm->nvlDomainSize <= 1) return ncclSuccess;
 #ifdef HIP_FABRIC_API
   // Check that FABRIC handles can be exported & imported by IMEX
   {
@@ -75,7 +82,7 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     CUresult err;
 
     // Allocate FABRIC handle compatible memory
-    ncclResult_t ret = ncclCuMemAlloc(&ptr, &handle, CU_MEM_HANDLE_TYPE_FABRIC, CUDA_IPC_MIN);
+    ncclResult_t ret = ncclCuMemAlloc(&ptr, &handle, CU_MEM_HANDLE_TYPE_FABRIC, CUDA_IPC_MIN, comm->memManager, ncclMemOffload);
     if (ret != ncclSuccess) {
       // Return an error if this is a MNNVL capable system but FABRIC handles are not supported
       WARN("MNNVL (cliqueSize %d) is available but not working on this system. Check afmctl. Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
@@ -93,19 +100,19 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     // it was removed, so future maintainers don't re-add it expecting it to work.
       const char *errStr;
       (void) cuGetErrorString(err, &errStr);
-      NCCLCHECK(ncclCuMemFree(ptr));
+      NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));
       // Return an error if this is a MNNVL capable system but it's not working
       WARN("MNNVL rank%d (cliqueSize %d) is available but not working on this system: cuMemExportToShareableHandle/cuMemImportFromShareableHandle failed: %s. Check afmctl. Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
           comm->rank, comm->clique.size, errStr);
       return ncclSystemError;
     }
-    NCCLCHECK(ncclCuMemFree(ptr));
+    NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));
 
     // Force the CUMEM handle type to be FABRIC for MNNVL
     ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_FABRIC;
     comm->MNNVL = 1;
-    INFO(NCCL_INIT, "MNNVL %d cliqueId %x cliqueSize %d cliqueRank %d",
-        comm->MNNVL, comm->clique.id, comm->clique.size, comm->cliqueRank);
+    INFO(NCCL_INIT, "MNNVL %d cliqueId %x cliqueSize %d cliqueRank %d nvlDomainSize %d",
+        comm->MNNVL, comm->clique.id, comm->clique.size, comm->cliqueRank, comm->nvlDomainSize);
   }
 #endif
   return ncclSuccess;

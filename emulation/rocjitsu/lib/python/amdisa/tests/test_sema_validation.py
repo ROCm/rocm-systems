@@ -155,6 +155,12 @@ class TestVectorBinopValidation:
         assert new_props['reads_lane']
         assert new_props['writes_lane']
 
+    def test_legacy_i24_mul_uses_unsigned_helper(self):
+        old = gen_vector_binop(['vdst'], ['src0', 'vsrc1'], 'mul', 'i24')
+
+        assert '::rocjitsu::amdgpu::mul_i24_u32' in old
+        assert 'sv0 * sv1' not in old
+
 
 class TestVectorTernaryValidation:
     def test_fma_f32(self):
@@ -208,6 +214,15 @@ class TestSaveexecValidation:
         assert 'set_exec' in old or 'set_exec' in old
         assert 'set_exec' in new
         assert 'write_scc' in new
+
+    def test_saveexec_b32_uses_32_bit_operand_access(self):
+        sem = _FakeSem('S_AND_SAVEEXEC_B32', 'scalar_saveexec', 'and', 'b32')
+        new = _new_output(sem, ['ssrc0'], ['sdst'], 'b32')
+        assert 'ssrc0.read_scalar(wf)' in new
+        assert 'ssrc0.read_scalar64(wf)' not in new
+        assert 'sdst.write_scalar(wf' in new
+        assert 'sdst.write_scalar64(wf' not in new
+        assert '0xffffffffULL' in new
 
 
 class TestAllClassesLowerWithOperandMap:
