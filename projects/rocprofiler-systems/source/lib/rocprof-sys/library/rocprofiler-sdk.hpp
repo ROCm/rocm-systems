@@ -3435,8 +3435,8 @@ library_sdk<Wrapper, Externals>::tool_attach_fini(void* /*tool_data_ptr*/)
 {
     // Stop and flush SDK contexts/buffers so that buffer callbacks
     // write their Perfetto events before Perfetto post-processing.
-    ::rocprofsys::rocprofiler_sdk::stop();
-    ::rocprofsys::rocprofiler_sdk::flush();
+    stop();
+    flush();
     finalize_sdk_common();
 
     // Flush any pending region cache entries
