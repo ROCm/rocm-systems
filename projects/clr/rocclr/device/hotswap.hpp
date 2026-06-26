@@ -27,7 +27,7 @@ namespace amd {
 namespace hotswap {
 
 // On when this tool is loaded via HSA_TOOLS_LIB (name must match ROCR LoadTools).
-inline constexpr const char* kHotswapToolLib = "libamd_comgr_hotswap_tool.so";
+inline constexpr const char* kHotswapToolLib = "libhsa-hotswap.so";
 
 inline bool Enabled() {
   const char* tools_lib = std::getenv("HSA_TOOLS_LIB");
@@ -43,8 +43,6 @@ struct SourceTargetPair {
 
 inline constexpr SourceTargetPair kSupportedPairs[] = {
     {"gfx1250", "gfx1250"},
-    {"gfx1250", "gfx950"},
-    {"gfx1250", "gfx942"},
 };
 
 // True if (source_gfx -> target_gfx) is a supported pair.

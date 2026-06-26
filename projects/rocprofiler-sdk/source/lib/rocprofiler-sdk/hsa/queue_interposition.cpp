@@ -223,14 +223,28 @@ publish_submitted_packets(QueueState* state, uint64_t submit_pos)
     tls.last_published_submit_pos = submit_pos;
 }
 
+// Ring the doorbell with the last index we have actually submitted (next_submit_pos - 1),
+// never the application's virtualized value, which may point past it and make the GPU
+// consume unpublished ring slots.
+inline void
+ring_published_doorbell(QueueState* state, const doorbell_fn_t& ring_doorbell)
+{
+    const uint64_t published = state->next_submit_pos;
+    if(published == 0) return;
+    ring_doorbell(state->doorbell_signal, static_cast<hsa_signal_value_t>(published - 1));
+}
+
 inline void
 wait_for_free_slot(QueueState* state, uint64_t submit_pos)
 {
     while(true)
     {
         auto real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
-        auto ring_used = submit_pos - real_rdid;
-        if(ring_used < state->ring_size)
+
+        // Guard the unsigned subtraction: if real_rdid has reached or passed our write
+        // position the ring has free space. Otherwise (submit_pos - real_rdid) would
+        // underflow and spin forever while holding gate_lock.
+        if(real_rdid >= submit_pos || (submit_pos - real_rdid) < state->ring_size)
         {
             return;
         }
@@ -716,6 +730,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     if(scan_pos >= wptr_end)
     {
+        // Already scanned through virtual_wptr, so `value` is <= what we have submitted and
+        // cannot advertise unpublished slots; forward it (and never drop the doorbell).
         ring_doorbell(state_ptr->doorbell_signal, value);
         return;
     }
@@ -744,7 +760,10 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     if(drained == 0)
     {
-        ring_doorbell(state_ptr->doorbell_signal, value);
+        // The next slot is claimed but not yet written by its producer, so there is
+        // nothing to publish now; that producer's own later doorbell will drain it.
+        // Re-ring only the last published index, not the virtual value.
+        ring_published_doorbell(state_ptr, ring_doorbell);
         return;
     }
 

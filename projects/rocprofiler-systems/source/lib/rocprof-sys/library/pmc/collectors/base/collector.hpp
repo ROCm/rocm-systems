@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -146,6 +147,7 @@ struct collector
                     {
                         PerfettoApi::store_sample(_device_id, _metrics, _timestamp);
                     }
+                    m_sample_counts[_device_id]++;
                     return false;  // Keep device
                 } catch(const std::runtime_error& e)
                 {
@@ -169,6 +171,23 @@ struct collector
         {
             Traits::template post_process_perfetto<PerfettoApi>(m_device_entries,
                                                                 m_enabled_metrics);
+        }
+        for(const auto& entry : m_device_entries)
+        {
+            const auto   _device_id   = entry.device->get_index();
+            const auto&  _device_name = entry.device->get_name();
+            const auto   _it          = m_sample_counts.find(_device_id);
+            const size_t _count       = _it == m_sample_counts.end() ? 0 : _it->second;
+            if(_count == 0)
+            {
+                LOG_WARNING("No samples were collected for {} device '{}'",
+                            Traits::device_name, _device_name);
+            }
+            else
+            {
+                LOG_DEBUG("Collected {} samples for {} device '{}'", _count,
+                          Traits::device_name, _device_name);
+            }
         }
     }
 
@@ -250,6 +269,7 @@ private:
     device_entries_t m_device_entries;  ///< Devices with cached supported metrics
     std::shared_ptr<device_provider> m_device_provider;  ///< Device provider instance
     enabled_metrics_t                m_enabled_metrics;  ///< Enabled metrics
+    std::map<size_t, size_t>         m_sample_counts;    ///< Per-device sample counts
 };
 
 }  // namespace rocprofsys::pmc::collectors::base

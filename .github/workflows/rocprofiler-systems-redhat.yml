@@ -112,7 +112,7 @@ jobs:
           fi
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ github.workspace }}/.ccache
         key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
@@ -311,7 +311,7 @@ jobs:
           dnf clean all
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ github.workspace }}/.ccache
         key: ccache-redhat-system-deps-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ github.sha }}

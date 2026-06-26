@@ -12,22 +12,19 @@
 #include "param.h"
 #include "bootstrap.h"
 
-#include <dlfcn.h>
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <fstream>
 
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
-DECLARE_ROCM_PFN(hsa_amd_portable_export_dmabuf); // DMA-BUF support
+// DMA-BUF feature gate: stays NULL when the platform does not support DMA-BUF.
+// hsa_init/hsa_system_get_info/hsa_status_string are called directly via the
+// hsa-runtime64 library librccl links against (no dlopen/dlsym).
+DECLARE_ROCM_PFN(hsa_amd_portable_export_dmabuf);
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
 RCCL_PARAM(ForceEnableDMABUF, "FORCE_ENABLE_DMABUF", 0);
-/* ROCr Driver functions loaded with dlsym() */
-DECLARE_ROCM_PFN(hsa_init);
-DECLARE_ROCM_PFN(hsa_system_get_info);
-DECLARE_ROCM_PFN(hsa_status_string);
 
-static void *hsaLib;
 static uint16_t version_major, version_minor;
 
 int ncclCudaDriverVersionCache = -1;
@@ -185,53 +182,19 @@ static void initOnceFunc() {
   hsa_status_t res;
 
   /*
-   * Load ROCr driver library
+   * The HSA (ROCr) runtime is directly linked into librccl via
+   * hsa-runtime64::hsa-runtime64; its entry points are resolved by the dynamic
+   * loader through librccl's RPATH (the same one that resolves libamdhip64).
+   * No dlopen/dlsym and no library-name string are needed here.
    */
-  char path[1024];
-  char *ncclCudaPath = getenv("RCCL_ROCR_PATH");
-  if (ncclCudaPath == NULL)
-    snprintf(path, 1024, "%s", "libhsa-runtime64.so");
-  else
-    snprintf(path, 1024, "%s%s", ncclCudaPath, "libhsa-runtime64.so");
-
-  hsaLib = dlopen(path, RTLD_LAZY);
-  if (hsaLib == NULL) {
-    WARN("Failed to find ROCm runtime library in %s (RCCL_ROCR_PATH=%s)", ncclCudaPath, ncclCudaPath);
-    goto error;
-  } else {
-    INFO(NCCL_INIT, "Using ROCr runtime at %s%s", path, ncclCudaPath ? " (RCCL_ROCR_PATH set)" : "");
-  }
-
-  /*
-   * Load initial ROCr functions
-   */
-
-  pfn_hsa_init = (PFN_hsa_init) dlsym(hsaLib, "hsa_init");
-  if (pfn_hsa_init == NULL) {
-    WARN("Failed to load ROCr missing symbol hsa_init");
-    goto error;
-  }
-
-  pfn_hsa_system_get_info = (PFN_hsa_system_get_info) dlsym(hsaLib, "hsa_system_get_info");
-  if (pfn_hsa_system_get_info == NULL) {
-    WARN("Failed to load ROCr missing symbol hsa_system_get_info");
-    goto error;
-  }
-
-  pfn_hsa_status_string = (PFN_hsa_status_string) dlsym(hsaLib, "hsa_status_string");
-  if (pfn_hsa_status_string == NULL) {
-    WARN("Failed to load ROCr missing symbol hsa_status_string");
-    goto error;
-  }
-
-  res = pfn_hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version_major);
+  res = hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version_major);
   if (res != 0) {
-    WARN("pfn_hsa_system_get_info failed with %d", res);
+    WARN("hsa_system_get_info failed with %d", res);
     goto error;
   }
-  res = pfn_hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MINOR, &version_minor);
+  res = hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MINOR, &version_minor);
   if (res != 0) {
-    WARN("pfn_hsa_system_get_info failed with %d", res);
+    WARN("hsa_system_get_info failed with %d", res);
     goto error;
   }
 
@@ -265,17 +228,21 @@ static void initOnceFunc() {
   }
 
   // ROCr checks
-  res = pfn_hsa_system_get_info((hsa_system_info_t) 0x204, &dmaBufSupport);
+  res = hsa_system_get_info((hsa_system_info_t) 0x204, &dmaBufSupport);
   if (res != HSA_STATUS_SUCCESS || !dmaBufSupport){
     INFO(NCCL_INIT, "Current version of ROCm does not support dmabuf feature.");
     goto error;
   }
+  else if (hsa_amd_portable_export_dmabuf == nullptr) {
+    // The capability query advertised DMA-BUF, but the weakly-linked entry point
+    // did not resolve (ROCr runtime too old to export it). Disable the feature
+    // cleanly rather than leaving an inconsistent gate.
+    INFO(NCCL_INIT, "ROCr runtime does not export hsa_amd_portable_export_dmabuf; disabling DMA-BUF.");
+    goto error;
+  }
   else {
-    pfn_hsa_amd_portable_export_dmabuf = (PFN_hsa_amd_portable_export_dmabuf) dlsym(hsaLib, "hsa_amd_portable_export_dmabuf");
-    if (pfn_hsa_amd_portable_export_dmabuf == NULL) {
-      WARN("Failed to load ROCr missing symbol hsa_amd_portable_export_dmabuf");
-      goto error;
-    }
+    // Arm the DMA-BUF feature gate with the resolved HSA symbol.
+    pfn_hsa_amd_portable_export_dmabuf = hsa_amd_portable_export_dmabuf;
   }
 
   //check OS kernel support
@@ -394,7 +361,7 @@ static void initOnceFunc() {
    * Multiple calls of hsa_init() will return immediately
    * without making any relevant change
    */
-  pfn_hsa_init();
+  hsa_init();
 
   initResult = ncclSuccess;
   return;

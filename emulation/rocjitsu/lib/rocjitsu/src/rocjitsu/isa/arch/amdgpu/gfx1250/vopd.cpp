@@ -122,7 +122,7 @@ const char *Vopd::op_name(uint16_t op) {
   }
 }
 
-bool Vopd::is_float32_op(uint16_t op) {
+bool Vopd::uses_src_neg_modifier(uint16_t op) {
   switch (op) {
   case kVopdFmacF32:
   case kVopdFmaakF32:
@@ -135,6 +135,7 @@ bool Vopd::is_float32_op(uint16_t op) {
   case kVopdMaxNumF32:
   case kVopdMinNumF32:
   case kVopdFmaF32:
+  case kVopdCndmaskB32:
     return true;
   default:
     return false;
@@ -206,7 +207,7 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   uint32_t src0 = slot.src0->read_lane(wf, lane);
   uint32_t src1 = slot.src1->read_lane(wf, lane);
   uint32_t src2 = slot.has_src2_operand ? slot.src2->read_lane(wf, lane) : slot.src2_imm;
-  if (is_float32_op(slot.op)) {
+  if (uses_src_neg_modifier(slot.op)) {
     src0 = apply_neg(src0, slot.neg, 0);
     src1 = apply_neg(src1, slot.neg, 1);
     src2 = apply_neg(src2, slot.neg, 2);
