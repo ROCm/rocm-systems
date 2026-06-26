@@ -8,7 +8,11 @@ do_configureLogrotate() {
 
   mkdir -p "${logPath}"
   touch "${logFile}"
-  chmod -R a+rw "${logPath}"
+  # Relax permissions on the operational log file only so non-root
+  # processes can append to it. Do NOT use chmod -R here: recursing
+  # would also make the log directory and sibling files (e.g.
+  # postinst.log) world-writable, which would let a local user create
+  # or tamper with files under a root-owned log directory (CWE-732).
   chmod a+rw "${logFile}"
 
   if ! command -v logrotate &>/dev/null; then
@@ -17,7 +21,7 @@ do_configureLogrotate() {
     return
   fi
 
-  if [ ! -f $logrotateConfFile ]; then
+  if [ ! -f "$logrotateConfFile" ]; then
     touch "${logrotateConfFile}"
     chmod 644 "${logrotateConfFile}" # root r/w, all others read
     # AMD SMI logging rotation, rotates files using root user/group
@@ -67,101 +71,25 @@ do_ldconfig() {
   fi
 }
 
-do_install_amdsmi_python_lib() {
-  # get python version
-  local python3_minor_version
-  python3_minor_version=$(python3 -c 'import sys;print(sys.version_info.minor)')
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Could not determine python version. "\
-      "AMD-SMI python library will not be installed."
-    return
-  fi
-
-  # check if python version is supported
-  if [ "$python3_minor_version" -lt 6 ]; then
-    echo "[WARNING] AMD-SMI python library is not "\
-      "supported on python version 3.$python3_minor_version. "\
-      "AMD-SMI python library will not be installed."
-    return
-  fi
-
-  local PREVIOUS_PIP_ROOT_USER_ACTION="$PIP_ROOT_USER_ACTION"
-  export PIP_ROOT_USER_ACTION=ignore
-  # python3.11 requires --break-system-packages
-  local PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES="$PIP_BREAK_SYSTEM_PACKAGES"
-  export PIP_BREAK_SYSTEM_PACKAGES=1
-
-  # Remove old python library
-  local amdsmi_pip_list_output
-  amdsmi_pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check)
-  # check pip list output for amdsmi
-  if [[ $amdsmi_pip_list_output == *"amdsmi"* ]]; then
-    echo "Detected old AMD-SMI python library (amdsmi)..."
-    python3 -m pip uninstall amdsmi --yes --quiet --disable-pip-version-check
-    echo "Removed old AMD-SMI python library (amdsmi)..."
-  fi
-
-  # static builds don't include python lib
-  if [ "@BUILD_SHARED_LIBS@" != "ON" ]; then
-    return
-  fi
-
- check_and_install_amdsmi() {
-  local setuptools_version
-  setuptools_version=$(python3 -c 'import setuptools; print(setuptools.__version__)')
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Could not determine setuptools version. "\
-      "AMD-SMI python library will not be installed."
-    return
-  fi
-
-  # install python library at @CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi
-  local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
-  local amdsmi_python_lib_path="$python_lib_path"
-  local amdsmi_setup_py_path="$python_lib_path/setup.py"
-
-  # Decide installation method based on setuptools version
-  if [[ "$(printf '%s\n' "$setuptools_version" "28.5" | sort -V | head -n1)" == "$setuptools_version" ]]; then
-    echo "[WARNING] Setuptools version is less than 28.5. AMD-SMI will not be installed."
-  elif [[ "$(printf '%s\n' "$setuptools_version" "41.0.1" | sort -V | head -n1)" != "41.0.1" ]]; then
-    echo "Using setup.py for installation due to setuptools version $setuptools_version"
-    python3 "$amdsmi_setup_py_path" install
-  else
-    echo "Using pyproject.toml for installation due to setuptools version $setuptools_version"
-    python3 -m pip install "$amdsmi_python_lib_path" --quiet --disable-pip-version-check --no-build-isolation --no-index
-  fi
-}
-
-  # Call the function
-  check_and_install_amdsmi
-
-  export PIP_ROOT_USER_ACTION="$PREVIOUS_PIP_ROOT_USER_ACTION"
-  export PIP_BREAK_SYSTEM_PACKAGES="$PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES"
-
-  # only try to activate argcomplete if such command exists
-  # python3-argcomplete is recommended but optional, we handle its absence gracefully
+do_activate_argcomplete() {
+  # python3-argcomplete is recommended but optional; activate global bash
+  # completion when its helper is present, otherwise continue gracefully.
   if command -v activate-global-python-argcomplete &>/dev/null; then
-    activate-global-python-argcomplete 2>/dev/null || {
-      echo "[INFO] Bash completion activation skipped. You can manually enable it with: activate-global-python-argcomplete"
-    }
+    activate-global-python-argcomplete 2>/dev/null || \
+      echo "[INFO] Bash completion activation skipped. Enable it manually with: activate-global-python-argcomplete"
+  elif command -v activate-global-python-argcomplete3 &>/dev/null; then
+    activate-global-python-argcomplete3 2>/dev/null || \
+      echo "[INFO] Bash completion activation skipped. Enable it manually with: activate-global-python-argcomplete3"
   else
-    # try older argcomplete3 version
-    if command -v activate-global-python-argcomplete3 &>/dev/null; then
-      activate-global-python-argcomplete3 2>/dev/null || {
-        echo "[INFO] Bash completion activation skipped. You can manually enable it with: activate-global-python-argcomplete3"
-      }
-    else
-      echo "[WARNING] Could not find argcomplete activation command. "\
-        "Argument completion will not work. Install python3-argcomplete package to enable it."
-    fi
+    echo "[WARNING] Could not find argcomplete activation command."\
+    "Argument completion will not work. Install python3-argcomplete to enable it."
   fi
 }
-
 
 case "$1" in
   ( configure )
-    do_install_amdsmi_python_lib
     do_ldconfig
+    do_activate_argcomplete
     do_configureLogrotate || exit 0
   ;;
   ( abort-upgrade | abort-remove | abort-deconfigure )
