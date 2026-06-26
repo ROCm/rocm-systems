@@ -392,6 +392,7 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= INDIRECT_CALL;
+  flags_ |= PC_OPERAND;
 }
 
 std::optional<int64_t> SCallB64Sopk::branch_offset_bytes() const {

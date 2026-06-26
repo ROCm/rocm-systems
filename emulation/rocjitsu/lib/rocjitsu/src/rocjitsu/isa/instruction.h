@@ -46,7 +46,9 @@ enum InstFlags : uint64_t {
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
   ACCVGPR = (1ULL << 10),
   /// @brief Destination update is conditional and must not kill the old value.
-  PREDICATED_DEF = (1ULL << 11)
+  PREDICATED_DEF = (1ULL << 11),
+  /// @brief Instruction includes PC as an operand
+  PC_OPERAND = (1ULL << 12)
 };
 
 class BasicBlock;
@@ -204,6 +206,11 @@ public:
   bool is_mfma() const { return flags_ & MFMA; }
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  /// @brief Whether this instruction reads or writes the program counter.
+  /// @retval true The instruction has the PC_OPERAND flag (OPR_PC operand).
+  /// @retval false The instruction does not access PC as an operand.
+  bool is_pc_operand() const { return flags_ & PC_OPERAND; }
 
   /// @brief Signed byte offset for a direct branch target.
   ///

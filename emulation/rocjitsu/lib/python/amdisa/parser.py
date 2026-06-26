@@ -864,6 +864,9 @@ class Parser:
                     continue
                 opcode = int(xs.get_node_text(opcode_node))
                 opnds = []
+                # Operands the spec declares implicit and are currently
+                # excluded from `opnds`.
+                implicit_opnds = []
                 for opnd in operands_node:
                     is_in = opnd.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true'
                     is_out = opnd.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true'
@@ -894,14 +897,33 @@ class Parser:
                                 order,
                             )
                         )
+                    else:
+                        implicit_opnds.append(
+                            Operand(
+                                '',
+                                opnd_size,
+                                opnd_type,
+                                is_in,
+                                is_out,
+                                is_implicit,
+                                is_bin_ucode_required,
+                                order,
+                            )
+                        )
                 opnds.sort(key=lambda x: x.order)
+                implicit_opnds.sort(key=lambda x: x.order)
 
                 enc = self.isa_spec.encoding_map[enc_name]
                 is_implied_literal = (
                     enc_name in self.isa_spec.alt_encs_with_implied_literal
                 )
                 inst = Instruction(
-                    inst_name, enc_name, opcode, opnds, is_implied_literal
+                    inst_name,
+                    enc_name,
+                    opcode,
+                    opnds,
+                    is_implied_literal,
+                    implicit_opnds,
                 )
 
                 # Implied-literal instructions go to the parent encoding's

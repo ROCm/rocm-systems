@@ -976,6 +976,7 @@ SCbranchGForkSop2::SCbranchGForkSop2(const MachineInst *inst)
     ssrc1 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= PC_OPERAND;
 }
 
 void SCbranchGForkSop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1025,6 +1026,7 @@ SRfeRestoreB64Sop2::SRfeRestoreB64Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= PC_OPERAND;
 }
 
 void SRfeRestoreB64Sop2::execute_impl(amdgpu::Wavefront &wf) {

@@ -5592,6 +5592,10 @@ class CodeGenerator:
                         'scalar_call',
                     ):
                         ctor_body_parts.append('flags_ |= INDIRECT_CALL;')
+                    # Instructions that read or write the program counter via an
+                    # implicit OPR_PC operand (e.g., s_getpc).
+                    if inst.has_implicit_operand('OPR_PC'):
+                        ctor_body_parts.append('flags_ |= PC_OPERAND;')
                     # Conditional scalar moves leave the destination unchanged
                     # when their predicate is false, so liveness cannot treat
                     # them as unconditional kills.

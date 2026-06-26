@@ -183,7 +183,9 @@ class Instruction(InstBase):
     Attributes:
         name: Name of the instruction.
         opcode: Opcode of the instruction.
-        operands: The instruction's operands.
+        operands: The instruction's explicit (FieldName-bearing) operands.
+        implicit_operands: The instruction's implicit operands (e.g. EXEC and
+            PC) and are not included in `operands`.
     """
 
     def __init__(
@@ -193,11 +195,23 @@ class Instruction(InstBase):
         opcode: int,
         operands: list[Operand],
         is_implied_literal_enc: bool = False,
+        implicit_operands: list[Operand] | None = None,
     ) -> None:
         super().__init__(enc_name, is_implied_literal_enc)
         self.name = name
         self.opcode = opcode
         self.operands = operands
+        self.implicit_operands = (
+            implicit_operands if implicit_operands is not None else []
+        )
+
+    def has_implicit_operand(self, operand_type: str) -> bool:
+        """Whether any implicit operand has the given type (e.g. ``'OPR_PC'``).
+
+        Implicit operands are the field-less, side-effect operands the spec
+        declares (EXEC, SCC, VCC, M0, PC, memory).
+        """
+        return any(op.operand_type == operand_type for op in self.implicit_operands)
 
     @cached_property
     def fmt_name(self) -> str:

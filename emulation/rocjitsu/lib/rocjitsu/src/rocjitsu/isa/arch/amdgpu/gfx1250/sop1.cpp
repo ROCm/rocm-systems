@@ -1592,6 +1592,7 @@ SGetPcI64Sop1::SGetPcI64Sop1(const MachineInst *inst)
   dst_operands_[0] = &sdst;
   num_src_ = 0;
   num_dst_ = 1;
+  flags_ |= PC_OPERAND;
 }
 
 void SGetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) { sdst.write_scalar64(wf, wf.pc + size_); }
@@ -1615,6 +1616,7 @@ SSetPcI64Sop1::SSetPcI64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   flags_ |= INDIRECT_BRANCH;
+  flags_ |= PC_OPERAND;
 }
 
 void SSetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) { wf.pc = ssrc0.read_scalar64(wf) - size_; }
@@ -1640,6 +1642,7 @@ SSwapPcI64Sop1::SSwapPcI64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   flags_ |= INDIRECT_CALL;
+  flags_ |= PC_OPERAND;
 }
 
 void SSwapPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1665,6 +1668,7 @@ SRfeI64Sop1::SRfeI64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= PC_OPERAND;
 }
 
 void SRfeI64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -1688,6 +1692,7 @@ SAddPcI64Sop1::SAddPcI64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   flags_ |= INDIRECT_BRANCH;
+  flags_ |= PC_OPERAND;
 }
 
 void SAddPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
