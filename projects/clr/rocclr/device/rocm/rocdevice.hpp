@@ -779,15 +779,8 @@ class Device : public NullDevice {
     uint64_t GetLoadMetric(hsa_queue_t* queue, uint32_t mode = 1) const {
       auto depth = GetHwQueueDepth(queue);
 
-      uint64_t dedicated_queue_penalty = 0;
-      if (hasDedicatedQueue_) {
-        // Scale with depth<<4, capped at 2048, so idle queue has zero penalty.
-        constexpr uint64_t kMaxPenalty = 2048;
-        dedicated_queue_penalty = std::min(kMaxPenalty, depth << 4);
-      }
-
       // Advanced weighted metric: Give queue depth significantly more weight than refCount
-      uint64_t metric = dedicated_queue_penalty + (depth << 4) + static_cast<uint64_t>(refCount);
+      uint64_t metric = (depth << 4) + static_cast<uint64_t>(refCount);
       return metric;
     }
   };
