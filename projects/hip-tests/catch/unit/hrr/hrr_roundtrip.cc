@@ -566,13 +566,14 @@ HIP_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
  *   - Capture Unit_HRR_UncapturedHostWrite_Direct: a mapped host flag is set by
  *     an uncaptured CPU store, then kDivergeIters kernels each write the flag
  *     value out and read it back.  Every replay D2H diverges (fresh zero flag).
- *   - Section 1 (guard ON): replay with a low divergence-abort threshold and a
- *     small min-samples count.  REQUIRE clean exit code 2 (replay diverged) —
- *     the guard stops the replay deterministically.  Directly validates the
- *     divergence-abort guard.
- *   - Section 2 (guard OFF): replay with HIP_HRR_REPLAY_DIVERGENCE_ABORT=0.
- *     REQUIRE the exit code is NOT 2 (it runs to completion / D2H-fail), proving
- *     the guard is what produces exit 2, not some unrelated error.
+ *   - Section 1 (guard ON): replay with a low divergence-abort threshold,
+ *     exact D2H validation, and a small min-samples count.  REQUIRE clean exit
+ *     code 2 (replay diverged) — the guard stops the replay deterministically.
+ *     Directly validates the divergence-abort guard.
+ *   - Section 2 (guard OFF): replay with HIP_HRR_REPLAY_DIVERGENCE_ABORT=0 and
+ *     exact D2H validation.  REQUIRE the exit code is NOT 2 (it runs to
+ *     completion / D2H-fail), proving the guard is what produces exit 2, not
+ *     some unrelated error.
  */
 HIP_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_divergence"};
@@ -582,6 +583,7 @@ HIP_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
     auto [ret, out] = hrr_playback_env(
         cap.path,
         {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0.25"},
+         {"HIP_HRR_D2H_EXACT", "1"},
          {"HIP_HRR_REPLAY_DIVERGENCE_MIN_SAMPLES", "16"}});
     INFO("Playback stdout:\n" << out);
     INFO("Playback exit code: " << ret);
@@ -593,7 +595,9 @@ HIP_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
 
   SECTION("guard OFF -> not exit 2") {
     auto [ret, out] = hrr_playback_env(
-        cap.path, {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"}});
+        cap.path,
+        {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"},
+         {"HIP_HRR_D2H_EXACT", "1"}});
     INFO("Playback stdout:\n" << out);
     INFO("Playback exit code: " << ret);
     // With the guard disabled the replay does not stop early: it either
