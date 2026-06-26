@@ -61,7 +61,6 @@ if(GPU_TARGETS)
   # Convert comma-separated string to CMake list (semicolon-separated)
   # This handles both -DGPU_TARGETS=gfx942,gfx950 and -DGPU_TARGETS="gfx942;gfx950"
   string(REPLACE "," ";" _GPU_TARGETS_LIST "${GPU_TARGETS}")
-  set(_GPU_TARGETS_LIST ${_GPU_TARGETS_LIST})
   strip_arch_features("${_GPU_TARGETS_LIST}" _BITCODE_DEFAULT_ARCHS)
 elseif(COMMAND rocm_local_targets)
   rocm_local_targets(_LOCAL_GPUS)
@@ -81,51 +80,19 @@ set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architecture
 # -target-feature flags to clang. These are embedded in the HSACO amdhsa.target
 # metadata string, which HIP validates when loading the module — a mismatch causes error 209.
 #
-# The arch list always comes from GPU_TARGETS/auto-detect. ROCSHMEM_GPU_TARGETS
-# is an optional env var that supplies feature suffixes for individual arches —
-# it acts as an overlay, not a replacement. For any arch listed in
-# ROCSHMEM_GPU_TARGETS the full string (with suffixes) is used; arches not
-# mentioned fall back to bare arch names from GPU_TARGETS or auto-detect.
-#
-# Example — building for five arches, providing suffixes for two:
-#   -DGPU_TARGETS="gfx90a;gfx1100;gfx1201;gfx942;gfx950"
-#   ROCSHMEM_GPU_TARGETS="gfx942:sramecc+:xnack-;gfx950:sramecc+:xnack-"
-#
-# If GPU_TARGETS itself already carries feature suffixes they are used directly
-# and ROCSHMEM_GPU_TARGETS is not needed.
-if(GPU_TARGETS)
-  set(_FULL_BASE_LIST ${_GPU_TARGETS_LIST})
+# GPU_TARGETS_FULL is set by the main CMakeLists.txt from the user-supplied
+# GPU_TARGETS value before rocm_check_target_ids strips feature suffixes.
+# When available, use it as the source of truth for per-arch feature strings.
+# Fall back to bare arch names when building with auto-detected GPUs (where
+# no suffix information is available without querying the hardware directly).
+if(GPU_TARGETS_FULL)
+  string(REPLACE "," ";" _GPU_TARGETS_FULL_LIST "${GPU_TARGETS_FULL}")
+  set(_BITCODE_FULL_LIST ${_GPU_TARGETS_FULL_LIST})
 else()
-  set(_FULL_BASE_LIST ${_BITCODE_DEFAULT_ARCHS})
+  set(_BITCODE_FULL_LIST ${_BITCODE_DEFAULT_ARCHS})
 endif()
-
-# Build a base->full map from ROCSHMEM_GPU_TARGETS (feature suffix overlay).
-if(DEFINED ENV{ROCSHMEM_GPU_TARGETS})
-  string(REPLACE "," ";" _ROCSHMEM_GPU_TARGETS_LIST "$ENV{ROCSHMEM_GPU_TARGETS}")
-  foreach(_entry ${_ROCSHMEM_GPU_TARGETS_LIST})
-    string(REGEX REPLACE ":.*" "" _entry_base "${_entry}")
-    set(_ROCSHMEM_ARCH_${_entry_base} "${_entry}")
-  endforeach()
-  message(STATUS "Device bitcode: ROCSHMEM_GPU_TARGETS feature overlay: $ENV{ROCSHMEM_GPU_TARGETS}")
-endif()
-
-# For each arch in the build list, prefer the overlay entry if one exists,
-# then the full string from GPU_TARGETS, then the bare arch name.
-set(_BITCODE_FULL_LIST "")
-foreach(_entry ${_FULL_BASE_LIST})
-  string(REGEX REPLACE ":.*" "" _base "${_entry}")
-  if(DEFINED _ROCSHMEM_ARCH_${_base})
-    list(APPEND _BITCODE_FULL_LIST "${_ROCSHMEM_ARCH_${_base}}")
-  else()
-    list(APPEND _BITCODE_FULL_LIST "${_entry}")
-  endif()
-endforeach()
-
 set(BITCODE_GPU_ARCHS_FULL "${_BITCODE_FULL_LIST}" CACHE STRING
   "Full GPU arch strings with feature suffixes for device bitcode (e.g. gfx950:sramecc+:xnack-)")
-
-message(STATUS "Device bitcode GPU archs (base):  ${BITCODE_GPU_ARCHS}")
-message(STATUS "Device bitcode GPU archs (full):  ${BITCODE_GPU_ARCHS_FULL}")
 
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and clang backend compilation.
