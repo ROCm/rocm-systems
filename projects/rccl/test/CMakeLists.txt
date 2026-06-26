@@ -253,7 +253,7 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
-      NetDevsPolicyTests.cpp
+      TopoEnvPolicyTests.cpp
       NetSocketTests.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
@@ -279,6 +279,7 @@ if(BUILD_TESTS)
     target_compile_options(rccl-UnitTestsFixturesDebug PRIVATE
       -fvisibility=hidden -fvisibility-inlines-hidden)
     # NetDevsPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
+    # TopoEnvPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
     # from the source tree (tools/topo_expl/models). Expose the test source dir
     # so they can build the path.
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE

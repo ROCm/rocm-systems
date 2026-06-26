@@ -994,11 +994,13 @@ class DeadlockAnalyzer:
             # The innermost deadlock frame is frame #0 when a known hint pattern
             # is present — highlight it so it stands out in deep call chains.
             hint_frame_idx = None
+            hint_frame_text = None
             if hint:
                 for idx, frame in enumerate(frames):
                     for substring, _ in _HINT_RULES:
                         if substring in frame:
                             hint_frame_idx = idx
+                            hint_frame_text = frame
                             break
                     if hint_frame_idx is not None:
                         break
@@ -1022,7 +1024,10 @@ class DeadlockAnalyzer:
                 other_wf_count += len(entries)
 
             if hint:
-                print(f'  {c.HINT}[HINT] {hint}{c.RESET}', file=out)
+                detected = f' (at: {hint_frame_text.strip()})' if hint_frame_text else ''
+                print(f'  {c.HINT}[HINT] {hint}{detected}{c.RESET}', file=out)
+            elif frames:
+                print(f'  {c.LOC}[STUCK] Innermost frame: {frames[0].strip()}{c.RESET}', file=out)
 
             print('', file=out)
 

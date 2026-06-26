@@ -221,6 +221,9 @@ Device::~Device() {
   delete xferQueue_;
   xferQueue_ = nullptr;
 
+  // Final drain of deferred destroys on the main thread before hsa_shut_down.
+  DrainDeferredQueueDestroys();
+
   for (auto& it : queuePool_) {
     for (auto qIter = it.begin(); qIter != it.end();) {
       hsa_queue_t* queue = qIter->first;
@@ -3173,6 +3176,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   bool dedicated_queue, hsa_queue_t* preferred,
                                   const std::unordered_set<uint64_t>* excluded_ids,
                                   void** metadata_ring_buffer) {
+  // App-thread context: flush queues deferred from the async thread once they
+  // reach the batch threshold, bounding live deferred queues.
+  if (DeferredQueueCount() >= kDeferredQueueDrainThreshold) {
+    DrainDeferredQueueDestroys();
+  }
+
   hsa_amd_queue_priority_t queue_priority;
   uint qIndex;
   switch (priority) {
@@ -3464,8 +3473,36 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
   // hsa queues with cumask set and coop queues are not being reused. Hence, if the app uses such
   // queues, we need to destroy them when the queue is released.
   if (!cuMask.empty() || coop_queue) {
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
-            queue->base_address);
+    // On the async-events thread a non-coop ~AqlQueue self-deadlocks; defer it to an app thread.
+    // Coop queues are recycled synchronously via GWSRelease, so never defer them.
+    if (InAsyncSignalHandler() && !coop_queue) {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deferring CG enabled hardware queue %p destroy",
+              queue->base_address);
+      std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
+      deferredQueueDestroy_.push_back(queue);
+    } else {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
+              queue->base_address);
+      Hsa::queue_destroy(queue);
+    }
+  }
+}
+
+size_t Device::DeferredQueueCount() {
+  std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
+  return deferredQueueDestroy_.size();
+}
+
+void Device::DrainDeferredQueueDestroys() {
+  // Swap out the batch under lock, then destroy without holding it: queue_destroy
+  // is blocking and may run runtime callbacks.
+  std::vector<hsa_queue_t*> pending;
+  {
+    std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
+    pending.swap(deferredQueueDestroy_);
+  }
+  for (hsa_queue_t* queue : pending) {
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p", queue->base_address);
     Hsa::queue_destroy(queue);
   }
 }
