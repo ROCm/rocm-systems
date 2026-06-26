@@ -5,6 +5,8 @@
 #include "halt_snapshot_plugin.h"
 
 #include "embedded_schema.h"
+#include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
@@ -166,6 +168,58 @@ void step_until_halted(simdojo::SimulationEngine &engine,
     else if (saw_work)
       break;
   }
+}
+
+std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_offset,
+                                                   std::string_view symbol_name) {
+  constexpr uint64_t dyn_offset = 0x100;
+  constexpr uint64_t symtab_offset = 0x200;
+  constexpr uint64_t strtab_offset = 0x300;
+  constexpr uint64_t hash_offset = 0x380;
+
+  std::vector<uint8_t> image(4096, 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = 1;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  Elf64_Phdr phdr{};
+  phdr.p_type = PT_DYNAMIC;
+  phdr.p_vaddr = dyn_offset;
+  phdr.p_memsz = 5 * sizeof(Elf64_Dyn);
+  std::memcpy(image.data() + ehdr.e_phoff, &phdr, sizeof(phdr));
+
+  auto *dyn = reinterpret_cast<Elf64_Dyn *>(image.data() + dyn_offset);
+  dyn[0].d_tag = DT_SYMTAB;
+  dyn[0].d_un.d_val = symtab_offset;
+  dyn[1].d_tag = DT_STRTAB;
+  dyn[1].d_un.d_val = strtab_offset;
+  dyn[2].d_tag = DT_STRSZ;
+  dyn[2].d_un.d_val = symbol_name.size() + 2;
+  dyn[3].d_tag = DT_HASH;
+  dyn[3].d_un.d_val = hash_offset;
+  dyn[4].d_tag = DT_NULL;
+
+  image[strtab_offset] = '\0';
+  std::memcpy(image.data() + strtab_offset + 1, symbol_name.data(), symbol_name.size());
+
+  auto *sym = reinterpret_cast<Elf64_Sym *>(image.data() + symtab_offset);
+  sym[1].st_name = 1;
+  sym[1].st_value = kernel_descriptor_offset;
+
+  auto *hash = reinterpret_cast<uint32_t *>(image.data() + hash_offset);
+  hash[1] = 2; // nchain: null symbol + kernel descriptor symbol.
+
+  return image;
 }
 
 TEST(GpuMemoryTest, ReadWriteRoundTrip) {
@@ -340,6 +394,48 @@ TEST(RdnaDispatchTest, WgpModeRequiresConfiguredSiblingCuPair) {
   queue.dispatch(ko, 64, 64);
 
   EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+}
+
+TEST(GpuMemoryTest, FindHostRangeUsesVmidPageTable) {
+  amdgpu::GpuMemory mem("vmid_range_mem");
+  KfdProcess process(/*process_id=*/123);
+  std::vector<uint8_t> backing(3 * amdgpu::GpuMemory::PAGE_SIZE);
+  constexpr uint64_t gpu_va = 0x100000;
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(gpu_va, backing.data(), backing.size());
+
+  auto [host_base, size] =
+      mem.find_host_range(gpu_va + amdgpu::GpuMemory::PAGE_SIZE + 0x123, process.process_id());
+  EXPECT_EQ(host_base, reinterpret_cast<uint64_t>(backing.data()));
+  EXPECT_EQ(size, backing.size());
+
+  mem.unregister_process(process.process_id());
+}
+
+TEST(GpuMemoryTest, VmidMappedKernelSymbolUsesTranslatedHostPointer) {
+  amdgpu::GpuMemory mem("vmid_kernel_symbol_mem");
+  KfdProcess process(/*process_id=*/124);
+  constexpr uint64_t gpu_va = 0x5400200000;
+  constexpr uint64_t kernel_descriptor_offset = 0x800;
+  auto image = make_loaded_kernel_symbol_elf(kernel_descriptor_offset, "vmid_kernel.kd");
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(gpu_va, image.data(), image.size());
+
+  uint64_t kernel_object = gpu_va + kernel_descriptor_offset;
+  auto [host_base, host_size] = mem.find_host_range(kernel_object, process.process_id());
+  ASSERT_NE(host_base, 0u);
+  auto *mapped_page = mem.translate_debug(kernel_object, process.process_id());
+  ASSERT_NE(mapped_page, nullptr);
+  auto *kernel_object_host = mapped_page + (kernel_object & amdgpu::GpuMemory::PAGE_MASK);
+
+  EXPECT_NE(reinterpret_cast<uint64_t>(kernel_object_host), kernel_object);
+  EXPECT_EQ(find_kernel_symbol(kernel_object_host, reinterpret_cast<const uint8_t *>(host_base),
+                               host_size),
+            "vmid_kernel");
+
+  mem.unregister_process(process.process_id());
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {

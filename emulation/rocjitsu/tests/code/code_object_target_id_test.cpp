@@ -17,6 +17,7 @@
 // \NPI new GPU: extend these tests with its MACH/triple -> target mapping.
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <gtest/gtest.h>
@@ -242,6 +243,19 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx1201ForBasicBlockList) {
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx1250ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250);
+}
+
+TEST(KernelSymbolTest, DemanglesMangledKernelSymbol) {
+  EXPECT_EQ(demangle_kernel_symbol("_Z11racy_kernelPKfPf"), "racy_kernel(float const*, float*)");
+}
+
+TEST(KernelSymbolTest, DisplayNameIsHeaderSafe) {
+  EXPECT_EQ(kernel_display_name("_Z11racy_kernelPKfPf"), "racy_kernel");
+  EXPECT_EQ(kernel_display_name("_ZN2at6native29vectorized_elementwise_kernelILi4ENS0_"
+                                "15CUDAFunctor_addIfEESt5arrayIPcLm3EEEEviT0_T1_"),
+            "at::native::vectorized_elementwise_kernel<4,at::native::CUDAFunctor_add<float>,std::"
+            "array<char*,3ul>>");
+  EXPECT_EQ(kernel_display_name("__amd_rocclr_copyBuffer"), "__amd_rocclr_copyBuffer");
 }
 
 } // namespace

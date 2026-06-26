@@ -5,6 +5,9 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 
+#include <cctype>
+#include <cstdlib>
+#include <cxxabi.h>
 #include <string_view>
 
 namespace rocjitsu {
@@ -133,6 +136,33 @@ std::string find_kernel_symbol(const uint8_t *kernel_object_ptr, const uint8_t *
       return best_name;
   }
   return {};
+}
+
+std::string demangle_kernel_symbol(std::string_view symbol) {
+  if (symbol.empty())
+    return {};
+
+  std::string symbol_string(symbol);
+  int status = 0;
+  char *demangled = abi::__cxa_demangle(symbol_string.c_str(), nullptr, nullptr, &status);
+  if (status != 0 || demangled == nullptr)
+    return symbol_string;
+
+  std::string result(demangled);
+  std::free(demangled);
+  return result;
+}
+
+std::string kernel_display_name(std::string_view symbol) {
+  std::string result = demangle_kernel_symbol(symbol);
+  size_t parenthesis_position = result.find('(');
+  if (parenthesis_position != std::string::npos)
+    result.resize(parenthesis_position);
+  if (result.starts_with("void "))
+    result.erase(0, 5);
+
+  std::erase_if(result, [](unsigned char c) { return std::isspace(c); });
+  return result;
 }
 
 } // namespace rocjitsu
