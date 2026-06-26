@@ -159,7 +159,6 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   const size_t sizeof_addrRangeUnmapped = 10 * granule_size;
   const size_t sizeof_addrRange = 20 * granule_size;
 
-  // AIEs do not map CPU memory, so skip AIE-specific steps for CPU pools
   const bool is_cpu_pool = (ag_type == HSA_DEVICE_TYPE_CPU);
 
   ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
