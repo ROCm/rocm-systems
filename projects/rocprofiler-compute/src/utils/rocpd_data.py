@@ -1,6 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+from __future__ import annotations
+
 import csv
 import sqlite3
 from contextlib import ExitStack, closing
@@ -100,69 +102,98 @@ def convert_dbs_to_csv(
                         )
 
 
-def update_rocpd_pmc_events(counter_info: list[dict], rocpd_db_path: str) -> None:
-    """Updates pmc_event table in the given rocpd database path."""
+def update_rocpd_pmc_events(
+    counter_csv_path: str,
+    rocpd_db_path: str,
+    batch_size: int = 50_000,
+) -> None:
+    """Stream counter CSV in batches into the rocpd pmc_event table."""
     try:
         with closing(sqlite3.connect(rocpd_db_path)) as conn:
-            # Get pmc_event table name
-            with closing(
-                conn.execute(
-                    TABLE_NAME_PREFIX_QUERY.format(
-                        table_name_prefix=ROCPD_PMC_EVENT_TABLE_NAME_PREFIX
-                    )
-                )
-            ) as cursor:
-                table_name = cursor.fetchone()
-            if table_name is None:
-                console_error("No pmc_event table found in the rocpd database")
-            table_name = table_name[0]
-
-            # get pmc_event table data
-            guid = table_name[len(ROCPD_PMC_EVENT_TABLE_NAME_PREFIX) :].replace(
-                "_", "-"
-            )
-            # Map dispatch_id to event_id from rocpd_kernel_dispatch
-            # Native counter collection CSV has dispatch_id, but schema needs event_id
-            # event_id may differ from dispatch_id when marker API tracing is enabled
-            with closing(conn.execute(KERNEL_DISPATCH_QUERY, (guid,))) as cursor:
-                db_rows = cursor.fetchall()
-            if not db_rows:
-                console_error("No kernel dispatch data found.")
+            metadata = _resolve_pmc_event_metadata(conn)
+            if metadata is None:
                 return
-            # DB output (numeric) converted to str to align with counter_info
-            dispatch_to_event = {
-                str(dispatch_id): str(event_id) for dispatch_id, event_id, _ in db_rows
-            }
-
-            # Map dispatch_id to event_id for each row
-            # Create new event_id column without destroying dispatch_id
-            for row in counter_info:
-                dispatch_id = row.get("dispatch_id")
-                row["event_id"] = dispatch_to_event.get(dispatch_id)
+            table_name, guid, dispatch_to_event = metadata
 
             columns = ("guid", "event_id", "pmc_id", "value")
-            values = [
-                (
-                    guid,
-                    row.get("event_id"),
-                    row.get("counter_id"),
-                    row.get("counter_value"),
-                )
-                for row in counter_info
-            ]
+            placeholders = ", ".join(["?"] * len(columns))
+            insert_sql = INSERT_QUERY.format(
+                table_name=table_name,
+                columns=", ".join(columns),
+                placeholders=placeholders,
+            )
 
-            # insert into pmc_event table
-            with conn:
-                placeholders = ", ".join(["?"] * len(columns))
-                conn.executemany(
-                    INSERT_QUERY.format(
-                        table_name=table_name,
-                        columns=", ".join(columns),
-                        placeholders=placeholders,
-                    ),
-                    values,
-                )
+            _stream_csv_to_pmc_event_table(
+                conn,
+                counter_csv_path,
+                insert_sql,
+                guid,
+                dispatch_to_event,
+                batch_size,
+            )
     except OSError as e:
         console_error(f"Database error while updating pmc_event table: {e}")
     except Exception as e:
         console_error(f"Unexpected error updating pmc_event table: {e}")
+
+
+def _resolve_pmc_event_metadata(
+    conn: sqlite3.Connection,
+) -> tuple[str, str, dict[str, str]] | None:
+    """Return (table_name, guid, dispatch_to_event) or None on failure."""
+    with closing(
+        conn.execute(
+            TABLE_NAME_PREFIX_QUERY.format(
+                table_name_prefix=ROCPD_PMC_EVENT_TABLE_NAME_PREFIX
+            )
+        )
+    ) as cursor:
+        table_name = cursor.fetchone()
+
+    if table_name is None:
+        console_error("No pmc_event table found in the rocpd database")
+        return None
+    table_name = table_name[0]
+
+    guid = table_name[len(ROCPD_PMC_EVENT_TABLE_NAME_PREFIX) :].replace("_", "-")
+
+    # event_id may differ from dispatch_id when marker API tracing is enabled
+    with closing(conn.execute(KERNEL_DISPATCH_QUERY, (guid,))) as cursor:
+        db_rows = cursor.fetchall()
+
+    if not db_rows:
+        console_error("No kernel dispatch data found.")
+        return None
+
+    dispatch_to_event = {
+        str(dispatch_id): str(event_id) for dispatch_id, event_id, _ in db_rows
+    }
+    return table_name, guid, dispatch_to_event
+
+
+def _stream_csv_to_pmc_event_table(
+    conn: sqlite3.Connection,
+    counter_csv_path: str,
+    insert_sql: str,
+    guid: str,
+    dispatch_to_event: dict[str, str],
+    batch_size: int,
+) -> None:
+    """Read counter CSV in batches and insert into the pmc_event table."""
+    batch: list[tuple[str | None, ...]] = []
+    with conn:
+        with open(counter_csv_path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                event_id = dispatch_to_event.get(row.get("dispatch_id", ""))
+                batch.append((
+                    guid,
+                    event_id,
+                    row.get("counter_id"),
+                    row.get("counter_value"),
+                ))
+                if len(batch) >= batch_size:
+                    conn.executemany(insert_sql, batch)
+                    batch.clear()
+
+        if batch:
+            conn.executemany(insert_sql, batch)

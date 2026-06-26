@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import csv
 import fcntl
 import importlib
 import os
@@ -297,9 +298,8 @@ def run_prof(
                         f"skipping rocpd update for {db_name}."
                     )
                     continue
-                counter_rows, _ = csv_ops.read_csv_as_dicts(str(counter_csv))
                 rocpd_data.update_rocpd_pmc_events(
-                    counter_rows,
+                    str(counter_csv),
                     str(db_name),
                 )
                 console_debug(f"Updated rocpd db {db_name} with native tool counters.")
@@ -675,29 +675,17 @@ def v3_counter_csv_to_v2_csv(
 
 
 def convert_native_counter_collection_csv(workload_dir: str) -> None:
+    """Convert native counter CSVs to rocprofiler-sdk format.
+
+    Joins native counter data with kernel trace data and writes
+    counter_collection CSVs for further processing to pmc_perf.csv.
     """
-    Use native counter collection csv and rocprofiler-sdk kernel
-    trace to write counter collection csv in rocprofiler-sdk format
-    for further processing to pmc_perf.csv file
-    """
+    groupby_columns = ("dispatch_id", "counter_name")
+
     for native_path in (Path(workload_dir) / "out/pmc_1").glob(
         "*_native_counter_collection.csv"
     ):
-        counter_data, _ = csv_ops.read_csv_as_dicts(str(native_path))
-        # Group by on dispatch_id and counter_id and sum the counter_value,
-        # Other rows in group have the same value, so take the first one
-        groupby_cols = ["dispatch_id", "counter_name"]
-        if counter_data:
-            agg_dict = {
-                col: "first"
-                for col in counter_data[0].keys()
-                if col not in groupby_cols
-            }
-        else:
-            agg_dict = {}
-        # Overwrite counter_value aggregation to sum
-        agg_dict["counter_value"] = "sum"
-        counter_data = csv_ops.groupby_aggregate(counter_data, groupby_cols, agg_dict)
+        groups = _stream_aggregate_counter_csv(native_path, groupby_columns)
 
         pid = native_path.stem.split("_")[0]
         kernel_data_filename = str(
@@ -705,53 +693,85 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
         )
         kernel_data, _ = csv_ops.read_csv_as_dicts(kernel_data_filename)
 
-        # Merge counter_data with kernel_data on dispatch_id
-        merged_data = csv_ops.merge_rows(
-            counter_data,
-            kernel_data,
-            left_on="dispatch_id",
-            right_on="Dispatch_Id",
-            how="inner",
-        )
+        kernel_lookup: dict[str, list[dict]] = {}
+        for kernel_row in kernel_data:
+            dispatch_id = kernel_row.get("Dispatch_Id", "")
+            kernel_lookup.setdefault(dispatch_id, []).append(kernel_row)
 
-        # Build new rows with calculated columns
-        rocprofv3_counter_data = []
-        for row in merged_data:
-            new_row = {
-                "Correlation_Id": row.get("Correlation_Id"),
-                "Dispatch_Id": row.get("dispatch_id"),
-                "Agent_Id": row.get("Agent_Id"),
-                "Queue_Id": row.get("Queue_Id"),
-                "Process_Id": row.get("Thread_Id"),
-                "Thread_Id": row.get("Thread_Id"),
-                "Grid_Size": (
-                    int(row.get("Grid_Size_X", 1))
-                    * int(row.get("Grid_Size_Y", 1))
-                    * int(row.get("Grid_Size_Z", 1))
-                ),
-                "Kernel_Id": row.get("Kernel_Id"),
-                "Kernel_Name": row.get("Kernel_Name"),
-                "Workgroup_Size": (
-                    int(row.get("Workgroup_Size_X", 1))
-                    * int(row.get("Workgroup_Size_Y", 1))
-                    * int(row.get("Workgroup_Size_Z", 1))
-                ),
-                "LDS_Block_Size": row.get("LDS_Block_Size"),
-                "Scratch_Size": row.get("Scratch_Size"),
-                "VGPR_Count": row.get("VGPR_Count"),
-                "Accum_VGPR_Count": row.get("Accum_VGPR_Count"),
-                "SGPR_Count": row.get("SGPR_Count"),
-                "Counter_Name": row.get("counter_name"),
-                "Counter_Value": row.get("counter_value"),
-                "Start_Timestamp": row.get("Start_Timestamp"),
-                "End_Timestamp": row.get("End_Timestamp"),
-            }
-            rocprofv3_counter_data.append(new_row)
+        rocprofv3_counter_data = _build_rocprofv3_counter_rows(groups, kernel_lookup)
 
         csv_ops.write_csv_from_dicts(
             kernel_data_filename.replace("kernel_trace", "counter_collection"),
             rocprofv3_counter_data,
         )
+
+
+def _stream_aggregate_counter_csv(
+    csv_path: Path,
+    groupby_columns: tuple[str, ...],
+) -> dict[tuple[str, ...], dict]:
+    """Stream CSV and group rows by key columns, summing counter_value."""
+    groups: dict[tuple[str, ...], dict] = {}
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            key = tuple(row.get(col, "") for col in groupby_columns)
+            if key not in groups:
+                try:
+                    row["counter_value"] = float(row.get("counter_value", 0))
+                except (ValueError, TypeError):
+                    row["counter_value"] = 0.0
+                groups[key] = row
+                continue
+            try:
+                groups[key]["counter_value"] += float(row.get("counter_value", 0))
+            except (ValueError, TypeError):
+                pass
+    return groups
+
+
+def _build_rocprofv3_counter_rows(
+    groups: dict[tuple[str, ...], dict],
+    kernel_lookup: dict[str, list[dict]],
+) -> list[dict]:
+    """Inner-join grouped counter data with kernel trace data."""
+    rows = []
+    for group_row in groups.values():
+        dispatch_id = group_row.get("dispatch_id", "")
+        matching_kernels = kernel_lookup.get(dispatch_id)
+        if matching_kernels is None:
+            continue
+        for kernel_row in matching_kernels:
+            merged = {**group_row, **kernel_row}
+            rows.append({
+                "Correlation_Id": merged.get("Correlation_Id"),
+                "Dispatch_Id": dispatch_id,
+                "Agent_Id": merged.get("Agent_Id"),
+                "Queue_Id": merged.get("Queue_Id"),
+                "Process_Id": merged.get("Thread_Id"),
+                "Thread_Id": merged.get("Thread_Id"),
+                "Grid_Size": (
+                    int(merged.get("Grid_Size_X", 1))
+                    * int(merged.get("Grid_Size_Y", 1))
+                    * int(merged.get("Grid_Size_Z", 1))
+                ),
+                "Kernel_Id": merged.get("Kernel_Id"),
+                "Kernel_Name": merged.get("Kernel_Name"),
+                "Workgroup_Size": (
+                    int(merged.get("Workgroup_Size_X", 1))
+                    * int(merged.get("Workgroup_Size_Y", 1))
+                    * int(merged.get("Workgroup_Size_Z", 1))
+                ),
+                "LDS_Block_Size": merged.get("LDS_Block_Size"),
+                "Scratch_Size": merged.get("Scratch_Size"),
+                "VGPR_Count": merged.get("VGPR_Count"),
+                "Accum_VGPR_Count": merged.get("Accum_VGPR_Count"),
+                "SGPR_Count": merged.get("SGPR_Count"),
+                "Counter_Name": merged.get("counter_name"),
+                "Counter_Value": merged.get("counter_value"),
+                "Start_Timestamp": merged.get("Start_Timestamp"),
+                "End_Timestamp": merged.get("End_Timestamp"),
+            })
+    return rows
 
 
 def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list[str]:
