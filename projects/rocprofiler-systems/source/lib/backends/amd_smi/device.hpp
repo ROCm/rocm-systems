@@ -27,14 +27,14 @@ using gpu::populate_if_supported;
 
 // SDMA process-list methods — only required when the wrapper declares sdma_supported.
 template <typename T>
-concept sdma_session_contract = requires { typename T::proc_info_t; } &&
-                                requires(T sess, typename T::processor_handle ph,
-                                         std::uint32_t* cp, typename T::proc_info_t* pp) {
-                                    {
-                                        sess.try_get_gpu_process_list(ph, cp, pp)
-                                    } -> std::convertible_to<bool>;
-                                    { sess.get_gpu_process_list(ph, cp, pp) };
-                                };
+concept sdma_session_contract = requires {
+    typename T::proc_info_t;
+} && requires(T sess, typename T::processor_handle ph) {
+    { sess.probe_sdma_support(ph) } -> std::convertible_to<bool>;
+    {
+        sess.get_gpu_process_list(ph)
+    } -> std::same_as<std::vector<typename T::proc_info_t>>;
+};
 
 /**
  * @brief Concept that a Backend session type passed to device must satisfy.
@@ -165,12 +165,7 @@ public:
     // sdma_supported == false so callers need no #ifdef.
     [[nodiscard]] bool probe_sdma_gpu_support() const noexcept
     {
-        if constexpr(sdma_supported)
-        {
-            std::uint32_t count = 0;
-            return m_session->try_get_gpu_process_list(
-                m_handle, &count, static_cast<typename Backend::proc_info_t*>(nullptr));
-        }
+        if constexpr(sdma_supported) return m_session->probe_sdma_support(m_handle);
         return false;
     }
 
@@ -178,25 +173,13 @@ public:
     {
         if constexpr(Backend::sdma_supported)
         {
-            std::uint32_t count = 0;
-            if(!m_session->try_get_gpu_process_list(
-                   m_handle, &count,
-                   static_cast<typename Backend::proc_info_t*>(nullptr)) ||
-               count == 0)
-                return 0;
-
-            std::vector<typename Backend::proc_info_t> procs(count);
-            m_session->get_gpu_process_list(m_handle, &count, procs.data());
-
             std::uint64_t cumulative = 0;
+            auto          procs      = m_session->get_gpu_process_list(m_handle);
             for(const auto& proc : procs)
                 cumulative += proc.sdma_usage;
             return cumulative;
         }
-        else
-        {
-            return 0;
-        }
+        return 0;
     }
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1

@@ -650,14 +650,14 @@ TEST_F(DeviceBackendTest, get_raw_sdma_usage_returns_zero_when_no_processes)
     EXPECT_EQ(sut.get_raw_sdma_usage(), 0U);
 }
 
-TEST_F(DeviceBackendTest, get_raw_sdma_usage_returns_zero_when_count_fails)
+TEST_F(DeviceBackendTest, get_raw_sdma_usage_throws_when_count_fails)
 {
     EXPECT_CALL(*testing::g_mock_backend,
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(Return(k_err));
 
     DeviceSut sut{ m_session, k_handle };
-    EXPECT_EQ(sut.get_raw_sdma_usage(), 0U);
+    EXPECT_THROW(static_cast<void>(sut.get_raw_sdma_usage()), std::runtime_error);
 }
 
 TEST_F(DeviceBackendTest, get_raw_sdma_usage_accumulates_sdma_usage)

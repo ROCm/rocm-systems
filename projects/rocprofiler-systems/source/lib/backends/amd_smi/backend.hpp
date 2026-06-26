@@ -257,26 +257,33 @@ public:
         return temperature;
     }
 
-    [[nodiscard]] bool try_get_gpu_process_list(processor_handle h, std::uint32_t* count,
-                                                auto* list) const noexcept
+    [[nodiscard]] bool probe_sdma_support(processor_handle h) const noexcept
     {
         if constexpr(sdma_supported)
         {
-            return m_amdsmi.get_gpu_process_list(h, count, list) == STATUS_SUCCESS;
+            std::uint32_t count = 0;
+            return m_amdsmi.get_gpu_process_list(
+                       h, &count, static_cast<typename Wrapper::proc_info_t*>(nullptr)) ==
+                   STATUS_SUCCESS;
         }
-        else
-        {
-            return false;
-        }
+        return false;
     }
 
-    void get_gpu_process_list(processor_handle h, std::uint32_t* count, auto* list) const
+    [[nodiscard]] std::vector<typename Wrapper::proc_info_t> get_gpu_process_list(
+        processor_handle h) const
     {
         if constexpr(sdma_supported)
         {
-            check_status(m_amdsmi.get_gpu_process_list(h, count, list),
-                         "amdsmi_get_gpu_process_list");
+            std::uint32_t count = 0;
+            check_status(m_amdsmi.get_gpu_process_list(h, &count, nullptr),
+                         "amdsmi_get_gpu_process_list (count)");
+            if(count == 0) return {};
+            std::vector<typename Wrapper::proc_info_t> procs(count);
+            check_status(m_amdsmi.get_gpu_process_list(h, &count, procs.data()),
+                         "amdsmi_get_gpu_process_list (data)");
+            return procs;
         }
+        return {};
     }
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1

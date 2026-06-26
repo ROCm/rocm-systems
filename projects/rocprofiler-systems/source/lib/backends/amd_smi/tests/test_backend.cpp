@@ -424,61 +424,58 @@ TEST_F(BackendTest, get_temp_metric_error_message_contains_function_name)
 // SDMA forwarding
 // ─────────────────────────────────────────────────────────────────────────────
 
-TEST_F(BackendTest, try_get_gpu_process_list_returns_true_on_success)
+TEST_F(BackendTest, probe_sdma_support_returns_true_on_success)
 {
-    std::uint32_t count = 0;
     EXPECT_CALL(*testing::g_mock_backend,
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<1>(0U), Return(k_ok)));
-    EXPECT_TRUE(m_session.try_get_gpu_process_list(
-        k_handle, &count, static_cast<sut_t::proc_info_t*>(nullptr)));
+    EXPECT_TRUE(m_session.probe_sdma_support(k_handle));
 }
 
-TEST_F(BackendTest, try_get_gpu_process_list_returns_false_on_failure)
+TEST_F(BackendTest, probe_sdma_support_returns_false_on_failure)
 {
-    std::uint32_t count = 0;
     EXPECT_CALL(*testing::g_mock_backend,
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(Return(k_err));
-    EXPECT_FALSE(m_session.try_get_gpu_process_list(
-        k_handle, &count, static_cast<sut_t::proc_info_t*>(nullptr)));
+    EXPECT_FALSE(m_session.probe_sdma_support(k_handle));
 }
 
-TEST_F(BackendTest, get_gpu_process_list_calls_backend_method)
+TEST_F(BackendTest, get_gpu_process_list_returns_process_vector)
 {
-    testing::mock_proc_info_t procs[1] = { { .sdma_usage = 500 } };
-    std::uint32_t             count    = 1;
+    const testing::mock_proc_info_t procs[] = { { .sdma_usage = 500 } };
+    InSequence                      seq;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(1U), Return(k_ok)));
     EXPECT_CALL(*testing::g_mock_backend,
                 get_gpu_process_list(k_handle, NotNull(), NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(1U), SetArrayArgument<2>(procs, procs + 1),
                         Return(k_ok)));
 
-    testing::mock_proc_info_t out{};
-    m_session.get_gpu_process_list(k_handle, &count, &out);
-    EXPECT_EQ(out.sdma_usage, 500U);
+    auto result = m_session.get_gpu_process_list(k_handle);
+    ASSERT_EQ(result.size(), 1U);
+    EXPECT_EQ(result[0].sdma_usage, 500U);
 }
 
 TEST_F(BackendTest, get_gpu_process_list_throws_on_backend_error)
 {
-    std::uint32_t             count = 0;
-    testing::mock_proc_info_t out{};
-    EXPECT_CALL(*testing::g_mock_backend, get_gpu_process_list(k_handle, _, _))
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(Return(k_err));
-    EXPECT_THROW(m_session.get_gpu_process_list(k_handle, &count, &out),
+    EXPECT_THROW(static_cast<void>(m_session.get_gpu_process_list(k_handle)),
                  std::runtime_error);
 }
 
 TEST_F(BackendTest, get_gpu_process_list_error_message_contains_function_name)
 {
-    std::uint32_t             count = 0;
-    testing::mock_proc_info_t out{};
-    EXPECT_CALL(*testing::g_mock_backend, get_gpu_process_list(k_handle, _, _))
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(Return(k_err));
     EXPECT_THROW(
         {
             try
             {
-                m_session.get_gpu_process_list(k_handle, &count, &out);
+                static_cast<void>(m_session.get_gpu_process_list(k_handle));
             } catch(const std::runtime_error& ex)
             {
                 EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_process_list"));
