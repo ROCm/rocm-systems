@@ -1,11 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from __future__ import annotations
-
 import csv
 import sqlite3
 from contextlib import ExitStack, closing
+from typing import Optional
 
 from utils.logger import console_error
 
@@ -139,7 +138,7 @@ def update_rocpd_pmc_events(
 
 def _resolve_pmc_event_metadata(
     conn: sqlite3.Connection,
-) -> tuple[str, str, dict[str, str]] | None:
+) -> Optional[tuple[str, str, dict[str, str]]]:
     """Return (table_name, guid, dispatch_to_event) or None on failure."""
     with closing(
         conn.execute(
@@ -180,7 +179,7 @@ def _stream_csv_to_pmc_event_table(
     batch_size: int,
 ) -> None:
     """Read counter CSV in batches and insert into the pmc_event table."""
-    batch: list[tuple[str | None, ...]] = []
+    batch: list[tuple[Optional[str], ...]] = []
     with conn:
         with open(counter_csv_path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
