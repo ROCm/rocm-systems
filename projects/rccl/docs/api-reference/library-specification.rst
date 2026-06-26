@@ -37,11 +37,11 @@ Communicator suspend and resume
 These functions release and reacquire the resources held by a communicator
 that is temporarily idle, and report per-communicator memory statistics. They
 are useful when an application wants to free GPU memory held by an inactive
-communicator and later resume collective operations on the same communicator.
+communicator, and then later resume collective operations on the same communicator.
 
 Releasing the physical backing of a suspended communicator requires virtual
 memory management (VMM) support enabled through ``NCCL_CUMEM_ENABLE``. Without
-it, ``ncclCommSuspend`` and ``ncclCommResume`` succeed but do not release GPU
+it, ``ncclCommSuspend`` and ``ncclCommResume`` succeed but don't release GPU
 memory. See :ref:`suspend-resume` for the full list of prerequisites.
 
 Use ``ncclGroupStart`` and ``ncclGroupEnd`` when suspending or resuming multiple

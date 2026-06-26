@@ -233,7 +233,7 @@ A long-lived application can hold several RCCL communicators that are only used
 during specific phases. While a communicator is idle, the GPU memory it holds
 for channel buffers, transport FIFOs, and similar resources stays reserved and
 is unavailable to the rest of the application. RCCL provides an API to release
-those resources while a communicator is idle and to reacquire them later,
+those resources while a communicator is idle and to reacquire them later
 without destroying and recreating the communicator.
 
 The relevant functions, declared in ``rccl.h``, are described in full in
@@ -241,7 +241,7 @@ The relevant functions, declared in ``rccl.h``, are described in full in
 
 - ``ncclCommSuspend`` releases the resources selected by its ``flags``
   argument. Pass ``NCCL_SUSPEND_MEM`` to release dynamic GPU memory
-  allocations. After this call the communicator cannot be used until it is
+  allocations. After this call, the communicator can't be used until it's
   resumed.
 - ``ncclCommResume`` reacquires every resource that the matching
   ``ncclCommSuspend`` call released, after which the communicator can run
@@ -266,7 +266,7 @@ support. VMM is available only when all of the following conditions are met:
 - The GPU and driver report VMM support.
 
 Without VMM support, ``ncclCommSuspend`` and ``ncclCommResume`` still succeed,
-but they cannot release the physical GPU memory, so the operation is
+but they can't release the physical GPU memory, so the operation is
 effectively a no-op.
 
 Example

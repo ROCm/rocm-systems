@@ -328,6 +328,7 @@ TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
 }
 
 TEST(amdsmitstReadWrite, TestComputePartitionMemAllocModeReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestComputePartitionMemAllocModeReadWrite tst;
   RunGenericTest(&tst);
@@ -354,6 +355,7 @@ TEST(amdsmitstReadOnly, TestGPUCacheRead) {
 
 TEST(amdsmitstReadWrite, TestMemoryReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestMemoryReadWrite tst;
   RunGenericTest(&tst);
 }

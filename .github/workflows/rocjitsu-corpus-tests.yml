@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/06/16.
-        default: "dc70e0519b3587543e3892149207b7658f04b56b"
+        # Last updated on 2026/06/23.
+        default: "34a1241bb374307d24c5aee93c9fbd2279c1b04b"
         required: true
 
 concurrency:
@@ -39,13 +39,14 @@ env:
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
-  ROCJITSU_CORPUS_CONFIG: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu/tests/corpus/iree_gfx1250_hip.json
 
 jobs:
   pytest:
     runs-on: azure-linux-scale-rocm
+    name: pytest
     container:
-      image: ubuntu:24.04
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --user 0:0
       env:
         DEBIAN_FRONTEND: noninteractive
     continue-on-error: true
@@ -60,7 +61,8 @@ jobs:
             cmake \
             git \
             libdrm-dev \
-            ninja-build
+            ninja-build \
+            clang
 
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -74,8 +76,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/06/16.
-          ref: dc70e0519b3587543e3892149207b7658f04b56b
+          # Last updated on 2026/06/23.
+          ref: 34a1241bb374307d24c5aee93c9fbd2279c1b04b
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -88,48 +90,34 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --pre \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-            "rocm[devel]==7.14.0a20260619"
-
-          ROCM_ROOT="$(rocm-sdk path --root)"
+            "rocm[devel,libraries]==7.14.0a20260619"
           ROCM_LIB="$(rocm-sdk path --root)"/lib
-          LLVM_BIN="${ROCM_LIB}/llvm/bin"
-          LLVM_LIB="${ROCM_LIB}/llvm/lib"
-          ROCM_SYSDEPS="${ROCM_LIB}/rocm_sysdeps"
-
-          test -x "${LLVM_BIN}/amdclang"
-          test -x "${LLVM_BIN}/amdclang++"
-          test -d "${LLVM_LIB}"
-
-          {
-            echo "ROCM_PATH=${ROCM_ROOT}"
-            echo "CC=${LLVM_BIN}/amdclang"
-            echo "CXX=${LLVM_BIN}/amdclang++"
-            echo "LD_LIBRARY_PATH=${ROCM_LIB}:${LD_LIBRARY_PATH:-}"
-          } >> "${GITHUB_ENV}"
-
-          if [ -d "${ROCM_SYSDEPS}/include" ]; then
-            {
-              echo "CFLAGS=-I${ROCM_SYSDEPS}/include"
-              echo "CXXFLAGS=-I${ROCM_SYSDEPS}/include -Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
-            } >> "${GITHUB_ENV}"
-          else
-            echo "CXXFLAGS=-Wno-error=unknown-warning-option -Wno-error=nested-anon-types" >> "${GITHUB_ENV}"
-          fi
-
-          echo "${LLVM_BIN}" >> "${GITHUB_PATH}"
+          echo "LD_LIBRARY_PATH=${ROCM_LIB}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
       - name: Build rocjitsu
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
+          ROCMINFO=RocminfoTest
+          ROCBLAS_GEMM=RocblasGemmTest
+          RCCL_DAEMON=RcclDaemonTest
+          ROCBLAS_GEMMS=RocblasGemmTest
+          ROCBLAS_GEMM_FUZZ=RocblasGemmFuzz
+          ROCBLAS_GEMM_CDNA3=RocblasGemmCdna3
+          EXCLUDED_TESTS="${ROCMINFO}|${ROCBLAS_GEMM}|${RCCL_DAEMON}|${ROCBLAS_GEMMS}|${ROCBLAS_GEMM_FUZZ}|${ROCBLAS_GEMM_CDNA3}"
+          echo "CXXFLAGS=-Wno-error=unknown-warning-option -Wno-error=nested-anon-types" >> "${GITHUB_ENV}"
+          ROCM_PATH=`rocm-sdk path --root` \
           cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER="${CC}" \
-            -DCMAKE_CXX_COMPILER="${CXX}" \
             -DCMAKE_C_FLAGS="${CFLAGS:-}" \
-            -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}" \
-            -DAMDCLANG="${CXX}"
+            -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}"
           cmake --build "${ROCJITSU_BUILD_DIR}"
+
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -E ${EXCLUDED_TESTS} \
+            --output-on-failure
+
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
+          echo "CXXFLAGS=" >> "${GITHUB_ENV}"
 
       - name: Install corpus test dependencies
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
@@ -139,7 +127,43 @@ jobs:
 
       - name: Run corpus tests
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
+        shell: bash
         env:
           ROCJITSU_ROOT: ${{ env.ROCJITSU_SOURCE_DIR }}
           ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
-        run: rocjitsu --config "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_gfx1250.json" -- pytest --config-files="${ROCJITSU_CORPUS_CONFIG}" --timeout 15
+        run: |
+          targets=(
+            "gfx942 amdgpu_cdna3.json iree_gfx942_hip.json"
+            "gfx950 amdgpu_cdna4.json iree_gfx950_hip.json"
+            "gfx1100 amdgpu_rdna3_gfx1100_w7900_kmd.json iree_gfx1100_hip.json"
+            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json iree_gfx1201_hip.json"
+            "gfx1250 amdgpu_gfx1250.json iree_gfx1250_hip.json"
+          )
+
+          for target in "${targets[@]}"; do
+            read -r name rocjitsu_config corpus_config <<< "${target}"
+            echo "::group::pytest (${name})"
+            rocjitsu \
+              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
+              -- pytest \
+              --config-files="${ROCJITSU_SOURCE_DIR}/tests/corpus/${corpus_config}" \
+              --timeout 15 \
+              corpus/iree/
+            echo "::endgroup::"
+          done
+
+          targets=(
+            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json fuzz_gfx1201.json"
+          )
+          for target in "${targets[@]}"; do
+            read -r name rocjitsu_config corpus_config <<< "${target}"
+            echo "::group::pytest (${name})"
+            ROCM_PATH=`rocm-sdk path --root` \
+              rocjitsu \
+              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
+              -- pytest \
+              --fuzz-target-config-files="${ROCJITSU_SOURCE_DIR}/tests/corpus/${corpus_config}" \
+              --timeout 60 \
+              tests/test_fuzz_targets.py
+            echo "::endgroup::"
+          done
