@@ -511,7 +511,7 @@ jobs:
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
 
     - name: Build
-      timeout-minutes: 90
+      timeout-minutes: 60
       shell: bash
       working-directory: projects/rocprofiler-systems/
       env:
