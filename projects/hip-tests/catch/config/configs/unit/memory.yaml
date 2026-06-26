@@ -351,6 +351,9 @@ memory:
     # Does not play well with ASAN
     disabled: [asan]
     tags: []
+  Unit_hipMemcpy_DynamicQueueChurn_StagedCopies:
+    <<: *level_2
+    tags: [multigpu, transfer]
   Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
     <<: *level_2
     # disabling due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111

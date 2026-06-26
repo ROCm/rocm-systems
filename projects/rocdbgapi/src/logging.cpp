@@ -452,25 +452,8 @@ template <>
 std::string
 to_string (amd_dbgapi_instruction_properties_t instruction_properties)
 {
-  std::string str;
-
-  if (!instruction_properties)
-    return one_instruction_property_to_string (instruction_properties);
-
-  while (instruction_properties)
-    {
-      amd_dbgapi_instruction_properties_t one_bit
-        = instruction_properties
-          ^ (instruction_properties & (instruction_properties - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_instruction_property_to_string (one_bit);
-
-      instruction_properties ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (instruction_properties,
+                                 one_instruction_property_to_string);
 }
 
 namespace
@@ -496,25 +479,8 @@ template <>
 std::string
 to_string (amd_dbgapi_register_properties_t register_properties)
 {
-  std::string str;
-
-  if (!register_properties)
-    return one_register_property_to_string (register_properties);
-
-  while (register_properties)
-    {
-      amd_dbgapi_register_properties_t one_bit
-        = register_properties
-          ^ (register_properties & (register_properties - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_register_property_to_string (one_bit);
-
-      register_properties ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (register_properties,
+                                 one_register_property_to_string);
 }
 
 template <>
@@ -985,24 +951,8 @@ template <>
 std::string
 to_string (amd_dbgapi_exceptions_t queue_error_reason)
 {
-  std::string str;
-
-  if (!queue_error_reason)
-    return one_queue_error_reason_to_string (queue_error_reason);
-
-  while (queue_error_reason)
-    {
-      amd_dbgapi_exceptions_t one_bit
-        = queue_error_reason ^ (queue_error_reason & (queue_error_reason - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_queue_error_reason_to_string (one_bit);
-
-      queue_error_reason ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (queue_error_reason,
+                                 one_queue_error_reason_to_string);
 }
 
 template <>
@@ -1240,24 +1190,7 @@ template <>
 std::string
 to_string (amd_dbgapi_wave_stop_reasons_t stop_reason)
 {
-  std::string str;
-
-  if (!stop_reason)
-    return one_stop_reason_to_string (stop_reason);
-
-  while (stop_reason)
-    {
-      amd_dbgapi_wave_stop_reasons_t one_bit
-        = stop_reason ^ (stop_reason & (stop_reason - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_stop_reason_to_string (one_bit);
-
-      stop_reason ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (stop_reason, one_stop_reason_to_string);
 }
 
 template <>
@@ -1689,23 +1622,7 @@ template <>
 std::string
 to_string (os_wave_launch_trap_mask_t value)
 {
-  std::string str;
-
-  if (!value)
-    return one_launch_trap_mask_to_string (value);
-
-  while (value != os_wave_launch_trap_mask_t::none)
-    {
-      os_wave_launch_trap_mask_t one_bit = value ^ (value & (value - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_launch_trap_mask_to_string (one_bit);
-
-      value ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (value, one_launch_trap_mask_to_string);
 }
 
 template <>
