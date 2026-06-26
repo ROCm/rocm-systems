@@ -87,6 +87,7 @@ jobs:
           sparse-checkout: |
             emulation/rocjitsu
             .github
+            shared/machine-readable-isa/isa
 
       - name: Checkout rocjitsu corpus
         if: matrix.name == 'release'
@@ -206,6 +207,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+
+      - name: Run amdisa tests
+        if: matrix.name == 'release'
+        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        run: |
+          cd lib/python && pip install -e . && pytest amdisa/tests
 
       - name: Run corpus tests
         if: matrix.name == 'release'

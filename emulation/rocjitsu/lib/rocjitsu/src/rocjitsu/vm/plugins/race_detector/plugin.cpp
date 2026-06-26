@@ -30,6 +30,7 @@ void warn_cluster_peer_writes_ignored_once() {
 
 } // namespace
 
+// Declared in plugin.h (used by formatTrace tests in execution_plugin_test.cpp).
 std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detector) {
   auto make = [&](auto eid) -> MarkedPc {
     return {detector.events().pc(eid), detector.events().waveId(eid).value, -1};

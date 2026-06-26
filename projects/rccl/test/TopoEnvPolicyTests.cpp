@@ -4,7 +4,16 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Topology unit tests for NCCL_NETDEVS_POLICY on the P2P NET path.
+// Topology unit tests for environment-variable-driven behavior, built on
+// hand-loaded synthetic topologies (no real GPUs, NICs, or MPI launch). Each
+// case runs in an isolated process (RUN_ISOLATED_TEST*) so cached env parses
+// and env values are fresh per case. Two groups live here today:
+//
+//   * NetDevsPolicyTests       -- NCCL_NETDEVS_POLICY on the P2P NET path.
+//   * SymmetricMemP2pLevelTests -- symmetric-memory availability vs
+//                                  NCCL_P2P_LEVEL
+//
+// --- NetDevsPolicyTests ---
 //
 // NCCL 2.29.2 changed send, recv, and all-to-all so they now obey
 // NCCL_NETDEVS_POLICY when running over the network. Before this change, these
@@ -230,6 +239,32 @@ void expectAutoSelection(struct ncclTopoSystem* system)
     ASSERT_GE(nets, 2);
     ASSERT_GE(gpus, 1);
     EXPECT_EQ(distinctNetsAcrossChannels(system, nets), divUp(nets, gpus));
+}
+
+constexpr int kXgmiPeerRank = 1;
+
+void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut)
+{
+    *p2pOut     = -1;
+    *cudaP2pOut = -1;
+
+    struct ncclTopoSystem* system = nullptr;
+    ASSERT_EQ(loadTopoSystem(kTopoXmlPath, &system), ncclSuccess)
+        << "failed to load topo fixture: " << kTopoXmlPath;
+    ASSERT_NE(system, nullptr);
+
+    MockComm mock(system);
+    ASSERT_EQ(ncclTopoComputePaths(system, mock.comm), ncclSuccess);
+
+    int p2p = -1, cudaP2p = -1, intermediateRank = -1;
+    ASSERT_EQ(ncclTopoCheckP2p(mock.comm, system, kRank, kXgmiPeerRank, &p2p,
+                               /*read=*/nullptr, &intermediateRank, &cudaP2p),
+              ncclSuccess);
+
+    *p2pOut     = p2p;
+    *cudaP2pOut = cudaP2p;
+
+    ncclTopoFree(system);
 }
 
 }  // namespace
@@ -474,6 +509,101 @@ TEST(NetDevsPolicyTests, EmptyString_FallsBackToAuto)
     RUN_ISOLATED_TEST_WITH_ENV(
         "EmptyString_FallsBackToAuto", []() { withTopoSystem(expectAutoSelection); },
         {{"NCCL_NETDEVS_POLICY", ""}});
+}
+
+// ---------------------------------------------------------------------------
+// Symmetric-memory availability vs NCCL_P2P_LEVEL
+// ---------------------------------------------------------------------------
+//
+// Upstream NCCL 2.28.7 removed the NCCL_P2P_LEVEL distance check from the
+// symmetric-memory availability decision: once CUDA P2P can be established, the
+// symmetric path is eligible regardless of topology distance. RCCL absorbed
+// this through the May 2026 upstream sync, which split the single P2P probe in
+// ncclTransportCheckP2pType() into two flags surfaced by ncclTopoCheckP2p():
+//
+//   * p2p / isAllDirectP2p  -- distance-gated by NCCL_P2P_LEVEL (legacy "flat"
+//     P2P schedule).
+//   * cudaP2p / isAllCudaP2p -- raw CUDA P2P capability, independent of the
+//     NCCL_P2P_LEVEL distance (on HIP: any same-host or MNNVL pair).
+//
+// The symmetric gate in src/init.cc reads isAllCudaP2p (NOT isAllDirectP2p):
+//   comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable()
+//                            && ncclCuMemEnable() && (GIN || oneLsaTeams);
+// so a restrictive NCCL_P2P_LEVEL must not, on its own, disable symmetric
+// memory. These tests pin that divergence at the ncclTopoCheckP2p boundary.
+//
+// Each case runs in an isolated process so the cached ncclTopoUserP2pLevel
+// static and the env value are fresh per case.
+
+// Default P2P level: the XGMI pair is both within the distance gate
+// and CUDA-P2P capable, so both flags are set.
+TEST(SymmetricMemP2pLevelTests, DefaultLevel_BothP2pFlagsSet)
+{
+    RUN_ISOLATED_TEST(
+        "DefaultLevel_BothP2pFlagsSet",
+        []()
+        {
+            ::unsetenv("NCCL_P2P_LEVEL");
+            ::unsetenv("NCCL_P2P_DISABLE");
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p);
+            EXPECT_EQ(p2p, 1) << "default level: distance-gated p2p should be set";
+            EXPECT_EQ(cudaP2p, 1) << "default level: raw CUDA P2P should be set";
+        });
+}
+
+// NCCL_P2P_LEVEL=LOC (PATH_LOC=0) is more restrictive than the XGMI distance
+// (PATH_NVL=1), so the distance-gated flag (-> isAllDirectP2p) drops to 0. The
+// raw CUDA-P2P flag (-> isAllCudaP2p, the symmetric-memory prerequisite) must
+// stay 1.
+TEST(SymmetricMemP2pLevelTests, RestrictiveLevelLOC_KeepsCudaP2p)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RestrictiveLevelLOC_KeepsCudaP2p",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_LEVEL=LOC must engage the distance gate";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_LEVEL", "LOC"}});
+}
+
+// Old-style numeric form: NCCL_P2P_LEVEL=0 maps to PATH_LOC. Same contract as
+// the string form -- distance gate engages, CUDA-P2P capability is unchanged.
+TEST(SymmetricMemP2pLevelTests, RestrictiveLevelNumericZero_KeepsCudaP2p)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RestrictiveLevelNumericZero_KeepsCudaP2p",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_LEVEL=0 must engage the distance gate";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_LEVEL", "0"}});
+}
+
+// NCCL_P2P_DISABLE=1 collapses the distance level to PATH_LOC. Even with
+// P2P fully "disabled" by distance, raw CUDA-P2P capability stays 1 so the
+// symmetric path remains eligible.
+TEST(SymmetricMemP2pLevelTests, P2pDisable_KeepsCudaP2p)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "P2pDisable_KeepsCudaP2p",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_DISABLE=1 must engage the distance gate";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_DISABLE", "1"}});
 }
 
 }  // namespace RcclUnitTesting
