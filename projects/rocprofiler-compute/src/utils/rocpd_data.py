@@ -131,7 +131,7 @@ def update_rocpd_pmc_events(
                 batch_size,
             )
     except OSError as e:
-        console_error(f"Database error while updating pmc_event table: {e}")
+        console_error(f"Error while updating pmc_event table: {e}")
     except Exception as e:
         console_error(f"Unexpected error updating pmc_event table: {e}")
 
@@ -182,7 +182,10 @@ def _stream_csv_to_pmc_event_table(
     batch: list[tuple[Optional[str], ...]] = []
     with conn:
         with open(counter_csv_path, newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
+            reader = csv.DictReader(f)
+            if reader.fieldnames is None:
+                return
+            for row in reader:
                 event_id = dispatch_to_event.get(row.get("dispatch_id", ""))
                 batch.append((
                     guid,

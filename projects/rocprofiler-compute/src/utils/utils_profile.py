@@ -713,7 +713,10 @@ def _stream_aggregate_counter_csv(
     """Stream CSV and group rows by key columns, summing counter_value."""
     groups: dict[tuple[str, ...], dict] = {}
     with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            return groups
+        for row in reader:
             key = tuple(row.get(col, "") for col in groupby_columns)
             if key not in groups:
                 try:
