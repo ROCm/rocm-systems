@@ -212,7 +212,7 @@ static void testWindowRegisterSingleRankNonSymTeardown() {
     ncclComm_t comm;
     NCCLCHECK(initSingleRankComm(&comm));
 
-    const size_t bufferSize = 4096; // NCCL_WIN_REQUIRED_ALIGNMENT
+    const size_t bufferSize = NCCL_WIN_REQUIRED_ALIGNMENT; // required alignment for window registration
     void* buf = nullptr;
     NCCLCHECK(ncclMemAlloc(&buf, bufferSize));
 
