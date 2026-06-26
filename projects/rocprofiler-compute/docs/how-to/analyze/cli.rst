@@ -810,9 +810,32 @@ operators appear in the same run.
 
 List all captured Triton kernels
 ---------------------------------
+
+Display all Triton kernels captured during profiling:
+
 .. code-block:: shell-session
 
    $ rocprof-compute analyze --experimental --list-triton-operators --path ./workload
+
+   ================================================================================
+   Triton Operator Call Tree: ./workload
+   Grouped by source location, sorted by total GPU kernel duration.
+   ================================================================================
+
+   torch_compile_triton.py:26 (dispatches: 39, total: 4.22 ms, dispatch_mean: 0.11 ms, dispatch_min: 0.05 ms, dispatch_max: 0.81 ms)
+   └─ torch.compile.fused (calls: 1)
+      └─ triton.CompiledKernel.triton_poi_fused_add_mul_relu_0 (calls: 3)
+         └─ triton_poi_fused_add_mul_relu_0 (id 0) (dispatches: 39, total: 4.22 ms)
+
+   Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
+   ╒══════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
+   │ Operator                                                                 │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
+   ╞══════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
+   │ torch.compile.fused                                                      │       1 │           39 │ 4.22 ms │    100.00 │     4.22 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
+   ├──────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ torch.compile.fused/triton.CompiledKernel.triton_poi_fused_add_mul_relu_ │       3 │           39 │ 4.22 ms │    100.00 │     1.41 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
+   │ 0                                                                        │         │              │         │           │             │         │         │         │
+   ╘══════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
 Filter the Triton kernels
 -------------------------
