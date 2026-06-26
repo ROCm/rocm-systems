@@ -28,6 +28,9 @@ class Memory;
 struct ProfilingSignal;
 class Timestamp;
 
+//! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
+bool InAsyncSignalHandler();
+
 // Initial HSA signal value
 constexpr static hsa_signal_value_t kInitSignalValueOne = 1;
 
