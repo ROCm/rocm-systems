@@ -173,10 +173,10 @@ hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
   HIP_INIT_API(hipFuncGetAttributes, attr, func);
 
   if (attr == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
   if (func == nullptr) {
-    return hipErrorInvalidDeviceFunction;
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
   HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().GetFuncAttr(attr, func, ihipGetDevice()));
@@ -1390,6 +1390,8 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
   CHECK_STREAM_DETACHED_API(hStream);
+
+  STREAM_CAPTURE(hipDrvLaunchKernelEx, hStream, config, f, kernelParams, extra);
 
   int drvDeviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* drvDevice = g_devices[drvDeviceId]->devices()[0];
