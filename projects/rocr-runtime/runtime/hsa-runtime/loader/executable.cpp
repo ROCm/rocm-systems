@@ -118,6 +118,8 @@ public:
   const amd::options::ValueOption<std::string>* DumpDir() const { return &dump_dir; }
   const amd::options::PrefixOption* Substitute() const { return &substitute; }
 
+  bool TrampolineEnabled() const { return trampoline_enabled_; }
+
   bool ParseOptions(const std::string& options);
   void Reset();
   void PrintHelp(std::ostream& out) const;
@@ -137,6 +139,7 @@ private:
   amd::options::ValueOption<std::string> dump_dir;
   amd::options::PrefixOption substitute;
   amd::options::OptionParser option_parser;
+  bool trampoline_enabled_ = false;
 };
 
 LoaderOptions::LoaderOptions(std::ostream& error) :
@@ -156,6 +159,12 @@ LoaderOptions::LoaderOptions(std::ostream& error) :
   option_parser.AddOption(&dump_all);
   option_parser.AddOption(&dump_dir);
   option_parser.AddOption(&substitute);
+
+  // LOADER_ENABLE_TRAMPOLINE: set to enable gfx125x kernel-entry trampolines.
+  const char* enable_trampoline = getenv("LOADER_ENABLE_TRAMPOLINE");
+  if (enable_trampoline && std::strcmp(enable_trampoline, "0") != 0) {
+    trampoline_enabled_ = true;
+  }
 }
 
 bool LoaderOptions::ParseOptions(const std::string& options)
@@ -1316,9 +1325,9 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
-  // Kernel-entry trampolines (gfx125x). Gate on this code object's ISA and reset
-  // the per-object fixup list collected by LoadDefinitionSymbol.
-  trampoline_enabled_gfx125x_ = CodeObjectIsaIsGfx125Family(codeIsa);
+  // Kernel-entry trampolines (gfx125x). Gate on env var and this code object's ISA.
+  trampoline_enabled_gfx125x_ =
+      loaderOptions.TrampolineEnabled() && CodeObjectIsaIsGfx125Family(codeIsa);
   kd_fixups_.clear();
 
   uint32_t majorVersion, minorVersion;
