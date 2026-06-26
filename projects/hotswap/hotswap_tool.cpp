@@ -21,14 +21,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <elf.h>
 #include <hsa.h>
 #include <hsa_api_trace.h>
 #include <hsa_ext_amd.h>
 #include <memory>
 #include <mutex>
-#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -57,15 +54,42 @@ struct ReaderEntry {
   bool keepalive_after_load = false;
 };
 
+// State for the HSA_TOOLS_LIB callbacks. Ordinary file-scope statics: OnUnload
+// is driven late (from HIP's atexit -> hsa_shut_down -> UnloadTools), and it
+// deliberately does NOT touch any of this heap-owning state -- it only restores
+// the API-table function pointers (POD). That keeps teardown safe regardless of
+// C++ static-destruction order; the maps/buffers are freed by their normal
+// static destructors at exit. (An earlier version clear()ed these in OnUnload,
+// which crashed: by the time OnUnload runs, the static dtors have already freed
+// them -> use-after-free SIGSEGV.)
 std::mutex g_reader_map_mutex;
 std::unordered_map<uint64_t, ReaderEntry> g_reader_map;
 
 // Rewritten ELF buffers must outlive the executable because ROCR's
-// LoadedCodeObjectImpl stores a raw pointer to the ELF data (used by
-// debuggers, profilers, and hsa_ven_amd_loader queries). We keep them
-// alive until OnUnload.
+// LoadedCodeObjectImpl stores a raw pointer to the ELF data (used by debuggers,
+// profilers, and hsa_ven_amd_loader queries). Those queries happen during the
+// executable's life, not during teardown, so freeing them at process exit (via
+// the normal static destructor) is safe.
 std::mutex g_rewritten_elfs_mutex;
 std::vector<OwnedElf> g_rewritten_elfs;
+
+// Opt-in diagnostic logging (HSA_HOTSWAP_VERBOSE=1). Off by default so
+// production stays quiet; lets us confirm which code objects are intercepted,
+// gated, and rewritten. Runtime-gated (no rebuild to toggle); when off the cost
+// is a single cached bool load per call site.
+bool verbose() {
+  static const bool v = [] {
+    const char *e = std::getenv("HSA_HOTSWAP_VERBOSE");
+    return e && e[0] && e[0] != '0';
+  }();
+  return v;
+}
+
+#define HOTSWAP_LOG(...)                                                        \
+  do {                                                                         \
+    if (verbose())                                                            \
+      fprintf(stderr, __VA_ARGS__);                                           \
+  } while (0)
 
 CoreApiTable *g_core_table = nullptr;
 
@@ -81,22 +105,6 @@ void stash_bytes(uint64_t handle, const uint8_t *data, size_t size) {
   auto vec = std::make_shared<std::vector<uint8_t>>(data, data + size);
   std::scoped_lock lock(g_reader_map_mutex);
   g_reader_map[handle] = ReaderEntry{std::move(vec), false, false};
-}
-
-bool checked_add(size_t lhs, size_t rhs, size_t *out) {
-  if (lhs > std::numeric_limits<size_t>::max() - rhs) {
-    return false;
-  }
-  *out = lhs + rhs;
-  return true;
-}
-
-bool checked_mul(size_t lhs, size_t rhs, size_t *out) {
-  if (lhs != 0 && rhs > std::numeric_limits<size_t>::max() / lhs) {
-    return false;
-  }
-  *out = lhs * rhs;
-  return true;
 }
 
 bool try_get_reader_entry(uint64_t handle, ByteVec *bytes, bool *from_file) {
@@ -129,145 +137,6 @@ void mark_reader_keepalive(uint64_t handle) {
   }
 }
 
-// Validate ELF64 header and return pointer, or nullptr on failure.
-const Elf64_Ehdr *validate_elf64(const uint8_t *elf, size_t size) {
-  if (size < sizeof(Elf64_Ehdr)) {
-    return nullptr;
-  }
-  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(elf);
-  if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) {
-    return nullptr;
-  }
-  if (ehdr->e_ident[EI_CLASS] != ELFCLASS64) {
-    return nullptr;
-  }
-  return ehdr;
-}
-
-bool validate_program_header_table(const Elf64_Ehdr *ehdr, size_t size) {
-  return ehdr->e_phoff != 0 && ehdr->e_phoff <= size && ehdr->e_phnum != 0 &&
-         ehdr->e_phentsize >= sizeof(Elf64_Phdr);
-}
-
-bool compute_program_header_offset(const Elf64_Ehdr *ehdr, size_t size,
-                                   uint16_t index, size_t *hdr_offset) {
-  size_t hdr_index_offset = 0;
-  if (!checked_mul(static_cast<size_t>(index),
-                   static_cast<size_t>(ehdr->e_phentsize),
-                   &hdr_index_offset) ||
-      !checked_add(ehdr->e_phoff, hdr_index_offset, hdr_offset) ||
-      *hdr_offset > size || sizeof(Elf64_Phdr) > size - *hdr_offset) {
-    return false;
-  }
-  return true;
-}
-
-bool compute_note_segment_bounds(const Elf64_Phdr *phdr, size_t size,
-                                 size_t *note_offset, size_t *note_end) {
-  *note_offset = phdr->p_offset;
-  return *note_offset <= size && phdr->p_filesz <= size - *note_offset &&
-         checked_add(*note_offset, phdr->p_filesz, note_end);
-}
-
-bool compute_note_layout(size_t note_offset, size_t note_end,
-                         const Elf64_Nhdr *nhdr, size_t *desc_off,
-                         size_t *next_note) {
-  size_t raw_name_size = 0;
-  size_t raw_desc_size = 0;
-  size_t name_sz_aligned = 0;
-  size_t desc_sz_aligned = 0;
-  if (!checked_add(static_cast<size_t>(nhdr->n_namesz), 3, &raw_name_size) ||
-      !checked_add(static_cast<size_t>(nhdr->n_descsz), 3, &raw_desc_size)) {
-    return false;
-  }
-
-  name_sz_aligned = raw_name_size & ~size_t{3};
-  desc_sz_aligned = raw_desc_size & ~size_t{3};
-  return checked_add(note_offset, sizeof(Elf64_Nhdr), desc_off) &&
-         checked_add(*desc_off, name_sz_aligned, desc_off) &&
-         checked_add(*desc_off, desc_sz_aligned, next_note) &&
-         *next_note <= note_end;
-}
-
-// Search a single NT_AMDGPU_METADATA note descriptor for the ISA triple.
-std::string find_isa_in_metadata(const char *desc, size_t desc_size) {
-  const char prefix[] = "amdgcn-amd-amdhsa--";
-  const size_t prefix_len = sizeof(prefix) - 1;
-  for (size_t j = 0; j + prefix_len <= desc_size; ++j) {
-    if (memcmp(desc + j, prefix, prefix_len) == 0) {
-      size_t len = 0;
-      while (j + len < desc_size && desc[j + len] != '\0' &&
-             desc[j + len] != '\n' && desc[j + len] != '\'' &&
-             desc[j + len] != '"' && desc[j + len] != ' ') {
-        ++len;
-      }
-      return std::string(desc + j, len);
-    }
-  }
-  return {};
-}
-
-std::string read_elf_isa_from_note_segment(const uint8_t *elf, size_t note_offset,
-                                           size_t note_end) {
-  while (note_offset <= note_end &&
-         sizeof(Elf64_Nhdr) <= note_end - note_offset) {
-    const auto *nhdr = reinterpret_cast<const Elf64_Nhdr *>(elf + note_offset);
-    size_t desc_off = 0;
-    size_t next_note = 0;
-    if (!compute_note_layout(note_offset, note_end, nhdr, &desc_off,
-                             &next_note)) {
-      break;
-    }
-
-    constexpr uint32_t NT_AMDGPU_METADATA = 32;
-    if (nhdr->n_type == NT_AMDGPU_METADATA && nhdr->n_descsz > 0 &&
-        desc_off + nhdr->n_descsz <= note_end) {
-      const char *desc = reinterpret_cast<const char *>(elf + desc_off);
-      std::string result = find_isa_in_metadata(desc, nhdr->n_descsz);
-      if (!result.empty()) {
-        return result;
-      }
-    }
-
-    note_offset = next_note;
-  }
-  return {};
-}
-
-// Parse ELF PT_NOTE segments to find the AMDGPU ISA name from
-// NT_AMDGPU_METADATA (type 32) notes in v3+ code objects.
-std::string read_elf_isa_note(const uint8_t *elf, size_t size) {
-  const Elf64_Ehdr *ehdr = validate_elf64(elf, size);
-  if (!ehdr || !validate_program_header_table(ehdr, size)) {
-    return {};
-  }
-
-  for (uint16_t i = 0; i < ehdr->e_phnum; ++i) {
-    size_t hdr_offset = 0;
-    if (!compute_program_header_offset(ehdr, size, i, &hdr_offset)) {
-      break;
-    }
-    const auto *phdr =
-        reinterpret_cast<const Elf64_Phdr *>(elf + hdr_offset);
-    if (phdr->p_type != PT_NOTE) {
-      continue;
-    }
-
-    size_t note_offset = 0;
-    size_t note_end = 0;
-    if (!compute_note_segment_bounds(phdr, size, &note_offset, &note_end)) {
-      continue;
-    }
-
-    std::string result = read_elf_isa_from_note_segment(elf, note_offset,
-                                                        note_end);
-    if (!result.empty()) {
-      return result;
-    }
-  }
-  return {};
-}
-
 hsa_status_t HSA_API hotswap_reader_create_from_memory(
     const void *code_object, size_t size,
     hsa_code_object_reader_t *code_object_reader) {
@@ -280,6 +149,8 @@ hsa_status_t HSA_API hotswap_reader_create_from_memory(
 
   try {
     stash_bytes(reader.handle, static_cast<const uint8_t *>(code_object), size);
+    HOTSWAP_LOG("hotswap: reader_create_from_memory handle=%lu size=%zu\n",
+                static_cast<unsigned long>(reader.handle), size);
   } catch (const std::bad_alloc &) {
     // Fall back to the original load path without rewrite support.
   }
@@ -318,6 +189,9 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
       std::scoped_lock lock(g_reader_map_mutex);
       g_reader_map[reader.handle] = ReaderEntry{std::move(vec), true, false};
     }
+    HOTSWAP_LOG("hotswap: reader_create_from_file handle=%lu size=%lld\n",
+                static_cast<unsigned long>(reader.handle),
+                static_cast<long long>(file_size));
     *code_object_reader = reader;
     return HSA_STATUS_SUCCESS;
   } catch (const std::bad_alloc &) {
@@ -384,22 +258,25 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
                                    const char *options,
                                    hsa_loaded_code_object_t *loaded_code_object,
                                    const ByteVec &local_bytes) {
-  const std::string source_isa =
-      read_elf_isa_note(local_bytes->data(), local_bytes->size());
+  // Source ISA from the code object, target ISA from the running GPU.
+  const std::string source_isa = rocr::hotswap::GetCodeObjectIsaName(
+      local_bytes->data(), local_bytes->size());
   const std::string target_isa = get_agent_isa_name(agent);
-
   if (source_isa.empty() || target_isa.empty()) {
+    HOTSWAP_LOG("hotswap: rewrite SKIP empty isa (src='%s' tgt='%s' size=%zu)\n",
+                source_isa.c_str(), target_isa.c_str(), local_bytes->size());
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
-  // Route through RetargetCodeObject for unified logging, validation,
-  // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
-  // patching uses the same ISA name on both sides.
   void *out_elf = nullptr;
   size_t out_elf_size = 0;
   const int rc = rocr::hotswap::RetargetCodeObject(
       local_bytes->data(), local_bytes->size(), source_isa.c_str(),
       target_isa.c_str(), &out_elf, &out_elf_size);
+
+  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s in=%zu rc=%d out=%zu changed=%d\n",
+              source_isa.c_str(), target_isa.c_str(), local_bytes->size(), rc,
+              out_elf_size, out_elf != local_bytes->data());
 
   if (rc != 0 || out_elf == local_bytes->data()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
@@ -424,6 +301,10 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     try_get_reader_entry(code_object_reader.handle, &local_bytes,
                          &reader_from_file);
 
+    HOTSWAP_LOG("hotswap: load_agent_code_object handle=%lu has_bytes=%d\n",
+                static_cast<unsigned long>(code_object_reader.handle),
+                local_bytes ? 1 : 0);
+
     if (!local_bytes) {
       return load_original_reader(executable, agent, code_object_reader,
                                   options, loaded_code_object,
@@ -434,6 +315,8 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     // the original code object unchanged instead of routing through COMGR.
     const AgentGfxRevision gfx = query_agent_gfx_revision(agent);
     if (!gate_allows_hotswap(gfx)) {
+      HOTSWAP_LOG("hotswap: gate BLOCKED (gfx=%s rev=%u valid=%d)\n",
+                  gfx.gfx_target.c_str(), gfx.asic_revision, gfx.revision_valid);
       return load_original_reader(executable, agent, code_object_reader,
                                   options, loaded_code_object,
                                   reader_from_file);
@@ -523,16 +406,10 @@ void OnUnload() {
   g_orig_reader_destroy = nullptr;
   g_orig_load_agent_code_object = nullptr;
 
-  {
-    std::scoped_lock lock(g_reader_map_mutex);
-    g_reader_map.clear();
-  }
-
-  {
-    std::scoped_lock lock(g_rewritten_elfs_mutex);
-    g_rewritten_elfs.clear();
-  }
-
+  // Intentionally do NOT clear g_reader_map / g_rewritten_elfs here. OnUnload is
+  // driven from HIP's atexit hsa_shut_down, which runs AFTER this library's
+  // static destructors have already freed those containers; touching them here
+  // is a use-after-free. They are freed exactly once, by their static dtors.
   fprintf(stderr, "hotswap: tool unloaded\n");
 }
 

@@ -71,6 +71,8 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -95,6 +97,68 @@ uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
 uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
   const uint64_t remainder = value % alignment;
   return remainder == 0 ? value : value + alignment - remainder;
+}
+
+template <typename T>
+T read_elf_struct_for_test(const std::vector<uint8_t> &image, uint64_t offset) {
+  T value{};
+  assert(offset <= image.size());
+  assert(sizeof(T) <= image.size() - offset);
+  std::memcpy(&value, image.data() + offset, sizeof(value));
+  return value;
+}
+
+template <typename T>
+std::vector<T> read_elf_array_for_test(const std::vector<uint8_t> &image, uint64_t offset,
+                                       size_t count) {
+  std::vector<T> values(count);
+  assert(offset <= image.size());
+  assert(count <= (image.size() - offset) / sizeof(T));
+  std::memcpy(values.data(), image.data() + offset, count * sizeof(T));
+  return values;
+}
+
+template <typename T>
+void write_elf_struct_for_test(std::vector<uint8_t> &image, uint64_t offset, const T &value) {
+  assert(offset <= image.size());
+  assert(sizeof(T) <= image.size() - offset);
+  std::memcpy(image.data() + offset, &value, sizeof(value));
+}
+
+void write_bytes_for_test(std::vector<uint8_t> &image, uint64_t offset, const void *src,
+                          size_t size) {
+  assert(offset <= image.size());
+  assert(size <= image.size() - offset);
+  std::memcpy(image.data() + offset, src, size);
+}
+
+template <typename T>
+void write_value_for_test(std::vector<uint8_t> &image, uint64_t offset, T value) {
+  write_bytes_for_test(image, offset, &value, sizeof(value));
+}
+
+using TestKernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
+constexpr size_t kKernelDescriptorSize = sizeof(TestKernelDescriptor);
+constexpr size_t kKernelDescriptorEntryOffset =
+    offsetof(TestKernelDescriptor, kernel_code_entry_byte_offset);
+constexpr uint64_t kKernargPreloadSkipBytes = 256;
+
+void write_kernel_descriptor_entry_offset(void *descriptor, int64_t entry_offset) {
+  auto *bytes = static_cast<uint8_t *>(descriptor);
+  std::memcpy(bytes + kKernelDescriptorEntryOffset, &entry_offset, sizeof(entry_offset));
+}
+
+int64_t read_kernel_descriptor_entry_offset(const void *descriptor) {
+  const auto *bytes = static_cast<const uint8_t *>(descriptor);
+  int64_t entry_offset = 0;
+  std::memcpy(&entry_offset, bytes + kKernelDescriptorEntryOffset, sizeof(entry_offset));
+  return entry_offset;
+}
+
+std::vector<uint8_t> make_kernel_descriptor_bytes(int64_t entry_offset) {
+  std::vector<uint8_t> descriptor(kKernelDescriptorSize, 0);
+  write_kernel_descriptor_entry_offset(descriptor.data(), entry_offset);
+  return descriptor;
 }
 
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_text_and_rodata() {
@@ -294,12 +358,11 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_load_segments() {
 
 std::vector<uint8_t>
 make_minimal_amdgpu_elf_with_descriptor_after_text(const std::vector<uint32_t> &text_words) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   const uint64_t text_size = text_words.size() * sizeof(uint32_t);
   constexpr uint64_t load_align = 0x1000;
-  constexpr uint64_t rodata_size = sizeof(KD);
+  constexpr uint64_t rodata_size = kKernelDescriptorSize;
 
   std::vector<uint8_t> shstrtab{'\0'};
   const uint32_t text_name = add_elf_name(shstrtab, ".text");
@@ -363,10 +426,9 @@ make_minimal_amdgpu_elf_with_descriptor_after_text(const std::vector<uint32_t> &
 
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
-  KD kd{};
-  kd.kernel_code_entry_byte_offset =
-      static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
-  std::memcpy(image.data() + rodata_offset, &kd, sizeof(kd));
+  const auto descriptor = make_kernel_descriptor_bytes(static_cast<int64_t>(text_vaddr) -
+                                                       static_cast<int64_t>(rodata_vaddr));
+  std::memcpy(image.data() + rodata_offset, descriptor.data(), descriptor.size());
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
   std::array<Elf64_Sym, sym_count> syms{};
@@ -374,7 +436,7 @@ make_minimal_amdgpu_elf_with_descriptor_after_text(const std::vector<uint32_t> &
   syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
   syms[1].st_shndx = 2;
   syms[1].st_value = rodata_vaddr;
-  syms[1].st_size = sizeof(KD);
+  syms[1].st_size = kKernelDescriptorSize;
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
@@ -443,12 +505,11 @@ bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kin
 }
 
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   constexpr uint64_t text_size = 8;
   constexpr uint64_t load_align = 0x1000;
-  constexpr uint64_t rodata_size = 2 * sizeof(KD);
+  constexpr uint64_t rodata_size = 2 * kKernelDescriptorSize;
 
   std::vector<uint8_t> shstrtab{'\0'};
   const uint32_t text_name = add_elf_name(shstrtab, ".text");
@@ -515,13 +576,14 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
   const std::array<uint32_t, 2> text_words = {kCdna4SEndpgm, kCdna4SEndpgm};
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
-  std::array<KD, 2> descriptors{};
-  descriptors[0].kernel_code_entry_byte_offset =
-      static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
-  descriptors[1].kernel_code_entry_byte_offset =
+  std::vector<uint8_t> descriptors(rodata_size, 0);
+  write_kernel_descriptor_entry_offset(descriptors.data(), static_cast<int64_t>(text_vaddr) -
+                                                               static_cast<int64_t>(rodata_vaddr));
+  write_kernel_descriptor_entry_offset(
+      descriptors.data() + kKernelDescriptorSize,
       static_cast<int64_t>(text_vaddr + sizeof(uint32_t)) -
-      static_cast<int64_t>(rodata_vaddr + sizeof(KD));
-  std::memcpy(image.data() + rodata_offset, descriptors.data(), rodata_size);
+          static_cast<int64_t>(rodata_vaddr + kKernelDescriptorSize));
+  std::memcpy(image.data() + rodata_offset, descriptors.data(), descriptors.size());
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
   std::array<Elf64_Sym, sym_count> syms{};
@@ -529,12 +591,12 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
   syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
   syms[1].st_shndx = 2;
   syms[1].st_value = rodata_vaddr;
-  syms[1].st_size = sizeof(KD);
+  syms[1].st_size = kKernelDescriptorSize;
   syms[2].st_name = kernel1_name;
   syms[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
   syms[2].st_shndx = 2;
-  syms[2].st_value = rodata_vaddr + sizeof(KD);
-  syms[2].st_size = sizeof(KD);
+  syms[2].st_value = rodata_vaddr + kKernelDescriptorSize;
+  syms[2].st_size = kKernelDescriptorSize;
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
@@ -689,13 +751,12 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_relocation_after_text() {
 }
 
 std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   constexpr uint64_t rodata_offset = 0x100;
   constexpr uint64_t rodata_vaddr = 0x100;
   constexpr uint64_t text_offset = 0x1000;
   constexpr uint64_t text_vaddr = 0x1000;
   constexpr uint64_t text_size = 0x21000;
-  constexpr uint64_t rodata_size = sizeof(KD);
+  constexpr uint64_t rodata_size = kKernelDescriptorSize;
   constexpr uint64_t load_align = 0x1000;
 
   std::vector<uint8_t> shstrtab{'\0'};
@@ -718,48 +779,46 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
 
   std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
 
-  Elf64_Ehdr ehdr{};
-  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
-  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
-  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
-  ehdr.e_type = ET_DYN;
-  ehdr.e_machine = EM_AMDGPU;
-  ehdr.e_version = 1;
-  ehdr.e_phoff = sizeof(Elf64_Ehdr);
-  ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
-  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
-  ehdr.e_phentsize = sizeof(Elf64_Phdr);
-  ehdr.e_phnum = phdr_count;
-  ehdr.e_shentsize = sizeof(Elf64_Shdr);
-  ehdr.e_shnum = section_count;
-  ehdr.e_shstrndx = 5;
-  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+  write_bytes_for_test(image, offsetof(Elf64_Ehdr, e_ident), EI_MAGIC, EI_MAGIC_SIZE);
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_CLASS] = ELFCLASS64;
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  write_value_for_test<uint16_t>(image, offsetof(Elf64_Ehdr, e_type), ET_DYN);
+  write_value_for_test<uint16_t>(image, offsetof(Elf64_Ehdr, e_machine), EM_AMDGPU);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_version), 1);
+  write_value_for_test<uint64_t>(image, offsetof(Elf64_Ehdr, e_phoff), sizeof(Elf64_Ehdr));
+  write_value_for_test<uint64_t>(image, offsetof(Elf64_Ehdr, e_shoff), shoff);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX950);
+  write_value_for_test<uint16_t>(image, offsetof(Elf64_Ehdr, e_ehsize), sizeof(Elf64_Ehdr));
+  write_value_for_test<uint16_t>(image, offsetof(Elf64_Ehdr, e_phentsize), sizeof(Elf64_Phdr));
+  write_value_for_test<uint16_t>(image, offsetof(Elf64_Ehdr, e_phnum), phdr_count);
+  write_value_for_test<uint16_t>(image, offsetof(Elf64_Ehdr, e_shentsize), sizeof(Elf64_Shdr));
+  write_value_for_test<uint16_t>(image, offsetof(Elf64_Ehdr, e_shnum), section_count);
+  write_value_for_test<uint16_t>(image, offsetof(Elf64_Ehdr, e_shstrndx), 5);
 
-  std::array<Elf64_Phdr, phdr_count> phdrs{};
-  phdrs[0].p_type = PT_LOAD;
-  phdrs[0].p_flags = 0x4; // PF_R
-  phdrs[0].p_offset = rodata_offset;
-  phdrs[0].p_vaddr = rodata_vaddr;
-  phdrs[0].p_paddr = rodata_vaddr;
-  phdrs[0].p_filesz = rodata_size;
-  phdrs[0].p_memsz = rodata_size;
-  phdrs[0].p_align = load_align;
+  const uint64_t phdr0 = sizeof(Elf64_Ehdr);
+  write_value_for_test<uint32_t>(image, phdr0 + offsetof(Elf64_Phdr, p_type), PT_LOAD);
+  write_value_for_test<uint32_t>(image, phdr0 + offsetof(Elf64_Phdr, p_flags), 0x4); // PF_R
+  write_value_for_test<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_offset), rodata_offset);
+  write_value_for_test<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_vaddr), rodata_vaddr);
+  write_value_for_test<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_paddr), rodata_vaddr);
+  write_value_for_test<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_filesz), rodata_size);
+  write_value_for_test<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_memsz), rodata_size);
+  write_value_for_test<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_align), load_align);
 
-  phdrs[1].p_type = PT_LOAD;
-  phdrs[1].p_flags = 0x5; // PF_R | PF_X
-  phdrs[1].p_offset = text_offset;
-  phdrs[1].p_vaddr = text_vaddr;
-  phdrs[1].p_paddr = text_vaddr;
-  phdrs[1].p_filesz = text_size;
-  phdrs[1].p_memsz = text_size;
-  phdrs[1].p_align = load_align;
-  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+  const uint64_t phdr1 = phdr0 + sizeof(Elf64_Phdr);
+  write_value_for_test<uint32_t>(image, phdr1 + offsetof(Elf64_Phdr, p_type), PT_LOAD);
+  write_value_for_test<uint32_t>(image, phdr1 + offsetof(Elf64_Phdr, p_flags), 0x5); // PF_R | PF_X
+  write_value_for_test<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_offset), text_offset);
+  write_value_for_test<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_vaddr), text_vaddr);
+  write_value_for_test<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_paddr), text_vaddr);
+  write_value_for_test<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_filesz), text_size);
+  write_value_for_test<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_memsz), text_size);
+  write_value_for_test<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_align), load_align);
 
-  KD kd{};
-  kd.kernel_code_entry_byte_offset =
-      static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
-  std::memcpy(image.data() + rodata_offset, &kd, sizeof(kd));
+  const auto descriptor = make_kernel_descriptor_bytes(static_cast<int64_t>(text_vaddr) -
+                                                       static_cast<int64_t>(rodata_vaddr));
+  std::memcpy(image.data() + rodata_offset, descriptor.data(), descriptor.size());
 
   std::vector<uint32_t> text_words(text_size / sizeof(uint32_t),
                                    build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
@@ -767,55 +826,39 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
-  std::array<Elf64_Sym, sym_count> syms{};
-  syms[1].st_name = kd_symbol_name;
-  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
-  syms[1].st_shndx = 1;
-  syms[1].st_value = rodata_vaddr;
-  syms[1].st_size = sizeof(KD);
-  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
+  const uint64_t sym1 = symtab_offset + sizeof(Elf64_Sym);
+  write_value_for_test<uint32_t>(image, sym1 + offsetof(Elf64_Sym, st_name), kd_symbol_name);
+  write_value_for_test<unsigned char>(image, sym1 + offsetof(Elf64_Sym, st_info),
+                                      elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject));
+  write_value_for_test<uint16_t>(image, sym1 + offsetof(Elf64_Sym, st_shndx), 1);
+  write_value_for_test<uint64_t>(image, sym1 + offsetof(Elf64_Sym, st_value), rodata_vaddr);
+  write_value_for_test<uint64_t>(image, sym1 + offsetof(Elf64_Sym, st_size), kKernelDescriptorSize);
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
-  std::array<Elf64_Shdr, section_count> shdrs{};
-  shdrs[1].sh_name = rodata_name;
-  shdrs[1].sh_type = SHT_PROGBITS;
-  shdrs[1].sh_flags = SHF_ALLOC;
-  shdrs[1].sh_addr = rodata_vaddr;
-  shdrs[1].sh_offset = rodata_offset;
-  shdrs[1].sh_size = rodata_size;
-  shdrs[1].sh_addralign = 64;
-
-  shdrs[2].sh_name = text_name;
-  shdrs[2].sh_type = SHT_PROGBITS;
-  shdrs[2].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-  shdrs[2].sh_addr = text_vaddr;
-  shdrs[2].sh_offset = text_offset;
-  shdrs[2].sh_size = text_size;
-  shdrs[2].sh_addralign = 256;
-
-  shdrs[3].sh_name = symtab_name;
-  shdrs[3].sh_type = SHT_SYMTAB;
-  shdrs[3].sh_offset = symtab_offset;
-  shdrs[3].sh_size = syms.size() * sizeof(Elf64_Sym);
-  shdrs[3].sh_link = 4;
-  shdrs[3].sh_info = 1;
-  shdrs[3].sh_addralign = 8;
-  shdrs[3].sh_entsize = sizeof(Elf64_Sym);
-
-  shdrs[4].sh_name = strtab_name;
-  shdrs[4].sh_type = SHT_STRTAB;
-  shdrs[4].sh_offset = strtab_offset;
-  shdrs[4].sh_size = strtab.size();
-  shdrs[4].sh_addralign = 1;
-
-  shdrs[5].sh_name = shstrtab_name;
-  shdrs[5].sh_type = SHT_STRTAB;
-  shdrs[5].sh_offset = shstrtab_offset;
-  shdrs[5].sh_size = shstrtab.size();
-  shdrs[5].sh_addralign = 1;
-
-  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  const auto write_shdr = [&](uint64_t index, uint32_t name, uint32_t type, uint64_t flags,
+                              uint64_t addr, uint64_t offset, uint64_t size, uint32_t link,
+                              uint32_t info, uint64_t addralign, uint64_t entsize) {
+    const uint64_t base = shoff + index * sizeof(Elf64_Shdr);
+    write_value_for_test<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_name), name);
+    write_value_for_test<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_type), type);
+    write_value_for_test<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_flags), flags);
+    write_value_for_test<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_addr), addr);
+    write_value_for_test<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_offset), offset);
+    write_value_for_test<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_size), size);
+    write_value_for_test<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_link), link);
+    write_value_for_test<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_info), info);
+    write_value_for_test<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_addralign), addralign);
+    write_value_for_test<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_entsize), entsize);
+  };
+  write_shdr(1, rodata_name, SHT_PROGBITS, SHF_ALLOC, rodata_vaddr, rodata_offset, rodata_size, 0,
+             0, 64, 0);
+  write_shdr(2, text_name, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, text_vaddr, text_offset,
+             text_size, 0, 0, 256, 0);
+  write_shdr(3, symtab_name, SHT_SYMTAB, 0, 0, symtab_offset, sym_count * sizeof(Elf64_Sym), 4, 1,
+             8, sizeof(Elf64_Sym));
+  write_shdr(4, strtab_name, SHT_STRTAB, 0, 0, strtab_offset, strtab.size(), 0, 0, 1, 0);
+  write_shdr(5, shstrtab_name, SHT_STRTAB, 0, 0, shstrtab_offset, shstrtab.size(), 0, 0, 1, 0);
   return image;
 }
 
@@ -1213,11 +1256,11 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
   EXPECT_EQ(rodata->vaddr(), text->vaddr() + 8 + load_align + padded_file_delta)
       << "later allocated sections must move after the expanded RX LOAD segment";
 
-  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(patched_bytes.data());
-  ASSERT_EQ(ehdr->e_phnum, 2u);
-  const auto *phdrs = reinterpret_cast<const Elf64_Phdr *>(patched_bytes.data() + ehdr->e_phoff);
-  const auto *shdrs = reinterpret_cast<const Elf64_Shdr *>(patched_bytes.data() + ehdr->e_shoff);
-  for (uint16_t i = 0; i < ehdr->e_phnum; ++i) {
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched_bytes, 0);
+  ASSERT_EQ(ehdr.e_phnum, 2u);
+  const auto phdrs = read_elf_array_for_test<Elf64_Phdr>(patched_bytes, ehdr.e_phoff, ehdr.e_phnum);
+  const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(patched_bytes, ehdr.e_shoff, ehdr.e_shnum);
+  for (uint16_t i = 0; i < ehdr.e_phnum; ++i) {
     ASSERT_NE(phdrs[i].p_align, 0u);
     EXPECT_EQ(phdrs[i].p_offset % phdrs[i].p_align, phdrs[i].p_vaddr % phdrs[i].p_align)
         << "PT_LOAD " << i << " must remain loader-congruent";
@@ -1230,14 +1273,14 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
   EXPECT_LE(phdrs[0].p_vaddr + phdrs[0].p_memsz, phdrs[1].p_vaddr)
       << "expanded RX LOAD must not overlap the following LOAD in virtual memory";
 
-  const auto *symtab = std::find_if(shdrs, shdrs + ehdr->e_shnum, [](const Elf64_Shdr &shdr) {
+  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
     return shdr.sh_type == SHT_SYMTAB;
   });
-  ASSERT_NE(symtab, shdrs + ehdr->e_shnum);
+  ASSERT_NE(symtab, shdrs.end());
   ASSERT_EQ(symtab->sh_entsize, sizeof(Elf64_Sym));
   ASSERT_GE(symtab->sh_size / symtab->sh_entsize, 3u);
-  const auto *symbols =
-      reinterpret_cast<const Elf64_Sym *>(patched_bytes.data() + symtab->sh_offset);
+  const auto symbols = read_elf_array_for_test<Elf64_Sym>(patched_bytes, symtab->sh_offset,
+                                                          symtab->sh_size / symtab->sh_entsize);
   EXPECT_EQ(symbols[1].st_value, rodata->vaddr())
       << "defined symbols in moved sections must track the section virtual address";
   EXPECT_EQ(symbols[2].st_value, text->vaddr())
@@ -1247,7 +1290,6 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
 }
 
 TEST(CodeObjectPatcher, ReplaceTextPreservesMovedKernelDescriptorEntryAddress) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   constexpr uint64_t load_align = 0x1000;
   constexpr uint64_t padded_file_delta = 2 * load_align;
 
@@ -1257,8 +1299,8 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesMovedKernelDescriptorEntryAddress) {
   ASSERT_FALSE(co.text_sections().empty());
   const auto *original_rodata = find_section(co, ".rodata");
   ASSERT_NE(original_rodata, nullptr);
-  KD original_kd{};
-  std::memcpy(&original_kd, original_rodata->data(), sizeof(original_kd));
+  const int64_t original_entry_offset =
+      read_kernel_descriptor_entry_offset(original_rodata->data());
 
   CodeObjectPatcher patcher(co);
   const std::vector<uint32_t> text_words(load_align / sizeof(uint32_t) + 3, 0xDEADBEEFu);
@@ -1272,15 +1314,13 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesMovedKernelDescriptorEntryAddress) {
   const auto *patched_rodata = find_section(patched, ".rodata");
   ASSERT_NE(patched_rodata, nullptr);
 
-  KD patched_kd{};
-  std::memcpy(&patched_kd, patched_rodata->data(), sizeof(patched_kd));
+  const int64_t patched_entry_offset = read_kernel_descriptor_entry_offset(patched_rodata->data());
   EXPECT_EQ(patched_rodata->vaddr(), original_rodata->vaddr() + padded_file_delta);
-  EXPECT_EQ(static_cast<uint64_t>(static_cast<int64_t>(patched_rodata->vaddr()) +
-                                  patched_kd.kernel_code_entry_byte_offset),
-            patched_text->vaddr())
+  EXPECT_EQ(
+      static_cast<uint64_t>(static_cast<int64_t>(patched_rodata->vaddr()) + patched_entry_offset),
+      patched_text->vaddr())
       << "KERNEL_CODE_ENTRY_BYTE_OFFSET is relative to the descriptor address";
-  EXPECT_EQ(patched_kd.kernel_code_entry_byte_offset,
-            original_kd.kernel_code_entry_byte_offset - static_cast<int64_t>(padded_file_delta));
+  EXPECT_EQ(patched_entry_offset, original_entry_offset - static_cast<int64_t>(padded_file_delta));
 }
 
 TEST(CodeObjectPatcher, ReplaceTextUpdatesRelocationOffsetsIntoMovedSections) {
@@ -1363,11 +1403,18 @@ TEST(BinaryTranslator, LocalCaveIgnoresUnreachableTextTail) {
          "after the large unreachable .text tail";
 }
 
-TEST(BinaryTranslator, PreservesKernargPreloadEntrySkipWindow) {
+TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   auto image = make_large_amdgpu_elf_with_waitcnt_entry();
   AmdGpuCodeObject source_layout(image.data(), image.size());
   ASSERT_TRUE(source_layout.is_valid());
   ASSERT_FALSE(source_layout.text_sections().empty());
+  const auto *source_rodata = find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+
+  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
 
   const auto *source_text = source_layout.text_sections()[0];
   auto *source_words = reinterpret_cast<uint32_t *>(image.data() + source_text->sectionOffset());
@@ -1387,15 +1434,115 @@ TEST(BinaryTranslator, PreservesKernargPreloadEntrySkipWindow) {
   ASSERT_FALSE(translated.text_sections().empty());
 
   const auto *text = translated.text_sections()[0];
-  ASSERT_GT(text->size(), 256u);
+  ASSERT_GT(text->size(), kKernargPreloadSkipBytes);
   const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
-  EXPECT_EQ(target_words[0], build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA3))
-      << "the compatibility prologue must still branch over the 256-byte preload skip window";
+  EXPECT_EQ(target_words[0], build_s_branch(64, ROCJITSU_CODE_ARCH_CDNA3))
+      << "old firmware enters the synthesized compatibility stub, which branches to the "
+         "translated compatibility source entry";
   for (size_t i = 1; i < 64; ++i)
     EXPECT_EQ(target_words[i], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3))
-        << "preload skip window padding word " << i << " must remain executable padding";
-  EXPECT_EQ(target_words[64], 0xBF810000u)
-      << "compatible firmware starts at descriptor entry + 256 when kernargs are preloaded";
+        << "the synthesized launch window must keep the compatible firmware entry exactly 256 "
+           "bytes after the descriptor entry";
+  EXPECT_EQ(target_words[64], build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3))
+      << "compatible firmware enters at descriptor entry + 256 and branches to the translated "
+         "preloaded-kernarg source entry";
+  EXPECT_EQ(target_words[65], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3))
+      << "the original compatibility source block is translated in the compact body";
+  EXPECT_EQ(target_words[66], 0xBF810000u)
+      << "the original compatible-firmware source entry is translated in the compact body";
+
+  const auto *target_rodata = find_section(translated, ".rodata");
+  ASSERT_NE(target_rodata, nullptr);
+  ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  const auto *target_kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      translated.image_data() + target_rodata->sectionOffset());
+  EXPECT_EQ(target_kd->kernel_code_entry_byte_offset, source_kd->kernel_code_entry_byte_offset)
+      << "the descriptor is redirected to the synthesized compatibility entry; compatible "
+         "firmware still reaches the synthesized +256 entry by adding the ABI skip";
+}
+
+TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPrologue) {
+  constexpr uint64_t kSourceEntryBytes = 512;
+  constexpr size_t kSourceEntryWord = kSourceEntryBytes / sizeof(uint32_t);
+  constexpr size_t kSourcePreloadEntryWord =
+      (kSourceEntryBytes + kKernargPreloadSkipBytes) / sizeof(uint32_t);
+  constexpr uint16_t kScalarOperandTtmpBase = 108;
+  constexpr uint16_t kTtmpRdna4GridX = 9;
+
+  std::vector<uint32_t> words(kSourcePreloadEntryWord + 1,
+                              build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words[0] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  words[kSourceEntryWord] = build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4);
+  words[kSourcePreloadEntryWord] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  enable_workgroup_id_x_sgpr(image);
+
+  AmdGpuCodeObject source_layout(image.data(), image.size());
+  ASSERT_TRUE(source_layout.is_valid());
+  ASSERT_FALSE(source_layout.text_sections().empty());
+  const auto *source_text = source_layout.text_sections()[0];
+  const auto *source_rodata = find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+
+  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  source_kd->kernel_code_entry_byte_offset =
+      static_cast<int64_t>(source_text->vaddr() + kSourceEntryBytes) -
+      static_cast<int64_t>(source_rodata->vaddr());
+
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(co);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *text = translated.text_sections()[0];
+  ASSERT_GT(text->size(), kKernargPreloadSkipBytes + 3 * sizeof(uint32_t));
+  const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
+
+  const uint32_t workgroup_id_x_prologue =
+      build_s_mov_b32(0, kScalarOperandTtmpBase + kTtmpRdna4GridX, ROCJITSU_CODE_ARCH_RDNA4);
+  const uint32_t prologue_delay = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto expect_launch_stub = [&](size_t word_index, int16_t branch_offset) {
+    EXPECT_EQ(target_words[word_index], workgroup_id_x_prologue)
+        << "the synthesized kernarg-preload launch stub must materialize descriptor ABI SGPRs "
+           "before branching into the relocated body";
+    EXPECT_EQ(target_words[word_index + 1], prologue_delay)
+        << "the synthesized launch stub must preserve scalar producer/consumer hazards";
+    EXPECT_EQ(target_words[word_index + 2], build_s_branch(branch_offset, ROCJITSU_CODE_ARCH_RDNA4))
+        << "the synthesized launch stub branches only after the descriptor ABI prologue";
+  };
+  expect_launch_stub(0, 64);
+  expect_launch_stub(kKernargPreloadSkipBytes / sizeof(uint32_t), 1);
+
+  EXPECT_EQ(target_words[67], build_s_branch(0, ROCJITSU_CODE_ARCH_RDNA4))
+      << "the original compatibility source entry is translated in the compact body";
+  EXPECT_EQ(target_words[68], build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4))
+      << "the original preloaded-kernarg source entry is translated in the compact body";
+
+  const auto *target_rodata = find_section(translated, ".rodata");
+  ASSERT_NE(target_rodata, nullptr);
+  ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  const auto *target_kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      translated.image_data() + target_rodata->sectionOffset());
+  const int64_t target_entry_text_offset = static_cast<int64_t>(target_rodata->vaddr()) +
+                                           target_kd->kernel_code_entry_byte_offset -
+                                           static_cast<int64_t>(text->vaddr());
+  EXPECT_EQ(target_entry_text_offset, 0)
+      << "the descriptor must be redirected from the moved source entry to the synthesized "
+         "compatibility launch stub";
+  EXPECT_NE(target_kd->kernel_code_entry_byte_offset, source_kd->kernel_code_entry_byte_offset)
+      << "the source descriptor entry is deliberately nonzero, so this assertion proves the "
+         "descriptor was repointed rather than passing because both entries were zero";
 }
 
 TEST(InstructionBuilder, PatchPcrelBranchOffsetInRange) {
@@ -2013,8 +2160,6 @@ void expect_cdna3_translated_descriptor_vgprs_at_least(const std::vector<uint8_t
 
 // --- Synthetic BinaryTranslator integration tests ---
 TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
-
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_two_kernel_descriptors();
   rocjitsu::AmdGpuCodeObject co(image.data(), image.size());
   ASSERT_TRUE(co.is_valid());
@@ -2039,7 +2184,8 @@ TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
   std::ranges::sort(original_descriptor_offsets);
   EXPECT_EQ(original_entries, (std::vector<uint64_t>{0, sizeof(uint32_t)}));
   EXPECT_EQ(original_descriptor_offsets,
-            (std::vector<uint64_t>{rodata->sectionOffset(), rodata->sectionOffset() + sizeof(KD)}));
+            (std::vector<uint64_t>{rodata->sectionOffset(),
+                                   rodata->sectionOffset() + rocjitsu::kKernelDescriptorSize}));
 
   rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   auto result = translator.translate(co);
@@ -2172,8 +2318,7 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3MfmaPartialScratchGrowsDescriptor) {
   expect_cdna3_translated_descriptor_vgprs_at_least(result.elf_bytes, kScratchFloor + 4);
 }
 
-TEST(BinaryTranslatorE2E, RelocatedKernelCompactsSourceGapsAndPatchesBranches) {
-  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+TEST(BinaryTranslatorE2E, RelocatedKernelCompactsEntryWindowAndPatchesBranches) {
   constexpr uint32_t kCdna4SCbranchScc1ToSourceTarget = rocjitsu::pack_sopp(5, 4);
   const std::vector<uint32_t> words = {
       rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> source 0x0c.
@@ -2185,7 +2330,7 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsSourceGapsAndPatchesBranches) {
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x18 unreachable.
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x1c unreachable.
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x20 conditional target.
-      kCdna4SEndpgm,                                         // 0x24 fallthrough-branch target.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x24 fallthrough-branch target.
   };
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -2201,18 +2346,54 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsSourceGapsAndPatchesBranches) {
 
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  // Relocation emits only reachable blocks, compacted in source order. Explicit
-  // branch immediates are then patched into the compact layout; the old source
-  // gaps are not preserved for compatibility.
-  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[1], rocjitsu::pack_sopp(5, 1));
-  EXPECT_EQ(target_words[2], rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[3], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[4], kCdna4SEndpgm);
-  for (size_t i = 5; i < words.size(); ++i) {
+  // Without kernarg preload, the relocated body keeps only reachable blocks.
+  // Explicit branches are retargeted in that compact body while unreachable
+  // source gaps are removed.
+  const std::vector<uint32_t> expected = {
+      rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::pack_sopp(5, 1),
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3),
+  };
+  for (size_t i = 0; i < expected.size(); ++i) {
     SCOPED_TRACE(i);
-    EXPECT_EQ(target_words[i], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+    EXPECT_EQ(target_words[i], expected[i]);
   }
+}
+
+TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBlocksAfterEntry) {
+  std::vector<uint32_t> words(74, rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words[0] = rocjitsu::build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4); // 0x00 -> 0x100.
+  words[64] = rocjitsu::build_s_branch(7, ROCJITSU_CODE_ARCH_CDNA4); // 0x100 -> 0x120.
+  words[72] = rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);    // Reachable target.
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *text = translated.text_sections()[0];
+  ASSERT_GE(text->size(), words.size() * sizeof(uint32_t));
+
+  const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
+  // The final ELF section is tail-padded back to the original size, but the
+  // relocated body starts at the descriptor entry and keeps only reachable
+  // blocks. The source 0x100 and 0x120 targets therefore land immediately after
+  // their predecessor branches instead of remaining at the original words 64
+  // and 72.
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[64], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[72], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
 }
 
 TEST(BinaryTranslatorE2E, RejectsIndirectBranchAndCallInstructions) {
@@ -2388,26 +2569,28 @@ TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {
   EXPECT_FALSE(diagnostic->message.empty());
 }
 
-TEST(KernelDescriptorTranslator, IgnoresExecutableSectionsOutsideTextForEntryRange) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
-
+TEST(KernelDescriptorTranslator, IgnoresNonAllocExecutableSectionsForEntryRange) {
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
-  auto *ehdr = reinterpret_cast<rocjitsu::Elf64_Ehdr *>(image.data());
-  auto *shdrs = reinterpret_cast<rocjitsu::Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+  const auto ehdr = rocjitsu::read_elf_struct_for_test<rocjitsu::Elf64_Ehdr>(image, 0);
+  auto shdrs =
+      rocjitsu::read_elf_array_for_test<rocjitsu::Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
 
   constexpr uint64_t fake_exec_vaddr = 0x9000;
-  shdrs[5].sh_flags = rocjitsu::SHF_ALLOC | rocjitsu::SHF_EXECINSTR;
+  shdrs[5].sh_flags = rocjitsu::SHF_EXECINSTR;
   shdrs[5].sh_addr = fake_exec_vaddr;
   shdrs[5].sh_size = sizeof(uint32_t);
+  for (size_t i = 0; i < shdrs.size(); ++i)
+    rocjitsu::write_elf_struct_for_test(image, ehdr.e_shoff + i * sizeof(rocjitsu::Elf64_Shdr),
+                                        shdrs[i]);
 
-  auto *kd = reinterpret_cast<KD *>(image.data() + shdrs[2].sh_offset);
-  kd->kernel_code_entry_byte_offset =
-      static_cast<int64_t>(fake_exec_vaddr) - static_cast<int64_t>(shdrs[2].sh_addr);
+  rocjitsu::write_kernel_descriptor_entry_offset(image.data() + shdrs[2].sh_offset,
+                                                 static_cast<int64_t>(fake_exec_vaddr) -
+                                                     static_cast<int64_t>(shdrs[2].sh_addr));
 
   rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
                                                   ROCJITSU_CODE_ARCH_RDNA4);
   const auto translations = translator.translate_image(
       image, shdrs[1].sh_offset, shdrs[1].sh_size, rocjitsu::KernelDescriptorTranslationOptions{});
   EXPECT_TRUE(translations.empty())
-      << "descriptor entries must point into the .text section being translated";
+      << "non-loadable executable sections must not extend valid kernel entry range";
 }

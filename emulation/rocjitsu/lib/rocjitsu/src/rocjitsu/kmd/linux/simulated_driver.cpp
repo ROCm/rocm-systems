@@ -287,7 +287,7 @@ int SimulatedDriver::open() {
 
   std::lock_guard<std::mutex> lk(process_mutex_);
   if (!daemon_mode_ && local_process_id_ != 0 && processes_.contains(local_process_id_)) {
-    processes_[local_process_id_]->event_state_.reset();
+    processes_[local_process_id_]->retain_open();
     return fd_;
   }
   uint32_t pid = next_process_id_++;
@@ -354,7 +354,19 @@ int SimulatedDriver::open() {
   return fd_;
 }
 
-uint32_t SimulatedDriver::open_process() {
+void SimulatedDriver::set_process_client_pid(uint32_t process_id, pid_t client_pid) {
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  auto it = processes_.find(process_id);
+  if (it != processes_.end()) {
+    it->second->set_client_pid(client_pid);
+    for (auto &g : gpus_) {
+      if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+        mem->set_process_client_pid(process_id, client_pid);
+    }
+  }
+}
+
+uint32_t SimulatedDriver::open_process(pid_t client_pid) {
   if (fd_ < 0) {
     fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
     if (fd_ < 0)
@@ -364,12 +376,31 @@ uint32_t SimulatedDriver::open_process() {
   uint32_t pid;
   {
     std::lock_guard<std::mutex> lk(process_mutex_);
+    // Client-PID process reuse (and its matching retain) is a daemon-mode
+    // feature: multiple client opens of the same PID share one process and
+    // balance against multiple close()/release_open() calls. Gating reuse on
+    // daemon_mode_ keeps it symmetric with close() — outside daemon mode every
+    // open creates a fresh process so the first close cannot tear down a
+    // still-referenced one.
+    if (daemon_mode_ && client_pid > 0) {
+      for (auto &[id, proc] : processes_) {
+        if (proc->client_pid() == client_pid) {
+          proc->retain_open();
+          return id;
+        }
+      }
+    }
     pid = next_process_id_++;
     auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
+    if (client_pid > 0)
+      proc->set_client_pid(client_pid);
     proc->event_state_.reset();
     for (auto &g : gpus_) {
-      if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+      if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
         mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+        if (client_pid > 0)
+          mem->set_process_client_pid(pid, client_pid);
+      }
     }
     processes_[pid] = proc;
 
@@ -425,6 +456,23 @@ uint32_t SimulatedDriver::open_process() {
   return pid;
 }
 
+void SimulatedDriver::retain_local_open() {
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  if (local_process_id_ == 0)
+    return;
+  auto it = processes_.find(local_process_id_);
+  if (it != processes_.end())
+    it->second->retain_open();
+}
+
+uint32_t SimulatedDriver::local_open_ref_count() const {
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  if (local_process_id_ == 0)
+    return 0;
+  auto it = processes_.find(local_process_id_);
+  return it != processes_.end() ? it->second->open_ref_count() : 0;
+}
+
 int SimulatedDriver::close() { return close(local_process_id_); }
 
 int SimulatedDriver::close(uint32_t process_id) {
@@ -435,6 +483,8 @@ int SimulatedDriver::close(uint32_t process_id) {
     std::lock_guard<std::mutex> lk(process_mutex_);
     auto it = processes_.find(process_id);
     if (it == processes_.end())
+      return 0;
+    if (!it->second->release_open())
       return 0;
     extracted = std::move(it->second);
     processes_.erase(it);
@@ -1176,6 +1226,17 @@ bool SimulatedDriver::allocate_scratch_backing(uint32_t process_id, uint64_t gpu
   std::memset(host_ptr, 0, aligned_size);
   proc->map_pages(gpu_va, host_ptr, aligned_size);
 
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    KfdProcess::GpuAllocation alloc{};
+    alloc.gpu_va = gpu_va;
+    alloc.size = aligned_size;
+    alloc.host_ptr = host_ptr;
+    alloc.handle = proc->next_handle_++;
+    alloc.memfd = -1;
+    proc->allocations_[alloc.handle] = alloc;
+  }
+
   util::Logger::vm([&](auto &os) {
     os << "SCRATCH_BACKING pid=" << process_id << " gpu_va=0x" << std::hex << gpu_va << " size=0x"
        << aligned_size << std::dec << " host=" << host_ptr;
@@ -1249,8 +1310,19 @@ int SimulatedDriver::map_memory_ioctl(KfdProcess &proc, void *arg) {
   return 0;
 }
 
-int SimulatedDriver::unmap_memory_ioctl([[maybe_unused]] KfdProcess &proc, void *arg) {
+int SimulatedDriver::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg);
+  std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+  auto it = proc.allocations_.find(args->handle);
+  if (it != proc.allocations_.end()) {
+    // UNMAP only tears down GPU page-table mappings; the allocation record
+    // (and its backing memfd/dmabuf_fd) stays tracked until FREE_MEMORY_OF_GPU
+    // releases it. Erasing here would leak those fds and make a later FREE a
+    // no-op for this handle.
+    auto &alloc = it->second;
+    if (alloc.host_ptr)
+      unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+  }
   args->n_success = args->n_devices;
   return 0;
 }
