@@ -192,20 +192,30 @@ endif()
 set(DEFAULT_GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING
     "Target default GPUs if GPU_TARGETS is not defined.")
 
-# Preserve the user-supplied GPU_TARGETS before rocm_check_target_ids strips
-# feature suffixes (e.g. gfx942:sramecc+:xnack-). GPU_TARGETS_FULL is consumed
-# by DeviceBitcode.cmake to embed correct amdhsa.target metadata in HSACOs.
+# Preserve the raw user-supplied GPU_TARGETS in GPU_TARGETS_FULL before
+# rocm_check_target_ids strips feature suffixes (e.g. gfx942:sramecc+:xnack-).
+# GPU_TARGETS_FULL is consumed by DeviceBitcode.cmake to embed correct
+# amdhsa.target metadata in HSACOs.
 if(GPU_TARGETS)
   set(GPU_TARGETS_FULL "${GPU_TARGETS}" CACHE STRING
     "GPU arch strings with feature suffixes as supplied by the user (before validation strips them)")
 endif()
 
 if (COMMAND rocm_check_target_ids)
-  message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
-  rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
+  if(GPU_TARGETS)
+    message(STATUS "Checking for ROCm support for GPU targets: " "${GPU_TARGETS}")
+    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${GPU_TARGETS})
+  else()
+    message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
+    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
+  endif()
 else()
   message(WARNING "Unable to check for supported GPU targets.")
-  set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
+  if(GPU_TARGETS)
+    set(SUPPORTED_GPUS ${GPU_TARGETS})
+  else()
+    set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
+  endif()
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU architectures to compile for")
