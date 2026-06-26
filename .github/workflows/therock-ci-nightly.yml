@@ -1,3 +1,4 @@
+
 name: TheRock CI Nightly
 
 on:
@@ -54,12 +55,16 @@ jobs:
           sparse-checkout-cone-mode: true
           fetch-depth: 2
 
+      - name: Resolve CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -184,3 +189,4 @@ jobs:
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.windows_build_runs_on }}
+
