@@ -33,66 +33,77 @@ concept sdma_wrapper_contract = requires { typename T::proc_info_t; } &&
                                 };
 
 template <typename T>
-concept wrapper_policy =
-    // ── Required type aliases ─────────────────────────────────────────────────
-    requires {
-        typename T::status_t;
-        typename T::version_t;
-        typename T::socket_handle;
-        typename T::processor_handle;
-        typename T::gpu_metrics_t;
-        typename T::asic_info_t;
-        typename T::memory_type_t;
-        typename T::temperature_type_t;
-        typename T::temperature_metric_t;
-        { T::sdma_supported } -> std::convertible_to<bool>;
-    } &&
-    // ── Constants, status helpers, lifecycle, enumeration, per-device calls ───
-    requires(T t, typename T::status_t s, typename T::version_t* vp, std::uint32_t* cp,
-             typename T::socket_handle sh, typename T::socket_handle* shp,
-             typename T::processor_handle ph, typename T::processor_handle* php,
-             typename T::gpu_metrics_t* gmp, typename T::asic_info_t* aip,
-             typename T::memory_type_t mt, std::uint64_t* u64p,
-             typename T::temperature_type_t tt, typename T::temperature_metric_t tm,
-             std::int64_t* i64p) {
-        { T::STATUS_SUCCESS } -> std::convertible_to<typename T::status_t>;
-        { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
-        { T::TEMP_CURRENT } -> std::convertible_to<typename T::temperature_metric_t>;
-        {
-            T::TEMPERATURE_TYPE_HOTSPOT
-        } -> std::convertible_to<typename T::temperature_type_t>;
-        {
-            T::TEMPERATURE_TYPE_EDGE
-        } -> std::convertible_to<typename T::temperature_type_t>;
-        { T::status_to_string(s) } -> std::convertible_to<std::string>;
-        { t.init() } -> std::convertible_to<typename T::status_t>;
-        { t.shutdown() } -> std::convertible_to<typename T::status_t>;
-        { t.get_version(vp) } -> std::convertible_to<typename T::status_t>;
+concept wrapper_types = requires {
+    typename T::status_t;
+    typename T::version_t;
+    typename T::socket_handle;
+    typename T::processor_handle;
+    typename T::gpu_metrics_t;
+    typename T::asic_info_t;
+    typename T::memory_type_t;
+    typename T::temperature_type_t;
+    typename T::temperature_metric_t;
+    { T::sdma_supported } -> std::convertible_to<bool>;
+};
+
+template <typename T>
+concept wrapper_constants = requires(typename T::status_t s) {
+    { T::STATUS_SUCCESS } -> std::convertible_to<typename T::status_t>;
+    { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
+    { T::TEMP_CURRENT } -> std::convertible_to<typename T::temperature_metric_t>;
+    {
+        T::TEMPERATURE_TYPE_HOTSPOT
+    } -> std::convertible_to<typename T::temperature_type_t>;
+    { T::TEMPERATURE_TYPE_EDGE } -> std::convertible_to<typename T::temperature_type_t>;
+    { T::status_to_string(s) } -> std::convertible_to<std::string>;
+};
+
+template <typename T>
+concept wrapper_lifecycle = requires(T t, typename T::version_t* vp) {
+    { t.init() } -> std::convertible_to<typename T::status_t>;
+    { t.shutdown() } -> std::convertible_to<typename T::status_t>;
+    { t.get_version(vp) } -> std::convertible_to<typename T::status_t>;
+};
+
+template <typename T>
+concept wrapper_enumeration =
+    requires(T t, std::uint32_t* cp, typename T::socket_handle sh,
+             typename T::socket_handle* shp, typename T::processor_handle* php) {
         { t.get_socket_handles(cp, shp) } -> std::convertible_to<typename T::status_t>;
         {
             t.get_processor_handles(sh, cp, php)
         } -> std::convertible_to<typename T::status_t>;
+    };
+
+template <typename T>
+concept wrapper_gpu_queries =
+    requires(T t, typename T::processor_handle ph, typename T::gpu_metrics_t* gmp,
+             typename T::asic_info_t* aip, typename T::memory_type_t mt,
+             std::uint64_t* u64p, typename T::temperature_type_t tt,
+             typename T::temperature_metric_t tm, std::int64_t* i64p) {
         { t.get_metrics_info(ph, gmp) } -> std::convertible_to<typename T::status_t>;
         { t.get_gpu_asic_info(ph, aip) } -> std::convertible_to<typename T::status_t>;
         { t.get_memory_usage(ph, mt, u64p) } -> std::convertible_to<typename T::status_t>;
         {
             t.get_temp_metric(ph, tt, tm, i64p)
         } -> std::convertible_to<typename T::status_t>;
-    } &&
-    // ── SDMA methods — only required when sdma_supported == true ─────────────
-    (!T::sdma_supported || sdma_wrapper_contract<T>)
+    };
+
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    &&
-    requires {
-        typename T::processor_type;
-        typename T::nic_asic_info_t;
-        typename T::nic_port_info_t;
-        typename T::nic_rdma_devices_info_t;
-        typename T::nic_stat_t;
-    } &&
-    requires(typename T::processor_type pt) {
-        { T::NIC_PROCESSOR_TYPE } -> std::convertible_to<typename T::processor_type>;
-    } &&
+
+template <typename T>
+concept nic_wrapper_types = requires {
+    typename T::processor_type;
+    typename T::nic_asic_info_t;
+    typename T::nic_port_info_t;
+    typename T::nic_rdma_devices_info_t;
+    typename T::nic_stat_t;
+} && requires(typename T::processor_type pt) {
+    { T::NIC_PROCESSOR_TYPE } -> std::convertible_to<typename T::processor_type>;
+};
+
+template <typename T>
+concept nic_wrapper_queries =
     requires(T t, typename T::processor_handle ph, typename T::nic_asic_info_t* nap,
              typename T::nic_port_info_t* npp, typename T::nic_rdma_devices_info_t* ndp,
              std::uint8_t port_idx, std::uint32_t* cp, typename T::nic_stat_t* nsp) {
@@ -102,9 +113,19 @@ concept wrapper_policy =
         {
             t.get_nic_rdma_port_statistics(ph, port_idx, cp, nsp)
         } -> std::convertible_to<typename T::status_t>;
-    }
+    };
+
 #endif
-;
+
+template <typename T>
+concept wrapper_policy =
+    wrapper_types<T> && wrapper_constants<T> && wrapper_lifecycle<T> &&
+    wrapper_enumeration<T> && wrapper_gpu_queries<T> &&
+    (!T::sdma_supported || sdma_wrapper_contract<T>)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    && nic_wrapper_types<T> && nic_wrapper_queries<T>
+#endif
+    ;
 
 /**
  * @brief Session-level smart wrapper around an AMD SMI backend policy.
@@ -185,7 +206,7 @@ public:
 
     [[nodiscard]] std::vector<processor_handle> enumerate_gpu_handles()
     {
-        return enumerate_handles(
+        return enumerate_socket_handles(
             [this](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
                 return m_amdsmi.get_processor_handles(socket, count, procs);
             },
@@ -195,7 +216,7 @@ public:
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     [[nodiscard]] std::vector<processor_handle> enumerate_nic_handles()
     {
-        return enumerate_handles(
+        return enumerate_socket_handles(
             [this](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
                 return m_amdsmi.get_processor_handles_by_type(
                     socket, Wrapper::NIC_PROCESSOR_TYPE, procs, count);
@@ -294,8 +315,8 @@ private:
     }
 
     template <typename QueryFn>
-    [[nodiscard]] std::vector<processor_handle> enumerate_handles(QueryFn     query,
-                                                                  const char* fn_name)
+    [[nodiscard]] std::vector<processor_handle> enumerate_socket_handles(
+        QueryFn query, const char* fn_name)
     {
         std::vector<processor_handle> result;
 

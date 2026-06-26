@@ -26,7 +26,6 @@ concept gpu_backend_contract = requires(const Backend backend) {
     { backend.get_edge_temperature() } -> std::same_as<std::int64_t>;
     { backend.get_raw_sdma_usage() } -> std::same_as<std::uint64_t>;
     { backend.probe_sdma_gpu_support() } -> std::same_as<bool>;
-    { Backend::sdma_supported } -> std::convertible_to<bool>;
 };
 
 template <gpu_backend_contract Backend>

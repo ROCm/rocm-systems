@@ -18,8 +18,6 @@ using gpu::metrics;
 
 struct mock_gpu_backend
 {
-    static constexpr bool sdma_supported = true;
-
     MOCK_METHOD(asic_info, get_gpu_asic_info, (), (const));
     MOCK_METHOD(metrics, get_metrics, (), (const));
     MOCK_METHOD(std::uint64_t, get_memory_usage, (), (const));
