@@ -112,7 +112,7 @@ jobs:
           fi
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ github.workspace }}/.ccache
         key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
@@ -150,6 +150,7 @@ jobs:
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_EXAMPLES=ON
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_USE_MPI=OFF
           -DROCPROFSYS_USE_OMPT=OFF
@@ -311,7 +312,7 @@ jobs:
           dnf clean all
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ github.workspace }}/.ccache
         key: ccache-redhat-system-deps-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ github.sha }}
@@ -355,6 +356,7 @@ jobs:
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
+          -DROCPROFSYS_BUILD_EXAMPLES=ON \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_USE_MPI_HEADERS=ON \

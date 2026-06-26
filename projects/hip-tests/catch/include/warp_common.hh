@@ -286,6 +286,7 @@ const char* opToString()
     return "logical_or";
   else if constexpr (std::is_same<Op, XorOp<T>>::value)
     return "logical_xor";
+#if HT_AMD
   else if constexpr (std::is_same<Op, cooperative_groups::plus<T>>::value)
     return "cooperative_groups::plus";
   else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value)
@@ -298,6 +299,7 @@ const char* opToString()
     return "cooperative_groups::bit_or";
   else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<T>>::value)
     return "cooperative_groups::bit_xor";
+#endif
   else if constexpr (std::is_same<Op, MaxOfAbsolute<T>>::value)
     return "MaxOfAbsolute";
   else {
@@ -397,7 +399,11 @@ T calculateExpected(const T* input, Op& op, unsigned long long mask)
   T result;
   int wavefrontSize = getWarpSize();
 
-  if constexpr (std::is_same<Op, std::plus<T>>::value || std::is_same<Op, cooperative_groups::plus<T>>::value) {
+  if constexpr (std::is_same<Op, std::plus<T>>::value
+#if HT_AMD
+      || std::is_same<Op, cooperative_groups::plus<T>>::value
+#endif
+  ) {
     T tmp[64] = { 0 };
 
     for (int i = 0; i < wavefrontSize; i++) {
@@ -415,6 +421,7 @@ T calculateExpected(const T* input, Op& op, unsigned long long mask)
       }
     }
     result = tmp[0];
+#if HT_AMD
   } else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
     MinOp<T> minOp;
     return calculateExpected(input, minOp, mask);
@@ -430,6 +437,7 @@ T calculateExpected(const T* input, Op& op, unsigned long long mask)
   } else if constexpr (std::is_same<Op, cooperative_groups::bit_and<T>>::value) {
     std::bit_and<T> andOp;
     return calculateExpected(input, andOp, mask);
+#endif
   } else {
     bool initialized = false;
 
