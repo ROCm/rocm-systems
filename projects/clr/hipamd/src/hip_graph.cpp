@@ -1597,7 +1597,9 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
   }
 
   // PAL/Windows: classic topological path — no segment scheduling, no AQL capture.
-  if (GPU_ENABLE_PAL != 0) {
+  // DEBUG_HIP_GRAPH_CLASSIC_PATH=1 forces this path on Linux for testing without
+  // enabling the full PAL backend.
+  if (GPU_ENABLE_PAL != 0 || DEBUG_HIP_GRAPH_CLASSIC_PATH) {
     auto* classicExec = new hip::GraphExecClassic(flags);
     graph->clone(classicExec, true);
     graph->SetGraphInstantiated(true);

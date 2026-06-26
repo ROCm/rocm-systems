@@ -1292,12 +1292,16 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
                 "[hipGraph] ChildGraphNode::EnqueueCommands failed with status=%d", status);
       }
-    } else if (max_streams_ == 1) {
-      // Legacy topological order execution for non-segmented graphs
-      for (int i = 0; i < topoOrder_.size(); i++) {
-        topoOrder_[i]->SetStream(stream_);
-        hipError_t status = topoOrder_[i]->CreateCommand(topoOrder_[i]->GetQueue());
-        topoOrder_[i]->EnqueueCommands(stream_);
+    } else {
+      // Classic path: no segments, no AQL capture — walk topoOrder_ directly.
+      // Populate topoOrder_ on first launch if not yet done.
+      if (topoOrder_.empty()) {
+        Graph::TopologicalOrder(topoOrder_);
+      }
+      for (auto* node : topoOrder_) {
+        node->SetStream(stream);
+        [[maybe_unused]] hipError_t s = node->CreateCommand(node->GetQueue());
+        node->EnqueueCommands(stream);
       }
     }
   }
