@@ -90,6 +90,7 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/signal.h"
 #include "core/util/memory.h"
 #include "core/util/os.h"
+#include "core/util/poll_backoff.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 
 #ifndef HSA_VERSION_MAJOR
@@ -2018,13 +2019,11 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // Process all signals on the CPU first
       bool finish = false;
       bool polling = false;
-      // Nap bounds for the no-interrupt polling mode below. poll_nap_us is
-      // re-initialized here, i.e. once per outer-loop iteration (one per new
-      // wait batch), so the backoff only compounds within a single idle wait
-      // and every new wait starts again at the floor -- the escalated value
-      // cannot carry across waits.
-      constexpr int kPollNapFloorUs = 20;
-      constexpr int kPollNapCeilingUs = 2000;
+      // Nap duration for the no-interrupt polling mode below (see
+      // core/util/poll_backoff.h). poll_nap_us is re-initialized here, i.e.
+      // once per outer-loop iteration (one per new wait batch), so the backoff
+      // only compounds within a single idle wait and every new wait starts
+      // again at the floor -- the escalated value cannot carry across waits.
       int poll_nap_us = kPollNapFloorUs;
 
       while (!finish) {
@@ -2130,7 +2129,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // processed event leaves this inner loop, and the next wait starts
           // again from the floor.
           os::uSleep(poll_nap_us);
-          poll_nap_us = std::min(poll_nap_us * 2, kPollNapCeilingUs);
+          poll_nap_us = NextPollNapUs(poll_nap_us);
         }
       }
     }
