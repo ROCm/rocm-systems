@@ -423,6 +423,14 @@ static ncclResult_t kvConvertToInt(const char* str, int* value, struct kvDict* d
   return ncclSuccess;
 }
 static ncclResult_t kvConvertToStr(int value, const char** str, struct kvDict* dict) {
+  if (dict == NULL) {
+    WARN("KV Convert to str : null dictionary");
+    return ncclInternalError;
+  }
+  if (str == NULL) {
+    WARN("KV Convert to str : null result pointer");
+    return ncclInternalError;
+  }
   struct kvDict* d = dict;
   while (d->str) {
     if (value == d->value) {
