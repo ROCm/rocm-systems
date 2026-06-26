@@ -9,29 +9,12 @@
 RCCL usage tips
 *****************************************
 
-This topic describes some of the more common RCCL extensions, such as NPKit, and provides tips on how to
-configure and customize the application.
+This topic describes common RCCL configuration options and usage tips.
 
-NPKit
-=====
+Profiling
+=========
 
-RCCL integrates `NPKit <https://github.com/microsoft/npkit>`_, a profiler framework that
-enables the collection of fine-grained trace events in RCCL components, especially in giant collective GPU kernels.
-See the `NPKit sample workflow for RCCL <https://github.com/microsoft/NPKit/tree/main/rccl_samples>`_ for
-a fully-automated usage example. It also provides useful templates for the following manual instructions.
-
-To manually build RCCL with NPKit enabled, pass ``-DNPKIT_FLAGS="-DENABLE_NPKIT -DENABLE_NPKIT_...(other NPKit compile-time switches)"`` to the ``cmake`` command. 
-All NPKit compile-time switches are declared in the RCCL code base as macros with the prefix ``ENABLE_NPKIT_``.
-These switches control the information that is collected.
-
-.. note::
-   
-   NPKit only supports the collection of non-overlapped events on the GPU.
-   The ``-DNPKIT_FLAGS`` settings must follow this rule.
-
-To manually run RCCL with NPKit enabled, set the environment variable ``NPKIT_DUMP_DIR``
-to the NPKit event dump directory. NPKit only supports one GPU per process.
-To manually analyze the NPKit dump results, use `npkit_trace_generator.py <https://github.com/microsoft/NPKit/blob/main/rccl_samples/npkit_trace_generator.py>`_.
+For fine-grained profiling of collective operations, use the RCCL **profiler plugin** API and related tooling rather than legacy in-tree profilers.
 
 MSCCL and MSCCL++ integration has been removed from RCCL. The legacy API symbols ``mscclLoadAlgo``,
 ``mscclRunAlgo``, and ``mscclUnloadAlgo`` remain as no-ops for link compatibility.
@@ -48,6 +31,52 @@ set the HSA environment variable as follows:
 
 This feature requires GPUs that support peer-to-peer access along with
 proper large BAR addressing support.
+
+Symmetric memory and ``NCCL_P2P_LEVEL``
+=======================================
+
+RCCL can accelerate some collectives (for example, allreduce, allgather, and
+reduce-scatter) through a *symmetric memory* path. This path uses
+:doc:`Virtual Memory Management <../api-reference/api-library>`-backed
+buffers that are registered as symmetric windows
+(``ncclCommWindowRegister`` with the ``NCCL_WIN_COLL_SYMMETRIC`` flag, or
+buffers allocated with ``ncclMemAlloc``) so that every participating rank can
+address the buffer directly.
+
+Whether a communicator can use symmetric memory is decided once at
+``ncclCommInitRank`` time. The prerequisites are:
+
+- All local ranks are **peer-to-peer capable** with each other (on AMD
+  GPUs this means they are on the same host over PCIe or XGMI,
+  or are reachable through a Multi-Node Infinity Fabric clique).
+- Virtual Memory Management is enabled (``NCCL_CUMEM_ENABLE=1``).
+- Symmetric windows are enabled (``NCCL_WIN_ENABLE=1``, the default).
+- Either GPU-Initiated Networking (GIN) is available, or the communicator is a
+  single locality (one-LSA) team.
+
+.. note::
+
+   Symmetric-memory availability does **not** depend on the
+   ``NCCL_P2P_LEVEL`` distance setting. This matches the behavior introduced in
+   upstream NCCL 2.28.7, which removed the topology-distance check from the
+   symmetric-memory decision. Restricting peer-to-peer reach with a value such
+   as ``NCCL_P2P_LEVEL=PHB`` (or even disabling distance-based P2P entirely with
+   ``NCCL_P2P_DISABLE=1``) changes how the *flat* P2P transport schedule is
+   built, but it does **not** by itself turn off the symmetric path: as long as
+   the GPUs are CUDA peer-to-peer capable, symmetric memory remains eligible.
+
+To confirm whether symmetric memory was enabled for a run, inspect the init
+logs:
+
+.. code-block:: shell
+
+   NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT ./your_app
+
+When symmetric memory is **not** available, RCCL logs a line that begins with
+``Symmetric memory is not supported`` and reports which prerequisite was
+missing (for example, ``cuMemEnable`` or ``globalGinSupport``). If you expect
+the symmetric path but it is disabled, check those prerequisites rather than
+``NCCL_P2P_LEVEL``.
 
 Ignoring CPU affinity with multi-node
 =====================================

@@ -424,6 +424,16 @@ typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
 /// \endcond
 
 /**
+ * @brief Compute Partition Memory Allocation Mode. Controls how GPU memory
+ * is allocated across XCPs within a memory partition.
+ */
+typedef enum {
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID = 0,  //!< Invalid mode
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING,      //!< Memory evenly capped per XCP
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL           //!< Each XCP may use full partition memory
+} rsmi_compute_partition_mem_alloc_mode_t;
+
+/**
  * @brief Memory Partitions. This enum is used to identify various
  * memory partition types.
  */
@@ -5111,6 +5121,27 @@ rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
                                              rsmi_compute_partition_type_t compute_partition);
 
 /**
+ *  @brief Retrieves the compute partition memory allocation mode for a device.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[out] mode a pointer to an ::rsmi_compute_partition_mem_alloc_mode_t into
+ *  which the current mode will be written.
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ */
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_get(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t* mode);
+
+/**
+ *  @brief Sets the compute partition memory allocation mode for a device.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] mode the desired ::rsmi_compute_partition_mem_alloc_mode_t value.
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ */
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_set(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t mode);
+
+/**
  *  @brief Retrieves the partition_id for a desired device
  *
  *  @details
@@ -5411,8 +5442,6 @@ rsmi_status_t rsmi_dev_memory_partition_capabilities_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
- *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
  *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
  *  because it is already being used - device is busy
  *

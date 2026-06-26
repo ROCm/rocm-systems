@@ -1,13 +1,14 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+
 # Re-find the disasm backend the decoder was built against, so its transitive
 # include dirs and link libs are usable from the consumer's build directory.
 # The library and consumer must agree on the LLVM (or comgr) used because
 # cxx/disassembly.hpp is header-only and inlines those calls into the
 # consumer's TUs.
 if(@USE_LLVM_DISASM@)
-    include(CMakeFindDependencyMacro)
-
     # Pin the LLVM_DIR the decoder was built with so the consumer doesn't
     # silently pick a different LLVM. Override by setting LLVM_DIR before
     # find_package(rocprof-trace-decoder).

@@ -113,14 +113,19 @@ The CUID tool supports both privileged and non-privileged users:
 - Allows creation of primary/derived CUIDs (if privileged).
 - Simplifies device management and integration.
 
-### Build Instructions
+### Build and Install Instructions
+
+The below instructions allow the building of the CUID project and also the installation of its files and services:
 
 ```sh
 mkdir build
 cd build
-cmake ..
-make
-make install
+# Set CMAKE_INSTALL_PREFIX as needed (default is typically /opt/rocm/core)
+cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
+# Use sudo if installing to a system prefix like /opt
+sudo make install
+# Replace <install-prefix> with the value used for CMAKE_INSTALL_PREFIX above
+sudo <install-prefix>/share/amdcuid/amdcuid_postinst.sh
 ```
 
 Both static and shared libraries are built.

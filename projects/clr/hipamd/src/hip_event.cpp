@@ -151,6 +151,9 @@ int64_t EventDD::time(bool getStartTs) const {
 }
 // ================================================================================================
 hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream) {
+  // Guard event_ against concurrent record/sync. Graph stream-wait nodes call
+  // this directly (not via the locked streamWait path); lock_ is recursive.
+  std::scoped_lock lock(lock_);
   const amd::Command::EventWaitList eventWaitList =
       (event_ != nullptr) ? amd::Command::EventWaitList{event_} : amd::Command::EventWaitList{};
 
@@ -186,6 +189,9 @@ hipError_t Event::streamWait(hip::Stream* stream, uint flags) {
 // ================================================================================================
 hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, uint32_t ext_flags,
                                 bool batch_flush) {
+  // Guard event state against concurrent access. Graph event-record nodes call
+  // this directly (not via the locked addMarker path); lock_ is recursive.
+  std::scoped_lock lock(lock_);
   if (command != nullptr) {
     return hipSuccess;
   }
@@ -201,12 +207,34 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
 
   constexpr bool kMarkerTs = true;
   constexpr bool kFlushCache = false;
-  command = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags, batch_flush);
+
+  // Check hipEventDisableTiming flag to skip profiling/timing infrastructure
+  const bool enable_profiling = !(flags & hipEventDisableTiming);
+
+  auto* marker = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags,
+                                      batch_flush, enable_profiling);
+
+  // Only timing-disabled events opt into coalescing: a non-null coalesceEvent()
+  // marks the record eligible and carries its identity for the device layer.
+  if (flags & hipEventDisableTiming) {
+    // Assign monotonic ID on first record to avoid address-reuse collision
+    if (coalesce_id_ == 0) {
+      coalesce_id_ = GenerateCoalesceId();
+    }
+    marker->setCoalesceEvent(coalesce_id_);
+    marker->setSyncedSinceRecord(WasSyncedSinceLastRecord());
+  }
+
+  command = marker;
+
   return hipSuccess;
 }
 
 // ================================================================================================
 hipError_t Event::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  // Guard event_ release/replace against concurrent access. Graph event-record
+  // nodes call this directly (not via locked addMarker); lock_ is recursive.
+  std::scoped_lock lock(lock_);
   command->enqueue();
 
   amd::Event& new_event = command->event();
@@ -339,7 +367,7 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   HIP_INIT_API(hipEventCreateWithFlags, event, flags);
 
   if (event == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, flags), *event);
@@ -350,7 +378,7 @@ hipError_t hipEventCreate(hipEvent_t* event) {
   HIP_INIT_API(hipEventCreate, event);
 
   if (event == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, 0), *event);
@@ -366,7 +394,7 @@ hipError_t hipEventDestroy(hipEvent_t event) {
 
   std::unique_lock lock(hip::eventSetLock);
   if (hip::eventSet.erase(event) == 0) {
-    return hipErrorContextIsDestroyed;
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   auto* e = reinterpret_cast<hip::Event*>(event);
@@ -413,6 +441,7 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
   }
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   auto* const e = reinterpret_cast<hip::Event*>(event);
   auto* const hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
@@ -535,6 +564,10 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
 
   auto* e = reinterpret_cast<hip::Event*>(event);
   const auto status = e->synchronize();
+  // Mark event as synced to prevent coalescing until next record
+  if (status == hipSuccess) {
+    e->MarkSynced();
+  }
   // Release freed memory for all memory pools on the device
   g_devices[e->deviceId()]->ReleaseFreedMemory();
   HIP_RETURN(status);

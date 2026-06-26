@@ -70,7 +70,9 @@ __device__ void SingleHeap::free([[maybe_unused]] void* ptr) {}
 
 void* SingleHeap::realloc([[maybe_unused]] void* ptr, [[maybe_unused]] size_t size) { return nullptr; }
 
-void* SingleHeap::malign([[maybe_unused]] size_t alignment, [[maybe_unused]] size_t size) { return nullptr; }
+void SingleHeap::malign(void** ptr, size_t alignment, size_t size) {
+  strat_->align(reinterpret_cast<char**>(ptr), alignment, size);
+}
 
 char* SingleHeap::get_base_ptr() { return heap_mem_->get_ptr(); }
 

@@ -40,4 +40,13 @@ target_link_libraries(
         rocprofiler-systems-core-library
         rocprofiler-systems::rocprofiler-systems-interface-library
         rocprofiler-systems::rocprofiler-systems-rocm
+        rocprofiler-systems::rocprofiler-systems-amd-smi-backend
+        rocprofiler-systems::rocprofiler-systems-procfs-backend
 )
+
+if(TARGET rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend)
+    target_link_libraries(
+        rocprofiler-systems-pmc-library
+        PRIVATE rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
+    )
+endif()

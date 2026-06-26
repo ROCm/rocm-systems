@@ -19,9 +19,12 @@ test_categories:
       - "Rcclwrap.*"
       - "TransportTest.*"
       - "ArgCheckTest.*"
+      - "DdaIpcEligibilityTest.*"
       - "NetSocketTests.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
+      - "NetDevsPolicyP2pNetTests.*"
+      - "TopoTest.*"
     exclude_windows:
       - "*"
     labels:

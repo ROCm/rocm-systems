@@ -1,19 +1,28 @@
 /*************************************************************************
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_DEBUG_H_
 #define NCCL_DEBUG_H_
 
-// Workaround for libstdc++ trying to force public visibility of std:: symbols.  We don't want to do that in libnccl.so.
-#include <bits/c++config.h>
-#undef _GLIBCXX_VISIBILITY
-#define _GLIBCXX_VISIBILITY(V)
+#ifdef NCCL_OS_LINUX
+  // Workaround for libstdc++ trying to force public visibility of std:: symbols.  We don't want to do that in libnccl.so.
+  #include <bits/c++config.h>
+  #undef _GLIBCXX_VISIBILITY
+  #define _GLIBCXX_VISIBILITY(V)
+#endif
 
 #include <cstdint>
 #include "nccl.h"
+
+// Windows compatibility: define ssize_t if not available
+#ifdef NCCL_OS_WINDOWS
+  #include <BaseTsd.h>
+  typedef SSIZE_T ssize_t;
+#endif
 
 typedef enum {
   NCCL_LOG_NONE = 0,
@@ -42,7 +51,8 @@ typedef enum {
   NCCL_REG = 0x2000,
   NCCL_PROFILE = 0x4000,
   NCCL_RAS = 0x8000,
-  NCCL_VERBS = 0x10000,
+  NCCL_DESTROY = 0x10000,
+  NCCL_VERBS = 0x20000,
   NCCL_ALL = ~0
 } ncclDebugLogSubSys;
 
@@ -74,7 +84,11 @@ typedef enum {
   ncclFuncAlltoAllPivot = 11,
   ncclFuncAlltoAllGda = 12,
   ncclFuncAlltoAllvGda = 13,
-  ncclNumFuncs = 14
+  ncclFuncAllGatherV = 14,
+  ncclFuncPutSignal = 15,
+  ncclFuncSignal = 16,
+  ncclFuncWaitSignal = 17,
+  ncclNumFuncs = 18
 } ncclFunc_t;
 
 
