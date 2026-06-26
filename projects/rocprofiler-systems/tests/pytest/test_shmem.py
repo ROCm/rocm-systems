@@ -45,15 +45,15 @@ def shmem_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.fixture(scope="session")
 def shmem_validated(rocprof_config) -> tuple[bool, str]:
-    """Run ``oshrun -n 2 shmem_hello`` and validate output."""
+    """Run ``oshrun -n 2 shmem-hello`` and validate output."""
     oshrun = rocprof_config.capabilities.oshrun_exec
     if oshrun is None:
         return False, "oshrun not found"
 
     try:
-        hello = rocprof_config.get_target_executable("shmem_hello")
+        hello = rocprof_config.get_target_executable("shmem-hello")
     except FileNotFoundError:
-        return False, "shmem_hello not found"
+        return False, "shmem-hello not found"
 
     cmd = [str(oshrun), "-n", str(_SHMEM_NP), str(hello)]
     try:
@@ -100,7 +100,7 @@ class TestShmem(RocprofsysTest):
 
         result = self.run_test(
             mode,
-            "shmem_pingpong",
+            "shmem-pingpong",
             env=shmem_env,
             launcher="shmem",
             num_procs=_SHMEM_NP,
@@ -111,7 +111,7 @@ class TestShmem(RocprofsysTest):
             self.assert_perfetto(
                 result,
                 categories=["shmem", "host"],
-                labels=["shmem_pingpong", "start_pes"],
+                labels=["shmem-pingpong", "start_pes"],
                 counts=[1, 1],
                 depths=[0, 1],
             )
