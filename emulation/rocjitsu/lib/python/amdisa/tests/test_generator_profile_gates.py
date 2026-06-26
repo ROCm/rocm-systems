@@ -791,7 +791,8 @@ def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe():
     body = execute_shared[start:end]
 
     assert 'ROCJITSU_TRY_SIMD_DOTC_F16(false);' in body
-    assert 'float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));' in body
+    assert 'uint32_t acc = inst.vdst.read_lane(wf, lane);' in body
+    assert 'float facc = std::bit_cast<float>(acc);' in body
     assert 'facc += a0 * b0 + a1 * b1;' in body
     assert 'throw util::UnimplementedInst' not in body
 
@@ -1174,6 +1175,52 @@ def test_gfx1250_flat_u64_atomic_payload_width_uses_two_dwords():
     assert 'd->elem_size = 8;' in body
     assert 'd->store_data.resize(wf.wf_size() * 8);' in body
     assert 'data_base + 1' in body
+
+
+def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        profile=Gfx1250Profile(),
+    )
+
+    cluster = SimpleNamespace(
+        name='CLUSTER_LOAD_B32',
+        elem_size=4,
+        num_elems=1,
+        sign_extend=False,
+        d16_hi=False,
+        d16_lo=False,
+    )
+    ordinary = SimpleNamespace(
+        name='GLOBAL_LOAD_B32',
+        elem_size=4,
+        num_elems=1,
+        sign_extend=False,
+        d16_hi=False,
+        d16_lo=False,
+    )
+    cluster_body = codegen._gen_flat_load([], [], cluster)
+    ordinary_body = codegen._gen_flat_load([], [], ordinary)
+
+    assert 'd->request_force_l1_bypass = true;' in cluster_body
+    assert 'd->request_force_l1_bypass = true;' not in ordinary_body
+
+    cluster_async = SimpleNamespace(
+        name='CLUSTER_LOAD_ASYNC_TO_LDS_B32',
+        elem_size=4,
+        num_elems=1,
+    )
+    global_async = SimpleNamespace(
+        name='GLOBAL_LOAD_ASYNC_TO_LDS_B32',
+        elem_size=4,
+        num_elems=1,
+    )
+    cluster_async_body = codegen._gen_global_load_async_to_lds([], [], cluster_async)
+    global_async_body = codegen._gen_global_load_async_to_lds([], [], global_async)
+
+    assert 'd->request_force_l1_bypass = true;' in cluster_async_body
+    assert 'd->request_force_l1_bypass = true;' not in global_async_body
 
 
 def test_gfx1250_buffer_cmpswap_payload_width_is_independent_of_element_width():

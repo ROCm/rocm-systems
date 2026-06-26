@@ -43,8 +43,6 @@ struct SourceTargetPair {
 
 inline constexpr SourceTargetPair kSupportedPairs[] = {
     {"gfx1250", "gfx1250"},
-    {"gfx1250", "gfx950"},
-    {"gfx1250", "gfx942"},
 };
 
 // True if (source_gfx -> target_gfx) is a supported pair.

@@ -88,6 +88,13 @@ public:
   /// @{
   int open() override;
   int close() override;
+
+  /// @brief Add one open reference to the local process without re-opening.
+  /// @details Used by the interposer when an existing KFD fd is duplicated
+  /// (dup/dup2/dup3/fcntl F_DUPFD). Each live fd holds one reference so the
+  /// process is torn down only when the last fd is closed, not the first.
+  /// No-op when there is no local process (e.g. daemon/remote mode).
+  void retain_local_open();
   int ioctl(unsigned long request, void *arg) override;
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
   int munmap(void *addr, size_t length) override;
@@ -100,7 +107,8 @@ public:
   /// @details Unlike open(), which sets local_process_id_ (not thread-safe for
   /// concurrent daemon clients), this method returns the ID directly so the
   /// caller can associate it with a specific client connection.
-  uint32_t open_process();
+  uint32_t open_process(pid_t client_pid = 0);
+  void set_process_client_pid(uint32_t process_id, pid_t client_pid);
 
   int ioctl(uint32_t process_id, unsigned long request, void *arg);
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);
@@ -122,6 +130,12 @@ public:
   std::string topology_path() const { return topology_.path(); }
   [[nodiscard]] int fd() const { return fd_; }
   [[nodiscard]] uint32_t local_process_id() const { return local_process_id_; }
+
+  /// @brief Open-reference count of the local process, or 0 if none is alive.
+  /// @details Introspection for tests/diagnostics. Each live KFD fd (the primary
+  /// plus every dup) holds one reference; the process is destroyed at zero.
+  [[nodiscard]] uint32_t local_open_ref_count() const;
+
   [[nodiscard]] bool owns_fd(int fd) const;
   std::string redirect_sysfs_path(const char *path) const;
   [[nodiscard]] int claim_fd(int real_fd);
