@@ -524,6 +524,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         amdsmi_min_version_marker_check(item)
         amdgpu_min_version_marker_check(item)
         perf_event_paranoid_marker_check(item)
+        perf_event_usable_marker_check(item)
         ptrace_scope_marker_check(item)
         run_if_gpu_category_marker_check(item)
         multi_gpu_marker_check(item)
@@ -746,7 +747,7 @@ def mpi_marker_check(item: pytest.Item) -> None:
 def mpi_implementation_marker_check(item: pytest.Item) -> None:
     if _test_has_marker(item, "mpi_implementation", has_args=True):
         required = item.get_closest_marker("mpi_implementation").args[0]
-        available = get_rocprof_config().capabilities.mpiexec_exec
+        available = get_rocprof_config().capabilities.mpi_implementation
         if available != required:
             item.add_marker(
                 pytest.mark.skip(
@@ -872,9 +873,9 @@ def perf_event_paranoid_marker_check(item: pytest.Item) -> None:
             )
 
 
-def perf_events_usable_marker_check(item: pytest.Item) -> None:
+def perf_event_usable_marker_check(item: pytest.Item) -> None:
     if (
-        _test_has_marker(item, "perf_events_usable")
+        _test_has_marker(item, "perf_event_usable")
         and not get_rocprof_config().capabilities.perf_events_usable
     ):
         item.add_marker(
