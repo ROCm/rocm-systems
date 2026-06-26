@@ -220,12 +220,12 @@ def _export_with_pandas(
         write_export(df.to_html(index=False))
 
     elif export_format == "md":
-        # pandas 1.0+ has to_markdown
         try:
             write_export(df.to_markdown(index=False))
         except AttributeError:
-            # fallback: manually write markdown table
-            _df_to_markdown_fallback(df, export_path)
+            return _export_without_pandas(
+                conn, query, params, "md", export_path, **kwargs
+            )
 
     elif export_format == "pdf":
         _export_df_to_pdf(df, export_path)
@@ -274,10 +274,10 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
         for row in str_rows:
             for i, v in enumerate(row):
                 col_widths[i] = max(col_widths[i], len(v))
-        header = "  ".join(c.ljust(col_widths[i]) for i, c in enumerate(col_names_raw))
+        header = "  ".join(c.rjust(col_widths[i]) for i, c in enumerate(col_names_raw))
         print(header)
         for row in str_rows:
-            print("  ".join(v.ljust(col_widths[i]) for i, v in enumerate(row)))
+            print("  ".join(v.rjust(col_widths[i]) for i, v in enumerate(row)))
         return None
 
     ext = export_format
@@ -318,30 +318,103 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
             f.write("\n".join(lines) + "\n")
 
     elif export_format == "md":
+
+        def _fmt_val_md(v):
+            if v is None or (isinstance(v, float) and math.isnan(v)):
+                return "nan"
+            if isinstance(v, float):
+                return f"{v:.6g}"
+            return str(v)
+
+        def _split_decimal(s):
+            """Split a formatted value at its first '.'; return (int_part, frac_part)."""
+            dot = s.find(".")
+            if dot == -1:
+                return s, ""
+            return s[:dot], s[dot:]
+
+        # Detect column types (numeric = all non-None values are int or float)
+        col_numeric = [
+            all(isinstance(row[ci], (int, float)) or row[ci] is None for row in rows)
+            for ci in range(len(col_names_raw))
+        ]
+
+        # Format all cell values
+        str_rows = [
+            [_fmt_val_md(row[ci]) for ci in range(len(col_names_raw))] for row in rows
+        ]
+
+        # Compute per-column layout parameters
+        # For numeric: decimal-point alignment (padded_w = max(header+2, max_int+max_frac))
+        # For strings: simple left-align (padded_w = max(header, max_data))
+        col_padded_w = []
+        col_eff_int = []  # effective max integer-part width (after header expansion)
+        col_max_frac = []
+
+        for ci, header in enumerate(col_names_raw):
+            if col_numeric[ci]:
+                splits = [_split_decimal(r[ci]) for r in str_rows]
+                max_int = max(len(ip) for ip, fp in splits)
+                max_frac = max(len(fp) for ip, fp in splits)
+                data_w = max_int + max_frac
+                padded_w = max(len(header) + 2, data_w)
+                col_padded_w.append(padded_w)
+                col_eff_int.append(padded_w - max_frac)
+                col_max_frac.append(max_frac)
+            else:
+                max_data = max(len(r[ci]) for r in str_rows)
+                padded_w = max(len(header), max_data)
+                col_padded_w.append(padded_w)
+                col_eff_int.append(padded_w)
+                col_max_frac.append(0)
+
+        def _pad_cell(s, ci):
+            if col_numeric[ci]:
+                ip, fp = _split_decimal(s)
+                return (
+                    " " * (col_eff_int[ci] - len(ip))
+                    + ip
+                    + fp
+                    + " " * (col_max_frac[ci] - len(fp))
+                )
+            return s.ljust(col_padded_w[ci])
+
         with open(export_path, "w", encoding="utf-8") as f:
-            f.write("| " + " | ".join(col_names_raw) + " |\n")
-            f.write("|" + "|".join("---" for _ in col_names_raw) + "|\n")
-            for row in rows:
-                f.write("| " + " | ".join(str(v) for v in row) + " |\n")
+            # Header row: numeric → right-aligned, string → left-aligned
+            f.write(
+                "| "
+                + " | ".join(
+                    (
+                        col_names_raw[ci].rjust(col_padded_w[ci])
+                        if col_numeric[ci]
+                        else col_names_raw[ci].ljust(col_padded_w[ci])
+                    )
+                    for ci in range(len(col_names_raw))
+                )
+                + " |\n"
+            )
+            # Separator: width = col_padded_w + 2 (to match the `| cell |` spacing)
+            sep_parts = [
+                (
+                    ("-" * (col_padded_w[ci] + 1) + ":")
+                    if col_numeric[ci]
+                    else (":" + "-" * (col_padded_w[ci] + 1))
+                )
+                for ci in range(len(col_names_raw))
+            ]
+            f.write("|" + "|".join(sep_parts) + "|\n")
+            # Data rows
+            for row in str_rows:
+                f.write(
+                    "| "
+                    + " | ".join(
+                        _pad_cell(row[ci], ci) for ci in range(len(col_names_raw))
+                    )
+                    + " |\n"
+                )
 
     print(f"Exported to: {export_path}\n")
     return export_path
-
-
-def _df_to_markdown_fallback(df, path: str):
-    """
-    Simple fallback if pandas.DataFrame.to_markdown(...) is unavailable.
-    """
-    headers = list(df.columns)
-    with open(path, "w", encoding="utf-8") as f:
-        # Header row
-        f.write("| " + " | ".join(headers) + " |\n")
-        # Separator
-        f.write("|" + "|".join("---" for _ in headers) + "|\n")
-        # Data rows
-        for row in df.itertuples(index=False):
-            line = "| " + " | ".join(str(v) for v in row) + " |\n"
-            f.write(line)
 
 
 def _export_df_to_pdf(df, path: str):
