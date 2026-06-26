@@ -614,6 +614,22 @@ def test_load_per_kernel_offset_sort_is_numeric() -> None:
     assert df["offset"].tolist() == ["0x20", "0x100"]
 
 
+@pytest.mark.parametrize("num_rows, expected_rows", [(1, 1), (0, 2), (None, 2)])
+def test_load_per_kernel_num_rows_limit(
+    num_rows: int | None,
+    expected_rows: int,
+) -> None:
+    """num_rows caps the table after sorting; 0 or None keeps every row."""
+    df = load_pc_sampling_data_per_kernel(
+        method="host_trap",
+        tool_data=setup_per_kernel_data(),
+        kernel_name="vecCopy",
+        sorting_type="count",
+        num_rows=num_rows,
+    )
+    assert len(df) == expected_rows
+
+
 def make_per_kernel_guard_data(
     instructions: list | None,
     comments: list | None,
@@ -1240,7 +1256,7 @@ def test_load_non_mertrics_table_populates_pc_sampling_from_tool_data(
     tmp_path: Path,
 ) -> None:
     """A ``from_pc_sampling`` table is populated when tool data is provided."""
-    args = argparse.Namespace(pc_sampling_sorting_type="count")
+    args = argparse.Namespace(pc_sampling_sorting_type="count", pc_sampling_rows=10)
     workload = schema.Workload()
     workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
     tool_data = make_tool_data(**sample_tool_data_kwargs())
@@ -1254,7 +1270,7 @@ def test_load_non_mertrics_table_pc_sampling_empty_without_tool_data(
     tmp_path: Path,
 ) -> None:
     """Without tool data the ``from_pc_sampling`` table stays empty (no crash)."""
-    args = argparse.Namespace(pc_sampling_sorting_type="count")
+    args = argparse.Namespace(pc_sampling_sorting_type="count", pc_sampling_rows=10)
     workload = schema.Workload()
     workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
     load_non_mertrics_table(workload, str(tmp_path), args)
