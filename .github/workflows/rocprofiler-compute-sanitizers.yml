@@ -56,27 +56,17 @@ jobs:
   sanitizer:
     name: ${{ matrix.sanitizer.name }}
     runs-on: linux-mi355-1gpu-ossci-rocm
-    timeout-minutes: 120
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - sanitizer:
-              name: asan
-              enable_sanitizer: ASAN
-              quick: false
-          - sanitizer:
-              name: host-asan
-              enable_sanitizer: HOST_ASAN
-              quick: false
-          - sanitizer:
-              name: ubsan
-              enable_sanitizer: UBSAN
-              quick: false
-          - sanitizer:
-              name: tsan
-              enable_sanitizer: TSAN
-              quick: true
+        sanitizer:
+          - name: asan
+            enable_sanitizer: ASAN
+          - name: tsan
+            enable_sanitizer: TSAN
+          - name: ubsan
+            enable_sanitizer: UBSAN
     env:
       HIP_PLATFORM: "amd"
       OMPI_ALLOW_RUN_AS_ROOT: 1
@@ -104,7 +94,6 @@ jobs:
         working-directory: projects/rocprofiler-compute
         shell: bash
         run: |
-          echo "excluded_tests=test_profile_live_attach_detach" >> "${GITHUB_OUTPUT}"
           echo "code_name=noble" >> "${GITHUB_OUTPUT}"
 
       - name: Install amdgpu and dependencies
@@ -126,10 +115,12 @@ jobs:
         shell: bash
         run: |
           set -e
-          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
-          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+          tarball="$(ls "${ROCM_PATH}"-*-multiarch.tar.gz | head -n1)"
+          tarball_rocm_version="$(echo "${tarball}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
+          mkdir -p "${ROCM_PATH}-${ROCM_VERSION}"
+          tar -xf "${tarball}" -C "${ROCM_PATH}-${ROCM_VERSION}"
+          ln -s "${ROCM_PATH}-${ROCM_VERSION}" "${ROCM_PATH}"
+          echo "ROCm ${tarball_rocm_version} installed to: ${ROCM_PATH}"
           echo "✅ ROCm Installation Complete!"
 
       - name: Output TheRock manifest
@@ -148,77 +139,37 @@ jobs:
           echo "sanitizer_lib_dir=${sanitizer_lib_dir}" >> "${GITHUB_OUTPUT}"
           echo "Clang sanitizer runtime: ${sanitizer_lib_dir}"
 
-      - name: Install Python requirements
+      - name: Determine sanitizer tests
+        id: sanitizer_tests
         working-directory: projects/rocprofiler-compute
         shell: bash
         run: |
-          for attempt in 1 2 3; do
-            pip install \
-              -r requirements.txt \
-              --break-system-packages \
-              --ignore-installed \
-              --timeout 60 && break
-            echo "⚠️ pip install attempt ${attempt} failed, retrying..."
-            sleep 10
-          done
-          for attempt in 1 2 3; do
-            pip install \
-              -r requirements-test.txt \
-              --break-system-packages \
-              --ignore-installed \
-              --timeout 60 && break
-            echo "⚠️ pip install attempt ${attempt} failed, retrying..."
-            sleep 10
-          done
-          echo "✅ pip requirements installed!"
-
-      - name: Determine quick tests
-        id: quick_tests
-        working-directory: projects/rocprofiler-compute
-        shell: bash
-        run: |
-          quick_regex="$(python3 - <<'PY'
+          sanitizer_regex="$(python3 - <<'PY'
           from pathlib import Path
 
           import yaml
 
           path = Path("tests/test_categories.yaml")
-          if not path.exists():
-              raise SystemExit(0)
-
           data = yaml.safe_load(path.read_text()) or {}
           patterns = (
               data.get("test_categories", {})
-              .get("quick", {})
+              .get("sanitizer", {})
               .get("test_patterns", [])
           )
-          if patterns is None:
-              patterns = []
-          if not isinstance(patterns, list):
-              raise TypeError("test_categories.quick.test_patterns must be a list")
+          if not isinstance(patterns, list) or not patterns:
+              raise SystemExit(
+                  "test_categories.sanitizer.test_patterns must be a non-empty list"
+              )
 
           print("|".join(str(pattern) for pattern in patterns if str(pattern)))
           PY
           )"
-          echo "quick_regex=${quick_regex}" >> "${GITHUB_OUTPUT}"
-          if [ -z "${quick_regex}" ]; then
-            echo "::warning::No quick test patterns found in tests/test_categories.yaml; quick sanitizer legs will be skipped."
-            echo "has_quick_tests=false" >> "${GITHUB_OUTPUT}"
-          else
-            echo "has_quick_tests=true" >> "${GITHUB_OUTPUT}"
-          fi
-
-      - name: Skip quick sanitizer tests
-        if: ${{ matrix.sanitizer.quick == true && steps.quick_tests.outputs.has_quick_tests == 'false' }}
-        shell: bash
-        run: |
-          echo "🔍 No quick test patterns were defined in tests/test_categories.yaml; skipping ${{ matrix.sanitizer.name }} quick sanitizer leg."
+          echo "sanitizer_regex=${sanitizer_regex}" >> "${GITHUB_OUTPUT}"
+          echo "Sanitizer tests: ${sanitizer_regex}"
 
       - name: Configure, build, and test
         id: test
-        if: ${{ matrix.sanitizer.quick == false || steps.quick_tests.outputs.has_quick_tests == 'true' }}
         continue-on-error: true
-        timeout-minutes: ${{ matrix.sanitizer.quick && 60 || 90 }}
         working-directory: projects/rocprofiler-compute
         shell: bash
         run: |
@@ -232,36 +183,25 @@ jobs:
           c_compiler="$(command -v amdclang)"
           cxx_compiler="$(command -v amdclang++)"
 
-          run_ci=(
-            python3 ./tools/run-ci.py
-            --name
-            "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-24.04-${{ matrix.sanitizer.name }}"
-            --actor "${{ github.actor }}"
-            --site linux-mi355-1gpu-ossci-rocm
-            --mode Continuous
-            --build-jobs 16
-            --repeat-until-pass 1
-            --repeat-after-timeout 1
-            --
-            "-DCMAKE_C_COMPILER=${c_compiler}"
-            "-DCMAKE_CXX_COMPILER=${cxx_compiler}"
-            "-DCMAKE_HIP_COMPILER=${cxx_compiler}"
-            -DCMAKE_BUILD_TYPE=Debug
-            "-DCMAKE_PREFIX_PATH=${ROCM_PATH}"
-            -DENABLE_TESTS=ON
-            -DINSTALL_TESTS=ON
-            "-DENABLE_SANITIZER=${{ matrix.sanitizer.enable_sanitizer }}"
-            -DGPU_TARGETS=gfx950
-            -DPYTEST_NUMPROCS=8
-            --
-            -E "${{ steps.setup_env.outputs.excluded_tests }}"
-          )
-
-          if [ "${{ matrix.sanitizer.quick }}" = "true" ]; then
-            run_ci+=(-R "${{ steps.quick_tests.outputs.quick_regex }}")
-          fi
-
-          "${run_ci[@]}"
+          python3 ./tools/run-ci.py \
+            --name "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-24.04-${{ matrix.sanitizer.name }}" \
+            --actor "${{ github.actor }}" \
+            --site linux-mi355-1gpu-ossci-rocm \
+            --mode Continuous \
+            --build-jobs 16 \
+            --repeat-until-pass 1 \
+            --repeat-after-timeout 1 \
+            -- \
+            "-DCMAKE_C_COMPILER=${c_compiler}" \
+            "-DCMAKE_CXX_COMPILER=${cxx_compiler}" \
+            "-DCMAKE_HIP_COMPILER=${cxx_compiler}" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_PREFIX_PATH=${ROCM_PATH}" \
+            -DENABLE_TESTS=ON \
+            -DINSTALL_TESTS=ON \
+            "-DENABLE_SANITIZER=${{ matrix.sanitizer.enable_sanitizer }}" \
+            -- \
+            -R "${{ steps.sanitizer_tests.outputs.sanitizer_regex }}"
 
       - name: Output logs
         if: steps.test.outcome == 'failure'

@@ -182,7 +182,7 @@ void tool_fini(void* user_data)
     auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(user_data);
     generate_output(tool_data_ptr->get());
 
-    g_tool_data.reset();
+    tool_data_ptr->reset();
 }
 
 }  // namespace rocprofiler_compute_tool
