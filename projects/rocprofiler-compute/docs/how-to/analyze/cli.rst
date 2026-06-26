@@ -830,6 +830,8 @@ arguments, ``all``, ``*``, or ``**``):
    $ rocprof-compute analyze --experimental \
        --triton-operator "*matmul*,*softmax*" --path ./workload
 
-``--torch-operator`` and ``--triton-operator`` are mutually exclusive: apply
-one operator filter per analysis run, and run the analysis separately for each
-framework.
+.. note::
+
+   ``--torch-operator`` and ``--triton-operator`` are mutually exclusive: apply
+   one operator filter per analysis run, and run the analysis separately for
+   each framework.

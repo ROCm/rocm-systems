@@ -161,10 +161,9 @@ std::vector<std::string> decode_marker_path(const std::string& wire)
         segments.push_back(decoded);
 
         if (sep == std::string::npos)
-            break;
+            return segments;
         start = sep + 1;
     }
-    return segments;
 }
 
 }  // namespace

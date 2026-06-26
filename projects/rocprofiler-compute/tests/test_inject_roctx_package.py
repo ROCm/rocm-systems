@@ -23,7 +23,7 @@ def record_call(calls, names):
     calls.append(list(names))
 
 
-def find_spec_without(absent_name, real_find_spec, name, *args, **kwargs):
+def find_spec_without_name(absent_name, real_find_spec, name, *args, **kwargs):
     """Behave like ``find_spec`` but report ``absent_name`` as missing."""
     if name == absent_name:
         return None
@@ -170,7 +170,7 @@ def test_triton_backend_skips_when_triton_missing(monkeypatch):
     monkeypatch.setattr(
         importlib.util,
         "find_spec",
-        functools.partial(find_spec_without, "triton", real_find_spec),
+        functools.partial(find_spec_without_name, "triton", real_find_spec),
     )
 
     warnings: list[tuple] = []
