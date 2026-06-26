@@ -45,14 +45,26 @@ fault aborts the host, or a host SIGSEGV):
 
 - **Periodic checkpoints.** The writer flushes the buffer and `fsync`s every
   `kCheckpointEvents` (4096) events, bounding how much a crash can lose.
-- **Chained fatal-signal handlers.** `hip_capture_init` installs `sigaction`
-  handlers (SIGSEGV/SIGABRT/SIGBUS/SIGILL/SIGFPE/SIGTERM/SIGINT) on an alternate
-  stack. On a fatal signal the handler `writer::emergency_finalize()`s — an
-  async-signal-safe `write()`+`fsync` of the event buffer plus a minimal
-  `manifest.json` (`complete:false`) via raw `open/write` — then **chains** to
-  the previously installed handler so ROCr still emits `gpucore.<pid>` and the
-  kernel still produces the host core dump. It deliberately does **not** write
-  the clean trailer.
+- **Chained fatal-signal handlers (env-gated).** These handlers are installed
+  **only when capture is enabled** — i.e. only when `HIP_HRR_CAPTURE_OUTPUT` is
+  set (and only after `writer::open()` succeeds). `hip_capture_init` returns
+  early when capture is disabled, so HRR installs **no** signal handlers and
+  leaves SIGTERM/SIGINT (and every other signal) at their default/previous
+  disposition for any process that is not actively recording. When enabled,
+  `hip_capture_init` installs `sigaction` handlers
+  (SIGSEGV/SIGABRT/SIGBUS/SIGILL/SIGFPE/SIGTERM/SIGINT) on an alternate stack.
+  On a signal the handler `writer::emergency_finalize()`s — an async-signal-safe
+  `write()`+`fsync` of the event buffer plus a minimal `manifest.json` via raw
+  `open/write` — then **chains** to the previously installed handler so ROCr
+  still emits `gpucore.<pid>` and the kernel still produces the host core dump.
+  The two signal classes are treated differently:
+    - **Crash signals** (SIGSEGV/SIGABRT/SIGBUS/SIGILL/SIGFPE): the process is in
+      an undefined state, so the handler writes `complete:false` and deliberately
+      does **not** write the clean trailer — its absence is how the reader
+      detects a crash-truncated archive.
+    - **Orderly-termination signals** (SIGTERM/SIGINT): a `kill -TERM` is not a
+      crash, so the handler appends the clean `hrr_eof_record` trailer and writes
+      `complete:true`, so an orderly kill is not misreported as a crash.
 - **Clean-shutdown trailer.** A normal `writer::flush` appends an
   `hrr_eof_record` (event_type `HRR_EOF_MARKER`, payload carries the final event
   count + `HRR_EOF_MAGIC`) and writes `manifest.json` with `complete:true`. The

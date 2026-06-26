@@ -105,22 +105,19 @@ const char* hip_capture_output_dir() {
   return HIP_HRR_CAPTURE_OUTPUT;
 }
 
-// HIP_HRR_DEBUG_ARGS=<non-empty> also enables provenance tracing: every H2D
-// memcpy destination is logged so a kernel pointer arg can be matched to the
-// copy that filled it. Evaluated once.
+// HIP_HRR_DEBUG_ARGS also enables provenance tracing: every H2D memcpy
+// destination is logged so a kernel pointer arg can be matched to the copy that
+// filled it. Routed through the CLR flags registry (flags.hpp) like every other
+// HRR flag, so it is discoverable and honors AMD_LOG_LEVEL log routing.
 static bool hrr_dbg_args_enabled() {
-  static const bool e = []() {
-    const char* v = std::getenv("HIP_HRR_DEBUG_ARGS");
-    return v != nullptr && v[0] != '\0';
-  }();
-  return e;
+  return HIP_HRR_DEBUG_ARGS;
 }
 
 static void hrr_trace_h2d(const char* api, const void* dst, size_t sz) {
   if (hrr_dbg_args_enabled())
-    std::fprintf(stderr, "[HRR h2d] %s dst=0x%llx size=%zu\n", api,
-                 (unsigned long long)reinterpret_cast<uintptr_t>(dst),
-                 sz);
+    LogPrintfInfo("[HRR h2d] %s dst=0x%llx size=%zu", api,
+                  (unsigned long long)reinterpret_cast<uintptr_t>(dst),
+                  sz);
 }
 
 // Parse the extra[] sentinel format for packed kernarg buffers.
@@ -334,12 +331,10 @@ static void serialize_kernel_launch(
   push_u16(num_args);
   push_u16(0);  // num_snapshots
 
-  // HIP_HRR_DEBUG_ARGS=<non-empty> dumps every captured arg (kind, size, full
-  // bytes, detected embedded-pointer offsets) — used to confirm pointer layout.
-  static const bool dbg = []() {
-    const char* e = std::getenv("HIP_HRR_DEBUG_ARGS");
-    return e != nullptr && e[0] != '\0';
-  }();
+  // HIP_HRR_DEBUG_ARGS dumps every captured arg (kind, size, full bytes,
+  // detected embedded-pointer offsets) — used to confirm pointer layout. Use the
+  // single cached accessor rather than re-reading the env var here.
+  const bool dbg = hrr_dbg_args_enabled();
 
   // Serialize one argument: a whole-arg pointer (kind 1), or a scalar/struct
   // that we additionally scan for embedded device pointers (kind 3 if any are
@@ -352,9 +347,9 @@ static void serialize_kernel_launch(
       else for (uint16_t j = 0; j < sz; j++) push_u8(0);
       if (dbg) {
         uint64_t v = 0; if (bytes && sz >= 8) std::memcpy(&v, bytes, 8);
-        std::fprintf(stderr, "[HRR args] %s arg[%u] kind=1(ptr) size=%u value=0x%llx%s\n",
-                     kernel_name, idx, sz, (unsigned long long)v,
-                     bytes ? "" : " [TRUNCATED:no-bytes]");
+        LogPrintfInfo("[HRR args] %s arg[%u] kind=1(ptr) size=%u value=0x%llx%s",
+                      kernel_name, idx, sz, (unsigned long long)v,
+                      bytes ? "" : " [TRUNCATED:no-bytes]");
       }
       return;
     }
@@ -376,9 +371,9 @@ static void serialize_kernel_launch(
       }
       std::string off_str;
       for (uint16_t o : offs) { std::snprintf(tmp, sizeof(tmp), "%u ", o); off_str += tmp; }
-      std::fprintf(stderr, "[HRR args] %s arg[%u] kind=%u size=%u bytes=%s ptr_off=[%s]%s\n",
-                   kernel_name, idx, kind, sz, hex.c_str(), off_str.c_str(),
-                   bytes ? "" : " [TRUNCATED:no-bytes]");
+      LogPrintfInfo("[HRR args] %s arg[%u] kind=%u size=%u bytes=%s ptr_off=[%s]%s",
+                    kernel_name, idx, kind, sz, hex.c_str(), off_str.c_str(),
+                    bytes ? "" : " [TRUNCATED:no-bytes]");
     }
   };
 
@@ -392,9 +387,9 @@ static void serialize_kernel_launch(
         need = std::max<uint32_t>(need,
                  static_cast<uint32_t>(desc.offset_ + desc.size_));
       }
-      std::fprintf(stderr, "[HRR args] %s kbuf path: ksz=%zu need=%u n_all=%u%s\n",
-                   kernel_name, ksz, need, n_all,
-                   (ksz < need) ? " [KBUF-TOO-SMALL]" : "");
+      LogPrintfInfo("[HRR args] %s kbuf path: ksz=%zu need=%u n_all=%u%s",
+                    kernel_name, ksz, need, n_all,
+                    (ksz < need) ? " [KBUF-TOO-SMALL]" : "");
     }
     for (uint32_t i = 0; i < n_all; i++) {
       const auto& desc = sig.at(i);
@@ -1336,6 +1331,25 @@ static void record_fat_binary_blob(const void* blob_ptr) {
 // is not misreported as a crash (see emergency_finalize's clean_shutdown path).
 //
 // POSIX only; on Windows the writer's periodic checkpoint still bounds loss.
+//
+// Why not reuse CLR's amd::Os::installExceptionHandlers (os/os.hpp)? That hook
+// exists but does not fit this use case:
+//   - Single callback slot, already owned by async logging
+//     (rocclr/utils/debug.cpp installs crashFlushCallback when AMD_LOG_LEVEL
+//     file logging is enabled). A second installer either clobbers the logger's
+//     flush or — because the POSIX impl guards with an "already installed" flag
+//     and returns early — never gets registered at all.
+//   - No handler chaining: it overwrites the prior sigaction (SA_RESETHAND,
+//     plain sa_handler), so it cannot forward to ROCr's gpucore handler. HRR
+//     must chain so ROCr still emits gpucore.<pid> and the kernel still dumps.
+//   - Crash signals only — no SIGTERM/SIGINT, so it cannot distinguish an
+//     orderly `kill -TERM` (write the clean trailer) from a fatal fault.
+//   - No alt-stack: it cannot run after a stack-overflow SIGSEGV, which the
+//     sigaltstack below handles.
+// Adapting Os::installExceptionHandlers to support multi-listener chaining,
+// SIGTERM/SIGINT, siginfo forwarding and an alt-stack would be a larger change
+// to shared CLR infrastructure than the self-contained handlers here, so HRR
+// keeps its own chained handlers scoped to the capture layer.
 // ---------------------------------------------------------------------------
 #ifndef _WIN32
 namespace {
@@ -1412,6 +1426,19 @@ void hrr_install_signal_handlers() {
 
 void hip_capture_init() {
   if (!hip_capture_enabled()) return;
+
+  // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
+  // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
+  // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
+  // level to LOG_INFO (never lower an already-higher level) so enabling
+  // HIP_HRR_DEBUG_ARGS alone is enough to get the traces, as it was when they
+  // went through raw fprintf(stderr).
+  if (hrr_dbg_args_enabled() && AMD_LOG_LEVEL < amd::LOG_INFO) {
+    AMD_LOG_LEVEL = amd::LOG_INFO;
+    LogPrintfInfo("[HRR capture] HIP_HRR_DEBUG_ARGS set — raised AMD_LOG_LEVEL "
+                  "to %d (LOG_INFO) so argument traces are visible",
+                  static_cast<int>(amd::LOG_INFO));
+  }
 
   // Snapshot the fully-initialized dispatch table and install runtime shims here
   // only (see comment above — no static-init capture hook).

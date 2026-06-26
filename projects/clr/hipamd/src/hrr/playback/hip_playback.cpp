@@ -16,6 +16,19 @@
 #include "hrr_reader.h"   // hrr::hash_hex
 
 #include <hip/hip_runtime.h>
+// hipExtModuleLaunchKernel is declared in <hip/hip_ext.h>. That header redeclares
+// symbols whose attributes trip -Werror=attributes against the runtime headers
+// already pulled in above, so wrap the include in a diagnostic guard rather than
+// hand-declaring the exported symbol (a hand declaration silently diverges from
+// the library ABI if the signature ever changes).
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+#endif
+#include <hip/hip_ext.h>
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -365,16 +378,9 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 // that blow-up deadlocks the kernel: only the first wave of workgroups is
 // resident and the spinning consumers wait forever on producers that live in
 // later, never-scheduled waves.
-// hipExtModuleLaunchKernel lives in hip/hip_ext.h, which conflicts with the
-// already-included runtime headers under -Werror=attributes. Forward-declare the
-// exported symbol (from libamdhip64) directly, matching the capture-side shim.
-extern "C" hipError_t hipExtModuleLaunchKernel(
-    hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY,
-    uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-    uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream,
-    void** kernelParams, void** extra, hipEvent_t startEvent,
-    hipEvent_t stopEvent, uint32_t flags);
-
+// hipExtModuleLaunchKernel is declared via <hip/hip_ext.h> (included at the top
+// of this file behind a -Wattributes diagnostic guard) so the prototype always
+// tracks the library ABI instead of a hand-maintained copy.
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                        bool ext_global_worksize = false) {
     // Skip the 32-byte header; kernel launch has a variable-length binary format.
@@ -398,6 +404,15 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     // grid is over-launched by blockDim and the persistent producer/consumer
     // handshake deadlocks. Setting HIP_HRR_REPLAY_FORCE_EXT_CIJK=1 reinterprets
     // these grids as global work items (replay through the Ext API).
+    //
+    // SUNSET: this is a backward-compat escape hatch only. New recordings record
+    // hipExtModuleLaunchKernel under HRR_API_HIPEXTMODULELAUNCHKERNEL, whose
+    // dedicated playback handler already passes ext_global_worksize=true (see
+    // playback_hipExtModuleLaunchKernel below), so they never need this path. The
+    // heuristic depends on the third-party Tensile/hipBLASLt "Cijk_" naming
+    // convention, which can change without notice. Safe to delete once no archive
+    // predating the capture-side Ext-tagging fix is still being replayed (i.e.
+    // every recording in use routes Ext launches through their own event id).
     if (!ext_global_worksize && kernel_name.compare(0, 5, "Cijk_") == 0 &&
         std::getenv("HIP_HRR_REPLAY_FORCE_EXT_CIJK"))
         ext_global_worksize = true;
