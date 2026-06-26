@@ -45,19 +45,14 @@
 
 #include <cstdint>
 
-// Pure (side-effect-free) decision logic for InterceptQueue, factored out of
-// InterceptQueue::Submit so it can be unit tested without the HSA runtime, a real
-// queue, or a GPU. This is where the retry/overflow hardening lives, so the unit
-// tests here are the regression coverage for that fix.
+// Pure decision logic for InterceptQueue::Submit, factored out so it can be unit
+// tested without the HSA runtime or a GPU (regression coverage for the retry/overflow fix).
 namespace rocr {
 namespace core {
 namespace intercept_queue_logic {
 
-// Whether a retry barrier is still outstanding (i.e. guaranteed to deliver a future
-// async wake). The read index alone is not sufficient: it can lag arbitrarily, so
-// retry_index > read may still hold for a barrier that has already completed. Gating
-// on retry_outstanding (set on insertion, cleared on the retry completion wake) avoids
-// suppressing a needed replacement barrier and stranding a non-empty overflow buffer.
+// Whether a retry barrier is still outstanding. The read index alone can lag and report a
+// completed barrier as pending, so gate on retry_outstanding to avoid stranding overflow.
 inline bool RetryPending(bool retry_outstanding, uint64_t retry_index, uint64_t read_index) {
   return retry_outstanding && retry_index > read_index;
 }
@@ -69,14 +64,8 @@ struct SubmitPlan {
   bool insert_retry_barrier;
 };
 
-// Decide how many packets fit now and whether a retry barrier is needed, given a
-// snapshot of the wrapped queue. write/read are loaded non-atomically by the caller
-// and the packet processor advances read concurrently, so read can transiently appear
-// ahead of the stale write; computing size - (write - read) directly would underflow
-// and overcommit submitted_count, walking the copy loop past the end of packets[].
-// In-flight is therefore clamped to [0, qsize] (a transient read > write is treated as
-// "queue full"), free_slots reservations are saturating, and submitted_count is clamped
-// to the available non-marker packets.
+// Decide how many packets fit now and whether a retry barrier is needed. write/read are read
+// non-atomically, so a transient read > write is clamped to "queue full" (no underflow/OOB).
 inline SubmitPlan PlanSubmit(uint64_t write, uint64_t read, uint64_t qsize, uint64_t count,
                              uint64_t marker_count, bool pending_retry_point,
                              bool overflow_nonempty) {
@@ -88,14 +77,12 @@ inline SubmitPlan PlanSubmit(uint64_t write, uint64_t read, uint64_t qsize, uint
   uint64_t submitted_count = non_marker;
 
   if (submitted_count >= qsize) {
-    // Cannot fit all at once; submit what fits, reserving a slot for the retry
-    // barrier if one is not already present. Saturating so free_slots == 0 does not
-    // underflow.
+    // Submit what fits, reserving a slot for the retry barrier (saturating: free_slots
+    // may be 0).
     uint64_t reserve = pending_retry_point ? 0 : 1;
     submitted_count = (free_slots > reserve) ? (free_slots - reserve) : 0;
   } else if (free_slots < submitted_count + (pending_retry_point ? 0 : 1)) {
-    // Out of space for the whole rewrite: prefer all-or-nothing, but when draining
-    // overflow submit as much as fits to keep making progress.
+    // Out of space: prefer all-or-nothing, but when draining overflow submit what fits.
     if (overflow_nonempty && free_slots > (pending_retry_point ? 1 : 2)) {
       submitted_count = free_slots - (pending_retry_point ? 0 : 1);
     } else {
@@ -106,9 +93,8 @@ inline SubmitPlan PlanSubmit(uint64_t write, uint64_t read, uint64_t qsize, uint
   // packets[] has exactly non_marker non-marker entries; never copy more than that.
   if (submitted_count > non_marker) submitted_count = non_marker;
 
-  // A replacement retry barrier is needed only when packets remain unsubmitted, none
-  // is already pending, and there is a free slot to hold it (the completion-aware
-  // pending check means a completed-but-unread barrier may still occupy its slot).
+  // Need a replacement barrier only when packets remain, none is pending, and a slot is
+  // free (a completed-but-unread barrier may still occupy its slot).
   const bool insert_retry_barrier =
       submitted_count < non_marker && !pending_retry_point && free_slots >= 1;
 

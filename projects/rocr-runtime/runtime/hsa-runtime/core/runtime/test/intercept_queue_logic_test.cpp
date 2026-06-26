@@ -40,9 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-// Unit tests for the pure InterceptQueue retry/overflow decision logic. These run
-// without the HSA runtime or a GPU and are the regression coverage for the
-// counter-collection hang and the Submit() out-of-bounds crash fixes.
+// Unit tests for the pure InterceptQueue retry/overflow decision logic (no HSA/GPU);
+// regression coverage for the counter-collection hang and Submit() out-of-bounds fixes.
 
 #include "core/inc/intercept_queue_logic.h"
 
@@ -58,14 +57,11 @@ namespace {
 
 constexpr uint64_t kQSize = 1024;  // power of two, like a real AQL ring
 
-// ----------------------------------------------------------------------------
 // RetryPending: completion-aware "is a retry barrier still outstanding" decision.
-// ----------------------------------------------------------------------------
 
 TEST(RetryPending, NotOutstandingIsNeverPending) {
-  // The original bug: read index lags (retry_index > read) for a barrier that has
-  // already completed. Gating on retry_outstanding must report NOT pending so a
-  // replacement barrier gets inserted (otherwise overflow is stranded -> hang).
+  // The hang bug: read index lags (retry_index > read) for an already-completed barrier;
+  // gating on retry_outstanding must report NOT pending so a replacement gets inserted.
   EXPECT_FALSE(RetryPending(/*retry_outstanding=*/false, /*retry_index=*/100, /*read=*/10));
 }
 
@@ -78,11 +74,8 @@ TEST(RetryPending, OutstandingButReadCaughtUpIsNotPending) {
   EXPECT_FALSE(RetryPending(/*retry_outstanding=*/true, /*retry_index=*/100, /*read=*/200));
 }
 
-// ----------------------------------------------------------------------------
-// PlanSubmit: slot accounting. The two invariants that prevent the crash:
-//   (1) submitted_count never exceeds the available non-marker packets, and
-//   (2) submitted_count never exceeds free_slots (never overcommits the ring).
-// ----------------------------------------------------------------------------
+// PlanSubmit: slot accounting. Two invariants prevent the crash: submitted_count never
+// exceeds the available non-marker packets, nor free_slots (never overcommits the ring).
 
 TEST(PlanSubmit, EverythingFitsSubmitsAllNoBarrier) {
   // write==read => empty ring, plenty of room for a small rewrite.
@@ -93,9 +86,8 @@ TEST(PlanSubmit, EverythingFitsSubmitsAllNoBarrier) {
 }
 
 TEST(PlanSubmit, TransientReadAheadOfWriteDoesNotUnderflow) {
-  // Regression: write/read are read non-atomically; read can transiently exceed the
-  // stale write. The old code underflowed size-(write-read) -> huge submitted_count
-  // -> OOB copy of packets[]. Now it must clamp to "queue full" (0 free slots).
+  // Regression: read transiently past the stale write underflowed size-(write-read) -> huge
+  // submitted_count -> OOB copy. Must clamp to "queue full" (0 free slots).
   auto p = PlanSubmit(/*write=*/100, /*read=*/130, kQSize, /*count=*/8, /*marker=*/0,
                       /*pending=*/false, /*overflow=*/true);
   EXPECT_EQ(p.submitted_count, 0u);
@@ -110,9 +102,8 @@ TEST(PlanSubmit, InflightLargerThanQueueIsClamped) {
 }
 
 TEST(PlanSubmit, HugeCountNeverOvercommits) {
-  // Regression: count >> qsize must never make submitted_count exceed either the
-  // input packet count or the free slots (this is what walked off the end of
-  // packets[]). Ring half full here.
+  // Regression: count >> qsize must never make submitted_count exceed the input count or
+  // the free slots (what walked off the end of packets[]). Ring half full here.
   const uint64_t write = 512, read = 0;  // 512 in flight, 512 free
   auto p = PlanSubmit(write, read, kQSize, /*count=*/16209, /*marker=*/0,
                       /*pending=*/false, /*overflow=*/true);
@@ -156,9 +147,8 @@ TEST(PlanSubmit, MarkerPacketsExcludedFromSubmitCount) {
   EXPECT_EQ(p.submitted_count, 7u);  // 10 - 3 markers
 }
 
-// Exhaustive guard: across a wide range of (possibly inconsistent) snapshots, the
-// two safety invariants must always hold so the ring copy can never go out of bounds
-// or overcommit the queue.
+// Exhaustive guard: across a wide range of (possibly inconsistent) snapshots, the two
+// safety invariants must always hold so the ring copy can never go OOB or overcommit.
 TEST(PlanSubmit, InvariantsHoldOverManySnapshots) {
   const uint64_t qsize = 64;
   for (uint64_t write = 0; write <= 2 * qsize; ++write) {

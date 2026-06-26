@@ -227,9 +227,8 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   // Index at which async intercept processing was scheduled.
   uint64_t retry_index_;
 
-  // True while a retry barrier is inserted but its retry_doorbell_ completion wake
-  // has not been delivered. Tracks the actual outstanding wake (the read index
-  // alone can misreport a completed barrier as pending; see IsPendingRetryPoint).
+  // True while a retry barrier is inserted but its retry_doorbell_ completion wake has not
+  // arrived; tracks the real outstanding wake (the read index alone can misreport it).
   std::atomic<bool> retry_outstanding_{false};
 
   // Given the current value of the wrapped queue read index, determine if
@@ -239,9 +238,8 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   // Event signal to use for async packet processing and control flag.
   Signal* async_doorbell_;
 
-  // Dedicated completion signal for the retry barrier, distinct from the shared
-  // async_doorbell_ (which also fires on every device doorbell ring) so a retry
-  // completion is unambiguous. HandleRetryDoorbell() is its handler.
+  // Dedicated retry-barrier completion signal, distinct from async_doorbell_ (which fires on
+  // every doorbell ring) so completion is unambiguous. HandleRetryDoorbell() is its handler.
   Signal* retry_doorbell_;
   std::atomic<bool> quit_;
 
