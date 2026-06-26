@@ -243,9 +243,9 @@ jobs:
           done
 
           targets=(
-            "gfx942 amdgpu_cdna3_kmd.json fuzz_gfx942.json 15"
-            "gfx950 amdgpu_cdna4_kmd.json fuzz_gfx950.json 15"
-            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json fuzz_gfx1201.json 60"
+            "gfx942 amdgpu_cdna3_kmd.json external_kernel_gfx942.json 15"
+            "gfx950 amdgpu_cdna4_kmd.json external_kernel_gfx950.json 15"
+            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json external_kernel_gfx1201.json 60"
           )
           for target in "${targets[@]}"; do
             read -r name rocjitsu_config corpus_config timeout <<< "${target}"

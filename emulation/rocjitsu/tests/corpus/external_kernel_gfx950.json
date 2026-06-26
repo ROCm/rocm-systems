@@ -1,5 +1,5 @@
 {
-  "config_name": "fuzz_gfx950",
+  "config_name": "external_kernel_gfx950",
   "architecture_family": "cdna4",
   "hip_architectures": ["gfx950"],
   "cmake": {
