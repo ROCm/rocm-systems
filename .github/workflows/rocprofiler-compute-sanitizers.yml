@@ -139,34 +139,6 @@ jobs:
           echo "sanitizer_lib_dir=${sanitizer_lib_dir}" >> "${GITHUB_OUTPUT}"
           echo "Clang sanitizer runtime: ${sanitizer_lib_dir}"
 
-      - name: Determine sanitizer tests
-        id: sanitizer_tests
-        working-directory: projects/rocprofiler-compute
-        shell: bash
-        run: |
-          sanitizer_regex="$(python3 - <<'PY'
-          from pathlib import Path
-
-          import yaml
-
-          path = Path("tests/test_categories.yaml")
-          data = yaml.safe_load(path.read_text()) or {}
-          patterns = (
-              data.get("test_categories", {})
-              .get("sanitizer", {})
-              .get("test_patterns", [])
-          )
-          if not isinstance(patterns, list) or not patterns:
-              raise SystemExit(
-                  "test_categories.sanitizer.test_patterns must be a non-empty list"
-              )
-
-          print("|".join(str(pattern) for pattern in patterns if str(pattern)))
-          PY
-          )"
-          echo "sanitizer_regex=${sanitizer_regex}" >> "${GITHUB_OUTPUT}"
-          echo "Sanitizer tests: ${sanitizer_regex}"
-
       - name: Configure, build, and test
         id: test
         continue-on-error: true
@@ -201,7 +173,7 @@ jobs:
             -DINSTALL_TESTS=ON \
             "-DENABLE_SANITIZER=${{ matrix.sanitizer.enable_sanitizer }}" \
             -- \
-            -R "${{ steps.sanitizer_tests.outputs.sanitizer_regex }}"
+            -L sanitizer
 
       - name: Output logs
         if: steps.test.outcome == 'failure'
