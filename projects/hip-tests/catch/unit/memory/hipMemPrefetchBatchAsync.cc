@@ -525,7 +525,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation) {
 /**
  * Test Description
  * ------------------------
- *  - Test with non-managed memory (malloc) and managed memory (hipMallocManaged)
+ *  - Test with non-managed memory (hipMalloc) and managed memory (hipMallocManaged)
  *  - Verify behavior based on device capabilities:
  *    - Non-managed memory requires hipDeviceAttributePageableMemoryAccess
  *    - Managed memory requires hipDeviceAttributeConcurrentManagedAccess
@@ -533,22 +533,24 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation) {
 HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities) {
   int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  hipStream_t stream{};
+  HIP_CHECK(hipStreamCreate(&stream));
 
-  StreamGuard stream_guard(Streams::created);
+  typedef enum {
+    hip_malloc = 0,
+    hip_malloc_managed = 1,
+  } alloc_type_t;
 
-  auto alloc_type = GENERATE(LinearAllocs::hipMalloc, LinearAllocs::hipMallocManaged);
+  auto alloc_type = GENERATE(alloc_type_t::hip_malloc, alloc_type_t::hip_malloc_managed);
 
-  // Managed allocation aborts via HIP_CHECK on hardware without managed memory
-  // support, so skip that generation rather than crashing the run.
-  if (alloc_type == LinearAllocs::hipMallocManaged &&
-      !DeviceAttributesSupport(device, hipDeviceAttributeManagedMemory,
-                               hipDeviceAttributeConcurrentManagedAccess)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+  void* memory{};
+  if (alloc_type == alloc_type_t::hip_malloc) {
+    HIP_CHECK(hipMalloc(&memory, kTestBufferBytes));
+  } else {
+    HIP_CHECK(hipMallocManaged(&memory, kTestBufferBytes));
   }
 
-  LinearAllocGuard<int> memory(alloc_type, kTestBufferBytes);
-
-  std::array<void*, 1> managed_ptrs = {memory.ptr()};
+  std::array<void*, 1> managed_ptrs = {memory};
   std::array<size_t, 1> buffer_sizes = {kTestBufferBytes};
 
   std::array<hipMemLocation, 1> locations;
@@ -559,11 +561,15 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities) {
   constexpr unsigned long long flags = 0;
   hipError_t result = hipMemPrefetchBatchAsync(
       managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(), locations.data(),
-      location_indices.data(), locations.size(), flags, stream_guard.stream());
+      location_indices.data(), locations.size(), flags, stream);
 
-  auto required_attr = (alloc_type == LinearAllocs::hipMalloc)
+  auto required_attr = (alloc_type == alloc_type_t::hip_malloc)
                            ? hipDeviceAttributePageableMemoryAccess
                            : hipDeviceAttributeConcurrentManagedAccess;
+
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(memory));
 
   if (!DeviceAttributesSupport(device, required_attr)) {
     REQUIRE(result == hipErrorInvalidValue);
