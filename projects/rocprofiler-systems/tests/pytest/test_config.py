@@ -195,9 +195,7 @@ class TestConfig(RocprofsysTest):
         )
 
     @pytest.mark.parametrize("source", ["environment", "config"])
-    @pytest.mark.parametrize(
-        "values, absent_regex", VALID_NON_BOOLEAN_TYPED_VALUE_CASES
-    )
+    @pytest.mark.parametrize("values, absent_regex", VALID_NON_BOOLEAN_TYPED_VALUE_CASES)
     def test_valid_non_boolean_values_are_not_rejected(
         self, config_target, create_config_file, source, values, absent_regex
     ):
