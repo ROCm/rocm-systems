@@ -411,8 +411,6 @@ class RocProfCompute_Base:
         pc_sampling = PCSamplingProfile(
             args=args,
             profiler=self.__profiler,
-            workload_dir=args.output_directory,
-            native_tool_path=native_tool_path,
         )
         if self.__profiler == "rocprofiler-sdk":
             options = self.get_profiler_options(native_tool_path=native_tool_path)
@@ -508,10 +506,15 @@ class RocProfCompute_Base:
             )
             return
 
-        # No native tool for pc sampling
-        pc_sampling.run(self.get_profiler_options(), total_runs)
+        if self.__profiler == "rocprofiler-sdk":
+            pc_sampling_options = self.get_pc_sampling_profiler_options(
+                native_tool_path=native_tool_path
+            )
+        else:
+            pc_sampling_options = self.get_pc_sampling_profiler_options()
+        pc_sampling.run(pc_sampling_options, total_runs)
 
-    def __get_native_tool_path(self, args: argparse.Namespace) -> str | None:
+    def __get_native_tool_path(self, args: argparse.Namespace) -> Optional[str]:
         try:
             if (
                 self.__is_native_tool_requested(args)  # noqa: E501

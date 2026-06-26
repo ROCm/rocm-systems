@@ -56,6 +56,11 @@ def is_live_attach(
     )
 
 
+def pc_sampling_unit(method: str) -> str:
+    """Map a PC sampling method to its sampling unit."""
+    return "time" if method == "host_trap" else "cycles"
+
+
 def _classify_output_line(line: str) -> None:
     """Log a subprocess output line at the appropriate level.
 
