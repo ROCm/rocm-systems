@@ -1019,10 +1019,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     pr_number = int(pr_number_s)  # type: ignore[arg-type]
 
-    # Resolve the policy path relative to THIS script.
+    # Resolve the policy path. A relative --policy is resolved FIRST against the
+    # current working directory (the repo root, which is how the workflow passes
+    # `tools/systems_pr_bot/policy.yml`); only if not found there do we fall back
+    # to the directory next to THIS script. This prevents accidentally doubling
+    # the path (e.g. `tools/systems_pr_bot/tools/systems_pr_bot/policy.yml`).
     policy_path = Path(args.policy)
     if not policy_path.is_absolute():
-        policy_path = (THIS_SCRIPT_DIR / policy_path).resolve()
+        cwd_candidate = (Path.cwd() / policy_path).resolve()
+        if cwd_candidate.is_file():
+            policy_path = cwd_candidate
+        else:
+            policy_path = (THIS_SCRIPT_DIR / policy_path).resolve()
     policy = load_policy(policy_path)
 
     pr = get_pr(owner=owner, repo=repo, pr_number=pr_number, token=token)  # type: ignore[arg-type]
