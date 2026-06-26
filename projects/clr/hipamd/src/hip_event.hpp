@@ -244,19 +244,34 @@ class IPCEventEmulated : public Event {
       // work -- it does NOT drain unrelated streams.
       hipError_t status = synchronize();
       (void)status;
-      // Defer the physical IPC cleanup (ihipHostUnregister -> SyncAllStreams,
-      // munmap, shm_unlink) out of the destroy path so hipEventDestroy() does
-      // not block on unrelated device work. Drained later at a safe sync point.
+#if !defined(_MSC_VER)
+      // POSIX: defer the physical IPC cleanup (ihipHostUnregister ->
+      // SyncAllStreams, munmap, shm_unlink) out of the destroy path so
+      // hipEventDestroy() does not block on unrelated device work (the #7520
+      // stall). Drained later at a safe device-wide sync point.
       hip::ihipIpcEventShmem_t* shmem = ipc_evt_.ipc_shmem_;
       ipc_evt_.ipc_shmem_ = nullptr;  // detach the user-facing handle
       hip::enqueueDeferredIpcEventCleanup(
           {shmem, ipc_evt_.ipc_name_, owners, deviceId()});
+#else
+      // Windows/PAL: keep the original inline cleanup. The destroy-latency issue
+      // (#7520) was reported and validated only on Linux, so the emulated path
+      // here is left unchanged to avoid an untested behavior shift on a path
+      // that has no ROCr-IPC-signal alternative.
+      status = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
+      if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
+        // print hipErrorInvalidHandle;
+      }
+      if (owners == 0) {
+        amd::Os::shm_unlink(ipc_evt_.ipc_name_);
+      }
+#endif
     }
-    // NOTE: the previous unconditional POSIX shm_unlink() that ran here was
-    // removed. It fired even when owners > 0 (other processes still hold the
-    // shmem) or when ipc_shmem_ was null / already unlinked, removing the shm
-    // name from the filesystem while peers still needed to open it by name. The
-    // amd::Os::shm_unlink in the deferred owners == 0 path is the correct and
+    // NOTE: the previous unconditional POSIX shm_unlink() that ran here (outside
+    // the ipc_shmem_ guard, under #if !defined(_MSC_VER)) was removed. It fired
+    // even when owners > 0 (peers still hold the shmem) or when ipc_shmem_ was
+    // null / already unlinked, racing peers that still needed to open the shm by
+    // name. The amd::Os::shm_unlink in the owners == 0 path is the correct and
     // sufficient unlink.
   }
   bool createIpcEventShmemIfNeeded();
