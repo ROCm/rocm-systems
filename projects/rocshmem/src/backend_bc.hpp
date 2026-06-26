@@ -362,15 +362,14 @@ class Backend {
 
  protected:
   /**
-<<<<<<< HEAD
    * @brief Alignment for regions carved from a backend's work/sync pool.
    *
    * The barrier_sync and pSync pools are accessed with 64-bit atomics, which
    * require 8-byte alignment.
    */
   static constexpr size_t wrk_sync_pool_alignment{alignof(int64_t)};
-=======
-   * @brief Maximum number of concurrent symmetric buffer registrations.
+
+  /* @brief Maximum number of concurrent symmetric buffer registrations.
    *
    * Configured via ROCSHMEM_MAX_SYMM_REGIONS (see envvar::max_symm_regions)
    * and shared by every backend that supports symmetric registration.
@@ -386,7 +385,6 @@ class Backend {
    * Shared helper for backends exchanging registration handles.
    */
   void symm_allgather(void *inout, size_t bytes_per_pe);
->>>>>>> 11214334fe (Add common backend symmetric registration bookkeeping)
 
   /**
    * @brief Required to support static inheritance for device calls.

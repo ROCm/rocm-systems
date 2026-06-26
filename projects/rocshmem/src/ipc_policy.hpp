@@ -85,6 +85,15 @@ class IpcOnImpl {
 
   char **ipc_bases{nullptr};
 
+  /**
+   * @brief Size in bytes of the local symmetric heap.
+   *
+   * The heap occupies [ipc_bases[my_pe], ipc_bases[my_pe] + heap_size).
+   * ipcPeerPtr() uses this to recognize heap addresses (the common case) and
+   * translate them directly, before searching the registered-buffer table.
+   */
+  size_t heap_size{0};
+
   int *pes_with_ipc_avail{nullptr};
 
   /**
@@ -150,6 +159,7 @@ class IpcOnImpl {
 
   void initFrom(const IpcOnImpl &other) {
     ipc_bases = other.ipc_bases;
+    heap_size = other.heap_size;
     shm_size = other.shm_size;
     shm_rank = other.shm_rank;
     pes_with_ipc_avail = other.pes_with_ipc_avail;
@@ -159,9 +169,9 @@ class IpcOnImpl {
   /**
    * @brief Return the address of a symmetric object on a target PE.
    *
-   * If sym_addr falls within a symmetrically-registered user buffer, the
-   * translation uses that region's peer base. Otherwise it falls back to the
-   * symmetric heap (ipc_bases).
+   * The common case is an address in the symmetric heap, which is translated
+   * directly from the local heap base. Only addresses outside the heap are
+   * matched against the symmetrically-registered user buffers.
    *
    * @param[in] sym_addr Symmetric address (valid in the local address space)
    * @param[in] my_pe    Local PE id (index into ipc_bases for the local base)
@@ -171,6 +181,18 @@ class IpcOnImpl {
   __device__ __forceinline__ char *ipcPeerPtr(const void *sym_addr, int my_pe,
                                                int pe) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
+    uintptr_t heap_base = reinterpret_cast<uintptr_t>(ipc_bases[my_pe]);
+
+    /*
+     * Common case: the address lives in the symmetric heap. Translate it
+     * directly and skip the registered-buffer search. The single unsigned
+     * compare also rejects addresses below the heap base (they wrap large).
+     */
+    if (addr - heap_base < heap_size) {
+      return ipc_bases[pe] + (addr - heap_base);
+    }
+
+    /* Otherwise it may belong to a symmetrically-registered user buffer. */
     if (symm_table != nullptr) {
       int n = symm_table->count;
       for (int i = 0; i < n; ++i) {
@@ -180,8 +202,9 @@ class IpcOnImpl {
         }
       }
     }
-    uint64_t offset = addr - reinterpret_cast<uintptr_t>(ipc_bases[my_pe]);
-    return ipc_bases[pe] + offset;
+
+    /* Not a heap address and not in any registered region: invalid input. */
+    return nullptr;
   }
 
   void assignSdmaChannel([[maybe_unused]] unsigned int ctx_id) {}
@@ -472,6 +495,8 @@ class IpcOffImpl {
   uint32_t shm_size{0};
 
   char **ipc_bases{nullptr};
+
+  size_t heap_size{0};
 
   int *pes_with_ipc_avail{nullptr};
 
