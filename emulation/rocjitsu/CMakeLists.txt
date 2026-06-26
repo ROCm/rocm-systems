@@ -21,7 +21,7 @@ unset(_RJ_ROCM_PATH_EXPLICIT)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(rj_default_compiler)
 
-project(rocm_jit_suite VERSION 0.1.0)
+project(rocm_jit_suite VERSION 0.2.0)
 
 include(rj_version)
 
@@ -57,10 +57,20 @@ set(HSA_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
 )
 
+# DRM/amdgpu UAPI headers (vendored kernel ABI, MIT-licensed). Lets the
+# interposer service the amdgpu DRM ioctl surface using the real kernel structs
+# instead of hand-mirrored copies, without depending on libdrm library types.
+set(DRM_INCLUDE_DIR
+    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux/uapi/drm"
+)
+
 include(rj_log)
 
 # Sanitizer and static analysis options.
-option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")
+option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
@@ -73,12 +83,24 @@ option(
     OFF
 )
 
+set(_rj_sanitizer_kinds)
+if(RJ_ENABLE_ASAN)
+    list(APPEND _rj_sanitizer_kinds address)
+endif()
+if(RJ_ENABLE_UBSAN)
+    list(APPEND _rj_sanitizer_kinds undefined)
+endif()
+if(RJ_ENABLE_TSAN)
+    list(APPEND _rj_sanitizer_kinds thread)
+endif()
+if(RJ_ENABLE_MSAN)
+    list(APPEND _rj_sanitizer_kinds memory)
+endif()
+list(LENGTH _rj_sanitizer_kinds _rj_sanitizer_count)
+
 if(LTO)
-    if(RJ_SANITIZER)
-        message(
-            FATAL_ERROR
-            "LTO is incompatible with RJ_SANITIZER=${RJ_SANITIZER}. Disable one."
-        )
+    if(_rj_sanitizer_count GREATER 0)
+        message(FATAL_ERROR "LTO is incompatible with sanitizers. Disable one.")
     endif()
     include(CheckIPOSupported)
     check_ipo_supported(RESULT _rj_ipo_ok OUTPUT _rj_ipo_err)
@@ -116,51 +138,65 @@ if(LTO)
     endif()
 endif()
 
-if(RJ_SANITIZER)
-    message(STATUS "Sanitizer enabled: ${RJ_SANITIZER}")
+if(_rj_sanitizer_count GREATER 0)
+    if(thread IN_LIST _rj_sanitizer_kinds AND _rj_sanitizer_count GREATER 1)
+        message(
+            FATAL_ERROR
+            "ThreadSanitizer cannot be combined with other sanitizers"
+        )
+    endif()
+    if(memory IN_LIST _rj_sanitizer_kinds AND _rj_sanitizer_count GREATER 1)
+        message(
+            FATAL_ERROR
+            "MemorySanitizer cannot be combined with other sanitizers"
+        )
+    endif()
+    list(JOIN _rj_sanitizer_kinds "," _rj_sanitizer_arg)
+    set(RJ_SANITIZER_COMPILE_OPTIONS)
+    set(RJ_SANITIZER_LINK_OPTIONS)
+    message(STATUS "Sanitizer enabled: ${_rj_sanitizer_arg}")
     if(MSVC)
         # MSVC only supports AddressSanitizer; ubsan/tsan/msan are GCC/Clang-only.
-        if(RJ_SANITIZER STREQUAL "asan")
-            add_compile_options(/fsanitize=address)
+        if(_rj_sanitizer_arg STREQUAL "address")
+            list(APPEND RJ_SANITIZER_COMPILE_OPTIONS /fsanitize=address)
+            add_compile_options(${RJ_SANITIZER_COMPILE_OPTIONS})
             # /INCREMENTAL:NO is required when using MSVC ASAN.
             add_link_options(/INCREMENTAL:NO)
         else()
-            message(
-                FATAL_ERROR
-                "RJ_SANITIZER=${RJ_SANITIZER} is not supported by MSVC. Only 'asan' is available."
-            )
+            message(FATAL_ERROR "Only RJ_ENABLE_ASAN is supported by MSVC.")
         endif()
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-        if(RJ_SANITIZER STREQUAL "asan")
-            add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-            add_link_options(-fsanitize=address)
+        list(
+            APPEND RJ_SANITIZER_COMPILE_OPTIONS
+            -fsanitize=${_rj_sanitizer_arg}
+        )
+        list(APPEND RJ_SANITIZER_LINK_OPTIONS -fsanitize=${_rj_sanitizer_arg})
+        if(
+            address IN_LIST _rj_sanitizer_kinds
+            OR undefined IN_LIST _rj_sanitizer_kinds
+            OR memory IN_LIST _rj_sanitizer_kinds
+        )
+            list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -fno-omit-frame-pointer)
+        endif()
+        add_compile_options(${RJ_SANITIZER_COMPILE_OPTIONS})
+        add_link_options(${RJ_SANITIZER_LINK_OPTIONS})
+        if(address IN_LIST _rj_sanitizer_kinds)
             # GCC 13+ emits false-positive -Wmaybe-uninitialized in std_function.h
             # when ASAN is enabled. Suppress to avoid -Werror failures.
             if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
                 add_compile_options(-Wno-maybe-uninitialized)
             endif()
-        elseif(RJ_SANITIZER STREQUAL "ubsan")
-            add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
-            add_link_options(-fsanitize=undefined)
-        elseif(RJ_SANITIZER STREQUAL "tsan")
-            add_compile_options(-fsanitize=thread)
-            add_link_options(-fsanitize=thread)
-        elseif(RJ_SANITIZER STREQUAL "msan")
-            add_compile_options(-fsanitize=memory -fno-omit-frame-pointer)
-            add_link_options(-fsanitize=memory)
-        else()
-            message(
-                FATAL_ERROR
-                "Unknown sanitizer: ${RJ_SANITIZER}. Use asan, ubsan, tsan, or msan."
-            )
         endif()
     else()
         message(
             FATAL_ERROR
-            "RJ_SANITIZER is not supported for compiler '${CMAKE_CXX_COMPILER_ID}'."
+            "Sanitizers are not supported for compiler '${CMAKE_CXX_COMPILER_ID}'."
         )
     endif()
+    unset(_rj_sanitizer_arg)
 endif()
+unset(_rj_sanitizer_count)
+unset(_rj_sanitizer_kinds)
 
 if(RJ_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)

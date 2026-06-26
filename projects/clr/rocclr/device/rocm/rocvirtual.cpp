@@ -374,8 +374,22 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
   signal->flags_.done_ = true;
 }
 
+// True while this thread is executing inside HsaAmdSignalHandler (the ROCr
+// async-events thread). Device::releaseQueue uses it to defer the blocking
+// queue_destroy off this thread and avoid a self-deadlock.
+namespace {
+thread_local bool tls_in_async_handler = false;
+struct AsyncHandlerScope {
+  AsyncHandlerScope() { tls_in_async_handler = true; }
+  ~AsyncHandlerScope() { tls_in_async_handler = false; }
+};
+}  // namespace
+
+bool InAsyncSignalHandler() { return tls_in_async_handler; }
+
 // ================================================================================================
 bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
+  AsyncHandlerScope async_scope;
   Timestamp* ts = reinterpret_cast<Timestamp*>(arg);
 
   VirtualGPU* const gpu = ts->gpu();
