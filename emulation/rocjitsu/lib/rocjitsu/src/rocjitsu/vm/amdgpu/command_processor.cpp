@@ -86,13 +86,6 @@ void validate_cluster_shape(const DispatchEntry &dp) {
   }
 }
 
-uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr) {
-  uint32_t value = 0;
-  for (uint32_t i = 0; i < sizeof(value); ++i)
-    value |= static_cast<uint32_t>(memory->read8(addr + i)) << (i * 8);
-  return value;
-}
-
 uint32_t aligned_lds_bytes_per_workgroup(const DispatchEntry &entry) {
   // Match ComputeUnitCore::allocate_lds()/can_accept_workgroup() granularity for all dispatches.
   return util::align_up(entry.group_segment_fixed_size, 256u);

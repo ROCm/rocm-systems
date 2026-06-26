@@ -310,7 +310,7 @@ TEST(L1VectorCacheTest, CoalescesContiguousLaneLoads) {
   memory.write_block(kBase, input.data(), input.size());
 
   std::array<uint8_t, 64 * kStride> output{};
-  l1.load(addrs.data(), (1ULL << kLanes) - 1, kElemSize, kNumElems, output.data(), Mtype::RW,
+  l1.load(addrs.data(), (1ULL << kLanes) - 1, kElemSize, kNumElems, output.data(), Mtype::RW, false,
           false);
 
   EXPECT_EQ(l1.read_count(), 1u);
@@ -381,7 +381,7 @@ TEST(L1VectorCacheTest, MaskGapsBreakContiguousLaneLoadRuns) {
                      input.size() * sizeof(uint32_t));
 
   std::array<uint8_t, 64 * kStride> output{};
-  l1.load(addrs.data(), kMask, kElemSize, kNumElems, output.data(), Mtype::RW, false);
+  l1.load(addrs.data(), kMask, kElemSize, kNumElems, output.data(), Mtype::RW, false, false);
 
   EXPECT_EQ(l1.read_count(), 2u);
   uint32_t lane0 = 0;
