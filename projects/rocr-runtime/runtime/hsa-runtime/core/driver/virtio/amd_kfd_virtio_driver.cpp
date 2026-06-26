@@ -236,10 +236,6 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
     kmt_alloc_flags.ui32.NonPaged = 1;
   }
 
-  if (!m_region.IsLocalMemory() && (alloc_flags & core::MemoryRegion::AllocateMemoryOnly)) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   // Allocating a memory handle for virtual memory
   kmt_alloc_flags.ui32.NoAddress = !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);
 
@@ -560,7 +556,9 @@ hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void
 
 hsa_status_t KfdVirtioDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                     const core::Agent& agent,
-                                                    core::DriverMemoryHandle* handle, uint64_t* offset) {
+                                                    core::DriverMemoryHandle* handle, uint64_t* offset,
+                                                    core::Agent** import_agent_used) {
+  (void)import_agent_used;
   return HSA_STATUS_ERROR;
 }
 

@@ -1039,6 +1039,7 @@ class Runtime {
     bool imported; // True if this BO was imported from another process
     bool is_fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
+    core::Agent* drm_owner; // Gpu agent used for import of host memory, NULL for device memory 
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
@@ -1063,6 +1064,9 @@ class Runtime {
     hsa_access_permission_t permissions;
     MappedHandle* mappedHandle;
     DriverMemoryHandle driver_handle;
+    /* False when driver_handle is borrowed from MemoryHandle::driver_handle (drm_owner reuse
+     * path) */
+    bool owns_driver_handle = true;
   };
 
   struct MappedHandle {

@@ -4389,7 +4389,7 @@ typedef enum {
  * To minimize internal memory fragmentation, align the size to the recommended allocation granule
  * size, see HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE
  *
- * @param[in] pool memory to use. Only GPU agent pools are supported.
+ * @param[in] pool memory to use.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
  * @param[in] flags - currently unsupported

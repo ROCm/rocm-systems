@@ -292,10 +292,12 @@ public:
   /// @param[in] agent agent associated with @p mem
   /// @param[out] handle handle of the memory object
   /// @param[out] offset memory offset in bytes
+  /// @param[out] import_agent_used GPU agent used for importing host bo into drm
   virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
                                              const core::Agent& agent,
                                              core::DriverMemoryHandle* handle,
-                                             uint64_t* offset) = 0;
+                                             uint64_t* offset,
+                                             core::Agent** import_agent_used = nullptr) = 0;
 
   /// @brief Destroys the handle created during @ref CreateShareableHandle.
   ///

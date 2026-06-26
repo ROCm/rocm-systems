@@ -112,7 +112,8 @@ class KfdVirtioDriver final : public core::Driver {
                    hsa_access_permission_t perms, uint32_t node_id) override;
   hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size, uint32_t node_id) override;
   hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
-                                     core::DriverMemoryHandle* handle, uint64_t* offset) override;
+                                     core::DriverMemoryHandle* handle, uint64_t* offset,
+                                     core::Agent** import_agent_used = nullptr) override;
   hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const;
   hsa_status_t SPMAcquire(uint32_t node_id) const override;

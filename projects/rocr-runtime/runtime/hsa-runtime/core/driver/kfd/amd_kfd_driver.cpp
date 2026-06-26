@@ -239,11 +239,6 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     kmt_alloc_flags.ui32.NonPaged = 1;
   }
 
-  if (!m_region.IsLocalMemory() &&
-      (alloc_flags & core::MemoryRegion::AllocateMemoryOnly)) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   // Allocating a memory handle for virtual memory
   kmt_alloc_flags.ui32.NoAddress =
       !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);
@@ -618,11 +613,23 @@ hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
 
 hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                               const core::Agent& agent,
-                                              core::DriverMemoryHandle* handle, uint64_t* offset) {
+                                              core::DriverMemoryHandle* handle, uint64_t* offset,
+                                              core::Agent** import_agent_used) {
   // Create handle by exporting and importing the memory from the owning agent.
   (void)va;
 
   int source_fd = -1;
+
+  /* For CPU-owned memory, DRM operations require a GPU device handle. 
+  Use the first available GPU agent. */
+  core::Agent* import_agent = const_cast<core::Agent*>(&agent);
+  if (agent.device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
+    if (gpus.empty()) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    import_agent = gpus.front();
+  }
+
+  if (import_agent_used) *import_agent_used = import_agent;
 
   /*
    * On Linux, export via KFD first (EXPORT_MEMORY_FLAGS_KFD_DMABUF) so the KFD section of the
@@ -644,7 +651,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   source_handle.dmabuf_fd = source_fd;
 
   core::DriverMemoryHandle targetHandle = {};
-  hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareType::DMABUF_FD,
+  hsa_status_t ret = ImportMemoryHandle(*import_agent, &targetHandle, core::ShareType::DMABUF_FD,
                                         &source_handle, mem);
 #if defined(__linux__)
   rocr::os::DmaBufClose(source_fd);
@@ -664,7 +671,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   }
 #endif
 
-  const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
+  const auto devhandle = static_cast<const GpuAgent&>(*import_agent).libThunkDev();
   const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
   if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
     DestroyMemoryHandle(&targetHandle);

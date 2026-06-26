@@ -3889,13 +3889,18 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     uint64_t offset;
     core::DriverMemoryHandle driver_handle = {};
     auto agentOwner = region->owner();
-    auto ret = agentOwner->driver().CreateShareableHandle(nullptr, mem, size, *agentOwner, &driver_handle, &offset);
+    core::Agent* drm_agent = nullptr;
+
+    auto ret = agentOwner->driver().CreateShareableHandle(nullptr, mem, size, *agentOwner, &driver_handle, &offset, &drm_agent);
     if (ret != HSA_STATUS_SUCCESS) {
       region->Free(mem, size);
       return ret;
     }
 
     auto memoryHandle = std::make_unique<MemoryHandle>(region, flags_unused, driver_handle, alloc_flags);
+    if (drm_agent && drm_agent != agentOwner)
+      memoryHandle->drm_owner = drm_agent;
+      
     *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
     memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   }
@@ -4028,9 +4033,20 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
       mappedHandle(_mappedHandle) {
 
   // CPU agents have access as the memory is already mapped to the host.
-  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
+  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    return;
+  }
 
   MemoryHandle *memHandle = mappedHandle->mem_handle;
+
+  /* Avoid creating multiple amdgpu bos in the same gpu agent that was used 
+  for drm import of host memory during the creation of a shareable_handle */
+  if (memHandle->agentOwner()->device_type() == core::Agent::DeviceType::kAmdCpuDevice &&
+      memHandle->drm_owner && memHandle->drm_owner == targetAgent) {
+    driver_handle = memHandle->driver_handle;
+    owns_driver_handle = false;
+    return;
+  }
 
   hsa_status_t status;
   if (memHandle->imported && memHandle->is_fabric_handle) {
@@ -4056,9 +4072,11 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
     (void)result;
   }
   else {
-    hsa_status_t status = targetAgent->driver().DestroyImportedMemoryHandle(&driver_handle);
-    assert(status == HSA_STATUS_SUCCESS);
-    (void)status;
+    if (owns_driver_handle) {
+      hsa_status_t status = targetAgent->driver().DestroyImportedMemoryHandle(&driver_handle);
+      assert(status == HSA_STATUS_SUCCESS);
+      (void)status;
+    }
   }
 }
 
@@ -4066,10 +4084,12 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
 
-    auto agentOwner = mappedHandle->mem_handle->agentOwner();
+    core::Agent* agent = mappedHandle->mem_handle->drm_owner
+                               ? mappedHandle->mem_handle->drm_owner
+                               : mappedHandle->mem_handle->agentOwner();
     int mmap_fd = -1;
     /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it is valid for mmap_fd to be -1*/
-    agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd);
+    agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
 
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
                              mappedHandle->mem_handle->driver_handle.mmap_offset)) {
@@ -4134,7 +4154,8 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
           driver_handle(driver_handle),
           imported(false),
           is_fabric_handle(false),
-          alloc_flag(alloc_flag) {
+          alloc_flag(alloc_flag),
+          drm_owner(nullptr) {
 
   assert(driver_handle.handle != 0);
 }
@@ -4146,7 +4167,8 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
     driver_handle({.dmabuf_fd = dmabuf_fd}),
     imported(true),
     is_fabric_handle(false),
-    alloc_flag(MemoryRegion::AllocateNoFlags) {
+    alloc_flag(MemoryRegion::AllocateNoFlags),
+    drm_owner(nullptr) {
 }
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
@@ -4156,19 +4178,25 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     driver_handle({.dmabuf_fd = -1, .fabric_handle = fabric_handle}),
     imported(true),
     is_fabric_handle(true),
-    alloc_flag(MemoryRegion::AllocateNoFlags) {
+    alloc_flag(MemoryRegion::AllocateNoFlags),
+    drm_owner(nullptr) {
 }
 
 Runtime::MemoryHandle::~MemoryHandle() {
-  if (driver_handle.handle != 0 && region != nullptr)
-    agentOwner()->driver().DestroyMemoryHandle(&driver_handle);
+  if (driver_handle.handle != 0 && region != nullptr) {
+    /* For host memory, CreateShareableHandle imports the BO into a GPU DRM context
+    (drm_owner) to produce a driver_handle. The resulting driver_handle 
+    is owned by that GPU agent, not the CPU region, so destruction must be 
+    dispatched through drm_owner */
+    core::Agent* destroy_agent = drm_owner ? drm_owner : agentOwner();
+    destroy_agent->driver().DestroyMemoryHandle(&driver_handle);
+  }
 
   if (driver_handle.dmabuf_fd >= 0) {
     os::DmaBufClose(driver_handle.dmabuf_fd);
     driver_handle.dmabuf_fd = -1;
   }
 }
-
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held
 hsa_status_t
@@ -4184,10 +4212,12 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
    */
   bool created_dmabuf_fd = false;
   if (!memHandle->imported && memHandle->driver_handle.dmabuf_fd == -1) {
-    Agent *ownerAgent = memHandle->agentOwner();
+    /* For host memory, agentOwner() is the CPU agent which cannot perform DRM exports.
+     * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
+    Agent *exportAgent = memHandle->drm_owner ? memHandle->drm_owner : memHandle->agentOwner();
     int dmabuf_fd = -1;
-    hsa_status_t status = ownerAgent->driver().ExportMemoryHandle(
-        *ownerAgent, memHandle->driver_handle, ShareType::DMABUF_FD, 0, &dmabuf_fd);
+    hsa_status_t status = exportAgent->driver().ExportMemoryHandle(
+        *exportAgent, memHandle->driver_handle, ShareType::DMABUF_FD, 0, &dmabuf_fd);
     if (status != HSA_STATUS_SUCCESS)
       return status;
     memHandle->driver_handle.dmabuf_fd = dmabuf_fd;
@@ -4396,7 +4426,10 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   if (memoryHandle->imported)
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
-  auto agentOwner = memoryHandle->region->owner();
+  /* For host memory, agentOwner() is the CPU agent which cannot perform DRM exports.
+   * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
+  auto agentOwner = memoryHandle->drm_owner ? memoryHandle->drm_owner
+                                            : memoryHandle->region->owner();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
                                                  ShareType::DMABUF_FD,
