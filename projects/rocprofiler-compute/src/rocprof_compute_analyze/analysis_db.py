@@ -774,67 +774,73 @@ class db_analysis(OmniAnalyze_Base):
         metrics_info_data_per_workload: dict[str, pd.DataFrame] = {}
         metric_expression_data_per_workload: dict[str, pd.DataFrame] = {}
 
+        non_expression_columns = {
+            "Metric",
+            "Channel",
+            "Unit",
+            "Description",
+            "Type",
+            "Xfer",
+            "Coherency",
+            "Transaction",
+            "Percent of Peak",
+        }
+
         for workload_path in self._pmc_df_per_workload.keys():
             gfx_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
-            # for example 201 -> Wavefront
-            table_names_map = dict()
-            for panel_config in self._arch_configs[gfx_arch].panel_configs.values():
+            arch_config = self._arch_configs[gfx_arch]
+
+            # Build table_id -> title map
+            # (e.g. 700 -> "Wavefront", 701 -> "Wavefront Launch Stats").
+            table_names_map: dict[int, str] = {}
+            for panel_config in arch_config.panel_configs.values():
                 table_names_map[panel_config["id"]] = panel_config["title"]
                 for source in panel_config["data source"]:
-                    table_names_map[list(source.values())[0]["id"]] = list(
-                        source.values()
-                    )[0]["title"]
-            # Build metric data
-            non_expression_columns = [
-                "Metric",
-                "Channel",
-                "Unit",
-                "Description",
-                "Type",
-                "Xfer",
-                "Coherency",
-                "Transaction",
-                "Percent of Peak",
-            ]
-            metric_table_rows = [
-                (metric_id, metric_df, row)
-                for df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
-                if df_id != 402  # roofline points handled in calc_roofline_data
+                    for table in source.values():
+                        table_names_map[table["id"]] = table["title"]
+
+            # Collect metric tables with table-level fields (table_name,
+            # sub_table_name, value_columns) and rows computed once per table.
+            metric_tables = [
+                (
+                    table_names_map[table_id // 100 * 100],
+                    table_names_map[table_id],
+                    [c for c in metric_df.columns if c not in non_expression_columns],
+                    list(metric_df.iterrows()),
+                )
+                for table_id, metric_df in arch_config.dfs.items()
+                if table_id != 402  # roofline points handled in calc_roofline_data
                 if set(metric_df.columns).intersection({"Metric", "Channel"})
-                for metric_id, row in metric_df.iterrows()
             ]
+
+            metric_info_rows = [
+                MetricInfoRow(
+                    name=row.get("Metric") or row["Channel"].strip(),
+                    metric_id=metric_id,
+                    description=row.get("Description"),
+                    unit=row.get("Unit"),
+                    pct_of_peak=row.get("Percent of Peak") is True,
+                    table_name=table_name,
+                    sub_table_name=sub_table_name,
+                )
+                for table_name, sub_table_name, _value_columns, rows in metric_tables
+                for metric_id, row in rows
+            ]
+            expression_rows = [
+                ExpressionRow(
+                    metric_id=metric_id,
+                    value_name=value_name,
+                    value=row[value_name].strip(),
+                )
+                for _table_name, _sub_table_name, value_columns, rows in metric_tables
+                for metric_id, row in rows
+                for value_name in value_columns
+            ]
+
             metrics_info_df = pd.DataFrame(
-                [
-                    MetricInfoRow(
-                        name=row.get("Metric") or row["Channel"].strip(),
-                        metric_id=metric_id,
-                        description=row.get("Description"),
-                        unit=row.get("Unit"),
-                        pct_of_peak=row.get("Percent of Peak") is True,
-                        table_name=table_names_map[int(metric_id.split(".")[0]) * 100],
-                        sub_table_name=table_names_map[
-                            int(metric_id.split(".")[0]) * 100
-                            + int(metric_id.split(".")[1])
-                        ],
-                    )
-                    for metric_id, _, row in metric_table_rows
-                ],
-                columns=MetricInfoRow._fields,
+                metric_info_rows, columns=MetricInfoRow._fields
             )
-            expression_df = pd.DataFrame(
-                [
-                    ExpressionRow(
-                        metric_id=metric_id,
-                        value_name=value_name,
-                        value=row[value_name].strip(),
-                    )
-                    for metric_id, metric_df, row in metric_table_rows
-                    for value_name in metric_df.drop(
-                        columns=non_expression_columns, errors="ignore"
-                    ).columns
-                ],
-                columns=ExpressionRow._fields,
-            )
+            expression_df = pd.DataFrame(expression_rows, columns=ExpressionRow._fields)
 
             metrics_info_data_per_workload[workload_path] = metrics_info_df
             metric_expression_data_per_workload[workload_path] = expression_df
