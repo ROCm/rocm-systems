@@ -447,7 +447,10 @@ void ncclResetDebugInitInternal() {
 #ifdef pncclResetDebugInit
 #undef pncclResetDebugInit
 #endif
-#if defined(NCCL_OS_LINUX)
+// The alias() target resolves to the extern-"C" host symbol ncclResetDebugInit,
+// which is not emitted during the device (gfx942) compilation pass that -fgpu-rdc
+// (required by --rocshmem) forces. Only declare the host alias on the host pass.
+#if defined(NCCL_OS_LINUX) && !__HIP_DEVICE_COMPILE__
 __attribute__ ((visibility("default")))
 __attribute__ ((alias("ncclResetDebugInit")))
 #endif

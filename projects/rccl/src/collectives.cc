@@ -672,6 +672,9 @@ ncclResult_t ncclPutSignal_impl(const void* localbuff, size_t count, ncclDataTyp
   struct ncclInfo info = { ncclFuncPutSignal, "PutSignal",
     localbuff, NULL, count, datatype, ncclSum, peer, comm, stream, /* Args */
     1, 1, nullptr, /* chunkSteps, sliceSteps, acc */
+#ifdef ENABLE_ROCSHMEM
+    NULL, /* sizes (rocSHMEM per-op metadata) */
+#endif
     false, /* useDirect */
     peerWinOffset, peerWin, sigIdx, ctx, flags, /* peerWinOffset, peerWin, sigIdx, ctx, flags */
     0, NULL }; /* nDesc, signalDescs */
@@ -688,6 +691,9 @@ ncclResult_t ncclSignal_impl(int peer, int sigIdx, int ctx, unsigned int flags,
   struct ncclInfo info = { ncclFuncSignal, "Signal",
     NULL, NULL, 0, ncclInt8, ncclSum, peer, comm, stream, /* Args */
     1, 1, nullptr, /* chunkSteps, sliceSteps, acc */
+#ifdef ENABLE_ROCSHMEM
+    NULL, /* sizes (rocSHMEM per-op metadata) */
+#endif
     false, /* useDirect */
     0, NULL, sigIdx, ctx, flags, /* peerWinOffset, peerWin, sigIdx, ctx, flags */
     0, NULL }; /* nDesc, signalDescs */
@@ -704,6 +710,9 @@ ncclResult_t ncclWaitSignal_impl(int nDesc, ncclWaitSignalDesc_t* signalDescs,
   struct ncclInfo info = { ncclFuncWaitSignal, "WaitSignal",
     NULL, NULL, 0, ncclInt32, ncclSum, 0, comm, stream, /* Args */
     1, 1, nullptr, /* chunkSteps, sliceSteps, acc */
+#ifdef ENABLE_ROCSHMEM
+    NULL, /* sizes (rocSHMEM per-op metadata) */
+#endif
     false, /* useDirect */
     0, NULL, 0, 0, 0, /* peerWinOffset, peerWin, sigIdx, ctx, flags */
     nDesc, signalDescs }; /* nDesc, signalDescs */
