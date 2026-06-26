@@ -209,13 +209,6 @@ Installing multiple versions of ROCm on the same system can result in the `amd-s
    python3 -m pip install --user .
    ```
 
-   If using TheRock nightly wheel, after installing ROCm Core SDK, run the following:
-   ```
-   # To find out which site-packages rocm-sdk-core is installed at, run: pip show rocm-sdk-core
-   cd <site-packages>/_rocm_sdk_core/share/amd_smi
-   pip install .
-   ```
-
    > **Note:** `sudo` may be required. On some systems, use `--break-system-packages` if pip installation fails.
 
 3. You should now have the AMD SMI Python library in your Python path:
