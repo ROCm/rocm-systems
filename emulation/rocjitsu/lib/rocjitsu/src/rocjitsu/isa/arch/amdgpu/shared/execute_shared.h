@@ -2548,11 +2548,6 @@ inline void execute_s_subb_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
 }
 
 template <typename Inst>
-inline void execute_s_trap_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  throw util::UnimplementedInst(inst.mnemonic());
-}
-
-template <typename Inst>
 inline void execute_s_trunc_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result =
       util::trunc_scalar(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
