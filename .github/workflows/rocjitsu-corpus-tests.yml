@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/06/25.
-        default: "3998d8edc92c87fd26d000d06c9af51f518d7439"
+        # Last updated on 2026/06/26.
+        default: "9661a80073abfff688fda5a970bfa9de24de2ead"
         required: true
 
 concurrency:
@@ -94,8 +94,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/06/25.
-          ref: 3998d8edc92c87fd26d000d06c9af51f518d7439
+          # Last updated on 2026/06/26.
+          ref: 9661a80073abfff688fda5a970bfa9de24de2ead
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -259,3 +259,26 @@ jobs:
               tests/test_fuzz_targets.py
             echo "::endgroup::"
           done
+
+          targets=(
+            # CDNA3 FPSAN has no passing tests yet.
+            # "gfx942 amdgpu_cdna3.json fpsan_gfx942.json"
+            "gfx950 amdgpu_cdna4.json fpsan_gfx950.json"
+            "gfx1100 amdgpu_rdna3_gfx1100_w7900_kmd.json fpsan_gfx1100.json"
+            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json fpsan_gfx1201.json"
+            "gfx1250 amdgpu_gfx1250.json fpsan_gfx1250.json"
+          )
+          fpsan_status=0
+          for target in "${targets[@]}"; do
+            read -r name rocjitsu_config fpsan_config <<< "${target}"
+            echo "::group::fpsan ctest (${name})"
+            ROCM_PATH=`rocm-sdk path --root` \
+              rocjitsu \
+              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
+              -- \
+              tests/run_fpsan_ctest.sh \
+              --config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${fpsan_config}" \
+              --timeout 15 || fpsan_status=$?
+            echo "::endgroup::"
+          done
+          exit "${fpsan_status}"
