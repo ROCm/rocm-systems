@@ -1596,15 +1596,10 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
     }
   }
 
-  // PAL/Windows uses the classic topological path; Linux/ROCm uses the segmented AQL path.
+  // PAL/Windows: classic topological path — no segment scheduling, no AQL capture.
   if (GPU_ENABLE_PAL != 0) {
     auto* classicExec = new hip::GraphExecClassic(flags);
     graph->clone(classicExec, true);
-    // Classic path only needs a topological ordering of nodes; no segment scheduling.
-    if (!classicExec->TopologicalOrder()) {
-      delete classicExec;
-      return hipErrorInvalidValue;
-    }
     graph->SetGraphInstantiated(true);
     hipError_t initStatus = classicExec->Init();
     if (initStatus != hipSuccess) {

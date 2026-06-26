@@ -1270,8 +1270,9 @@ struct GraphLaunchCleanup {
 // GraphExecClassic — PAL/Windows path: simple topological enqueue, no AQL capture.
 // ================================================================================================
 hipError_t GraphExecClassic::Init() {
-  // topoOrder_ is populated by TopologicalOrder() before Init() is called.
-  // Determine the capture device from the first node.
+  if (!TopologicalOrder()) {
+    return hipErrorInvalidValue;
+  }
   if (!topoOrder_.empty()) {
     auto* dev = topoOrder_[0]->GetParentGraph()->Device();
     if (dev != nullptr) {
