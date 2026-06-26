@@ -278,6 +278,41 @@ def test_triton_backend_reentrancy_dedups_nested_launch(monkeypatch):
     assert pushes == ["triton.JITFunction.outer"]
 
 
+def test_triton_backend_patch_is_idempotent(monkeypatch):
+    """Patching twice does not re-wrap the launch entry point."""
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    pushes: list[str] = []
+    monkeypatch.setattr(
+        triton_backend,
+        "_push_scope",
+        lambda marker, ctx, backend="": pushes.append(marker),
+    )
+    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
+    # Reset the per-thread guard.
+    if hasattr(triton_backend._thread_local, "in_launch"):
+        del triton_backend._thread_local.in_launch
+
+    class FakeJIT:
+        name = "k"
+
+        def run(self, *a, **kw):
+            return "ran"
+
+    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", None)
+    monkeypatch.setattr(triton_backend._STATE, "jit_function", FakeJIT)
+
+    triton_backend.patch_triton_launcher()
+    wrapped_once = FakeJIT.__dict__["run"]
+    triton_backend.patch_triton_launcher()
+
+    assert FakeJIT.__dict__["run"] is wrapped_once, (
+        "second patch re-wrapped the launcher"
+    )
+    assert FakeJIT().run() == "ran"
+    assert pushes == ["triton.JITFunction.k"], "exactly one marker per launch"
+
+
 def test_triton_backend_registers_framework_root(monkeypatch):
     """install() registers triton's package directory as a framework root."""
     from utils.inject_roctx._backends import triton as triton_backend

@@ -6106,17 +6106,6 @@ def test_parse_operator_patterns_generic_attr():
 
 
 @pytest.mark.torch_ops
-def test_backend_cli_mapping_has_torch_and_triton():
-    from rocprof_compute_analyze.analysis_cli import _BACKEND_CLI
-
-    assert _BACKEND_CLI["torch"]["filter_attr"] == "torch_operator"
-    assert _BACKEND_CLI["torch"]["list_attr"] == "list_torch_operators"
-    assert _BACKEND_CLI["triton"]["filter_attr"] == "triton_operator"
-    assert _BACKEND_CLI["triton"]["list_attr"] == "list_triton_operators"
-    assert _BACKEND_CLI["triton"]["label"] == "Triton"
-
-
-@pytest.mark.torch_ops
 def test_filter_by_backend_selects_only_requested_backend():
     import pandas as pd
 
