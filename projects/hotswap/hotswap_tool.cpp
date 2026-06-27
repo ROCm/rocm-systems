@@ -16,6 +16,7 @@
 #include "hotswap.hpp"
 #include "hotswap_gfx_query.hpp"
 #include "hotswap_platform_io.hpp"
+#include "hotswap_rewrite_policy.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
@@ -41,14 +42,14 @@ namespace {
 
 namespace hotswap_io = rocr::hotswap::platform_io;
 
-using rocr::hotswap::add_gfx1250_stepping_feature;
 using rocr::hotswap::AgentGfxRevision;
-using rocr::hotswap::extract_gfx_target;
-using rocr::hotswap::gate_allows_hotswap;
-using rocr::hotswap::gate_allows_hotswap_rewrite;
+using rocr::hotswap::decide_hotswap_rewrite;
 using rocr::hotswap::get_agent_isa_name;
-using rocr::hotswap::is_gfx12_5_entry_trampoline_target;
+using rocr::hotswap::has_candidate_hotswap_rewrite;
 using rocr::hotswap::query_agent_gfx_revision;
+using rocr::hotswap::RewriteDecision;
+using rocr::hotswap::RewriteOptions;
+using rocr::hotswap::rewrite_kind_name;
 
 using ByteVec = std::shared_ptr<std::vector<uint8_t>>;
 using OwnedElf = std::unique_ptr<void, decltype(&std::free)>;
@@ -267,49 +268,21 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
                                    const char *options,
                                    hsa_loaded_code_object_t *loaded_code_object,
                                    const ByteVec &local_bytes,
-                                   const AgentGfxRevision &gfx,
-                                   bool entry_trampolines) {
-  // Source ISA from the code object, target ISA from the running GPU.
-  std::string source_isa = rocr::hotswap::GetCodeObjectIsaName(
-      local_bytes->data(), local_bytes->size());
-  std::string target_isa = get_agent_isa_name(agent);
-  if (source_isa.empty() || target_isa.empty()) {
-    HOTSWAP_LOG("hotswap: rewrite SKIP empty isa (src='%s' tgt='%s' size=%zu)\n",
-                source_isa.c_str(), target_isa.c_str(), local_bytes->size());
-    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-  }
-
-  std::string source_gfx = extract_gfx_target(source_isa);
-  std::string target_gfx = extract_gfx_target(target_isa);
-  // COMGR's entry-trampoline pass accepts gfx12-5-generic. Keep a generic
-  // source generic even on a concrete gfx125* agent so this path does not turn
-  // into processor retargeting.
-  if (entry_trampolines && source_gfx != target_gfx &&
-      (source_gfx == "gfx12-5-generic" || target_gfx == "gfx12-5-generic") &&
-      is_gfx12_5_entry_trampoline_target(source_gfx) &&
-      is_gfx12_5_entry_trampoline_target(target_gfx)) {
-    target_isa = source_isa;
-    target_gfx = source_gfx;
-  }
-
-  if (source_gfx == "gfx1250" && target_gfx == "gfx1250") {
-    source_isa = add_gfx1250_stepping_feature(source_isa, true);
-    target_isa =
-        add_gfx1250_stepping_feature(target_isa, !gate_allows_hotswap(gfx));
-  }
-
+                                   const RewriteDecision &decision) {
   // Route through RetargetCodeObject for unified logging, validation,
   // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
   // patching uses the same ISA name on both sides.
   void *out_elf = nullptr;
   size_t out_elf_size = 0;
   const int rc = rocr::hotswap::RetargetCodeObject(
-      local_bytes->data(), local_bytes->size(), source_isa.c_str(),
-      target_isa.c_str(), &out_elf, &out_elf_size);
+      local_bytes->data(), local_bytes->size(), decision.source_isa.c_str(),
+      decision.target_isa.c_str(), &out_elf, &out_elf_size);
 
-  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s in=%zu rc=%d out=%zu changed=%d\n",
-              source_isa.c_str(), target_isa.c_str(), local_bytes->size(), rc,
-              out_elf_size, out_elf != local_bytes->data());
+  HOTSWAP_LOG("hotswap: rewrite kind=%s src=%s tgt=%s in=%zu rc=%d out=%zu "
+              "changed=%d\n",
+              rewrite_kind_name(decision.kind), decision.source_isa.c_str(),
+              decision.target_isa.c_str(), local_bytes->size(), rc, out_elf_size,
+              out_elf != local_bytes->data());
 
   if (rc != 0 || out_elf == local_bytes->data()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
@@ -345,8 +318,8 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     }
 
     const AgentGfxRevision gfx = query_agent_gfx_revision(agent);
-    const bool entry_trampolines = entry_trampolines_requested();
-    if (!gate_allows_hotswap_rewrite(gfx, entry_trampolines)) {
+    const RewriteOptions rewrite_options{entry_trampolines_requested()};
+    if (!has_candidate_hotswap_rewrite(gfx, rewrite_options)) {
       HOTSWAP_LOG("hotswap: gate BLOCKED (gfx=%s rev=%u valid=%d)\n",
                   gfx.gfx_target.c_str(), gfx.asic_revision, gfx.revision_valid);
       return load_original_reader(executable, agent, code_object_reader,
@@ -354,9 +327,21 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
                                   reader_from_file);
     }
 
+    const std::string source_isa = rocr::hotswap::GetCodeObjectIsaName(
+        local_bytes->data(), local_bytes->size());
+    const std::string target_isa = get_agent_isa_name(agent);
+    const RewriteDecision decision =
+        decide_hotswap_rewrite(gfx, source_isa, target_isa, rewrite_options);
+    if (!decision.should_rewrite()) {
+      HOTSWAP_LOG("hotswap: decision NONE (gfx=%s src='%s' tgt='%s')\n",
+                  gfx.gfx_target.c_str(), source_isa.c_str(), target_isa.c_str());
+      return load_original_reader(executable, agent, code_object_reader,
+                                  options, loaded_code_object,
+                                  reader_from_file);
+    }
+
     const hsa_status_t status = try_retarget_and_load(
-        executable, agent, options, loaded_code_object, local_bytes, gfx,
-        entry_trampolines);
+        executable, agent, options, loaded_code_object, local_bytes, decision);
     if (status == HSA_STATUS_SUCCESS) {
       return status;
     }

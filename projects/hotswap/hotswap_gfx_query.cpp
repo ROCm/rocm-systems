@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
@@ -60,20 +59,6 @@ std::mutex g_cache_mutex;
 std::unordered_map<uint64_t, AgentGfxRevision> g_cache;
 } // namespace
 
-bool is_gfx12_5_entry_trampoline_target(const std::string &gfx_target) {
-  constexpr char Gfx125Prefix[] = "gfx125";
-  constexpr size_t Gfx125PrefixLen = sizeof(Gfx125Prefix) - 1;
-  if (gfx_target == "gfx12-5-generic") {
-    return true;
-  }
-  if (gfx_target.size() <= Gfx125PrefixLen ||
-      gfx_target.compare(0, Gfx125PrefixLen, Gfx125Prefix) != 0) {
-    return false;
-  }
-  return std::all_of(gfx_target.begin() + Gfx125PrefixLen, gfx_target.end(),
-                     [](unsigned char c) { return std::isdigit(c); });
-}
-
 AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent) {
   {
     std::scoped_lock lock(g_cache_mutex);
@@ -109,30 +94,6 @@ AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent) {
 void reset_gfx_revision_cache() {
   std::scoped_lock lock(g_cache_mutex);
   g_cache.clear();
-}
-
-bool gate_allows_hotswap(const AgentGfxRevision &gfx) {
-  return gfx.revision_valid && gfx.gfx_target == "gfx1250" &&
-         gfx.asic_revision == 0; // A0
-}
-
-bool gate_allows_hotswap_rewrite(const AgentGfxRevision &gfx,
-                                 bool entry_trampolines_requested) {
-  if (gate_allows_hotswap(gfx)) {
-    return true;
-  }
-  return entry_trampolines_requested &&
-         is_gfx12_5_entry_trampoline_target(gfx.gfx_target);
-}
-
-std::string add_gfx1250_stepping_feature(const std::string &isa_name,
-                                         bool is_b0) {
-  if (extract_gfx_target(isa_name) != "gfx1250" ||
-      isa_name.find(":gfx1250-b0-specific+") != std::string::npos ||
-      isa_name.find(":gfx1250-b0-specific-") != std::string::npos) {
-    return isa_name;
-  }
-  return isa_name + (is_b0 ? ":gfx1250-b0-specific+" : ":gfx1250-b0-specific-");
 }
 
 } // namespace rocr::hotswap

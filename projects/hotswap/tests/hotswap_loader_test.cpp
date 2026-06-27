@@ -393,10 +393,13 @@ void test_A0RetargetsWithoutFlag() {
 
 void test_FlagOneBlocksNonGfx12_5() {
   begin_test("FlagOneBlocksNonGfx12_5",
-             "The trampoline flag must not become a global rewrite enable.");
-  const LoadResult result = load_once(kGfx942Isa, kGfx942Isa, "1", 0);
-  check_original_load(result,
-                      "entry trampoline flag does not route non-gfx12.5");
+             "The trampoline flag must not become a global rewrite enable for "
+             "unsupported agents or source code objects.");
+  LoadResult result = load_once(kGfx942Isa, kGfx942Isa, "1", 0);
+  check_original_load(result, "non-gfx12.5 agent does not route");
+
+  result = load_once(kGfx942Isa, kGfx1251Isa, "1");
+  check_original_load(result, "non-gfx12.5 source does not route");
 }
 
 void test_RetargetFailureFallsBackToOriginalReader() {

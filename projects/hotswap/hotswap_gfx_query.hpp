@@ -41,31 +41,12 @@ std::string extract_gfx_target(const std::string &isa_name);
 
 // Queries the agent's gfx target and ASIC revision via the HSA runtime. The
 // result is cached per agent handle, since code-object loads can be frequent.
-// This function intentionally encodes no gating policy; callers apply
-// gate_allows_hotswap() (below) to decide whether to act.
+// This function intentionally encodes no rewrite policy; callers apply the
+// policy in hotswap_rewrite_policy.{hpp,cpp}.
 AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent);
 
 // Clears the per-agent-handle cache used by query_agent_gfx_revision(). 
 void reset_gfx_revision_cache();
-
-// HotSwap's default activation policy: B0-to-A0 rewriting is performed only
-// for gfx1250 silicon at ASIC revision A0 (and only when the revision was
-// successfully queried).
-bool gate_allows_hotswap(const AgentGfxRevision &gfx);
-
-// True for COMGR entry-trampoline targets: gfx12-5-generic or concrete gfx125
-// processor names with a numeric suffix (for example, gfx1250 or gfx1251).
-bool is_gfx12_5_entry_trampoline_target(const std::string &gfx_target);
-
-// Combined activation policy for libhsa-hotswap.so.
-bool gate_allows_hotswap_rewrite(const AgentGfxRevision &gfx,
-                                 bool entry_trampolines_requested);
-
-// Adds COMGR's hotswap-local gfx1250 stepping feature to an ISA name while
-// preserving any existing feature suffixes. Non-gfx1250 ISA names and ISA
-// names that already carry the stepping feature are returned unchanged.
-std::string add_gfx1250_stepping_feature(const std::string &isa_name,
-                                         bool is_b0);
 
 } // namespace rocr::hotswap
 

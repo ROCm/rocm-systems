@@ -4,16 +4,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Unit tests for query_agent_gfx_revision() in hotswap_gfx_query.cpp, plus the
-// gfx1250-A0 gate that hotswap_load_agent_code_object() applies on top of it.
+// Unit tests for query_agent_gfx_revision() in hotswap_gfx_query.cpp and the
+// rewrite decisions selected by hotswap_rewrite_policy.cpp.
 //
-// The query helpers — query_agent_gfx_revision(), extract_gfx_target() and the
-// AgentGfxRevision type — live in their own translation unit (compiled in
-// alongside this test), so the test includes only the small
-// hotswap_gfx_query.hpp header. The HSA entry
-// points the query calls are replaced with in-file stubs (linked in place of
-// the real libraries) so the query can be driven entirely from the test without
-// GPU hardware:
+// The HSA entry points used by the query helper are replaced with in-file stubs
+// (linked in place of the real libraries) so query and policy behavior can be
+// driven entirely from the test without GPU hardware:
 //
 //   * ISA name        <- hsa_agent_iterate_isas / hsa_isa_get_info_alt
 //   * ASIC revision   <- hsa_agent_get_info(HSA_AMD_AGENT_INFO_ASIC_REVISION)
@@ -45,16 +41,21 @@ struct FakeEnv {
 FakeEnv g_env;
 }  // namespace
 
-// The unit under test (brings in hsa.h and the query helper declarations).
+// The units under test (bring in HSA query helpers and rewrite policy).
 #include "hotswap_gfx_query.hpp"
+#include "hotswap_rewrite_policy.hpp"
 
 using rocr::hotswap::AgentGfxRevision;
 using rocr::hotswap::add_gfx1250_stepping_feature;
+using rocr::hotswap::decide_hotswap_rewrite;
 using rocr::hotswap::gate_allows_hotswap;
-using rocr::hotswap::gate_allows_hotswap_rewrite;
+using rocr::hotswap::has_candidate_hotswap_rewrite;
 using rocr::hotswap::is_gfx12_5_entry_trampoline_target;
 using rocr::hotswap::query_agent_gfx_revision;
 using rocr::hotswap::reset_gfx_revision_cache;
+using rocr::hotswap::RewriteDecision;
+using rocr::hotswap::RewriteKind;
+using rocr::hotswap::RewriteOptions;
 
 // ---------------------------------------------------------------------------
 // Stubs replacing the real HSA symbols referenced by the tool.
@@ -146,9 +147,8 @@ const char *kGfx12_5GenericIsa = "amdgcn-amd-amdhsa--gfx12-5-generic";
 const char *kGfx12_5GenericIsaWithFeatures =
     "amdgcn-amd-amdhsa--gfx12-5-generic:sramecc+";
 
-// The gate applied in hotswap_load_agent_code_object() is the shared
-// rocr::hotswap::gate_allows_hotswap(), exercised directly below so the tests
-// and the tool can never drift apart.
+// The rewrite-policy helpers are exercised directly below so the tests and the
+// loader can never drift apart.
 
 // gfx1250 silicon at ASIC revision A0 -> parsed target + revision, gate passes.
 void test_Gfx1250A0Passes() {
@@ -230,9 +230,9 @@ void test_EntryTrampolineFlagAllowsGfx1250NonA0() {
   g_env.asic_revision = 1;  // A1/B0-side path, not A0.
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
   run("default gate blocks non-A0",
-      gate_allows_hotswap_rewrite(g, false) == false);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{false}) == false);
   run("trampoline gate allows gfx1250 non-A0",
-      gate_allows_hotswap_rewrite(g, true) == true);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == true);
 }
 
 // The explicit trampoline gate covers the broader gfx125* family, while the
@@ -244,9 +244,9 @@ void test_EntryTrampolineFlagAllowsGfx125Family() {
   g_env.asic_revision = 1;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
   run("default gate blocks gfx1251",
-      gate_allows_hotswap_rewrite(g, false) == false);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{false}) == false);
   run("trampoline gate allows gfx1251",
-      gate_allows_hotswap_rewrite(g, true) == true);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == true);
 }
 
 void test_EntryTrampolineFlagRejectsMalformedGfx125Prefix() {
@@ -260,7 +260,7 @@ void test_EntryTrampolineFlagRejectsMalformedGfx125Prefix() {
   run("trampoline family predicate rejects malformed suffix",
       is_gfx12_5_entry_trampoline_target(g.gfx_target) == false);
   run("trampoline gate rejects malformed gfx125 prefix",
-      gate_allows_hotswap_rewrite(g, true) == false);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == false);
 }
 
 // COMGR's entry-trampoline pass also accepts the gfx12.5 generic processor
@@ -272,9 +272,9 @@ void test_EntryTrampolineFlagAllowsGfx12_5Generic() {
   g_env.asic_revision = 1;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
   run("default gate blocks gfx12-5-generic",
-      gate_allows_hotswap_rewrite(g, false) == false);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{false}) == false);
   run("trampoline gate allows gfx12-5-generic",
-      gate_allows_hotswap_rewrite(g, true) == true);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == true);
 }
 
 // If ASIC revision cannot be queried, the explicit trampoline flag can still
@@ -288,9 +288,9 @@ void test_EntryTrampolineFlagAllowsGfx1250UnknownRevision() {
   g_env.asic_rev_ok = false;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
   run("default gate blocks unknown revision",
-      gate_allows_hotswap_rewrite(g, false) == false);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{false}) == false);
   run("trampoline gate allows gfx1250 unknown revision",
-      gate_allows_hotswap_rewrite(g, true) == true);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == true);
 }
 
 // The trampoline flag is not a global rewrite enable; non-gfx12.5 targets still
@@ -302,7 +302,59 @@ void test_EntryTrampolineFlagBlocksOtherTargets() {
   g_env.asic_revision = 0;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
   run("trampoline gate blocks gfx942",
-      gate_allows_hotswap_rewrite(g, true) == false);
+      has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == false);
+}
+
+void test_RewriteDecisionSelectsModeAndIsaPair() {
+  printf("TEST RewriteDecisionSelectsModeAndIsaPair...\n");
+
+  AgentGfxRevision gfx1250_a0;
+  gfx1250_a0.gfx_target = "gfx1250";
+  gfx1250_a0.revision_valid = true;
+  gfx1250_a0.asic_revision = 0;
+  RewriteDecision d =
+      decide_hotswap_rewrite(gfx1250_a0, kGfx1250Isa, kGfx1250Isa,
+                             RewriteOptions{false});
+  run("A0 gfx1250 selects default patch",
+      d.kind == RewriteKind::Gfx1250A0Patch);
+  run("A0 patch uses B0 source",
+      d.source_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific+");
+  run("A0 patch uses A0 target",
+      d.target_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific-");
+
+  AgentGfxRevision gfx1250_b0;
+  gfx1250_b0.gfx_target = "gfx1250";
+  gfx1250_b0.revision_valid = true;
+  gfx1250_b0.asic_revision = 1;
+  d = decide_hotswap_rewrite(gfx1250_b0, kGfx1250Isa, kGfx1250Isa,
+                             RewriteOptions{true});
+  run("flagged non-A0 gfx1250 selects trampoline",
+      d.kind == RewriteKind::Gfx12_5EntryTrampoline);
+  run("trampoline keeps gfx1250 target B0",
+      d.target_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific+");
+
+  AgentGfxRevision gfx1251;
+  gfx1251.gfx_target = "gfx1251";
+  gfx1251.revision_valid = true;
+  gfx1251.asic_revision = 1;
+  d = decide_hotswap_rewrite(gfx1251, kGfx1251Isa, kGfx1251Isa,
+                             RewriteOptions{true});
+  run("flagged gfx1251 selects trampoline",
+      d.kind == RewriteKind::Gfx12_5EntryTrampoline);
+  run("gfx1251 ISA pair is preserved",
+      d.source_isa == kGfx1251Isa && d.target_isa == kGfx1251Isa);
+
+  d = decide_hotswap_rewrite(gfx1251, kGfx12_5GenericIsa, kGfx1251Isa,
+                             RewriteOptions{true});
+  run("generic source on concrete gfx125 agent selects trampoline",
+      d.kind == RewriteKind::Gfx12_5EntryTrampoline);
+  run("generic source keeps generic target",
+      d.source_isa == kGfx12_5GenericIsa && d.target_isa == kGfx12_5GenericIsa);
+
+  d = decide_hotswap_rewrite(gfx1251, kGfx942Isa, kGfx1251Isa,
+                             RewriteOptions{true});
+  run("non-gfx12.5 source on gfx125 agent is not rewritten",
+      d.kind == RewriteKind::None);
 }
 
 void test_AddGfx1250SteppingFeature() {
@@ -386,6 +438,7 @@ int main() {
   test_EntryTrampolineFlagAllowsGfx12_5Generic();
   test_EntryTrampolineFlagAllowsGfx1250UnknownRevision();
   test_EntryTrampolineFlagBlocksOtherTargets();
+  test_RewriteDecisionSelectsModeAndIsaPair();
   test_AddGfx1250SteppingFeature();
   test_AsicRevisionQueryFailure();
   test_ResultIsCachedPerHandle();

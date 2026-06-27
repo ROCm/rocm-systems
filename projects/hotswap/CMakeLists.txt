@@ -30,6 +30,7 @@ add_library(hsa-hotswap SHARED
   hotswap_tool.cpp
   hotswap.cpp
   hotswap_gfx_query.cpp
+  hotswap_rewrite_policy.cpp
   ${HOTSWAP_PLATFORM_IO_SRC}
 )
 
@@ -68,14 +69,14 @@ file(WRITE "${_hotswap_co_hdr}"
   "static const unsigned char kGfx1250MinCo[] = {${_hotswap_co_arr}};\n")
 target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
-# Unit tests for the gfx-target / ASIC-revision query logic. The test compiles
-# the portable hotswap_gfx_query.cpp unit alongside the test translation unit 
-# and supplies its own stubs for the HSA entry points, so this target needs 
-# the relevant headers but must NOT link the real HSA library (doing so would 
-# clash with the in-file stubs). 
+# Unit tests for gfx-target / ASIC-revision query logic and rewrite-policy
+# decisions. The test supplies its own HSA stubs, so this target needs the
+# relevant headers but must NOT link the real HSA library (doing so would clash
+# with the in-file stubs).
 add_executable(hotswap_tool_test
   tests/hotswap_tool_test.cpp
   hotswap_gfx_query.cpp
+  hotswap_rewrite_policy.cpp
 )
 target_include_directories(hotswap_tool_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -89,6 +90,7 @@ target_include_directories(hotswap_tool_test PRIVATE
 add_executable(hotswap_loader_test
   tests/hotswap_loader_test.cpp
   hotswap_gfx_query.cpp
+  hotswap_rewrite_policy.cpp
   ${HOTSWAP_PLATFORM_IO_SRC}
 )
 target_include_directories(hotswap_loader_test PRIVATE
