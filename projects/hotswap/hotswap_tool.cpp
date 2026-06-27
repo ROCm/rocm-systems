@@ -281,6 +281,9 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
 
   std::string source_gfx = extract_gfx_target(source_isa);
   std::string target_gfx = extract_gfx_target(target_isa);
+  // COMGR's entry-trampoline pass accepts gfx12-5-generic. Keep a generic
+  // source generic even on a concrete gfx125* agent so this path does not turn
+  // into processor retargeting.
   if (entry_trampolines && source_gfx != target_gfx &&
       (source_gfx == "gfx12-5-generic" || target_gfx == "gfx12-5-generic") &&
       is_gfx12_5_entry_trampoline_target(source_gfx) &&

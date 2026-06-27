@@ -45,6 +45,9 @@ FakeEnv g_env;
 
 namespace rocr::hotswap {
 
+// The production helper uses COMGR to read a real code object's ISA metadata.
+// This test double only supplies a source ISA so the test can stay focused on
+// loader policy without linking COMGR.
 std::string GetCodeObjectIsaName(const void *elf_data, size_t elf_size) {
   if (!elf_data || elf_size == 0) {
     return {};
