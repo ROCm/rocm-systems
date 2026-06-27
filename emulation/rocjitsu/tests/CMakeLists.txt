@@ -175,13 +175,13 @@ rj_configure_target(scaling_test TEST)
 #   rocjitsu --config <cfg> -- <test_binary> [args]
 # The CLI handles LD_PRELOAD and config discovery. No RESOURCE_LOCK needed.
 
-set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json")
-set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json")
+set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json")
+set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
 set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
-    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4.json"
+    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
 )
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
@@ -684,8 +684,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         daemon_test
         PRIVATE
             RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
-            RJ_DAEMON_CONFIG="${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
-            RJ_DAEMON_CONFIG_2GPU="${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd_2gpu.json"
+            RJ_DAEMON_CONFIG="${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+            RJ_DAEMON_CONFIG_2GPU="${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
             RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_kmd_shim>"
             RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
             RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"

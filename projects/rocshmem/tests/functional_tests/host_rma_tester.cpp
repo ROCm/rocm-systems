@@ -151,18 +151,44 @@ void HostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
       }
       break;
 
-    // IpcHostAmoAllPes: all n_pes PEs simultaneously atomic-add 1 to PE 0's
-    // amo_int_buf, including PE 0 itself. 
-    // Expected final value: n_pes.
+    // Each PE: fetch_add 1 (fetch path) then atomic_add 1 (non-fetch path).
+    // Expected final value on PE 0: 2 * n_pes.
     case HostAmoAllPesTestType:
       rocshmem_int_atomic_fetch_add(amo_int_buf, 1, 0);
+      rocshmem_int_atomic_add(amo_int_buf, 1, 0);
+      rocshmem_quiet();
       break;
 
+    // Each PE: fetch_add 1 (fetch path) then atomic_add 1 (non-fetch path)
+    // to its own amo_int_buf. Expected final value: 2.
     case HostAmoSelfTestType: {
       int old = rocshmem_int_atomic_fetch_add(amo_int_buf, 1, my_pe);
       dest_buf[0] = static_cast<char>(old == 0 ? 1 : 0);
+      rocshmem_int_atomic_add(amo_int_buf, 1, my_pe);
+      rocshmem_quiet();
       break;
     }
+
+    // Non-fetch atomic_add: long (default ctx) + int (default ctx) +
+    // long (explicit ctx). quiet ensures completion before the barrier.
+    case HostAmoAddTestType:
+      if (my_pe == 0) {
+        rocshmem_long_atomic_add(amo_buf, 1L, peer);
+        rocshmem_int_atomic_add(amo_int_buf, 1, peer);
+        rocshmem_quiet();
+        rocshmem_ctx_t ctx;
+        int rc = rocshmem_ctx_create(0, &ctx);
+        if (rc != ROCSHMEM_SUCCESS) {
+          std::cerr << "[PE " << my_pe
+                    << "] AmoAdd: rocshmem_ctx_create failed rc=" << rc
+                    << " (set ROCSHMEM_MAX_NUM_HOST_CONTEXTS >= 2)\n";
+          rocshmem_global_exit(1);
+        }
+        rocshmem_ctx_long_atomic_add(ctx, amo_buf, 1L, peer);
+        rocshmem_ctx_quiet(ctx);
+        rocshmem_ctx_destroy(ctx);
+      }
+      break;
 
     default:
       break;
@@ -256,23 +282,37 @@ void HostRmaTester::verifyResults(size_t size) {
       break;
 
     case HostAmoAllPesTestType:
-      // PE 0: final counter must equal n_pes (all PEs added 1, including self).
-      if (my_pe == 0 && *amo_int_buf != n_pes) {
-        std::cerr << "[PE 0] AmoAllPes: expected " << n_pes
+      // PE 0: fetch_add + atomic_add from each PE → 2 * n_pes total.
+      if (my_pe == 0 && *amo_int_buf != 2 * n_pes) {
+        std::cerr << "[PE 0] AmoAllPes: expected " << 2 * n_pes
                   << " got " << *amo_int_buf << "\n";
         rocshmem_global_exit(1);
       }
       break;
 
     case HostAmoSelfTestType:
-      // Each PE: old value must be 0, final value must be 1.
+      // Each PE: fetch_add returned 0, final value is 2 (fetch + non-fetch).
       if (dest_buf[0] != 1) {
         std::cerr << "[PE " << my_pe
                   << "] AmoSelf: fetch_add did not return old value 0\n";
         rocshmem_global_exit(1);
       }
-      if (*amo_int_buf != 1) {
-        std::cerr << "[PE " << my_pe << "] AmoSelf: expected 1 got "
+      if (*amo_int_buf != 2) {
+        std::cerr << "[PE " << my_pe << "] AmoSelf: expected 2 got "
+                  << *amo_int_buf << "\n";
+        rocshmem_global_exit(1);
+      }
+      break;
+
+    case HostAmoAddTestType:
+      // PE 1: two long adds (default + explicit ctx) → 2; one int add → 1.
+      if (my_pe == 1 && *amo_buf != 2L) {
+        std::cerr << "[PE " << my_pe << "] AmoAdd(long): expected 2 got "
+                  << *amo_buf << "\n";
+        rocshmem_global_exit(1);
+      }
+      if (my_pe == 1 && *amo_int_buf != 1) {
+        std::cerr << "[PE " << my_pe << "] AmoAdd(int): expected 1 got "
                   << *amo_int_buf << "\n";
         rocshmem_global_exit(1);
       }

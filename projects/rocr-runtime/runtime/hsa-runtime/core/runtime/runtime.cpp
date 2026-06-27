@@ -4088,7 +4088,7 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   }
   else {
     if (owns_driver_handle) {
-      hsa_status_t status = targetAgent->driver().DestroyImportedMemoryHandle(&driver_handle);
+      hsa_status_t status = targetAgent->driver().DestroyMemoryHandle(&driver_handle);
       assert(status == HSA_STATUS_SUCCESS);
       (void)status;
     }
