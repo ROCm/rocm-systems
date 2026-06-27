@@ -183,14 +183,15 @@ void RDCServer::Run() {
     }
     builder.AddListeningPort(server_address_, grpc::SslServerCredentials(ssl_opts));
   } else {
-    // the unauthenticated server performs no client authentication
-    // so privileged GPU management RPCs (power caps, GPU reset,
-    // RAS actions, per-job utilization) must never be reachable over the network.
-    // Refuse to bind insecurely to anything but loopback or a UNIX domain socket.
-    if (!amd::rdc::IsLoopbackOrUnixAddress(server_address_)) {
+    // The unauthenticated server performs no client authentication, so
+    // privileged GPU management RPCs (power caps, GPU reset, RAS actions,
+    // per-job utilization) must never be reachable over the network. rdcd only
+    // accepts an IPv4 listen address, so refuse to bind insecurely to anything
+    // but the IPv4 loopback interface.
+    if (!amd::rdc::IsLoopbackAddress(server_address_)) {
       std::cerr << "Refusing to start rdcd: unauthenticated mode (--unauth_comm/-u) may "
-                   "only listen on loopback (127.0.0.1, ::1, localhost) or a unix: socket, "
-                   "but the configured listen address is \""
+                   "only listen on the IPv4 loopback interface (127.0.0.0/8), but the "
+                   "configured listen address is \""
                 << server_address_
                 << "\". Use authenticated (mTLS) mode to listen on a network address." << std::endl;
       return;

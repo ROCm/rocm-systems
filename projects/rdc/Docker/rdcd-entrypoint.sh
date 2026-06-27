@@ -23,7 +23,7 @@ CLI_KEY="$RDC_ETC/client/private/rdc_client_cert.key"
 CLI_CRT="$RDC_ETC/client/certs/rdc_client_cert.pem"
 CA_CRT="$RDC_ETC/client/certs/rdc_cacert.pem"
 
-if [[ ! -s "$SRV_KEY" || ! -s "$SRV_CRT" || ! -s "$CA_CRT" ]]; then
+if [[ ! -s "$SRV_KEY" || ! -s "$SRV_CRT" || ! -s "$CA_CRT" || ! -s "$CLI_KEY" || ! -s "$CLI_CRT" ]]; then
   echo "rdcd-entrypoint: generating self-signed mTLS certificates under $RDC_ETC"
   install -d -m 0755 "$RDC_ETC/server/certs" "$RDC_ETC/client/certs"
   install -d -m 0700 "$RDC_ETC/server/private" "$RDC_ETC/client/private"

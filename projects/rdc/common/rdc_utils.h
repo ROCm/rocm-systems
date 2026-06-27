@@ -48,14 +48,11 @@ int ReadFile(const char* path, std::string* retStr, bool chop_newline = false);
 bool IsNumber(const std::string& s);
 bool IsIP(const std::string& s);
 
-// Returns true if `address` is a loopback TCP endpoint (127.0.0.0/8, ::1,
-// localhost) or a UNIX domain socket ("unix:"/"unix-abstract:"). Used to ensure
-// the unauthenticated (insecure) RDC gRPC server is never exposed over the network
-inline bool IsLoopbackOrUnixAddress(const std::string& address) {
-  return address.rfind("unix:", 0) == 0 || address.rfind("unix-abstract:", 0) == 0 ||
-         address.rfind("127.", 0) == 0 || address.rfind("[::1]", 0) == 0 ||
-         address.rfind("localhost:", 0) == 0;
-}
+// Returns true if `address` is an IPv4 loopback endpoint (127.0.0.0/8), e.g.
+// "127.0.0.1:50051". rdcd only accepts an IPv4 literal for its listen address
+// (see IsIP), so this is the set of addresses the unauthenticated (insecure)
+// gRPC server may bind to without being reachable over the network.
+inline bool IsLoopbackAddress(const std::string& address) { return address.rfind("127.", 0) == 0; }
 
 }  // namespace rdc
 }  // namespace amd

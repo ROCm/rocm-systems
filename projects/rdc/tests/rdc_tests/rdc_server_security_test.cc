@@ -27,27 +27,22 @@ THE SOFTWARE.
 #include "common/rdc_utils.h"
 
 // The unauthenticated (insecure) rdcd gRPC server must never be reachable over
-// the network. rdcd refuses to start in unauthenticated mode unless the listen
-// address is loopback or a UNIX domain socket; these tests pin the address
-// classification that guard relies on.
+// the network. rdcd only accepts an IPv4 listen address and refuses to start in
+// unauthenticated mode unless that address is on the IPv4 loopback interface;
+// these tests pin the address classification the guard relies on.
 
 TEST(RdcServerSecurity, RejectsNonLoopbackInsecureBind) {
-  // The default (0.0.0.0) and any routable address must be rejected.
-  EXPECT_FALSE(amd::rdc::IsLoopbackOrUnixAddress("0.0.0.0:50051"));
-  EXPECT_FALSE(amd::rdc::IsLoopbackOrUnixAddress("10.0.0.5:50051"));
-  EXPECT_FALSE(amd::rdc::IsLoopbackOrUnixAddress("192.168.1.10:50051"));
-  EXPECT_FALSE(amd::rdc::IsLoopbackOrUnixAddress("172.16.0.1:50051"));
-  EXPECT_FALSE(amd::rdc::IsLoopbackOrUnixAddress("[2001:db8::1]:50051"));
-  EXPECT_FALSE(amd::rdc::IsLoopbackOrUnixAddress("::"));
-  EXPECT_FALSE(amd::rdc::IsLoopbackOrUnixAddress("example.com:50051"));
-  EXPECT_FALSE(amd::rdc::IsLoopbackOrUnixAddress(""));
+  // The default (0.0.0.0) and any routable IPv4 address must be rejected.
+  EXPECT_FALSE(amd::rdc::IsLoopbackAddress("0.0.0.0:50051"));
+  EXPECT_FALSE(amd::rdc::IsLoopbackAddress("10.0.0.5:50051"));
+  EXPECT_FALSE(amd::rdc::IsLoopbackAddress("192.168.1.10:50051"));
+  EXPECT_FALSE(amd::rdc::IsLoopbackAddress("172.16.0.1:50051"));
+  EXPECT_FALSE(amd::rdc::IsLoopbackAddress("8.8.8.8:50051"));
+  EXPECT_FALSE(amd::rdc::IsLoopbackAddress(""));
 }
 
-TEST(RdcServerSecurity, AllowsLoopbackAndUnixInsecureBind) {
-  EXPECT_TRUE(amd::rdc::IsLoopbackOrUnixAddress("127.0.0.1:50051"));
-  EXPECT_TRUE(amd::rdc::IsLoopbackOrUnixAddress("127.5.5.5:50051"));  // 127.0.0.0/8
-  EXPECT_TRUE(amd::rdc::IsLoopbackOrUnixAddress("[::1]:50051"));
-  EXPECT_TRUE(amd::rdc::IsLoopbackOrUnixAddress("localhost:50051"));
-  EXPECT_TRUE(amd::rdc::IsLoopbackOrUnixAddress("unix:/var/run/rdc.sock"));
-  EXPECT_TRUE(amd::rdc::IsLoopbackOrUnixAddress("unix-abstract:rdc"));
+TEST(RdcServerSecurity, AllowsLoopbackInsecureBind) {
+  EXPECT_TRUE(amd::rdc::IsLoopbackAddress("127.0.0.1:50051"));
+  EXPECT_TRUE(amd::rdc::IsLoopbackAddress("127.5.5.5:50051"));  // 127.0.0.0/8
+  EXPECT_TRUE(amd::rdc::IsLoopbackAddress("127.0.0.1:12345"));
 }
