@@ -22,7 +22,6 @@ namespace rocr::hotswap {
 enum class RewriteKind {
   None,
   Gfx1250A0Patch,
-  Gfx1250A0PatchWithEntryTrampoline,
   Gfx12_5EntryTrampoline,
 };
 

@@ -18,8 +18,6 @@ const char *rewrite_kind_name(RewriteKind kind) {
     return "none";
   case RewriteKind::Gfx1250A0Patch:
     return "gfx1250-a0-patch";
-  case RewriteKind::Gfx1250A0PatchWithEntryTrampoline:
-    return "gfx1250-a0-patch+gfx12.5-entry-trampoline";
   case RewriteKind::Gfx12_5EntryTrampoline:
     return "gfx12.5-entry-trampoline";
   }
@@ -79,9 +77,7 @@ RewriteDecision decide_hotswap_rewrite(const AgentGfxRevision &gfx,
 
   if (gate_allows_hotswap(gfx) && source_gfx == "gfx1250" &&
       target_gfx == "gfx1250") {
-    decision.kind = options.entry_trampolines_requested
-                        ? RewriteKind::Gfx1250A0PatchWithEntryTrampoline
-                        : RewriteKind::Gfx1250A0Patch;
+    decision.kind = RewriteKind::Gfx1250A0Patch;
     decision.source_isa = add_gfx1250_stepping_feature(source_isa, true);
     decision.target_isa = add_gfx1250_stepping_feature(target_isa, false);
     return decision;
