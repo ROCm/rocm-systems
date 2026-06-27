@@ -26,6 +26,8 @@ set(RJ_OBJECT_LIBS
     rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
+    rocjitsu_plugin_logging
+    rocjitsu_plugin_race_detector
     rocjitsu_vm_risc_v
     rocjitsu_config
     rocjitsu_dbt_config

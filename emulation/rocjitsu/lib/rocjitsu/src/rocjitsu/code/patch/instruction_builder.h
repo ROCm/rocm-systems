@@ -21,6 +21,8 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
+#include <span>
 #include <vector>
 
 #include "rocjitsu/code/rj_code.h"
@@ -47,6 +49,8 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 
 namespace rocjitsu {
+
+class Instruction;
 
 /// @brief SOPP encoding prefix, consistent across all AMDGPU ISA generations.
 inline constexpr uint32_t kSoppEncodingPrefix = cdna4::encoding::kSopp;
@@ -209,6 +213,35 @@ inline constexpr uint16_t kWaitAluDepctrSaSdst0 = 0xFF9E;
 /// @brief Scalar source operand encoding for a non-negative inline integer.
 [[nodiscard]] inline constexpr uint16_t scalar_positive_inline_u32(uint16_t value) {
   return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
+}
+
+/// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
+///        to @p target under SOPP semantics: target = branch_pc + 4 + simm16*4.
+///
+/// Returns std::nullopt if @p branch_pc or @p target is not dword-aligned, if
+/// the resulting delta does not fit in a signed 16-bit dword field, or if
+/// @p branch_pc / @p target are large enough that the signed int64 intermediate
+/// would overflow.
+[[nodiscard]] inline constexpr std::optional<int16_t> compute_sopp_branch_simm16(uint64_t branch_pc,
+                                                                                 uint64_t target) {
+  constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
+  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr uint64_t kMaxSignedBranchPc =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
+  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
+    return std::nullopt;
+
+  if (branch_pc % sizeof(uint32_t) != 0 || target % sizeof(uint32_t) != 0)
+    return std::nullopt;
+
+  const int64_t delta_bytes =
+      static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + kBranchPcBiasBytes);
+  const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
+  if (delta_dwords < std::numeric_limits<int16_t>::min() ||
+      delta_dwords > std::numeric_limits<int16_t>::max())
+    return std::nullopt;
+
+  return static_cast<int16_t>(delta_dwords);
 }
 
 /// @brief Get the s_branch opcode for a target ISA.
@@ -403,6 +436,18 @@ inline constexpr uint16_t kWaitAluDepctrSaSdst0 = 0xFF9E;
   return build_sopp_encoding(arch, sopp_op_branch(arch), static_cast<uint16_t>(offset_dwords));
 }
 
+/// @brief Patch an emitted direct PC-relative branch instruction in-place.
+///
+/// @details @p words points into the translated output buffer. @p delta_bytes is
+/// relative to the instruction's branch base. For AMDGPU SOPP direct branches,
+/// the base is the next instruction and the immediate is a signed dword offset.
+/// The function handles unconditional and conditional SOPP direct branches by
+/// replacing bits [15:0] of word 0. It returns false when @p inst is not a
+/// decoded direct branch, the buffer is empty, or the delta is not representable
+/// by SOPP's signed 16-bit dword immediate.
+[[nodiscard]] bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> words,
+                                             int64_t delta_bytes, rj_code_arch_t arch);
+
 /// @brief Build a PC-relative long branch through s_getpc_b64/s_setpc_b64.
 ///
 /// @details This clobbers @p sgpr_pair and @p sgpr_pair + 1, so callers must
@@ -490,6 +535,11 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 /// @returns The encoded 32-bit instruction word.
 [[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
   return build_sopp_encoding(arch, sopp_op_endpgm(arch), 0);
+}
+
+/// @brief Encode an s_endpgm instruction for the given target ISA.
+[[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
+  return pack_sopp(sopp_op_endpgm(arch), 0);
 }
 
 /// @brief Encode s_delay_alu for the given target ISA.

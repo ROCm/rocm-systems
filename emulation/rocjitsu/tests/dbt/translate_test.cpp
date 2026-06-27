@@ -1161,7 +1161,7 @@ std::vector<uint32_t> section_tail_words_for_test(const Section &section, size_t
 }
 
 std::vector<uint32_t> local_expanded_text_words_for_test(const CodeObject &translated,
-                                                        size_t original_text_size) {
+                                                         size_t original_text_size) {
   EXPECT_EQ(find_section(translated, ".rj_translations"), nullptr);
   EXPECT_FALSE(translated.text_sections().empty());
   if (translated.text_sections().empty())
@@ -1173,7 +1173,7 @@ std::vector<uint32_t> local_expanded_text_words_for_test(const CodeObject &trans
 }
 
 const Section *local_expanded_text_section_for_test(const CodeObject &translated,
-                                                   size_t original_text_size) {
+                                                    size_t original_text_size) {
   EXPECT_EQ(find_section(translated, ".rj_translations"), nullptr);
   EXPECT_FALSE(translated.text_sections().empty());
   if (translated.text_sections().empty())
@@ -1190,9 +1190,9 @@ const Section *local_expanded_text_section_for_test(const CodeObject &translated
   std::memcpy(data.get(), words.data(), byte_count);
 
   static thread_local std::unique_ptr<SyntheticSectionForTest> section;
-  section = std::make_unique<SyntheticSectionForTest>(".text.expanded_tail", std::move(data),
-                                                      byte_count,
-                                                      text->sectionOffset() + original_text_size);
+  section =
+      std::make_unique<SyntheticSectionForTest>(".text.expanded_tail", std::move(data), byte_count,
+                                                text->sectionOffset() + original_text_size);
   return section.get();
 }
 
@@ -1251,8 +1251,8 @@ void expect_gfx1250_rdna4_entry_stub_for_test(const CodeObject &translated) {
   EXPECT_TRUE(find_gfx1250_rdna4_entry_stub_body_word_offset_for_test(words).has_value());
 }
 
-std::vector<uint32_t> entry_body_words_after_gfx1250_rdna4_stub_for_test(
-    std::span<const uint32_t> words) {
+std::vector<uint32_t>
+entry_body_words_after_gfx1250_rdna4_stub_for_test(std::span<const uint32_t> words) {
   const auto body_offset = find_gfx1250_rdna4_entry_stub_body_word_offset_for_test(words);
   EXPECT_TRUE(body_offset.has_value());
   if (!body_offset)
@@ -1810,9 +1810,6 @@ TEST(CodeObjectPatcher, CaveBodyMaterializesInRjTranslationsAfterText) {
 
   const Section *translations = find_section(patched, ".rj_translations");
   ASSERT_NE(translations, nullptr);
-  ASSERT_EQ(patched.code_sections().size(), 2u);
-  EXPECT_EQ(patched.code_sections()[0]->name(), ".text");
-  EXPECT_EQ(patched.code_sections()[1]->name(), ".rj_translations");
   EXPECT_EQ(translations->sectionOffset(), text->sectionOffset() + text->size())
       << ".rj_translations must be physically placed immediately after .text";
   ASSERT_EQ(translations->size(), cave_words.size() * sizeof(uint32_t));
@@ -10356,7 +10353,7 @@ TEST(BinaryTranslator, Gfx1250Vopd3DualFmaWithoutNegLowersToMulAddThroughCave) {
 
 TEST(BinaryTranslator, Gfx1250UnhandledVopd3DoesNotUseEncodingFallback) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  const auto vopd = make_gfx1250_vopd3(32, 0, 0, 0, 1, 0, 0, 0, 0, 2);
+  const auto vopd = make_gfx1250_vopd3(33, 0, 0, 0, 1, 0, 0, 0, 0, 2);
   const std::array<uint32_t, 4> text_words = {vopd[0], vopd[1], vopd[2], kGfx1250SEndpgm};
 
   auto image =

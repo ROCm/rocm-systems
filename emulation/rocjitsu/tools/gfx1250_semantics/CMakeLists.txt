@@ -27,8 +27,11 @@ set(RJ_GFX1250_SEMANTICS_OBJECT_LIBS
     rocjitsu_isa_gfx1250
     rocjitsu_isa_risc_v
     simdojo
+    rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
+    rocjitsu_plugin_logging
+    rocjitsu_plugin_race_detector
     rocjitsu_vm_risc_v
     rocjitsu_config
 )
