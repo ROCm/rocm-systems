@@ -42,7 +42,7 @@ std::string extract_gfx_target(const std::string &isa_name);
 // Queries the agent's gfx target and ASIC revision via the HSA runtime. The
 // result is cached per agent handle, since code-object loads can be frequent.
 // This function intentionally encodes no rewrite policy; callers apply the
-// policy in hotswap_rewrite_policy.{hpp,cpp}.
+// policy in hotswap_loader_policy.{hpp,cpp}.
 AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent);
 
 // Clears the per-agent-handle cache used by query_agent_gfx_revision(). 

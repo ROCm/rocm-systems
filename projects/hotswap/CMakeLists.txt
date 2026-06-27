@@ -30,7 +30,7 @@ add_library(hsa-hotswap SHARED
   hotswap_tool.cpp
   hotswap.cpp
   hotswap_gfx_query.cpp
-  hotswap_rewrite_policy.cpp
+  hotswap_loader_policy.cpp
   ${HOTSWAP_PLATFORM_IO_SRC}
 )
 
@@ -76,7 +76,7 @@ target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 add_executable(hotswap_tool_test
   tests/hotswap_tool_test.cpp
   hotswap_gfx_query.cpp
-  hotswap_rewrite_policy.cpp
+  hotswap_loader_policy.cpp
 )
 target_include_directories(hotswap_tool_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -90,7 +90,7 @@ target_include_directories(hotswap_tool_test PRIVATE
 add_executable(hotswap_loader_test
   tests/hotswap_loader_test.cpp
   hotswap_gfx_query.cpp
-  hotswap_rewrite_policy.cpp
+  hotswap_loader_policy.cpp
   ${HOTSWAP_PLATFORM_IO_SRC}
 )
 target_include_directories(hotswap_loader_test PRIVATE

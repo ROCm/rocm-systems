@@ -16,7 +16,7 @@
 #include "hotswap.hpp"
 #include "hotswap_gfx_query.hpp"
 #include "hotswap_platform_io.hpp"
-#include "hotswap_rewrite_policy.hpp"
+#include "hotswap_loader_policy.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
@@ -112,7 +112,7 @@ void stash_bytes(uint64_t handle, const uint8_t *data, size_t size) {
   g_reader_map[handle] = ReaderEntry{std::move(vec), false, false};
 }
 
-bool entry_trampolines_requested() {
+bool gfx12_5_rewrite_requested() {
   const char *value = std::getenv("AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES");
   return value && value[0] != '\0' && std::strcmp(value, "0") != 0;
 }
@@ -269,19 +269,18 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
                                    const ByteVec &local_bytes,
                                    const RewriteDecision &decision,
                                    const RewriteOptions &rewrite_options) {
-  // Route through RetargetCodeObject for unified logging, validation,
-  // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
-  // patching uses the same ISA name on both sides.
+  // Route through RetargetCodeObject once policy has selected a request. A
+  // same-processor source/target pair can still be meaningful to COMGR.
   void *out_elf = nullptr;
   size_t out_elf_size = 0;
   const int rc = rocr::hotswap::RetargetCodeObject(
       local_bytes->data(), local_bytes->size(), decision.source_isa.c_str(),
       decision.target_isa.c_str(), &out_elf, &out_elf_size);
 
-  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d in=%zu "
+  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s gfx12_5_opt_in=%d in=%zu "
               "rc=%d out=%zu changed=%d\n",
               decision.source_isa.c_str(), decision.target_isa.c_str(),
-              rewrite_options.entry_trampolines_requested, local_bytes->size(),
+              rewrite_options.gfx12_5_rewrite_requested, local_bytes->size(),
               rc, out_elf_size, out_elf != local_bytes->data());
 
   if (rc != 0 || out_elf == local_bytes->data()) {
@@ -318,7 +317,7 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     }
 
     const AgentGfxRevision gfx = query_agent_gfx_revision(agent);
-    const RewriteOptions rewrite_options{entry_trampolines_requested()};
+    const RewriteOptions rewrite_options{gfx12_5_rewrite_requested()};
     if (!has_candidate_hotswap_rewrite(gfx, rewrite_options)) {
       HOTSWAP_LOG("hotswap: gate BLOCKED (gfx=%s rev=%u valid=%d)\n",
                   gfx.gfx_target.c_str(), gfx.asic_revision, gfx.revision_valid);

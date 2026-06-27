@@ -5,7 +5,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Unit tests for query_agent_gfx_revision() in hotswap_gfx_query.cpp and the
-// rewrite decisions selected by hotswap_rewrite_policy.cpp.
+// COMGR requests selected by hotswap_loader_policy.cpp.
 //
 // The HSA entry points used by the query helper are replaced with in-file stubs
 // (linked in place of the real libraries) so query and policy behavior can be
@@ -44,14 +44,12 @@ FakeEnv g_env;
 
 // The units under test (bring in HSA query helpers and rewrite policy).
 #include "hotswap_gfx_query.hpp"
-#include "hotswap_rewrite_policy.hpp"
+#include "hotswap_loader_policy.hpp"
 
 using rocr::hotswap::AgentGfxRevision;
-using rocr::hotswap::add_gfx1250_stepping_feature;
 using rocr::hotswap::decide_hotswap_rewrite;
 using rocr::hotswap::gate_allows_hotswap;
 using rocr::hotswap::has_candidate_hotswap_rewrite;
-using rocr::hotswap::is_gfx12_5_entry_trampoline_target;
 using rocr::hotswap::query_agent_gfx_revision;
 using rocr::hotswap::reset_gfx_revision_cache;
 using rocr::hotswap::RewriteDecision;
@@ -215,7 +213,7 @@ void test_NearMissTargetBlocks() {
 }
 
 // Hyphenated generic processor names must be preserved while stripping feature
-// suffixes; otherwise the gfx12.5 trampoline gate would see only "gfx12".
+// suffixes; otherwise gfx12.5 opt-in routing would see only "gfx12".
 void test_Gfx12_5GenericFeatureSuffixParsed() {
   printf("TEST Gfx12_5GenericFeatureSuffixParsed...\n");
   reset_env();
@@ -224,7 +222,7 @@ void test_Gfx12_5GenericFeatureSuffixParsed() {
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
   run("feature suffix stripped -> gfx12-5-generic",
       g.gfx_target == "gfx12-5-generic");
-  run("default B0/A0 gate blocks gfx12-5-generic",
+  run("baseline route blocks gfx12-5-generic",
       gate_allows_hotswap(g) == false);
 }
 
@@ -239,131 +237,125 @@ void test_Gfx1250NonA0Blocks() {
   run("gate blocks gfx1250 A1", gate_allows_hotswap(g) == false);
 }
 
-// The entry-trampoline flag opens an explicit gfx1250 path independent of the
-// B0/A0 retargeting gate.
-void test_EntryTrampolineFlagAllowsGfx1250NonA0() {
-  printf("TEST EntryTrampolineFlagAllowsGfx1250NonA0...\n");
+// The explicit opt-in opens a gfx1250 route independent of the baseline A0
+// agent route.
+void test_OptInAllowsGfx1250NonA0() {
+  printf("TEST OptInAllowsGfx1250NonA0...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
   g_env.asic_revision = 1;  // A1/B0-side path, not A0.
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  run("default gate blocks non-A0",
+  run("baseline route blocks non-A0",
       has_candidate_hotswap_rewrite(g, RewriteOptions{false}) == false);
-  run("trampoline gate allows gfx1250 non-A0",
+  run("opt-in route allows gfx1250 non-A0",
       has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == true);
 }
 
-// The explicit trampoline gate covers the broader gfx125* family, while the
-// default B0/A0 patch gate remains exact gfx1250 A0 only.
-void test_EntryTrampolineFlagAllowsGfx125Family() {
-  printf("TEST EntryTrampolineFlagAllowsGfx125Family...\n");
+// The explicit opt-in covers the broader gfx125* family, while the baseline
+// route remains exact gfx1250 A0 only.
+void test_OptInAllowsGfx125Family() {
+  printf("TEST OptInAllowsGfx125Family...\n");
   reset_env();
   g_env.isa_name = kGfx1251Isa;
   g_env.asic_revision = 1;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  run("default gate blocks gfx1251",
+  run("baseline route blocks gfx1251",
       has_candidate_hotswap_rewrite(g, RewriteOptions{false}) == false);
-  run("trampoline gate allows gfx1251",
+  run("opt-in route allows gfx1251",
       has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == true);
 }
 
-void test_EntryTrampolineFlagRejectsMalformedGfx125Prefix() {
-  printf("TEST EntryTrampolineFlagRejectsMalformedGfx125Prefix...\n");
+void test_OptInRejectsMalformedGfx125Prefix() {
+  printf("TEST OptInRejectsMalformedGfx125Prefix...\n");
   reset_env();
   g_env.isa_name = kGfx125MalformedIsa;
   g_env.asic_revision = 1;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
   run("malformed gfx125 prefix is parsed",
       g.gfx_target == "gfx125foo");
-  run("trampoline family predicate rejects malformed suffix",
-      is_gfx12_5_entry_trampoline_target(g.gfx_target) == false);
-  run("trampoline gate rejects malformed gfx125 prefix",
+  run("opt-in route rejects malformed gfx125 prefix",
       has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == false);
 }
 
-// COMGR's entry-trampoline pass also accepts the gfx12.5 generic processor
-// name, so the HSA tool must route that target when explicitly requested.
-void test_EntryTrampolineFlagAllowsGfx12_5Generic() {
-  printf("TEST EntryTrampolineFlagAllowsGfx12_5Generic...\n");
+// The HSA tool routes gfx12-5-generic when explicitly requested.
+void test_OptInAllowsGfx12_5Generic() {
+  printf("TEST OptInAllowsGfx12_5Generic...\n");
   reset_env();
   g_env.isa_name = kGfx12_5GenericIsa;
   g_env.asic_revision = 1;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  run("default gate blocks gfx12-5-generic",
+  run("baseline route blocks gfx12-5-generic",
       has_candidate_hotswap_rewrite(g, RewriteOptions{false}) == false);
-  run("trampoline gate allows gfx12-5-generic",
+  run("opt-in route allows gfx12-5-generic",
       has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == true);
 }
 
-// If ASIC revision cannot be queried, the explicit trampoline flag can still
-// route gfx12.5 targets through COMGR. The exact gfx1250 target is treated as
-// non-A0 for B0/A0 patch selection so the trampoline pass does not imply
-// A0-specific fixes.
-void test_EntryTrampolineFlagAllowsGfx1250UnknownRevision() {
-  printf("TEST EntryTrampolineFlagAllowsGfx1250UnknownRevision...\n");
+// If ASIC revision cannot be queried, the explicit opt-in can still route
+// gfx12.5 targets through COMGR. The baseline A0 route remains disabled.
+void test_OptInAllowsGfx1250UnknownRevision() {
+  printf("TEST OptInAllowsGfx1250UnknownRevision...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
   g_env.asic_rev_ok = false;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  run("default gate blocks unknown revision",
+  run("baseline route blocks unknown revision",
       has_candidate_hotswap_rewrite(g, RewriteOptions{false}) == false);
-  run("trampoline gate allows gfx1250 unknown revision",
+  run("opt-in route allows gfx1250 unknown revision",
       has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == true);
 }
 
-// The trampoline flag is not a global rewrite enable; non-gfx12.5 targets still
+// The opt-in is not a global rewrite enable; non-gfx12.5 targets still
 // load unchanged.
-void test_EntryTrampolineFlagBlocksOtherTargets() {
-  printf("TEST EntryTrampolineFlagBlocksOtherTargets...\n");
+void test_OptInBlocksOtherTargets() {
+  printf("TEST OptInBlocksOtherTargets...\n");
   reset_env();
   g_env.isa_name = kGfx942Isa;
   g_env.asic_revision = 0;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  run("trampoline gate blocks gfx942",
+  run("opt-in route blocks gfx942",
       has_candidate_hotswap_rewrite(g, RewriteOptions{true}) == false);
 }
 
-// A0 gfx1250 without the trampoline flag is the original B0-to-A0 patch path.
-void test_RewriteDecisionSelectsA0Patch() {
-  printf("TEST RewriteDecisionSelectsA0Patch...\n");
+// A gfx1250 A0 agent uses the baseline COMGR request without the opt-in.
+void test_RewriteDecisionSelectsBaselineA0Request() {
+  printf("TEST RewriteDecisionSelectsBaselineA0Request...\n");
   const AgentGfxRevision gfx1250_a0 = make_gfx_revision("gfx1250", 0);
   const auto d =
       decide_hotswap_rewrite(gfx1250_a0, kGfx1250Isa, kGfx1250Isa,
                              RewriteOptions{false});
-  run_decision_pair("A0 patch uses B0 source and A0 target", d,
+  run_decision_pair("baseline request uses expected source and target ISA", d,
                     std::string(kGfx1250Isa) + ":gfx1250-b0-specific+",
                     std::string(kGfx1250Isa) + ":gfx1250-b0-specific-");
 }
 
-// A0 gfx1250 with the trampoline flag still selects the A0 patch ISA pair.
-// COMGR independently reads the trampoline flag and runs that pass as requested.
-void test_RewriteDecisionA0WithFlagKeepsA0Patch() {
-  printf("TEST RewriteDecisionA0WithFlagKeepsA0Patch...\n");
+// The explicit opt-in does not change the baseline gfx1250 A0 request.
+void test_RewriteDecisionA0WithOptInKeepsBaselineRequest() {
+  printf("TEST RewriteDecisionA0WithOptInKeepsBaselineRequest...\n");
   const AgentGfxRevision gfx1250_a0 = make_gfx_revision("gfx1250", 0);
   const auto d =
       decide_hotswap_rewrite(gfx1250_a0, kGfx1250Isa, kGfx1250Isa,
                              RewriteOptions{true});
-  run_decision_pair("A0 patch with flag keeps B0 source and A0 target", d,
+  run_decision_pair("opt-in keeps baseline source and target ISA", d,
                     std::string(kGfx1250Isa) + ":gfx1250-b0-specific+",
                     std::string(kGfx1250Isa) + ":gfx1250-b0-specific-");
 }
 
-// Non-A0 gfx1250 with the trampoline flag runs trampoline-only B0-to-B0.
-void test_RewriteDecisionSelectsGfx1250B0Trampoline() {
-  printf("TEST RewriteDecisionSelectsGfx1250B0Trampoline...\n");
+// A non-A0 gfx1250 opt-in uses a same-processor COMGR request.
+void test_RewriteDecisionOptInSelectsGfx1250SameProcessorRequest() {
+  printf("TEST RewriteDecisionOptInSelectsGfx1250SameProcessorRequest...\n");
   const AgentGfxRevision gfx1250_b0 = make_gfx_revision("gfx1250", 1);
   const auto d =
       decide_hotswap_rewrite(gfx1250_b0, kGfx1250Isa, kGfx1250Isa,
                              RewriteOptions{true});
   const std::string b0_isa =
       std::string(kGfx1250Isa) + ":gfx1250-b0-specific+";
-  run_decision_pair("trampoline-only gfx1250 uses B0 source and B0 target", d,
+  run_decision_pair("gfx1250 request keeps source and target on source ISA", d,
                     b0_isa, b0_isa);
 }
 
-// Concrete gfx125* targets other than gfx1250 use the trampoline path unchanged.
-void test_RewriteDecisionSelectsGfx125FamilyTrampoline() {
-  printf("TEST RewriteDecisionSelectsGfx125FamilyTrampoline...\n");
+// Concrete gfx125* targets other than gfx1250 use the original ISA pair.
+void test_RewriteDecisionOptInSelectsGfx125FamilyRequest() {
+  printf("TEST RewriteDecisionOptInSelectsGfx125FamilyRequest...\n");
   const AgentGfxRevision gfx1251 = make_gfx_revision("gfx1251", 1);
   const auto d =
       decide_hotswap_rewrite(gfx1251, kGfx1251Isa, kGfx1251Isa,
@@ -372,10 +364,10 @@ void test_RewriteDecisionSelectsGfx125FamilyTrampoline() {
                     kGfx1251Isa);
 }
 
-// Entry-trampoline rewrites keep COMGR on the source processor when the agent
-// reports a different concrete or generic gfx12.5 ISA.
-void test_RewriteDecisionKeepsTrampolineSourceProcessor() {
-  printf("TEST RewriteDecisionKeepsTrampolineSourceProcessor...\n");
+// The opt-in path keeps COMGR on the source processor when the agent reports a
+// different concrete or generic gfx12.5 ISA.
+void test_RewriteDecisionOptInKeepsSourceProcessor() {
+  printf("TEST RewriteDecisionOptInKeepsSourceProcessor...\n");
   const AgentGfxRevision gfx1251 = make_gfx_revision("gfx1251", 1);
   auto d =
       decide_hotswap_rewrite(gfx1251, kGfx12_5GenericIsa, kGfx1251Isa,
@@ -391,7 +383,7 @@ void test_RewriteDecisionKeepsTrampolineSourceProcessor() {
                     b0_isa);
 }
 
-// The trampoline flag never routes non-gfx12.5 source code objects through COMGR.
+// The opt-in never routes non-gfx12.5 source code objects through COMGR.
 void test_RewriteDecisionRejectsNonGfx12_5Source() {
   printf("TEST RewriteDecisionRejectsNonGfx12_5Source...\n");
   const AgentGfxRevision gfx1251 = make_gfx_revision("gfx1251", 1);
@@ -400,22 +392,6 @@ void test_RewriteDecisionRejectsNonGfx12_5Source() {
                              RewriteOptions{true});
   run("non-gfx12.5 source on gfx125 agent is not rewritten",
       !d.has_value());
-}
-
-void test_AddGfx1250SteppingFeature() {
-  printf("TEST AddGfx1250SteppingFeature...\n");
-  run("B0 feature appended to bare gfx1250",
-      add_gfx1250_stepping_feature(kGfx1250Isa, true) ==
-          std::string(kGfx1250Isa) + ":gfx1250-b0-specific+");
-  run("A0 feature appended after existing ISA features",
-      add_gfx1250_stepping_feature(kGfx1250IsaWithFeatures, false) ==
-          std::string(kGfx1250IsaWithFeatures) + ":gfx1250-b0-specific-");
-  run("existing B0 feature is preserved",
-      add_gfx1250_stepping_feature(
-          "amdgcn-amd-amdhsa--gfx1250:gfx1250-b0-specific+", false) ==
-          "amdgcn-amd-amdhsa--gfx1250:gfx1250-b0-specific+");
-  run("non-gfx1250 ISA is unchanged",
-      add_gfx1250_stepping_feature(kGfx942Isa, true) == kGfx942Isa);
 }
 
 // ASIC revision query failure -> revision_valid false and gate blocks, even for
@@ -477,19 +453,18 @@ int main() {
   test_NearMissTargetBlocks();
   test_Gfx12_5GenericFeatureSuffixParsed();
   test_Gfx1250NonA0Blocks();
-  test_EntryTrampolineFlagAllowsGfx1250NonA0();
-  test_EntryTrampolineFlagAllowsGfx125Family();
-  test_EntryTrampolineFlagRejectsMalformedGfx125Prefix();
-  test_EntryTrampolineFlagAllowsGfx12_5Generic();
-  test_EntryTrampolineFlagAllowsGfx1250UnknownRevision();
-  test_EntryTrampolineFlagBlocksOtherTargets();
-  test_RewriteDecisionSelectsA0Patch();
-  test_RewriteDecisionA0WithFlagKeepsA0Patch();
-  test_RewriteDecisionSelectsGfx1250B0Trampoline();
-  test_RewriteDecisionSelectsGfx125FamilyTrampoline();
-  test_RewriteDecisionKeepsTrampolineSourceProcessor();
+  test_OptInAllowsGfx1250NonA0();
+  test_OptInAllowsGfx125Family();
+  test_OptInRejectsMalformedGfx125Prefix();
+  test_OptInAllowsGfx12_5Generic();
+  test_OptInAllowsGfx1250UnknownRevision();
+  test_OptInBlocksOtherTargets();
+  test_RewriteDecisionSelectsBaselineA0Request();
+  test_RewriteDecisionA0WithOptInKeepsBaselineRequest();
+  test_RewriteDecisionOptInSelectsGfx1250SameProcessorRequest();
+  test_RewriteDecisionOptInSelectsGfx125FamilyRequest();
+  test_RewriteDecisionOptInKeepsSourceProcessor();
   test_RewriteDecisionRejectsNonGfx12_5Source();
-  test_AddGfx1250SteppingFeature();
   test_AsicRevisionQueryFailure();
   test_ResultIsCachedPerHandle();
   test_DistinctHandlesIndependent();

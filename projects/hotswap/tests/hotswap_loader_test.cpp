@@ -166,7 +166,7 @@ void check(bool cond, const char *name) {
   }
 }
 
-void set_entry_trampoline_env(const char *value) {
+void set_gfx12_5_rewrite_env(const char *value) {
 #ifdef _WIN32
   _putenv_s("AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES", value ? value : "");
 #else
@@ -193,7 +193,7 @@ void reset_state() {
   g_orig_reader_destroy = nullptr;
   g_orig_load_agent_code_object = nullptr;
   rocr::hotswap::reset_gfx_revision_cache();
-  set_entry_trampoline_env(nullptr);
+  set_gfx12_5_rewrite_env(nullptr);
   g_env = FakeEnv{};
 }
 
@@ -282,11 +282,11 @@ struct LoadResult {
 };
 
 LoadResult load_once(const char *code_object_isa, const char *agent_isa,
-                     const char *entry_trampoline_flag,
+                     const char *gfx12_5_rewrite_flag,
                      uint32_t asic_revision = 1,
                      int retarget_status = 0) {
   reset_state();
-  set_entry_trampoline_env(entry_trampoline_flag);
+  set_gfx12_5_rewrite_env(gfx12_5_rewrite_flag);
   g_env.agent_isa = agent_isa;
   g_env.asic_revision = asic_revision;
   g_env.retarget_status = retarget_status;
@@ -313,18 +313,18 @@ void check_original_load(const LoadResult &result, const char *name) {
         "original reader is loaded");
 }
 
-void test_DisabledFlagLoadsOriginal() {
-  begin_test("DisabledFlagLoadsOriginal",
-             "Unset, empty, and 0 trampoline flags must leave non-A0 gfx1250 "
+void test_OptInDisabledLoadsOriginal() {
+  begin_test("OptInDisabledLoadsOriginal",
+             "Unset, empty, and 0 opt-in values must leave non-A0 gfx1250 "
              "on the original reader.");
   struct FlagCase {
     const char *flag_value;
     const char *expectation;
   };
   const FlagCase cases[] = {
-      {nullptr, "unset flag skips non-A0 gfx1250 rewrite"},
-      {"", "empty flag skips non-A0 gfx1250 rewrite"},
-      {"0", "flag value 0 skips non-A0 gfx1250 rewrite"},
+      {nullptr, "unset opt-in skips non-A0 gfx1250 rewrite"},
+      {"", "empty opt-in skips non-A0 gfx1250 rewrite"},
+      {"0", "opt-in value 0 skips non-A0 gfx1250 rewrite"},
   };
   for (const FlagCase &c : cases) {
     const LoadResult result =
@@ -333,13 +333,14 @@ void test_DisabledFlagLoadsOriginal() {
   }
 }
 
-void test_FlagRoutesGfx1250B0() {
-  begin_test("FlagRoutesGfx1250B0",
-             "The trampoline flag must route non-A0 gfx1250 through COMGR "
-             "without selecting the A0 patch path.");
+void test_OptInRoutesGfx1250SameProcessor() {
+  begin_test("OptInRoutesGfx1250SameProcessor",
+             "The opt-in must route non-A0 gfx1250 through COMGR with a "
+             "same-processor request.");
   const LoadResult result = load_once(kGfx1250Isa, kGfx1250Isa, "1");
   check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
-  check(result.retarget_calls == 1, "flag routes B0 gfx1250 through COMGR");
+  check(result.retarget_calls == 1,
+        "opt-in routes non-A0 gfx1250 through COMGR");
   check(result.source_isa == kGfx1250B0Isa,
         "source ISA is tagged as B0");
   check(result.target_isa == kGfx1250B0Isa,
@@ -350,15 +351,16 @@ void test_FlagRoutesGfx1250B0() {
         "rewritten ELF is retained after successful load");
 }
 
-void test_FlagRoutesGfx12_5Family() {
-  begin_test("FlagRoutesGfx12_5Family",
-             "The trampoline flag must route gfx125* and gfx12-5-generic "
+void test_OptInRoutesGfx12_5Family() {
+  begin_test("OptInRoutesGfx12_5Family",
+             "The opt-in must route gfx125* and gfx12-5-generic "
              "without adding gfx1250 stepping features.");
   const char *cases[] = {kGfx1251Isa, kGfx12_5GenericIsa};
   for (const char *isa : cases) {
     const LoadResult result = load_once(isa, isa, "1");
     check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
-    check(result.retarget_calls == 1, "flag routes gfx12.5 target through COMGR");
+    check(result.retarget_calls == 1,
+          "opt-in routes gfx12.5 target through COMGR");
     check(result.source_isa == isa, "source ISA is preserved");
     check(result.target_isa == isa, "target ISA is preserved");
   }
@@ -392,23 +394,23 @@ void test_ConcreteSourceUsesSourceTarget() {
         "target ISA stays on the source processor");
 }
 
-void test_A0RetargetsWithoutFlag() {
-  begin_test("A0RetargetsWithoutFlag",
-             "The existing gfx1250 A0 rewrite path must still run without "
-             "the trampoline flag.");
+void test_A0UsesBaselineRouteWithoutOptIn() {
+  begin_test("A0UsesBaselineRouteWithoutOptIn",
+             "The existing gfx1250 A0 route must still call COMGR without "
+             "the opt-in.");
   const LoadResult result = load_once(kGfx1250Isa, kGfx1250Isa, nullptr, 0);
   check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
-  check(result.retarget_calls == 1, "A0 gfx1250 keeps default rewrite path");
+  check(result.retarget_calls == 1, "A0 gfx1250 keeps baseline route");
   check(result.source_isa == kGfx1250B0Isa,
         "source code object ISA is tagged as B0");
   check(result.target_isa == kGfx1250A0Isa,
         "A0 agent ISA is tagged as A0");
 }
 
-void test_A0WithFlagKeepsA0PatchPair() {
-  begin_test("A0WithFlagKeepsA0PatchPair",
-             "The trampoline flag on gfx1250 A0 must preserve the B0-to-A0 "
-             "patch ISA pair while routing through COMGR.");
+void test_A0WithOptInKeepsBaselinePair() {
+  begin_test("A0WithOptInKeepsBaselinePair",
+             "The opt-in on gfx1250 A0 must preserve the baseline ISA pair "
+             "while routing through COMGR.");
   const LoadResult result = load_once(kGfx1250Isa, kGfx1250Isa, "1", 0);
   check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
   check(result.retarget_calls == 1, "A0 gfx1250 routes through COMGR");
@@ -418,9 +420,9 @@ void test_A0WithFlagKeepsA0PatchPair() {
         "A0 agent ISA remains tagged as A0");
 }
 
-void test_FlagOneBlocksNonGfx12_5() {
-  begin_test("FlagOneBlocksNonGfx12_5",
-             "The trampoline flag must not become a global rewrite enable for "
+void test_OptInBlocksNonGfx12_5() {
+  begin_test("OptInBlocksNonGfx12_5",
+             "The opt-in must not become a global rewrite enable for "
              "unsupported agents or source code objects.");
   LoadResult result = load_once(kGfx942Isa, kGfx942Isa, "1", 0);
   check_original_load(result, "non-gfx12.5 agent does not route");
@@ -443,14 +445,14 @@ void test_RetargetFailureFallsBackToOriginalReader() {
 } // namespace
 
 int main() {
-  test_DisabledFlagLoadsOriginal();
-  test_FlagRoutesGfx1250B0();
-  test_FlagRoutesGfx12_5Family();
+  test_OptInDisabledLoadsOriginal();
+  test_OptInRoutesGfx1250SameProcessor();
+  test_OptInRoutesGfx12_5Family();
   test_GenericSourceUsesGenericTarget();
   test_ConcreteSourceUsesSourceTarget();
-  test_A0RetargetsWithoutFlag();
-  test_A0WithFlagKeepsA0PatchPair();
-  test_FlagOneBlocksNonGfx12_5();
+  test_A0UsesBaselineRouteWithoutOptIn();
+  test_A0WithOptInKeepsBaselinePair();
+  test_OptInBlocksNonGfx12_5();
   test_RetargetFailureFallsBackToOriginalReader();
   reset_state();
 
