@@ -60,7 +60,9 @@ If the above command does not work, try the following:
 2. Once inside the container, run the following command:
 
    ```bash
-   sudo /opt/rocm/bin/rdcd -u
+   # Provisions default self-signed mTLS certs (if none are mounted) and starts
+   # rdcd in authenticated mode. Mount your own certs over /etc/rdc for a real PKI.
+   /usr/local/bin/rdcd-entrypoint.sh
    ```
 
 ## Step 5: Run AMDSMI Image (optional)

@@ -29,6 +29,7 @@ RUN apt-get update && \
     libcap-dev \
     python3-argcomplete \
     python3-pip \
+    openssl \
     bash && \
     rm -rf /var/lib/apt/lists/*
 
@@ -100,8 +101,16 @@ RUN wget https://dl.grafana.com/oss/release/grafana-9.3.2.linux-amd64.tar.gz && 
 # Install Prometheus client for Python
 RUN python3 -m pip install prometheus_client
 
-# Ensure sudo can run without a password for the rdcd command
-RUN echo "ALL ALL=(ALL) NOPASSWD: /opt/rocm/bin/rdcd" >> /etc/sudoers
+# Install the rdcd entrypoint. It provisions default self-signed mTLS
+# certificates under /etc/rdc on first start (when none are mounted) and then
+# runs rdcd in authenticated mode.
+#
+# The previous entrypoint ran "sudo /opt/rocm/bin/rdcd -u"
+# (grpc::InsecureServerCredentials, plus a NOPASSWD sudoers entry), exposing
+# unauthenticated, root-equivalent GPU management RPCs on all interfaces.
+COPY rdcd-entrypoint.sh /usr/local/bin/rdcd-entrypoint.sh
+RUN chmod +x /usr/local/bin/rdcd-entrypoint.sh
 
-# Set the entry point to run the rdcd command
-ENTRYPOINT ["sudo", "/opt/rocm/bin/rdcd", "-u"]
+# Run rdcd in authenticated (mTLS) mode. Mount real certificates over /etc/rdc to
+# use your own PKI, or set RDC_SERVER_CN for the generated server certificate.
+ENTRYPOINT ["/usr/local/bin/rdcd-entrypoint.sh"]
