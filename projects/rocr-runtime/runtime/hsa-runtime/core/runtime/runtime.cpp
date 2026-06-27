@@ -4159,15 +4159,15 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
      * need this in the process that owns this memory allocation.
      */
     auto cpu_agent = agentOwner()->GetNearestCpuAgent();
-      auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
-                          std::forward_as_tuple(cpu_agent),
-                          std::forward_as_tuple(this, cpu_agent, va,
-                                                size, HSA_ACCESS_PERMISSION_NONE))
-                          .first;
+    auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
+                        std::forward_as_tuple(cpu_agent),
+                        std::forward_as_tuple(this, cpu_agent, va,
+                                              size, HSA_ACCESS_PERMISSION_NONE))
+                        .first;
 
-      auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
-      if (ret != HSA_STATUS_SUCCESS)
-        throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
+    auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
+    if (ret != HSA_STATUS_SUCCESS)
+      throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
   }
 }
 
