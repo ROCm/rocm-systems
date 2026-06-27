@@ -34,7 +34,8 @@ constexpr uint32_t cluster_multicast_rank_mask(uint32_t cluster_rank) {
   return cluster_rank < kClusterMulticastMaskBits ? (1u << cluster_rank) : 0u;
 }
 
-using MemoryPayload = util::inline_vector<uint8_t>;
+constexpr uint32_t kCommonVectorMemoryPayloadBytes = 64 * sizeof(uint64_t);
+using MemoryPayload = util::inline_vector<uint8_t, kCommonVectorMemoryPayloadBytes>;
 
 /// @brief Pipeline routing tags for AMDGPU memory instructions.
 enum MemPipelineTag : uint8_t {

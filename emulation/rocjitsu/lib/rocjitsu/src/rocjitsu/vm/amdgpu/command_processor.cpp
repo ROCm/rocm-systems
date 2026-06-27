@@ -703,7 +703,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
 
-    util::inline_vector<Wavefront *> wg_wavefronts;
+    constexpr uint32_t kCommonMaxWavesPerWorkgroup = 32;
+    util::inline_vector<Wavefront *, kCommonMaxWavesPerWorkgroup> wg_wavefronts;
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,

@@ -1300,7 +1300,8 @@ void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, ui
     uint32_t lane;
     uint32_t val;
   };
-  util::inline_vector<Result> results;
+  constexpr uint32_t common_result_count = 16 * 16;
+  util::inline_vector<Result, common_result_count> results;
   results.reserve(M * N);
 
   auto run_scalar = [&]() {
@@ -2959,7 +2960,8 @@ void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
     uint32_t lane;
     uint32_t val;
   };
-  util::inline_vector<Result> results;
+  constexpr uint32_t common_result_count = 16 * 16;
+  util::inline_vector<Result, common_result_count> results;
   results.reserve(M * N);
 
   auto run_scalar = [&]() {
