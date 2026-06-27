@@ -27,6 +27,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "util/data_types.h"
 #include "util/except.h"
+#include "util/inline_vector.h"
 #include "util/meta_programming.h"
 #include "util/simd.h"
 
@@ -35,7 +36,6 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -965,7 +965,7 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N * B);
 
   // Scalar reference: D[i][j] = C[i][j] + sum_k A[i][k] * B[k][j], accumulated
@@ -1144,7 +1144,7 @@ void exec_packed16_gfx9(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
     uint32_t sub_element;
     uint16_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N * B);
   for (uint32_t b = 0; b < B; ++b) {
     for (uint32_t row = 0; row < M; ++row) {
@@ -1170,8 +1170,8 @@ void exec_packed16_gfx9(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
       max_reg = r.reg;
   uint32_t dst_regs = max_reg + 1;
 
-  std::vector<uint32_t> words(dst_regs * wf, 0);
-  std::vector<uint8_t> masks(dst_regs * wf, 0);
+  util::inline_vector<uint32_t> words(dst_regs * wf, 0);
+  util::inline_vector<uint8_t> masks(dst_regs * wf, 0);
   for (const auto &r : results) {
     uint32_t idx = r.reg * wf + r.lane;
     uint32_t shift = r.sub_element * 16;
@@ -1244,7 +1244,7 @@ void exec_i32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N * B);
   for (uint32_t b = 0; b < B; ++b) {
     for (uint32_t row = 0; row < M; ++row) {
@@ -1299,7 +1299,7 @@ void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, ui
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   auto run_scalar = [&]() {
@@ -1377,7 +1377,7 @@ void exec_gfx11_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, 
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   for (uint32_t row = 0; row < M; ++row) {
@@ -1423,7 +1423,7 @@ void exec_gfx11_wmma_packed16(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, u
     uint32_t sub_element;
     uint16_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   for (uint32_t row = 0; row < M; ++row) {
@@ -1447,8 +1447,8 @@ void exec_gfx11_wmma_packed16(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, u
     max_reg = std::max(max_reg, r.reg);
   const uint32_t dst_regs = max_reg + 1;
 
-  std::vector<uint32_t> words(dst_regs * wave_size, 0);
-  std::vector<uint8_t> masks(dst_regs * wave_size, 0);
+  util::inline_vector<uint32_t> words(dst_regs * wave_size, 0);
+  util::inline_vector<uint8_t> masks(dst_regs * wave_size, 0);
   for (const auto &r : results) {
     uint32_t idx = r.reg * wave_size + r.lane;
     uint32_t shift = r.sub_element * 16;
@@ -1514,7 +1514,7 @@ void exec_wmma_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
   const bool mixed_subbyte_a = a_bits < 8 && b_bits == 8;
   const bool mixed_subbyte_b = b_bits < 8 && a_bits == 8;
@@ -1941,7 +1941,7 @@ void exec_swmmac_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   const uint32_t compressed_k = K / 2;
@@ -2037,7 +2037,7 @@ void exec_wmma_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
     uint32_t sub_element;
     uint16_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   auto run_scalar = [&]() {
@@ -2098,8 +2098,8 @@ void exec_wmma_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
   }
 
   uint32_t dst_regs = ((M * N) / wave_size + 1) / 2;
-  std::vector<uint32_t> words(dst_regs * wave_size, 0);
-  std::vector<uint8_t> masks(dst_regs * wave_size, 0);
+  util::inline_vector<uint32_t> words(dst_regs * wave_size, 0);
+  util::inline_vector<uint8_t> masks(dst_regs * wave_size, 0);
   for (const auto &r : results) {
     uint32_t idx = r.reg * wave_size + r.lane;
     uint32_t shift = r.sub_element * 16;
@@ -2134,7 +2134,7 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_
     uint32_t sub_element;
     uint16_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   for (uint32_t row = 0; row < M; ++row) {
@@ -2155,8 +2155,8 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_
   }
 
   uint32_t dst_regs = ((M * N) / WMMA_WAVE32 + 1) / 2;
-  std::vector<uint32_t> words(dst_regs * WMMA_WAVE32, 0);
-  std::vector<uint8_t> masks(dst_regs * WMMA_WAVE32, 0);
+  util::inline_vector<uint32_t> words(dst_regs * WMMA_WAVE32, 0);
+  util::inline_vector<uint8_t> masks(dst_regs * WMMA_WAVE32, 0);
   for (const auto &r : results) {
     uint32_t idx = r.reg * WMMA_WAVE32 + r.lane;
     uint32_t shift = r.sub_element * 16;
@@ -2193,7 +2193,7 @@ void exec_swmmac_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, u
     uint32_t sub_element;
     uint16_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   const uint32_t compressed_k = K / 2;
@@ -2261,8 +2261,8 @@ void exec_swmmac_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, u
   }
 
   uint32_t dst_regs = ((M * N) / wave_size + 1) / 2;
-  std::vector<uint32_t> words(dst_regs * wave_size, 0);
-  std::vector<uint8_t> masks(dst_regs * wave_size, 0);
+  util::inline_vector<uint32_t> words(dst_regs * wave_size, 0);
+  util::inline_vector<uint8_t> masks(dst_regs * wave_size, 0);
   for (const auto &r : results) {
     uint32_t idx = r.reg * wave_size + r.lane;
     uint32_t shift = r.sub_element * 16;
@@ -2651,7 +2651,7 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N * B);
   uint32_t num_blocks = (K + BLOCK_K - 1) / BLOCK_K;
 
@@ -2796,7 +2796,7 @@ void exec_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N * B);
   uint32_t num_blocks = (K + BLOCK_K - 1) / BLOCK_K;
   for (uint32_t b = 0; b < B; ++b) {
@@ -2841,7 +2841,7 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N * B);
 
   auto run_scalar = [&]() {
@@ -2958,7 +2958,7 @@ void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   auto run_scalar = [&]() {
@@ -3032,7 +3032,7 @@ void exec_gfx11_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, uint32
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   for (uint32_t row = 0; row < M; ++row) {
@@ -3159,7 +3159,7 @@ void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N);
 
   const uint32_t compressed_k = K / 2;
@@ -3253,7 +3253,7 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
     uint32_t lo;
     uint32_t hi;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(M * N * B);
 
   auto run_scalar = [&]() {
@@ -3403,7 +3403,7 @@ void exec_smfmac_f32_16x16x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   struct Result {
     uint32_t reg, lane, val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(16 * 16);
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
@@ -3438,7 +3438,7 @@ void exec_smfmac_f32_32x32x16_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   struct Result {
     uint32_t reg, lane, val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(32 * 32);
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t col = 0; col < 32; ++col) {
@@ -3476,7 +3476,7 @@ void exec_smfmac_f32_16x16x64_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   struct Result {
     uint32_t reg, lane, val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(16 * 16);
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
@@ -3513,7 +3513,7 @@ void exec_smfmac_f32_32x32x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   struct Result {
     uint32_t reg, lane, val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(32 * 32);
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t col = 0; col < 32; ++col) {
@@ -3553,7 +3553,7 @@ void exec_smfmac_f32_16x16x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   struct Result {
     uint32_t reg, lane, val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(16 * 16);
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
@@ -3595,7 +3595,7 @@ void exec_smfmac_f32_32x32x32_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   struct Result {
     uint32_t reg, lane, val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(32 * 32);
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t col = 0; col < 32; ++col) {
@@ -3639,7 +3639,7 @@ void exec_smfmac_f32_16x16x128_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s
   struct Result {
     uint32_t reg, lane, val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(16 * 16);
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
@@ -3681,7 +3681,7 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   struct Result {
     uint32_t reg, lane, val;
   };
-  std::vector<Result> results;
+  util::inline_vector<Result> results;
   results.reserve(32 * 32);
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t col = 0; col < 32; ++col) {
