@@ -11,7 +11,6 @@
 #include <array>
 #include <cstdint>
 #include <functional>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -54,7 +53,7 @@ struct ClusterLdsMulticastTransaction {
   /// needs the participant-owned LDS destination.
   std::array<uint64_t, 64> per_lane_global_addr = {};
   std::array<uint32_t, 64> per_lane_lds_addr = {};
-  std::vector<uint8_t> payload;
+  MemoryPayload payload;
   ClusterLdsTargets targets;
 };
 

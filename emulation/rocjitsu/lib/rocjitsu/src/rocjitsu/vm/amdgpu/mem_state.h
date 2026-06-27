@@ -14,12 +14,12 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "util/inline_vector.h"
 
 #include <string>
 
 #include <array>
 #include <cstdint>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -33,6 +33,8 @@ constexpr uint32_t kClusterMulticastMask = (1u << kClusterMulticastMaskBits) - 1
 constexpr uint32_t cluster_multicast_rank_mask(uint32_t cluster_rank) {
   return cluster_rank < kClusterMulticastMaskBits ? (1u << cluster_rank) : 0u;
 }
+
+using MemoryPayload = util::inline_vector<uint8_t, 0>;
 
 /// @brief Pipeline routing tags for AMDGPU memory instructions.
 enum MemPipelineTag : uint8_t {
@@ -124,8 +126,8 @@ struct VectorMemState : DynamicInstState {
   uint32_t wg_id = 0;              ///< Workgroup ID (for trace output).
   uint32_t wf_id = 0;              ///< Wavefront ID within WG (for trace output).
   std::string cu_path;             ///< CU full path (for trace output).
-  std::vector<uint8_t> response_data;
-  std::vector<uint8_t> store_data;
+  MemoryPayload response_data;
+  MemoryPayload store_data;
   uint8_t transpose = 0; ///< Transpose-load kind (0=none, see ds_transpose.h).
 
   /// @brief DS dual-access support (ds_write2/ds_read2).
@@ -137,8 +139,8 @@ struct VectorMemState : DynamicInstState {
   bool ds2_active = false;
   std::array<uint64_t, 64> ds2_per_lane_addr = {};
   uint32_t ds2_dst_reg_base = 0;
-  std::vector<uint8_t> ds2_store_data;
-  std::vector<uint8_t> ds2_response_data;
+  MemoryPayload ds2_store_data;
+  MemoryPayload ds2_response_data;
 };
 
 } // namespace amdgpu

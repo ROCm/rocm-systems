@@ -18,7 +18,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -30,8 +29,7 @@ enum class TransposeKind : uint8_t { NONE, TR_B4, TR_B6, TR_B8, TR_B16 };
 /// Groups of 4 source lanes, 8 byte iterations per group.
 /// Each iteration packs one byte from each of 4 source lanes into a dword
 /// and writes to a cross-lane destination computed by compact formula.
-inline void transpose_b64(std::vector<uint8_t> &response_data, uint32_t num_elems,
-                          uint32_t wf_size) {
+inline void transpose_b64(MemoryPayload &response_data, uint32_t num_elems, uint32_t wf_size) {
   constexpr uint32_t lanes_per_half = 32;
   constexpr uint32_t source_group_size = 4;
   constexpr uint32_t bytes_per_lane = 8;
@@ -39,7 +37,7 @@ inline void transpose_b64(std::vector<uint8_t> &response_data, uint32_t num_elem
   const uint32_t bytes_per_lane_total = num_elems * 4;
   const uint32_t num_halves = (wf_size > lanes_per_half) ? 2u : 1u;
 
-  std::vector<uint8_t> output(response_data.size(), 0);
+  MemoryPayload output(response_data.size(), 0);
 
   for (uint32_t half_index = 0; half_index < num_halves; ++half_index) {
     const uint32_t lane_base = half_index * lanes_per_half;
@@ -73,8 +71,7 @@ inline void transpose_b64(std::vector<uint8_t> &response_data, uint32_t num_elem
 ///
 /// Groups of 8 source lanes, each reading 8 halfwords. Destination lane
 /// `group_start + halfword_index` receives that halfword from each source lane.
-inline void transpose_b16(std::vector<uint8_t> &response_data, uint32_t num_elems,
-                          uint32_t wf_size) {
+inline void transpose_b16(MemoryPayload &response_data, uint32_t num_elems, uint32_t wf_size) {
   constexpr uint32_t lanes_per_half = 32;
 
   const uint32_t bytes_per_lane_total = num_elems * 4;
@@ -82,7 +79,7 @@ inline void transpose_b16(std::vector<uint8_t> &response_data, uint32_t num_elem
   const uint32_t group_size = halfwords_per_source_lane;
   const uint32_t num_halves = (wf_size > lanes_per_half) ? 2u : 1u;
 
-  std::vector<uint8_t> output(response_data.size(), 0);
+  MemoryPayload output(response_data.size(), 0);
 
   for (uint32_t half_index = 0; half_index < num_halves; ++half_index) {
     const uint32_t lane_base = half_index * lanes_per_half;
@@ -110,8 +107,7 @@ inline void transpose_b16(std::vector<uint8_t> &response_data, uint32_t num_elem
 ///
 /// Groups of 8 source lanes, each reading 8 bytes (64 bits). Extracts
 /// 4-bit nibbles and transposes them across lanes.
-inline void transpose_b4(std::vector<uint8_t> &response_data, uint32_t num_elems,
-                         uint32_t wf_size) {
+inline void transpose_b4(MemoryPayload &response_data, uint32_t num_elems, uint32_t wf_size) {
   constexpr uint32_t lanes_per_half = 32;
   constexpr uint32_t source_group_size = 8;
   constexpr uint32_t bytes_per_source_lane = 8;
@@ -120,7 +116,7 @@ inline void transpose_b4(std::vector<uint8_t> &response_data, uint32_t num_elems
   const uint32_t bytes_per_lane_total = num_elems * 4;
   const uint32_t num_halves = (wf_size > lanes_per_half) ? 2u : 1u;
 
-  std::vector<uint8_t> output(response_data.size(), 0);
+  MemoryPayload output(response_data.size(), 0);
 
   for (uint32_t half_index = 0; half_index < num_halves; ++half_index) {
     const uint32_t lane_base = half_index * lanes_per_half;
@@ -162,8 +158,7 @@ inline void transpose_b4(std::vector<uint8_t> &response_data, uint32_t num_elems
 ///
 /// 16x16 6-bit permutation in 2 passes over 32 lanes. Each pass reads
 /// 12 bytes (96 bits) from 16 source lanes and transposes 6-bit fields.
-inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems,
-                         uint32_t wf_size) {
+inline void transpose_b6(MemoryPayload &response_data, uint32_t num_elems, uint32_t wf_size) {
   constexpr uint32_t lanes_per_half = 32;
   constexpr uint32_t lanes_per_pass = 16;
   constexpr uint32_t dwords_per_lane = 3;
@@ -173,7 +168,7 @@ inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems
   const uint32_t bytes_per_lane_total = num_elems * 4;
   const uint32_t num_halves = (wf_size > lanes_per_half) ? 2u : 1u;
 
-  std::vector<uint8_t> output(response_data.size(), 0);
+  MemoryPayload output(response_data.size(), 0);
 
   for (uint32_t half_index = 0; half_index < num_halves; ++half_index) {
     const uint32_t lane_base = half_index * lanes_per_half;
