@@ -27,6 +27,8 @@ namespace {
 // Agent discovery
 // ---------------------------------------------------------------------------
 
+// HSA agent iteration callback: appends every agent of type DeviceType to the
+// std::vector<hsa_agent_t>* stored in `data`.
 template <hsa_device_type_t DeviceType>
 hsa_status_t discover_agents(hsa_agent_t agent, void* data) {
   if (!data) {
@@ -51,12 +53,17 @@ hsa_status_t discover_agents(hsa_agent_t agent, void* data) {
 // Memory pool discovery
 // ---------------------------------------------------------------------------
 
+// Parameters and result for find_memory_pool: describes what kind of pool to
+// look for and receives the first matching pool handle.
 struct find_pool_data {
   hsa_amd_memory_pool_global_flag_t expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
   bool expected_allocatable = true;
   hsa_amd_memory_pool_t pool{};
 };
 
+// HSA memory-pool iteration callback: stops at the first global pool that
+// matches the flags and allocatability recorded in the find_pool_data* stored
+// in `data`, storing the result there and returning HSA_STATUS_INFO_BREAK.
 hsa_status_t find_memory_pool(hsa_amd_memory_pool_t pool, void* data) {
   hsa_amd_segment_t segment{};
   auto s = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
@@ -98,34 +105,172 @@ hsa_status_t find_memory_pool(hsa_amd_memory_pool_t pool, void* data) {
 // Binary loader
 // ---------------------------------------------------------------------------
 
-bool load_binary(hsa_amd_memory_pool_t pool, const std::filesystem::path& path, void** buf,
-                 std::size_t& size_out) {
+// Open `path` for binary reading and report its size. On success the returned
+// stream is positioned at the start; on failure it is in a failed state, so the
+// caller can test it with `operator bool`.
+std::ifstream open_binary(const std::filesystem::path& path, std::size_t* size_out) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
-  if (!f) {
-    return false;
+  if (f) {
+    *size_out = static_cast<std::size_t>(f.tellg());
+    f.seekg(0);
   }
+  return f;
+}
 
-  const auto size = static_cast<std::size_t>(f.tellg());
-  f.seekg(0);
+// Read exactly `size` bytes from `f` into `dst`. Returns false on short read.
+bool read_exact(std::ifstream& f, void* dst, std::size_t size) {
+  f.read(static_cast<char*>(dst), static_cast<std::streamsize>(size));
+  return static_cast<std::size_t>(f.gcount()) == size;
+}
+
+testing::AssertionResult load_binary(hsa_amd_memory_pool_t pool, const std::filesystem::path& path,
+                                     void** buf, std::size_t& size_out) {
+  std::size_t size = 0;
+  auto f = open_binary(path, &size);
+  if (!f) {
+    return testing::AssertionFailure() << "failed to open '" << path << "'";
+  }
 
   if (hsa_amd_memory_pool_allocate(pool, size, 0, buf) != HSA_STATUS_SUCCESS) {
-    return false;
+    return testing::AssertionFailure()
+        << "failed to allocate " << size << " bytes for '" << path << "'";
   }
 
-  f.read(static_cast<char*>(*buf), static_cast<std::streamsize>(size));
-  if (static_cast<std::size_t>(f.gcount()) != size) {
+  if (!read_exact(f, *buf, size)) {
     hsa_amd_memory_pool_free(*buf);
     *buf = nullptr;
-    return false;
+    return testing::AssertionFailure()
+        << "short read loading '" << path << "' (expected " << size << " bytes)";
   }
   size_out = size;
-  return true;
+  return testing::AssertionSuccess();
 }
+
+// ---------------------------------------------------------------------------
+// Virtual memory (vmem) allocation
+// ---------------------------------------------------------------------------
+
+// Owns a vmem allocation: the physical handle, the reserved virtual address, and
+// the mapped size. All three are needed to fully release the buffer via vmem_free.
+struct vmem_buffer {
+  hsa_amd_vmem_alloc_handle_t handle{};
+  void* va = nullptr;
+  std::size_t size = 0;
+};
+
+// Allocate a buffer through the vmem API and make it accessible to every agent
+// in `agents`. The allocation is created from `pool` (a coarse-grained,
+// allocatable global pool), reserved, mapped, and granted RW access.
+testing::AssertionResult vmem_allocate(hsa_amd_memory_pool_t pool, std::size_t size,
+                                       const std::vector<hsa_agent_t>& agents, vmem_buffer* out) {
+  // The vmem API requires the allocation size to be a multiple of the pool's
+  // allocation granule (page size); unlike hsa_amd_memory_pool_allocate it does
+  // not round up internally. Round the request up to the granule.
+  std::size_t granule = 0;
+  if (hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
+                                   &granule) != HSA_STATUS_SUCCESS ||
+      granule == 0) {
+    return testing::AssertionFailure() << "failed to query pool allocation granule";
+  }
+  size = ((size + granule - 1) / granule) * granule;
+
+  vmem_buffer buf{};
+  buf.size = size;
+
+  if (hsa_amd_vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, 0, &buf.handle) !=
+      HSA_STATUS_SUCCESS) {
+    return testing::AssertionFailure()
+        << "hsa_amd_vmem_handle_create failed for " << size << " bytes";
+  }
+  if (hsa_amd_vmem_address_reserve_align(&buf.va, size, 0, 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER) !=
+      HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_handle_release(buf.handle);
+    return testing::AssertionFailure()
+        << "hsa_amd_vmem_address_reserve_align failed for " << size << " bytes";
+  }
+  if (hsa_amd_vmem_map(buf.va, size, 0, buf.handle, 0) != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_address_free(buf.va, size);
+    hsa_amd_vmem_handle_release(buf.handle);
+    return testing::AssertionFailure() << "hsa_amd_vmem_map failed for " << size << " bytes";
+  }
+
+  std::vector<hsa_amd_memory_access_desc_t> desc;
+  desc.reserve(agents.size());
+  for (const auto& agent : agents) {
+    desc.push_back({HSA_ACCESS_PERMISSION_RW, agent});
+  }
+  if (hsa_amd_vmem_set_access(buf.va, size, desc.data(), desc.size()) != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_unmap(buf.va, size);
+    hsa_amd_vmem_address_free(buf.va, size);
+    hsa_amd_vmem_handle_release(buf.handle);
+    return testing::AssertionFailure()
+        << "hsa_amd_vmem_set_access failed for " << agents.size() << " agents";
+  }
+
+  *out = buf;
+  return testing::AssertionSuccess();
+}
+
+// Release a vmem buffer: unmap, free the address range, release the handle.
+// All steps are attempted even if an earlier one fails, so a single buffer
+// cannot leak the rest of its resources.
+testing::AssertionResult vmem_free(const vmem_buffer& buf) {
+  std::vector<const char*> failures;
+  if (hsa_amd_vmem_unmap(buf.va, buf.size) != HSA_STATUS_SUCCESS) {
+    failures.push_back("hsa_amd_vmem_unmap");
+  }
+  if (hsa_amd_vmem_address_free(buf.va, buf.size) != HSA_STATUS_SUCCESS) {
+    failures.push_back("hsa_amd_vmem_address_free");
+  }
+  if (hsa_amd_vmem_handle_release(buf.handle) != HSA_STATUS_SUCCESS) {
+    failures.push_back("hsa_amd_vmem_handle_release");
+  }
+  if (failures.empty()) {
+    return testing::AssertionSuccess();
+  }
+
+  auto result = testing::AssertionFailure() << "vmem free failed:";
+  for (const auto* f : failures) {
+    result << ' ' << f;
+  }
+  return result;
+}
+
+#if 0
+// Load a file into a freshly vmem-allocated buffer accessible to `agents`.
+// Disabled: PDI/instructions must live in the dev heap, which is incompatible
+// with the vmem reserve+map path (see docs/bug-vmem-map-dev-heap.md). Kept here,
+// guarded out, so the intended vmem code path is preserved for when the
+// runtime/driver gains dev-heap vmem support.
+testing::AssertionResult load_binary_vmem(hsa_amd_memory_pool_t pool,
+                                          const std::vector<hsa_agent_t>& agents,
+                                          const std::filesystem::path& path, vmem_buffer* out) {
+  std::size_t size = 0;
+  auto f = open_binary(path, &size);
+  if (!f) {
+    return testing::AssertionFailure() << "failed to open '" << path << "'";
+  }
+
+  if (auto r = vmem_allocate(pool, size, agents, out); !r) {
+    return testing::AssertionFailure() << "loading '" << path << "': " << r.message();
+  }
+
+  if (!read_exact(f, out->va, size)) {
+    vmem_free(*out);
+    *out = {};
+    return testing::AssertionFailure()
+        << "short read loading '" << path << "' (expected " << size << " bytes)";
+  }
+  return testing::AssertionSuccess();
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // AIE packet submission
 // ---------------------------------------------------------------------------
 
+// Compile-time constants and dispatch helper for the vector-scalar-add AIE
+// kernel: adds 1 to every element of a uint32 array of element_count entries.
 struct aie_vector_scalar_kernel {
   static const std::filesystem::path pdiPath;
   static const std::filesystem::path instsPath;
@@ -471,6 +616,109 @@ TEST_F(DispatchTest, SingleDispatch) {
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, SingleDispatchVMem) {
+  // Same as SingleDispatch, but the I/O buffers and kernargs go through the vmem
+  // API. PDI and instructions stay on plain pool allocation because they must
+  // live in the dev heap, which is incompatible with the vmem reserve+map path
+  // (see docs/bug-vmem-map-dev-heap.md). The vmem buffers are made accessible to
+  // both the AIE agent (for execution) and the CPU agent (for filling inputs /
+  // verifying outputs).
+  std::vector<hsa_agent_t> cpu_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(cpu_agents.empty());
+
+  std::vector<hsa_agent_t> access_agents;
+  access_agents.insert(access_agents.end(), cpu_agents.begin(), cpu_agents.end());
+  access_agents.insert(access_agents.end(), aie_agents.begin(), aie_agents.end());
+
+  // --- Create queue ---
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  // --- Load PDI and instructions ---
+  // These must come from the dev pool, which is the XDNA dev heap. The dev heap
+  // is incompatible with the vmem reserve+map path (see
+  // docs/bug-vmem-map-dev-heap.md), so they use plain pool allocation while the
+  // I/O buffers and kernargs below go through the vmem API. The vmem variant is
+  // preserved behind `#if 0` for when the runtime/driver gains dev-heap vmem
+  // support.
+#if 0
+  vmem_buffer pdi{};
+  ASSERT_TRUE(load_binary_vmem(dev_pool, access_agents, aie_vector_scalar_kernel::pdiPath, &pdi));
+  void* const pdi_buf = pdi.va;
+
+  vmem_buffer insts{};
+  ASSERT_TRUE(
+      load_binary_vmem(dev_pool, access_agents, aie_vector_scalar_kernel::instsPath, &insts));
+  void* const insts_buf = insts.va;
+  const std::size_t insts_size = insts.size;
+#else
+  void* pdi_buf = nullptr;
+  std::size_t pdi_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
+
+  void* insts_buf = nullptr;
+  std::size_t insts_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+#endif
+
+  // --- Allocate I/O buffers ---
+  vmem_buffer input{};
+  ASSERT_TRUE(
+      vmem_allocate(data_pool, aie_vector_scalar_kernel::element_bytes, access_agents, &input));
+
+  vmem_buffer output{};
+  ASSERT_TRUE(
+      vmem_allocate(data_pool, aie_vector_scalar_kernel::element_bytes, access_agents, &output));
+
+  auto* input_data = static_cast<std::uint32_t*>(input.va);
+  auto* output_data = static_cast<std::uint32_t*>(output.va);
+  std::iota(input_data, input_data + aie_vector_scalar_kernel::element_count, 0);
+  std::fill_n(output_data, aie_vector_scalar_kernel::element_count, 0);
+
+  // --- Create payload ---
+  vmem_buffer kernargs{};
+  ASSERT_TRUE(
+      vmem_allocate(data_pool, aie_vector_scalar_kernel::kernarg_bytes, access_agents, &kernargs));
+
+  // --- Create completion signal ---
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+
+  // --- Dispatch packet ---
+  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
+      pdi_buf, insts_buf, insts_size, input.va, output.va, static_cast<std::uint64_t*>(kernargs.va),
+      signal, queue);
+
+  // --- Ring doorbell ---
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+
+  // --- Wait for completion ---
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  // --- Verify output: output[i] == input[i] + 1 ---
+  for (std::size_t i = 0; i < aie_vector_scalar_kernel::element_count; ++i) {
+    EXPECT_EQ(output_data[i], static_cast<std::uint32_t>(i + 1)) << "mismatch at index " << i;
+  }
+
+  // --- Cleanup ---
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  EXPECT_TRUE(vmem_free(kernargs));
+  EXPECT_TRUE(vmem_free(output));
+  EXPECT_TRUE(vmem_free(input));
+#if 0
+  EXPECT_TRUE(vmem_free(insts));
+  EXPECT_TRUE(vmem_free(pdi));
+#else
+  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+#endif
 }
 
 TEST_F(DispatchTest, MultiDispatch) {
