@@ -35,6 +35,19 @@ struct KdTranslation {
   /// @brief Original .text-relative kernel entry decoded from the source descriptor.
   uint64_t entry_text_offset = 0;
 
+  /// @brief True when the source descriptor requests CP kernarg preloading.
+  ///
+  /// @details AMDHSA uses kernarg_preload_spec_length != 0 to request that
+  /// compatible CP firmware copy dwords from the kernarg segment into User SGPRs
+  /// before entering the kernel. When this is enabled, compatible firmware starts
+  /// execution at KERNEL_CODE_ENTRY_BYTE_OFFSET + 256 while older/incompatible
+  /// firmware starts at KERNEL_CODE_ENTRY_BYTE_OFFSET. DBT must therefore treat
+  /// both source addresses as legal hardware entries for this kernel.
+  bool has_kernarg_preload = false;
+
+  /// @brief Source .text-relative entry used by compatible kernarg-preload firmware.
+  uint64_t kernarg_preload_entry_text_offset = 0;
+
   /// @brief New .text-relative kernel entry after DBT rewrites .text.
   ///
   /// @details This is the final launch address written into

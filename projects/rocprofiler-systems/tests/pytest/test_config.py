@@ -11,10 +11,7 @@ from pathlib import Path
 import shutil
 from conftest import RocprofsysTest
 
-pytestmark = [
-    pytest.mark.rocprof_config,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
-]
+pytestmark = [pytest.mark.rocprof_config]
 
 
 # =============================================================================
@@ -22,6 +19,10 @@ pytestmark = [
 # =============================================================================
 
 
+# `ls` cannot be used as the config-invalid target as it has no instrumentable
+# functions in the executable itself, so the instrumented process never
+# initializes the runtime far enough to validate the config and abort
+# on the unknown setting
 @pytest.fixture
 def config_target(rocprof_config) -> str:
     """Get the target executable for config tests."""
@@ -42,7 +43,7 @@ def config_target(rocprof_config) -> str:
 class TestConfig(RocprofsysTest):
     """Tests for configuration file tests."""
 
-    def test_invalid(self, config_target, create_config_file):
+    def test_invalid(self, create_config_file):
         """Test that invalid config file causes failure."""
         # Write invalid configuration file to test output directory
         config_env = {
@@ -55,7 +56,7 @@ class TestConfig(RocprofsysTest):
 
         result = self.run_test(
             "runtime_instrument",
-            target=config_target,
+            target="parallel-overhead",
             env=env,
             fail_on_pass=True,  # Expected to fail
         )

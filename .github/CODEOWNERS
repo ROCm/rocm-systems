@@ -2,6 +2,7 @@
 /.azuredevops/                                                        @ROCm/external-ci
 /.github/                                                             @ROCm/rocm-systems-reviewers
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
+/.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
@@ -17,7 +18,7 @@
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
 /projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
-/projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
+/projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
 /projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd @atgutier
@@ -62,7 +63,7 @@
 
 # Emulation
 /emulation/                                                           @atgutier
-/emulation/mirage/                                                    @atgutier @amd-arosa
+/emulation/mirage/                                                    @amd-arosa @ROCm/rocjitsu-core-team
 /emulation/rocjitsu/                                                  @atgutier @ROCm/rocjitsu-core-team
 
 # Profilers

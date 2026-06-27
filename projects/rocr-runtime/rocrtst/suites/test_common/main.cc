@@ -88,6 +88,7 @@
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
 #include "suites/functional/filter_devices.h"
+#include "suites/functional/fp_exception_shutdown.h"
 #include "suites/functional/gpu_coredump.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
@@ -348,6 +349,13 @@ TEST(rocrtstFunc, Time_Stamp) {
   RunCustomTestEpilog(&ts);
 }
 
+TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
+    TimeStamp ts;
+    RunCustomTestProlog(&ts);
+    ts.BarrierPacketTimestampValidationTest();
+    RunCustomTestEpilog(&ts);
+}
+
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
@@ -395,6 +403,13 @@ TEST(rocrtstFunc, GpuCoreDump_PipePattern) {
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestPipePattern();
     RunCustomTestEpilog(&gcd);
+}
+
+TEST(rocrtstFunc, FP_Exception_Shutdown) {
+    FpExceptionShutdownTest fpx;
+    if (!RunCustomTestProlog(&fpx)) return;
+    fpx.TestShutdownSurvivesStrictFpEnv();
+    RunCustomTestEpilog(&fpx);
 }
 
 
@@ -509,6 +524,13 @@ TEST(rocrtstFunc, SvmMemory_Negative_Test) {
     SvmMemoryTestBasic smt;
     if (!RunCustomTestProlog(&smt)) return;
     smt.TestSVMDiscardNegative();
+    RunCustomTestEpilog(&smt);
+}
+
+TEST(rocrtstFunc, SvmMemory_AccessedBy_All_Devices_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestAccessedByAllDevices();
     RunCustomTestEpilog(&smt);
 }
 

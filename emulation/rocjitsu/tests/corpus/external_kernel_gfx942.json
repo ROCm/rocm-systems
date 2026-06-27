@@ -1,0 +1,24 @@
+{
+  "config_name": "external_kernel_gfx942",
+  "architecture_family": "cdna3",
+  "hip_architectures": ["gfx942"],
+  "cmake": {
+    "cache_variables": {
+      "ROCFUZZ_ENABLE_HIP_STREAMK": "ON",
+      "ROCFUZZ_ENABLE_HIP_MATMUL": "ON",
+      "ROCFUZZ_ENABLE_HIPKITTENS": "ON",
+      "ROCFUZZ_ENABLE_LLAMA_HIP": "ON"
+    }
+  },
+  "skip_tests": [
+    "llama_noncont_batched_matmul",
+    "hip_matmul_matmul::m4096_n4096_k4096",
+    "hip_streamk_two_tile::m256_n256_k256",
+    "llama_mul_mat_vec_q",
+    "llama_rms_norm",
+    "hip_matmul_matmul_hazard",
+    "llama_noncont_batched_matmul_hazard"
+  ],
+  "expected_compile_failures": [],
+  "expected_run_failures": []
+}

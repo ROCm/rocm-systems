@@ -143,37 +143,38 @@ __host__ void *IPCHostContext::shmem_ptr(const void *dest, int pe) {
   return ret;
 }
 
-__host__ uint64_t IPCHostContext::ipc_amo_fadd(void *dst, uint64_t val,
-                                              bool is32) {
-  if (is32)
-    ipc_fadd<uint32_t><<<1, 1, 0, ctx_stream_>>>(
-        reinterpret_cast<uint32_t *>(dst), static_cast<uint32_t>(val),
-        reinterpret_cast<uint32_t *>(ipc_staging_buf_));
-  else
-    ipc_fadd<unsigned long long><<<1, 1, 0, ctx_stream_>>>(
-        reinterpret_cast<unsigned long long *>(dst),
-        static_cast<unsigned long long>(val),
-        reinterpret_cast<unsigned long long *>(ipc_staging_buf_));
+template <typename T>
+__host__ T IPCHostContext::ipc_amo_fadd(T *dst, T val, bool fetch) {
+  ipc_fadd<T><<<1, 1, 0, ctx_stream_>>>(dst, val,
+                                         reinterpret_cast<T *>(ipc_staging_buf_));
+  if (!fetch) return T{};
   CHECK_HIP(hipStreamSynchronize(ctx_stream_));
-  return *ipc_staging_buf_;
+  return *reinterpret_cast<T *>(ipc_staging_buf_);
 }
 
-__host__ uint64_t IPCHostContext::ipc_amo_fcas(void *dst, uint64_t cond,
-                                               uint64_t val, bool is32) {
-  if (is32)
-    ipc_fcas<uint32_t><<<1, 1, 0, ctx_stream_>>>(
-        reinterpret_cast<uint32_t *>(dst), static_cast<uint32_t>(cond),
-        static_cast<uint32_t>(val),
-        reinterpret_cast<uint32_t *>(ipc_staging_buf_));
-  else
-    ipc_fcas<unsigned long long><<<1, 1, 0, ctx_stream_>>>(
-        reinterpret_cast<unsigned long long *>(dst),
-        static_cast<unsigned long long>(cond),
-        static_cast<unsigned long long>(val),
-        reinterpret_cast<unsigned long long *>(ipc_staging_buf_));
+template <typename T>
+__host__ T IPCHostContext::ipc_amo_fcas(T *dst, T cond, T val) {
+  ipc_fcas<T><<<1, 1, 0, ctx_stream_>>>(dst, cond, val,
+                                          reinterpret_cast<T *>(ipc_staging_buf_));
   CHECK_HIP(hipStreamSynchronize(ctx_stream_));
-  return *ipc_staging_buf_;
+  return *reinterpret_cast<T *>(ipc_staging_buf_);
 }
+
+#define IPC_AMO_STANDARD_INST(T)                                          \
+  template __host__ T IPCHostContext::ipc_amo_fadd(T *, T, bool);         \
+  template __host__ T IPCHostContext::ipc_amo_fcas(T *, T, T);
+
+#define IPC_AMO_EXTENDED_INST(T)                                          \
+  template __host__ T IPCHostContext::ipc_amo_fadd(T *, T, bool);
+
+IPC_AMO_STANDARD_INST(int)
+IPC_AMO_STANDARD_INST(long)
+IPC_AMO_STANDARD_INST(long long)
+IPC_AMO_STANDARD_INST(unsigned int)
+IPC_AMO_STANDARD_INST(unsigned long)
+IPC_AMO_STANDARD_INST(unsigned long long)
+IPC_AMO_EXTENDED_INST(float)
+IPC_AMO_EXTENDED_INST(double)
 
 __host__ void IPCHostContext::sync_all() {
   host_interface->sync_all(context_window_info);

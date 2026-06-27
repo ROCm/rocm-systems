@@ -6,6 +6,10 @@
 //! `mirage host` subprocesses via `MIRAGE_BIN` (set to the test
 //! mirage binary), giving us full end-to-end coverage of the same
 //! code path users hit.
+//!
+//! Gated on the `webui` feature: the `mirage webui` subcommand and the
+//! served SPA only exist when the web UI is compiled in.
+#![cfg(feature = "webui")]
 
 use std::net::TcpListener;
 use std::path::PathBuf;

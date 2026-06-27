@@ -20,8 +20,6 @@ subtrees:
     entries:
       - file: tutorials/copy-a-file
         title: Copying a file
-      - file: tutorials/synchronous-file-copy
-        title: Synchronous file copy
       - file: tutorials/async-multistream-io
         title: Asynchronous multistream I/O
       - file: tutorials/get-version
@@ -55,3 +53,9 @@ subtrees:
           - file: reference/api-batch
           - file: reference/api-errors
           - file: reference/api-python
+  - caption: Troubleshooting
+    entries:
+      - file: troubleshooting/troubleshooting
+        title: Troubleshooting
+      - file: troubleshooting/known-issues
+        title: Known issues

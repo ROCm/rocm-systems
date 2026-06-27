@@ -37,6 +37,10 @@
 #define KCYN "\x1B[36m"
 #define KWHT "\x1B[37m"
 
+namespace amd::device {
+class Signal;
+}
+
 template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
 
 typedef struct hipArray {
@@ -97,6 +101,12 @@ static_assert(sizeof(ihipIpcEventHandle_t) <= sizeof(hipIpcEventHandle_t),
 const char* ihipGetErrorName(hipError_t hip_error);
 
 } // namespace hip
+
+#if defined(__GNUC__) || defined(__clang__)
+extern "C" __attribute__((visibility("default"))) void __hipOnError(const void *err_info);
+#else
+extern "C" void __hipOnError(const void *err_info);
+#endif
 
 // Helper: set up TLS device pointer on first use.
 #define HIP_INIT_TLS_DEVICE()                                                                      \
@@ -173,6 +183,28 @@ const char* ihipGetErrorName(hipError_t hip_error);
   } else if (hip::tls.last_command_error_ != hipSuccess &&                                         \
              hip::tls.last_command_error_ != hipErrorNotReady) {                                   \
     hip::tls.last_error_ = hip::tls.last_command_error_;                                           \
+  }                                                                                                \
+  if (hip::tls.last_command_error_ != hipSuccess &&                                                \
+      hip::tls.last_command_error_ != hipErrorNotReady) {                                          \
+    /*                                                                                             \
+     * The "version" is bumped when more fields are added to the structure.                        \
+     * Newer versions must keep backward compatibility with the previous ones,                     \
+     * by only tacking new fields at the end of the structure, so that older                       \
+     * clients can still extract the parameters they know.                                         \
+     */                                                                                            \
+    struct {                                                                                       \
+      uint32_t version;                                                                            \
+      uint32_t err_no;                                                                             \
+      const char *err_name;                                                                        \
+      const char *err_string;                                                                      \
+    } err_info = {                                                                                 \
+      1,                                                                                           \
+      hip::tls.last_command_error_,                                                                \
+      hipGetErrorName(hip::tls.last_command_error_),                                               \
+      hipGetErrorString(hip::tls.last_command_error_)                                              \
+    };                                                                                             \
+    /* The debugger may place a breakpoint at __hipOnError to catch failed API calls. */           \
+    __hipOnError((void *) &err_info);                                                              \
   }
 
 #define HIP_RETURN_DURATION(ret, ...)                                                              \
@@ -570,6 +602,16 @@ namespace hip {
     /// doesn't stall the current thread.
     void WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream = false);
 
+    // Destroying a recorded IPC event must wait for the GPU barrier that decrements the
+    // event's IPC signal before the signal can be freed (otherwise the GPU could write to
+    // freed memory).
+
+    /// Transfer an IPC signal (and its record marker's event, may be null) to this device's
+    /// deferred-cleanup queue. Frees inline if the queue grows past its bound.
+    void EnqueueDeferredIpcSignal(amd::device::Signal* signal, amd::Event* event);
+    /// Wait for the pending barriers of all deferred IPC signals on this device and free them.
+    void DrainDeferredIpcSignals();
+
     // --- Device activity ---
 
     void SetActiveStatus() { isActive_.store(true, std::memory_order_release); }
@@ -644,6 +686,18 @@ namespace hip {
     std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
     std::mutex resourceFamilyMapLock_;
 
+    struct DeferredIpcSignal {
+      amd::device::Signal* signal;  //!< IPC signal to free once its barrier completes
+      amd::Event* event;            //!< record marker's event (non-null => signal was armed)
+    };
+    /// Wait for an armed signal's in-flight barrier, then free the signal and release its event.
+    static void CleanupDeferredIpcSignal(const DeferredIpcSignal& item);
+
+    std::mutex deferredIpcLock_;                        //!< Guards deferredIpcSignals_
+    std::vector<DeferredIpcSignal> deferredIpcSignals_; //!< Signals awaiting deferred cleanup
+    /// Drain inline once the queue reaches this many entries, bounding memory if an app
+    /// destroys many IPC events without an intervening device sync.
+    static constexpr size_t kDeferredIpcDrainThreshold = 256;
   };
 
   /// Per-thread state aggregator for HIP runtime (one instance per thread via thread_local).

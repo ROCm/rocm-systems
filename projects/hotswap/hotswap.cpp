@@ -5,13 +5,50 @@
 //===----------------------------------------------------------------------===//
 
 #include "hotswap.hpp"
-#include <amd_comgr.h>
+#include "amd_comgr/amd_comgr.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 
 namespace rocr::hotswap {
+
+std::string GetCodeObjectIsaName(const void *elf_data, size_t elf_size) {
+  if (!elf_data || elf_size == 0) {
+    return {};
+  }
+
+  amd_comgr_data_t data = {0};
+  if (amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &data) !=
+      AMD_COMGR_STATUS_SUCCESS) {
+    return {};
+  }
+
+  std::string isa;
+  if (amd_comgr_set_data(data, elf_size,
+                         static_cast<const char *>(elf_data)) ==
+      AMD_COMGR_STATUS_SUCCESS) {
+    size_t isa_len = 0;
+    if (amd_comgr_get_data_isa_name(data, &isa_len, nullptr) ==
+            AMD_COMGR_STATUS_SUCCESS &&
+        isa_len > 0) {
+      isa.resize(isa_len);
+      if (amd_comgr_get_data_isa_name(data, &isa_len, isa.data()) ==
+          AMD_COMGR_STATUS_SUCCESS) {
+        // Reported size includes the terminating NUL.
+        if (!isa.empty() && isa.back() == '\0') {
+          isa.pop_back();
+        }
+      } else {
+        isa.clear();
+      }
+    }
+  }
+
+  amd_comgr_release_data(data);
+  return isa;
+}
 
 int RetargetCodeObject(const void *elf_data, size_t elf_size,
                        const char *source_isa, const char *target_isa,
@@ -47,7 +84,6 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
     return static_cast<int>(status);
   }
 
-  // Call the hotswap rewrite API.
   amd_comgr_data_t output = {0};
   status = amd_comgr_hotswap_rewrite(input, source_isa, target_isa, &output);
   amd_comgr_release_data(input);
