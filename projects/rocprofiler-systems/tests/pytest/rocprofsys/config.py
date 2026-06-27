@@ -240,6 +240,21 @@ class RocprofsysConfig:
             if key.startswith(("OMPI_", "ROCPROFSYS_")):
                 env[key] = value
 
+        # Forward GPU isolation from the CI container (e.g. --env-file
+        # /etc/podinfo/gha-gpu-isolation-settings) into pytest child processes.
+        # Without this, HIP/ROCr see all host GPUs while the runner is pinned to one.
+        for key in (
+            "ROCR_VISIBLE_DEVICES",
+            "HIP_VISIBLE_DEVICES",
+            "CUDA_VISIBLE_DEVICES",
+        ):
+            if key in os.environ:
+                env[key] = os.environ[key]
+        # Match rocprofiler-sdk CI: HIP_VISIBLE_DEVICES takes precedence over
+        # GPU_DEVICE_ORDINAL (see rocprofiler-sdk-continuous_integration.yml).
+        if "HIP_VISIBLE_DEVICES" not in os.environ and "GPU_DEVICE_ORDINAL" in os.environ:
+            env["GPU_DEVICE_ORDINAL"] = os.environ["GPU_DEVICE_ORDINAL"]
+
         # Forward sanitizer runtime options so pytest-launched binaries honor
         # the suppression files / exitcode set by the CI workflow.
         for key in (

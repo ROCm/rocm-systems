@@ -101,6 +101,22 @@ jobs:
           python ./build_tools/install_additional_requirements.py \
           --requirements-files=${{ join(fromJSON(inputs.component).additional_requirements_files, ',') }}
 
+      - name: Focus rocprofiler-systems test on transpose-sampling
+        if: ${{ fromJSON(inputs.component).job_name == 'rocprofiler-systems' }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("build_tools/github_actions/test_executable_scripts/test_rocprofiler_systems.py")
+          text = path.read_text()
+          start = text.index("    # Actual tests\n")
+          end = text.index("    logging.info(f\"++ Exec [{THEROCK_PATH}]$ {shlex.join(cmd)}\")", start)
+          replacement = '''    # Actual tests\n    # Diagnostic branch override: focus on the CI-only transpose-sampling timeout.\n    cmd = ctest_base + [\n        "--output-on-failure",\n        "--tests-regex",\n        "transpose-sampling",\n        "--repeat",\n        "until-pass:3",\n    ]\n'''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+          grep -n "transpose-sampling" \
+            build_tools/github_actions/test_executable_scripts/test_rocprofiler_systems.py
+
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
         env:
