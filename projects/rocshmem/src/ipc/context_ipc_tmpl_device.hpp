@@ -361,14 +361,16 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
   size_t direct_pWrk = PE_size * nreduce;
   size_t direct_pSync = PE_size;
   size_t ring_pSync = 2 * PE_size;
-  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  size_t provided_pWrk = max(nreduce / 2 + 1,
+          (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T));
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
     internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+      size_t ring_pWrk =
+          (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
       // integer division truncating value
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;
