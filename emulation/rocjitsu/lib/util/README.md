@@ -32,8 +32,15 @@ compiled sources.
 | File | Description |
 |------|-------------|
 | `arena_alloc.h` | Fixed-size block pool allocator with free-list. `ArenaAlloc<BlockSize, NumBlocks, BlockAlign>` provides O(1) alloc/dealloc with global-allocator fallback. |
+| `inline_vector.h` | Vector-like container with inline storage for small sizes and `uint32_t` size/capacity metadata. `inline_vector<T, 0>` keeps the dynamic-only object to pointer plus size plus capacity. |
 | `spinlock.h` | TTAS spinlock optimized for sub-microsecond critical sections. Uses C++20 `atomic::wait()` with ThreadSanitizer annotations. |
 | `intrusive_list.h` | Bidirectional intrusive linked list with optional parent-pointer tracking. `IntrusiveList<T>` and `IListNode<T>` with O(1) insert/erase. |
+
+`inline_vector.h` also supports optional destruction-size histograms. Build with
+`UTIL_INLINE_VECTOR_ENABLE_HISTOGRAM=1` and set
+`UTIL_INLINE_VECTOR_HISTOGRAM_FILE=/path/to/histogram.jsonl` to dump JSONL rows
+at process exit. Each row is keyed by the construction source location and the
+size observed at destruction.
 
 ### Diagnostics
 

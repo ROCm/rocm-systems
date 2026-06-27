@@ -59,6 +59,7 @@ add_executable(
     mtype_flags_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    inline_vector_test.cpp
     instruction_execution_harness_test.cpp
     decode_execute_benchmark.cpp
     util_simd_test.cpp
@@ -140,6 +141,18 @@ include(GoogleTest)
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*').
 gtest_discover_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
+
+add_executable(inline_vector_histogram_test inline_vector_histogram_test.cpp)
+target_compile_definitions(
+    inline_vector_histogram_test
+    PRIVATE UTIL_INLINE_VECTOR_ENABLE_HISTOGRAM=1
+)
+target_link_libraries(
+    inline_vector_histogram_test
+    PRIVATE util GTest::gtest_main
+)
+rj_configure_target(inline_vector_histogram_test TEST)
+gtest_discover_tests(inline_vector_histogram_test)
 
 add_executable(
     rj_dbt_translate_smoke_test
