@@ -12,18 +12,6 @@
 
 namespace rocr::hotswap {
 
-const char *rewrite_kind_name(RewriteKind kind) {
-  switch (kind) {
-  case RewriteKind::None:
-    return "none";
-  case RewriteKind::Gfx1250A0Patch:
-    return "gfx1250-a0-patch";
-  case RewriteKind::Gfx12_5EntryTrampoline:
-    return "gfx12.5-entry-trampoline";
-  }
-  return "unknown";
-}
-
 bool gate_allows_hotswap(const AgentGfxRevision &gfx) {
   return gfx.revision_valid && gfx.gfx_target == "gfx1250" &&
          gfx.asic_revision == 0; // A0
@@ -60,16 +48,13 @@ std::string add_gfx1250_stepping_feature(const std::string &isa_name,
   return isa_name + (is_b0 ? ":gfx1250-b0-specific+" : ":gfx1250-b0-specific-");
 }
 
-RewriteDecision decide_hotswap_rewrite(const AgentGfxRevision &gfx,
-                                       const std::string &source_isa,
-                                       const std::string &target_isa,
-                                       const RewriteOptions &options) {
-  RewriteDecision decision;
-  decision.source_isa = source_isa;
-  decision.target_isa = target_isa;
-
+std::optional<RewriteDecision>
+decide_hotswap_rewrite(const AgentGfxRevision &gfx,
+                       const std::string &source_isa,
+                       const std::string &target_isa,
+                       const RewriteOptions &options) {
   if (source_isa.empty() || target_isa.empty()) {
-    return decision;
+    return std::nullopt;
   }
 
   std::string source_gfx = extract_gfx_target(source_isa);
@@ -77,32 +62,25 @@ RewriteDecision decide_hotswap_rewrite(const AgentGfxRevision &gfx,
 
   if (gate_allows_hotswap(gfx) && source_gfx == "gfx1250" &&
       target_gfx == "gfx1250") {
-    decision.kind = RewriteKind::Gfx1250A0Patch;
-    decision.source_isa = add_gfx1250_stepping_feature(source_isa, true);
-    decision.target_isa = add_gfx1250_stepping_feature(target_isa, false);
-    return decision;
+    return RewriteDecision{add_gfx1250_stepping_feature(source_isa, true),
+                           add_gfx1250_stepping_feature(target_isa, false)};
   }
 
   if (!options.entry_trampolines_requested ||
       !is_gfx12_5_entry_trampoline_target(gfx.gfx_target) ||
-      !is_gfx12_5_entry_trampoline_target(source_gfx) ||
-      !is_gfx12_5_entry_trampoline_target(target_gfx)) {
-    return decision;
+      !is_gfx12_5_entry_trampoline_target(source_gfx)) {
+    return std::nullopt;
   }
-
-  decision.kind = RewriteKind::Gfx12_5EntryTrampoline;
 
   // ROCm/rocm-systems#7581 installs kernel-entry trampolines after the normal
   // loader compatibility checks and keys the work off the code object's ISA, not
   // a source->agent retarget. Mirror that here by keeping COMGR's target on the
   // source processor for all gfx12.5 entry-trampoline rewrites.
-  decision.target_isa = source_isa;
+  RewriteDecision decision{source_isa, source_isa};
 
   if (source_gfx == "gfx1250") {
     decision.source_isa = add_gfx1250_stepping_feature(source_isa, true);
-    decision.target_isa =
-        add_gfx1250_stepping_feature(decision.target_isa,
-                                     !gate_allows_hotswap(gfx));
+    decision.target_isa = add_gfx1250_stepping_feature(source_isa, true);
   }
 
   return decision;

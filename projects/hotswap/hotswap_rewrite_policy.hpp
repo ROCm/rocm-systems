@@ -4,9 +4,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Centralized policy for selecting HotSwap rewrite modes and the COMGR
-// source/target ISA pair. The HSA tools loader owns interception and fallback;
-// this unit owns the conditions under which a rewrite is requested.
+// Centralized policy for selecting whether HotSwap should call COMGR and which
+// source/target ISA pair it should pass. COMGR owns the enabled rewrite passes.
 //
 //===----------------------------------------------------------------------===//
 
@@ -15,32 +14,19 @@
 
 #include "hotswap_gfx_query.hpp"
 
+#include <optional>
 #include <string>
 
 namespace rocr::hotswap {
-
-enum class RewriteKind {
-  None,
-  Gfx1250A0Patch,
-  Gfx12_5EntryTrampoline,
-};
 
 struct RewriteOptions {
   bool entry_trampolines_requested = false;
 };
 
 struct RewriteDecision {
-  RewriteKind kind = RewriteKind::None;
   std::string source_isa;
   std::string target_isa;
-
-  bool should_rewrite() const {
-    return kind != RewriteKind::None && !source_isa.empty() &&
-           !target_isa.empty();
-  }
 };
-
-const char *rewrite_kind_name(RewriteKind kind);
 
 // HotSwap's default activation policy: B0-to-A0 rewriting is performed only
 // for gfx1250 silicon at ASIC revision A0 (and only when the revision was
@@ -52,7 +38,7 @@ bool gate_allows_hotswap(const AgentGfxRevision &gfx);
 bool is_gfx12_5_entry_trampoline_target(const std::string &gfx_target);
 
 // Agent-level precheck used by the loader to avoid source-ISA parsing when no
-// rewrite mode can possibly apply.
+// COMGR rewrite can possibly apply.
 bool has_candidate_hotswap_rewrite(const AgentGfxRevision &gfx,
                                    const RewriteOptions &options);
 
@@ -62,12 +48,13 @@ bool has_candidate_hotswap_rewrite(const AgentGfxRevision &gfx,
 std::string add_gfx1250_stepping_feature(const std::string &isa_name,
                                          bool is_b0);
 
-// Returns the rewrite mode and COMGR ISA pair for this load, or RewriteKind::None
-// when the original code object should be loaded unchanged.
-RewriteDecision decide_hotswap_rewrite(const AgentGfxRevision &gfx,
-                                       const std::string &source_isa,
-                                       const std::string &target_isa,
-                                       const RewriteOptions &options);
+// Returns the COMGR ISA pair for this load, or std::nullopt when the original
+// code object should be loaded unchanged.
+std::optional<RewriteDecision>
+decide_hotswap_rewrite(const AgentGfxRevision &gfx,
+                       const std::string &source_isa,
+                       const std::string &target_isa,
+                       const RewriteOptions &options);
 
 } // namespace rocr::hotswap
 

@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 
 // ---------------------------------------------------------------------------
@@ -54,7 +55,6 @@ using rocr::hotswap::is_gfx12_5_entry_trampoline_target;
 using rocr::hotswap::query_agent_gfx_revision;
 using rocr::hotswap::reset_gfx_revision_cache;
 using rocr::hotswap::RewriteDecision;
-using rocr::hotswap::RewriteKind;
 using rocr::hotswap::RewriteOptions;
 
 // ---------------------------------------------------------------------------
@@ -155,6 +155,14 @@ AgentGfxRevision make_gfx_revision(const char *gfx_target,
   gfx.revision_valid = revision_valid;
   gfx.asic_revision = asic_revision;
   return gfx;
+}
+
+void run_decision_pair(const char *name,
+                       const std::optional<RewriteDecision> &decision,
+                       const std::string &source_isa,
+                       const std::string &target_isa) {
+  run(name, decision && decision->source_isa == source_isa &&
+                decision->target_isa == target_isa);
 }
 
 // The rewrite-policy helpers are exercised directly below so the tests and the
@@ -319,15 +327,12 @@ void test_EntryTrampolineFlagBlocksOtherTargets() {
 void test_RewriteDecisionSelectsA0Patch() {
   printf("TEST RewriteDecisionSelectsA0Patch...\n");
   const AgentGfxRevision gfx1250_a0 = make_gfx_revision("gfx1250", 0);
-  const RewriteDecision d =
+  const auto d =
       decide_hotswap_rewrite(gfx1250_a0, kGfx1250Isa, kGfx1250Isa,
                              RewriteOptions{false});
-  run("A0 gfx1250 selects default patch",
-      d.kind == RewriteKind::Gfx1250A0Patch);
-  run("A0 patch uses B0 source",
-      d.source_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific+");
-  run("A0 patch uses A0 target",
-      d.target_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific-");
+  run_decision_pair("A0 patch uses B0 source and A0 target", d,
+                    std::string(kGfx1250Isa) + ":gfx1250-b0-specific+",
+                    std::string(kGfx1250Isa) + ":gfx1250-b0-specific-");
 }
 
 // A0 gfx1250 with the trampoline flag still selects the A0 patch ISA pair.
@@ -335,41 +340,36 @@ void test_RewriteDecisionSelectsA0Patch() {
 void test_RewriteDecisionA0WithFlagKeepsA0Patch() {
   printf("TEST RewriteDecisionA0WithFlagKeepsA0Patch...\n");
   const AgentGfxRevision gfx1250_a0 = make_gfx_revision("gfx1250", 0);
-  const RewriteDecision d =
+  const auto d =
       decide_hotswap_rewrite(gfx1250_a0, kGfx1250Isa, kGfx1250Isa,
                              RewriteOptions{true});
-  run("A0 gfx1250 with flag selects default patch",
-      d.kind == RewriteKind::Gfx1250A0Patch);
-  run("A0 patch with flag uses B0 source",
-      d.source_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific+");
-  run("A0 patch with flag uses A0 target",
-      d.target_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific-");
+  run_decision_pair("A0 patch with flag keeps B0 source and A0 target", d,
+                    std::string(kGfx1250Isa) + ":gfx1250-b0-specific+",
+                    std::string(kGfx1250Isa) + ":gfx1250-b0-specific-");
 }
 
 // Non-A0 gfx1250 with the trampoline flag runs trampoline-only B0-to-B0.
 void test_RewriteDecisionSelectsGfx1250B0Trampoline() {
   printf("TEST RewriteDecisionSelectsGfx1250B0Trampoline...\n");
   const AgentGfxRevision gfx1250_b0 = make_gfx_revision("gfx1250", 1);
-  const RewriteDecision d =
+  const auto d =
       decide_hotswap_rewrite(gfx1250_b0, kGfx1250Isa, kGfx1250Isa,
                              RewriteOptions{true});
-  run("flagged non-A0 gfx1250 selects trampoline",
-      d.kind == RewriteKind::Gfx12_5EntryTrampoline);
-  run("trampoline keeps gfx1250 target B0",
-      d.target_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific+");
+  const std::string b0_isa =
+      std::string(kGfx1250Isa) + ":gfx1250-b0-specific+";
+  run_decision_pair("trampoline-only gfx1250 uses B0 source and B0 target", d,
+                    b0_isa, b0_isa);
 }
 
 // Concrete gfx125* targets other than gfx1250 use the trampoline path unchanged.
 void test_RewriteDecisionSelectsGfx125FamilyTrampoline() {
   printf("TEST RewriteDecisionSelectsGfx125FamilyTrampoline...\n");
   const AgentGfxRevision gfx1251 = make_gfx_revision("gfx1251", 1);
-  const RewriteDecision d =
+  const auto d =
       decide_hotswap_rewrite(gfx1251, kGfx1251Isa, kGfx1251Isa,
                              RewriteOptions{true});
-  run("flagged gfx1251 selects trampoline",
-      d.kind == RewriteKind::Gfx12_5EntryTrampoline);
-  run("gfx1251 ISA pair is preserved",
-      d.source_isa == kGfx1251Isa && d.target_isa == kGfx1251Isa);
+  run_decision_pair("gfx1251 ISA pair is preserved", d, kGfx1251Isa,
+                    kGfx1251Isa);
 }
 
 // Entry-trampoline rewrites keep COMGR on the source processor when the agent
@@ -377,42 +377,29 @@ void test_RewriteDecisionSelectsGfx125FamilyTrampoline() {
 void test_RewriteDecisionKeepsTrampolineSourceProcessor() {
   printf("TEST RewriteDecisionKeepsTrampolineSourceProcessor...\n");
   const AgentGfxRevision gfx1251 = make_gfx_revision("gfx1251", 1);
-  RewriteDecision d =
+  auto d =
       decide_hotswap_rewrite(gfx1251, kGfx12_5GenericIsa, kGfx1251Isa,
                              RewriteOptions{true});
-  run("generic source on concrete gfx125 agent selects trampoline",
-      d.kind == RewriteKind::Gfx12_5EntryTrampoline);
-  run("generic source keeps generic target",
-      d.source_isa == kGfx12_5GenericIsa && d.target_isa == kGfx12_5GenericIsa);
+  run_decision_pair("generic source keeps generic target", d,
+                    kGfx12_5GenericIsa, kGfx12_5GenericIsa);
 
   d = decide_hotswap_rewrite(gfx1251, kGfx1250Isa, kGfx1251Isa,
                              RewriteOptions{true});
-  run("concrete source on different gfx125 agent selects trampoline",
-      d.kind == RewriteKind::Gfx12_5EntryTrampoline);
-  run("concrete mismatch keeps source processor",
-      d.source_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific+" &&
-          d.target_isa == d.source_isa);
+  const std::string b0_isa =
+      std::string(kGfx1250Isa) + ":gfx1250-b0-specific+";
+  run_decision_pair("concrete mismatch keeps source processor", d, b0_isa,
+                    b0_isa);
 }
 
 // The trampoline flag never routes non-gfx12.5 source code objects through COMGR.
 void test_RewriteDecisionRejectsNonGfx12_5Source() {
   printf("TEST RewriteDecisionRejectsNonGfx12_5Source...\n");
   const AgentGfxRevision gfx1251 = make_gfx_revision("gfx1251", 1);
-  const RewriteDecision d =
+  const auto d =
       decide_hotswap_rewrite(gfx1251, kGfx942Isa, kGfx1251Isa,
                              RewriteOptions{true});
   run("non-gfx12.5 source on gfx125 agent is not rewritten",
-      d.kind == RewriteKind::None);
-  run("non-gfx12.5 source decision does not rewrite",
-      d.should_rewrite() == false);
-}
-
-// Public RewriteDecision objects with incomplete ISA state are not actionable.
-void test_RewriteDecisionRequiresIsaPair() {
-  printf("TEST RewriteDecisionRequiresIsaPair...\n");
-  RewriteDecision d;
-  d.kind = RewriteKind::Gfx12_5EntryTrampoline;
-  run("missing ISA pair does not rewrite", d.should_rewrite() == false);
+      !d.has_value());
 }
 
 void test_AddGfx1250SteppingFeature() {
@@ -502,7 +489,6 @@ int main() {
   test_RewriteDecisionSelectsGfx125FamilyTrampoline();
   test_RewriteDecisionKeepsTrampolineSourceProcessor();
   test_RewriteDecisionRejectsNonGfx12_5Source();
-  test_RewriteDecisionRequiresIsaPair();
   test_AddGfx1250SteppingFeature();
   test_AsicRevisionQueryFailure();
   test_ResultIsCachedPerHandle();

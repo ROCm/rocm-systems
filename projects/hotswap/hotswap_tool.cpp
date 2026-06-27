@@ -49,7 +49,6 @@ using rocr::hotswap::has_candidate_hotswap_rewrite;
 using rocr::hotswap::query_agent_gfx_revision;
 using rocr::hotswap::RewriteDecision;
 using rocr::hotswap::RewriteOptions;
-using rocr::hotswap::rewrite_kind_name;
 
 using ByteVec = std::shared_ptr<std::vector<uint8_t>>;
 using OwnedElf = std::unique_ptr<void, decltype(&std::free)>;
@@ -268,7 +267,8 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
                                    const char *options,
                                    hsa_loaded_code_object_t *loaded_code_object,
                                    const ByteVec &local_bytes,
-                                   const RewriteDecision &decision) {
+                                   const RewriteDecision &decision,
+                                   const RewriteOptions &rewrite_options) {
   // Route through RetargetCodeObject for unified logging, validation,
   // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
   // patching uses the same ISA name on both sides.
@@ -278,11 +278,11 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
       local_bytes->data(), local_bytes->size(), decision.source_isa.c_str(),
       decision.target_isa.c_str(), &out_elf, &out_elf_size);
 
-  HOTSWAP_LOG("hotswap: rewrite kind=%s src=%s tgt=%s in=%zu rc=%d out=%zu "
-              "changed=%d\n",
-              rewrite_kind_name(decision.kind), decision.source_isa.c_str(),
-              decision.target_isa.c_str(), local_bytes->size(), rc, out_elf_size,
-              out_elf != local_bytes->data());
+  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d in=%zu "
+              "rc=%d out=%zu changed=%d\n",
+              decision.source_isa.c_str(), decision.target_isa.c_str(),
+              rewrite_options.entry_trampolines_requested, local_bytes->size(),
+              rc, out_elf_size, out_elf != local_bytes->data());
 
   if (rc != 0 || out_elf == local_bytes->data()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
@@ -330,9 +330,9 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     const std::string source_isa = rocr::hotswap::GetCodeObjectIsaName(
         local_bytes->data(), local_bytes->size());
     const std::string target_isa = get_agent_isa_name(agent);
-    const RewriteDecision decision =
+    const auto decision =
         decide_hotswap_rewrite(gfx, source_isa, target_isa, rewrite_options);
-    if (!decision.should_rewrite()) {
+    if (!decision) {
       HOTSWAP_LOG("hotswap: decision NONE (gfx=%s src='%s' tgt='%s')\n",
                   gfx.gfx_target.c_str(), source_isa.c_str(), target_isa.c_str());
       return load_original_reader(executable, agent, code_object_reader,
@@ -341,7 +341,8 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     }
 
     const hsa_status_t status = try_retarget_and_load(
-        executable, agent, options, loaded_code_object, local_bytes, decision);
+        executable, agent, options, loaded_code_object, local_bytes, *decision,
+        rewrite_options);
     if (status == HSA_STATUS_SUCCESS) {
       return status;
     }
