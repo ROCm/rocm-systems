@@ -78,6 +78,7 @@
 #include "dda_all_reduce_ipc.h"
 #include "ipc_init.h"
 #include  <cpuid.h>
+#include <sys/utsname.h>
 
 #ifndef STR2
   #define STR2(v) #v
@@ -187,7 +188,7 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 1);
 
 /**
- * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
+ * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
 
@@ -266,6 +267,63 @@ static void initOnceFunc() {
 exit:;
 }
 
+// Return true when IOMMU passthrough is configured (explicit cmdline or kernel default).
+static bool ncclKernelHasConfigOption(const char* option) {
+  struct utsname utsname;
+  if (uname(&utsname) == -1) return false;
+
+  const char* possiblePaths[] = {
+    "/proc/config.gz",
+    "/boot/config-%s",
+    "/usr/src/linux-%s/.config",
+    "/usr/src/linux/.config",
+    "/usr/lib/modules/%s/config",
+    "/usr/lib/ostree-boot/config-%s",
+    "/usr/lib/kernel/config-%s",
+    "/usr/src/linux-headers-%s/.config",
+    "/lib/modules/%s/build/.config",
+  };
+
+  char kernelConfFile[128];
+  char buf[256];
+  int hasZcat = (system("which zcat > /dev/null 2>&1") == 0);
+
+  for (const auto& path : possiblePaths) {
+    snprintf(kernelConfFile, sizeof(kernelConfFile), path, utsname.release);
+
+    FILE* fp = NULL;
+    if (strstr(path, "/proc/config.gz") != NULL) {
+      if (!hasZcat || access("/proc/config.gz", R_OK) != 0) continue;
+      fp = popen("zcat /proc/config.gz 2>/dev/null", "r");
+    } else {
+      fp = fopen(kernelConfFile, "r");
+    }
+    if (fp == NULL) continue;
+
+    bool found = false;
+    while (fgets(buf, sizeof(buf), fp) != NULL) {
+      if (strstr(buf, option) != NULL) {
+        found = true;
+        break;
+      }
+    }
+
+    if (strstr(path, "/proc/config.gz") != NULL) {
+      pclose(fp);
+    } else {
+      fclose(fp);
+    }
+
+    if (found) return true;
+  }
+  return false;
+}
+
+static bool ncclIommuPassthroughOk(const char* cmdline) {
+  if (cmdline && strstr(cmdline, "iommu=pt") != NULL) return true;
+  return ncclKernelHasConfigOption("CONFIG_IOMMU_DEFAULT_PASSTHROUGH=y");
+}
+
 static ncclResult_t ncclInit() {
     // Register atexit handler to detect process shutdown. This must happen
     // early so the handler runs BEFORE HIP runtime static destructors.
@@ -298,7 +356,7 @@ static ncclResult_t ncclInit() {
           }
           fclose(file);
         }
-        if (strstr(strValue, "iommu=pt") == NULL)
+        if (!ncclIommuPassthroughOk(strValue))
           WARN("Missing \"iommu=pt\" from kernel command line which can lead to system instablity or hang!");
       }
 #ifndef HIP_UNCACHED_MEMORY
@@ -652,13 +710,13 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   ncclMemoryStackConstruct(&comm->memPermanent);
   ncclMemoryStackConstruct(&comm->memScoped);
   comm->destructorHead = nullptr;
-  
+
   comm->ddaIpcMemHandler = nullptr;
   comm->ddaIpcScratch = nullptr;
   comm->ddaIpcScratchBytes = 0;
   comm->ddaIpcPeerPtrsDev = nullptr;
   comm->ddaIpcBarrierState = nullptr;
-  
+
   comm->rank = rank;
   comm->nRanks = ndev;
   comm->pxnDisable = RCCL_VALUE_UNSET;
@@ -1575,11 +1633,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
      * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
      * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
      * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
-     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels 
-     * is required during Preset. Therefore, nChannels cannot be auto-calculated 
+     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
+     * is required during Preset. Therefore, nChannels cannot be auto-calculated
      * based on nNodes at this stage.
-     * Recommended: Set nChannels via environment variable (e.g., 6 channels for 
-     * optimal 4-node load balancing). Missing channel data is backfilled 
+     * Recommended: Set nChannels via environment variable (e.g., 6 channels for
+     * optimal 4-node load balancing). Missing channel data is backfilled
      * by repairMissingChannels() during Postset.
      * */
     int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
@@ -1899,7 +1957,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       INFO(NCCL_GRAPH, "CPUs with mixed vendors were detected.");
     }
   }
-  
+
   // Now that we know nNodes, alloc nodeRanks and compute localRanks for each node
   NCCLCHECKGOTO(ncclCalloc(&comm->nodeRanks, comm->nNodes), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&comm->rankToLocalRank, comm->nRanks), ret, fail);
@@ -2540,10 +2598,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     } else if (rocshmemHeapSize > (size_t)(2147483648)) {
 	    rocshmemHeapSize = (size_t)(1024*1024*1024); //increase symmetric allocation size for heap size > 2GB
     }
-    
+
     comm->sourceRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
     comm->destRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
-    INFO(NCCL_INIT, "Symmetric memory allocated: size %zu", rocshmemHeapSize); 
+    INFO(NCCL_INIT, "Symmetric memory allocated: size %zu", rocshmemHeapSize);
 
     comm->enableRocshmem = rcclParamRocshmemEnabled();
     comm->rocshmemThreshold = rcclParamRocshmemThreshold();
@@ -3539,7 +3597,7 @@ ncclResult_t ncclCommDestroy_impl(ncclComm_t comm) {
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem) {
     rocshmem::rocshmem_free(comm->sourceRshmem);
-    rocshmem::rocshmem_free(comm->destRshmem);	 
+    rocshmem::rocshmem_free(comm->destRshmem);
     //TODO: subcomm check
     rocshmem::rocshmem_team_t  team;
     if (!ncclCommToRshmemTeam.empty()) {
