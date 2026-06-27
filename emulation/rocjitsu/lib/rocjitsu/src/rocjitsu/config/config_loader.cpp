@@ -314,7 +314,7 @@ std::string subst_vars(const std::string &pat, const std::unordered_map<std::str
   return r;
 }
 
-util::inline_vector<std::string> expand_range(const std::string &pat) {
+util::inline_vector<std::string, 8> expand_range(const std::string &pat) {
   static const std::regex re(R"(^(\w*)\[(\d+):(\d+)\](.*)$)");
   std::smatch m;
   if (!std::regex_match(pat, m, re))
@@ -323,7 +323,7 @@ util::inline_vector<std::string> expand_range(const std::string &pat) {
   auto s = static_cast<uint32_t>(std::stoul(m[2].str()));
   auto e = static_cast<uint32_t>(std::stoul(m[3].str()));
   auto sfx = m[4].str();
-  util::inline_vector<std::string> out;
+  util::inline_vector<std::string, 8> out;
   for (uint32_t i = s; i < e; ++i)
     out.push_back(pfx + std::to_string(i) + sfx);
   return out;
@@ -342,7 +342,7 @@ void iterate_for(const flatbuffers::Vector<flatbuffers::Offset<fb::ForRange>> *r
     std::string name;
     uint32_t lo, hi;
   };
-  util::inline_vector<R> rv;
+  util::inline_vector<R, 3> rv;
   for (auto *fr : *ranges)
     rv.push_back({fr->var_name() ? fr->var_name()->str() : "", fr->start(), fr->end()});
 

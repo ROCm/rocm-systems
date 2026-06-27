@@ -239,7 +239,7 @@ private:
   util::inline_vector<HwQueue> hw_queues_;
   HwQueueStateList new_queue_states_;
   ComputeUnitList cus_;
-  util::inline_vector<simdojo::Port *> dispatch_ports_;
+  util::inline_vector<simdojo::Port *, 32> dispatch_ports_;
 
   size_t next_cu_ = 0;
   size_t next_queue_idx_ = 0;
