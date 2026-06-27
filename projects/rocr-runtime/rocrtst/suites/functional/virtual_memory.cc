@@ -155,11 +155,25 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
 
   if (ag_type == HSA_DEVICE_TYPE_CPU && pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
 
+  // Query whether this agent supports host memory DMA-BUF allocation via vmem APIs
+  const bool is_cpu_pool = (ag_type == HSA_DEVICE_TYPE_CPU);
+  bool vmem_host_supported = false;
+  ASSERT_SUCCESS(hsa_agent_get_info(agent,
+                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
+                                    &vmem_host_supported));
+
+  // Skip test for CPU pools if host memory DMA-BUF is not supported
+  if (is_cpu_pool && !vmem_host_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Host memory allocation not supported on this CPU agent - Skipping test." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
   size_t granule_size = pool_i.alloc_granule;
   const size_t sizeof_addrRangeUnmapped = 10 * granule_size;
   const size_t sizeof_addrRange = 20 * granule_size;
-
-  const bool is_cpu_pool = (ag_type == HSA_DEVICE_TYPE_CPU);
 
   ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
   ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateAIEAgents, &aies));
@@ -406,6 +420,21 @@ void VirtMemoryTestBasic::TestRefCount(hsa_agent_t agent, hsa_amd_memory_pool_t 
 
   if (ag_type == HSA_DEVICE_TYPE_CPU && pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
 
+  // Query whether this agent supports host memory allocation via vmem APIs
+  bool vmem_host_supported = false;
+  ASSERT_SUCCESS(hsa_agent_get_info(agent,
+                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
+                                    &vmem_host_supported));
+
+  // Skip test for CPU pools if host memory allocation is not supported
+  if (ag_type == HSA_DEVICE_TYPE_CPU && !vmem_host_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Host memory allocation not supported on this CPU agent - Skipping test." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
   size_t granule_size = pool_i.alloc_granule;
 
   ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addrRange, 10 * granule_size, 0, 0));
@@ -488,6 +517,21 @@ void VirtMemoryTestBasic::TestPartialMapping(hsa_agent_t agent, hsa_amd_memory_p
       !pool_i.alloc_allowed) return;
 
   if (ag_type == HSA_DEVICE_TYPE_CPU && pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
+
+  // Query whether this agent supports host memory DMA-BUF allocation via vmem APIs
+  bool vmem_host_supported = false;
+  ASSERT_SUCCESS(hsa_agent_get_info(agent,
+                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
+                                    &vmem_host_supported));
+
+  // Skip test for CPU pools if host memory DMA-BUF is not supported
+  if (ag_type == HSA_DEVICE_TYPE_CPU && !vmem_host_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Host memory allocation not supported on this CPU agent - Skipping test." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
 
   size_t granule_size = pool_i.alloc_granule;
 
@@ -1304,6 +1348,21 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
   ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
   if (ag_type != HSA_DEVICE_TYPE_CPU) return;
 
+  // Query whether this agent supports host memory allocation via vmem APIs
+  bool vmem_host_supported = false;
+  ASSERT_SUCCESS(hsa_agent_get_info(agent,
+                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
+                                    &vmem_host_supported));
+
+  // Skip test for CPU pools if host memory is not supported
+  if (!vmem_host_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Host memory allocation not supported on this CPU agent - Skipping test." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
   rocrtst::pool_info_t pool_i;
   ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
   if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
@@ -1709,6 +1768,20 @@ void VirtMemoryTestBasic::NonContiguousChunks(hsa_agent_t agent, hsa_amd_memory_
   hsa_device_type_t ag_type;
   ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
   if (ag_type != HSA_DEVICE_TYPE_CPU) return;
+
+  bool vmem_host_supported = false;
+  ASSERT_SUCCESS(hsa_agent_get_info(agent,
+                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
+                                    &vmem_host_supported));
+
+  // Skip test for CPU pools if host memory allocation is not supported
+  if (!vmem_host_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Host memory allocation not supported on this CPU agent - Skipping test." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
 
   rocrtst::pool_info_t pool_i;
   ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
@@ -2251,6 +2324,21 @@ void VirtMemoryTestInterProcess::ChildProcessImpl() {
 void VirtMemoryTestBasic::TestGpuAccessToHostMemoryAllocation(hsa_agent_t cpu_agent,
                                                                hsa_agent_t gpu_agent,
                                                                hsa_amd_memory_pool_t cpu_pool) {
+  // Query whether this CPU agent supports host memory DMA-BUF allocation via vmem APIs
+  bool vmem_host_supported = false;
+  ASSERT_SUCCESS(hsa_agent_get_info(cpu_agent,
+                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
+                                    &vmem_host_supported));
+
+  // Skip test if host memory is not supported
+  if (!vmem_host_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Host memory DMA-BUF allocation not supported on this CPU agent - Skipping test." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
   // Check if pool supports allocation
   rocrtst::pool_info_t pool_i;
   ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(cpu_pool, &pool_i));

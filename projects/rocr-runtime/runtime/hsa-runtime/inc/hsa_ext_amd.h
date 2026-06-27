@@ -78,9 +78,10 @@
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
  * - 1.26 - hsa_amd_queue_create: batch queue creation with descriptor
+ * - 1.27 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 26
+#define HSA_AMD_INTERFACE_VERSION_MINOR 27
 
 #ifdef __cplusplus
 extern "C" {
@@ -969,6 +970,12 @@ typedef enum hsa_amd_agent_info_s {
    * Returns uint32_t. Zero if the device does not support dynamic data prefetch.
    */
   HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS = 0xA123,
+  /**
+   * Queries whether the agent supports allocating host memory that can be
+   * exported as a DMA-BUF file descriptor for use with virtual memory APIs.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
 } hsa_amd_agent_info_t;
 
 /**
