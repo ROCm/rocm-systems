@@ -20,6 +20,7 @@
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "util/arena_alloc.h"
+#include "util/inline_vector.h"
 #include "util/intrusive_list.h"
 #include "util/log.h"
 
@@ -38,7 +39,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace {
 
@@ -271,10 +271,12 @@ struct DetectedElfTarget {
 /// intrusive list and fixed-block arena so this C ABI path can report registry
 /// exhaustion as an HSA status instead of depending on throwing STL allocation.
 /// Entries for application readers are non-owning and rely on the application's
-/// reader lifetime. Entries for hidden translated readers own a vector so ROCR's
+/// reader lifetime. Entries for hidden translated readers own byte storage so ROCR's
 /// memory-reader pointer remains valid while the translated load is in progress.
 class CodeObjectReaderRegistry {
 public:
+  using OwnedBytes = util::inline_vector<uint8_t>;
+
   /// @brief Return the singleton registry used by all hook wrappers.
   static CodeObjectReaderRegistry &instance() {
     static CodeObjectReaderRegistry registry;
@@ -287,7 +289,7 @@ public:
   /// @param size Size of the ELF image in bytes.
   /// @param owned Optional owned storage for translated ELF bytes.
   [[nodiscard]] bool store(hsa_code_object_reader_t reader, const uint8_t *bytes, size_t size,
-                           std::vector<uint8_t> *owned) {
+                           OwnedBytes *owned) {
     std::unique_lock lock(mutex_);
     for (auto it = entries_.begin(); it != entries_.end(); ++it) {
       auto *entry = static_cast<Entry *>(it.node_pointer());
@@ -350,13 +352,13 @@ public:
 
 private:
   struct Entry : util::IListNode<Entry> {
-    Entry(uint64_t h, const uint8_t *b, size_t s, std::vector<uint8_t> *o)
+    Entry(uint64_t h, const uint8_t *b, size_t s, OwnedBytes *o)
         : handle(h), bytes(b), size(s), owned(o) {}
 
     uint64_t handle = 0;
     const uint8_t *bytes = nullptr;
     size_t size = 0;
-    std::vector<uint8_t> *owned = nullptr;
+    OwnedBytes *owned = nullptr;
   };
 
   void destroy_entry(Entry *entry) {
@@ -572,9 +574,9 @@ hsa_status_t HSA_API rj_code_object_reader_destroy(hsa_code_object_reader_t code
   return original(code_object_reader);
 }
 
-[[nodiscard]] hsa_status_t create_translated_reader(std::vector<uint8_t> translated,
+[[nodiscard]] hsa_status_t create_translated_reader(CodeObjectReaderRegistry::OwnedBytes translated,
                                                     hsa_code_object_reader_t *translated_reader) {
-  auto *owned = new (std::nothrow) std::vector<uint8_t>(std::move(translated));
+  auto *owned = new (std::nothrow) CodeObjectReaderRegistry::OwnedBytes(std::move(translated));
   if (owned == nullptr)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
