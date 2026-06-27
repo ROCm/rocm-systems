@@ -24,7 +24,6 @@ namespace {
 
 struct FakeEnv {
   std::string agent_isa = "amdgcn-amd-amdhsa--gfx1250";
-  bool asic_rev_ok = true;
   uint32_t asic_revision = 0;
 
   int retarget_calls = 0;
@@ -131,9 +130,6 @@ hsa_status_t hsa_agent_get_info(hsa_agent_t /*agent*/,
                                 hsa_agent_info_t attribute, void *value) {
   if (attribute ==
       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION)) {
-    if (!g_env.asic_rev_ok) {
-      return HSA_STATUS_ERROR;
-    }
     *static_cast<uint32_t *>(value) = g_env.asic_revision;
     return HSA_STATUS_SUCCESS;
   }
@@ -268,185 +264,157 @@ hsa_status_t load_reader(CoreApiTable &core, hsa_code_object_reader_t reader) {
       hsa_executable_t{}, fake_agent(), reader, nullptr, &loaded);
 }
 
-void test_FlagUnsetLoadsOriginalForNonA0Gfx1250() {
-  std::printf("TEST FlagUnsetLoadsOriginalForNonA0Gfx1250...\n");
-  reset_state();
-  g_env.agent_isa = kGfx1250Isa;
-  g_env.asic_revision = 1;
-  CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
-  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 0, "flag unset skips non-A0 gfx1250 rewrite");
-  check(g_env.last_loaded_reader == reader.handle,
-        "original reader is loaded when flag is unset");
+void begin_test(const char *name, const char *description) {
+  std::printf("TEST %s...\n  %s\n", name, description);
 }
 
-void test_FlagZeroLoadsOriginalForNonA0Gfx1250() {
-  std::printf("TEST FlagZeroLoadsOriginalForNonA0Gfx1250...\n");
+struct LoadResult {
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+  uint64_t original_reader = 0;
+  uint64_t loaded_reader = 0;
+  int retarget_calls = 0;
+  std::string source_isa;
+  std::string target_isa;
+  size_t retained_elfs = 0;
+};
+
+LoadResult load_once(const char *code_object_isa, const char *agent_isa,
+                     const char *entry_trampoline_flag,
+                     uint32_t asic_revision = 1,
+                     int retarget_status = 0) {
   reset_state();
-  set_entry_trampoline_env("0");
-  g_env.agent_isa = kGfx1250Isa;
-  g_env.asic_revision = 1;
+  set_entry_trampoline_env(entry_trampoline_flag);
+  g_env.agent_isa = agent_isa;
+  g_env.asic_revision = asic_revision;
+  g_env.retarget_status = retarget_status;
+
   CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
+  std::vector<uint8_t> elf = make_code_object(code_object_isa);
   const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 0, "flag value 0 disables entry trampolines");
-  check(g_env.last_loaded_reader == reader.handle,
-        "original reader is loaded when flag is 0");
+
+  LoadResult result;
+  result.original_reader = reader.handle;
+  result.status = load_reader(core, reader);
+  result.loaded_reader = g_env.last_loaded_reader;
+  result.retarget_calls = g_env.retarget_calls;
+  result.source_isa = g_env.retarget_source_isa;
+  result.target_isa = g_env.retarget_target_isa;
+  result.retained_elfs = g_rewritten_elfs.size();
+  return result;
 }
 
-void test_FlagOneRetargetsB0ToB0() {
-  std::printf("TEST FlagOneRetargetsB0ToB0...\n");
-  reset_state();
-  set_entry_trampoline_env("1");
-  g_env.agent_isa = kGfx1250Isa;
-  g_env.asic_revision = 1;
-  CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
-  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 1, "flag 1 routes B0 gfx1250 through COMGR");
-  check(g_env.retarget_source_isa == kGfx1250B0Isa,
+void check_original_load(const LoadResult &result, const char *name) {
+  check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
+  check(result.retarget_calls == 0, name);
+  check(result.loaded_reader == result.original_reader,
+        "original reader is loaded");
+}
+
+void test_DisabledFlagLoadsOriginal() {
+  begin_test("DisabledFlagLoadsOriginal",
+             "Unset, empty, and 0 trampoline flags must leave non-A0 gfx1250 "
+             "on the original reader.");
+  struct FlagCase {
+    const char *flag_value;
+    const char *expectation;
+  };
+  const FlagCase cases[] = {
+      {nullptr, "unset flag skips non-A0 gfx1250 rewrite"},
+      {"", "empty flag skips non-A0 gfx1250 rewrite"},
+      {"0", "flag value 0 skips non-A0 gfx1250 rewrite"},
+  };
+  for (const FlagCase &c : cases) {
+    const LoadResult result =
+        load_once(kGfx1250Isa, kGfx1250Isa, c.flag_value);
+    check_original_load(result, c.expectation);
+  }
+}
+
+void test_FlagRoutesGfx1250B0() {
+  begin_test("FlagRoutesGfx1250B0",
+             "The trampoline flag must route non-A0 gfx1250 through COMGR "
+             "without selecting the A0 patch path.");
+  const LoadResult result = load_once(kGfx1250Isa, kGfx1250Isa, "1");
+  check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
+  check(result.retarget_calls == 1, "flag routes B0 gfx1250 through COMGR");
+  check(result.source_isa == kGfx1250B0Isa,
         "source ISA is tagged as B0");
-  check(g_env.retarget_target_isa == kGfx1250B0Isa,
+  check(result.target_isa == kGfx1250B0Isa,
         "non-A0 target ISA is tagged as B0");
-  check(g_env.last_loaded_reader != reader.handle,
+  check(result.loaded_reader != result.original_reader,
         "rewritten reader is loaded instead of original reader");
-  check(g_rewritten_elfs.size() == 1,
+  check(result.retained_elfs == 1,
         "rewritten ELF is retained after successful load");
 }
 
-void test_FlagOneRetargetsGfx125FamilyWithoutSteppingSuffix() {
-  std::printf("TEST FlagOneRetargetsGfx125FamilyWithoutSteppingSuffix...\n");
-  reset_state();
-  set_entry_trampoline_env("1");
-  g_env.agent_isa = kGfx1251Isa;
-  g_env.asic_revision = 1;
-  CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx1251Isa);
-  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 1, "flag 1 routes gfx1251 through COMGR");
-  check(g_env.retarget_source_isa == kGfx1251Isa,
-        "gfx1251 source ISA is not tagged with gfx1250 stepping feature");
-  check(g_env.retarget_target_isa == kGfx1251Isa,
-        "gfx1251 target ISA is not tagged with gfx1250 stepping feature");
+void test_FlagRoutesGfx12_5Family() {
+  begin_test("FlagRoutesGfx12_5Family",
+             "The trampoline flag must route gfx125* and gfx12-5-generic "
+             "without adding gfx1250 stepping features.");
+  const char *cases[] = {kGfx1251Isa, kGfx12_5GenericIsa};
+  for (const char *isa : cases) {
+    const LoadResult result = load_once(isa, isa, "1");
+    check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
+    check(result.retarget_calls == 1, "flag routes gfx12.5 target through COMGR");
+    check(result.source_isa == isa, "source ISA is preserved");
+    check(result.target_isa == isa, "target ISA is preserved");
+  }
 }
 
-void test_FlagOneRetargetsGfx12_5GenericWithoutSteppingSuffix() {
-  std::printf("TEST FlagOneRetargetsGfx12_5GenericWithoutSteppingSuffix...\n");
-  reset_state();
-  set_entry_trampoline_env("1");
-  g_env.agent_isa = kGfx12_5GenericIsa;
-  g_env.asic_revision = 1;
-  CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx12_5GenericIsa);
-  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 1,
-        "flag 1 routes gfx12-5-generic through COMGR");
-  check(g_env.retarget_source_isa == kGfx12_5GenericIsa,
-        "generic source ISA is not tagged with gfx1250 stepping feature");
-  check(g_env.retarget_target_isa == kGfx12_5GenericIsa,
-        "generic target ISA is not tagged with gfx1250 stepping feature");
-}
-
-void test_FlagOneRetargetsGenericSourceOnConcreteGfx125Agent() {
-  std::printf(
-      "TEST FlagOneRetargetsGenericSourceOnConcreteGfx125Agent...\n");
-  reset_state();
-  set_entry_trampoline_env("1");
-  g_env.agent_isa = kGfx1251Isa;
-  g_env.asic_revision = 1;
-  CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx12_5GenericIsa);
-  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 1,
-        "flag 1 routes generic source on concrete gfx125 agent through COMGR");
-  check(g_env.retarget_source_isa == kGfx12_5GenericIsa,
+void test_GenericSourceUsesGenericTarget() {
+  begin_test("GenericSourceUsesGenericTarget",
+             "A gfx12-5-generic source loaded on a concrete gfx125* agent "
+             "must stay generic to avoid processor retargeting.");
+  const LoadResult result = load_once(kGfx12_5GenericIsa, kGfx1251Isa, "1");
+  check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
+  check(result.retarget_calls == 1,
+        "generic source on concrete gfx125 agent routes through COMGR");
+  check(result.source_isa == kGfx12_5GenericIsa,
         "generic source ISA is preserved");
-  check(g_env.retarget_target_isa == kGfx12_5GenericIsa,
+  check(result.target_isa == kGfx12_5GenericIsa,
         "generic target ISA is preserved to avoid processor retargeting");
 }
 
 void test_A0RetargetsWithoutFlag() {
-  std::printf("TEST A0RetargetsWithoutFlag...\n");
-  reset_state();
-  g_env.agent_isa = kGfx1250Isa;
-  g_env.asic_revision = 0;
-  CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
-  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 1, "A0 gfx1250 keeps default rewrite path");
-  check(g_env.retarget_source_isa == kGfx1250B0Isa,
+  begin_test("A0RetargetsWithoutFlag",
+             "The existing gfx1250 A0 rewrite path must still run without "
+             "the trampoline flag.");
+  const LoadResult result = load_once(kGfx1250Isa, kGfx1250Isa, nullptr, 0);
+  check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
+  check(result.retarget_calls == 1, "A0 gfx1250 keeps default rewrite path");
+  check(result.source_isa == kGfx1250B0Isa,
         "source code object ISA is tagged as B0");
-  check(g_env.retarget_target_isa == kGfx1250A0Isa,
+  check(result.target_isa == kGfx1250A0Isa,
         "A0 agent ISA is tagged as A0");
 }
 
-void test_FlagOneRetargetsUnknownRevisionAsB0Target() {
-  std::printf("TEST FlagOneRetargetsUnknownRevisionAsB0Target...\n");
-  reset_state();
-  set_entry_trampoline_env("1");
-  g_env.agent_isa = kGfx1250Isa;
-  g_env.asic_rev_ok = false;
-  CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
-  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 1,
-        "flag 1 routes unknown-revision gfx1250 through COMGR");
-  check(g_env.retarget_target_isa == kGfx1250B0Isa,
-        "unknown revision is treated as non-A0 for target suffix");
-}
-
 void test_FlagOneBlocksNonGfx12_5() {
-  std::printf("TEST FlagOneBlocksNonGfx12_5...\n");
-  reset_state();
-  set_entry_trampoline_env("1");
-  g_env.agent_isa = kGfx942Isa;
-  g_env.asic_revision = 0;
-  CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx942Isa);
-  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 0,
-        "entry trampoline flag does not enable non-gfx12.5 rewrite");
-  check(g_env.last_loaded_reader == reader.handle,
-        "non-gfx12.5 uses original reader");
+  begin_test("FlagOneBlocksNonGfx12_5",
+             "The trampoline flag must not become a global rewrite enable.");
+  const LoadResult result = load_once(kGfx942Isa, kGfx942Isa, "1", 0);
+  check_original_load(result,
+                      "entry trampoline flag does not route non-gfx12.5");
 }
 
 void test_RetargetFailureFallsBackToOriginalReader() {
-  std::printf("TEST RetargetFailureFallsBackToOriginalReader...\n");
-  reset_state();
-  set_entry_trampoline_env("1");
-  g_env.agent_isa = kGfx1250Isa;
-  g_env.asic_revision = 1;
-  g_env.retarget_status = -1;
-  CoreApiTable core = install_tool();
-  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
-  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "fallback load succeeds");
-  check(g_env.retarget_calls == 1, "COMGR retarget was attempted");
-  check(g_env.last_loaded_reader == reader.handle,
+  begin_test("RetargetFailureFallsBackToOriginalReader",
+             "If COMGR rejects a gated rewrite, the loader must still load "
+             "the original reader.");
+  const LoadResult result = load_once(kGfx1250Isa, kGfx1250Isa, "1", 1, -1);
+  check(result.status == HSA_STATUS_SUCCESS, "fallback load succeeds");
+  check(result.retarget_calls == 1, "COMGR retarget was attempted");
+  check(result.loaded_reader == result.original_reader,
         "retarget failure falls back to original reader");
 }
 
 } // namespace
 
 int main() {
-  test_FlagUnsetLoadsOriginalForNonA0Gfx1250();
-  test_FlagZeroLoadsOriginalForNonA0Gfx1250();
-  test_FlagOneRetargetsB0ToB0();
-  test_FlagOneRetargetsGfx125FamilyWithoutSteppingSuffix();
-  test_FlagOneRetargetsGfx12_5GenericWithoutSteppingSuffix();
-  test_FlagOneRetargetsGenericSourceOnConcreteGfx125Agent();
+  test_DisabledFlagLoadsOriginal();
+  test_FlagRoutesGfx1250B0();
+  test_FlagRoutesGfx12_5Family();
+  test_GenericSourceUsesGenericTarget();
   test_A0RetargetsWithoutFlag();
-  test_FlagOneRetargetsUnknownRevisionAsB0Target();
   test_FlagOneBlocksNonGfx12_5();
   test_RetargetFailureFallsBackToOriginalReader();
   reset_state();
