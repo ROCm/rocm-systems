@@ -1034,7 +1034,7 @@ class Runtime {
 
     /** 
      * @brief For host owned memory, resolve to the GPU agent that imported the memory. 
-     * For device owned memory, return the GPU agent that owns the memory.
+     * For device owned memory, return the agent that owns the memory.
      */
     __forceinline core::Agent* GetDrmAgent() const {
       return drm_owner ? drm_owner : agentOwner();
