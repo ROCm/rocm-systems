@@ -161,8 +161,7 @@ public:
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
   /// @brief Return LDS targets selected by a cluster multicast mask.
-  std::vector<ClusterLdsTarget> cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
-                                                    uint32_t mcast_mask);
+  ClusterLdsTargets cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint32_t mcast_mask);
 
 private:
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
@@ -258,7 +257,7 @@ private:
     uint32_t cluster_rank = 0;
     uint32_t cluster_size = 1;
     bool completed = false;
-    std::vector<uint32_t> peer_wg_ids;
+    util::inline_vector<uint32_t, kClusterMulticastMaskBits> peer_wg_ids;
   };
   std::unordered_map<uint64_t, ClusterWorkgroupPlacement> cluster_wg_placements_;
 

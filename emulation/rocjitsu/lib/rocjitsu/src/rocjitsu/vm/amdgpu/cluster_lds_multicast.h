@@ -4,7 +4,9 @@
 #ifndef ROCJITSU_VM_AMDGPU_CLUSTER_LDS_MULTICAST_H_
 #define ROCJITSU_VM_AMDGPU_CLUSTER_LDS_MULTICAST_H_
 
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "util/inline_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -26,6 +28,8 @@ struct ClusterLdsTarget {
   /// cluster operations; current multicast writes need only CU and LDS base.
   uint32_t cluster_rank = 0;
 };
+
+using ClusterLdsTargets = util::inline_vector<ClusterLdsTarget, kClusterMulticastMaskBits>;
 
 /// @brief Fully described LDS writeback request produced by an async cluster load.
 ///
@@ -51,7 +55,7 @@ struct ClusterLdsMulticastTransaction {
   std::array<uint64_t, 64> per_lane_global_addr = {};
   std::array<uint32_t, 64> per_lane_lds_addr = {};
   std::vector<uint8_t> payload;
-  std::vector<ClusterLdsTarget> targets;
+  ClusterLdsTargets targets;
 };
 
 enum class [[nodiscard]] ClusterLdsMulticastResult {
@@ -76,9 +80,9 @@ uint32_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32
 /// @brief Return true when the transaction mask selects the issuing workgroup.
 bool cluster_lds_source_rank_selected(const ClusterLdsMulticastTransaction &txn);
 
-ClusterLdsMulticastTransaction
-make_cluster_lds_multicast_transaction(VectorMemState &state, const Wavefront &wf,
-                                       std::vector<ClusterLdsTarget> targets);
+ClusterLdsMulticastTransaction make_cluster_lds_multicast_transaction(VectorMemState &state,
+                                                                      const Wavefront &wf,
+                                                                      ClusterLdsTargets targets);
 
 /// @brief Execution boundary for one participant's cluster async-to-LDS writeback.
 class ClusterLdsMulticastEngine {

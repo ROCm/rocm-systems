@@ -1453,8 +1453,8 @@ TEST(Gfx1250ExecutionTest, ClusterLdsMulticastTransactionCapturesRemapState) {
   state.per_lane_lds_addr[1] = state.lds_base + 0x24;
   state.response_data.resize(state.wf_size * state.num_elems * state.elem_size);
 
-  std::vector<amdgpu::ClusterLdsTarget> targets = {{cu, /*wg_id=*/11, /*lds_base=*/0x400,
-                                                    /*cluster_rank=*/3}};
+  amdgpu::ClusterLdsTargets targets = {{cu, /*wg_id=*/11, /*lds_base=*/0x400,
+                                        /*cluster_rank=*/3}};
   auto txn = amdgpu::make_cluster_lds_multicast_transaction(state, *wf, std::move(targets));
 
   EXPECT_EQ(txn.dispatch_id, 7u);

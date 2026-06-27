@@ -41,9 +41,8 @@ uint32_t extend_scalar_load(const uint8_t *bytes, uint32_t elem_size, bool sign_
   return value;
 }
 
-std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavefront &wf,
-                                                        ComputeUnitCore &cu) {
-  std::vector<ClusterLdsTarget> targets;
+ClusterLdsTargets resolve_lds_write_targets(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu) {
+  ClusterLdsTargets targets;
   if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
     if (auto *cp = cu.command_processor())
       targets = cp->cluster_lds_targets(wf.dispatch_id(), wf.wg_id(), d.cluster_mcast_mask);
@@ -77,7 +76,7 @@ void write_lds_dst_load_direct(const VectorMemState &d, ComputeUnitCore &cu,
 MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
                                              MemoryAccessDeferredCompletion complete) {
   uint32_t per_lane_bytes = d.num_elems * d.elem_size;
-  std::vector<ClusterLdsTarget> targets;
+  ClusterLdsTargets targets;
   size_t target_count = 1;
   const bool cluster_downgrades_to_ordinary = d.cluster_multicast && wf.cluster_size() <= 1;
   if (d.cluster_multicast && !cluster_downgrades_to_ordinary) {

@@ -66,9 +66,9 @@ uint32_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32
   return remap_cluster_lds_addr(txn.source_lds_base, target_lds_base, source_lds_addr);
 }
 
-ClusterLdsMulticastTransaction
-make_cluster_lds_multicast_transaction(VectorMemState &state, const Wavefront &wf,
-                                       std::vector<ClusterLdsTarget> targets) {
+ClusterLdsMulticastTransaction make_cluster_lds_multicast_transaction(VectorMemState &state,
+                                                                      const Wavefront &wf,
+                                                                      ClusterLdsTargets targets) {
   assert(state.cluster_multicast && "cluster LDS multicast transaction requires cluster_multicast");
   assert(state.lds_base == wf.lds_base() &&
          "cluster LDS multicast source base must be the source WG allocation base");

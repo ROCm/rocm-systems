@@ -14,6 +14,7 @@ RJ_DIAGNOSTIC_POP
 
 #include "simdojo/sim/message.h"
 #include "simdojo/sim/simulation.h"
+#include "util/inline_vector.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -102,12 +103,13 @@ bool any_active_wavefronts(const std::vector<ComputeUnitCore *> &cus) {
 
 bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_local_wg_id,
                              size_t next_cu, const std::vector<ComputeUnitCore *> &cus,
-                             std::vector<PlannedWorkgroup> &plan, size_t &planned_next_cu) {
+                             util::inline_vector<PlannedWorkgroup, kMaxClusterWorkgroups> &plan,
+                             size_t &planned_next_cu) {
   plan.clear();
   uint32_t cluster_size = entry.cluster_size();
   const uint32_t lds_bytes_per_wg = aligned_lds_bytes_per_workgroup(entry);
   constexpr auto kU32Max = std::numeric_limits<uint32_t>::max();
-  std::vector<uint32_t> planned_per_cu(cus.size(), 0);
+  util::inline_vector<uint32_t, 0> planned_per_cu(cus.size(), 0);
   size_t last_cu_idx = next_cu;
 
   for (uint32_t rank = 0; rank < cluster_size; ++rank) {
@@ -651,10 +653,10 @@ void CommandProcessor::erase_cluster_workgroups(uint32_t dispatch_id) {
   }
 }
 
-std::vector<ClusterLdsTarget>
-CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint32_t mcast_mask) {
+ClusterLdsTargets CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
+                                                        uint32_t mcast_mask) {
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  std::vector<ClusterLdsTarget> targets;
+  ClusterLdsTargets targets;
   auto src_it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
   if (src_it == cluster_wg_placements_.end())
     return targets;
@@ -701,7 +703,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
 
-    std::vector<Wavefront *> wg_wavefronts;
+    util::inline_vector<Wavefront *> wg_wavefronts;
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
@@ -740,7 +742,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
              "validate_cluster_shape guarantees a complete trailing cluster");
       uint32_t cluster_ordinal = entry.dispatched_wgs / cluster_size;
       local_wg_id = entry.cluster_base_local_wg_id_for_ordinal(cluster_ordinal);
-      std::vector<PlannedWorkgroup> plan;
+      util::inline_vector<PlannedWorkgroup, kMaxClusterWorkgroups> plan;
       size_t planned_next_cu = next_cu_;
       if (!plan_cluster_workgroups(entry, local_wg_id, next_cu_, cus_, plan, planned_next_cu)) {
         if (!any_active_wavefronts(cus_)) {
@@ -821,7 +823,7 @@ void CommandProcessor::on_cu_idle() {
   if (completion_)
     completion_->drain_completions(new_queue_states_);
 
-  std::vector<bool> was_idle(cus_.size());
+  util::inline_vector<bool, 0> was_idle(cus_.size());
   for (size_t i = 0; i < cus_.size(); ++i)
     was_idle[i] = !cus_[i]->has_active_wfs();
 
