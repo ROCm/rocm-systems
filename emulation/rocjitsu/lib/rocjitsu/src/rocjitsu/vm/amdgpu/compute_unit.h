@@ -26,6 +26,7 @@
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
+#include "util/inline_vector.h"
 #include "util/log.h"
 
 #include "simdojo/sim/component.h"
@@ -502,7 +503,7 @@ protected:
   bool sram_ecc_ = false;
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
-  std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
+  util::inline_vector<std::unique_ptr<Wavefront>, 0> wfs_; ///< Pre-allocated wavefront slots.
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 
@@ -531,7 +532,7 @@ protected:
 
   /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
   /// Populated at dispatch_wf time. Null entries mean "not allocated".
-  std::vector<Wavefront *> sgpr_to_wave_;
+  util::inline_vector<Wavefront *, 0> sgpr_to_wave_;
   /// Populated by the ISA-specific subclass (which owns the VGPR file).
   virtual void fill_vgpr_to_wave(uint32_t /*base*/, uint32_t /*count*/, Wavefront * /*wf*/) {}
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
@@ -673,7 +674,7 @@ protected:
 
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
-  std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
+  util::inline_vector<Wavefront *, 0> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
   uint32_t vgprs_per_block_ = 0;
 };
 

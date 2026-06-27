@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/except.h"
+#include "util/inline_vector.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -323,7 +324,7 @@ void ComputeUnitCore::update_wf_states() {
       }
     }
     if (all_at_barrier) {
-      std::vector<Wavefront *> barrier_wfs;
+      util::inline_vector<Wavefront *> barrier_wfs;
       for (auto &w2 : wfs_)
         if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER)
           barrier_wfs.push_back(w2.get());

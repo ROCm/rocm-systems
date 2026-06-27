@@ -15,6 +15,7 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
+#include "util/inline_vector.h"
 
 #include <cassert>
 #include <cstdint>
@@ -78,7 +79,7 @@ public:
 
       uint32_t lds_base = cu->allocate_lds(wg.entry->group_segment_fixed_size);
       cu->begin_workgroup(wg.entry->dispatch_id, wg.global_wg_id, wg.entry->wfs_per_workgroup);
-      std::vector<Wavefront *> wg_wfs;
+      util::inline_vector<Wavefront *> wg_wfs;
       wg_wfs.reserve(wg.entry->wfs_per_workgroup);
       for (uint32_t w = 0; w < wg.entry->wfs_per_workgroup; ++w) {
         Wavefront *wf = cu->dispatch_wf(wg.global_wg_id, wg.entry->kernel_entry_pc,
