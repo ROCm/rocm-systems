@@ -103,3 +103,10 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# Standalone unit test for the rdcd insecure-bind loopback guard.
+# Header-only: no running server or GPU required.
+add_executable(rdc_server_security_test ${SRC_DIR}/rdc_server_security_test.cc)
+target_include_directories(rdc_server_security_test PRIVATE ${PROJECT_SOURCE_DIR})
+target_link_libraries(rdc_server_security_test PRIVATE GTest::gtest_main pthread)
+add_test(NAME rdc_server_security_test COMMAND rdc_server_security_test)
