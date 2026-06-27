@@ -527,11 +527,6 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
   }
 }
 
-hsa_status_t KfdVirtioDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Calls DestroyMemoryHandle, as an amdgpu_bo_handle object is created during import.
-  return DestroyMemoryHandle(handle);
-}
-
 hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
                                   size_t size, hsa_access_permission_t perms, uint32_t node_id) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);

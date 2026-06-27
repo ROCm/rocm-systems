@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/06/23.
-        default: "34a1241bb374307d24c5aee93c9fbd2279c1b04b"
+        # Last updated on 2026/06/26.
+        default: "9661a80073abfff688fda5a970bfa9de24de2ead"
         required: true
 
 concurrency:
@@ -87,14 +87,15 @@ jobs:
           sparse-checkout: |
             emulation/rocjitsu
             .github
+            shared/machine-readable-isa/isa
 
       - name: Checkout rocjitsu corpus
         if: matrix.name == 'release'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/06/23.
-          ref: 34a1241bb374307d24c5aee93c9fbd2279c1b04b
+          # Last updated on 2026/06/26.
+          ref: 9661a80073abfff688fda5a970bfa9de24de2ead
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -207,6 +208,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      - name: Run amdisa tests
+        if: matrix.name == 'release'
+        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        run: |
+          cd lib/python && pip install -e . && pytest amdisa/tests
+
       - name: Run corpus tests
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
@@ -216,11 +223,11 @@ jobs:
           ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
         run: |
           targets=(
-            "gfx942 amdgpu_cdna3.json iree_gfx942_hip.json"
-            "gfx950 amdgpu_cdna4.json iree_gfx950_hip.json"
-            "gfx1100 amdgpu_rdna3_gfx1100_w7900_kmd.json iree_gfx1100_hip.json"
-            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json iree_gfx1201_hip.json"
-            "gfx1250 amdgpu_gfx1250.json iree_gfx1250_hip.json"
+            "gfx942 gfx942_cdna3.json iree_gfx942_hip.json"
+            "gfx950 gfx950_cdna4.json iree_gfx950_hip.json"
+            "gfx1100 gfx1100_w7900.json iree_gfx1100_hip.json"
+            "gfx1201 gfx1201_r9700.json iree_gfx1201_hip.json"
+            "gfx1250 gfx1250.json iree_gfx1250_hip.json"
           )
 
           for target in "${targets[@]}"; do
@@ -236,17 +243,42 @@ jobs:
           done
 
           targets=(
-            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json fuzz_gfx1201.json"
+            "gfx942 gfx942_cdna3_kmd.json external_kernel_gfx942.json 15"
+            "gfx950 gfx950_cdna4_kmd.json external_kernel_gfx950.json 15"
+            "gfx1201 gfx1201_r9700.json external_kernel_gfx1201.json 60"
           )
           for target in "${targets[@]}"; do
-            read -r name rocjitsu_config corpus_config <<< "${target}"
+            read -r name rocjitsu_config corpus_config timeout <<< "${target}"
             echo "::group::pytest (${name})"
             ROCM_PATH=`rocm-sdk path --root` \
               rocjitsu \
               --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
               -- pytest \
               --fuzz-target-config-files="${ROCJITSU_SOURCE_DIR}/tests/corpus/${corpus_config}" \
-              --timeout 60 \
+              --timeout "${timeout}" \
               tests/test_fuzz_targets.py
             echo "::endgroup::"
           done
+
+          targets=(
+            # CDNA3 FPSAN has no passing tests yet.
+            # "gfx942 gfx942_cdna3.json fpsan_gfx942.json"
+            "gfx950 gfx950_cdna4.json fpsan_gfx950.json"
+            "gfx1100 gfx1100_w7900.json fpsan_gfx1100.json"
+            "gfx1201 gfx1201_r9700.json fpsan_gfx1201.json"
+            "gfx1250 gfx1250.json fpsan_gfx1250.json"
+          )
+          fpsan_status=0
+          for target in "${targets[@]}"; do
+            read -r name rocjitsu_config fpsan_config <<< "${target}"
+            echo "::group::fpsan ctest (${name})"
+            ROCM_PATH=`rocm-sdk path --root` \
+              rocjitsu \
+              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
+              -- \
+              tests/run_fpsan_ctest.sh \
+              --config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${fpsan_config}" \
+              --timeout 15 || fpsan_status=$?
+            echo "::endgroup::"
+          done
+          exit "${fpsan_status}"
