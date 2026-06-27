@@ -148,7 +148,7 @@ Port *Topology::resolve_port(const std::string &path) const {
   return resolve_port_impl(root_.get(), path);
 }
 
-void Topology::wire_links(const std::vector<LinkSpec> &specs, ExecMode mode) {
+void Topology::wire_links(std::span<const LinkSpec> specs, ExecMode mode) {
   for (auto &ls : specs) {
     auto *sp = resolve_port_impl(root_.get(), ls.src);
     auto *dp = resolve_port_impl(root_.get(), ls.dst);

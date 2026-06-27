@@ -17,7 +17,8 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 namespace config {
@@ -29,12 +30,12 @@ namespace config {
 struct TopologyBuildResult {
   std::unique_ptr<simdojo::CompositeComponent> root;
   amdgpu::GpuMemory *memory = nullptr;
-  std::vector<simdojo::LinkSpec> link_specs; ///< Deferred link specs for wiring.
+  util::inline_vector<simdojo::LinkSpec> link_specs; ///< Deferred link specs for wiring.
 
   /// @brief Convenience: number of XCDs in the topology.
   uint32_t num_xcds = 0;
   /// @brief Convenience: XCD pointers (non-owning, into root's subtree).
-  std::vector<amdgpu::Xcd *> xcds;
+  util::inline_vector<amdgpu::Xcd *> xcds;
 };
 
 /// @brief Result of loading a simulation configuration.
@@ -94,12 +95,12 @@ struct KfdDeviceConfig {
 struct LoadedConfig {
   simdojo::SimulationEngine::Config engine_config;
   TopologyBuildResult build_result;
-  std::vector<TopologyBuildResult>
+  util::inline_vector<TopologyBuildResult>
       extra_gpu_builds; ///< Additional GPU SoC trees (for num_gpus > 1).
   simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL;
-  KfdDeviceConfig device;               ///< KFD device identity from vm.gpu.device.
-  uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
-  std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
+  KfdDeviceConfig device;                       ///< KFD device identity from vm.gpu.device.
+  uint32_t num_gpus = 1;                        ///< Number of simulated GPU instances.
+  util::inline_vector<KfdDeviceConfig> devices; ///< Per-GPU configs (num_gpus > 1).
 
   /// @brief Return the SoC from the topology root.
   SoC *soc();

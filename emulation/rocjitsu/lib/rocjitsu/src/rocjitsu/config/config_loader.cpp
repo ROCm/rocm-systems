@@ -314,7 +314,7 @@ std::string subst_vars(const std::string &pat, const std::unordered_map<std::str
   return r;
 }
 
-std::vector<std::string> expand_range(const std::string &pat) {
+util::inline_vector<std::string> expand_range(const std::string &pat) {
   static const std::regex re(R"(^(\w*)\[(\d+):(\d+)\](.*)$)");
   std::smatch m;
   if (!std::regex_match(pat, m, re))
@@ -323,7 +323,7 @@ std::vector<std::string> expand_range(const std::string &pat) {
   auto s = static_cast<uint32_t>(std::stoul(m[2].str()));
   auto e = static_cast<uint32_t>(std::stoul(m[3].str()));
   auto sfx = m[4].str();
-  std::vector<std::string> out;
+  util::inline_vector<std::string> out;
   for (uint32_t i = s; i < e; ++i)
     out.push_back(pfx + std::to_string(i) + sfx);
   return out;
@@ -342,7 +342,7 @@ void iterate_for(const flatbuffers::Vector<flatbuffers::Offset<fb::ForRange>> *r
     std::string name;
     uint32_t lo, hi;
   };
-  std::vector<R> rv;
+  util::inline_vector<R> rv;
   for (auto *fr : *ranges)
     rv.push_back({fr->var_name() ? fr->var_name()->str() : "", fr->start(), fr->end()});
 
@@ -362,8 +362,8 @@ void iterate_for(const flatbuffers::Vector<flatbuffers::Offset<fb::ForRange>> *r
   go(0);
 }
 
-std::vector<simdojo::LinkSpec> expand_link(const fb::LinkDef *ld) {
-  std::vector<simdojo::LinkSpec> out;
+util::inline_vector<simdojo::LinkSpec> expand_link(const fb::LinkDef *ld) {
+  util::inline_vector<simdojo::LinkSpec> out;
   auto lat = ld->latency();
   auto wt = ld->weight();
   if (ld->pattern() && ld->pattern()->size() > 0) {
@@ -518,7 +518,7 @@ void build_children(simdojo::CompositeComponent *parent,
 }
 
 void do_wire_cps(simdojo::CompositeComponent *root) {
-  std::vector<simdojo::Component *> all;
+  util::inline_vector<simdojo::Component *> all;
   root->collect_components(all);
   for (auto *comp : all) {
     auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(comp);
@@ -527,7 +527,7 @@ void do_wire_cps(simdojo::CompositeComponent *root) {
     auto *par = static_cast<simdojo::CompositeComponent *>(cp->parent());
     if (!par)
       continue;
-    std::vector<simdojo::Component *> sub;
+    util::inline_vector<simdojo::Component *> sub;
     par->collect_components(sub);
     for (auto *s : sub) {
       if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(s))
@@ -540,7 +540,7 @@ void do_wire_cps(simdojo::CompositeComponent *root) {
 /// processor. Must be called AFTER CUs are added to SEs (so the lazily
 /// created SPI captures the correct CU list).
 void wire_spi_to_cp(simdojo::CompositeComponent *root) {
-  std::vector<simdojo::Component *> all;
+  util::inline_vector<simdojo::Component *> all;
   root->collect_components(all);
   for (auto *comp : all) {
     auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(comp);
@@ -549,7 +549,7 @@ void wire_spi_to_cp(simdojo::CompositeComponent *root) {
     auto *par = static_cast<simdojo::CompositeComponent *>(cp->parent());
     if (!par)
       continue;
-    std::vector<simdojo::Component *> sub;
+    util::inline_vector<simdojo::Component *> sub;
     par->collect_components(sub);
     for (auto *s : sub) {
       if (auto *se = dynamic_cast<amdgpu::ShaderEngine *>(s))
@@ -559,7 +559,7 @@ void wire_spi_to_cp(simdojo::CompositeComponent *root) {
 }
 
 void set_cu_l2(simdojo::CompositeComponent *root) {
-  std::vector<simdojo::Component *> all;
+  util::inline_vector<simdojo::Component *> all;
   root->collect_components(all);
   for (auto *comp : all) {
     auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(comp);
@@ -610,7 +610,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
   build_children(root, rd->children(), mode, arch, mem);
 
   if (!mem) {
-    std::vector<simdojo::Component *> all;
+    util::inline_vector<simdojo::Component *> all;
     root->collect_components(all);
     for (auto *c : all)
       if (auto *m = dynamic_cast<amdgpu::GpuMemory *>(c)) {
@@ -622,7 +622,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
     throw std::runtime_error("Topology must contain a 'gpu_memory' component");
 
   {
-    std::vector<simdojo::Component *> all;
+    util::inline_vector<simdojo::Component *> all;
     root->collect_components(all);
     for (auto *c : all) {
       if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(c))
@@ -641,7 +641,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
         result.link_specs.push_back(std::move(ls));
 
   {
-    std::vector<simdojo::Component *> all;
+    util::inline_vector<simdojo::Component *> all;
     root->collect_components(all);
     auto *soc = dynamic_cast<SoC *>(root);
 

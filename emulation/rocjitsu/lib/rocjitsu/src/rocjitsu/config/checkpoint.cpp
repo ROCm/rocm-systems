@@ -11,7 +11,8 @@
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 namespace config {
@@ -102,12 +103,12 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
   flatbuffers::FlatBufferBuilder builder(1024 * 1024);
 
   // Serialize compute unit states across all XCDs and their shader engines.
-  std::vector<flatbuffers::Offset<fb::ComputeUnitState>> cu_offsets;
+  util::inline_vector<flatbuffers::Offset<fb::ComputeUnitState>> cu_offsets;
   for (auto *xcd : soc.xcds()) {
     for (auto *se : xcd->shader_engines()) {
       for (uint32_t ci = 0; ci < se->num_compute_units(); ++ci) {
         auto *cu = se->compute_unit(ci);
-        std::vector<flatbuffers::Offset<fb::WavefrontState>> wf_offsets;
+        util::inline_vector<flatbuffers::Offset<fb::WavefrontState>> wf_offsets;
         for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
           const auto *w = cu->wf(i);
           // Only checkpoint active (non-halted) wavefronts. Idle slots
@@ -128,7 +129,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
         }
 
         auto name = builder.CreateString(cu->name());
-        auto wfs_vec = builder.CreateVector(wf_offsets);
+        auto wfs_vec = builder.CreateVector(wf_offsets.data(), wf_offsets.size());
         auto cus = fb::CreateComputeUnitState(builder, name, wfs_vec, 0);
         cu_offsets.push_back(cus);
       }
@@ -145,14 +146,14 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
   }
 
   // Serialize GPU memory pages.
-  std::vector<flatbuffers::Offset<fb::MemoryPage>> page_offsets;
+  util::inline_vector<flatbuffers::Offset<fb::MemoryPage>> page_offsets;
   soc.memory()->for_each_page([&](uint64_t addr, const auto &page) {
     auto data_vec = builder.CreateVector(page.data(), page.size());
     page_offsets.push_back(fb::CreateMemoryPage(builder, addr, data_vec));
   });
 
-  auto cu_vec = builder.CreateVector(cu_offsets);
-  auto pages_vec = builder.CreateVector(page_offsets);
+  auto cu_vec = builder.CreateVector(cu_offsets.data(), cu_offsets.size());
+  auto pages_vec = builder.CreateVector(page_offsets.data(), page_offsets.size());
   auto mem_state = fb::CreateGpuMemoryState(builder, pages_vec);
   auto config_offset = serialize_config(builder, soc, engine_config);
 
@@ -177,7 +178,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
     throw std::runtime_error("Empty or unreadable checkpoint file: " + path);
   auto size = static_cast<size_t>(pos);
   f.seekg(0, std::ios::beg);
-  std::vector<uint8_t> buf(size);
+  util::inline_vector<uint8_t> buf(static_cast<uint32_t>(size));
   if (!f.read(reinterpret_cast<char *>(buf.data()), static_cast<std::streamsize>(size)))
     throw std::runtime_error("Failed to read checkpoint file: " + path);
 
@@ -211,7 +212,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   }
 
   // Collect all CUs across XCDs and their shader engines for indexed restoration.
-  std::vector<amdgpu::ComputeUnitCore *> all_cus;
+  util::inline_vector<amdgpu::ComputeUnitCore *> all_cus;
   for (auto *xcd : soc_ptr->xcds()) {
     for (auto *se : xcd->shader_engines()) {
       for (uint32_t ci = 0; ci < se->num_compute_units(); ++ci)

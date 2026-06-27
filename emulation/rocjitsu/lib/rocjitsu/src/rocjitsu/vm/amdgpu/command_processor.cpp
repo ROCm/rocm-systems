@@ -109,7 +109,7 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
   uint32_t cluster_size = entry.cluster_size();
   const uint32_t lds_bytes_per_wg = aligned_lds_bytes_per_workgroup(entry);
   constexpr auto kU32Max = std::numeric_limits<uint32_t>::max();
-  util::inline_vector<uint32_t, 0> planned_per_cu(cus.size(), 0);
+  util::inline_vector<uint32_t> planned_per_cu(cus.size(), 0);
   size_t last_cu_idx = next_cu;
 
   for (uint32_t rank = 0; rank < cluster_size; ++rank) {
@@ -823,7 +823,7 @@ void CommandProcessor::on_cu_idle() {
   if (completion_)
     completion_->drain_completions(new_queue_states_);
 
-  util::inline_vector<bool, 0> was_idle(cus_.size());
+  util::inline_vector<bool> was_idle(cus_.size());
   for (size_t i = 0; i < cus_.size(); ++i)
     was_idle[i] = !cus_[i]->has_active_wfs();
 

@@ -61,10 +61,10 @@ public:
                                            uint64_t old_entry_text_offset,
                                            uint64_t new_entry_text_offset);
 
-  util::inline_vector<uint8_t, 0> emit() const;
+  util::inline_vector<uint8_t> emit() const;
 
 private:
-  util::inline_vector<uint8_t, 0> image_;
+  util::inline_vector<uint8_t> image_;
   uint64_t text_offset_;
   uint64_t text_size_;
 };

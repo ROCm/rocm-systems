@@ -21,7 +21,7 @@ class CodeObject;
 class Decoder;
 class BasicBlock;
 
-using BasicBlockList = util::inline_vector<std::unique_ptr<BasicBlock>, 0>;
+using BasicBlockList = util::inline_vector<std::unique_ptr<BasicBlock>>;
 using BasicBlockPtrList = util::inline_vector<BasicBlock *>;
 
 /// @brief A maximal sequence of instructions with single entry, single exit.
@@ -99,7 +99,7 @@ private:
   uint32_t num_instructions_ = 0;
   bool has_terminator_ = false;
   InstructionList instructions_;
-  util::inline_vector<std::unique_ptr<Instruction>, 0> storage_;
+  util::inline_vector<std::unique_ptr<Instruction>> storage_;
   BasicBlockPtrList successors_;
   BasicBlockPtrList predecessors_;
 };

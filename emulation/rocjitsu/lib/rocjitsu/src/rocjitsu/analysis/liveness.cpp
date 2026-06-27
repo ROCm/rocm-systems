@@ -128,7 +128,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
 
   const auto rpo = reverse_post_order(blocks);
   std::deque<size_t> worklist;
-  util::inline_vector<bool, 0> in_worklist(blocks.size(), false);
+  util::inline_vector<bool> in_worklist(blocks.size(), false);
   auto enqueue = [&](size_t idx) {
     if (idx >= in_worklist.size() || in_worklist[idx])
       return;

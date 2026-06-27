@@ -44,9 +44,9 @@ struct EventId {
 };
 
 using RegisterList = util::inline_vector<uint32_t>;
-using LaneBaseAddressList = util::inline_vector<uint32_t, 0>;
+using LaneBaseAddressList = util::inline_vector<uint32_t>;
 using EventIdList = util::inline_vector<EventId>;
-using CounterList = util::inline_vector<int, 0>;
+using CounterList = util::inline_vector<int>;
 
 inline void removeFromUnorderedList(EventIdList &list, EventId eventId) {
   auto it = std::find(list.begin(), list.end(), eventId);

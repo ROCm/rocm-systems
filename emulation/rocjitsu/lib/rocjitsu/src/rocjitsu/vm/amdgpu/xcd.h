@@ -113,7 +113,7 @@ private:
   simdojo::ExecMode exec_mode_;
   CommandProcessor *cp_ = nullptr;
   L2Cache *l2_cache_ = nullptr;
-  util::inline_vector<ShaderEngine *, 0> shader_engines_;
+  util::inline_vector<ShaderEngine *> shader_engines_;
 };
 
 } // namespace amdgpu

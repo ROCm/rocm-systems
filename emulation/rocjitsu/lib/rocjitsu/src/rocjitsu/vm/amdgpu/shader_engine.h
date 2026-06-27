@@ -88,7 +88,7 @@ public:
   }
 
 private:
-  util::inline_vector<ComputeUnitCore *, 0> cus_;
+  util::inline_vector<ComputeUnitCore *> cus_;
   std::unique_ptr<ShaderProcessorInput> spi_;
 };
 

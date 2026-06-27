@@ -531,7 +531,7 @@ private:
   // the wavefront's GPU simulation contract. The SIMD register-read path is
   // const (it doesn't alter GPU state), but plugins need to update their own
   // tracking during reads.
-  mutable util::inline_vector<std::unique_ptr<WavefrontState>, 0> plugin_states_;
+  mutable util::inline_vector<std::unique_ptr<WavefrontState>> plugin_states_;
   uint64_t ready_cycle_ = 0;
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 

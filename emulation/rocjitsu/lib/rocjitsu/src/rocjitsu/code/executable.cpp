@@ -140,7 +140,7 @@ void Executable::load_fat_binary() {
     is_valid_ = false;
     return;
   }
-  util::inline_vector<Elf64_Shdr, 0> section_hdrs(static_cast<uint32_t>(num_shdrs));
+  util::inline_vector<Elf64_Shdr> section_hdrs(static_cast<uint32_t>(num_shdrs));
   std::memcpy(section_hdrs.data(), image_.data() + header_->sectionHeaderOff(),
               section_hdrs.size() * sizeof(Elf64_Shdr));
 

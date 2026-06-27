@@ -185,7 +185,7 @@ void AmdGpuCodeObject::load_sections() {
     return;
   }
 
-  util::inline_vector<Elf64_Shdr, 0> section_hdrs(static_cast<uint32_t>(num_shdrs));
+  util::inline_vector<Elf64_Shdr> section_hdrs(static_cast<uint32_t>(num_shdrs));
   std::memcpy(section_hdrs.data(), image_.data() + shoff, section_hdrs.size() * sizeof(Elf64_Shdr));
 
   int shstrndx = header_->sectionHeaderStrIdx();

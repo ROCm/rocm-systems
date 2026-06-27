@@ -48,21 +48,21 @@ struct BranchFixup {
 /// patches explicit PC-relative branch immediates. Expansion bodies are appended
 /// after the emitted body as a local cave.
 struct KernelTextLayout {
-  KdTranslation *translation = nullptr;              ///< Descriptor plan for this kernel.
-  uint64_t source_entry = 0;                         ///< Original descriptor entry offset.
-  uint64_t target_entry = 0;                         ///< Final descriptor entry offset.
-  uint64_t target_body_entry = 0;                    ///< Relocated original entry offset.
-  uint64_t body_begin = 0;                           ///< First emitted body byte.
-  uint64_t body_end = 0;                             ///< One-past-end of emitted body.
-  uint64_t cave_begin = 0;                           ///< First local cave byte.
-  uint64_t cave_end = 0;                             ///< One-past-end of local cave.
-  util::inline_vector<BlockPlacement, 0> blocks;     ///< Kernel-local block placements.
-  util::inline_vector<BranchFixup, 0> branch_fixups; ///< Explicit branch patches.
+  KdTranslation *translation = nullptr;           ///< Descriptor plan for this kernel.
+  uint64_t source_entry = 0;                      ///< Original descriptor entry offset.
+  uint64_t target_entry = 0;                      ///< Final descriptor entry offset.
+  uint64_t target_body_entry = 0;                 ///< Relocated original entry offset.
+  uint64_t body_begin = 0;                        ///< First emitted body byte.
+  uint64_t body_end = 0;                          ///< One-past-end of emitted body.
+  uint64_t cave_begin = 0;                        ///< First local cave byte.
+  uint64_t cave_end = 0;                          ///< One-past-end of local cave.
+  util::inline_vector<BlockPlacement> blocks;     ///< Kernel-local block placements.
+  util::inline_vector<BranchFixup> branch_fixups; ///< Explicit branch patches.
 };
 
-void append_words(util::inline_vector<uint8_t, 0> &text, std::span<const uint32_t> words);
+void append_words(util::inline_vector<uint8_t> &text, std::span<const uint32_t> words);
 
-void append_nop_padding(util::inline_vector<uint8_t, 0> &text, uint64_t byte_count,
+void append_nop_padding(util::inline_vector<uint8_t> &text, uint64_t byte_count,
                         rj_code_arch_t arch);
 
 [[nodiscard]] uint64_t padding_for_residue(uint64_t current_offset, uint64_t target_residue,

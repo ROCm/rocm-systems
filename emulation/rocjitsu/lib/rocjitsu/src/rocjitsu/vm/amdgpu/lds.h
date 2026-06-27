@@ -181,7 +181,7 @@ public:
   uint8_t *data() { return data_.data(); }
 
 private:
-  util::inline_vector<uint8_t, 0> data_;
+  util::inline_vector<uint8_t> data_;
 };
 
 } // namespace amdgpu

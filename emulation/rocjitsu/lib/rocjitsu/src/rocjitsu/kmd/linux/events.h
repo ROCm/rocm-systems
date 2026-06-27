@@ -22,7 +22,8 @@
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -108,7 +109,7 @@ private:
     bool auto_reset = false; ///< If true, signaled clears after wakeup.
     bool signaled = false;   ///< True when the event has been signaled.
     uint64_t event_age = 1;  ///< Monotonic age counter (starts at 1, matching real KFD).
-    std::vector<std::condition_variable *> waiters; ///< Per-event waiter list (kernel wait_queue).
+    util::inline_vector<std::condition_variable *> waiters; ///< Per-event waiter list.
   };
 
   std::mutex mutex_;                              ///< Protects all mutable event state.

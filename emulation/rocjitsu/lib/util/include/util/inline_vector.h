@@ -671,6 +671,22 @@ template <typename T, uint32_t LhsInlineN, uint32_t RhsInlineN>
   return !(lhs == rhs);
 }
 
+template <typename T, uint32_t InlineN, typename U>
+typename inline_vector<T, InlineN>::size_type erase(inline_vector<T, InlineN> &container,
+                                                    const U &value) noexcept {
+  const auto old_size = container.size();
+  container.erase(std::remove(container.begin(), container.end(), value), container.end());
+  return old_size - container.size();
+}
+
+template <typename T, uint32_t InlineN, typename Pred>
+typename inline_vector<T, InlineN>::size_type erase_if(inline_vector<T, InlineN> &container,
+                                                       Pred pred) noexcept {
+  const auto old_size = container.size();
+  container.erase(std::remove_if(container.begin(), container.end(), pred), container.end());
+  return old_size - container.size();
+}
+
 #ifdef UTIL_INLINE_VECTOR_ENABLE_HISTOGRAM
 inline void dump_inline_vector_histograms(std::ostream &os) noexcept {
   detail::inline_vector_histogram_registry::instance().write_jsonl(os);

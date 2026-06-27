@@ -20,7 +20,8 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -125,7 +126,7 @@ private:
     uint64_t size;
     int memfd;
   };
-  std::vector<AllocRange> alloc_ranges_;
+  util::inline_vector<AllocRange> alloc_ranges_;
 };
 
 } // namespace rocjitsu

@@ -110,7 +110,7 @@ private:
   mutable std::mutex flush_mutex_; ///< Exclusive lock for flush_all (must not race with stripes).
   CacheStore cache_;
   simdojo::Port *req_ = nullptr;
-  util::inline_vector<simdojo::Port *, 0> cpl_ports_;
+  util::inline_vector<simdojo::Port *> cpl_ports_;
 };
 
 } // namespace amdgpu

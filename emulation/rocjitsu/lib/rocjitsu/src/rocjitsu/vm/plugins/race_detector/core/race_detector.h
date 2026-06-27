@@ -96,7 +96,7 @@ private:
   std::function<void(RaceViolation)> raceHandler;
 
   /// One WaveRaceState per wave, indexed by wave ID.
-  util::inline_vector<WaveRaceState, 0> waveRaceStates;
+  util::inline_vector<WaveRaceState> waveRaceStates;
 };
 
 } // namespace rocjitsu::plugins::race_detector

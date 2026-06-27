@@ -53,7 +53,7 @@ struct TrampolinePlan {
 
 /// @brief Output bytes for one trampoline.
 struct TrampolineBytes {
-  util::inline_vector<uint8_t, 0> patched_anchor_bytes; // original_size bytes.
+  util::inline_vector<uint8_t> patched_anchor_bytes; // original_size bytes.
   util::inline_vector<uint32_t> trampoline_words;
 };
 

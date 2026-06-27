@@ -20,6 +20,8 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <sys/ioctl.h>
 
+#include "util/inline_vector.h"
+
 using namespace rocjitsu;
 
 namespace {
@@ -43,8 +45,8 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   s->engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
 
   if (loaded.num_gpus > 1 && !loaded.extra_gpu_builds.empty()) {
-    std::vector<std::unique_ptr<SoC>> socs;
-    std::vector<uint32_t> gpu_ids;
+    util::inline_vector<std::unique_ptr<SoC>> socs;
+    util::inline_vector<uint32_t> gpu_ids;
 
     auto root0 = loaded.take_root();
     root0.release();

@@ -333,7 +333,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return leave_unchanged();
   }
 
-  util::inline_vector<uint8_t, 0> translated_text;
+  util::inline_vector<uint8_t> translated_text;
   const bool continue_after_failure = options_.debug_continue_after_failure;
 
   auto copy_original_instruction = [&](const Instruction &inst, uint64_t offset,
@@ -366,7 +366,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return true;
   };
 
-  auto write_words_at = [](util::inline_vector<uint8_t, 0> &dst, uint64_t offset,
+  auto write_words_at = [](util::inline_vector<uint8_t> &dst, uint64_t offset,
                            std::span<const uint32_t> words) {
     if (words.empty())
       return;
@@ -863,8 +863,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 }
 
 bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl,
-                                      util::inline_vector<uint8_t, 0> &text,
-                                      KernelTextLayout &layout, std::span<const uint8_t> orig_text,
+                                      util::inline_vector<uint8_t> &text, KernelTextLayout &layout,
+                                      std::span<const uint8_t> orig_text,
                                       uint64_t source_return_offset) {
   assert(repl.matched() && "apply_semantic called with unmatched replacement");
   assert(repl.start_offset < repl.end_offset && "invalid replacement range");
@@ -922,9 +922,9 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl,
 }
 
 bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
-                                       uint64_t target_offset,
-                                       util::inline_vector<uint8_t, 0> &text, uint16_t dst_opcode,
-                                       KernelTextLayout &layout, std::span<const uint8_t> orig_text,
+                                       uint64_t target_offset, util::inline_vector<uint8_t> &text,
+                                       uint16_t dst_opcode, KernelTextLayout &layout,
+                                       std::span<const uint8_t> orig_text,
                                        const InstructionLegalization *leg) {
   const uint32_t *raw = inst.raw_encoding();
   assert(raw && "handle_encoding called without raw encoding");

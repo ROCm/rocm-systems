@@ -28,11 +28,11 @@ VirtualMachine::VirtualMachine(std::unique_ptr<SoC> soc, bool daemon_mode)
   driver_ = std::make_unique<SimulatedDriver>(*soc_, daemon_mode);
 }
 
-VirtualMachine::VirtualMachine(std::vector<std::unique_ptr<SoC>> socs,
-                               std::vector<uint32_t> gpu_ids, bool daemon_mode)
+VirtualMachine::VirtualMachine(util::inline_vector<std::unique_ptr<SoC>> socs,
+                               util::inline_vector<uint32_t> gpu_ids, bool daemon_mode)
     : simdojo::CompositeComponent("vm") {
   set_weight(0);
-  std::vector<SoC *> ptrs;
+  util::inline_vector<SoC *> ptrs;
   ptrs.reserve(socs.size());
   for (size_t i = 0; i < socs.size(); ++i) {
     auto *p = socs[i].get();

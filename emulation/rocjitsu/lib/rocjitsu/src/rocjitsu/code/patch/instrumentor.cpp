@@ -359,7 +359,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // grows .text in place and fixes up the surrounding ELF (section/segment
   // sizes, moved symbols, descriptor entries).
   const auto text_span = patcher.text_bytes();
-  util::inline_vector<uint8_t, 0> new_text(text_span.begin(), text_span.end());
+  util::inline_vector<uint8_t> new_text(text_span.begin(), text_span.end());
   for (const auto &a : applied) {
     std::memcpy(new_text.data() + a.site->anchor_offset, a.bytes.patched_anchor_bytes.data(),
                 a.site->original_size);

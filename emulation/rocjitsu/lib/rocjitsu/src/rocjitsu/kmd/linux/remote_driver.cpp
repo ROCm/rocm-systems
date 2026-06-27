@@ -354,7 +354,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   }
 
   constexpr size_t prefix = sizeof(RpcHeader) + sizeof(RpcIoctlRequest);
-  std::vector<uint8_t> buf(prefix + arg_size);
+  util::inline_vector<uint8_t> buf(static_cast<uint32_t>(prefix + arg_size));
 
   std::memcpy(buf.data() + prefix, arg, arg_size);
 
@@ -415,7 +415,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   auto *resp = reinterpret_cast<RpcHeader *>(resp_header_buf);
 
   if (resp->payload_bytes > 0) {
-    std::vector<uint8_t> payload(resp->payload_bytes);
+    util::inline_vector<uint8_t> payload(resp->payload_bytes);
     if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
       return -1;
 
@@ -481,7 +481,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
     constexpr size_t page_size = 4096;
     size_t num_pages = (length + page_size - 1) / page_size;
-    std::vector<uint8_t> resident(num_pages);
+    util::inline_vector<uint8_t> resident(static_cast<uint32_t>(num_pages));
     auto mc_rc = syscall(SYS_mincore, va, length, resident.data());
 
     auto *temp =
@@ -539,8 +539,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     auto *free_args = static_cast<kfd_ioctl_free_memory_of_gpu_args *>(arg);
     if (auto it = handle_memfds_.find(free_args->handle); it != handle_memfds_.end()) {
       int freed_memfd = it->second;
-      std::erase_if(alloc_ranges_,
-                    [freed_memfd](const AllocRange &r) { return r.memfd == freed_memfd; });
+      util::erase_if(alloc_ranges_,
+                     [freed_memfd](const AllocRange &r) { return r.memfd == freed_memfd; });
       syscall(SYS_close, freed_memfd);
       handle_memfds_.erase(it);
     }
@@ -581,7 +581,7 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
       if (prot_rc == 0) {
         constexpr size_t page_size = 4096;
         size_t num_pages = (length + page_size - 1) / page_size;
-        std::vector<uint8_t> page_resident(num_pages);
+        util::inline_vector<uint8_t> page_resident(static_cast<uint32_t>(num_pages));
         auto mc_rc = syscall(SYS_mincore, addr, length, page_resident.data());
         auto *temp = static_cast<uint8_t *>(
             safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, mapping_memfd, 0));

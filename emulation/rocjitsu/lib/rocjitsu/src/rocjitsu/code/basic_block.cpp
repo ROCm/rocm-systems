@@ -78,7 +78,7 @@ BasicBlockList BasicBlock::build(const CodeObject &co, Decoder &decoder,
       uint64_t offset;
       std::unique_ptr<Instruction> inst;
     };
-    util::inline_vector<DecodedInst, 0> decoded;
+    util::inline_vector<DecodedInst> decoded;
 
     while (pc < inst_data_size) {
       auto *raw_inst = decoder.decode(&inst_data[pc]);

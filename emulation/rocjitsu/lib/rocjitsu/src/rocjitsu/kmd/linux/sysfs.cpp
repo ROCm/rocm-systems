@@ -322,7 +322,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   }
 }
 
-void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
+void Sysfs::write_drm_tree(std::span<const GpuInfo> gpus) {
   char tmpl[] = "/tmp/rocjitsu_drm_XXXXXX";
   char *dir = mkdtemp(tmpl);
   if (!dir)
@@ -378,9 +378,11 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
   write_file(drm_dir_ + "/version", "drm 1.1.0\n");
 }
 
-std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<GpuInfo>{gpu}); }
+std::string Sysfs::generate(const GpuInfo &gpu) {
+  return generate(std::span<const GpuInfo>(&gpu, 1));
+}
 
-std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
+std::string Sysfs::generate(std::span<const GpuInfo> gpus) {
   cleanup();
 
   char tmpl[] = "/tmp/rocjitsu_topology_XXXXXX";

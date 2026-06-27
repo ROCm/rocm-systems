@@ -232,7 +232,7 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     for (uint32_t i = 0; i < args->num_events; ++i) {
       auto it = events_.find(ev_data[i].event_id);
       if (it != events_.end())
-        std::erase(it->second.waiters, &my_cv);
+        util::erase(it->second.waiters, &my_cv);
     }
   };
 

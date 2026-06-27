@@ -108,7 +108,7 @@ private:
   void analyze(KernelBlockScope blocks);
 
   uint16_t min_free_vgpr_ = 0;
-  util::inline_vector<BlockLiveness, 0> liveness_;
+  util::inline_vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;
   static constexpr RegisterSet empty_{};

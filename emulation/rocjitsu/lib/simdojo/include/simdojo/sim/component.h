@@ -245,6 +245,18 @@ public:
   /// @param[out] out Vector to append components into.
   void collect_components(std::vector<Component *> &out);
 
+  template <typename OutputList> void collect_components(OutputList &out) {
+    out.push_back(this);
+    for (auto &child : children_) {
+      auto *composite = dynamic_cast<CompositeComponent *>(child.get());
+      if (composite != nullptr) {
+        composite->collect_components(out);
+      } else {
+        out.push_back(child.get());
+      }
+    }
+  }
+
   /// @brief Return the total number of descendants (recursive).
   /// @returns Count of all children, grandchildren, etc.
   uint32_t num_descendants() const;

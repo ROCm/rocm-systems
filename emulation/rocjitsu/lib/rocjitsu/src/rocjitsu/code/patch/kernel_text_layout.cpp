@@ -37,7 +37,7 @@ namespace {
 
 } // namespace
 
-void append_words(util::inline_vector<uint8_t, 0> &text, std::span<const uint32_t> words) {
+void append_words(util::inline_vector<uint8_t> &text, std::span<const uint32_t> words) {
   if (words.empty())
     return;
 
@@ -47,7 +47,7 @@ void append_words(util::inline_vector<uint8_t, 0> &text, std::span<const uint32_
   std::memcpy(text.data() + old_size, words.data(), extra_bytes);
 }
 
-void append_nop_padding(util::inline_vector<uint8_t, 0> &text, uint64_t byte_count,
+void append_nop_padding(util::inline_vector<uint8_t> &text, uint64_t byte_count,
                         rj_code_arch_t arch) {
   assert(byte_count % sizeof(uint32_t) == 0 && "padding must be word-aligned");
   for (uint64_t off = 0; off < byte_count; off += sizeof(uint32_t)) {

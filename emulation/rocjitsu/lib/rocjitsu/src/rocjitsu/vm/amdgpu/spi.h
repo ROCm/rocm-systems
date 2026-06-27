@@ -161,9 +161,9 @@ public:
   std::span<ComputeUnitCore *const> compute_units() const { return {cus_.data(), cus_.size()}; }
 
 private:
-  util::inline_vector<ComputeUnitCore *, 0> cus_;
+  util::inline_vector<ComputeUnitCore *> cus_;
   size_t next_cu_ = 0;
-  util::inline_vector<std::deque<WgRequest>, 0> pipe_queues_;
+  util::inline_vector<std::deque<WgRequest>> pipe_queues_;
   size_t next_pipe_ = 0;
 };
 

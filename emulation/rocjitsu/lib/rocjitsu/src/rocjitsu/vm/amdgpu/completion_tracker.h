@@ -22,8 +22,8 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-using ComputeUnitList = util::inline_vector<ComputeUnitCore *, 0>;
-using HwQueueStateList = util::inline_vector<HwQueueState, 0>;
+using ComputeUnitList = util::inline_vector<ComputeUnitCore *>;
+using HwQueueStateList = util::inline_vector<HwQueueState>;
 
 class CompletionTracker {
 public:

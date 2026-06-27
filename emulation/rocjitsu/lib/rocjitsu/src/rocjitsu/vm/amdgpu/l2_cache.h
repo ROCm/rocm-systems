@@ -205,7 +205,7 @@ private:
   /// a range of cache lines, allowing atomics to different lines to proceed
   /// in parallel (matching real L2 arbitration behavior).
   std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
-  util::inline_vector<simdojo::Port *, 0> cpl_ports_;
+  util::inline_vector<simdojo::Port *> cpl_ports_;
   uint64_t write_count_ = 0; ///< Debug: total L2 writes (for trace).
 };
 

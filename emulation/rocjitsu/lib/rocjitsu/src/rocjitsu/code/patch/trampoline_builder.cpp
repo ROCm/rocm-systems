@@ -33,7 +33,7 @@ namespace {
 // endian and rocjitsu only supports little-endian hosts (matches DBT's
 // memcpy convention in binary_translator.cpp); if either invariant ever
 // changes, this helper needs an explicit byte-swap.
-void append_word(util::inline_vector<uint8_t, 0> &dst, uint32_t w) {
+void append_word(util::inline_vector<uint8_t> &dst, uint32_t w) {
   uint8_t buf[sizeof(w)];
   std::memcpy(buf, &w, sizeof(w));
   dst.insert(dst.end(), buf, buf + sizeof(w));

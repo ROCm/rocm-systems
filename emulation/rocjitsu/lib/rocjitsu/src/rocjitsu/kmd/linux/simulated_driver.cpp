@@ -167,7 +167,7 @@ SimulatedDriver::SimulatedDriver(SoC &soc, bool daemon_mode) : daemon_mode_(daem
   gpus_.push_back({&soc, 0, false, {}});
 }
 
-SimulatedDriver::SimulatedDriver(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids,
+SimulatedDriver::SimulatedDriver(std::span<SoC *> socs, std::span<const uint32_t> gpu_ids,
                                  bool daemon_mode)
     : daemon_mode_(daemon_mode) {
   for (size_t i = 0; i < socs.size(); ++i)
@@ -200,9 +200,9 @@ void SimulatedDriver::setup_topology(const Sysfs::GpuInfo &gpu) {
   topology_.setup_environment();
 }
 
-void SimulatedDriver::setup_topology(const std::vector<config::KfdDeviceConfig> &devs,
+void SimulatedDriver::setup_topology(std::span<const config::KfdDeviceConfig> devs,
                                      uint32_t num_xcc) {
-  std::vector<Sysfs::GpuInfo> infos;
+  util::inline_vector<Sysfs::GpuInfo> infos;
   infos.reserve(devs.size());
   for (auto &dev : devs) {
     if (!dev.present)
@@ -477,7 +477,7 @@ int SimulatedDriver::close() { return close(local_process_id_); }
 
 int SimulatedDriver::close(uint32_t process_id) {
   std::shared_ptr<KfdProcess> extracted;
-  std::vector<uint32_t> queue_ids;
+  util::inline_vector<uint32_t> queue_ids;
 
   {
     std::lock_guard<std::mutex> lk(process_mutex_);
@@ -505,7 +505,7 @@ int SimulatedDriver::close(uint32_t process_id) {
   size_t leaked_allocations = 0;
   uint64_t leaked_bytes = 0;
   size_t leaked_queues = 0;
-  std::vector<uint64_t> leaked_handles;
+  util::inline_vector<uint64_t> leaked_handles;
   proc.event_state_.notify_closing();
   proc.event_state_.signal_page_shutdown();
 
@@ -908,7 +908,7 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
       if (prot_rc == 0) {
         constexpr size_t page_size = 4096;
         size_t num_pages = (length + page_size - 1) / page_size;
-        std::vector<uint8_t> page_resident(num_pages);
+        util::inline_vector<uint8_t> page_resident(static_cast<uint32_t>(num_pages));
         auto mc_rc = syscall(SYS_mincore, addr, length, page_resident.data());
 
         auto *temp_mapping = static_cast<uint8_t *>(
@@ -1423,7 +1423,7 @@ int SimulatedDriver::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
       });
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
-    std::erase(proc.active_queue_ids_, args->queue_id);
+    util::erase(proc.active_queue_ids_, args->queue_id);
     auto it = proc.queue_doorbell_map_.find(args->queue_id);
     if (it != proc.queue_doorbell_map_.end()) {
       auto &gs = proc.gpu(it->second.gpu_ordinal);

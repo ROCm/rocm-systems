@@ -26,7 +26,7 @@ struct rj_code_object_t : rocjitsu::RefCounted {
 
 struct rj_code_inst_list_t : rocjitsu::RefCounted {
   rocjitsu::InstructionList list;
-  util::inline_vector<std::unique_ptr<rocjitsu::Instruction>, 0> storage;
+  util::inline_vector<std::unique_ptr<rocjitsu::Instruction>> storage;
 };
 
 struct rj_code_basic_block_list_t : rocjitsu::RefCounted {

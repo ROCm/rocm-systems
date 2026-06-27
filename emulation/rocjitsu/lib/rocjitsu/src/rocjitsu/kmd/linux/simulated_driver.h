@@ -21,8 +21,11 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -81,7 +84,8 @@ public:
   [[nodiscard]] bool daemon_mode() const { return daemon_mode_; }
 
   SimulatedDriver(SoC &soc, bool daemon_mode = false);
-  SimulatedDriver(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode = false);
+  SimulatedDriver(std::span<SoC *> socs, std::span<const uint32_t> gpu_ids,
+                  bool daemon_mode = false);
   ~SimulatedDriver() override;
 
   /// @brief Local-mode interface (interposer). Operates on the local process.
@@ -122,7 +126,7 @@ public:
 
   void setup_topology(const Sysfs::GpuInfo &gpu);
   void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
-  void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc);
+  void setup_topology(std::span<const config::KfdDeviceConfig> devs, uint32_t num_xcc);
   bool is_doorbell_range(const void *addr, size_t length) const;
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
@@ -203,7 +207,7 @@ private:
   int get_tile_config_ioctl(void *arg);
   bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
 
-  std::vector<GpuDevice> gpus_;
+  util::inline_vector<GpuDevice> gpus_;
   bool daemon_mode_ = false;
   int fd_ = -1;
 

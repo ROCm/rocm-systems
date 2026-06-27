@@ -116,7 +116,7 @@ struct InstrumentationPatch {
   uint64_t trampoline_offset; // .text-relative.
   uint64_t return_target;
   util::inline_vector<uint8_t> original_bytes;
-  util::inline_vector<uint8_t, 0> patched_anchor_bytes;
+  util::inline_vector<uint8_t> patched_anchor_bytes;
 };
 
 /// @brief Result of Instrumentor::patch().
@@ -125,7 +125,7 @@ struct InstrumentationPatch {
 /// `errors` is non-empty. On success, `errors` is empty and `elf_bytes`
 /// contains a re-parseable patched ELF.
 struct InstrumentedCodeObject {
-  util::inline_vector<uint8_t, 0> elf_bytes;
+  util::inline_vector<uint8_t> elf_bytes;
   util::inline_vector<std::string> errors;
   util::inline_vector<std::string> warnings;
 };
@@ -280,7 +280,7 @@ private:
 
   // Lazily populated.
   std::unique_ptr<Decoder> decoder_;
-  util::inline_vector<std::unique_ptr<BasicBlock>, 0> blocks_;
+  util::inline_vector<std::unique_ptr<BasicBlock>> blocks_;
   // .text-relative byte offset -> decoded Instruction. Populated alongside
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).

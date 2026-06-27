@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -118,6 +120,52 @@ TEST(InlineVectorTest, ResizeAndEraseMaintainContiguousContents) {
   ASSERT_EQ(values.size(), 2u);
   EXPECT_EQ(values[0], 1);
   EXPECT_EQ(values[1], 4);
+}
+
+TEST(InlineVectorTest, BoolElementsArePlainContiguousObjects) {
+  util::inline_vector<bool, 2> values;
+  static_assert(std::is_same_v<decltype(values[0]), bool &>);
+  static_assert(std::is_same_v<decltype(std::as_const(values)[0]), const bool &>);
+
+  values.push_back(true);
+  values.push_back(false);
+  bool *inline_data = values.data();
+
+  ASSERT_EQ(values.size(), 2u);
+  EXPECT_TRUE(values.is_inline());
+  EXPECT_EQ(&values[0], inline_data);
+  EXPECT_EQ(&values[1], inline_data + 1);
+
+  values.push_back(false);
+  values[1] = true;
+  bool &last = values[2];
+  last = true;
+
+  ASSERT_EQ(values.size(), 3u);
+  EXPECT_FALSE(values.is_inline());
+  EXPECT_EQ(&values[0], values.data());
+  EXPECT_EQ(&values[1], values.data() + 1);
+  EXPECT_EQ(&values[2], values.data() + 2);
+  EXPECT_TRUE(values[0]);
+  EXPECT_TRUE(values[1]);
+  EXPECT_TRUE(values[2]);
+}
+
+TEST(InlineVectorTest, EraseHelpersReturnRemovedCount) {
+  util::inline_vector<int, 2> values{1, 2, 3, 2, 4, 2};
+
+  EXPECT_EQ(util::erase(values, 2), 3u);
+
+  ASSERT_EQ(values.size(), 3u);
+  EXPECT_EQ(values[0], 1);
+  EXPECT_EQ(values[1], 3);
+  EXPECT_EQ(values[2], 4);
+  EXPECT_EQ(util::erase(values, 9), 0u);
+
+  EXPECT_EQ(util::erase_if(values, [](int value) { return value % 2 != 0; }), 2u);
+
+  ASSERT_EQ(values.size(), 1u);
+  EXPECT_EQ(values[0], 4);
 }
 
 TEST(InlineVectorTest, SupportsRangeConstructionAssignAndInsert) {

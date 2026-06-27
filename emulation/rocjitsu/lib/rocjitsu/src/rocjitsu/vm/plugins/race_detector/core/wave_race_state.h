@@ -112,8 +112,8 @@ private:
     regEventCount[static_cast<int>(type)][reg]--;
   }
 
-  util::inline_vector<EventIdList, 0> vgprMemoryEvents;
-  util::inline_vector<EventIdList, 0> sgprMemoryEvents;
+  util::inline_vector<EventIdList> vgprMemoryEvents;
+  util::inline_vector<EventIdList> sgprMemoryEvents;
   CounterList sgprEventCount;
 
   static constexpr int kNumEventTypes = static_cast<int>(MemoryEventType::N);

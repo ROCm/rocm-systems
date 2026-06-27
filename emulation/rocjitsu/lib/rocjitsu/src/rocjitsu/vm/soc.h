@@ -173,12 +173,12 @@ private:
   std::atomic<uint32_t> next_xcd_assignment_{0};
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
-  util::inline_vector<amdgpu::Xcd *, 0> xcds_;
-  util::inline_vector<amdgpu::Iod *, 0> iods_;
+  util::inline_vector<amdgpu::Xcd *> xcds_;
+  util::inline_vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;
   std::unique_ptr<amdgpu::HbmController> hbm_standalone_; ///< Used when num_iods == 0.
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
-  util::inline_vector<amdgpu::ComputeUnitCore *, 0> all_cus_cache_;
+  util::inline_vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
 };
 
 } // namespace rocjitsu

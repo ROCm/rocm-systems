@@ -11,9 +11,10 @@
 
 #include "simdojo/sim/component.h"
 
+#include "util/inline_vector.h"
+
 #include <cstdint>
 #include <memory>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -38,8 +39,8 @@ public:
 
   explicit VirtualMachine(const Config &config);
   VirtualMachine(std::unique_ptr<SoC> soc, bool daemon_mode = false);
-  VirtualMachine(std::vector<std::unique_ptr<SoC>> socs, std::vector<uint32_t> gpu_ids,
-                 bool daemon_mode = false);
+  VirtualMachine(util::inline_vector<std::unique_ptr<SoC>> socs,
+                 util::inline_vector<uint32_t> gpu_ids, bool daemon_mode = false);
   ~VirtualMachine() override;
 
   VirtualMachine(const VirtualMachine &) = delete;

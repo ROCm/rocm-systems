@@ -117,7 +117,7 @@ private:
     base_offset_ += trimCount;
   }
 
-  util::inline_vector<EventInfo, 0> entries_;
+  util::inline_vector<EventInfo> entries_;
   int base_offset_ = 0;
 };
 

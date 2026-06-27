@@ -56,10 +56,10 @@ public:
 private:
   MemorySideCache *msc_ = nullptr;
   HbmController *hbm_ = nullptr;
-  util::inline_vector<simdojo::Port *, 0> cpl_ports_;
+  util::inline_vector<simdojo::Port *> cpl_ports_;
   simdojo::Port *peer_req_ = nullptr;
   simdojo::Port *peer_cpl_ = nullptr;
-  util::inline_vector<simdojo::Port *, 0> req_ports_;
+  util::inline_vector<simdojo::Port *> req_ports_;
   std::unique_ptr<simdojo::Link> msc_hbm_link_;
 };
 

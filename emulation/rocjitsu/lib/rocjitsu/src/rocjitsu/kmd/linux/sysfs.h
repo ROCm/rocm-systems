@@ -8,8 +8,8 @@
 #define ROCJITSU_KMD_LINUX_SYSFS_H_
 
 #include <cstdint>
+#include <span>
 #include <string>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -97,7 +97,7 @@ public:
 
   /// @brief Generate the sysfs topology directory for multiple GPUs.
   /// @param gpus Per-GPU configurations. Each gets its own topology node.
-  std::string generate(const std::vector<GpuInfo> &gpus);
+  std::string generate(std::span<const GpuInfo> gpus);
 
   /// @brief Get the generated KFD topology path (empty if not yet generated).
   const std::string &path() const { return topology_dir_; }
@@ -126,7 +126,7 @@ private:
   void write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links);
   void write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, const GpuInfo &gpu,
                       uint32_t total_gpus);
-  void write_drm_tree(const std::vector<GpuInfo> &gpus);
+  void write_drm_tree(std::span<const GpuInfo> gpus);
 };
 
 } // namespace rocjitsu

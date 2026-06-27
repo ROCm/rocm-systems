@@ -101,7 +101,7 @@ private:
 
   GpuMemory *memory_;
   simdojo::Port *cpl_ = nullptr;
-  util::inline_vector<simdojo::Port *, 0> cpl_ports_;
+  util::inline_vector<simdojo::Port *> cpl_ports_;
 };
 
 } // namespace amdgpu

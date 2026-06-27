@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -154,7 +155,7 @@ public:
   Port *resolve_port(const std::string &path) const;
 
   /// @brief Wire deferred link specs, creating ports on demand.
-  void wire_links(const std::vector<LinkSpec> &specs, ExecMode mode);
+  void wire_links(std::span<const LinkSpec> specs, ExecMode mode);
 
   /// @brief Partition the topology with explicit partition assignments.
   ///

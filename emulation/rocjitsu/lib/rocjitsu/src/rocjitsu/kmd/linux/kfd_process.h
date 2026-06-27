@@ -22,7 +22,8 @@
 #include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -40,7 +41,7 @@ public:
     size_t doorbell_page_size = 0;
     uint64_t doorbell_gpu_va = 0;
     uint64_t next_doorbell_offset = 0;
-    std::vector<uint32_t> free_doorbell_offsets;
+    util::inline_vector<uint32_t> free_doorbell_offsets;
     uint64_t scratch_backing_va = 0;
     uint64_t trap_tba_addr = 0;
     uint64_t trap_tma_addr = 0;
@@ -168,14 +169,14 @@ public:
   uint64_t next_gpu_va_;
 
   /// @brief Per-GPU state, indexed by gpu ordinal (0-based position in driver's gpus_ vector).
-  std::vector<PerGpuState> gpu_state_;
+  util::inline_vector<PerGpuState> gpu_state_;
 
   /// @brief Access per-GPU state by ordinal.
   PerGpuState &gpu(uint32_t ordinal) { return gpu_state_[ordinal]; }
   const PerGpuState &gpu(uint32_t ordinal) const { return gpu_state_[ordinal]; }
 
   uint32_t next_queue_id_ = 1;
-  std::vector<uint32_t> active_queue_ids_;
+  util::inline_vector<uint32_t> active_queue_ids_;
   struct QueueDoorbellInfo {
     uint32_t gpu_ordinal;
     uint32_t doorbell_offset;

@@ -89,7 +89,7 @@ protected:
   std::unique_ptr<char[]> data_;
 };
 
-using CodeObjectImage = util::inline_vector<char, 0>;
+using CodeObjectImage = util::inline_vector<char>;
 using CodeObjectSectionList = util::inline_vector<std::unique_ptr<Section>>;
 using CodeObjectSectionPtrList = util::inline_vector<const Section *>;
 

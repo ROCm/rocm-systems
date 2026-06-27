@@ -101,7 +101,7 @@ private:
 
   std::mutex mutex_;
   uint64_t base_ = 0;
-  util::inline_vector<std::string, 0> entries_;
+  util::inline_vector<std::string> entries_;
   std::atomic<size_t> size_{0};
 };
 
