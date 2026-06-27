@@ -17,8 +17,7 @@ namespace rocjitsu {
 /// Replaces (does not append). Each function that takes a `std::string *`
 /// out-param is contracted to report at most one failure per call. This is
 /// so that the string holds "this call's single failure reason", as opposed to
-/// a running log. The caller is in charge of Cross-call accumulation (e.g.
-/// `std::vector<std::string>`).
+/// a running log. The caller is in charge of cross-call accumulation.
 inline void report(std::string *out, const char *msg) {
   if (out)
     *out = msg;

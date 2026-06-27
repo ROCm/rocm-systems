@@ -12,7 +12,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -88,6 +89,10 @@ protected:
   std::unique_ptr<char[]> data_;
 };
 
+using CodeObjectImage = util::inline_vector<char, 0>;
+using CodeObjectSectionList = util::inline_vector<std::unique_ptr<Section>>;
+using CodeObjectSectionPtrList = util::inline_vector<const Section *>;
+
 /// @brief Base class for code objects containing machine code and metadata.
 class CodeObject {
 public:
@@ -104,14 +109,14 @@ public:
 
   /// @brief .text sections containing executable machine code.
   /// @returns Vector of pointers to .text sections.
-  const std::vector<const Section *> &text_sections() const { return text_sections_; }
+  const CodeObjectSectionPtrList &text_sections() const { return text_sections_; }
 
   /// @brief .rodata sections containing read-only data.
   /// @returns Vector of pointers to .rodata sections.
-  const std::vector<const Section *> &rodata_sections() const { return rodata_sections_; }
+  const CodeObjectSectionPtrList &rodata_sections() const { return rodata_sections_; }
 
   /// @brief All sections in the code object.
-  const std::vector<std::unique_ptr<Section>> &all_sections() const { return sections_; }
+  const CodeObjectSectionList &all_sections() const { return sections_; }
 
   /// @brief Raw ELF image data.
   const char *image_data() const { return image_.data(); }
@@ -185,11 +190,11 @@ public:
 
 protected:
   bool is_valid_ = true;
-  std::vector<char> image_;
+  CodeObjectImage image_;
   std::unique_ptr<Header> header_;
-  std::vector<std::unique_ptr<Section>> sections_;
-  std::vector<const Section *> text_sections_;
-  std::vector<const Section *> rodata_sections_;
+  CodeObjectSectionList sections_;
+  CodeObjectSectionPtrList text_sections_;
+  CodeObjectSectionPtrList rodata_sections_;
 };
 
 } // namespace rocjitsu

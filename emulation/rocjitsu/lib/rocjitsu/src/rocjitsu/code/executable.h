@@ -16,7 +16,8 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -79,8 +80,9 @@ private:
   void load_hip_fatbin(const Section &fatbin_section);
   void register_code_object(std::unique_ptr<AmdGpuCodeObject> co);
 
-  std::vector<std::unique_ptr<AmdGpuCodeObject>> owned_code_objs_;
-  std::unordered_map<rj_code_target_id_t, std::vector<AmdGpuCodeObject *>> code_objs_by_target_;
+  util::inline_vector<std::unique_ptr<AmdGpuCodeObject>> owned_code_objs_;
+  std::unordered_map<rj_code_target_id_t, util::inline_vector<AmdGpuCodeObject *>>
+      code_objs_by_target_;
 };
 
 } // namespace rocjitsu

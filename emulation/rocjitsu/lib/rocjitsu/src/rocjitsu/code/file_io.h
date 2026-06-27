@@ -8,11 +8,12 @@
 #include <cstdint>
 #include <cstring>
 #include <string_view>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu::detail {
 
-std::vector<char> read_file_bytes(std::string_view path);
+util::inline_vector<char, 0> read_file_bytes(std::string_view path);
 
 bool fits_in_bounds(uint64_t offset, uint64_t size, size_t limit);
 

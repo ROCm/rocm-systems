@@ -8,6 +8,7 @@
 #include "util/log.h"
 
 #include <cstring>
+#include <limits>
 #include <ranges>
 #include <utility>
 
@@ -139,7 +140,7 @@ void Executable::load_fat_binary() {
     is_valid_ = false;
     return;
   }
-  std::vector<Elf64_Shdr> section_hdrs(static_cast<size_t>(num_shdrs));
+  util::inline_vector<Elf64_Shdr, 0> section_hdrs(static_cast<uint32_t>(num_shdrs));
   std::memcpy(section_hdrs.data(), image_.data() + header_->sectionHeaderOff(),
               section_hdrs.size() * sizeof(Elf64_Shdr));
 
@@ -207,7 +208,12 @@ void Executable::load_hip_fatbin(const Section &fatbin_section) {
   util::Logger::debug_print(__func__, ": Found .hip_fatbin with ", bundle_hdr.num_code_objs,
                             " code objects");
 
-  std::vector<ClangOffloadBundleInfo> infos(bundle_hdr.num_code_objs);
+  if (bundle_hdr.num_code_objs > std::numeric_limits<uint32_t>::max()) {
+    is_valid_ = false;
+    return;
+  }
+  util::inline_vector<ClangOffloadBundleInfo> infos(
+      static_cast<uint32_t>(bundle_hdr.num_code_objs));
   for (auto &info : infos) {
     if (!read_value(fatbin_data, fatbin_size, cursor, info.offset)) {
       is_valid_ = false;
@@ -230,7 +236,7 @@ void Executable::load_hip_fatbin(const Section &fatbin_section) {
     cursor += static_cast<size_t>(info.bundle_entry_id_size);
 
     auto parts_view = info.bundle_entry_id | std::views::split('-');
-    std::vector<std::string> parts;
+    util::inline_vector<std::string, 8> parts;
     for (const auto &v : parts_view)
       parts.emplace_back(v.begin(), v.end());
 
