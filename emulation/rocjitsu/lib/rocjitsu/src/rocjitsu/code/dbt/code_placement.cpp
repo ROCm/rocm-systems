@@ -57,8 +57,7 @@ constexpr uint32_t kSNop0 = 0xBF800000u;
   return true;
 }
 
-[[nodiscard]] std::optional<uint64_t> padding_to_preserve_residue(uint64_t value,
-                                                                  uint64_t residue,
+[[nodiscard]] std::optional<uint64_t> padding_to_preserve_residue(uint64_t value, uint64_t residue,
                                                                   uint64_t alignment) {
   if (alignment == 0)
     return std::nullopt;
@@ -144,16 +143,23 @@ bool ranges_overlap(uint64_t lhs_start, uint64_t lhs_end, uint64_t rhs_start, ui
 
 bool overlaps_any_range(uint64_t start, uint64_t end,
                         std::span<const std::pair<uint64_t, uint64_t>> ranges) {
-  return std::ranges::any_of(ranges, [&](const auto &range) {
-    return ranges_overlap(start, end, range.first, range.second);
-  });
+  if (start >= end || ranges.empty())
+    return false;
+
+  const auto it =
+      std::ranges::lower_bound(ranges, end, {}, [](const auto &range) { return range.first; });
+  if (it == ranges.begin())
+    return false;
+
+  const auto &range = *std::prev(it);
+  return ranges_overlap(start, end, range.first, range.second);
 }
 
-std::optional<BranchableTextPlacement> find_local_text_cave(
-    std::span<const uint8_t> text, const LocalTextCaveRequest &request,
-    std::span<const std::pair<uint64_t, uint64_t>> reserved_ranges,
-    std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-    bool allow_unreachable_text_caves) {
+std::optional<BranchableTextPlacement>
+find_local_text_cave(std::span<const uint8_t> text, const LocalTextCaveRequest &request,
+                     std::span<const std::pair<uint64_t, uint64_t>> reserved_ranges,
+                     std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
+                     bool allow_unreachable_text_caves) {
   const uint64_t cave_size = request.cave_size_bytes;
   if (cave_size == 0 || cave_size % sizeof(uint32_t) != 0 || cave_size > text.size())
     return std::nullopt;
@@ -187,7 +193,8 @@ std::optional<BranchableTextPlacement> find_local_text_cave(
   if (allow_unreachable_text_caves) {
     const auto gaps = unprotected_text_gaps(text.size(), protected_ranges);
 
-    auto scan_forward = [&](uint64_t start, uint64_t end) -> std::optional<BranchableTextPlacement> {
+    auto scan_forward = [&](uint64_t start,
+                            uint64_t end) -> std::optional<BranchableTextPlacement> {
       if (end < start || end - start < cave_size)
         return std::nullopt;
       for (uint64_t candidate = align_up_to_word(start); candidate + cave_size <= end;
@@ -253,11 +260,11 @@ std::optional<BranchableTextPlacement> find_local_text_cave(
   return std::nullopt;
 }
 
-std::optional<BranchableTextPlacement> find_local_branch_island(
-    std::span<const uint8_t> text, const LocalBranchIslandRequest &request,
-    std::span<const std::pair<uint64_t, uint64_t>> reserved_ranges,
-    std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-    bool allow_unreachable_text_caves) {
+std::optional<BranchableTextPlacement>
+find_local_branch_island(std::span<const uint8_t> text, const LocalBranchIslandRequest &request,
+                         std::span<const std::pair<uint64_t, uint64_t>> reserved_ranges,
+                         std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
+                         bool allow_unreachable_text_caves) {
   constexpr uint64_t kIslandSize = sizeof(uint32_t);
   if (text.size() < kIslandSize)
     return std::nullopt;
@@ -332,8 +339,8 @@ std::optional<BranchableTextPlacement> find_local_branch_island(
   return scan_forward(0, text.size());
 }
 
-std::optional<ExpandedTextScopePlacement> plan_expanded_text_scope_placement(
-    const ExpandedTextScopePlacementRequest &request) {
+std::optional<ExpandedTextScopePlacement>
+plan_expanded_text_scope_placement(const ExpandedTextScopePlacementRequest &request) {
   if (request.entry_alignment_bytes == 0)
     return std::nullopt;
 
@@ -353,9 +360,8 @@ std::optional<ExpandedTextScopePlacement> plan_expanded_text_scope_placement(
       return std::nullopt;
     }
 
-    auto padding =
-        padding_to_preserve_residue(entry_without_padding, entry_residue,
-                                    request.entry_alignment_bytes);
+    auto padding = padding_to_preserve_residue(entry_without_padding, entry_residue,
+                                               request.entry_alignment_bytes);
     if (!padding || *padding % sizeof(uint32_t) != 0)
       return std::nullopt;
 
@@ -371,16 +377,14 @@ std::optional<ExpandedTextScopePlacement> plan_expanded_text_scope_placement(
     return placement;
   }
 
-  auto padding =
-      padding_to_preserve_residue(base_without_padding, entry_residue,
-                                  request.entry_alignment_bytes);
+  auto padding = padding_to_preserve_residue(base_without_padding, entry_residue,
+                                             request.entry_alignment_bytes);
   if (!padding || *padding % sizeof(uint32_t) != 0)
     return std::nullopt;
 
   placement.padding_bytes = *padding;
   uint64_t launch_stub_offset = 0;
-  if (!checked_add(request.current_tail_size_bytes, placement.padding_bytes,
-                   launch_stub_offset)) {
+  if (!checked_add(request.current_tail_size_bytes, placement.padding_bytes, launch_stub_offset)) {
     return std::nullopt;
   }
   placement.launch_stub_offset = launch_stub_offset;
@@ -437,20 +441,17 @@ relocate_expanded_text_branches(const ExpandedTextBranchRelocationRequest &reque
       continue;
     if (request.words[word + 1] != pack_sop2(0, sgpr_pair, sgpr_pair, 255))
       continue;
-    if (request.words[word + 3] !=
-        pack_sop2(4, static_cast<uint16_t>(sgpr_pair + 1u),
-                  static_cast<uint16_t>(sgpr_pair + 1u), 255)) {
+    if (request.words[word + 3] != pack_sop2(4, static_cast<uint16_t>(sgpr_pair + 1u),
+                                             static_cast<uint16_t>(sgpr_pair + 1u), 255)) {
       continue;
     }
     if (request.words[word + 5] != pack_sop1(72, 0, sgpr_pair))
       continue;
 
-    const uint64_t delta_bits =
-        static_cast<uint64_t>(request.words[word + 2]) |
-        (static_cast<uint64_t>(request.words[word + 4]) << 32);
+    const uint64_t delta_bits = static_cast<uint64_t>(request.words[word + 2]) |
+                                (static_cast<uint64_t>(request.words[word + 4]) << 32);
     const int64_t delta = static_cast<int64_t>(delta_bits);
-    const int64_t target =
-        static_cast<int64_t>(word * sizeof(uint32_t) + sizeof(uint32_t)) + delta;
+    const int64_t target = static_cast<int64_t>(word * sizeof(uint32_t) + sizeof(uint32_t)) + delta;
     if (target < 0 || target % static_cast<int64_t>(sizeof(uint32_t)) != 0) {
       return fail("expanded text copy cannot relocate unaligned s_setpc target");
     }
@@ -516,8 +517,7 @@ relocate_expanded_text_branches(const ExpandedTextBranchRelocationRequest &reque
 
       const uint32_t word = request.words[branch.word_index];
       if (!branch.sgpr_pair)
-        return fail("expanded text copy needs a dead SGPR pair for long branch " +
-                    branch.mnemonic);
+        return fail("expanded text copy needs a dead SGPR pair for long branch " + branch.mnemonic);
       if (!is_s_branch_word(word) && !inverse_conditional_sopp(word))
         return fail("expanded text copy cannot build long branch for " + branch.mnemonic);
 
@@ -547,9 +547,8 @@ relocate_expanded_text_branches(const ExpandedTextBranchRelocationRequest &reque
     const uint64_t target_pc = old_to_new[*target_word] * sizeof(uint32_t);
     const uint32_t word = request.words[old_word];
     if (is_s_branch_word(word)) {
-      auto long_branch =
-          build_s_setpc_long_branch(relocated_words.size() * sizeof(uint32_t), target_pc,
-                                    *branch.sgpr_pair);
+      auto long_branch = build_s_setpc_long_branch(relocated_words.size() * sizeof(uint32_t),
+                                                   target_pc, *branch.sgpr_pair);
       if (long_branch.empty())
         return fail("expanded text copy could not build long branch for " + branch.mnemonic);
       relocated_words.insert(relocated_words.end(), long_branch.begin(), long_branch.end());
@@ -557,9 +556,8 @@ relocate_expanded_text_branches(const ExpandedTextBranchRelocationRequest &reque
     }
 
     auto inverse = inverse_conditional_sopp(word);
-    auto long_branch =
-        build_s_setpc_long_branch((relocated_words.size() + 1) * sizeof(uint32_t), target_pc,
-                                  *branch.sgpr_pair);
+    auto long_branch = build_s_setpc_long_branch((relocated_words.size() + 1) * sizeof(uint32_t),
+                                                 target_pc, *branch.sgpr_pair);
     if (!inverse || long_branch.empty() ||
         long_branch.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
       return fail("expanded text copy could not build long conditional branch for " +
@@ -582,8 +580,7 @@ relocate_expanded_text_branches(const ExpandedTextBranchRelocationRequest &reque
     const uint64_t branch_pc = old_to_new[branch.word_index] * sizeof(uint32_t);
     const uint64_t target_pc = old_to_new[*target_word] * sizeof(uint32_t);
     if (!compute_sopp_branch_offset(branch_pc, target_pc, branch_dwords))
-      return fail("expanded text copy branch range exceeds s_branch simm16 for " +
-                  branch.mnemonic);
+      return fail("expanded text copy branch range exceeds s_branch simm16 for " + branch.mnemonic);
     relocated_words[old_to_new[branch.word_index]] =
         build_sopp_with_simm(relocated_words[old_to_new[branch.word_index]], branch_dwords);
   }
@@ -615,8 +612,8 @@ relocate_expanded_text_branches(const ExpandedTextBranchRelocationRequest &reque
   return result;
 }
 
-ExpandedTextPcRelativeRelocation relocate_expanded_text_pc_relative_fixups(
-    const ExpandedTextPcRelativeRelocationRequest &request) {
+ExpandedTextPcRelativeRelocation
+relocate_expanded_text_pc_relative_fixups(const ExpandedTextPcRelativeRelocationRequest &request) {
   ExpandedTextPcRelativeRelocation result;
   if (request.fixups.empty()) {
     result.success = true;
@@ -645,8 +642,7 @@ ExpandedTextPcRelativeRelocation relocate_expanded_text_pc_relative_fixups(
 
     const uint32_t add_tmp = request.words[add_tmp_word];
     const uint16_t tmp = static_cast<uint16_t>((add_tmp >> 16) & 0x7Fu);
-    if (tmp >= 128 ||
-        add_tmp != pack_sop2(kOpSAddCoI32, tmp, 255, scalar_positive_inline_u32(4))) {
+    if (tmp >= 128 || add_tmp != pack_sop2(kOpSAddCoI32, tmp, 255, scalar_positive_inline_u32(4))) {
       return fail("expanded text copy pc-relative " + fixup.kind +
                   " materialization was rewritten");
     }
@@ -658,7 +654,7 @@ ExpandedTextPcRelativeRelocation relocate_expanded_text_pc_relative_fixups(
                                    *copied_target_offset)
             : static_cast<int64_t>(fixup.target_offset);
     const int64_t getpc_pc = static_cast<int64_t>(request.original_text_size_bytes +
-                                                 request.scope_base_bytes + *getpc_offset);
+                                                  request.scope_base_bytes + *getpc_offset);
     const int64_t literal = target - getpc_pc - 2 * static_cast<int64_t>(sizeof(uint32_t));
     if (literal < std::numeric_limits<int32_t>::min() ||
         literal > std::numeric_limits<int32_t>::max()) {

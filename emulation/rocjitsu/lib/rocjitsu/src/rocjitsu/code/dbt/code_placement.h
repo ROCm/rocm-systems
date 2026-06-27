@@ -114,29 +114,31 @@ struct ExpandedTextDescriptorRedirectionPlan {
 [[nodiscard]] bool ranges_overlap(uint64_t lhs_start, uint64_t lhs_end, uint64_t rhs_start,
                                   uint64_t rhs_end);
 
+/// Returns true when [start, end) overlaps one of the sorted, non-overlapping
+/// ranges.
 [[nodiscard]] bool overlaps_any_range(uint64_t start, uint64_t end,
                                       std::span<const std::pair<uint64_t, uint64_t>> ranges);
 
-[[nodiscard]] std::optional<BranchableTextPlacement> find_local_text_cave(
-    std::span<const uint8_t> text, const LocalTextCaveRequest &request,
-    std::span<const std::pair<uint64_t, uint64_t>> reserved_ranges,
-    std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-    bool allow_unreachable_text_caves);
+[[nodiscard]] std::optional<BranchableTextPlacement>
+find_local_text_cave(std::span<const uint8_t> text, const LocalTextCaveRequest &request,
+                     std::span<const std::pair<uint64_t, uint64_t>> reserved_ranges,
+                     std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
+                     bool allow_unreachable_text_caves);
 
-[[nodiscard]] std::optional<BranchableTextPlacement> find_local_branch_island(
-    std::span<const uint8_t> text, const LocalBranchIslandRequest &request,
-    std::span<const std::pair<uint64_t, uint64_t>> reserved_ranges,
-    std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-    bool allow_unreachable_text_caves);
+[[nodiscard]] std::optional<BranchableTextPlacement>
+find_local_branch_island(std::span<const uint8_t> text, const LocalBranchIslandRequest &request,
+                         std::span<const std::pair<uint64_t, uint64_t>> reserved_ranges,
+                         std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
+                         bool allow_unreachable_text_caves);
 
-[[nodiscard]] std::optional<ExpandedTextScopePlacement> plan_expanded_text_scope_placement(
-    const ExpandedTextScopePlacementRequest &request);
+[[nodiscard]] std::optional<ExpandedTextScopePlacement>
+plan_expanded_text_scope_placement(const ExpandedTextScopePlacementRequest &request);
 
 [[nodiscard]] ExpandedTextBranchRelocation
 relocate_expanded_text_branches(const ExpandedTextBranchRelocationRequest &request);
 
-[[nodiscard]] ExpandedTextPcRelativeRelocation relocate_expanded_text_pc_relative_fixups(
-    const ExpandedTextPcRelativeRelocationRequest &request);
+[[nodiscard]] ExpandedTextPcRelativeRelocation
+relocate_expanded_text_pc_relative_fixups(const ExpandedTextPcRelativeRelocationRequest &request);
 
 [[nodiscard]] ExpandedTextDescriptorRedirectionPlan plan_expanded_text_descriptor_redirections(
     std::span<const ExpandedTextDescriptorEntry> descriptors,

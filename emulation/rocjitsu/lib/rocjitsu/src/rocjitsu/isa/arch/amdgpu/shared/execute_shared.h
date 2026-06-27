@@ -8623,6 +8623,23 @@ inline void execute_v_cvt_f32_bf8_vop3([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
+inline void execute_v_cvt_pk_f32_bf8_vop1([[maybe_unused]] Inst &inst,
+                                          [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw = inst.src0.read_lane(wf, lane) & 0xFFFFu;
+    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFFu));
+    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
+    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
+    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
+    inst.vdst.write_lane64(wf, lane,
+                           static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
+  }
+}
+
+template <typename Inst>
 inline void execute_v_cvt_f32_f16_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t,
@@ -8719,6 +8736,23 @@ inline void execute_v_cvt_f32_fp8_vop3([[maybe_unused]] Inst &inst,
                                               ((amdgpu::vop3_opsel(inst.inst_) & 0x2u) >> 1)) *
                                              8u)) &
                                            0xFFu)))));
+  }
+}
+
+template <typename Inst>
+inline void execute_v_cvt_pk_f32_fp8_vop1([[maybe_unused]] Inst &inst,
+                                          [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw = inst.src0.read_lane(wf, lane) & 0xFFFFu;
+    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFFu));
+    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
+    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
+    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
+    inst.vdst.write_lane64(wf, lane,
+                           static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
   }
 }
 
@@ -16394,6 +16428,16 @@ inline void execute_v_not_b32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane, (~inst.src0.read_lane(wf, lane)));
+  }
+}
+
+template <typename Inst>
+inline void execute_v_not_b16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    inst.vdst.write_lane(wf, lane, (~inst.src0.read_lane(wf, lane)) & 0xFFFFu);
   }
 }
 
