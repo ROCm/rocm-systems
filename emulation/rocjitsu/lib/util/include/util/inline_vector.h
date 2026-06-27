@@ -25,6 +25,11 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 #endif
 
 namespace util {
@@ -51,6 +56,25 @@ struct InlineVectorActiveEntry {
   InlineVectorSourceKey source;
   bool allocated_dynamic_storage = false;
 };
+
+inline uint64_t inline_vector_histogram_process_id() noexcept {
+#ifdef _WIN32
+  return static_cast<uint64_t>(_getpid());
+#else
+  return static_cast<uint64_t>(getpid());
+#endif
+}
+
+inline std::string expand_inline_vector_histogram_path(const char *path) {
+  std::string expanded(path);
+  const std::string pid = std::to_string(inline_vector_histogram_process_id());
+  std::size_t pos = 0;
+  while ((pos = expanded.find("%p", pos)) != std::string::npos) {
+    expanded.replace(pos, 2, pid);
+    pos += pid.size();
+  }
+  return expanded;
+}
 
 class inline_vector_histogram_registry {
 public:
@@ -146,7 +170,8 @@ private:
       return;
     }
 
-    std::ofstream os(path);
+    const std::string dump_path = expand_inline_vector_histogram_path(path);
+    std::ofstream os(dump_path);
     if (!os) {
       return;
     }

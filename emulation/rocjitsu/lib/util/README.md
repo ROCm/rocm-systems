@@ -39,10 +39,12 @@ compiled sources.
 `inline_vector.h` also supports optional destruction-size histograms. Build with
 `UTIL_INLINE_VECTOR_ENABLE_HISTOGRAM=1` and set
 `UTIL_INLINE_VECTOR_HISTOGRAM_FILE=/path/to/histogram.jsonl` to dump JSONL rows
-at process exit. Each row is keyed by the construction source location and the
-size observed at destruction. Histogram builds also include per-source dynamic
-growth counters so tuning can distinguish vectors that merely end large from
-vectors that actually allocate dynamic storage.
+at process exit. Use `%p` in the file path for multi-process runs; it expands to
+the process id so parallel test runners do not overwrite each other's histogram
+files. Each row is keyed by the construction source location and the size
+observed at destruction. Histogram builds also include per-source dynamic growth
+counters so tuning can distinguish vectors that merely end large from vectors
+that actually allocate dynamic storage.
 
 ### Diagnostics
 

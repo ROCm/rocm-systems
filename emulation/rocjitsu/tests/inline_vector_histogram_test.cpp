@@ -66,4 +66,12 @@ TEST(InlineVectorHistogramTest, RecordsDynamicAllocationsByConstructionSite) {
   EXPECT_NE(report.find("\"max_dynamic_capacity\":4"), std::string::npos);
 }
 
+TEST(InlineVectorHistogramTest, ExpandsProcessIdPlaceholderInOutputPath) {
+  const std::string path =
+      util::detail::expand_inline_vector_histogram_path("/tmp/inline-vector-%p-%p.jsonl");
+  const std::string pid = std::to_string(util::detail::inline_vector_histogram_process_id());
+
+  EXPECT_EQ(path, "/tmp/inline-vector-" + pid + "-" + pid + ".jsonl");
+}
+
 } // namespace
