@@ -10,6 +10,7 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
+#include "util/inline_vector.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -22,10 +23,10 @@ RJ_DIAGNOSTIC_POP
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 namespace {
 
@@ -673,6 +674,8 @@ constexpr uint32_t S_ENDPGM = sopp(1, 0);
 } // namespace enc
 
 struct ExecFixture {
+  using ProgramWords = util::inline_vector<uint32_t>;
+
   VmFixture f;
   std::string arch_;
 
@@ -681,16 +684,16 @@ struct ExecFixture {
   bool is_cdna4() const { return arch_ == "cdna4"; }
   uint32_t sopp_bytes() const { return 4u; }
 
-  std::vector<uint32_t> sopp(uint32_t word) const { return {word}; }
+  ProgramWords sopp(uint32_t word) const { return {word}; }
 
-  static std::vector<uint32_t> cat(std::initializer_list<std::vector<uint32_t>> parts) {
-    std::vector<uint32_t> result;
+  static ProgramWords cat(std::initializer_list<ProgramWords> parts) {
+    ProgramWords result;
     for (const auto &p : parts)
       result.insert(result.end(), p.begin(), p.end());
     return result;
   }
 
-  void load_program(const std::vector<uint32_t> &words, uint64_t base = 0x1000) {
+  void load_program(const ProgramWords &words, uint64_t base = 0x1000) {
     uint64_t ko = f.write_kernel(base, words.data(), words.size() * sizeof(uint32_t));
     test::AqlQueue queue(f.mem(), f.cp());
     queue.dispatch(ko, 64);

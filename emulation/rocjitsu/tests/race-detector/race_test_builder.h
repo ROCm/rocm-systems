@@ -10,11 +10,11 @@
 
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
+#include "util/inline_vector.h"
 
 #include <cassert>
 #include <cstdint>
 #include <memory>
-#include <vector>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -45,7 +45,8 @@ public:
 
   /// Register a Direct-to-LDS global load (tracked by vmcnt).
   /// ldsAddrs is per-active-lane; padded to waveSize internally.
-  void globalToLds(int wave, std::vector<uint32_t> ldsAddrs, int bytesPerLane, uint64_t exec = 0) {
+  void globalToLds(int wave, util::inline_vector<uint32_t> ldsAddrs, int bytesPerLane,
+                   uint64_t exec = 0) {
     if (!exec) {
       exec = defaultExec_;
     }
@@ -80,7 +81,7 @@ public:
       exec = defaultExec_;
     }
     detector_->validateWrite(addr, WaveId{wave}, lane, bytes);
-    std::vector<uint32_t> ldsAddrs(waveSize_, 0);
+    util::inline_vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
     waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::VGPR_TO_LDS,
@@ -96,7 +97,7 @@ public:
       exec = defaultExec_;
     }
     detector_->validateRead(addr, WaveId{wave}, lane, bytes);
-    std::vector<uint32_t> ldsAddrs(waveSize_, 0);
+    util::inline_vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
     RegisterList regs = {static_cast<uint32_t>(vgprDst)};
@@ -144,7 +145,7 @@ public:
 
   bool hasRace() const { return !violations_.empty(); }
   int raceCount() const { return static_cast<int>(violations_.size()); }
-  const std::vector<RaceViolation> &violations() const { return violations_; }
+  const util::inline_vector<RaceViolation> &violations() const { return violations_; }
 
   bool hasVgprRace(int reg) const {
     for (const auto &v : violations_) {
@@ -179,8 +180,8 @@ public:
 
 private:
   std::unique_ptr<RaceDetector> detector_;
-  std::vector<WaveRaceState *> waves_;
-  std::vector<RaceViolation> violations_;
+  util::inline_vector<WaveRaceState *> waves_;
+  util::inline_vector<RaceViolation> violations_;
   int waveSize_;
   uint64_t defaultExec_;
   int pc_ = 0; // Auto-incrementing fake PC for event registration.

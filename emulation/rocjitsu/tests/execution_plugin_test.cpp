@@ -18,6 +18,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
+#include "util/inline_vector.h"
 
 #include <gtest/gtest.h>
 
@@ -26,8 +27,9 @@ RJ_DIAGNOSTIC_POP
 #include <format>
 #include <map>
 #include <memory>
+#include <set>
+#include <span>
 #include <string>
-#include <vector>
 
 namespace {
 
@@ -74,11 +76,13 @@ struct HookEvent {
   std::string mnemonic;
 };
 
+using HookEventLog = util::inline_vector<HookEvent>;
+
 /// A plugin that records an ordered event log for ordering assertions.
 class OrderingPlugin : public ExecutionPlugin {
 public:
   OrderingPlugin() : ExecutionPlugin("ordering") {}
-  std::vector<HookEvent> events;
+  HookEventLog events;
 
   void onInit() override { events.push_back(HookEvent(HookEvent::INIT)); }
 
@@ -224,7 +228,7 @@ class EventLog {
 public:
   using Kind = HookEvent::Kind;
 
-  explicit EventLog(const std::vector<HookEvent> &events) : events_(events) {}
+  explicit EventLog(const HookEventLog &events) : events_(events) {}
 
   /// Print the full lifecycle event timeline to stderr.
   void dump() const {
@@ -267,8 +271,8 @@ public:
   }
 
   /// Return dispatch_ids in the order they first appear as DISPATCH_PACKET_PROCESSED.
-  std::vector<uint32_t> dispatchIds() const {
-    std::vector<uint32_t> ids;
+  util::inline_vector<uint32_t> dispatchIds() const {
+    util::inline_vector<uint32_t> ids;
     for (const auto &e : events_) {
       if (e.kind == Kind::DISPATCH_PACKET_PROCESSED &&
           std::find(ids.begin(), ids.end(), e.dispatch_id) == ids.end())
@@ -372,7 +376,7 @@ private:
   }
 
 private:
-  const std::vector<HookEvent> &events_;
+  const HookEventLog &events_;
 };
 
 /// Minimal SoC fixture: 1 XCD, 1 SE, 1 CU.
