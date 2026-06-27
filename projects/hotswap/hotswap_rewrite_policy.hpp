@@ -22,6 +22,7 @@ namespace rocr::hotswap {
 enum class RewriteKind {
   None,
   Gfx1250A0Patch,
+  Gfx1250A0PatchWithEntryTrampoline,
   Gfx12_5EntryTrampoline,
 };
 
@@ -34,7 +35,10 @@ struct RewriteDecision {
   std::string source_isa;
   std::string target_isa;
 
-  bool should_rewrite() const { return kind != RewriteKind::None; }
+  bool should_rewrite() const {
+    return kind != RewriteKind::None && !source_isa.empty() &&
+           !target_isa.empty();
+  }
 };
 
 const char *rewrite_kind_name(RewriteKind kind);

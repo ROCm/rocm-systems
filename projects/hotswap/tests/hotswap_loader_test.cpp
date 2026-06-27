@@ -405,6 +405,19 @@ void test_A0RetargetsWithoutFlag() {
         "A0 agent ISA is tagged as A0");
 }
 
+void test_A0WithFlagKeepsA0PatchPair() {
+  begin_test("A0WithFlagKeepsA0PatchPair",
+             "The trampoline flag on gfx1250 A0 must preserve the B0-to-A0 "
+             "patch ISA pair while routing through COMGR.");
+  const LoadResult result = load_once(kGfx1250Isa, kGfx1250Isa, "1", 0);
+  check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
+  check(result.retarget_calls == 1, "A0 gfx1250 routes through COMGR");
+  check(result.source_isa == kGfx1250B0Isa,
+        "source code object ISA is tagged as B0");
+  check(result.target_isa == kGfx1250A0Isa,
+        "A0 agent ISA remains tagged as A0");
+}
+
 void test_FlagOneBlocksNonGfx12_5() {
   begin_test("FlagOneBlocksNonGfx12_5",
              "The trampoline flag must not become a global rewrite enable for "
@@ -436,6 +449,7 @@ int main() {
   test_GenericSourceUsesGenericTarget();
   test_ConcreteSourceUsesSourceTarget();
   test_A0RetargetsWithoutFlag();
+  test_A0WithFlagKeepsA0PatchPair();
   test_FlagOneBlocksNonGfx12_5();
   test_RetargetFailureFallsBackToOriginalReader();
   reset_state();
