@@ -13,12 +13,12 @@
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
+#include "util/inline_vector.h"
 
 #include <cassert>
 #include <cstdint>
 #include <memory>
 #include <string_view>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -531,7 +531,7 @@ private:
   // the wavefront's GPU simulation contract. The SIMD register-read path is
   // const (it doesn't alter GPU state), but plugins need to update their own
   // tracking during reads.
-  mutable std::vector<std::unique_ptr<WavefrontState>> plugin_states_;
+  mutable util::inline_vector<std::unique_ptr<WavefrontState>, 0> plugin_states_;
   uint64_t ready_cycle_ = 0;
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
