@@ -11,12 +11,14 @@
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
+#include "util/inline_vector.h"
 
 #include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -185,7 +187,9 @@ public:
 
   /// @brief Return all completer ports (CU-facing).
   /// @returns Const reference to the vector of completer ports.
-  const std::vector<simdojo::Port *> &cpl_ports() const { return cpl_ports_; }
+  std::span<simdojo::Port *const> cpl_ports() const {
+    return {cpl_ports_.data(), cpl_ports_.size()};
+  }
 
 private:
   void ensure_line(uint64_t addr, uint32_t vmid = 0);
@@ -201,7 +205,7 @@ private:
   /// a range of cache lines, allowing atomics to different lines to proceed
   /// in parallel (matching real L2 arbitration behavior).
   std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
-  std::vector<simdojo::Port *> cpl_ports_;
+  util::inline_vector<simdojo::Port *, 0> cpl_ports_;
   uint64_t write_count_ = 0; ///< Debug: total L2 writes (for trace).
 };
 

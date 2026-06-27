@@ -5,11 +5,11 @@
 #define ROCJITSU_VM_AMDGPU_LDS_H_
 
 #include "simdojo/components/memory_interface.h"
+#include "util/inline_vector.h"
 
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -181,7 +181,7 @@ public:
   uint8_t *data() { return data_.data(); }
 
 private:
-  std::vector<uint8_t> data_;
+  util::inline_vector<uint8_t, 0> data_;
 };
 
 } // namespace amdgpu

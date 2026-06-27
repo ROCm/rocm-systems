@@ -53,8 +53,8 @@ void Xcd::initialize() {
   auto &topo = engine()->topology();
 
   // Wire CP req ports → CU cpl ports.
-  auto &dispatch_ports = cp_->dispatch_ports();
-  auto &cus = cp_->compute_units();
+  auto dispatch_ports = cp_->dispatch_ports();
+  auto cus = cp_->compute_units();
   assert(dispatch_ports.size() == cus.size() && "dispatch ports and CU count must match");
   for (size_t i = 0; i < cus.size(); ++i) {
     auto *link = topo.add_link(dispatch_ports[i], cus[i]->cpl_port(), /*latency=*/1,

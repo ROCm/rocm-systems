@@ -22,7 +22,6 @@
 #include <deque>
 #include <functional>
 #include <span>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -42,7 +41,8 @@ public:
     DispatchEntry *entry;
   };
 
-  explicit ShaderProcessorInput(std::vector<ComputeUnitCore *> cus) : cus_(std::move(cus)) {}
+  explicit ShaderProcessorInput(std::span<ComputeUnitCore *const> cus)
+      : cus_(cus.begin(), cus.end()) {}
 
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
                      uint64_t private_limit) {
@@ -158,12 +158,12 @@ public:
   /// @brief Legacy: direct dispatch (kept for backward compatibility).
   ComputeUnitCore *dispatch_workgroup(const DispatchEntry &entry) { return select_cu(entry); }
 
-  const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
+  std::span<ComputeUnitCore *const> compute_units() const { return {cus_.data(), cus_.size()}; }
 
 private:
-  std::vector<ComputeUnitCore *> cus_;
+  util::inline_vector<ComputeUnitCore *, 0> cus_;
   size_t next_cu_ = 0;
-  std::vector<std::deque<WgRequest>> pipe_queues_;
+  util::inline_vector<std::deque<WgRequest>, 0> pipe_queues_;
   size_t next_pipe_ = 0;
 };
 

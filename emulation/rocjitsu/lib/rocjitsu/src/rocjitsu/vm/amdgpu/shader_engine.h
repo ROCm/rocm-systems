@@ -9,13 +9,14 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
+#include "util/inline_vector.h"
 
 #include "simdojo/sim/component.h"
 
 #include <cassert>
 #include <cstdint>
+#include <span>
 #include <string>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -76,17 +77,18 @@ public:
 
   /// @brief Return all compute units.
   /// @returns Const reference to the vector of CU pointers.
-  const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
+  std::span<ComputeUnitCore *const> compute_units() const { return {cus_.data(), cus_.size()}; }
 
   /// @brief Get or create the SPI for this shader engine.
   ShaderProcessorInput &spi() {
     if (!spi_)
-      spi_ = std::make_unique<ShaderProcessorInput>(cus_);
+      spi_ = std::make_unique<ShaderProcessorInput>(
+          std::span<ComputeUnitCore *const>(cus_.data(), cus_.size()));
     return *spi_;
   }
 
 private:
-  std::vector<ComputeUnitCore *> cus_;
+  util::inline_vector<ComputeUnitCore *, 0> cus_;
   std::unique_ptr<ShaderProcessorInput> spi_;
 };
 

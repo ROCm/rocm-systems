@@ -6,13 +6,13 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "simdojo/sim/component.h"
+#include "util/inline_vector.h"
 
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -101,7 +101,7 @@ private:
 
   GpuMemory *memory_;
   simdojo::Port *cpl_ = nullptr;
-  std::vector<simdojo::Port *> cpl_ports_;
+  util::inline_vector<simdojo::Port *, 0> cpl_ports_;
 };
 
 } // namespace amdgpu

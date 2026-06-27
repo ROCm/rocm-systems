@@ -15,13 +15,14 @@
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
+#include "util/inline_vector.h"
 
 #include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -95,7 +96,7 @@ public:
 
   /// @brief Return all XCDs.
   /// @returns Const reference to the vector of XCD pointers.
-  const std::vector<amdgpu::Xcd *> &xcds() const { return xcds_; }
+  std::span<amdgpu::Xcd *const> xcds() const { return {xcds_.data(), xcds_.size()}; }
 
   /// @brief MES-like round-robin queue assignment across XCD command processors.
   ///
@@ -162,7 +163,7 @@ public:
 
   void run_to_idle();
 
-  const std::vector<amdgpu::ComputeUnitCore *> &all_cus();
+  std::span<amdgpu::ComputeUnitCore *const> all_cus();
 
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
@@ -172,12 +173,12 @@ private:
   std::atomic<uint32_t> next_xcd_assignment_{0};
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
-  std::vector<amdgpu::Xcd *> xcds_;
-  std::vector<amdgpu::Iod *> iods_;
+  util::inline_vector<amdgpu::Xcd *, 0> xcds_;
+  util::inline_vector<amdgpu::Iod *, 0> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;
   std::unique_ptr<amdgpu::HbmController> hbm_standalone_; ///< Used when num_iods == 0.
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
-  std::vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
+  util::inline_vector<amdgpu::ComputeUnitCore *, 0> all_cus_cache_;
 };
 
 } // namespace rocjitsu

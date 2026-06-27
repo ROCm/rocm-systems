@@ -19,7 +19,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
-                                           std::vector<HwQueueState> &queues) {
+                                           HwQueueStateList &queues) {
   for (auto &qs : queues) {
     for (auto &entry : qs.entries) {
       if (entry.dispatch_id == dispatch_id) {
@@ -35,7 +35,7 @@ void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
   }
 }
 
-void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
+void CompletionTracker::drain_completions(HwQueueStateList &queues) {
   for (auto &qs : queues) {
     bool had_entries = !qs.entries.empty();
     uint32_t last_process_id = 0;
@@ -139,7 +139,7 @@ void CompletionTracker::flush_caches(uint32_t vmid) {
     cu->flush_all(vmid);
 }
 
-bool CompletionTracker::all_complete(const std::vector<HwQueueState> &queues) const {
+bool CompletionTracker::all_complete(const HwQueueStateList &queues) const {
   for (const auto &qs : queues) {
     if (!qs.entries.empty())
       return false;

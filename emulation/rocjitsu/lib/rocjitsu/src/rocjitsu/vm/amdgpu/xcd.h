@@ -11,14 +11,15 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
+#include "util/inline_vector.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
 
 #include <cassert>
 #include <cstdint>
+#include <span>
 #include <string>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -98,7 +99,9 @@ public:
 
   /// @brief Return all shader engines.
   /// @returns Const reference to the vector of shader engine pointers.
-  const std::vector<ShaderEngine *> &shader_engines() const { return shader_engines_; }
+  std::span<ShaderEngine *const> shader_engines() const {
+    return {shader_engines_.data(), shader_engines_.size()};
+  }
 
   /// @brief Return the shared L2 cache component.
   /// @returns Pointer to the L2 cache.
@@ -110,7 +113,7 @@ private:
   simdojo::ExecMode exec_mode_;
   CommandProcessor *cp_ = nullptr;
   L2Cache *l2_cache_ = nullptr;
-  std::vector<ShaderEngine *> shader_engines_;
+  util::inline_vector<ShaderEngine *, 0> shader_engines_;
 };
 
 } // namespace amdgpu

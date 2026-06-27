@@ -28,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
+#include "util/inline_vector.h"
 
 #include "simdojo/sim/component.h"
 
@@ -35,11 +36,11 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "rocjitsu/base/rj_compiler.h"
 #ifndef HSA_LARGE_MODEL
@@ -157,8 +158,10 @@ public:
 
   size_t next_cu_index() const { return next_cu_; }
 
-  const std::vector<simdojo::Port *> &dispatch_ports() const { return dispatch_ports_; }
-  const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
+  std::span<simdojo::Port *const> dispatch_ports() const {
+    return {dispatch_ports_.data(), dispatch_ports_.size()};
+  }
+  std::span<ComputeUnitCore *const> compute_units() const { return {cus_.data(), cus_.size()}; }
 
   /// @brief Return LDS targets selected by a cluster multicast mask.
   ClusterLdsTargets cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint32_t mcast_mask);
@@ -231,12 +234,12 @@ private:
   }
 
   GpuMemory *memory_ = nullptr;
-  std::vector<ShaderProcessorInput *> spis_;
-  std::vector<L2Cache *> l2_caches_;
-  std::vector<HwQueue> hw_queues_;
-  std::vector<HwQueueState> new_queue_states_;
-  std::vector<ComputeUnitCore *> cus_;
-  std::vector<simdojo::Port *> dispatch_ports_;
+  util::inline_vector<ShaderProcessorInput *, 0> spis_;
+  util::inline_vector<L2Cache *, 0> l2_caches_;
+  util::inline_vector<HwQueue, 0> hw_queues_;
+  HwQueueStateList new_queue_states_;
+  ComputeUnitList cus_;
+  util::inline_vector<simdojo::Port *, 0> dispatch_ports_;
 
   size_t next_cu_ = 0;
   size_t next_queue_idx_ = 0;

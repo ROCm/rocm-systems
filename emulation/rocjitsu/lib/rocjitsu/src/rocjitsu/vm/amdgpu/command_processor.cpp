@@ -97,12 +97,12 @@ uint32_t aligned_lds_bytes_per_workgroup(const DispatchEntry &entry) {
   return util::align_up(entry.group_segment_fixed_size, 256u);
 }
 
-bool any_active_wavefronts(const std::vector<ComputeUnitCore *> &cus) {
+bool any_active_wavefronts(const ComputeUnitList &cus) {
   return std::any_of(cus.begin(), cus.end(), [](const auto *cu) { return cu->has_active_wfs(); });
 }
 
 bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_local_wg_id,
-                             size_t next_cu, const std::vector<ComputeUnitCore *> &cus,
+                             size_t next_cu, const ComputeUnitList &cus,
                              util::inline_vector<PlannedWorkgroup, kMaxClusterWorkgroups> &plan,
                              size_t &planned_next_cu) {
   plan.clear();

@@ -12,23 +12,25 @@
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "util/inline_vector.h"
 
 #include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+using ComputeUnitList = util::inline_vector<ComputeUnitCore *, 0>;
+using HwQueueStateList = util::inline_vector<HwQueueState, 0>;
 
 class CompletionTracker {
 public:
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
   using DispatchRetiredCallback = std::function<void(const DispatchEntry &entry)>;
 
-  CompletionTracker(GpuMemory *mem, std::vector<ComputeUnitCore *> &cus)
-      : memory_(mem), cus_(cus) {}
+  CompletionTracker(GpuMemory *mem, ComputeUnitList &cus) : memory_(mem), cus_(cus) {}
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -40,16 +42,16 @@ public:
   }
 
   /// @brief Notify that a workgroup has completed all its wavefronts.
-  void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id, std::vector<HwQueueState> &queues);
+  void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id, HwQueueStateList &queues);
 
   /// @brief Scan all queues and fire completion signals for retired dispatches.
-  void drain_completions(std::vector<HwQueueState> &queues);
+  void drain_completions(HwQueueStateList &queues);
 
   /// @brief Flush L1/L2 caches before firing a completion signal.
   void flush_caches(uint32_t vmid = 0);
 
   /// @brief Check if all queues have no pending entries.
-  bool all_complete(const std::vector<HwQueueState> &queues) const;
+  bool all_complete(const HwQueueStateList &queues) const;
 
   /// @brief Write queue-idle status to the queue's inactive signal.
   void fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id);
@@ -58,7 +60,7 @@ private:
   void fire_signal(const DispatchEntry &entry);
 
   GpuMemory *memory_;
-  std::vector<ComputeUnitCore *> &cus_;
+  ComputeUnitList &cus_;
   InterruptCallback interrupt_cb_;
   DispatchRetiredCallback dispatch_retired_cb_;
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();

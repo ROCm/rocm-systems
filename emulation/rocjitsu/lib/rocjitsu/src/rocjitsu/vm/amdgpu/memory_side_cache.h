@@ -7,6 +7,7 @@
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
+#include "util/inline_vector.h"
 
 #include <array>
 #include <cstdint>
@@ -109,7 +110,7 @@ private:
   mutable std::mutex flush_mutex_; ///< Exclusive lock for flush_all (must not race with stripes).
   CacheStore cache_;
   simdojo::Port *req_ = nullptr;
-  std::vector<simdojo::Port *> cpl_ports_;
+  util::inline_vector<simdojo::Port *, 0> cpl_ports_;
 };
 
 } // namespace amdgpu

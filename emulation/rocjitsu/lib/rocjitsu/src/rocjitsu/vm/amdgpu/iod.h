@@ -7,13 +7,14 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
+#include "util/inline_vector.h"
 
 #include "simdojo/sim/component.h"
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
-#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -48,15 +49,17 @@ public:
   HbmController *hbm_controller() { return hbm_; }
 
   /// @brief Return the HBM requester ports (structural, for topology visibility).
-  const std::vector<simdojo::Port *> &req_ports() const { return req_ports_; }
+  std::span<simdojo::Port *const> req_ports() const {
+    return {req_ports_.data(), req_ports_.size()};
+  }
 
 private:
   MemorySideCache *msc_ = nullptr;
   HbmController *hbm_ = nullptr;
-  std::vector<simdojo::Port *> cpl_ports_;
+  util::inline_vector<simdojo::Port *, 0> cpl_ports_;
   simdojo::Port *peer_req_ = nullptr;
   simdojo::Port *peer_cpl_ = nullptr;
-  std::vector<simdojo::Port *> req_ports_;
+  util::inline_vector<simdojo::Port *, 0> req_ports_;
   std::unique_ptr<simdojo::Link> msc_hbm_link_;
 };
 
