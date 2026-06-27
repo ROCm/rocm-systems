@@ -21,8 +21,8 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4_kmd_2gpu.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
+const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4_kmd_2gpu.json";
 
 struct PartitionedTopology {
   config::LoadedConfig loaded;
