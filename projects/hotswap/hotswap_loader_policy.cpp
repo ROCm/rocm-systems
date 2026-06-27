@@ -12,17 +12,26 @@
 
 namespace rocr::hotswap {
 
-bool gate_allows_hotswap(const AgentGfxRevision &gfx) {
-  return gfx.revision_valid && gfx.gfx_target == "gfx1250" &&
-         gfx.asic_revision == 0; // A0
-}
-
 namespace {
 
+constexpr char Gfx1250[] = "gfx1250";
+constexpr char Gfx12_5Generic[] = "gfx12-5-generic";
+constexpr char Gfx125Prefix[] = "gfx125";
+constexpr char Gfx1250B0Feature[] = ":gfx1250-b0-specific+";
+constexpr char Gfx1250A0Feature[] = ":gfx1250-b0-specific-";
+
+enum class Gfx1250Stepping {
+  B0,
+  A0,
+};
+
+const char *gfx1250_stepping_feature(Gfx1250Stepping stepping) {
+  return stepping == Gfx1250Stepping::B0 ? Gfx1250B0Feature : Gfx1250A0Feature;
+}
+
 bool is_gfx12_5_target(const std::string &gfx_target) {
-  constexpr char Gfx125Prefix[] = "gfx125";
   constexpr size_t Gfx125PrefixLen = sizeof(Gfx125Prefix) - 1;
-  if (gfx_target == "gfx12-5-generic") {
+  if (gfx_target == Gfx12_5Generic) {
     return true;
   }
   if (gfx_target.size() <= Gfx125PrefixLen ||
@@ -34,16 +43,21 @@ bool is_gfx12_5_target(const std::string &gfx_target) {
 }
 
 std::string with_gfx1250_stepping_feature(const std::string &isa_name,
-                                          bool is_b0) {
-  if (extract_gfx_target(isa_name) != "gfx1250" ||
-      isa_name.find(":gfx1250-b0-specific+") != std::string::npos ||
-      isa_name.find(":gfx1250-b0-specific-") != std::string::npos) {
+                                          Gfx1250Stepping stepping) {
+  if (extract_gfx_target(isa_name) != Gfx1250 ||
+      isa_name.find(Gfx1250B0Feature) != std::string::npos ||
+      isa_name.find(Gfx1250A0Feature) != std::string::npos) {
     return isa_name;
   }
-  return isa_name + (is_b0 ? ":gfx1250-b0-specific+" : ":gfx1250-b0-specific-");
+  return isa_name + gfx1250_stepping_feature(stepping);
 }
 
 } // namespace
+
+bool gate_allows_hotswap(const AgentGfxRevision &gfx) {
+  return gfx.revision_valid && gfx.gfx_target == Gfx1250 &&
+         gfx.asic_revision == 0; // A0
+}
 
 bool has_candidate_hotswap_rewrite(const AgentGfxRevision &gfx,
                                    const RewriteOptions &options) {
@@ -62,12 +76,12 @@ decide_hotswap_rewrite(const AgentGfxRevision &gfx,
   }
 
   std::string source_gfx = extract_gfx_target(source_isa);
-  std::string target_gfx = extract_gfx_target(target_isa);
 
-  if (gate_allows_hotswap(gfx) && source_gfx == "gfx1250" &&
-      target_gfx == "gfx1250") {
-    return RewriteDecision{with_gfx1250_stepping_feature(source_isa, true),
-                           with_gfx1250_stepping_feature(target_isa, false)};
+  if (gate_allows_hotswap(gfx) && source_gfx == Gfx1250 &&
+      extract_gfx_target(target_isa) == Gfx1250) {
+    return RewriteDecision{
+        with_gfx1250_stepping_feature(source_isa, Gfx1250Stepping::B0),
+        with_gfx1250_stepping_feature(target_isa, Gfx1250Stepping::A0)};
   }
 
   if (!options.gfx12_5_rewrite_requested ||
@@ -79,9 +93,11 @@ decide_hotswap_rewrite(const AgentGfxRevision &gfx,
   // opt-in path uses the code object's processor, not a source->agent retarget.
   RewriteDecision decision{source_isa, source_isa};
 
-  if (source_gfx == "gfx1250") {
-    decision.source_isa = with_gfx1250_stepping_feature(source_isa, true);
-    decision.target_isa = with_gfx1250_stepping_feature(source_isa, true);
+  if (source_gfx == Gfx1250) {
+    decision.source_isa =
+        with_gfx1250_stepping_feature(source_isa, Gfx1250Stepping::B0);
+    decision.target_isa =
+        with_gfx1250_stepping_feature(source_isa, Gfx1250Stepping::B0);
   }
 
   return decision;
