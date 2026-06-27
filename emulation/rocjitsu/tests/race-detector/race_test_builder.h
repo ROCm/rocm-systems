@@ -36,7 +36,7 @@ public:
     if (!exec) {
       exec = defaultExec_;
     }
-    std::vector<uint32_t> regs(numRegs);
+    RegisterList regs(static_cast<uint32_t>(numRegs));
     for (int i = 0; i < numRegs; ++i) {
       regs[i] = vgprBase + i;
     }
@@ -66,7 +66,7 @@ public:
 
   /// Register a scalar load into SGPRs (tracked by lgkmcnt).
   void scalarLoad(int wave, int sgprBase, int numRegs) {
-    std::vector<uint32_t> regs(numRegs);
+    RegisterList regs(static_cast<uint32_t>(numRegs));
     for (int i = 0; i < numRegs; ++i) {
       regs[i] = sgprBase + i;
     }
@@ -99,7 +99,7 @@ public:
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
-    std::vector<uint32_t> regs = {static_cast<uint32_t>(vgprDst)};
+    RegisterList regs = {static_cast<uint32_t>(vgprDst)};
     waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::LDS_TO_VGPR, std::move(regs), laneMask,
                                    waveSize_, ldsAddrs, bytes, byteMask);
   }

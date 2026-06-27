@@ -184,7 +184,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   uint32_t num_waves = static_cast<uint32_t>(wavefronts.size());
   WorkgroupKey key{dispatch_id, wg_id};
 
-  std::vector<amdgpu::Wavefront *> wf_ptrs(wavefronts.begin(), wavefronts.end());
+  util::inline_vector<amdgpu::Wavefront *> wf_ptrs(wavefronts.begin(), wavefronts.end());
   auto handler = [this, wf_ptrs, dispatch_id](RaceViolation v) {
     assert(v.wave >= 0 && static_cast<size_t>(v.wave) < wf_ptrs.size() &&
            "wave index out of range");
@@ -280,7 +280,7 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
     uint32_t laneAddrs[64];
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
       laneAddrs[lane] = static_cast<uint32_t>(d.per_lane_addr[lane]);
-    std::vector<uint32_t> registers;
+    RegisterList registers;
     if (d.is_load) {
       uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
       registers.resize(d.num_elems);
@@ -313,7 +313,7 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
                            std::span<const uint32_t>(ldsAddrs, wf.wf_size()), perLaneBytes);
     } else if (d.is_load && d.dst_reg_base >= wf.vgpr_alloc().base) {
       uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
-      std::vector<uint32_t> registers(d.num_elems);
+      RegisterList registers(d.num_elems);
       for (uint32_t i = 0; i < d.num_elems; ++i)
         registers[i] = logicalBase + i;
       uint8_t byte_mask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
@@ -328,7 +328,7 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
     if (d.is_load) {
       uint32_t logicalBase = d.dst_reg_base - wf.sgpr_alloc().base;
-      std::vector<uint32_t> registers(d.num_dwords);
+      RegisterList registers(d.num_dwords);
       for (uint32_t i = 0; i < d.num_dwords; ++i)
         registers[i] = logicalBase + i;
       rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_SGPR, std::move(registers), wf.exec());

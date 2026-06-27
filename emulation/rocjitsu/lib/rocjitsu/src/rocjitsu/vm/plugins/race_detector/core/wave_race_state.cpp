@@ -49,13 +49,13 @@ void WaveRaceState::dispatch(PendingWaitCount waitCount) {
   }
 }
 
-void WaveRaceState::registerEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds,
+void WaveRaceState::registerEvent(uint64_t pc, MemoryEventType type, RegisterList regIds,
                                   uint64_t execMask, uint8_t byteMask) {
   registerEventWithIntervals(pc, type, std::move(regIds), execMask, byteMask, {});
 }
 
 void WaveRaceState::registerEventWithIntervals(uint64_t pc, MemoryEventType type,
-                                               std::vector<uint32_t> regIds, uint64_t execMask,
+                                               RegisterList regIds, uint64_t execMask,
                                                uint8_t byteMask, IntervalSet ldsIntervals) {
   ProfileScope ps(*profiler_, "registerEvent");
   bool toSgpr = isToSgpr(type);
@@ -78,10 +78,10 @@ void WaveRaceState::registerEventWithIntervals(uint64_t pc, MemoryEventType type
   waveMemoryEvents.push_back(eventId);
 }
 
-void WaveRaceState::registerLdsEvent(uint64_t pc, MemoryEventType type,
-                                     std::vector<uint32_t> registers, uint64_t execMask,
-                                     int waveSize, std::span<const uint32_t> laneBaseAddresses,
-                                     int bytesPerLane, uint8_t byteMask) {
+void WaveRaceState::registerLdsEvent(uint64_t pc, MemoryEventType type, RegisterList registers,
+                                     uint64_t execMask, int waveSize,
+                                     std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
+                                     uint8_t byteMask) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     int addr = static_cast<int>(laneBaseAddresses[lane]);
@@ -93,7 +93,7 @@ void WaveRaceState::registerLdsEvent(uint64_t pc, MemoryEventType type,
 }
 
 void WaveRaceState::registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type,
-                                               std::vector<uint32_t> registers, uint64_t execMask,
+                                               RegisterList registers, uint64_t execMask,
                                                int waveSize,
                                                std::span<const uint32_t> laneBaseAddresses,
                                                int32_t offset0, int32_t offset1) {
@@ -146,7 +146,7 @@ template <typename Pred> void WaveRaceState::resolveWaitCnt(int limit, Pred isTa
       waveMemoryEvents[write++] = eid;
     }
   }
-  waveMemoryEvents.resize(write);
+  waveMemoryEvents.resize(static_cast<uint32_t>(write));
 }
 
 void WaveRaceState::sWaitCntVmcnt(int vmcnt) {

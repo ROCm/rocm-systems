@@ -23,7 +23,8 @@
 #include <memory>
 #include <span>
 #include <string>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -170,9 +171,9 @@ protected:
     return result;
   }
 
-  std::vector<PluginSink *> external_sinks_;
+  util::inline_vector<PluginSink *> external_sinks_;
   std::string sink_dir_;
-  std::vector<std::unique_ptr<PluginSink>> owned_sinks_;
+  util::inline_vector<std::unique_ptr<PluginSink>> owned_sinks_;
 
 private:
   void build_sink_for(ExecutionPlugin &p) {
@@ -180,7 +181,7 @@ private:
       p.sink_ = s;
   }
 
-  std::vector<std::unique_ptr<ExecutionPlugin>> plugins_;
+  util::inline_vector<std::unique_ptr<ExecutionPlugin>> plugins_;
 };
 
 } // namespace rocjitsu

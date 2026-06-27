@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -19,6 +20,8 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -74,8 +77,12 @@ struct DisasmCache {
     if (entries_.empty())
       base_ = pc;
     idx = pc_to_idx(pc);
-    if (idx >= entries_.size())
-      entries_.resize(std::max(idx + 1, entries_.size() * 2));
+    if (idx >= entries_.size()) {
+      const size_t new_size = std::max(idx + 1, static_cast<size_t>(entries_.size()) * 2);
+      if (new_size > std::numeric_limits<uint32_t>::max())
+        return;
+      entries_.resize(static_cast<uint32_t>(new_size));
+    }
     if (entries_[idx].empty())
       entries_[idx] = inst.disassemble();
     size_.store(entries_.size(), std::memory_order_release);
@@ -94,7 +101,7 @@ private:
 
   std::mutex mutex_;
   uint64_t base_ = 0;
-  std::vector<std::string> entries_;
+  util::inline_vector<std::string, 0> entries_;
   std::atomic<size_t> size_{0};
 };
 

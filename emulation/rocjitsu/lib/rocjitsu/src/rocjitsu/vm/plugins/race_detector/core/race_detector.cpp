@@ -29,8 +29,8 @@ void RaceDetector::setProfiler(ProfilerInterface &p) {
 }
 
 EventId RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
-                                      std::vector<uint32_t> registers, uint64_t execMask,
-                                      uint8_t byteMask, IntervalSet ldsIntervals) {
+                                      RegisterList registers, uint64_t execMask, uint8_t byteMask,
+                                      IntervalSet ldsIntervals) {
   bool hasLds = !ldsIntervals.empty();
   EventId eid = events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
                             std::move(ldsIntervals));
@@ -111,7 +111,7 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes) co
   }
 }
 
-void RaceDetector::adjustByteCounts(const IntervalSet &ivs, std::vector<int> &counts, int delta) {
+void RaceDetector::adjustByteCounts(const IntervalSet &ivs, CounterList &counts, int delta) {
   for (const auto &iv : ivs) {
     int cStart = iv.start / kCountGranularity;
     int cEnd = (iv.end + kCountGranularity - 1) / kCountGranularity;
@@ -148,14 +148,14 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc,
   constexpr int nBefore = 1;
   constexpr int nAfter = 1;
 
-  auto printCodeBlocks = [&](std::ostringstream &oss, std::vector<uint64_t> eventPcs) {
+  auto printCodeBlocks = [&](std::ostringstream &oss, util::inline_vector<uint64_t> eventPcs) {
     std::sort(eventPcs.begin(), eventPcs.end());
     if (eventPcs.empty()) {
       return;
     }
     int64_t blockStart = static_cast<int64_t>(eventPcs[0]) - nBefore;
     int64_t blockEnd = static_cast<int64_t>(eventPcs[0]) + nAfter;
-    std::vector<uint64_t> arrows = {eventPcs[0]};
+    util::inline_vector<uint64_t> arrows = {eventPcs[0]};
 
     for (size_t i = 1; i < eventPcs.size(); ++i) {
       int64_t pc = static_cast<int64_t>(eventPcs[i]);
@@ -180,7 +180,7 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc,
         << ") in workgroup (" << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
         << "). Conflicting events:\n\n";
 
-    std::vector<uint64_t> eventPcs{wavePc};
+    util::inline_vector<uint64_t> eventPcs{wavePc};
     if (waveRaceState) {
       for (EventId evtId : waveRaceState->getVgprMemoryEvents(e.index)) {
         eventPcs.push_back(events_.pc(evtId));
@@ -196,7 +196,7 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc,
         << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
         << "). Conflicting events:\n\n";
 
-    std::vector<uint64_t> eventPcs{wavePc};
+    util::inline_vector<uint64_t> eventPcs{wavePc};
     if (waveRaceState) {
       for (EventId evtId : waveRaceState->getWaveMemoryEvents()) {
         if (isToSgpr(events_.type(evtId))) {
@@ -223,9 +223,9 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc,
       int wave;
       int lane;
     };
-    std::vector<PcWaveLane> entries{{wavePc, e.wave, e.lane}};
+    util::inline_vector<PcWaveLane> entries{{wavePc, e.wave, e.lane}};
 
-    auto scanEvents = [&](const std::vector<EventId> &events) {
+    auto scanEvents = [&](const EventIdList &events) {
       for (EventId eventId : events) {
         if (events_.ldsIntervals(eventId).contains(e.index)) {
           entries.push_back({events_.pc(eventId), events_.waveId(eventId).value, -1});

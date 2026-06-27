@@ -10,7 +10,6 @@
 #include <functional>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -36,9 +35,8 @@ public:
                std::function<void(RaceViolation)> raceHandler);
 
   /// Allocate a workgroup-global event ID and record its metadata.
-  EventId allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
-                          std::vector<uint32_t> registers, uint64_t execMask,
-                          uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {});
+  EventId allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type, RegisterList registers,
+                          uint64_t execMask, uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {});
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
@@ -58,8 +56,8 @@ public:
 
   const EventRegistry &events() const { return events_; }
 
-  const std::vector<EventId> &getLdsWriteEvents() const { return ldsWriteEvents; }
-  const std::vector<EventId> &getLdsReadEvents() const { return ldsReadEvents; }
+  const EventIdList &getLdsWriteEvents() const { return ldsWriteEvents; }
+  const EventIdList &getLdsReadEvents() const { return ldsReadEvents; }
 
   Dim3d getWorkgroupId() const { return workgroupId; }
   const std::function<void(RaceViolation)> &getRaceHandler() const { return raceHandler; }
@@ -75,13 +73,13 @@ public:
 private:
   void setProfiler(ProfilerInterface &p);
 
-  static void adjustByteCounts(const IntervalSet &ivs, std::vector<int> &counts, int delta);
+  static void adjustByteCounts(const IntervalSet &ivs, CounterList &counts, int delta);
 
   /// Active LDS write events (for scanning during read validation).
-  std::vector<EventId> ldsWriteEvents;
+  EventIdList ldsWriteEvents;
 
   /// Active LDS read events (for scanning during write validation).
-  std::vector<EventId> ldsReadEvents;
+  EventIdList ldsReadEvents;
 
   /// Outstanding write/read counts at chunk granularity for fast-path
   /// validation. Indexed by byte address / kCountGranularity. Conservative:
@@ -89,8 +87,8 @@ private:
   /// and grow dynamically in adjustByteCounts as LDS events arrive, avoiding
   /// reliance on compiler metadata for the LDS size.
   static constexpr int kCountGranularity = 16;
-  std::vector<int> byteWriteCounts;
-  std::vector<int> byteReadCounts;
+  CounterList byteWriteCounts;
+  CounterList byteReadCounts;
 
   EventRegistry events_;
 
@@ -98,7 +96,7 @@ private:
   std::function<void(RaceViolation)> raceHandler;
 
   /// One WaveRaceState per wave, indexed by wave ID.
-  std::vector<WaveRaceState> waveRaceStates;
+  util::inline_vector<WaveRaceState, 0> waveRaceStates;
 };
 
 } // namespace rocjitsu::plugins::race_detector

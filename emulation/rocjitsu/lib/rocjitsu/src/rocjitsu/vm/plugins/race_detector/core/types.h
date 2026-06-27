@@ -7,7 +7,8 @@
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
 #include <algorithm>
 #include <cstdint>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -42,7 +43,12 @@ struct EventId {
   bool operator<(EventId o) const { return value < o.value; }
 };
 
-inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId) {
+using RegisterList = util::inline_vector<uint32_t>;
+using LaneBaseAddressList = util::inline_vector<uint32_t, 0>;
+using EventIdList = util::inline_vector<EventId>;
+using CounterList = util::inline_vector<int, 0>;
+
+inline void removeFromUnorderedList(EventIdList &list, EventId eventId) {
   auto it = std::find(list.begin(), list.end(), eventId);
   if (it != list.end()) {
     std::swap(*it, list.back());
@@ -73,12 +79,12 @@ struct RaceViolation {
 struct PendingMemoryEvent {
   uint64_t pc;
   MemoryEventType type;
-  std::vector<uint32_t> registers;
+  RegisterList registers;
   uint64_t execMask;
   int waveSize;
   uint8_t byteMask = 0xF;
   // LDS events:
-  std::vector<uint32_t> laneBaseAddresses;
+  LaneBaseAddressList laneBaseAddresses;
   int bytesPerLane = 0;
   // Dual-offset LDS events:
   bool isDualOffset = false;

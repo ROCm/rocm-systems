@@ -37,7 +37,8 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -122,7 +123,7 @@ public:
   bool empty() const { return children_.empty(); }
 
 private:
-  std::vector<PluginSink *> children_;
+  util::inline_vector<PluginSink *> children_;
 };
 
 } // namespace rocjitsu

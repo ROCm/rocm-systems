@@ -8,7 +8,6 @@
 #include <cassert>
 #include <cstdint>
 #include <span>
-#include <vector>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -38,13 +37,13 @@ class EventRegistry {
     EventStatus status;
     uint8_t byteMask;
     uint64_t execMask;
-    std::vector<uint32_t> registers;
+    RegisterList registers;
     IntervalSet ldsIntervals;
   };
 
 public:
   /// Allocate a new event. Returns a unique EventId.
-  EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
+  EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, RegisterList registers,
               uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals) {
     int id = base_offset_ + static_cast<int>(entries_.size());
     entries_.push_back({waveId, pc, type, EventStatus::ACTIVE, byteMask, execMask,
@@ -118,7 +117,7 @@ private:
     base_offset_ += trimCount;
   }
 
-  std::vector<EventInfo> entries_;
+  util::inline_vector<EventInfo, 0> entries_;
   int base_offset_ = 0;
 };
 

@@ -8,7 +8,8 @@
 #include <array>
 #include <cstdint>
 #include <span>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -30,13 +31,13 @@ public:
   /// \param execMask The execution mask at the time the event was produced.
   /// \param byteMask The byte mask of the event, if this event effects only certain bytes offset
   ///                 register(s). Defaults to 0xF (all bytes).
-  void registerEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-                     uint64_t execMask, uint8_t byteMask = 0xF);
+  void registerEvent(uint64_t pc, MemoryEventType type, RegisterList registers, uint64_t execMask,
+                     uint8_t byteMask = 0xF);
 
   /// Register an in-flight memory event that involves LDS.
   /// The LDS memory involved is defined by `laneBaseAddresses` and `bytesPerLane`. Each active lane
   /// contributes one interval of size `bytesPerLane`.
-  void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
+  void registerLdsEvent(uint64_t pc, MemoryEventType type, RegisterList registers,
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask = 0xF);
@@ -45,8 +46,8 @@ public:
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
   /// and laneBaseAddresses[lane] + offset1*8. So each active lane contributes 2 intervals of 8
   /// bytes each.
-  void registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type,
-                                  std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
+  void registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type, RegisterList registers,
+                                  uint64_t execMask, int waveSize,
                                   std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
                                   int32_t offset1);
 
@@ -84,13 +85,11 @@ public:
     return regEventCount[static_cast<int>(type)][reg];
   }
 
-  std::vector<EventId> &getVgprMemoryEvents(int reg) { return vgprMemoryEvents[reg]; }
+  EventIdList &getVgprMemoryEvents(int reg) { return vgprMemoryEvents[reg]; }
 
-  const std::vector<EventId> &getWaveMemoryEvents() const { return waveMemoryEvents; }
+  const EventIdList &getWaveMemoryEvents() const { return waveMemoryEvents; }
 
-  const std::vector<EventId> &getWaveCompleteMemoryEvents() const {
-    return waveCompleteMemoryEvents;
-  }
+  const EventIdList &getWaveCompleteMemoryEvents() const { return waveCompleteMemoryEvents; }
 
   RaceDetector *getDetector() { return detector; }
   const RaceDetector *getDetector() const { return detector; }
@@ -100,9 +99,8 @@ public:
   WaveId getWaveId() const { return waveId; }
 
 private:
-  void registerEventWithIntervals(uint64_t pc, MemoryEventType type,
-                                  std::vector<uint32_t> registers, uint64_t execMask,
-                                  uint8_t byteMask, IntervalSet ldsIntervals);
+  void registerEventWithIntervals(uint64_t pc, MemoryEventType type, RegisterList registers,
+                                  uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals);
   void retireEventRegisters(EventId);
 
   template <typename Pred> void resolveWaitCnt(int limit, Pred isTargetType);
@@ -114,15 +112,15 @@ private:
     regEventCount[static_cast<int>(type)][reg]--;
   }
 
-  std::vector<std::vector<EventId>> vgprMemoryEvents;
-  std::vector<std::vector<EventId>> sgprMemoryEvents;
-  std::vector<int> sgprEventCount;
+  util::inline_vector<EventIdList, 0> vgprMemoryEvents;
+  util::inline_vector<EventIdList, 0> sgprMemoryEvents;
+  CounterList sgprEventCount;
 
   static constexpr int kNumEventTypes = static_cast<int>(MemoryEventType::N);
-  std::array<std::vector<int>, kNumEventTypes> regEventCount;
+  std::array<CounterList, kNumEventTypes> regEventCount;
 
-  std::vector<EventId> waveMemoryEvents;
-  std::vector<EventId> waveCompleteMemoryEvents;
+  EventIdList waveMemoryEvents;
+  EventIdList waveCompleteMemoryEvents;
 
   WaveId waveId;
   RaceDetector *detector;

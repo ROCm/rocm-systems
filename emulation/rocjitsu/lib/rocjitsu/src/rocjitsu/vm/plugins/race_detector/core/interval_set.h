@@ -4,7 +4,10 @@
 #pragma once
 #include <algorithm>
 #include <cassert>
-#include <vector>
+#include <cstdint>
+#include <limits>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -56,7 +59,10 @@ public:
     intervals.resize(out + 1);
   }
 
-  void reserve(size_t n) { intervals.reserve(n); }
+  void reserve(size_t n) {
+    assert(n <= std::numeric_limits<uint32_t>::max());
+    intervals.reserve(static_cast<uint32_t>(n));
+  }
 
   bool empty() const { return intervals.empty(); }
 
@@ -109,7 +115,7 @@ public:
   auto end() const { return intervals.end(); }
 
 private:
-  std::vector<Interval> intervals;
+  util::inline_vector<Interval> intervals;
 };
 
 } // namespace rocjitsu::plugins::race_detector
