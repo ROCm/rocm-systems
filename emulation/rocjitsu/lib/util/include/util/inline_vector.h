@@ -9,9 +9,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <new>
 #include <type_traits>
 #include <utility>
@@ -261,6 +264,9 @@ template <typename T, uint32_t InlineN = detail::DefaultInlineVectorCapacity<T>:
 class inline_vector {
   static_assert(!std::is_const_v<T>, "inline_vector<T> requires non-const T");
   static_assert(!std::is_void_v<T>, "inline_vector<T> requires object T");
+  static constexpr bool trivially_relocatable = std::is_trivially_copy_constructible_v<T> &&
+                                                std::is_trivially_move_constructible_v<T> &&
+                                                std::is_trivially_destructible_v<T>;
 
 public:
   using value_type = T;
@@ -341,8 +347,7 @@ public:
       return *this;
     }
     clear();
-    reserve(other.size_);
-    copy_construct_from(other.data_, other.data_ + other.size_);
+    copy_from(other);
     return *this;
   }
 
@@ -494,8 +499,23 @@ public:
     return back();
   }
 
-  void push_back(const T &value) noexcept { emplace_back(value); }
-  void push_back(T &&value) noexcept { emplace_back(std::move(value)); }
+  void push_back(const T &value) noexcept {
+    if (size_ == capacity_ && is_reference_to_storage(value)) {
+      T copy(value);
+      emplace_back(std::move(copy));
+      return;
+    }
+    emplace_back(value);
+  }
+
+  void push_back(T &&value) noexcept {
+    if (size_ == capacity_ && is_reference_to_storage(value)) {
+      T copy(std::move(value));
+      emplace_back(std::move(copy));
+      return;
+    }
+    emplace_back(std::move(value));
+  }
 
   void pop_back() noexcept {
     assert(size_ > 0);
@@ -509,6 +529,11 @@ public:
 
   iterator insert(const_iterator pos, size_type count, const T &value) noexcept {
     const size_type start_index = checked_index(pos);
+    if constexpr (trivially_relocatable) {
+      insert_repeated_trivial(start_index, count, value);
+      return data_ + start_index;
+    }
+
     for (size_type i = 0; i < count; ++i) {
       emplace(data_ + start_index + i, value);
     }
@@ -519,6 +544,13 @@ public:
     requires(!std::is_integral_v<InputIt>)
   iterator insert(const_iterator pos, InputIt first, InputIt last) noexcept {
     const size_type start_index = checked_index(pos);
+    if constexpr (trivially_relocatable && std::forward_iterator<InputIt> &&
+                  std::is_pointer_v<InputIt> &&
+                  std::is_same_v<std::remove_const_t<std::remove_pointer_t<InputIt>>, T>) {
+      insert_pointer_range_trivial(start_index, first, last);
+      return data_ + start_index;
+    }
+
     size_type insert_index = start_index;
     for (; first != last; ++first, ++insert_index) {
       emplace(data_ + insert_index, *first);
@@ -537,6 +569,7 @@ public:
       return data_ + index;
     }
 
+    T value(std::forward<Args>(args)...);
     if (size_ == capacity_) {
       if (size_ == std::numeric_limits<size_type>::max()) {
         detail::inline_vector_abort();
@@ -544,11 +577,16 @@ public:
       grow_for_size(static_cast<size_type>(size_ + 1));
     }
 
-    construct_at(data_ + size_, std::move(data_[size_ - 1]));
-    for (size_type i = size_ - 1; i > index; --i) {
-      data_[i] = std::move(data_[i - 1]);
+    if constexpr (trivially_relocatable) {
+      relocate_trivial(data_ + index + 1, data_ + index, static_cast<size_type>(size_ - index));
+      copy_trivial(data_ + index, std::addressof(value), 1);
+    } else {
+      construct_at(data_ + size_, std::move(data_[size_ - 1]));
+      for (size_type i = size_ - 1; i > index; --i) {
+        data_[i] = std::move(data_[i - 1]);
+      }
+      data_[index] = std::move(value);
     }
-    data_[index] = T(std::forward<Args>(args)...);
     ++size_;
     return data_ + index;
   }
@@ -573,7 +611,12 @@ public:
     T *erase_end = data_ + last_index;
     T *old_end = data_ + size_;
 
-    if constexpr (std::is_move_assignable_v<T>) {
+    if constexpr (trivially_relocatable) {
+      const size_type tail_count = static_cast<size_type>(old_end - erase_end);
+      if (tail_count != 0) {
+        relocate_trivial(erase_begin, erase_end, tail_count);
+      }
+    } else if constexpr (std::is_move_assignable_v<T>) {
       std::move(erase_end, old_end, erase_begin);
       destroy_range(old_end - erase_count, old_end);
     } else {
@@ -593,6 +636,16 @@ private:
   size_type checked_index(const_iterator pos) const noexcept {
     assert(pos >= cbegin() && pos <= cend());
     return static_cast<size_type>(pos - cbegin());
+  }
+
+  bool is_reference_to_storage(const T &value) const noexcept {
+    if (size_ == 0) {
+      return false;
+    }
+
+    const T *ptr = std::addressof(value);
+    std::less<> less;
+    return !less(ptr, data_) && less(ptr, data_ + size_);
   }
 
   template <typename InputIt> void reserve_for_range(InputIt first, InputIt last) noexcept {
@@ -636,10 +689,32 @@ private:
   }
 
   static void destroy_range(T *first, T *last) noexcept {
+    if constexpr (std::is_trivially_destructible_v<T>) {
+      (void)first;
+      (void)last;
+      return;
+    }
+
     while (last != first) {
       --last;
       destroy_at(last);
     }
+  }
+
+  static void copy_trivial(T *dest, const T *src, size_type count) noexcept {
+    if (count == 0) {
+      return;
+    }
+    std::memcpy(static_cast<void *>(dest), static_cast<const void *>(src),
+                static_cast<std::size_t>(count) * sizeof(T));
+  }
+
+  static void relocate_trivial(T *dest, const T *src, size_type count) noexcept {
+    if (count == 0) {
+      return;
+    }
+    std::memmove(static_cast<void *>(dest), static_cast<const void *>(src),
+                 static_cast<std::size_t>(count) * sizeof(T));
   }
 
   static T *allocate(size_type capacity) noexcept {
@@ -674,6 +749,18 @@ private:
   }
 
   void copy_construct_from(const T *first, const T *last) noexcept {
+    if constexpr (trivially_relocatable) {
+      if (first == last) {
+        return;
+      }
+
+      const size_type count =
+          detail::checked_inline_vector_size(static_cast<std::size_t>(last - first));
+      copy_trivial(data_ + size_, first, count);
+      size_ += count;
+      return;
+    }
+
     for (const T *it = first; it != last; ++it) {
       construct_at(data_ + size_, *it);
       ++size_;
@@ -681,6 +768,10 @@ private:
   }
 
   void copy_from(const inline_vector &other) noexcept {
+    if (other.size_ == 0) {
+      return;
+    }
+
     reserve(other.size_);
     copy_construct_from(other.data_, other.data_ + other.size_);
   }
@@ -695,9 +786,14 @@ private:
     }
 
     reserve(other.size_);
-    for (T &value : other) {
-      construct_at(data_ + size_, std::move(value));
-      ++size_;
+    if constexpr (trivially_relocatable) {
+      copy_trivial(data_, other.data_, other.size_);
+      size_ = other.size_;
+    } else {
+      for (T &value : other) {
+        construct_at(data_ + size_, std::move(value));
+        ++size_;
+      }
     }
     other.clear();
   }
@@ -715,15 +811,59 @@ private:
     T *new_data = allocate(new_capacity);
     record_dynamic_allocation(new_capacity);
     const size_type old_size = size_;
-    for (size_type i = 0; i < old_size; ++i) {
-      construct_at(new_data + i, std::move(data_[i]));
+
+    if constexpr (trivially_relocatable) {
+      copy_trivial(new_data, data_, old_size);
+    } else {
+      for (size_type i = 0; i < old_size; ++i) {
+        construct_at(new_data + i, std::move(data_[i]));
+      }
+      destroy_range(data_, data_ + old_size);
     }
 
-    destroy_range(data_, data_ + old_size);
     deallocate_dynamic();
     data_ = new_data;
     size_ = old_size;
     capacity_ = new_capacity;
+  }
+
+  void check_insert_size(size_type count) const noexcept {
+    if (count > std::numeric_limits<size_type>::max() - size_) {
+      detail::inline_vector_abort();
+    }
+  }
+
+  void insert_repeated_trivial(size_type index, size_type count, const T &value) noexcept {
+    if (count == 0) {
+      return;
+    }
+
+    check_insert_size(count);
+    T copy(value);
+    const size_type old_size = size_;
+    reserve(static_cast<size_type>(old_size + count));
+    const size_type tail_count = static_cast<size_type>(old_size - index);
+    relocate_trivial(data_ + index + count, data_ + index, tail_count);
+    for (size_type i = 0; i < count; ++i) {
+      copy_trivial(data_ + index + i, std::addressof(copy), 1);
+    }
+    size_ = static_cast<size_type>(old_size + count);
+  }
+
+  void insert_pointer_range_trivial(size_type index, const T *first, const T *last) noexcept {
+    if (first == last) {
+      return;
+    }
+
+    const size_type count =
+        detail::checked_inline_vector_size(static_cast<std::size_t>(last - first));
+    check_insert_size(count);
+    const size_type old_size = size_;
+    reserve(static_cast<size_type>(old_size + count));
+    const size_type tail_count = static_cast<size_type>(old_size - index);
+    relocate_trivial(data_ + index + count, data_ + index, tail_count);
+    copy_trivial(data_ + index, first, count);
+    size_ = static_cast<size_type>(old_size + count);
   }
 
   [[no_unique_address]] detail::InlineVectorStorage<T, InlineN> inline_storage_;

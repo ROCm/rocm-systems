@@ -192,6 +192,48 @@ TEST(InlineVectorTest, SupportsRangeConstructionAssignAndInsert) {
   EXPECT_EQ(values[2], 9);
 }
 
+TEST(InlineVectorTest, SupportsBulkInsertForTrivialElements) {
+  util::inline_vector<int, 2> values{1, 5};
+
+  values.insert(values.begin() + 1, 3, 7);
+
+  ASSERT_EQ(values.size(), 5u);
+  EXPECT_EQ(values[0], 1);
+  EXPECT_EQ(values[1], 7);
+  EXPECT_EQ(values[2], 7);
+  EXPECT_EQ(values[3], 7);
+  EXPECT_EQ(values[4], 5);
+
+  const int middle[] = {2, 3, 4};
+  values.insert(values.begin() + 1, middle, middle + 3);
+
+  ASSERT_EQ(values.size(), 8u);
+  EXPECT_EQ(values[0], 1);
+  EXPECT_EQ(values[1], 2);
+  EXPECT_EQ(values[2], 3);
+  EXPECT_EQ(values[3], 4);
+  EXPECT_EQ(values[4], 7);
+}
+
+TEST(InlineVectorTest, InsertAndPushBackHandleReferencesIntoStorage) {
+  util::inline_vector<int, 2> values{1, 2};
+
+  values.insert(values.begin() + 1, values[0]);
+
+  ASSERT_EQ(values.size(), 3u);
+  EXPECT_EQ(values[0], 1);
+  EXPECT_EQ(values[1], 1);
+  EXPECT_EQ(values[2], 2);
+
+  values.push_back(values[0]);
+
+  ASSERT_EQ(values.size(), 4u);
+  EXPECT_EQ(values[0], 1);
+  EXPECT_EQ(values[1], 1);
+  EXPECT_EQ(values[2], 2);
+  EXPECT_EQ(values[3], 1);
+}
+
 TEST(InlineVectorTest, TracksNonTrivialElementLifetimeAcrossGrowthAndCopy) {
   CountingValue::reset();
 
