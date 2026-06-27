@@ -53,12 +53,8 @@ void reset_gfx_revision_cache();
 // successfully queried).
 bool gate_allows_hotswap(const AgentGfxRevision &gfx);
 
-// Entry trampolines are a separate, opt-in rewrite that applies to the gfx12.5
-// family (gfx125* and gfx12-5-generic) when
-// AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES is enabled.
-bool gate_allows_entry_trampolines(const AgentGfxRevision &gfx);
-
-// True when a parsed gfx target is in the COMGR entry-trampoline family.
+// True for COMGR entry-trampoline targets: gfx12-5-generic or concrete gfx125
+// processor names with a numeric suffix (for example, gfx1250 or gfx1251).
 bool is_gfx12_5_entry_trampoline_target(const std::string &gfx_target);
 
 // Combined activation policy for libhsa-hotswap.so.

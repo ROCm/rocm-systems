@@ -52,6 +52,7 @@ using rocr::hotswap::AgentGfxRevision;
 using rocr::hotswap::add_gfx1250_stepping_feature;
 using rocr::hotswap::gate_allows_hotswap;
 using rocr::hotswap::gate_allows_hotswap_rewrite;
+using rocr::hotswap::is_gfx12_5_entry_trampoline_target;
 using rocr::hotswap::query_agent_gfx_revision;
 using rocr::hotswap::reset_gfx_revision_cache;
 
@@ -140,6 +141,7 @@ const char *kGfx1250IsaWithFeatures =
     "amdgcn-amd-amdhsa--gfx1250:sramecc+:xnack-";
 const char *kGfx942Isa = "amdgcn-amd-amdhsa--gfx942";
 const char *kGfx1251Isa = "amdgcn-amd-amdhsa--gfx1251";
+const char *kGfx125MalformedIsa = "amdgcn-amd-amdhsa--gfx125foo";
 const char *kGfx12_5GenericIsa = "amdgcn-amd-amdhsa--gfx12-5-generic";
 const char *kGfx12_5GenericIsaWithFeatures =
     "amdgcn-amd-amdhsa--gfx12-5-generic:sramecc+";
@@ -245,6 +247,20 @@ void test_EntryTrampolineFlagAllowsGfx125Family() {
       gate_allows_hotswap_rewrite(g, false) == false);
   run("trampoline gate allows gfx1251",
       gate_allows_hotswap_rewrite(g, true) == true);
+}
+
+void test_EntryTrampolineFlagRejectsMalformedGfx125Prefix() {
+  printf("TEST EntryTrampolineFlagRejectsMalformedGfx125Prefix...\n");
+  reset_env();
+  g_env.isa_name = kGfx125MalformedIsa;
+  g_env.asic_revision = 1;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  run("malformed gfx125 prefix is parsed",
+      g.gfx_target == "gfx125foo");
+  run("trampoline family predicate rejects malformed suffix",
+      is_gfx12_5_entry_trampoline_target(g.gfx_target) == false);
+  run("trampoline gate rejects malformed gfx125 prefix",
+      gate_allows_hotswap_rewrite(g, true) == false);
 }
 
 // COMGR's entry-trampoline pass also accepts the gfx12.5 generic processor
@@ -366,6 +382,7 @@ int main() {
   test_Gfx1250NonA0Blocks();
   test_EntryTrampolineFlagAllowsGfx1250NonA0();
   test_EntryTrampolineFlagAllowsGfx125Family();
+  test_EntryTrampolineFlagRejectsMalformedGfx125Prefix();
   test_EntryTrampolineFlagAllowsGfx12_5Generic();
   test_EntryTrampolineFlagAllowsGfx1250UnknownRevision();
   test_EntryTrampolineFlagBlocksOtherTargets();

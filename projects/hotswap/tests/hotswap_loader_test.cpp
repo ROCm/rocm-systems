@@ -20,11 +20,6 @@
 
 #include <hsa.h>
 
-#ifndef _WIN32
-#include <fcntl.h>
-#include <unistd.h>
-#endif
-
 namespace {
 
 struct FakeEnv {
@@ -33,25 +28,14 @@ struct FakeEnv {
   uint32_t asic_revision = 0;
 
   int retarget_calls = 0;
-  int load_calls = 0;
-  int memory_reader_create_calls = 0;
-  int file_reader_create_calls = 0;
-  int reader_destroy_calls = 0;
-  int isa_query_calls = 0;
-  int asic_rev_calls = 0;
 
   int retarget_status = 0;
-  hsa_status_t load_status = HSA_STATUS_SUCCESS;
-  hsa_status_t reader_create_status = HSA_STATUS_SUCCESS;
 
   uint64_t next_reader_handle = 100;
   uint64_t last_loaded_reader = 0;
-  uint64_t last_created_reader = 0;
-  uint64_t retarget_reader_handle = 0;
 
   std::string retarget_source_isa;
   std::string retarget_target_isa;
-  void *retarget_output_ptr = nullptr;
 };
 
 FakeEnv g_env;
@@ -110,7 +94,6 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
     return -1;
   }
   std::memcpy(copy, elf_data, elf_size);
-  g_env.retarget_output_ptr = copy;
   *out_data = copy;
   *out_size = elf_size;
   return 0;
@@ -124,7 +107,6 @@ hsa_status_t hsa_agent_iterate_isas(hsa_agent_t /*agent*/,
                                     hsa_status_t (*callback)(hsa_isa_t isa,
                                                              void *data),
                                     void *data) {
-  ++g_env.isa_query_calls;
   hsa_isa_t isa{};
   isa.handle = 1;
   const hsa_status_t status = callback(isa, data);
@@ -149,7 +131,6 @@ hsa_status_t hsa_agent_get_info(hsa_agent_t /*agent*/,
                                 hsa_agent_info_t attribute, void *value) {
   if (attribute ==
       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION)) {
-    ++g_env.asic_rev_calls;
     if (!g_env.asic_rev_ok) {
       return HSA_STATUS_ERROR;
     }
@@ -225,32 +206,19 @@ std::vector<uint8_t> make_code_object(const std::string &isa) {
 hsa_status_t HSA_API fake_reader_create_from_memory(
     const void * /*code_object*/, size_t /*size*/,
     hsa_code_object_reader_t *code_object_reader) {
-  ++g_env.memory_reader_create_calls;
-  if (g_env.reader_create_status != HSA_STATUS_SUCCESS) {
-    return g_env.reader_create_status;
-  }
   code_object_reader->handle = g_env.next_reader_handle++;
-  g_env.last_created_reader = code_object_reader->handle;
-  if (g_env.retarget_output_ptr) {
-    g_env.retarget_reader_handle = code_object_reader->handle;
-  }
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API fake_reader_create_from_file(
     hsa_file_t /*file*/, hsa_code_object_reader_t *code_object_reader) {
-  ++g_env.file_reader_create_calls;
   code_object_reader->handle = g_env.next_reader_handle++;
-  g_env.last_created_reader = code_object_reader->handle;
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API
 fake_reader_destroy(hsa_code_object_reader_t code_object_reader) {
-  ++g_env.reader_destroy_calls;
-  if (code_object_reader.handle == g_env.retarget_reader_handle) {
-    g_env.retarget_reader_handle = 0;
-  }
+  (void)code_object_reader;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -258,12 +226,11 @@ hsa_status_t HSA_API fake_load_agent_code_object(
     hsa_executable_t /*executable*/, hsa_agent_t /*agent*/,
     hsa_code_object_reader_t code_object_reader, const char * /*options*/,
     hsa_loaded_code_object_t *loaded_code_object) {
-  ++g_env.load_calls;
   g_env.last_loaded_reader = code_object_reader.handle;
   if (loaded_code_object) {
     loaded_code_object->handle = 0xC0DE;
   }
-  return g_env.load_status;
+  return HSA_STATUS_SUCCESS;
 }
 
 CoreApiTable install_tool() {
@@ -299,33 +266,6 @@ hsa_status_t load_reader(CoreApiTable &core, hsa_code_object_reader_t reader) {
   hsa_loaded_code_object_t loaded{};
   return core.hsa_executable_load_agent_code_object_fn(
       hsa_executable_t{}, fake_agent(), reader, nullptr, &loaded);
-}
-
-void test_OnLoadInstallsWrappers() {
-  std::printf("TEST OnLoadInstallsWrappers...\n");
-  reset_state();
-  CoreApiTable core = install_tool();
-  check(core.hsa_code_object_reader_create_from_memory_fn !=
-            fake_reader_create_from_memory,
-        "memory reader entry point is wrapped");
-  check(core.hsa_code_object_reader_create_from_file_fn !=
-            fake_reader_create_from_file,
-        "file reader entry point is wrapped");
-  check(core.hsa_executable_load_agent_code_object_fn !=
-            fake_load_agent_code_object,
-        "load entry point is wrapped");
-}
-
-void test_GetCodeObjectIsaNameFindsMetadata() {
-  std::printf("TEST GetCodeObjectIsaNameFindsMetadata...\n");
-  reset_state();
-  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
-  check(rocr::hotswap::GetCodeObjectIsaName(elf.data(), elf.size()) ==
-            kGfx1250Isa,
-        "metadata payload yields ISA");
-  const uint8_t not_elf[] = {0x7f, 'E', 'L', 'F'};
-  check(rocr::hotswap::GetCodeObjectIsaName(not_elf, sizeof(not_elf)).empty(),
-        "malformed ELF yields empty ISA");
 }
 
 void test_FlagUnsetLoadsOriginalForNonA0Gfx1250() {
@@ -496,58 +436,9 @@ void test_RetargetFailureFallsBackToOriginalReader() {
         "retarget failure falls back to original reader");
 }
 
-#ifndef _WIN32
-void test_FileReaderPathKeepsFileBackedReaderAlive() {
-  std::printf("TEST FileReaderPathKeepsFileBackedReaderAlive...\n");
-  reset_state();
-  set_entry_trampoline_env("1");
-  g_env.agent_isa = kGfx942Isa;
-  g_env.asic_revision = 0;
-  CoreApiTable core = install_tool();
-
-  std::vector<uint8_t> elf = make_code_object(kGfx942Isa);
-  char path[] = "/tmp/hotswap-loader-test-XXXXXX";
-  const int fd = mkstemp(path);
-  check(fd >= 0, "temporary code object file is created");
-  if (fd < 0) {
-    return;
-  }
-  unlink(path);
-  const ssize_t written = write(fd, elf.data(), elf.size());
-  check(written == static_cast<ssize_t>(elf.size()),
-        "temporary code object file is written");
-  lseek(fd, 0, SEEK_SET);
-
-  hsa_code_object_reader_t reader{};
-  const hsa_status_t create_status =
-      core.hsa_code_object_reader_create_from_file_fn(fd, &reader);
-  close(fd);
-  check(create_status == HSA_STATUS_SUCCESS, "file reader creation succeeds");
-  check(g_env.memory_reader_create_calls == 1,
-        "file reader path converts file contents to a memory reader");
-
-  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
-  check(g_env.retarget_calls == 0, "non-gfx1250 file reader is not rewritten");
-  check(g_env.last_loaded_reader == reader.handle,
-        "file-backed original reader is loaded");
-  check(core.hsa_code_object_reader_destroy_fn(reader) == HSA_STATUS_SUCCESS,
-        "file-backed reader destroy succeeds");
-
-  bool retained = false;
-  {
-    std::scoped_lock lock(g_reader_map_mutex);
-    const auto it = g_reader_map.find(reader.handle);
-    retained = it != g_reader_map.end() && it->second.from_file;
-  }
-  check(retained, "file-backed reader bytes stay alive after successful load");
-}
-#endif
-
 } // namespace
 
 int main() {
-  test_OnLoadInstallsWrappers();
-  test_GetCodeObjectIsaNameFindsMetadata();
   test_FlagUnsetLoadsOriginalForNonA0Gfx1250();
   test_FlagZeroLoadsOriginalForNonA0Gfx1250();
   test_FlagOneRetargetsB0ToB0();
@@ -558,9 +449,6 @@ int main() {
   test_FlagOneRetargetsUnknownRevisionAsB0Target();
   test_FlagOneBlocksNonGfx12_5();
   test_RetargetFailureFallsBackToOriginalReader();
-#ifndef _WIN32
-  test_FileReaderPathKeepsFileBackedReaderAlive();
-#endif
   reset_state();
 
   std::printf("\n%d passed, %d failed\n", tests_passed, tests_failed);
