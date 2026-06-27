@@ -965,7 +965,8 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
     uint32_t lane;
     uint32_t val;
   };
-  util::inline_vector<Result> results;
+  constexpr uint32_t common_result_count = 16 * 16;
+  util::inline_vector<Result, common_result_count> results;
   results.reserve(M * N * B);
 
   // Scalar reference: D[i][j] = C[i][j] + sum_k A[i][k] * B[k][j], accumulated
