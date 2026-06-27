@@ -145,6 +145,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
       -x ir
       -c ${LINKED_BC}
       -o ${OBJ_FILE}
+
     DEPENDS ${LINKED_BC}
     COMMENT "device_bitcode_tester: compiling to object for ${GPU_ARCH}"
     VERBATIM

@@ -219,8 +219,9 @@ if(COMMAND rocm_check_target_ids)
   endif()
 else()
   message(WARNING "Unable to check for supported GPU targets.")
-  set(SUPPORTED_GPUS ${GPU_TARGETS})
-  if(NOT SUPPORTED_GPUS)
+  if(GPU_TARGETS)
+    set(SUPPORTED_GPUS ${_bare_targets})
+  else()
     set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
   endif()
 endif()
@@ -229,6 +230,8 @@ endif()
 # Consumed by DeviceBitcode.cmake to embed correct amdhsa.target metadata in
 # HSACOs — HIP error 209 occurs if the suffix in the HSACO metadata does not
 # match the active feature configuration of the GPU.
+# Explicitly cleared when GPU_TARGETS is not set so a stale cached value from a
+# previous -DGPU_TARGETS=... configure run cannot persist into the defaults path.
 if(GPU_TARGETS)
   set(_full_validated "")
   foreach(_base ${SUPPORTED_GPUS})
@@ -240,6 +243,8 @@ if(GPU_TARGETS)
   endforeach()
   set(GPU_TARGETS_FULL "${_full_validated}" CACHE STRING
     "Validated GPU arch strings with feature suffixes (consumed by DeviceBitcode.cmake)" FORCE)
+else()
+  unset(GPU_TARGETS_FULL CACHE)
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU architectures to compile for" FORCE)
