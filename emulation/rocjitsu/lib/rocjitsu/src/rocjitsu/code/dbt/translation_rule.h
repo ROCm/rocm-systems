@@ -27,7 +27,8 @@
 #include <span>
 #include <string>
 #include <utility>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -133,13 +134,13 @@ enum class ExpandStatus {
 /// diagnostics instead of silently NOP-filling the source instruction.
 struct ExpandResult {
   ExpandStatus status = ExpandStatus::NotHandled;
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
   std::string message;
-  std::vector<std::string> required_work;
+  util::inline_vector<std::string> required_work;
 
   [[nodiscard]] static ExpandResult not_handled() { return {}; }
 
-  [[nodiscard]] static ExpandResult success(std::vector<uint32_t> replacement_words) {
+  [[nodiscard]] static ExpandResult success(util::inline_vector<uint32_t> replacement_words) {
     ExpandResult result;
     result.status = ExpandStatus::Success;
     result.words = std::move(replacement_words);
@@ -147,7 +148,7 @@ struct ExpandResult {
   }
 
   [[nodiscard]] static ExpandResult failed(std::string failure_message,
-                                           std::vector<std::string> work = {}) {
+                                           util::inline_vector<std::string> work = {}) {
     ExpandResult result;
     result.status = ExpandStatus::Failed;
     result.message = std::move(failure_message);

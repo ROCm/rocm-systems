@@ -5,7 +5,7 @@
 
 namespace rocjitsu {
 
-void HazardTracker::maybe_insert_delay(std::vector<uint32_t> &words, Pipeline consumer) {
+void HazardTracker::maybe_insert_delay(util::inline_vector<uint32_t> &words, Pipeline consumer) {
   if (consumer == Pipeline::None)
     return;
 
@@ -42,13 +42,13 @@ void HazardTracker::advance(Pipeline producer) {
   }
 }
 
-void HazardTracker::emit(std::vector<uint32_t> &words, uint32_t word, Pipeline pipeline) {
+void HazardTracker::emit(util::inline_vector<uint32_t> &words, uint32_t word, Pipeline pipeline) {
   maybe_insert_delay(words, pipeline);
   words.push_back(word);
   advance(pipeline);
 }
 
-void HazardTracker::emit2(std::vector<uint32_t> &words, uint32_t w0, uint32_t w1,
+void HazardTracker::emit2(util::inline_vector<uint32_t> &words, uint32_t w0, uint32_t w1,
                           Pipeline pipeline) {
   maybe_insert_delay(words, pipeline);
   words.push_back(w0);
@@ -56,7 +56,7 @@ void HazardTracker::emit2(std::vector<uint32_t> &words, uint32_t w0, uint32_t w1
   advance(pipeline);
 }
 
-void HazardTracker::emit_raw(std::vector<uint32_t> &words, uint32_t word) {
+void HazardTracker::emit_raw(util::inline_vector<uint32_t> &words, uint32_t word) {
   words.push_back(word);
   advance(Pipeline::None);
 }

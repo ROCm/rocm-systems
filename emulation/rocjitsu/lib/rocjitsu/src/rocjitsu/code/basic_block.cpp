@@ -60,13 +60,13 @@ void BasicBlock::add_successor(BasicBlock &successor) {
   successor.predecessors_.push_back(this);
 }
 
-std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co, Decoder &decoder) {
+BasicBlockList BasicBlock::build(const CodeObject &co, Decoder &decoder) {
   return build(co, decoder, {});
 }
 
-std::vector<std::unique_ptr<BasicBlock>>
-BasicBlock::build(const CodeObject &co, Decoder &decoder, std::span<const uint64_t> extra_leaders) {
-  std::vector<std::unique_ptr<BasicBlock>> blocks;
+BasicBlockList BasicBlock::build(const CodeObject &co, Decoder &decoder,
+                                 std::span<const uint64_t> extra_leaders) {
+  BasicBlockList blocks;
 
   for (const auto *sec : co.text_sections()) {
     const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
@@ -78,7 +78,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, std::span<const uint64
       uint64_t offset;
       std::unique_ptr<Instruction> inst;
     };
-    std::vector<DecodedInst> decoded;
+    util::inline_vector<DecodedInst, 0> decoded;
 
     while (pc < inst_data_size) {
       auto *raw_inst = decoder.decode(&inst_data[pc]);
@@ -127,7 +127,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, std::span<const uint64
       }
     }
 
-    std::vector<std::unique_ptr<BasicBlock>> section_blocks;
+    BasicBlockList section_blocks;
     for (size_t i = 0; i < decoded.size();) {
       auto current = std::make_unique<BasicBlock>(decoded[i].offset);
       while (i < decoded.size()) {

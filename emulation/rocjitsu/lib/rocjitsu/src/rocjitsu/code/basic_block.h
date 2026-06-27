@@ -8,17 +8,21 @@
 #define ROCJITSU_CODE_BASIC_BLOCK_H_
 
 #include "rocjitsu/code/instruction_list.h"
+#include "util/inline_vector.h"
 #include "util/intrusive_list.h"
 
 #include <cstdint>
 #include <memory>
 #include <span>
-#include <vector>
 
 namespace rocjitsu {
 
 class CodeObject;
 class Decoder;
+class BasicBlock;
+
+using BasicBlockList = util::inline_vector<std::unique_ptr<BasicBlock>, 0>;
+using BasicBlockPtrList = util::inline_vector<BasicBlock *>;
 
 /// @brief A maximal sequence of instructions with single entry, single exit.
 ///
@@ -58,10 +62,10 @@ public:
   ///
   /// @details Edges are non-owning links between blocks returned by build().
   /// They are valid as long as the returned vector owns the blocks.
-  [[nodiscard]] const std::vector<BasicBlock *> &successors() const { return successors_; }
+  [[nodiscard]] const BasicBlockPtrList &successors() const { return successors_; }
 
   /// @brief CFG predecessor blocks, inverse of successors().
-  [[nodiscard]] const std::vector<BasicBlock *> &predecessors() const { return predecessors_; }
+  [[nodiscard]] const BasicBlockPtrList &predecessors() const { return predecessors_; }
 
   /// @brief Mutable access to the intrusive list of instructions.
   /// @returns Reference to the instruction list.
@@ -75,7 +79,7 @@ public:
   /// @param[in] co Code object to analyze.
   /// @param[in] decoder Decoder for the target ISA.
   /// @returns Ordered list of basic blocks with their decoded instructions.
-  static std::vector<std::unique_ptr<BasicBlock>> build(const CodeObject &co, Decoder &decoder);
+  static BasicBlockList build(const CodeObject &co, Decoder &decoder);
 
   /// @brief Build basic blocks with additional externally-known entry leaders.
   ///
@@ -83,8 +87,8 @@ public:
   /// @param[in] decoder Decoder for the target ISA.
   /// @param[in] extra_leaders Byte offsets that must start a basic block.
   /// @returns Ordered list of basic blocks with their decoded instructions.
-  static std::vector<std::unique_ptr<BasicBlock>> build(const CodeObject &co, Decoder &decoder,
-                                                        std::span<const uint64_t> extra_leaders);
+  static BasicBlockList build(const CodeObject &co, Decoder &decoder,
+                              std::span<const uint64_t> extra_leaders);
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
@@ -95,9 +99,9 @@ private:
   uint32_t num_instructions_ = 0;
   bool has_terminator_ = false;
   InstructionList instructions_;
-  std::vector<std::unique_ptr<Instruction>> storage_;
-  std::vector<BasicBlock *> successors_;
-  std::vector<BasicBlock *> predecessors_;
+  util::inline_vector<std::unique_ptr<Instruction>, 0> storage_;
+  BasicBlockPtrList successors_;
+  BasicBlockPtrList predecessors_;
 };
 
 } // namespace rocjitsu

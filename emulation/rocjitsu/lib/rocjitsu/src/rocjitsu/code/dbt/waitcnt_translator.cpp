@@ -38,8 +38,8 @@ WaitcntValues decode_waitcnt_gfx9(uint16_t simm16) {
   return v;
 }
 
-std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
-  std::vector<uint32_t> words;
+util::inline_vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
+  util::inline_vector<uint32_t> words;
 
   const bool need_loadcnt = (vals.vmcnt != 0x3F);
   // GFX9 vmcnt is a unified counter for both loads and stores. GFX12 splits

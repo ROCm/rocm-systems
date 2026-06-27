@@ -60,7 +60,7 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   // grow the ordinary SGPR descriptor allocation. Treating it as normal SGPRs
   // makes valid RDNA targets look unsupported once diagnostics become fatal.
 
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
 
   // v_add_co_u32 writes VCC, then v_add_co_ci_u32 consumes VCC as carry-in.
   {

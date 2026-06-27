@@ -68,8 +68,7 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return nullptr;
 }
 
-[[nodiscard]] BasicBlock *block_for_offset(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                                           uint64_t offset) {
+[[nodiscard]] BasicBlock *block_for_offset(const BasicBlockList &blocks, uint64_t offset) {
   for (const auto &block : blocks) {
     if (block && block->start_offset() <= offset && offset < block->end_offset())
       return block.get();
@@ -77,7 +76,7 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return nullptr;
 }
 
-[[nodiscard]] std::vector<uint32_t> raw_words_for_inst(const Instruction &inst) {
+[[nodiscard]] util::inline_vector<uint32_t> raw_words_for_inst(const Instruction &inst) {
   const uint32_t *raw = inst.raw_encoding();
   if (!raw)
     return {};
@@ -91,10 +90,11 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return !std::ranges::equal(before, after);
 }
 
-void append_diagnostic(std::vector<TranslationDiagnostic> &diagnostics, DiagnosticSeverity severity,
-                       DiagnosticKind kind, std::string message,
+void append_diagnostic(util::inline_vector<TranslationDiagnostic> &diagnostics,
+                       DiagnosticSeverity severity, DiagnosticKind kind, std::string message,
                        std::optional<uint64_t> guest_offset = std::nullopt,
-                       std::string mnemonic = {}, std::vector<std::string> required_work = {}) {
+                       std::string mnemonic = {},
+                       util::inline_vector<std::string> required_work = {}) {
   diagnostics.push_back({.severity = severity,
                          .kind = kind,
                          .guest_offset = guest_offset,
@@ -103,20 +103,21 @@ void append_diagnostic(std::vector<TranslationDiagnostic> &diagnostics, Diagnost
                          .required_work = std::move(required_work)});
 }
 
-void append_error(std::vector<TranslationDiagnostic> &diagnostics, DiagnosticKind kind,
+void append_error(util::inline_vector<TranslationDiagnostic> &diagnostics, DiagnosticKind kind,
                   std::string message, std::optional<uint64_t> guest_offset = std::nullopt,
-                  std::string mnemonic = {}, std::vector<std::string> required_work = {}) {
+                  std::string mnemonic = {}, util::inline_vector<std::string> required_work = {}) {
   append_diagnostic(diagnostics, DiagnosticSeverity::Error, kind, std::move(message), guest_offset,
                     std::move(mnemonic), std::move(required_work));
 }
 
-void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
-                        const std::vector<TranslationDiagnostic> &src) {
+void append_diagnostics(util::inline_vector<TranslationDiagnostic> &dst,
+                        const util::inline_vector<TranslationDiagnostic> &src) {
   dst.insert(dst.end(), src.begin(), src.end());
 }
 
-[[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(std::span<const KdTranslation> kernels) {
-  std::vector<uint64_t> offsets;
+[[nodiscard]] util::inline_vector<uint64_t>
+kernel_entry_offsets(std::span<const KdTranslation> kernels) {
+  util::inline_vector<uint64_t> offsets;
   offsets.reserve(kernels.size());
   for (const KdTranslation &kernel : kernels)
     offsets.push_back(kernel.entry_text_offset);
@@ -126,9 +127,9 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
   return offsets;
 }
 
-[[nodiscard]] std::vector<uint64_t>
+[[nodiscard]] util::inline_vector<uint64_t>
 kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
-  std::vector<uint64_t> offsets;
+  util::inline_vector<uint64_t> offsets;
   offsets.reserve(kernels.size() * 2);
   for (const KdTranslation &kernel : kernels) {
     offsets.push_back(kernel.entry_text_offset);
@@ -141,9 +142,9 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
   return offsets;
 }
 
-[[nodiscard]] std::vector<uint64_t> kernel_block_leaders(std::span<const KdTranslation> kernels,
-                                                         std::span<const uint8_t> text) {
-  std::vector<uint64_t> offsets;
+[[nodiscard]] util::inline_vector<uint64_t>
+kernel_block_leaders(std::span<const KdTranslation> kernels, std::span<const uint8_t> text) {
+  util::inline_vector<uint64_t> offsets;
   offsets.reserve(kernels.size() * 2);
   for (const KdTranslation &kernel : kernels) {
     offsets.push_back(kernel.entry_text_offset);
@@ -163,15 +164,15 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
 struct KernelTranslationScope {
   KdTranslation *translation = nullptr;
   BasicBlock *entry = nullptr;
-  std::vector<BasicBlock *> blocks;
+  util::inline_vector<BasicBlock *> blocks;
 };
 
-[[nodiscard]] std::vector<BasicBlock *>
-reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, BasicBlock &entry,
+[[nodiscard]] util::inline_vector<BasicBlock *>
+reachable_kernel_blocks(const BasicBlockList &blocks, BasicBlock &entry,
                         const std::unordered_set<uint64_t> &kernel_entries,
                         const std::unordered_set<uint64_t> &own_entries) {
   std::unordered_set<const BasicBlock *> reachable;
-  std::vector<BasicBlock *> stack{&entry};
+  util::inline_vector<BasicBlock *> stack{&entry};
   for (const uint64_t own_entry : own_entries) {
     if (own_entry == entry.start_offset())
       continue;
@@ -197,7 +198,7 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
     }
   }
 
-  std::vector<BasicBlock *> ordered;
+  util::inline_vector<BasicBlock *> ordered;
   ordered.reserve(reachable.size());
   for (const auto &block : blocks) {
     if (block && reachable.contains(block.get()))
@@ -206,17 +207,16 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
   return ordered;
 }
 
-[[nodiscard]] std::vector<KernelTranslationScope>
-kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                          std::span<KdTranslation> kernels) {
-  std::vector<KernelTranslationScope> scopes;
+[[nodiscard]] util::inline_vector<KernelTranslationScope>
+kernel_translation_scopes(const BasicBlockList &blocks, std::span<KdTranslation> kernels) {
+  util::inline_vector<KernelTranslationScope> scopes;
   const auto entries = kernel_entry_offsets(kernels);
   if (entries.empty())
     return scopes;
 
   const auto hardware_entries = kernel_hardware_entry_offsets(kernels);
   std::unordered_set<uint64_t> entry_set(hardware_entries.begin(), hardware_entries.end());
-  std::vector<KdTranslation *> ordered_kernels;
+  util::inline_vector<KdTranslation *> ordered_kernels;
   ordered_kernels.reserve(kernels.size());
   std::unordered_set<uint64_t> seen_entries;
   for (KdTranslation &kernel : kernels) {
@@ -333,7 +333,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return leave_unchanged();
   }
 
-  std::vector<uint8_t> translated_text;
+  util::inline_vector<uint8_t, 0> translated_text;
   const bool continue_after_failure = options_.debug_continue_after_failure;
 
   auto copy_original_instruction = [&](const Instruction &inst, uint64_t offset,
@@ -366,7 +366,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return true;
   };
 
-  auto write_words_at = [](std::vector<uint8_t> &dst, uint64_t offset,
+  auto write_words_at = [](util::inline_vector<uint8_t, 0> &dst, uint64_t offset,
                            std::span<const uint32_t> words) {
     if (words.empty())
       return;
@@ -741,7 +741,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // coordinates and patch only the immediate bits of the translated branch.
       const int64_t new_delta = static_cast<int64_t>(*target_target) -
                                 static_cast<int64_t>(fixup.target_inst_offset + fixup.inst->size());
-      std::vector<uint32_t> words(fixup.inst->size() / sizeof(uint32_t));
+      util::inline_vector<uint32_t> words(fixup.inst->size() / sizeof(uint32_t));
       std::memcpy(words.data(), translated_text.data() + fixup.target_inst_offset,
                   fixup.inst->size());
       if (!patch_pcrel_branch_offset(*fixup.inst, words, new_delta, host_arch_)) {
@@ -862,7 +862,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   return result;
 }
 
-bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vector<uint8_t> &text,
+bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl,
+                                      util::inline_vector<uint8_t, 0> &text,
                                       KernelTextLayout &layout, std::span<const uint8_t> orig_text,
                                       uint64_t source_return_offset) {
   assert(repl.matched() && "apply_semantic called with unmatched replacement");
@@ -921,14 +922,14 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
 }
 
 bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
-                                       uint64_t target_offset, std::vector<uint8_t> &text,
-                                       uint16_t dst_opcode, KernelTextLayout &layout,
-                                       std::span<const uint8_t> orig_text,
+                                       uint64_t target_offset,
+                                       util::inline_vector<uint8_t, 0> &text, uint16_t dst_opcode,
+                                       KernelTextLayout &layout, std::span<const uint8_t> orig_text,
                                        const InstructionLegalization *leg) {
   const uint32_t *raw = inst.raw_encoding();
   assert(raw && "handle_encoding called without raw encoding");
   const bool tracing = static_cast<bool>(trace_callback_);
-  const auto source_words = tracing ? raw_words_for_inst(inst) : std::vector<uint32_t>{};
+  const auto source_words = tracing ? raw_words_for_inst(inst) : util::inline_vector<uint32_t>{};
 
   auto emit_trace = [&](bool copied_original, bool changed, bool emitted_in_cave,
                         uint64_t target_offset, std::span<const uint32_t> target_words) {

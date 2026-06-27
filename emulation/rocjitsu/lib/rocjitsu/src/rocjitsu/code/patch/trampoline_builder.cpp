@@ -33,7 +33,7 @@ namespace {
 // endian and rocjitsu only supports little-endian hosts (matches DBT's
 // memcpy convention in binary_translator.cpp); if either invariant ever
 // changes, this helper needs an explicit byte-swap.
-void append_word(std::vector<uint8_t> &dst, uint32_t w) {
+void append_word(util::inline_vector<uint8_t, 0> &dst, uint32_t w) {
   uint8_t buf[sizeof(w)];
   std::memcpy(buf, &w, sizeof(w));
   dst.insert(dst.end(), buf, buf + sizeof(w));
@@ -57,7 +57,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   // generic loops below handle any multi-item inline-asm shape; no reserve
   // hint because the per-item word counts aren't known up front and
   // vector::insert handles growth.
-  std::vector<uint32_t> body;
+  util::inline_vector<uint32_t> body;
   for (const InlineAsmItem &item : plan.before_items)
     body.insert(body.end(), item.words.begin(), item.words.end());
   if (plan.emit_original)

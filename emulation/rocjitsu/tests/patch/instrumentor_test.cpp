@@ -739,7 +739,7 @@ TEST(InstrumentorPatch, EmitsValidElfWithExpectedPatchSummary) {
   EXPECT_EQ(p.return_target, 8u);
 
   // Original bytes are s_nop 0 = 0xBF800000 little-endian.
-  const std::vector<uint8_t> expected_original = {0x00, 0x00, 0x80, 0xBF};
+  const util::inline_vector<uint8_t> expected_original = {0x00, 0x00, 0x80, 0xBF};
   EXPECT_EQ(p.original_bytes, expected_original);
 
   // Patched anchor is build_s_branch(0, CDNA4): branch from anchor to the

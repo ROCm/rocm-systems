@@ -99,8 +99,7 @@ uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
   return remainder == 0 ? value : value + alignment - remainder;
 }
 
-template <typename T>
-T read_elf_struct_for_test(const std::vector<uint8_t> &image, uint64_t offset) {
+template <typename T> T read_elf_struct_for_test(std::span<const uint8_t> image, uint64_t offset) {
   T value{};
   assert(offset <= image.size());
   assert(sizeof(T) <= image.size() - offset);
@@ -109,13 +108,18 @@ T read_elf_struct_for_test(const std::vector<uint8_t> &image, uint64_t offset) {
 }
 
 template <typename T>
-std::vector<T> read_elf_array_for_test(const std::vector<uint8_t> &image, uint64_t offset,
+std::vector<T> read_elf_array_for_test(std::span<const uint8_t> image, uint64_t offset,
                                        size_t count) {
   std::vector<T> values(count);
   assert(offset <= image.size());
   assert(count <= (image.size() - offset) / sizeof(T));
   std::memcpy(values.data(), image.data() + offset, count * sizeof(T));
   return values;
+}
+
+void expect_byte_ranges_equal(std::span<const uint8_t> actual, std::span<const uint8_t> expected) {
+  ASSERT_EQ(actual.size(), expected.size());
+  EXPECT_TRUE(std::ranges::equal(actual, expected));
 }
 
 template <typename T>
@@ -1361,7 +1365,7 @@ TEST(BinaryTranslator, CaveBranchOverflowLeavesCodeObjectUnchanged) {
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   auto result = translator.translate(co);
 
-  EXPECT_EQ(result.elf_bytes, image);
+  expect_byte_ranges_equal(result.elf_bytes, image);
   const bool diagnosed = std::any_of(
       result.diagnostics.begin(), result.diagnostics.end(),
       [](const TranslationDiagnostic &diagnostic) {
@@ -2144,7 +2148,7 @@ void expect_cdna3_local_cave_matches(const rocjitsu::Section &text, uint64_t cav
   }
 }
 
-void expect_cdna3_translated_descriptor_vgprs_at_least(const std::vector<uint8_t> &image,
+void expect_cdna3_translated_descriptor_vgprs_at_least(std::span<const uint8_t> image,
                                                        uint32_t expected_minimum) {
   rocjitsu::AmdGpuCodeObject translated(image.data(), image.size());
   ASSERT_TRUE(translated.is_valid());
@@ -2418,7 +2422,7 @@ TEST(BinaryTranslatorE2E, RejectsIndirectBranchAndCallInstructions) {
     rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
     auto result = translator.translate(source);
 
-    EXPECT_EQ(result.elf_bytes, image);
+    rocjitsu::expect_byte_ranges_equal(result.elf_bytes, image);
     EXPECT_TRUE(rocjitsu::has_error_containing(
         result, rocjitsu::DiagnosticKind::Legalization,
         "indirect branch or call target recovery is not implemented"));
@@ -2441,7 +2445,7 @@ TEST(BinaryTranslatorE2E, RejectsDirectBranchTargetBeforeText) {
   rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   auto result = translator.translate(source);
 
-  EXPECT_EQ(result.elf_bytes, image);
+  rocjitsu::expect_byte_ranges_equal(result.elf_bytes, image);
   EXPECT_TRUE(
       rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
                                      "direct branch target is outside the source .text range"));
@@ -2459,7 +2463,7 @@ TEST(BinaryTranslatorE2E, RejectsDirectBranchTargetAbsentFromRelocatedBody) {
   rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   auto result = translator.translate(source);
 
-  EXPECT_EQ(result.elf_bytes, image);
+  rocjitsu::expect_byte_ranges_equal(result.elf_bytes, image);
   EXPECT_TRUE(rocjitsu::has_error_containing(
       result, rocjitsu::DiagnosticKind::Legalization,
       "direct branch target is not present in the kernel-local relocated body"));
@@ -2478,7 +2482,7 @@ TEST(BinaryTranslatorE2E, RejectsDescriptorPrologueBranchRangeOverflow) {
   rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   auto result = translator.translate(source);
 
-  EXPECT_EQ(result.elf_bytes, image);
+  rocjitsu::expect_byte_ranges_equal(result.elf_bytes, image);
   EXPECT_TRUE(rocjitsu::has_error_containing(
       result, rocjitsu::DiagnosticKind::ResourceLimit,
       "kernel descriptor prologue branch range exceeds s_branch simm16"));
@@ -2528,8 +2532,7 @@ TEST(BinaryTranslatorE2E, DebugContinueAfterFailureCollectsMultipleExpandDiagnos
   auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.elf_bytes, image)
-      << "continued-failure diagnostics must not emit partially translated code";
+  rocjitsu::expect_byte_ranges_equal(result.elf_bytes, image);
 
   std::vector<uint64_t> expand_offsets;
   for (const auto &diagnostic : result.diagnostics) {

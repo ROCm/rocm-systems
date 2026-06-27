@@ -7,9 +7,9 @@
 #pragma once
 
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "util/inline_vector.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -27,12 +27,12 @@ public:
     SALU = 3,
   };
 
-  void emit(std::vector<uint32_t> &words, uint32_t word, Pipeline pipeline);
-  void emit2(std::vector<uint32_t> &words, uint32_t w0, uint32_t w1, Pipeline pipeline);
-  void emit_raw(std::vector<uint32_t> &words, uint32_t word);
+  void emit(util::inline_vector<uint32_t> &words, uint32_t word, Pipeline pipeline);
+  void emit2(util::inline_vector<uint32_t> &words, uint32_t w0, uint32_t w1, Pipeline pipeline);
+  void emit_raw(util::inline_vector<uint32_t> &words, uint32_t word);
 
 private:
-  void maybe_insert_delay(std::vector<uint32_t> &words, Pipeline consumer);
+  void maybe_insert_delay(util::inline_vector<uint32_t> &words, Pipeline consumer);
   void advance(Pipeline producer);
 
   struct Slot {

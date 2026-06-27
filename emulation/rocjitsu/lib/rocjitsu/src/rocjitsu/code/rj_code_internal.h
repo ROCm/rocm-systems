@@ -11,9 +11,9 @@
 #include "rocjitsu/code/instruction_list.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/refcount.h"
+#include "util/inline_vector.h"
 
 #include <memory>
-#include <vector>
 
 struct rj_code_executable_t : rocjitsu::RefCounted {
   std::unique_ptr<rocjitsu::Executable> exec;
@@ -26,11 +26,11 @@ struct rj_code_object_t : rocjitsu::RefCounted {
 
 struct rj_code_inst_list_t : rocjitsu::RefCounted {
   rocjitsu::InstructionList list;
-  std::vector<std::unique_ptr<rocjitsu::Instruction>> storage;
+  util::inline_vector<std::unique_ptr<rocjitsu::Instruction>, 0> storage;
 };
 
 struct rj_code_basic_block_list_t : rocjitsu::RefCounted {
-  std::vector<std::unique_ptr<rocjitsu::BasicBlock>> blocks;
+  rocjitsu::BasicBlockList blocks;
 };
 
 struct rj_code_basic_block_t : rocjitsu::RefCounted {

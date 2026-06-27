@@ -10,7 +10,8 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -43,11 +44,11 @@ struct TranslationDiagnostic {
   std::optional<uint64_t> guest_offset;
   std::string mnemonic;
   std::string message;
-  std::vector<std::string> required_work;
+  util::inline_vector<std::string> required_work;
 };
 
-[[nodiscard]] inline bool
-has_error_diagnostic(const std::vector<TranslationDiagnostic> &diagnostics) {
+template <typename Diagnostics>
+[[nodiscard]] inline bool has_error_diagnostic(const Diagnostics &diagnostics) {
   return std::ranges::any_of(diagnostics, [](const TranslationDiagnostic &diagnostic) {
     return diagnostic.severity == DiagnosticSeverity::Error;
   });

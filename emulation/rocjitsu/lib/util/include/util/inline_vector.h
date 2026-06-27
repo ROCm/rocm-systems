@@ -209,6 +209,8 @@ public:
   using const_pointer = const T *;
   using iterator = T *;
   using const_iterator = const T *;
+  using reverse_iterator = std::reverse_iterator<iterator>;
+  using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
   static constexpr size_type inline_capacity = InlineN;
 
@@ -332,6 +334,9 @@ public:
     return data_[index];
   }
 
+  reference at(size_type index) noexcept { return (*this)[index]; }
+  const_reference at(size_type index) const noexcept { return (*this)[index]; }
+
   reference front() noexcept {
     assert(size_ > 0);
     return data_[0];
@@ -362,6 +367,14 @@ public:
   iterator end() noexcept { return data_ + size_; }
   const_iterator end() const noexcept { return data_ + size_; }
   const_iterator cend() const noexcept { return data_ + size_; }
+
+  reverse_iterator rbegin() noexcept { return reverse_iterator(end()); }
+  const_reverse_iterator rbegin() const noexcept { return const_reverse_iterator(end()); }
+  const_reverse_iterator crbegin() const noexcept { return const_reverse_iterator(cend()); }
+
+  reverse_iterator rend() noexcept { return reverse_iterator(begin()); }
+  const_reverse_iterator rend() const noexcept { return const_reverse_iterator(begin()); }
+  const_reverse_iterator crend() const noexcept { return const_reverse_iterator(cbegin()); }
 
   [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
   [[nodiscard]] size_type size() const noexcept { return size_; }
@@ -645,6 +658,18 @@ private:
   size_type size_ = 0;
   size_type capacity_ = 0;
 };
+
+template <typename T, uint32_t LhsInlineN, uint32_t RhsInlineN>
+[[nodiscard]] bool operator==(const inline_vector<T, LhsInlineN> &lhs,
+                              const inline_vector<T, RhsInlineN> &rhs) noexcept {
+  return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+
+template <typename T, uint32_t LhsInlineN, uint32_t RhsInlineN>
+[[nodiscard]] bool operator!=(const inline_vector<T, LhsInlineN> &lhs,
+                              const inline_vector<T, RhsInlineN> &rhs) noexcept {
+  return !(lhs == rhs);
+}
 
 #ifdef UTIL_INLINE_VECTOR_ENABLE_HISTOGRAM
 inline void dump_inline_vector_histograms(std::ostream &os) noexcept {

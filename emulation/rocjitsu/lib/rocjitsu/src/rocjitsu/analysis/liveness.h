@@ -15,12 +15,12 @@
 #pragma once
 
 #include "rocjitsu/isa/register_set.h"
+#include "util/inline_vector.h"
 
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <unordered_map>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -61,7 +61,7 @@ struct LivenessAnalysisOptions {
 /// BasicBlock::build(); no separate graph object is needed. Traversal is
 /// constrained to the block span, so callers can analyze one kernel without
 /// walking into other decoded code.
-[[nodiscard]] std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks);
+[[nodiscard]] util::inline_vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks);
 
 /// @brief Backward SGPR/VGPR/ACC_VGPR liveness over one decoded kernel CFG scope.
 class LivenessAnalysis {
@@ -108,7 +108,7 @@ private:
   void analyze(KernelBlockScope blocks);
 
   uint16_t min_free_vgpr_ = 0;
-  std::vector<BlockLiveness> liveness_;
+  util::inline_vector<BlockLiveness, 0> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;
   static constexpr RegisterSet empty_{};

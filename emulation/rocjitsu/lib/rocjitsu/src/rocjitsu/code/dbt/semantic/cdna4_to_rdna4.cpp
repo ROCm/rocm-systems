@@ -204,7 +204,7 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
   context.require_sgprs(static_cast<uint32_t>(kTmpSgpr) + 1);
   context.require_vgprs(static_cast<uint32_t>(vaddr) + 1);
 
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
 
   words.push_back(make_gfx12_sopp(kOpWaitLoadcnt, 0));
   words.push_back(build_s_mov_b64(kExecSave, kExecLo));

@@ -28,11 +28,11 @@
 #include <optional>
 #include <span>
 #include <string>
-#include <vector>
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -114,9 +114,9 @@ struct BinaryTranslatorOptions {
 
 /// @brief Result of translating a code object.
 struct TranslatedCodeObject {
-  std::vector<uint8_t> elf_bytes;                        ///< Translated ELF for the host ISA.
-  rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
-  std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
+  util::inline_vector<uint8_t, 0> elf_bytes;              ///< Translated ELF for the host ISA.
+  rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID;  ///< Host ISA architecture.
+  util::inline_vector<TranslationDiagnostic> diagnostics; ///< Translation warnings/errors.
 
   [[nodiscard]] bool ok() const { return !has_error_diagnostic(diagnostics); }
 };
@@ -171,7 +171,7 @@ private:
   /// @returns true if the replacement was applied safely; false if an expanding
   ///          replacement could not be branched to/from the code cave.
   [[nodiscard]] bool apply_semantic(const struct SemanticReplacement &repl,
-                                    std::vector<uint8_t> &text, KernelTextLayout &layout,
+                                    util::inline_vector<uint8_t, 0> &text, KernelTextLayout &layout,
                                     std::span<const uint8_t> orig_text,
                                     uint64_t source_return_offset);
 
@@ -192,7 +192,7 @@ private:
   ///          the translated encoding expanded and could not be branched through
   ///          the code cave.
   [[nodiscard]] bool handle_encoding(const Instruction &inst, uint64_t offset,
-                                     uint64_t target_offset, std::vector<uint8_t> &text,
+                                     uint64_t target_offset, util::inline_vector<uint8_t, 0> &text,
                                      uint16_t dst_opcode, KernelTextLayout &layout,
                                      std::span<const uint8_t> orig_text,
                                      const InstructionLegalization *leg);
@@ -205,7 +205,7 @@ private:
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
   std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.
-  std::vector<TranslationDiagnostic> *diagnostics_ = nullptr; ///< Active result diagnostics.
+  util::inline_vector<TranslationDiagnostic> *diagnostics_ = nullptr; ///< Active diagnostics.
 };
 
 } // namespace rocjitsu

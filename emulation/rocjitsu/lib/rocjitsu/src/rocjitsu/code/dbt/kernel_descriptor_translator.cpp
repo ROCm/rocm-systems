@@ -422,7 +422,8 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
 // Kernel-entry prologue construction.
 // -----------------------------------------------------------------------------
 
-void append_salu_write(std::vector<uint32_t> &words, uint32_t word, rj_code_arch_t host_arch) {
+void append_salu_write(util::inline_vector<uint32_t> &words, uint32_t word,
+                       rj_code_arch_t host_arch) {
   words.push_back(word);
   // The prologue feeds the original kernel entry, whose first few instructions
   // may immediately consume these SGPRs. GFX12 needs an explicit ALU delay for
@@ -432,7 +433,7 @@ void append_salu_write(std::vector<uint32_t> &words, uint32_t word, rj_code_arch
   words.push_back(build_s_delay_alu(kDelayAluSaluDep1, host_arch));
 }
 
-void append_rdna4_workgroup_grid_prologue(std::vector<uint32_t> &words, const KD &desc,
+void append_rdna4_workgroup_grid_prologue(util::inline_vector<uint32_t> &words, const KD &desc,
                                           rj_code_arch_t host_arch) {
   const uint16_t shift16 = scalar_positive_inline_u32(16);
   const int16_t sgpr_wg_id_x = workgroup_id_sgpr(desc, 0);
@@ -467,9 +468,9 @@ void append_rdna4_workgroup_grid_prologue(std::vector<uint32_t> &words, const KD
   }
 }
 
-[[nodiscard]] std::vector<uint32_t>
+[[nodiscard]] util::inline_vector<uint32_t>
 build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
 
   // Kernel-entry register initialization ABI notes:
   // - CDNA descriptors may request workgroup_id_x/y/z as SGPRs immediately
@@ -681,10 +682,10 @@ KernelDescriptorTranslator::KernelDescriptorTranslator(rj_code_arch_t guest_arch
                                                        rj_code_arch_t host_arch)
     : guest_arch_(guest_arch), host_arch_(host_arch) {}
 
-std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
+util::inline_vector<KdTranslation> KernelDescriptorTranslator::translate_image(
     std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
     const KernelDescriptorTranslationOptions &options) const {
-  std::vector<KdTranslation> translations;
+  util::inline_vector<KdTranslation> translations;
 
   visit_kernel_descriptors(
       image, text_offset, text_size,

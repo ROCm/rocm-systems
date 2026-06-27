@@ -18,7 +18,7 @@
 namespace rocjitsu {
 namespace {
 
-uint32_t word_at(const std::vector<uint8_t> &bytes, size_t byte_off) {
+uint32_t word_at(std::span<const uint8_t> bytes, size_t byte_off) {
   uint32_t w = 0;
   std::memcpy(&w, bytes.data() + byte_off, sizeof(w));
   return w;

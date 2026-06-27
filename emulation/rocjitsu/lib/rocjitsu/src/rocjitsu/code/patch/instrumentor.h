@@ -48,7 +48,8 @@
 #include <span>
 #include <string>
 #include <unordered_map>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -99,7 +100,7 @@ struct ResolvedInstrumentationSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t anchor_offset = 0;
   uint32_t original_size = 0;
-  std::vector<uint8_t> original_bytes;
+  util::inline_vector<uint8_t> original_bytes;
   std::string mnemonic; // Diagnostic/debug only.
 };
 
@@ -114,8 +115,8 @@ struct InstrumentationPatch {
   uint32_t original_size;
   uint64_t trampoline_offset; // .text-relative.
   uint64_t return_target;
-  std::vector<uint8_t> original_bytes;
-  std::vector<uint8_t> patched_anchor_bytes;
+  util::inline_vector<uint8_t> original_bytes;
+  util::inline_vector<uint8_t, 0> patched_anchor_bytes;
 };
 
 /// @brief Result of Instrumentor::patch().
@@ -124,9 +125,9 @@ struct InstrumentationPatch {
 /// `errors` is non-empty. On success, `errors` is empty and `elf_bytes`
 /// contains a re-parseable patched ELF.
 struct InstrumentedCodeObject {
-  std::vector<uint8_t> elf_bytes;
-  std::vector<std::string> errors;
-  std::vector<std::string> warnings;
+  util::inline_vector<uint8_t, 0> elf_bytes;
+  util::inline_vector<std::string> errors;
+  util::inline_vector<std::string> warnings;
 };
 
 /// @brief Result of Instrumentor::patch_with_debug_summaries().
@@ -134,7 +135,7 @@ struct InstrumentedCodeObject {
 /// Extends InstrumentedCodeObject with one InstrumentationPatch per applied
 /// site. Test / debug surface only; the per-site schema is unstable.
 struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
-  std::vector<InstrumentationPatch> patches;
+  util::inline_vector<InstrumentationPatch> patches;
 };
 
 /// @brief Permanent structural checks: would @p anchor work as a trampoline
@@ -239,8 +240,8 @@ public:
                            InstrumentationKind kind = InstrumentationKind::BeforeInst);
 
   struct ValidationResult {
-    std::vector<ResolvedInstrumentationSite> sites;
-    std::vector<std::string> errors; // Fatal; sites is empty when non-empty.
+    util::inline_vector<ResolvedInstrumentationSite> sites;
+    util::inline_vector<std::string> errors; // Fatal; sites is empty when non-empty.
   };
 
   /// @brief Look up each queued point's anchor and validate it.
@@ -274,12 +275,12 @@ public:
 private:
   const AmdGpuCodeObject &obj_;
   rj_code_arch_t arch_;
-  std::vector<InstrumentationPoint> points_;
+  util::inline_vector<InstrumentationPoint> points_;
   bool patched_ = false;
 
   // Lazily populated.
   std::unique_ptr<Decoder> decoder_;
-  std::vector<std::unique_ptr<BasicBlock>> blocks_;
+  util::inline_vector<std::unique_ptr<BasicBlock>, 0> blocks_;
   // .text-relative byte offset -> decoded Instruction. Populated alongside
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).

@@ -7,7 +7,8 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -22,6 +23,6 @@ struct WaitcntValues {
 [[nodiscard]] WaitcntValues decode_waitcnt_gfx9(uint16_t simm16);
 
 /// @brief Encode wait-counter values as GFX12 split s_wait_* instruction words.
-[[nodiscard]] std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals);
+[[nodiscard]] util::inline_vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals);
 
 } // namespace rocjitsu

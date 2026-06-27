@@ -20,7 +20,8 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -28,7 +29,7 @@ namespace rocjitsu {
 ///        original in the trampoline. Declared clobbers are intentionally
 ///        deferred to a later milestone.
 struct InlineAsmItem {
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
 };
 
 /// @brief Builder-facing description of one trampoline.
@@ -43,17 +44,17 @@ struct TrampolinePlan {
   uint64_t trampoline_offset = 0;
   uint64_t return_target = 0; // Typically anchor_offset + original_size.
 
-  std::vector<uint32_t> original_words; // Exact bytes pulled from .text.
+  util::inline_vector<uint32_t> original_words; // Exact bytes pulled from .text.
 
-  std::vector<InlineAsmItem> before_items;
-  std::vector<InlineAsmItem> after_items;
+  util::inline_vector<InlineAsmItem> before_items;
+  util::inline_vector<InlineAsmItem> after_items;
   bool emit_original = true;
 };
 
 /// @brief Output bytes for one trampoline.
 struct TrampolineBytes {
-  std::vector<uint8_t> patched_anchor_bytes; // original_size bytes.
-  std::vector<uint32_t> trampoline_words;
+  util::inline_vector<uint8_t, 0> patched_anchor_bytes; // original_size bytes.
+  util::inline_vector<uint32_t> trampoline_words;
 };
 
 class TrampolineBuilder {

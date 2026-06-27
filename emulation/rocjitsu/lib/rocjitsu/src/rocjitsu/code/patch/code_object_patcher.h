@@ -10,7 +10,8 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -60,10 +61,10 @@ public:
                                            uint64_t old_entry_text_offset,
                                            uint64_t new_entry_text_offset);
 
-  std::vector<uint8_t> emit() const;
+  util::inline_vector<uint8_t, 0> emit() const;
 
 private:
-  std::vector<uint8_t> image_;
+  util::inline_vector<uint8_t, 0> image_;
   uint64_t text_offset_;
   uint64_t text_size_;
 };

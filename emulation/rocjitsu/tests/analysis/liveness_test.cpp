@@ -168,8 +168,8 @@ public:
   }
 };
 
-std::vector<std::unique_ptr<BasicBlock>>
-build_test_blocks(std::vector<TestOpcode> ops, std::span<const uint64_t> extra_leaders = {}) {
+BasicBlockList build_test_blocks(std::vector<TestOpcode> ops,
+                                 std::span<const uint64_t> extra_leaders = {}) {
   std::vector<uint32_t> words;
   words.reserve(ops.size());
   for (TestOpcode op : ops)
@@ -184,23 +184,22 @@ bool has_predecessor(const BasicBlock &block, const BasicBlock *pred) {
   return std::ranges::find(block.predecessors(), pred) != block.predecessors().end();
 }
 
-BasicBlock *block_starting_at(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                              uint64_t offset) {
+BasicBlock *block_starting_at(const BasicBlockList &blocks, uint64_t offset) {
   auto it = std::ranges::find_if(blocks, [offset](const auto &block) {
     return block != nullptr && block->start_offset() == offset;
   });
   return it == blocks.end() ? nullptr : it->get();
 }
 
-std::vector<BasicBlock *> block_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
-  std::vector<BasicBlock *> scope;
+util::inline_vector<BasicBlock *> block_scope(const BasicBlockList &blocks) {
+  util::inline_vector<BasicBlock *> scope;
   scope.reserve(blocks.size());
   for (const auto &block : blocks)
     scope.push_back(block.get());
   return scope;
 }
 
-LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+LivenessAnalysis analyze_scope(const BasicBlockList &blocks) {
   auto scope = block_scope(blocks);
   return LivenessAnalysis(KernelBlockScope(scope));
 }
@@ -488,7 +487,7 @@ TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
   LivenessAnalysis all_decoded_liveness = analyze_scope(blocks);
   EXPECT_TRUE(all_decoded_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 
-  std::vector<BasicBlock *> kernel_blocks{kernel0};
+  util::inline_vector<BasicBlock *> kernel_blocks{kernel0};
   LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks)};
   EXPECT_FALSE(kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 }

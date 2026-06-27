@@ -256,7 +256,7 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
   // All-or-nothing: per-point errors accumulate in `result.errors`; per-point
   // successes accumulate in `sites` but are only published to `result.sites`
   // if `errors` ends up empty.
-  std::vector<ResolvedInstrumentationSite> sites;
+  util::inline_vector<ResolvedInstrumentationSite> sites;
   std::unordered_set<uint64_t> site_offsets;
   sites.reserve(points_.size());
   for (const auto &pt : points_) {
@@ -322,7 +322,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   CodeObjectPatcher patcher(obj_);
   const uint64_t cave_start = patcher.text_size();
 
-  std::vector<AppliedSite> applied;
+  util::inline_vector<AppliedSite> applied;
   applied.reserve(sites.size());
   // The trampoline cursor advances through the local cave that begins at the
   // first byte after the original .text.
@@ -359,7 +359,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // grows .text in place and fixes up the surrounding ELF (section/segment
   // sizes, moved symbols, descriptor entries).
   const auto text_span = patcher.text_bytes();
-  std::vector<uint8_t> new_text(text_span.begin(), text_span.end());
+  util::inline_vector<uint8_t, 0> new_text(text_span.begin(), text_span.end());
   for (const auto &a : applied) {
     std::memcpy(new_text.data() + a.site->anchor_offset, a.bytes.patched_anchor_bytes.data(),
                 a.site->original_size);

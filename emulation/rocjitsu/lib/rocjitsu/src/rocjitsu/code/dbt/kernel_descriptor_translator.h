@@ -12,7 +12,8 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <vector>
+
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -115,12 +116,12 @@ struct KdTranslation {
 
   uint8_t target_user_sgpr_count = 0;
   bool needs_flat_scratch_init_sgpr = false;
-  std::vector<uint32_t> user_sgpr_shuffle;
+  util::inline_vector<uint32_t> user_sgpr_shuffle;
 
   /// All kernel-entry instructions required by descriptor ABI translation.
   /// BinaryTranslator places these words in the kernel-local .text cave and
   /// records the final descriptor entry offset.
-  std::vector<uint32_t> prologue_words;
+  util::inline_vector<uint32_t> prologue_words;
 
   uint8_t guest_wavefront_size = 64;
   uint8_t host_wavefront_size = 64;
@@ -163,7 +164,7 @@ struct KdTranslation {
   uint32_t target_occupancy = 0;
 
   bool supported = true;
-  std::vector<TranslationDiagnostic> diagnostics;
+  util::inline_vector<TranslationDiagnostic> diagnostics;
 };
 
 /// @brief Compute descriptor patches and semantic metadata for one DBT pair.
@@ -171,7 +172,7 @@ class KernelDescriptorTranslator {
 public:
   KernelDescriptorTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
 
-  [[nodiscard]] std::vector<KdTranslation>
+  [[nodiscard]] util::inline_vector<KdTranslation>
   translate_image(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
                   const KernelDescriptorTranslationOptions &options) const;
 

@@ -22,11 +22,11 @@ namespace {
 void dfs_reverse_post_order(const BasicBlock &start,
                             const std::unordered_set<const BasicBlock *> &allowed,
                             std::unordered_set<const BasicBlock *> &visited,
-                            std::vector<const BasicBlock *> &postorder) {
+                            util::inline_vector<const BasicBlock *> &postorder) {
   if (!allowed.contains(&start) || !visited.insert(&start).second)
     return;
 
-  std::vector<std::pair<const BasicBlock *, size_t>> stack;
+  util::inline_vector<std::pair<const BasicBlock *, size_t>> stack;
   stack.emplace_back(&start, 0);
 
   while (!stack.empty()) {
@@ -44,8 +44,8 @@ void dfs_reverse_post_order(const BasicBlock &start,
   }
 }
 
-std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
-  std::vector<const Instruction *> insts;
+util::inline_vector<const Instruction *> instructions_in_order(BasicBlock &block) {
+  util::inline_vector<const Instruction *> insts;
   for (const auto &inst : block.instructions())
     insts.push_back(&inst);
   return insts;
@@ -76,8 +76,8 @@ std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
 
 } // namespace
 
-std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
-  std::vector<const BasicBlock *> postorder;
+util::inline_vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
+  util::inline_vector<const BasicBlock *> postorder;
   std::unordered_set<const BasicBlock *> allowed;
   std::unordered_set<const BasicBlock *> visited;
 
@@ -128,7 +128,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
 
   const auto rpo = reverse_post_order(blocks);
   std::deque<size_t> worklist;
-  std::vector<bool> in_worklist(blocks.size(), false);
+  util::inline_vector<bool, 0> in_worklist(blocks.size(), false);
   auto enqueue = [&](size_t idx) {
     if (idx >= in_worklist.size() || in_worklist[idx])
       return;

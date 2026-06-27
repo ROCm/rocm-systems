@@ -154,28 +154,28 @@ constexpr uint8_t kCdna3SoppOpWaitcnt = 12;
 constexpr uint16_t kCdnaWaitcntLgkmcnt0 = 0xC07F;
 constexpr uint16_t kCdnaWaitcntAll0 = 0x0000;
 
-void emit_cdna3_vop3(std::vector<uint32_t> &words, uint16_t op, uint8_t vdst, uint16_t src0,
+void emit_cdna3_vop3(util::inline_vector<uint32_t> &words, uint16_t op, uint8_t vdst, uint16_t src0,
                      uint16_t src1 = 0, uint16_t src2 = 0) {
   auto [w0, w1] = build_cdna3_vop3(op, vdst, src0, src1, src2);
   words.push_back(w0);
   words.push_back(w1);
 }
 
-void emit_cdna3_ds(std::vector<uint32_t> &words, uint8_t op, uint8_t vdst, uint8_t addr,
+void emit_cdna3_ds(util::inline_vector<uint32_t> &words, uint8_t op, uint8_t vdst, uint8_t addr,
                    uint8_t data0 = 0, uint8_t data1 = 0, uint8_t offset0 = 0, uint8_t offset1 = 0) {
   auto [w0, w1] = build_cdna3_ds(op, vdst, addr, data0, data1, offset0, offset1);
   words.push_back(w0);
   words.push_back(w1);
 }
 
-void emit_cdna3_lgkm_wait(std::vector<uint32_t> &words) {
+void emit_cdna3_lgkm_wait(util::inline_vector<uint32_t> &words) {
   // GFX9/CDNA s_waitcnt encodes "lgkmcnt(0)" as lgkm=0 while leaving VM/EXP at
   // their no-wait maxima. The DS read/bpermute sequences below require the
   // loaded/permuted data before issuing dependent VALU instructions.
   words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntLgkmcnt0));
 }
 
-void emit_cdna3_wait_all(std::vector<uint32_t> &words) {
+void emit_cdna3_wait_all(util::inline_vector<uint32_t> &words) {
   // The load-to-LDS expansion below consumes a just-issued VMEM load through a
   // following DS write.  Waiting all counters is stronger than the hardware
   // `vmcnt(0)` dependency we strictly need, but it keeps this first lowering
@@ -185,31 +185,31 @@ void emit_cdna3_wait_all(std::vector<uint32_t> &words) {
 
 [[nodiscard]] constexpr uint16_t vgpr_src(uint8_t reg) { return static_cast<uint16_t>(256 + reg); }
 
-void emit_cdna3_mubuf(std::vector<uint32_t> &words, const cdna4::MubufMachineInst &src, uint8_t op,
-                      uint8_t vdata) {
+void emit_cdna3_mubuf(util::inline_vector<uint32_t> &words, const cdna4::MubufMachineInst &src,
+                      uint8_t op, uint8_t vdata) {
   auto [w0, w1] = build_cdna3_mubuf(src, op, vdata);
   words.push_back(w0);
   words.push_back(w1);
 }
 
-void emit_s_mov_b32_lit(std::vector<uint32_t> &words, uint8_t sdst, uint32_t literal) {
+void emit_s_mov_b32_lit(util::inline_vector<uint32_t> &words, uint8_t sdst, uint32_t literal) {
   auto [w0, w1] = build_s_mov_b32_lit(sdst, literal);
   words.push_back(w0);
   words.push_back(w1);
 }
 
-void emit_s_mov_b64(std::vector<uint32_t> &words, uint8_t sdst, uint16_t ssrc0) {
+void emit_s_mov_b64(util::inline_vector<uint32_t> &words, uint8_t sdst, uint16_t ssrc0) {
   words.push_back(build_s_mov_b64(sdst, ssrc0));
 }
 
-void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
+void emit_cdna3_exec_mask(util::inline_vector<uint32_t> &words, uint64_t mask) {
   // TODO: Optimize the common all-lanes case by emitting one s_mov_b64 -1
   // instead of two literal s_mov_b32 instructions.
   emit_s_mov_b32_lit(words, kExecLo, static_cast<uint32_t>(mask));
   emit_s_mov_b32_lit(words, kExecLo + 1, static_cast<uint32_t>(mask >> 32));
 }
 
-void emit_cdna3_mfma(std::vector<uint32_t> &words, uint8_t op,
+void emit_cdna3_mfma(util::inline_vector<uint32_t> &words, uint8_t op,
                      const cdna4::Vop3pMfmaMachineInst &src, uint16_t src0, uint16_t src1,
                      uint16_t src2) {
   auto [w0, w1] = build_cdna3_vop3p_mfma(op, src, static_cast<uint8_t>(src.vdst),
@@ -218,7 +218,7 @@ void emit_cdna3_mfma(std::vector<uint32_t> &words, uint8_t op,
   words.push_back(w1);
 }
 
-void emit_cdna3_mfma_to_vgpr(std::vector<uint32_t> &words, uint8_t op,
+void emit_cdna3_mfma_to_vgpr(util::inline_vector<uint32_t> &words, uint8_t op,
                              const cdna4::Vop3pMfmaMachineInst &src, uint8_t vdst, uint16_t src0,
                              uint16_t src1, uint16_t src2) {
   auto [w0, w1] = build_cdna3_vop3p_mfma(op, src, vdst, 0, src0, src1, src2);
@@ -228,7 +228,7 @@ void emit_cdna3_mfma_to_vgpr(std::vector<uint32_t> &words, uint8_t op,
 
 [[nodiscard]] ExpandResult failed_existing_expand_rule(const Instruction &inst,
                                                        const std::string &problem,
-                                                       std::vector<std::string> work = {}) {
+                                                       util::inline_vector<std::string> work = {}) {
   if (work.empty()) {
     work = {"Check this rule's operand restrictions and scratch allocation.",
             "Implement the unsupported form or add a narrower legalization entry."};
@@ -351,7 +351,7 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
     context.require_vgprs(static_cast<uint32_t>(*scratch) + scratch_count);
   }
 
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
 
   auto src_for_variable = [&](uint8_t variable_mask) -> uint16_t {
     switch (variable_mask) {
@@ -478,7 +478,7 @@ ExpandResult lower_permlane32_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   context.require_sgprs(static_cast<uint32_t>(saved_exec) + 2);
   context.require_vgprs(static_cast<uint32_t>(*scratch) + 3);
 
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
 
   // CDNA4 v_permlane32_swap_b32 ignores EXEC and swaps rows 2/3 of VDST with
   // rows 0/1 of SRC0:
@@ -553,7 +553,7 @@ ExpandResult lower_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &inst,
   const uint8_t hi = static_cast<uint8_t>(*scratch + 1);
   context.require_vgprs(static_cast<uint32_t>(*scratch) + 2);
 
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
   // CDNA4 v_cvt_pk_f16_f32 packs two f32-to-f16 conversions into one VGPR:
   //
   //   VDST[15:0]  = f32_to_f16(SRC0)
@@ -692,7 +692,7 @@ ExpandResult lower_wide_k_mfma_f16_cdna4_to_cdna3(const Instruction &inst,
     context.require_vgprs(static_cast<uint32_t>(*scratch) + lowering.dst_regs);
   }
 
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
   if (needs_scratch) {
     emit_cdna3_mfma_to_vgpr(words, lowering.narrow_op, mfma, partial_vdst,
                             static_cast<uint16_t>(mfma.src0), static_cast<uint16_t>(mfma.src1),
@@ -711,7 +711,7 @@ ExpandResult lower_wide_k_mfma_f16_cdna4_to_cdna3(const Instruction &inst,
 // DS transpose expansions.
 // -----------------------------------------------------------------------------
 
-void emit_cdna3_b16_transpose_halfword(std::vector<uint32_t> &words, uint8_t halfword_dst,
+void emit_cdna3_b16_transpose_halfword(util::inline_vector<uint32_t> &words, uint8_t halfword_dst,
                                        uint8_t gather_tmp, uint8_t lane_byte_addr, uint8_t raw_lo,
                                        uint8_t raw_hi, uint8_t halfword_selector) {
   emit_cdna3_ds(words, kCdna3DsOpBpermuteB32, halfword_dst, lane_byte_addr, raw_lo);
@@ -721,8 +721,9 @@ void emit_cdna3_b16_transpose_halfword(std::vector<uint32_t> &words, uint8_t hal
                   vgpr_src(halfword_dst), vgpr_src(halfword_selector));
 }
 
-void emit_cdna3_pack_low_b16_pair(std::vector<uint32_t> &words, uint8_t dst, uint8_t halfword_lo,
-                                  uint8_t halfword_hi, uint8_t shifted_hi_tmp, uint8_t mask_tmp) {
+void emit_cdna3_pack_low_b16_pair(util::inline_vector<uint32_t> &words, uint8_t dst,
+                                  uint8_t halfword_lo, uint8_t halfword_hi, uint8_t shifted_hi_tmp,
+                                  uint8_t mask_tmp) {
   // Pack the low 16 bits of two VGPR values into a raw 32-bit payload. This is
   // not an FP16 conversion; `v_pack_b32_f16` can canonicalize/change FP
   // payloads, so build the packed destination with integer operations:
@@ -813,7 +814,7 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // generated temporaries before the translated CDNA3 code can legally use them.
   context.require_vgprs(static_cast<uint32_t>(*scratch) + kScratchCount);
 
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
 
   // CDNA4 ds_read_b64_tr_b16 loads four transposed halfwords per lane from the
   // LDS read footprint. CDNA3 only has the non-transposed ds_read_b64, so the
@@ -988,7 +989,7 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   context.require_sgprs(static_cast<uint32_t>(saved_exec) + 2);
   context.require_vgprs(static_cast<uint32_t>(*scratch) + scratch_count);
 
-  std::vector<uint32_t> words;
+  util::inline_vector<uint32_t> words;
   // MUBUF-to-LDS uses physical TID-in-wave for the LDS lane slot, not the
   // active-lane prefix.  Compute that address with EXEC forced to all lanes,
   // then restore the original EXEC before issuing the global load and DS write

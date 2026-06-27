@@ -28,11 +28,11 @@
 
 #include <cstdint>
 #include <span>
-#include <vector>
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"
+#include "util/inline_vector.h"
 
 namespace rocjitsu {
 
@@ -41,9 +41,9 @@ class Instruction;
 /// @brief Result of a successful semantic translation: the source byte range
 /// and the target instruction words that replace it.
 struct SemanticReplacement {
-  uint64_t start_offset = 0;          ///< First byte of the matched source range.
-  uint64_t end_offset = 0;            ///< One past the last byte of the source range.
-  std::vector<uint32_t> target_words; ///< Replacement instruction words for the host ISA.
+  uint64_t start_offset = 0;                  ///< First byte of the matched source range.
+  uint64_t end_offset = 0;                    ///< One past the last byte of the source range.
+  util::inline_vector<uint32_t> target_words; ///< Replacement instruction words for the host ISA.
 
   /// @brief Whether this replacement represents a successful match.
   [[nodiscard]] bool matched() const { return !target_words.empty(); }
