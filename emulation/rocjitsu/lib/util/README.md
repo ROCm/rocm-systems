@@ -40,7 +40,9 @@ compiled sources.
 `UTIL_INLINE_VECTOR_ENABLE_HISTOGRAM=1` and set
 `UTIL_INLINE_VECTOR_HISTOGRAM_FILE=/path/to/histogram.jsonl` to dump JSONL rows
 at process exit. Each row is keyed by the construction source location and the
-size observed at destruction.
+size observed at destruction. Histogram builds also include per-source dynamic
+growth counters so tuning can distinguish vectors that merely end large from
+vectors that actually allocate dynamic storage.
 
 ### Diagnostics
 

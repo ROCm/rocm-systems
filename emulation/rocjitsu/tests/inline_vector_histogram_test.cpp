@@ -22,6 +22,13 @@ void construct_three_value_vector() {
   values.push_back(3);
 }
 
+void construct_growing_vector() {
+  util::inline_vector<int, 1> values;
+  values.push_back(1);
+  values.push_back(2);
+  values.push_back(3);
+}
+
 TEST(InlineVectorHistogramTest, AggregatesDestructionSizesByConstructionSite) {
   util::reset_inline_vector_histograms_for_testing();
 
@@ -40,6 +47,23 @@ TEST(InlineVectorHistogramTest, AggregatesDestructionSizesByConstructionSite) {
   EXPECT_NE(report.find("\"size\":3"), std::string::npos);
   EXPECT_NE(report.find("\"count\":1"), std::string::npos);
   EXPECT_NE(report.find("\"count\":2"), std::string::npos);
+}
+
+TEST(InlineVectorHistogramTest, RecordsDynamicAllocationsByConstructionSite) {
+  util::reset_inline_vector_histograms_for_testing();
+
+  construct_growing_vector();
+
+  std::ostringstream os;
+  util::dump_inline_vector_histograms(os);
+  const std::string report = os.str();
+
+  EXPECT_NE(report.find("construct_growing_vector"), std::string::npos);
+  EXPECT_NE(report.find("\"size\":3"), std::string::npos);
+  EXPECT_NE(report.find("\"dynamic_allocations\":2"), std::string::npos);
+  EXPECT_NE(report.find("\"dynamic_vectors\":1"), std::string::npos);
+  EXPECT_NE(report.find("\"max_size_at_allocation\":2"), std::string::npos);
+  EXPECT_NE(report.find("\"max_dynamic_capacity\":4"), std::string::npos);
 }
 
 } // namespace

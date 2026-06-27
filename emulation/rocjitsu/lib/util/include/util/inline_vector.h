@@ -47,6 +47,11 @@ struct InlineVectorSourceKey {
   }
 };
 
+struct InlineVectorActiveEntry {
+  InlineVectorSourceKey source;
+  bool allocated_dynamic_storage = false;
+};
+
 class inline_vector_histogram_registry {
 public:
   static inline_vector_histogram_registry &instance() noexcept {
@@ -56,11 +61,14 @@ public:
 
   void register_vector(const void *ptr, inline_vector_source_location loc) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
-    active_[ptr] = InlineVectorSourceKey{
-        .file = loc.file_name(),
-        .function = loc.function_name(),
-        .line = loc.line(),
-        .column = loc.column(),
+    active_[ptr] = InlineVectorActiveEntry{
+        .source =
+            {
+                .file = loc.file_name(),
+                .function = loc.function_name(),
+                .line = loc.line(),
+                .column = loc.column(),
+            },
     };
   }
 
@@ -70,19 +78,41 @@ public:
     if (it == active_.end()) {
       return;
     }
-    ++histograms_[it->second][size];
+    ++stats_[it->second.source].destruction_sizes[size];
     active_.erase(it);
+  }
+
+  void record_dynamic_allocation(const void *ptr, uint32_t size, uint32_t new_capacity) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto active_it = active_.find(ptr);
+    if (active_it == active_.end()) {
+      return;
+    }
+
+    auto &active = active_it->second;
+    auto &stats = stats_[active.source];
+    ++stats.dynamic_allocations;
+    stats.max_size_at_allocation = std::max(stats.max_size_at_allocation, size);
+    stats.max_dynamic_capacity = std::max(stats.max_dynamic_capacity, new_capacity);
+    if (!active.allocated_dynamic_storage) {
+      active.allocated_dynamic_storage = true;
+      ++stats.dynamic_vectors;
+    }
   }
 
   void write_jsonl(std::ostream &os) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto &[source, histogram] : histograms_) {
-      for (const auto &[size, count] : histogram) {
+    for (const auto &[source, stats] : stats_) {
+      for (const auto &[size, count] : stats.destruction_sizes) {
         os << "{\"file\":";
         write_json_string(os, source.file);
         os << ",\"line\":" << source.line << ",\"column\":" << source.column << ",\"function\":";
         write_json_string(os, source.function);
-        os << ",\"size\":" << size << ",\"count\":" << count << "}\n";
+        os << ",\"size\":" << size << ",\"count\":" << count
+           << ",\"dynamic_allocations\":" << stats.dynamic_allocations
+           << ",\"dynamic_vectors\":" << stats.dynamic_vectors
+           << ",\"max_size_at_allocation\":" << stats.max_size_at_allocation
+           << ",\"max_dynamic_capacity\":" << stats.max_dynamic_capacity << "}\n";
       }
     }
   }
@@ -90,11 +120,19 @@ public:
   void reset_for_testing() noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     active_.clear();
-    histograms_.clear();
+    stats_.clear();
   }
 
 private:
   using Histogram = std::map<uint32_t, uint64_t>;
+
+  struct SourceStats {
+    Histogram destruction_sizes;
+    uint64_t dynamic_allocations = 0;
+    uint64_t dynamic_vectors = 0;
+    uint32_t max_size_at_allocation = 0;
+    uint32_t max_dynamic_capacity = 0;
+  };
 
   static inline_vector_histogram_registry *create() noexcept {
     auto *registry = new inline_vector_histogram_registry();
@@ -143,8 +181,8 @@ private:
   }
 
   std::mutex mutex_;
-  std::unordered_map<const void *, InlineVectorSourceKey> active_;
-  std::map<InlineVectorSourceKey, Histogram> histograms_;
+  std::unordered_map<const void *, InlineVectorActiveEntry> active_;
+  std::map<InlineVectorSourceKey, SourceStats> stats_;
 };
 
 #else
@@ -553,6 +591,15 @@ private:
 #endif
   }
 
+  void record_dynamic_allocation(size_type new_capacity) noexcept {
+#ifdef UTIL_INLINE_VECTOR_ENABLE_HISTOGRAM
+    detail::inline_vector_histogram_registry::instance().record_dynamic_allocation(this, size_,
+                                                                                   new_capacity);
+#else
+    (void)new_capacity;
+#endif
+  }
+
   template <typename... Args> static void construct_at(T *ptr, Args &&...args) noexcept {
     ::new (static_cast<void *>(ptr)) T(std::forward<Args>(args)...);
   }
@@ -641,6 +688,7 @@ private:
 
   void grow_to(size_type new_capacity) noexcept {
     T *new_data = allocate(new_capacity);
+    record_dynamic_allocation(new_capacity);
     const size_type old_size = size_;
     for (size_type i = 0; i < old_size; ++i) {
       construct_at(new_data + i, std::move(data_[i]));
