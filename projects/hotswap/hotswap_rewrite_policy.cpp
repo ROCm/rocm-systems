@@ -92,14 +92,12 @@ RewriteDecision decide_hotswap_rewrite(const AgentGfxRevision &gfx,
 
   decision.kind = RewriteKind::Gfx12_5EntryTrampoline;
 
-  // COMGR's entry-trampoline pass accepts gfx12-5-generic. When one side is
-  // generic, keep the COMGR target on the source processor so this path does not
-  // become processor retargeting.
-  if (source_gfx != target_gfx &&
-      (source_gfx == "gfx12-5-generic" || target_gfx == "gfx12-5-generic")) {
-    decision.target_isa = source_isa;
-    target_gfx = source_gfx;
-  }
+  // ROCm/rocm-systems#7581 installs kernel-entry trampolines after the normal
+  // loader compatibility checks and keys the work off the code object's ISA, not
+  // a source->agent retarget. Mirror that here by keeping COMGR's target on the
+  // source processor for all gfx12.5 entry-trampoline rewrites.
+  decision.target_isa = source_isa;
+  target_gfx = source_gfx;
 
   if (source_gfx == "gfx1250" && target_gfx == "gfx1250") {
     decision.source_isa = add_gfx1250_stepping_feature(source_isa, true);

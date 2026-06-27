@@ -378,6 +378,20 @@ void test_GenericSourceUsesGenericTarget() {
         "generic target ISA is preserved to avoid processor retargeting");
 }
 
+void test_ConcreteSourceUsesSourceTarget() {
+  begin_test("ConcreteSourceUsesSourceTarget",
+             "A concrete gfx125* source loaded on a different gfx125* agent "
+             "must stay on the source processor to avoid retargeting.");
+  const LoadResult result = load_once(kGfx1250Isa, kGfx1251Isa, "1");
+  check(result.status == HSA_STATUS_SUCCESS, "load succeeds");
+  check(result.retarget_calls == 1,
+        "concrete source on different gfx125 agent routes through COMGR");
+  check(result.source_isa == kGfx1250B0Isa,
+        "source ISA is tagged as B0");
+  check(result.target_isa == kGfx1250B0Isa,
+        "target ISA stays on the source processor");
+}
+
 void test_A0RetargetsWithoutFlag() {
   begin_test("A0RetargetsWithoutFlag",
              "The existing gfx1250 A0 rewrite path must still run without "
@@ -420,6 +434,7 @@ int main() {
   test_FlagRoutesGfx1250B0();
   test_FlagRoutesGfx12_5Family();
   test_GenericSourceUsesGenericTarget();
+  test_ConcreteSourceUsesSourceTarget();
   test_A0RetargetsWithoutFlag();
   test_FlagOneBlocksNonGfx12_5();
   test_RetargetFailureFallsBackToOriginalReader();

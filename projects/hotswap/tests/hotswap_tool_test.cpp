@@ -351,6 +351,14 @@ void test_RewriteDecisionSelectsModeAndIsaPair() {
   run("generic source keeps generic target",
       d.source_isa == kGfx12_5GenericIsa && d.target_isa == kGfx12_5GenericIsa);
 
+  d = decide_hotswap_rewrite(gfx1251, kGfx1250Isa, kGfx1251Isa,
+                             RewriteOptions{true});
+  run("concrete source on different gfx125 agent selects trampoline",
+      d.kind == RewriteKind::Gfx12_5EntryTrampoline);
+  run("concrete mismatch keeps source processor",
+      d.source_isa == std::string(kGfx1250Isa) + ":gfx1250-b0-specific+" &&
+          d.target_isa == d.source_isa);
+
   d = decide_hotswap_rewrite(gfx1251, kGfx942Isa, kGfx1251Isa,
                              RewriteOptions{true});
   run("non-gfx12.5 source on gfx125 agent is not rewritten",
