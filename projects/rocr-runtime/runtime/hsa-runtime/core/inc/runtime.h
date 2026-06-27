@@ -1032,6 +1032,14 @@ class Runtime {
 
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
 
+    /** 
+     * @brief For host owned memory, resolve to the GPU agent that imported the memory. 
+     * For device owned memory, return the GPU agent that owns the memory.
+     */
+    __forceinline core::Agent* GetDrmAgent() const {
+      return drm_owner ? drm_owner : agentOwner();
+    }
+
     const MemoryRegion* region;
     int ref_count;
     int use_count;
@@ -1064,8 +1072,7 @@ class Runtime {
     hsa_access_permission_t permissions;
     MappedHandle* mappedHandle;
     DriverMemoryHandle driver_handle;
-    /* False when driver_handle is borrowed from MemoryHandle::driver_handle (drm_owner reuse
-     * path) */
+    // False when driver_handle is borrowed from MemoryHandle::driver_handle (drm_owner reuse path)
     bool owns_driver_handle = true;
   };
 

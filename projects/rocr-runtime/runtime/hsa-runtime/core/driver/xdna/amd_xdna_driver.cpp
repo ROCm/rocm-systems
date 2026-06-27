@@ -922,11 +922,9 @@ hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem
 
 hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                const core::Agent& agent,
-                                               core::DriverMemoryHandle* handle, uint64_t* offset,
-                                               core::Agent** import_agent_used) {
+                                               core::DriverMemoryHandle* handle, uint64_t* offset) {
   (void)va;
   (void)agent;
-  (void)import_agent_used;
 
   // Find BO handle; mem is the BO handle; see AllocateMemory.
   auto bo_handle = FindBOHandle(mem);

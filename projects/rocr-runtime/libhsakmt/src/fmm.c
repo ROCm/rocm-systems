@@ -2159,19 +2159,16 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 		}
 
 		if (mem && mflags.ui32.HostAccess) {
-			/* We do not need to map to cpu for GTT system memory 
-			that has been allocated from mem_handle_aperture */
-			if (mflags.ui32.NoAddress) {
-				return mem;
-			}
+			/* GTT system memory from mem_handle_aperture has no VA, so skip CPU mapping */
+			if (!mflags.ui32.NoAddress) {
+				void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
+							   mflags.ui32.HostAccess,
+							   gpu_drm_fd, mmap_offset);
 
-			void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
-						   mflags.ui32.HostAccess,
-						   gpu_drm_fd, mmap_offset);
-
-			if (ret == MAP_FAILED) {
-				__fmm_release(ctx, vm_obj, aperture);
-				return NULL;
+				if (ret == MAP_FAILED) {
+					__fmm_release(ctx, vm_obj, aperture);
+					return NULL;
+				}
 			}
 		}
     }
