@@ -152,6 +152,15 @@ jobs:
             echo "⚠️ pip install attempt ${attempt} failed, retrying..."
             sleep 10
           done
+          for attempt in 1 2 3; do
+            pip install \
+              -r requirements-test.txt \
+              --break-system-packages \
+              --ignore-installed \
+              --timeout 60 && break
+            echo "⚠️ pip install attempt ${attempt} failed, retrying..."
+            sleep 10
+          done
           echo "✅ pip requirements installed!"
 
       - name: Configure, build, and test
