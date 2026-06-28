@@ -55,17 +55,16 @@ namespace hotswap {
 std::string GetAgentIsaName(hsa_agent_t agent) {
   std::string name;
   HSA::hsa_agent_iterate_isas(
-      agent, [](hsa_isa_t isa, void* data) -> hsa_status_t {
+      agent,
+      [](hsa_isa_t isa, void* data) -> hsa_status_t {
         uint32_t len = 0;
-        if (HSA::hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
-            HSA_STATUS_SUCCESS) {
+        if (HSA::hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) != HSA_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR;
         }
 
         auto& out = *static_cast<std::string*>(data);
         out.resize(len);
-        if (HSA::hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, out.data()) !=
-            HSA_STATUS_SUCCESS) {
+        if (HSA::hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, out.data()) != HSA_STATUS_SUCCESS) {
           out.clear();
           return HSA_STATUS_ERROR;
         }
@@ -85,55 +84,52 @@ std::string ExtractGfxTarget(const std::string& isa_name) {
     return {};
   }
 
-  auto end = std::find_if_not(
-      isa_name.begin() + pos, isa_name.end(),
-      [](unsigned char c) { return std::isalnum(c); });
+  auto end = std::find_if_not(isa_name.begin() + pos, isa_name.end(),
+                              [](unsigned char c) { return std::isalnum(c); });
   return isa_name.substr(pos, end - isa_name.begin() - pos);
 }
 
 namespace {
 
-std::mutex g_cache_mutex;
-std::unordered_map<uint64_t, AgentGfxRevision> g_cache;
+std::mutex g_agent_gfx_revision_cache_mutex;
+std::unordered_map<uint64_t, AgentGfxRevision> g_agent_gfx_revision_cache;
 
 }  // namespace
 
-AgentGfxRevision QueryAgentGfxRevision(hsa_agent_t agent) {
+AgentGfxRevision GetAgentGfxRevision(hsa_agent_t agent) {
   {
-    std::scoped_lock lock(g_cache_mutex);
-    const auto it = g_cache.find(agent.handle);
-    if (it != g_cache.end()) {
+    std::scoped_lock lock(g_agent_gfx_revision_cache_mutex);
+    const auto it = g_agent_gfx_revision_cache.find(agent.handle);
+    if (it != g_agent_gfx_revision_cache.end()) {
       return it->second;
     }
   }
 
-  AgentGfxRevision info;
-  info.gfx_target = ExtractGfxTarget(GetAgentIsaName(agent));
+  AgentGfxRevision revision;
+  revision.gfx_target = ExtractGfxTarget(GetAgentIsaName(agent));
 
   uint32_t asic_revision = 0;
-  if (HSA::hsa_agent_get_info(
-          agent,
-          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
-          &asic_revision) == HSA_STATUS_SUCCESS) {
-    info.asic_revision = asic_revision;
-    info.revision_valid = true;
+  if (HSA::hsa_agent_get_info(agent,
+                              static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
+                              &asic_revision) == HSA_STATUS_SUCCESS) {
+    revision.asic_revision = asic_revision;
+    revision.has_asic_revision = true;
   }
 
   {
-    std::scoped_lock lock(g_cache_mutex);
-    g_cache[agent.handle] = info;
+    std::scoped_lock lock(g_agent_gfx_revision_cache_mutex);
+    g_agent_gfx_revision_cache[agent.handle] = revision;
   }
-  return info;
+  return revision;
 }
 
-void ResetGfxRevisionCache() {
-  std::scoped_lock lock(g_cache_mutex);
-  g_cache.clear();
+void ResetAgentGfxRevisionCache() {
+  std::scoped_lock lock(g_agent_gfx_revision_cache_mutex);
+  g_agent_gfx_revision_cache.clear();
 }
 
-bool GateAllowsHotswap(const AgentGfxRevision& gfx) {
-  return gfx.revision_valid && gfx.gfx_target == "gfx1250" &&
-         gfx.asic_revision == 0;
+bool IsHotswapSupportedGfxRevision(const AgentGfxRevision& gfx) {
+  return gfx.has_asic_revision && gfx.gfx_target == "gfx1250" && gfx.asic_revision == 0;
 }
 
 }  // namespace hotswap
