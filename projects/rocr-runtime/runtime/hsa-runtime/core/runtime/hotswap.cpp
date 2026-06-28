@@ -229,7 +229,9 @@ Comgr* GetComgr() {
   return ready ? &comgr : nullptr;
 }
 
-std::string GetDataIsaName(const void* elf_data, size_t elf_size) {
+}  // namespace
+
+std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size) {
   Comgr* comgr = GetComgr();
   if (!comgr || !elf_data || elf_size == 0) {
     return {};
@@ -264,6 +266,8 @@ std::string GetDataIsaName(const void* elf_data, size_t elf_size) {
   return isa;
 }
 
+namespace {
+
 bool GateAllowsAgent(hsa_agent_t agent) {
   const AgentGfxRevision gfx = QueryAgentGfxRevision(agent);
   HOTSWAP_LOG("hotswap: agent gfx=%s asic_revision=%u (valid=%s)\n",
@@ -271,6 +275,8 @@ bool GateAllowsAgent(hsa_agent_t agent) {
               gfx.asic_revision, gfx.revision_valid ? "yes" : "no");
   return GateAllowsHotswap(gfx);
 }
+
+}  // namespace
 
 bool RetargetCodeObject(const void* elf_data, size_t elf_size,
                         const char* source_isa, const char* target_isa,
@@ -330,8 +336,6 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size,
   return true;
 }
 
-}  // namespace
-
 bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
                            hsa_agent_t agent, OwnedElf* out_elf,
                            size_t* out_elf_size) {
@@ -341,7 +345,7 @@ bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
 
   const void* input = reader->GetCodeObjectMemory();
   const size_t input_size = reader->GetCodeObjectSize();
-  const std::string source_isa = GetDataIsaName(input, input_size);
+  const std::string source_isa = GetCodeObjectIsaName(input, input_size);
   const std::string target_isa = GetAgentIsaName(agent);
   if (source_isa.empty() || target_isa.empty()) {
     HOTSWAP_LOG("hotswap: rewrite skipped, empty isa (src='%s' tgt='%s')\n",
