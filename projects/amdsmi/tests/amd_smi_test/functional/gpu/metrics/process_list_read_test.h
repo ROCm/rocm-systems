@@ -20,22 +20,32 @@
  * THE SOFTWARE.
  */
 
-#ifndef __FDINFO__
-#define __FDINFO__
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_PROCESS_LIST_READ_TEST_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_PROCESS_LIST_READ_TEST_H_
 
-#include <vector>
+#include "test_base.h"
 
-#include "amd_smi/amdsmi.h"
+class TestProcessListRead : public TestBase {
+ public:
+  TestProcessListRead();
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+  // @Brief: Destructor for test case of TestProcessListRead
+  virtual ~TestProcessListRead();
 
-amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
-                                     amdsmi_proc_info_t& info, uint64_t kfd_gpu_id);
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-#ifdef __cplusplus
-}  // extern "C"
-#endif
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-#endif
+  // @Brief: Clean up and retrieve the resource
+  virtual void Close();
+
+  // @Brief: Display results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
+};
+
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_PROCESS_LIST_READ_TEST_H_

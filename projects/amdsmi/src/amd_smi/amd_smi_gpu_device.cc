@@ -283,9 +283,11 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
    */
   auto get_process_info = [&](const rsmi_process_info_t& rsmi_proc_info,
                               amdsmi_proc_info_t& amdsmi_proc_info) {
-    // amdsmi_proc_info_t gets populated with /proc information from gpuvsmi_get_pid_info()
-
-    auto status_code = gpuvsmi_get_pid_info(get_bdf(), rsmi_proc_info.process_id, amdsmi_proc_info);
+    // amdsmi_proc_info_t gets populated with /proc information from gpuvsmi_get_pid_info().
+    // Pass this device's KFD gpu id so it need not rebuild the KFD topology to derive it.
+    uint64_t kfd_gpu_id = get_kfd_gpu_id();
+    auto status_code =
+        gpuvsmi_get_pid_info(get_bdf(), rsmi_proc_info.process_id, amdsmi_proc_info, kfd_gpu_id);
     // If we cannot get the info from sysfs, save the minimum info
     if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
       amdsmi_proc_info.pid = rsmi_proc_info.process_id;
@@ -298,7 +300,6 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     amdsmi_proc_info.sdma_usage = rsmi_proc_info.sdma_usage;
 
     // Safely handle KFD processes to get total memory_usage of the process
-    uint64_t kfd_gpu_id = get_kfd_gpu_id();
     std::string kfd_proc_path =
         "/sys/class/kfd/kfd/proc/" + std::to_string(rsmi_proc_info.process_id);
     std::string kfd_vram_file = "/vram_" + std::to_string(kfd_gpu_id);
