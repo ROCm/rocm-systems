@@ -41,7 +41,9 @@ inline bool Enabled() {
          value == "no" || value == "n" || value == "f";
 }
 
-// Allowlist of (source -> device) gfx pairs native HotSwap handles; only these are forwarded.
+// Allowlist of (source -> device) gfx pairs native HotSwap handles; only these
+// are forwarded. gfx1250 -> gfx1250 selects the B0 gfx1250 bundle; ROCR leaves
+// it on the normal loader path for B0-on-B0 and rewrites it only for B0-to-A0.
 struct SourceTargetPair {
   const char* source;  // gfx processor, e.g. "gfx1250"
   const char* target;  // gfx processor, e.g. "gfx950"
