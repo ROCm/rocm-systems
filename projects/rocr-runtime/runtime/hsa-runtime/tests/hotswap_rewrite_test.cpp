@@ -15,7 +15,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
+
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -39,14 +48,29 @@ namespace rocr {
 namespace os {
 
 LibHandle LoadLib(std::string filename) {
+#if defined(_WIN32) || defined(_WIN64)
+  return LoadLibraryA(filename.c_str());
+#else
   return dlopen(filename.c_str(), RTLD_NOW | RTLD_LOCAL);
+#endif
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
+#if defined(_WIN32) || defined(_WIN64)
+  return reinterpret_cast<void*>(
+      GetProcAddress(static_cast<HMODULE>(lib), export_name.c_str()));
+#else
   return dlsym(lib, export_name.c_str());
+#endif
 }
 
-bool CloseLib(LibHandle lib) { return dlclose(lib) == 0; }
+bool CloseLib(LibHandle lib) {
+#if defined(_WIN32) || defined(_WIN64)
+  return FreeLibrary(static_cast<HMODULE>(lib)) != 0;
+#else
+  return dlclose(lib) == 0;
+#endif
+}
 
 bool IsEnvVarSet(std::string env_var_name) {
   return g_env_vars.find(env_var_name) != g_env_vars.end();
