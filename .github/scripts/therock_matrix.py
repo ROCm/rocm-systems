@@ -26,7 +26,6 @@ subtree_to_project_map = {
     "projects/rocprofiler-sdk": "profiler",
     "projects/rocprofiler-systems": "profiler",
     "projects/rocr-debug-agent": "debug_tools-debug-agent",
-    "projects/hotswap": "runtimes",
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",

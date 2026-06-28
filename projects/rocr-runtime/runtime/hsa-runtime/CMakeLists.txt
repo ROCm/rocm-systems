@@ -232,6 +232,8 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_topology.cpp
            core/runtime/default_signal.cpp
            core/runtime/host_queue.cpp
+           core/runtime/hotswap.cpp
+           core/runtime/hotswap_gfx_query.cpp
            core/runtime/hsa.cpp
            core/runtime/hsa_api_trace.cpp
            core/runtime/hsa_ext_amd.cpp
@@ -273,6 +275,18 @@ if ( BUILD_THUNK_VIRTIO )
 endif()
 
 target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${SRCS} ${SRC_OS} ${SRC_XDNA} )
+
+option(ROCR_BUILD_HOTSWAP_TESTS "Build HotSwap unit tests" OFF)
+if(ROCR_BUILD_HOTSWAP_TESTS)
+  enable_testing()
+  add_executable(hotswap_gfx_query_test
+    tests/hotswap_gfx_query_test.cpp
+    core/runtime/hotswap_gfx_query.cpp)
+  target_include_directories(hotswap_gfx_query_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/inc)
+  add_test(NAME hotswap_gfx_query_test COMMAND hotswap_gfx_query_test)
+endif()
 
 ## Depend on trap handler target.
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/trap_handler )
