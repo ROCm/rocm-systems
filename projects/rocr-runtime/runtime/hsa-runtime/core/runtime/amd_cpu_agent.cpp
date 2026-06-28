@@ -437,7 +437,7 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
         supported = !gpus.empty();
       }
-      *((bool*)value) = supported;
+      *static_cast<bool*>(value) = supported;
       break;
     }
     default:
