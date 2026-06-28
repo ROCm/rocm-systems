@@ -45,6 +45,7 @@
 
 #include <cstdlib>
 #include <memory>
+#include <string>
 
 #include "core/inc/amd_hsa_loader.hpp"
 #include "inc/hsa.h"
@@ -53,6 +54,12 @@ namespace rocr {
 namespace hotswap {
 
 using OwnedElf = std::unique_ptr<void, decltype(&std::free)>;
+
+std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size);
+
+bool RetargetCodeObject(const void* elf_data, size_t elf_size,
+                        const char* source_isa, const char* target_isa,
+                        OwnedElf* out_elf, size_t* out_elf_size);
 
 bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
                            hsa_agent_t agent, OwnedElf* out_elf,
