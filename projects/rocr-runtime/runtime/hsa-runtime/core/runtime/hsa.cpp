@@ -2276,7 +2276,7 @@ hsa_status_t hsa_executable_destroy(
   }
 
   GetLoader()->DestroyExecutable(exec);
-  hotswap::ReleaseElfs(executable);
+  hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
   return HSA_STATUS_SUCCESS;
   CATCH;
 }
@@ -2359,8 +2359,8 @@ hsa_status_t hsa_executable_load_agent_code_object(
 
   hotswap::LoadAgentCodeObjectCallbacks callbacks;
   callbacks.context = exec;
-  callbacks.load_original = LoadOriginalCodeObject;
-  callbacks.load_rewritten = LoadSizedCodeObject;
+  callbacks.load_original_code_object = LoadOriginalCodeObject;
+  callbacks.load_rewritten_code_object = LoadSizedCodeObject;
   return hotswap::LoadAgentCodeObjectWithHotswap(
       executable, agent, code_object, options, loaded_code_object, callbacks);
   CATCH;

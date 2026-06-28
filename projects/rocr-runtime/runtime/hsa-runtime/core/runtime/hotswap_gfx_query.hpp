@@ -52,21 +52,22 @@ namespace rocr {
 namespace hotswap {
 
 // Architecture-agnostic description of an agent: its gfx target and ASIC
-// revision. revision_valid is false when the runtime cannot query the revision.
+// revision. has_asic_revision is false when the runtime cannot query the
+// revision.
 struct AgentGfxRevision {
   std::string gfx_target;
   uint32_t asic_revision = 0;
-  bool revision_valid = false;
+  bool has_asic_revision = false;
 };
 
 std::string GetAgentIsaName(hsa_agent_t agent);
 std::string ExtractGfxTarget(const std::string& isa_name);
-AgentGfxRevision QueryAgentGfxRevision(hsa_agent_t agent);
-void ResetGfxRevisionCache();
+AgentGfxRevision GetAgentGfxRevision(hsa_agent_t agent);
+void ResetAgentGfxRevisionCache();
 
 // HotSwap rewrites B0 gfx1250 code objects only when loading for gfx1250 A0
 // silicon. B0-on-B0 remains the normal ROCR load path with no rewrite.
-bool GateAllowsHotswap(const AgentGfxRevision& gfx);
+bool IsHotswapSupportedGfxRevision(const AgentGfxRevision& gfx);
 
 }  // namespace hotswap
 }  // namespace rocr

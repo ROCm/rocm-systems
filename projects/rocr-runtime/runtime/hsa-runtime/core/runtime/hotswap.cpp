@@ -66,10 +66,10 @@ namespace rocr {
 namespace hotswap {
 namespace {
 
-std::mutex g_retained_elfs_mutex;
-std::unordered_map<uint64_t, std::vector<OwnedElf>> g_retained_elfs;
+std::mutex g_retained_rewritten_elf_buffers_mutex;
+std::unordered_map<uint64_t, std::vector<OwnedElfBuffer>> g_retained_rewritten_elf_buffers;
 
-bool EnvTruthy(const char* name) {
+bool IsEnvFlagEnabled(const char* name) {
   if (!os::IsEnvVarSet(name)) {
     return false;
   }
@@ -81,22 +81,22 @@ bool EnvTruthy(const char* name) {
 
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char c) { return std::tolower(c); });
-  return value != "0" && value != "off" && value != "false" &&
-         value != "no" && value != "n" && value != "f";
+  return value != "0" && value != "off" && value != "false" && value != "no" && value != "n" &&
+      value != "f";
 }
 
-bool Disabled() { return EnvTruthy("HSA_HOTSWAP_DISABLE"); }
+bool IsHotswapDisabledByEnv() { return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE"); }
 
-bool Verbose() {
-  static const bool verbose = EnvTruthy("HSA_HOTSWAP_VERBOSE");
+bool IsVerboseLoggingEnabled() {
+  static const bool verbose = IsEnvFlagEnabled("HSA_HOTSWAP_VERBOSE");
   return verbose;
 }
 
-#define HOTSWAP_LOG(...)                 \
-  do {                                   \
-    if (Verbose()) {                     \
-      fprintf(stderr, __VA_ARGS__);      \
-    }                                    \
+#define HOTSWAP_LOG(...)                                                                           \
+  do {                                                                                             \
+    if (IsVerboseLoggingEnabled()) {                                                               \
+      fprintf(stderr, __VA_ARGS__);                                                                \
+    }                                                                                              \
   } while (false)
 
 struct ComgrData {
@@ -106,45 +106,38 @@ struct ComgrData {
 constexpr int kComgrStatusSuccess = 0;
 constexpr int kComgrDataKindExecutable = 0x8;
 
-struct Comgr {
+struct ComgrApi {
   os::LibHandle lib = nullptr;
   int (*create_data)(int kind, ComgrData* data) = nullptr;
   int (*release_data)(ComgrData data) = nullptr;
   int (*set_data)(ComgrData data, size_t size, const char* bytes) = nullptr;
   int (*get_data)(ComgrData data, size_t* size, char* bytes) = nullptr;
-  int (*get_data_isa_name)(ComgrData data, size_t* size, char* isa_name) =
-      nullptr;
-  int (*hotswap_rewrite)(ComgrData input, const char* source_isa_name,
-                         const char* target_isa_name, ComgrData* output) =
-      nullptr;
+  int (*get_data_isa_name)(ComgrData data, size_t* size, char* isa_name) = nullptr;
+  int (*hotswap_rewrite)(ComgrData input, const char* source_isa_name, const char* target_isa_name,
+                         ComgrData* output) = nullptr;
 };
 
-template <typename T>
-bool LoadComgrSymbol(os::LibHandle lib, const char* name, T* out) {
-  *out = reinterpret_cast<T>(os::GetExportAddress(lib, name));
-  return *out != nullptr;
+template <typename T> bool ResolveComgrSymbol(os::LibHandle lib, const char* name, T* symbol) {
+  *symbol = reinterpret_cast<T>(os::GetExportAddress(lib, name));
+  return *symbol != nullptr;
 }
 
-bool LoadComgrFrom(os::LibHandle lib, Comgr* comgr) {
-  comgr->lib = lib;
-  return LoadComgrSymbol(lib, "amd_comgr_create_data", &comgr->create_data) &&
-         LoadComgrSymbol(lib, "amd_comgr_release_data",
-                         &comgr->release_data) &&
-         LoadComgrSymbol(lib, "amd_comgr_set_data", &comgr->set_data) &&
-         LoadComgrSymbol(lib, "amd_comgr_get_data", &comgr->get_data) &&
-         LoadComgrSymbol(lib, "amd_comgr_get_data_isa_name",
-                         &comgr->get_data_isa_name) &&
-         LoadComgrSymbol(lib, "amd_comgr_hotswap_rewrite",
-                         &comgr->hotswap_rewrite);
+bool ResolveComgrApi(os::LibHandle lib, ComgrApi* api) {
+  api->lib = lib;
+  return ResolveComgrSymbol(lib, "amd_comgr_create_data", &api->create_data) &&
+      ResolveComgrSymbol(lib, "amd_comgr_release_data", &api->release_data) &&
+      ResolveComgrSymbol(lib, "amd_comgr_set_data", &api->set_data) &&
+      ResolveComgrSymbol(lib, "amd_comgr_get_data", &api->get_data) &&
+      ResolveComgrSymbol(lib, "amd_comgr_get_data_isa_name", &api->get_data_isa_name) &&
+      ResolveComgrSymbol(lib, "amd_comgr_hotswap_rewrite", &api->hotswap_rewrite);
 }
 
-std::string RuntimeLibraryDir() {
+std::string GetRuntimeLibraryDirectory() {
 #if defined(_WIN32) || defined(_WIN64)
   HMODULE module = nullptr;
-  if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                          reinterpret_cast<LPCSTR>(&RuntimeLibraryDir),
-                          &module)) {
+  if (!GetModuleHandleExA(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          reinterpret_cast<LPCSTR>(&GetRuntimeLibraryDirectory), &module)) {
     return {};
   }
 
@@ -159,8 +152,8 @@ std::string RuntimeLibraryDir() {
   return slash == std::string::npos ? std::string{} : path_str.substr(0, slash);
 #else
   Dl_info info = {};
-  if (dladdr(reinterpret_cast<void*>(&RuntimeLibraryDir), &info) == 0 ||
-      !info.dli_fname || info.dli_fname[0] == '\0') {
+  if (dladdr(reinterpret_cast<void*>(&GetRuntimeLibraryDirectory), &info) == 0 || !info.dli_fname ||
+      info.dli_fname[0] == '\0') {
     return {};
   }
 
@@ -170,9 +163,9 @@ std::string RuntimeLibraryDir() {
 #endif
 }
 
-std::vector<std::string> ComgrCandidateNames() {
+std::vector<std::string> GetComgrLibraryCandidates() {
   std::vector<std::string> names;
-  const std::string runtime_dir = RuntimeLibraryDir();
+  const std::string runtime_dir = GetRuntimeLibraryDirectory();
   if (!runtime_dir.empty()) {
 #if defined(_WIN32) || defined(_WIN64)
     names.push_back(runtime_dir + "\\amd_comgr.dll");
@@ -191,13 +184,13 @@ std::vector<std::string> ComgrCandidateNames() {
   return names;
 }
 
-Comgr* GetComgr() {
+ComgrApi* GetComgrApi() {
   static std::once_flag once;
-  static Comgr comgr;
+  static ComgrApi api;
   static bool ready = false;
 
   std::call_once(once, [] {
-    auto try_load_comgr = [](const char* name) {
+    auto try_load_comgr_api = [](const char* name) {
       if (!name || name[0] == '\0') {
         return false;
       }
@@ -207,52 +200,47 @@ Comgr* GetComgr() {
         return false;
       }
 
-      if (LoadComgrFrom(lib, &comgr)) {
+      if (ResolveComgrApi(lib, &api)) {
         ready = true;
         HOTSWAP_LOG("hotswap: loaded COMGR from %s\n", name);
         return true;
       }
 
       os::CloseLib(lib);
-      comgr = Comgr{};
+      api = ComgrApi{};
       return false;
     };
 
-    for (const std::string& name : ComgrCandidateNames()) {
-      if (try_load_comgr(name.c_str())) {
+    for (const std::string& name : GetComgrLibraryCandidates()) {
+      if (try_load_comgr_api(name.c_str())) {
         return;
       }
     }
     HOTSWAP_LOG("hotswap: COMGR hotswap entry points unavailable\n");
   });
 
-  return ready ? &comgr : nullptr;
+  return ready ? &api : nullptr;
 }
 
 }  // namespace
 
 std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size) {
-  Comgr* comgr = GetComgr();
-  if (!comgr || !elf_data || elf_size == 0) {
+  ComgrApi* api = GetComgrApi();
+  if (!api || !elf_data || elf_size == 0) {
     return {};
   }
 
   ComgrData data = {};
-  if (comgr->create_data(kComgrDataKindExecutable, &data) !=
-      kComgrStatusSuccess) {
+  if (api->create_data(kComgrDataKindExecutable, &data) != kComgrStatusSuccess) {
     return {};
   }
 
   std::string isa;
-  if (comgr->set_data(data, elf_size, static_cast<const char*>(elf_data)) ==
-      kComgrStatusSuccess) {
+  if (api->set_data(data, elf_size, static_cast<const char*>(elf_data)) == kComgrStatusSuccess) {
     size_t isa_len = 0;
-    if (comgr->get_data_isa_name(data, &isa_len, nullptr) ==
-            kComgrStatusSuccess &&
-        isa_len > 0) {
+    if (api->get_data_isa_name(data, &isa_len, nullptr) == kComgrStatusSuccess && isa_len > 0) {
       isa.resize(isa_len);
-      if (comgr->get_data_isa_name(data, &isa_len, isa.data()) ==
-          kComgrStatusSuccess) {
+      if (api->get_data_isa_name(data, &isa_len, isa.data()) == kComgrStatusSuccess) {
         if (!isa.empty() && isa.back() == '\0') {
           isa.pop_back();
         }
@@ -262,108 +250,107 @@ std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size) {
     }
   }
 
-  comgr->release_data(data);
+  api->release_data(data);
   return isa;
 }
 
 namespace {
 
-bool GateAllowsAgent(hsa_agent_t agent) {
-  const AgentGfxRevision gfx = QueryAgentGfxRevision(agent);
+bool IsAgentEligibleForHotswap(hsa_agent_t agent) {
+  const AgentGfxRevision gfx = GetAgentGfxRevision(agent);
   HOTSWAP_LOG("hotswap: agent gfx=%s asic_revision=%u (valid=%s)\n",
-              gfx.gfx_target.empty() ? "?" : gfx.gfx_target.c_str(),
-              gfx.asic_revision, gfx.revision_valid ? "yes" : "no");
-  return GateAllowsHotswap(gfx);
+              gfx.gfx_target.empty() ? "?" : gfx.gfx_target.c_str(), gfx.asic_revision,
+              gfx.has_asic_revision ? "yes" : "no");
+  return IsHotswapSupportedGfxRevision(gfx);
+}
+
+void LogRewrittenCodeObjectLoadFailure(hsa_status_t status) {
+  HOTSWAP_LOG(
+      "hotswap: rewritten load failed (status=%d), falling back to "
+      "original code object\n",
+      static_cast<int>(status));
 }
 
 }  // namespace
 
-bool RetargetCodeObject(const void* elf_data, size_t elf_size,
-                        const char* source_isa, const char* target_isa,
-                        OwnedElf* out_elf, size_t* out_elf_size) {
-  Comgr* comgr = GetComgr();
-  if (!comgr || !elf_data || elf_size == 0 || !source_isa || !target_isa ||
-      !out_elf || !out_elf_size) {
+bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* source_isa,
+                        const char* target_isa, OwnedElfBuffer* out_elf_buffer,
+                        size_t* out_elf_size) {
+  ComgrApi* api = GetComgrApi();
+  if (!api || !elf_data || elf_size == 0 || !source_isa || !target_isa || !out_elf_buffer ||
+      !out_elf_size) {
     return false;
   }
 
   ComgrData input = {};
-  if (comgr->create_data(kComgrDataKindExecutable, &input) !=
-      kComgrStatusSuccess) {
+  if (api->create_data(kComgrDataKindExecutable, &input) != kComgrStatusSuccess) {
     return false;
   }
 
-  if (comgr->set_data(input, elf_size, static_cast<const char*>(elf_data)) !=
-      kComgrStatusSuccess) {
-    comgr->release_data(input);
+  if (api->set_data(input, elf_size, static_cast<const char*>(elf_data)) != kComgrStatusSuccess) {
+    api->release_data(input);
     return false;
   }
 
   ComgrData output = {};
-  const int status =
-      comgr->hotswap_rewrite(input, source_isa, target_isa, &output);
-  comgr->release_data(input);
+  const int status = api->hotswap_rewrite(input, source_isa, target_isa, &output);
+  api->release_data(input);
   if (status != kComgrStatusSuccess) {
-    HOTSWAP_LOG("hotswap: COMGR rewrite failed for %s -> %s (rc=%d)\n",
-                source_isa, target_isa, status);
+    HOTSWAP_LOG("hotswap: COMGR rewrite failed for %s -> %s (rc=%d)\n", source_isa, target_isa,
+                status);
     return false;
   }
 
   size_t output_size = 0;
-  if (comgr->get_data(output, &output_size, nullptr) != kComgrStatusSuccess ||
-      output_size == 0) {
-    comgr->release_data(output);
+  if (api->get_data(output, &output_size, nullptr) != kComgrStatusSuccess || output_size == 0) {
+    api->release_data(output);
     return false;
   }
 
-  OwnedElf output_buf(std::malloc(output_size), &std::free);
-  if (!output_buf) {
-    comgr->release_data(output);
+  OwnedElfBuffer output_buffer(std::malloc(output_size), &std::free);
+  if (!output_buffer) {
+    api->release_data(output);
     return false;
   }
 
   size_t copy_size = output_size;
-  if (comgr->get_data(output, &copy_size,
-                      static_cast<char*>(output_buf.get())) !=
+  if (api->get_data(output, &copy_size, static_cast<char*>(output_buffer.get())) !=
       kComgrStatusSuccess) {
-    comgr->release_data(output);
+    api->release_data(output);
     return false;
   }
 
-  comgr->release_data(output);
-  *out_elf = std::move(output_buf);
+  api->release_data(output);
+  *out_elf_buffer = std::move(output_buffer);
   *out_elf_size = output_size;
   return true;
 }
 
 bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
-                           OwnedElf* out_elf, size_t* out_elf_size) {
-  if (Disabled() || !code_object.data || code_object.size == 0 ||
-      !GateAllowsAgent(agent)) {
+                           OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
+  if (IsHotswapDisabledByEnv() || !code_object.data || code_object.size == 0 ||
+      !IsAgentEligibleForHotswap(agent)) {
     return false;
   }
 
-  const std::string source_isa =
-      GetCodeObjectIsaName(code_object.data, code_object.size);
+  const std::string source_isa = GetCodeObjectIsaName(code_object.data, code_object.size);
   const std::string target_isa = GetAgentIsaName(agent);
   if (source_isa.empty() || target_isa.empty()) {
-    HOTSWAP_LOG("hotswap: rewrite skipped, empty isa (src='%s' tgt='%s')\n",
-                source_isa.c_str(), target_isa.c_str());
+    HOTSWAP_LOG("hotswap: rewrite skipped, empty isa (src='%s' tgt='%s')\n", source_isa.c_str(),
+                target_isa.c_str());
     return false;
   }
 
-  const bool rewritten = RetargetCodeObject(
-      code_object.data, code_object.size, source_isa.c_str(),
-      target_isa.c_str(), out_elf, out_elf_size);
-  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s in=%zu out=%zu changed=%d\n",
-              source_isa.c_str(), target_isa.c_str(), code_object.size,
-              rewritten ? *out_elf_size : 0, rewritten ? 1 : 0);
+  const bool rewritten = RetargetCodeObject(code_object.data, code_object.size, source_isa.c_str(),
+                                            target_isa.c_str(), out_elf_buffer, out_elf_size);
+  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s in=%zu out=%zu changed=%d\n", source_isa.c_str(),
+              target_isa.c_str(), code_object.size, rewritten ? *out_elf_size : 0,
+              rewritten ? 1 : 0);
   return rewritten;
 }
 
-bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
-                           hsa_agent_t agent, OwnedElf* out_elf,
-                           size_t* out_elf_size) {
+bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
+                           OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
   if (!reader) {
     return false;
   }
@@ -372,71 +359,61 @@ bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
   code_object.data = reader->GetCodeObjectMemory();
   code_object.size = reader->GetCodeObjectSize();
   code_object.uri = reader->GetUri();
-  return TryRetargetCodeObject(code_object, agent, out_elf, out_elf_size);
+  return TryRetargetCodeObject(code_object, agent, out_elf_buffer, out_elf_size);
 }
 
-hsa_status_t LoadAgentCodeObjectWithHotswap(
-    hsa_executable_t executable, hsa_agent_t agent,
-    const CodeObjectView& code_object, const char* options,
-    hsa_loaded_code_object_t* loaded_code_object,
-    const LoadAgentCodeObjectCallbacks& callbacks) {
-  if (!callbacks.load_original || !callbacks.load_rewritten) {
+hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_agent_t agent,
+                                            const CodeObjectView& code_object, const char* options,
+                                            hsa_loaded_code_object_t* loaded_code_object,
+                                            const LoadAgentCodeObjectCallbacks& callbacks) {
+  if (!callbacks.load_original_code_object || !callbacks.load_rewritten_code_object) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  hsa_code_object_t original_code_object = {
-      reinterpret_cast<uint64_t>(code_object.data)};
+  hsa_code_object_t original_code_object = {reinterpret_cast<uint64_t>(code_object.data)};
 
-  OwnedElf rewritten_elf(nullptr, &std::free);
+  OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
   size_t rewritten_elf_size = 0;
-  if (TryRetargetCodeObject(code_object, agent, &rewritten_elf,
-                            &rewritten_elf_size)) {
+  if (TryRetargetCodeObject(code_object, agent, &rewritten_elf_buffer, &rewritten_elf_size)) {
     hsa_code_object_t rewritten_code_object = {
-        reinterpret_cast<uint64_t>(rewritten_elf.get())};
-    hsa_status_t status = callbacks.load_rewritten(
-        callbacks.context, agent, rewritten_code_object, rewritten_elf_size,
-        options, code_object.uri, loaded_code_object);
+        reinterpret_cast<uint64_t>(rewritten_elf_buffer.get())};
+    hsa_status_t status = callbacks.load_rewritten_code_object(
+        callbacks.context, agent, rewritten_code_object, rewritten_elf_size, options,
+        code_object.uri, loaded_code_object);
     if (status == HSA_STATUS_SUCCESS) {
-      RetainElf(executable, std::move(rewritten_elf));
+      RetainRewrittenElfBuffer(executable, std::move(rewritten_elf_buffer));
       return status;
     }
-    LogRewrittenLoadFailure(status);
+    LogRewrittenCodeObjectLoadFailure(status);
   }
 
-  return callbacks.load_original(callbacks.context, agent, original_code_object,
-                                 options, code_object.uri,
-                                 loaded_code_object);
+  return callbacks.load_original_code_object(callbacks.context, agent, original_code_object,
+                                             options, code_object.uri, loaded_code_object);
 }
 
-void RetainElf(hsa_executable_t executable, OwnedElf elf) {
+void RetainRewrittenElfBuffer(hsa_executable_t executable, OwnedElfBuffer elf_buffer) {
   try {
-    std::scoped_lock lock(g_retained_elfs_mutex);
-    g_retained_elfs[executable.handle].push_back(std::move(elf));
+    std::scoped_lock lock(g_retained_rewritten_elf_buffers_mutex);
+    g_retained_rewritten_elf_buffers[executable.handle].push_back(std::move(elf_buffer));
   } catch (const std::bad_alloc&) {
     // If the keepalive container cannot grow, preserve the loaded code object's
     // raw ELF pointer by intentionally leaking this allocation.
-    (void)elf.release();
+    (void)elf_buffer.release();
   }
 }
 
-void ReleaseElfs(hsa_executable_t executable) {
-  std::scoped_lock lock(g_retained_elfs_mutex);
-  g_retained_elfs.erase(executable.handle);
+void ReleaseRetainedRewrittenElfBuffers(hsa_executable_t executable) {
+  std::scoped_lock lock(g_retained_rewritten_elf_buffers_mutex);
+  g_retained_rewritten_elf_buffers.erase(executable.handle);
 }
 
 #ifdef ROCR_HOTSWAP_TESTING
-size_t RetainedElfCountForTesting(hsa_executable_t executable) {
-  std::scoped_lock lock(g_retained_elfs_mutex);
-  const auto it = g_retained_elfs.find(executable.handle);
-  return it == g_retained_elfs.end() ? 0 : it->second.size();
+size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable) {
+  std::scoped_lock lock(g_retained_rewritten_elf_buffers_mutex);
+  const auto it = g_retained_rewritten_elf_buffers.find(executable.handle);
+  return it == g_retained_rewritten_elf_buffers.end() ? 0 : it->second.size();
 }
 #endif
-
-void LogRewrittenLoadFailure(hsa_status_t status) {
-  HOTSWAP_LOG("hotswap: rewritten load failed (status=%d), falling back to "
-              "original code object\n",
-              static_cast<int>(status));
-}
 
 }  // namespace hotswap
 }  // namespace rocr
