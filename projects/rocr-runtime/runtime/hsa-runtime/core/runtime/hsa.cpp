@@ -2127,6 +2127,24 @@ Loader *GetLoader() {
   return core::Runtime::runtime_singleton_->loader();
 }
 
+hsa_status_t LoadOriginalCodeObject(
+    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
+    const char* options, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object) {
+  auto* exec = static_cast<Executable*>(context);
+  return exec->LoadCodeObject(agent, code_object, options, uri,
+                              loaded_code_object);
+}
+
+hsa_status_t LoadSizedCodeObject(
+    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
+    size_t code_object_size, const char* options, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object) {
+  auto* exec = static_cast<Executable*>(context);
+  return exec->LoadCodeObject(agent, code_object, code_object_size, options,
+                              uri, loaded_code_object);
+}
+
 } // namespace anonymous
 
 hsa_status_t hsa_code_object_reader_create_from_file(
@@ -2334,27 +2352,17 @@ hsa_status_t hsa_executable_load_agent_code_object(
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
   }
 
-  hsa_code_object_t code_object =
-      {reinterpret_cast<uint64_t>(reader->GetCodeObjectMemory())};
+  hotswap::CodeObjectView code_object;
+  code_object.data = reader->GetCodeObjectMemory();
+  code_object.size = reader->GetCodeObjectSize();
+  code_object.uri = reader->GetUri();
 
-  hotswap::OwnedElf rewritten_elf(nullptr, &std::free);
-  size_t rewritten_elf_size = 0;
-  if (hotswap::TryRetargetCodeObject(reader, agent, &rewritten_elf,
-                                     &rewritten_elf_size)) {
-    hsa_code_object_t rewritten_code_object =
-        {reinterpret_cast<uint64_t>(rewritten_elf.get())};
-    hsa_status_t status =
-        exec->LoadCodeObject(agent, rewritten_code_object, rewritten_elf_size,
-                             options, reader->GetUri(), loaded_code_object);
-    if (status == HSA_STATUS_SUCCESS) {
-      hotswap::RetainElf(executable, std::move(rewritten_elf));
-      return status;
-    }
-    hotswap::LogRewrittenLoadFailure(status);
-  }
-
-  return exec->LoadCodeObject( agent, code_object, options,
-                              reader->GetUri(), loaded_code_object);
+  hotswap::LoadAgentCodeObjectCallbacks callbacks;
+  callbacks.context = exec;
+  callbacks.load_original = LoadOriginalCodeObject;
+  callbacks.load_rewritten = LoadSizedCodeObject;
+  return hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, agent, code_object, options, loaded_code_object, callbacks);
   CATCH;
 }
 

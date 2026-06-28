@@ -43,6 +43,7 @@
 #ifndef HSA_RUNTIME_CORE_RUNTIME_HOTSWAP_HPP_
 #define HSA_RUNTIME_CORE_RUNTIME_HOTSWAP_HPP_
 
+#include <cstddef>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -55,19 +56,54 @@ namespace hotswap {
 
 using OwnedElf = std::unique_ptr<void, decltype(&std::free)>;
 
+struct CodeObjectView {
+  const void* data = nullptr;
+  size_t size = 0;
+  std::string uri;
+};
+
+using LoadOriginalCodeObjectFn = hsa_status_t (*)(
+    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
+    const char* options, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object);
+
+using LoadSizedCodeObjectFn = hsa_status_t (*)(
+    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
+    size_t code_object_size, const char* options, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object);
+
+struct LoadAgentCodeObjectCallbacks {
+  void* context = nullptr;
+  LoadOriginalCodeObjectFn load_original = nullptr;
+  LoadSizedCodeObjectFn load_rewritten = nullptr;
+};
+
 std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size);
 
 bool RetargetCodeObject(const void* elf_data, size_t elf_size,
                         const char* source_isa, const char* target_isa,
                         OwnedElf* out_elf, size_t* out_elf_size);
 
+bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
+                           OwnedElf* out_elf, size_t* out_elf_size);
+
 bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
                            hsa_agent_t agent, OwnedElf* out_elf,
                            size_t* out_elf_size);
 
+hsa_status_t LoadAgentCodeObjectWithHotswap(
+    hsa_executable_t executable, hsa_agent_t agent,
+    const CodeObjectView& code_object, const char* options,
+    hsa_loaded_code_object_t* loaded_code_object,
+    const LoadAgentCodeObjectCallbacks& callbacks);
+
 void RetainElf(hsa_executable_t executable, OwnedElf elf);
 void ReleaseElfs(hsa_executable_t executable);
 void LogRewrittenLoadFailure(hsa_status_t status);
+
+#ifdef ROCR_HOTSWAP_TESTING
+size_t RetainedElfCountForTesting(hsa_executable_t executable);
+#endif
 
 }  // namespace hotswap
 }  // namespace rocr

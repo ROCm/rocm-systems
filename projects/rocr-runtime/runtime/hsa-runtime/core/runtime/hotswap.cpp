@@ -336,16 +336,15 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size,
   return true;
 }
 
-bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
-                           hsa_agent_t agent, OwnedElf* out_elf,
-                           size_t* out_elf_size) {
-  if (Disabled() || !reader || !GateAllowsAgent(agent)) {
+bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
+                           OwnedElf* out_elf, size_t* out_elf_size) {
+  if (Disabled() || !code_object.data || code_object.size == 0 ||
+      !GateAllowsAgent(agent)) {
     return false;
   }
 
-  const void* input = reader->GetCodeObjectMemory();
-  const size_t input_size = reader->GetCodeObjectSize();
-  const std::string source_isa = GetCodeObjectIsaName(input, input_size);
+  const std::string source_isa =
+      GetCodeObjectIsaName(code_object.data, code_object.size);
   const std::string target_isa = GetAgentIsaName(agent);
   if (source_isa.empty() || target_isa.empty()) {
     HOTSWAP_LOG("hotswap: rewrite skipped, empty isa (src='%s' tgt='%s')\n",
@@ -353,14 +352,60 @@ bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
     return false;
   }
 
-  const bool rewritten = RetargetCodeObject(input, input_size,
-                                            source_isa.c_str(),
-                                            target_isa.c_str(), out_elf,
-                                            out_elf_size);
+  const bool rewritten = RetargetCodeObject(
+      code_object.data, code_object.size, source_isa.c_str(),
+      target_isa.c_str(), out_elf, out_elf_size);
   HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s in=%zu out=%zu changed=%d\n",
-              source_isa.c_str(), target_isa.c_str(), input_size,
+              source_isa.c_str(), target_isa.c_str(), code_object.size,
               rewritten ? *out_elf_size : 0, rewritten ? 1 : 0);
   return rewritten;
+}
+
+bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
+                           hsa_agent_t agent, OwnedElf* out_elf,
+                           size_t* out_elf_size) {
+  if (!reader) {
+    return false;
+  }
+
+  CodeObjectView code_object;
+  code_object.data = reader->GetCodeObjectMemory();
+  code_object.size = reader->GetCodeObjectSize();
+  code_object.uri = reader->GetUri();
+  return TryRetargetCodeObject(code_object, agent, out_elf, out_elf_size);
+}
+
+hsa_status_t LoadAgentCodeObjectWithHotswap(
+    hsa_executable_t executable, hsa_agent_t agent,
+    const CodeObjectView& code_object, const char* options,
+    hsa_loaded_code_object_t* loaded_code_object,
+    const LoadAgentCodeObjectCallbacks& callbacks) {
+  if (!callbacks.load_original || !callbacks.load_rewritten) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  hsa_code_object_t original_code_object = {
+      reinterpret_cast<uint64_t>(code_object.data)};
+
+  OwnedElf rewritten_elf(nullptr, &std::free);
+  size_t rewritten_elf_size = 0;
+  if (TryRetargetCodeObject(code_object, agent, &rewritten_elf,
+                            &rewritten_elf_size)) {
+    hsa_code_object_t rewritten_code_object = {
+        reinterpret_cast<uint64_t>(rewritten_elf.get())};
+    hsa_status_t status = callbacks.load_rewritten(
+        callbacks.context, agent, rewritten_code_object, rewritten_elf_size,
+        options, code_object.uri, loaded_code_object);
+    if (status == HSA_STATUS_SUCCESS) {
+      RetainElf(executable, std::move(rewritten_elf));
+      return status;
+    }
+    LogRewrittenLoadFailure(status);
+  }
+
+  return callbacks.load_original(callbacks.context, agent, original_code_object,
+                                 options, code_object.uri,
+                                 loaded_code_object);
 }
 
 void RetainElf(hsa_executable_t executable, OwnedElf elf) {
@@ -378,6 +423,14 @@ void ReleaseElfs(hsa_executable_t executable) {
   std::scoped_lock lock(g_retained_elfs_mutex);
   g_retained_elfs.erase(executable.handle);
 }
+
+#ifdef ROCR_HOTSWAP_TESTING
+size_t RetainedElfCountForTesting(hsa_executable_t executable) {
+  std::scoped_lock lock(g_retained_elfs_mutex);
+  const auto it = g_retained_elfs.find(executable.handle);
+  return it == g_retained_elfs.end() ? 0 : it->second.size();
+}
+#endif
 
 void LogRewrittenLoadFailure(hsa_status_t status) {
   HOTSWAP_LOG("hotswap: rewritten load failed (status=%d), falling back to "
