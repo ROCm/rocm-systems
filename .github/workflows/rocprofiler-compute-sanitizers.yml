@@ -139,6 +139,21 @@ jobs:
           echo "sanitizer_lib_dir=${sanitizer_lib_dir}" >> "${GITHUB_OUTPUT}"
           echo "Clang sanitizer runtime: ${sanitizer_lib_dir}"
 
+      - name: Install Python requirements
+        working-directory: projects/rocprofiler-compute
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            pip install \
+              -r requirements.txt \
+              --break-system-packages \
+              --ignore-installed \
+              --timeout 60 && break
+            echo "⚠️ pip install attempt ${attempt} failed, retrying..."
+            sleep 10
+          done
+          echo "✅ pip requirements installed!"
+
       - name: Configure, build, and test
         id: test
         continue-on-error: true
