@@ -12,9 +12,10 @@ RUN apt-get update && apt-get install -y wget gnupg2 ca-certificates && \
     wget -qO /tmp/rocm.gpg.key https://repo.radeon.com/rocm/rocm.gpg.key && \
     echo '2de99e2354646a90d9903e2a669fc4e36b02c1bbff7075c481e12d7edab2c88b  /tmp/rocm.gpg.key' | sha256sum -c - && \
     gpg --dearmor < /tmp/rocm.gpg.key > /etc/apt/keyrings/rocm.gpg && \
-    chmod a+r /etc/apt/keyrings/rocm.gpg && \
+    chmod 0644 /etc/apt/keyrings/rocm.gpg && \
     rm -f /tmp/rocm.gpg.key && \
-    echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian/ jammy main' > /etc/apt/sources.list.d/rocm.list
+    echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian/ jammy main' > /etc/apt/sources.list.d/rocm.list && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install ROCm runtime and dependencies
 RUN apt-get update && \
