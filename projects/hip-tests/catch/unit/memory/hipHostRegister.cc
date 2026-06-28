@@ -744,6 +744,80 @@ HIP_TEST_CASE(Unit_hipHostRegister_Negative) {
   }
 }
 
+/**
+ * Verifies that hipHostRegister rejects a duplicate or overlapping registration
+ * of a host range that is already registered, returning
+ * hipErrorHostMemoryAlreadyRegistered.
+ */
+HIP_TEST_CASE(Unit_hipHostRegister_DuplicateAndDisjoint) {
+  constexpr size_t pageSize = 4096;
+  const size_t sizeBytes = 4 * pageSize;
+  uint8_t* A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  REQUIRE(A != nullptr);
+
+  HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
+
+  SECTION("Same pointer, same size") {
+    HIP_CHECK_ERROR(hipHostRegister(A, sizeBytes, 0), hipErrorHostMemoryAlreadyRegistered);
+  }
+  SECTION("Same pointer, smaller size") {
+    HIP_CHECK_ERROR(hipHostRegister(A, sizeBytes / 2, 0), hipErrorHostMemoryAlreadyRegistered);
+  }
+  SECTION("Pointer inside an already-registered range") {
+    HIP_CHECK_ERROR(hipHostRegister(A + pageSize, pageSize, 0),
+                    hipErrorHostMemoryAlreadyRegistered);
+  }
+  SECTION("Disjoint segments of one allocation both register") {
+    // A single allocation split into two non-overlapping segments: [B, half) and
+    // [B + half, half). They are distinct byte ranges, so neither is falsely rejected
+    // even though they come from the same malloc (and may share a boundary page, which
+    // is handled underneath in ROCr/thunk).
+    const size_t bufBytes = 10000;
+    const size_t half = bufBytes / 2;  // 10000 -> [B, 5000) and [B + 5000, 5000)
+    uint8_t* B = reinterpret_cast<uint8_t*>(malloc(bufBytes));
+    REQUIRE(B != nullptr);
+    HIP_CHECK(hipHostRegister(B, half, 0));
+    HIP_CHECK(hipHostRegister(B + half, half, 0));
+    HIP_CHECK(hipHostUnregister(B));
+    HIP_CHECK(hipHostUnregister(B + half));
+    free(B);
+  }
+  SECTION("New range overlapping an existing one from the left is rejected") {
+    // Register an interior segment first, then a range that starts before it and
+    // overlaps into it. A containment-only check on the start pointer would miss this;
+    // the interval-overlap check must reject it (matches CUDA).
+    const size_t bufBytes = 10000;
+    const size_t half = bufBytes / 2;
+    uint8_t* B = reinterpret_cast<uint8_t*>(malloc(bufBytes));
+    REQUIRE(B != nullptr);
+    HIP_CHECK(hipHostRegister(B + half, half, 0));  // [B+5000, 5000)
+    // [B, 7000) starts before and overlaps [B+5000, B+7000).
+    HIP_CHECK_ERROR(hipHostRegister(B, 7000, 0), hipErrorHostMemoryAlreadyRegistered);
+    HIP_CHECK(hipHostUnregister(B + half));
+    free(B);
+  }
+  SECTION("New range fully containing a smaller existing one is rejected") {
+    const size_t bufBytes = 4 * pageSize;
+    uint8_t* B = reinterpret_cast<uint8_t*>(malloc(bufBytes));
+    REQUIRE(B != nullptr);
+    HIP_CHECK(hipHostRegister(B + pageSize, 256, 0));  // small interior registration
+    // [B, bufBytes) fully contains the small registration above.
+    HIP_CHECK_ERROR(hipHostRegister(B, bufBytes, 0), hipErrorHostMemoryAlreadyRegistered);
+    HIP_CHECK(hipHostUnregister(B + pageSize));
+    free(B);
+  }
+
+  // The original registration must still be intact and unregister cleanly (a rejected
+  // duplicate must not have consumed or leaked it).
+  HIP_CHECK(hipHostUnregister(A));
+
+  // After unregister, re-registering the same range must succeed (no stale state).
+  HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
+  HIP_CHECK(hipHostUnregister(A));
+
+  free(A);
+}
+
 HIP_TEST_CASE(Unit_hipHostRegister_Capture) {
   constexpr size_t kBufferSize = 1024;
   auto buffer = std::make_unique<int[]>(kBufferSize);

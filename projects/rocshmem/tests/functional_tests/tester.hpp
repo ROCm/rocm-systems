@@ -172,8 +172,14 @@
   X(HostIntAmoFAdd,            127)  \
   X(HostIntAmoFCswap,          128)  \
   X(HostAmoAllPes,             129)  \
-  X(HostAmoSelf,               130)
-
+  X(HostAmoSelf,               130)  \
+  X(HostAmoAdd,                131)  \
+  X(TileBroadcast,             132)  \
+  X(TileBroadcastWave,         133)  \
+  X(TileBroadcastWG,           134)  \
+  X(TileAllgather,             135)  \
+  X(TileAllgatherWave,         136)  \
+  X(TileAllgatherWG,           137)
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)

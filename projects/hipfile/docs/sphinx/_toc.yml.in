@@ -1,45 +1,61 @@
-defaults:
-  numbered: false
 root: index
 subtrees:
-
-- entries:
-  - file: introduction.rst
-    title: Introduction
-
-- caption: Build and install
-  entries:
-  - file: config_build.rst
-    title: Configure and build
-  - file: sanitizers.rst
-    title: Sanitizers
-
-- caption: Using hipFile
-  entries:
-  - file: hipify.rst
-    title: hipify
-  - file: nvidia_compat.rst
-    title: cuFile compatibility
-  - file: fio.rst
-    title: fio support
-  - file: stats_collection.rst
-    title: Collecting statistics
-
-- caption: API reference
-  entries:
-  - file: api/errors.rst
-    title: Errors
-  - file: api/core.rst
-    title: Core
-  - file: api/driver.rst
-    title: Drivers
-  - file: api/file.rst
-    title: File operations
-  - file: api/async.rst
-    title: Asynchronous operations
-  - file: api/batch.rst
-    title: Batch operations
-  - file: api/rdma.rst
-    title: RDMA
-  - file: api/misc_api.rst
-    title: Other
+  - caption: Install
+    entries:
+      - file: install/install
+        title: Install
+      - file: install/build-from-source
+        title: Build from source
+      - file: install/python-bindings
+        title: Install Python bindings
+  - caption: How to
+    entries:
+      - file: how-to/register-file-and-buffer
+        title: Register a file and buffer
+      - file: how-to/use-with-fio
+        title: Use fio
+      - file: how-to/use-python-api
+        title: Use the Python API
+  - caption: Tutorials
+    entries:
+      - file: tutorials/copy-a-file
+        title: Copying a file
+      - file: tutorials/async-multistream-io
+        title: Asynchronous multistream I/O
+      - file: tutorials/get-version
+        title: Query the hipFile version
+      - file: tutorials/python-gpu-io
+        title: Python GPU I/O
+  - caption: Reference
+    entries:
+      - file: reference/hipFile-io-backends.rst
+        title: Fastpath and fallback backends
+      - file: reference/hipFile-file-registration.rst
+        title: File registration
+      - file: reference/hipFile-buffer-registration.rst
+        title: Buffer registration
+      - file: reference/hipFile-reference-count.rst
+        title: Reference counting
+      - file: reference/hipFile-ais-stats-tool.rst
+        title: ais-stats tool
+      - file: reference/hipFile-environment-variables.rst
+        title: Environment variables
+      - file: reference/hipFile-cuFile-compatibility.rst
+        title: cuFile compatibility
+      - file: reference/hipFile-api-reference.rst
+        title: API reference
+        subtrees:
+        - entries:
+          - file: reference/api-synchronous-io
+          - file: reference/api-driver
+          - file: reference/api-file-and-buffer
+          - file: reference/api-async
+          - file: reference/api-batch
+          - file: reference/api-errors
+          - file: reference/api-python
+  - caption: Troubleshooting
+    entries:
+      - file: troubleshooting/troubleshooting
+        title: Troubleshooting
+      - file: troubleshooting/known-issues
+        title: Known issues

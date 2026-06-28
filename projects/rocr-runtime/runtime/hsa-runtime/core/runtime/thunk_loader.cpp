@@ -54,7 +54,7 @@ namespace rocr {
 namespace core {
 
   std::string ThunkLoader::whoami() {
-    is_dtif_ = is_dxg_ = false;
+    is_dtif_ = is_win_dxg_ = is_wsl_dxg_ = false;
     if (core::Runtime::runtime_singleton_->flag().enable_dtif()) {
       is_dtif_ = true;
 #if defined(_WIN32)
@@ -69,12 +69,12 @@ namespace core {
       int fd = open("/dev/dxg", O_RDWR);
       if (fd >= 0) {
         close(fd);
-        is_dxg_ = true;
+        is_wsl_dxg_ = true;
         return "librocdxg.so";
       }
     }
 #else
-    is_dxg_ = true;
+    is_win_dxg_ = true;
 #endif
 
     return "";
@@ -424,6 +424,9 @@ namespace core {
       HSAKMT_PFN(hsaKmtMemHandleFree) = (HSAKMT_DEF(hsaKmtMemHandleFree)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemHandleFree");
       if (HSAKMT_PFN(hsaKmtMemHandleFree) == nullptr) goto LOAD_ERROR;
 
+      HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = (HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemHandleFreePreserveMetadata");
+      if (HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) == nullptr) goto LOAD_ERROR;
+
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemoryGetCpuAddr");
       if (HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) == nullptr) goto LOAD_ERROR;
 
@@ -578,6 +581,7 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtMemoryVaMap) = (HSAKMT_DEF(hsaKmtMemoryVaMap)*)(&hsaKmtMemoryVaMap);
       HSAKMT_PFN(hsaKmtMemoryVaUnmap) = (HSAKMT_DEF(hsaKmtMemoryVaUnmap)*)(&hsaKmtMemoryVaUnmap);
       HSAKMT_PFN(hsaKmtMemHandleFree) = (HSAKMT_DEF(hsaKmtMemHandleFree)*)(&hsaKmtMemHandleFree);
+      HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = (HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)*)(&hsaKmtMemHandleFreePreserveMetadata);
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)(&hsaKmtMemoryGetCpuAddr);
       HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) = (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)*)(&hsaKmtGetAmdGPUDeviceFd);
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)(&hsaKmtMemoryCpuMap);

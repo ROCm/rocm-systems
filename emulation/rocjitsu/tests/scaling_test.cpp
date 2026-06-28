@@ -35,7 +35,7 @@ RJ_DIAGNOSTIC_POP
 
 using namespace rocjitsu;
 
-static const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+static const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
 static std::string kernel_path(const char *name) {
   return std::string(KERNEL_DIR) + "/" + name + ".o";
 }
