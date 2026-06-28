@@ -59,6 +59,7 @@
 #include "functional/power_read.h"
 #include "functional/power_read_write.h"
 #include "functional/process_info_read.h"
+#include "functional/process_list_read_test.h"
 #include "functional/sys_info_read.h"
 #include "functional/temp_read.h"
 #include "functional/version_read.h"
@@ -256,6 +257,11 @@ TEST(amdsmitstReadWrite, TestPerfCntrReadWrite) {
 
 TEST(amdsmitstReadOnly, TestProcInfoRead) {
   TestProcInfoRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(amdsmitstReadOnly, TestProcessListRead) {
+  TestProcessListRead tst;
   RunGenericTest(&tst);
 }
 
