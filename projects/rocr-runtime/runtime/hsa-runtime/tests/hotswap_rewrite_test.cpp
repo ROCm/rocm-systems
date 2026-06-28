@@ -6,6 +6,7 @@
 
 #include "core/inc/hsa_internal.h"
 #include "core/runtime/hotswap.hpp"
+#include "core/runtime/hotswap_gfx_query.hpp"
 #include "core/util/os.h"
 
 #include "gfx1250_min_hsaco.h"
@@ -16,6 +17,23 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace {
+
+static constexpr const char* kGfx1250Isa = "amdgcn-amd-amdhsa--gfx1250";
+
+struct FakeHsaEnv {
+  std::string isa_name = kGfx1250Isa;
+  bool asic_rev_ok = true;
+  uint32_t asic_revision = 0;
+};
+
+FakeHsaEnv g_hsa_env;
+std::unordered_map<std::string, std::string> g_env_vars;
+
+}  // namespace
 
 namespace rocr {
 namespace os {
@@ -31,12 +49,12 @@ void* GetExportAddress(LibHandle lib, std::string export_name) {
 bool CloseLib(LibHandle lib) { return dlclose(lib) == 0; }
 
 bool IsEnvVarSet(std::string env_var_name) {
-  return std::getenv(env_var_name.c_str()) != nullptr;
+  return g_env_vars.find(env_var_name) != g_env_vars.end();
 }
 
 std::string GetEnvVar(std::string env_var_name) {
-  const char* value = std::getenv(env_var_name.c_str());
-  return value ? value : "";
+  const auto it = g_env_vars.find(env_var_name);
+  return it == g_env_vars.end() ? "" : it->second;
 }
 
 }  // namespace os
@@ -54,13 +72,14 @@ hsa_status_t hsa_agent_iterate_isas(hsa_agent_t /*agent*/,
 
 hsa_status_t hsa_isa_get_info_alt(hsa_isa_t /*isa*/, hsa_isa_info_t attribute,
                                   void* value) {
-  static constexpr const char* kGfx1250Isa = "amdgcn-amd-amdhsa--gfx1250";
   if (attribute == HSA_ISA_INFO_NAME_LENGTH) {
-    *static_cast<uint32_t*>(value) = std::strlen(kGfx1250Isa) + 1;
+    *static_cast<uint32_t*>(value) =
+        static_cast<uint32_t>(g_hsa_env.isa_name.size() + 1);
     return HSA_STATUS_SUCCESS;
   }
   if (attribute == HSA_ISA_INFO_NAME) {
-    std::memcpy(value, kGfx1250Isa, std::strlen(kGfx1250Isa) + 1);
+    std::memcpy(value, g_hsa_env.isa_name.c_str(),
+                g_hsa_env.isa_name.size() + 1);
     return HSA_STATUS_SUCCESS;
   }
   return HSA_STATUS_ERROR;
@@ -70,7 +89,10 @@ hsa_status_t hsa_agent_get_info(hsa_agent_t /*agent*/,
                                 hsa_agent_info_t attribute, void* value) {
   if (attribute ==
       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION)) {
-    *static_cast<uint32_t*>(value) = 0;
+    if (!g_hsa_env.asic_rev_ok) {
+      return HSA_STATUS_ERROR;
+    }
+    *static_cast<uint32_t*>(value) = g_hsa_env.asic_revision;
     return HSA_STATUS_SUCCESS;
   }
   return HSA_STATUS_ERROR;
@@ -84,8 +106,6 @@ namespace {
 int tests_passed = 0;
 int tests_failed = 0;
 
-static constexpr const char* kGfx1250Isa = "amdgcn-amd-amdhsa--gfx1250";
-
 void check(bool cond, const char* name) {
   if (cond) {
     ++tests_passed;
@@ -94,6 +114,87 @@ void check(bool cond, const char* name) {
     ++tests_failed;
     fprintf(stderr, "  FAIL: %s\n", name);
   }
+}
+
+enum class LoadPath {
+  kOriginal,
+  kRewritten,
+};
+
+struct LoadCall {
+  LoadPath path;
+  const void* code_object;
+  size_t code_object_size;
+  std::string uri;
+};
+
+struct LoadEnv {
+  std::vector<LoadCall> calls;
+  hsa_status_t original_status = HSA_STATUS_SUCCESS;
+  hsa_status_t rewritten_status = HSA_STATUS_SUCCESS;
+};
+
+hsa_status_t RecordOriginalLoad(
+    void* context, hsa_agent_t /*agent*/, hsa_code_object_t code_object,
+    const char* /*options*/, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object) {
+  auto* env = static_cast<LoadEnv*>(context);
+  env->calls.push_back({LoadPath::kOriginal,
+                        reinterpret_cast<const void*>(code_object.handle), 0,
+                        uri});
+  if (loaded_code_object) {
+    loaded_code_object->handle = 0x1000 + env->calls.size();
+  }
+  return env->original_status;
+}
+
+hsa_status_t RecordRewrittenLoad(
+    void* context, hsa_agent_t /*agent*/, hsa_code_object_t code_object,
+    size_t code_object_size, const char* /*options*/, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object) {
+  auto* env = static_cast<LoadEnv*>(context);
+  env->calls.push_back({LoadPath::kRewritten,
+                        reinterpret_cast<const void*>(code_object.handle),
+                        code_object_size, uri});
+  if (loaded_code_object) {
+    loaded_code_object->handle = 0x2000 + env->calls.size();
+  }
+  return env->rewritten_status;
+}
+
+rocr::hotswap::LoadAgentCodeObjectCallbacks callbacks_for(LoadEnv* env) {
+  rocr::hotswap::LoadAgentCodeObjectCallbacks callbacks;
+  callbacks.context = env;
+  callbacks.load_original = RecordOriginalLoad;
+  callbacks.load_rewritten = RecordRewrittenLoad;
+  return callbacks;
+}
+
+void reset_runtime_env() {
+  g_hsa_env = FakeHsaEnv{};
+  g_env_vars.clear();
+  rocr::hotswap::ResetGfxRevisionCache();
+}
+
+hsa_agent_t test_agent() {
+  hsa_agent_t agent{};
+  agent.handle = 1;
+  return agent;
+}
+
+hsa_executable_t test_executable(uint64_t handle) {
+  hsa_executable_t executable{};
+  executable.handle = handle;
+  rocr::hotswap::ReleaseElfs(executable);
+  return executable;
+}
+
+rocr::hotswap::CodeObjectView real_code_object_view() {
+  rocr::hotswap::CodeObjectView code_object;
+  code_object.data = kGfx1250MinCo;
+  code_object.size = sizeof(kGfx1250MinCo);
+  code_object.uri = "memory://gfx1250_min.hsaco";
+  return code_object;
 }
 
 void test_GetIsaNameRealCodeObject() {
@@ -177,6 +278,124 @@ void test_RetargetNullSourceOrTarget() {
   check(!tgt_rewritten, "RetargetCodeObject rejects null target_isa");
 }
 
+void test_RuntimeLoadUsesRewrittenCodeObject() {
+  printf("TEST RuntimeLoadUsesRewrittenCodeObject...\n");
+  reset_runtime_env();
+  LoadEnv load;
+  hsa_loaded_code_object_t loaded{};
+  const hsa_executable_t executable = test_executable(0x501);
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, test_agent(), real_code_object_view(), nullptr, &loaded,
+      callbacks_for(&load));
+
+  check(status == HSA_STATUS_SUCCESS,
+        "runtime helper reports rewritten load success");
+  check(load.calls.size() == 1, "runtime helper made one load call");
+  check(load.calls.size() == 1 && load.calls[0].path == LoadPath::kRewritten,
+        "runtime helper chose rewritten code object");
+  check(load.calls.size() == 1 &&
+            load.calls[0].code_object != static_cast<const void*>(kGfx1250MinCo),
+        "rewritten load receives a fresh code object pointer");
+  check(load.calls.size() == 1 && load.calls[0].code_object_size > 0,
+        "rewritten load receives a non-zero code object size");
+  check(load.calls.size() == 1 &&
+            load.calls[0].uri == "memory://gfx1250_min.hsaco",
+        "runtime helper preserves the reader URI");
+  check(rocr::hotswap::RetainedElfCountForTesting(executable) == 1,
+        "successful rewritten load retains the rewritten ELF");
+  rocr::hotswap::ReleaseElfs(executable);
+  check(rocr::hotswap::RetainedElfCountForTesting(executable) == 0,
+        "executable destroy releases retained rewritten ELFs");
+}
+
+void test_RuntimeLoadNonA0FallsBackToOriginal() {
+  printf("TEST RuntimeLoadNonA0FallsBackToOriginal...\n");
+  reset_runtime_env();
+  g_hsa_env.asic_revision = 1;
+  LoadEnv load;
+  const hsa_executable_t executable = test_executable(0x502);
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, test_agent(), real_code_object_view(), nullptr, nullptr,
+      callbacks_for(&load));
+
+  check(status == HSA_STATUS_SUCCESS, "non-A0 runtime load succeeds");
+  check(load.calls.size() == 1 && load.calls[0].path == LoadPath::kOriginal,
+        "non-A0 runtime load uses the original code object");
+  check(load.calls.size() == 1 &&
+            load.calls[0].code_object == static_cast<const void*>(kGfx1250MinCo),
+        "non-A0 original load receives the input code object");
+  check(rocr::hotswap::RetainedElfCountForTesting(executable) == 0,
+        "non-A0 fallback does not retain a rewritten ELF");
+}
+
+void test_RuntimeLoadDisableEnvFallsBackToOriginal() {
+  printf("TEST RuntimeLoadDisableEnvFallsBackToOriginal...\n");
+  reset_runtime_env();
+  g_env_vars["HSA_HOTSWAP_DISABLE"] = "1";
+  LoadEnv load;
+  const hsa_executable_t executable = test_executable(0x503);
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, test_agent(), real_code_object_view(), nullptr, nullptr,
+      callbacks_for(&load));
+
+  check(status == HSA_STATUS_SUCCESS, "disabled runtime load succeeds");
+  check(load.calls.size() == 1 && load.calls[0].path == LoadPath::kOriginal,
+        "disable env var uses the original code object");
+  check(rocr::hotswap::RetainedElfCountForTesting(executable) == 0,
+        "disable env var does not retain a rewritten ELF");
+}
+
+void test_RuntimeLoadRewriteFailureFallsBackToOriginal() {
+  printf("TEST RuntimeLoadRewriteFailureFallsBackToOriginal...\n");
+  reset_runtime_env();
+  const unsigned char fake_elf[] = {0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01,
+                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                    0x00, 0x00};
+  rocr::hotswap::CodeObjectView code_object;
+  code_object.data = fake_elf;
+  code_object.size = sizeof(fake_elf);
+  code_object.uri = "memory://invalid.hsaco";
+
+  LoadEnv load;
+  const hsa_executable_t executable = test_executable(0x504);
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, test_agent(), code_object, nullptr, nullptr,
+      callbacks_for(&load));
+
+  check(status == HSA_STATUS_SUCCESS,
+        "rewrite failure runtime fallback succeeds");
+  check(load.calls.size() == 1 && load.calls[0].path == LoadPath::kOriginal,
+        "rewrite failure uses the original code object");
+  check(load.calls.size() == 1 && load.calls[0].code_object == fake_elf,
+        "rewrite failure fallback receives the input code object");
+  check(rocr::hotswap::RetainedElfCountForTesting(executable) == 0,
+        "rewrite failure does not retain a rewritten ELF");
+}
+
+void test_RuntimeLoadRewrittenLoadFailureFallsBackToOriginal() {
+  printf("TEST RuntimeLoadRewrittenLoadFailureFallsBackToOriginal...\n");
+  reset_runtime_env();
+  LoadEnv load;
+  load.rewritten_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  const hsa_executable_t executable = test_executable(0x505);
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, test_agent(), real_code_object_view(), nullptr, nullptr,
+      callbacks_for(&load));
+
+  check(status == HSA_STATUS_SUCCESS,
+        "rewritten-load failure returns original-load status");
+  check(load.calls.size() == 2, "rewritten-load failure makes two load calls");
+  check(load.calls.size() == 2 &&
+            load.calls[0].path == LoadPath::kRewritten &&
+            load.calls[1].path == LoadPath::kOriginal,
+        "rewritten-load failure falls back to original after rewritten attempt");
+  check(load.calls.size() == 2 &&
+            load.calls[1].code_object == static_cast<const void*>(kGfx1250MinCo),
+        "rewritten-load failure fallback receives the input code object");
+  check(rocr::hotswap::RetainedElfCountForTesting(executable) == 0,
+        "failed rewritten load does not retain the rewritten ELF");
+}
+
 }  // namespace
 
 int main() {
@@ -189,6 +408,11 @@ int main() {
   test_RetargetNullOutputPointers();
   test_RetargetNullInputs();
   test_RetargetNullSourceOrTarget();
+  test_RuntimeLoadUsesRewrittenCodeObject();
+  test_RuntimeLoadNonA0FallsBackToOriginal();
+  test_RuntimeLoadDisableEnvFallsBackToOriginal();
+  test_RuntimeLoadRewriteFailureFallsBackToOriginal();
+  test_RuntimeLoadRewrittenLoadFailureFallsBackToOriginal();
 
   printf("\n%d passed, %d failed\n", tests_passed, tests_failed);
   return tests_failed ? EXIT_FAILURE : EXIT_SUCCESS;

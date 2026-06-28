@@ -305,6 +305,8 @@ if(ROCR_BUILD_HOTSWAP_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${CMAKE_CURRENT_SOURCE_DIR}/inc
       ${CMAKE_CURRENT_BINARY_DIR})
+    target_compile_definitions(hotswap_rewrite_test PRIVATE
+      ROCR_HOTSWAP_TESTING)
     if(UNIX)
       target_link_libraries(hotswap_rewrite_test PRIVATE ${CMAKE_DL_LIBS})
       add_custom_command(TARGET hotswap_rewrite_test POST_BUILD
