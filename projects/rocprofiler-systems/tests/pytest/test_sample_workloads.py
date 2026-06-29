@@ -22,8 +22,6 @@ from conftest import RocprofsysTest
 pytestmark = [
     pytest.mark.sample_workloads,
     pytest.mark.gpu,
-    pytest.mark.rocm,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
 ]
 
 # Small transpose workload (<iterations> <M> <N>) to keep CLI+GPU runs fast.
@@ -37,14 +35,11 @@ _TRANSPOSE_ARGS = ["2", "100", "50"]
 
 @pytest.fixture
 def workload_trace_env() -> dict[str, str]:
-    # The rocpd marker sets ROCPROFSYS_USE_ROCPD on this dict before it reaches
-    # run_test; the workload-trace preset already turns on rocpd output.
     return {}
 
 
 @pytest.fixture
 def default_rules(validation_rules_dir: Path) -> list[Path]:
-    # The transpose runs here are tiny, so use the workload-agnostic rules.
     return [validation_rules_dir / "default-rules.json"]
 
 
@@ -154,11 +149,11 @@ WORKLOAD_CASES = [
 ]
 
 
+@pytest.mark.timeout(120)
 @pytest.mark.class_name("sample-workloads")
 class TestSampleWorkloads(RocprofsysTest):
     """rocprof-sys-sample CLI recipes against real HIP binaries."""
 
-    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "sampling_args, target, run_args, categories", WORKLOAD_CASES
     )
@@ -174,7 +169,6 @@ class TestSampleWorkloads(RocprofsysTest):
         if categories is not None:
             self.assert_perfetto(result, categories=categories)
 
-    @pytest.mark.timeout(120)
     def test_profile_only(self):
         """--preset=profile-only emits a flat wall_clock profile and no trace."""
         result = self.run_test(
@@ -186,10 +180,12 @@ class TestSampleWorkloads(RocprofsysTest):
         )
         # Clean run, and with tracing off no perfetto trace should be written.
         self.assert_regex(result, fail_regex=[r"\[perfetto\]> Outputting"])
+        assert (
+            result.perfetto_file is None
+        ), f"profile-only wrote an unexpected trace: {result.perfetto_file}"
         # The flat profile is still produced.
         self.assert_timemory(result, file_name="wall_clock.json", metric="wall_clock")
 
-    @pytest.mark.timeout(120)
     @pytest.mark.rocpd("workload_trace_env")
     def test_trace_rocpd(self, workload_trace_env, default_rules):
         """--preset=workload-trace produces a GPU trace and a rocpd database."""
