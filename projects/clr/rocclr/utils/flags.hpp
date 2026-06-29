@@ -247,6 +247,11 @@ release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
         "Number of graph nodes to batch at a time")                           \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 1,                          \
         "0 = Disable, 1 = Enable, 2 = Force")                                 \
+release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
+        "Min overlappable work (in occupancy passes) per unit of cross-stream "\
+        "sync (barrier packets + completion signals) to keep a graph "         \
+        "multi-stream; below this ratio it collapses to a single stream. "     \
+        "0 = off.")                                                            \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \

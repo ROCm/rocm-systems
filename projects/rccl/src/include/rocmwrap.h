@@ -12,6 +12,15 @@
 #include <hsa/hsa_ext_amd.h>  // hsa_amd_portable_export_dmabuf (DMA-BUF export)
 #include "checks.h"
 
+#ifndef CU_STREAM_WRITE_VALUE_DEFAULT
+#define CU_STREAM_WRITE_VALUE_DEFAULT 0
+#endif
+
+// HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
+// CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
+ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps,
+                                    CUstreamBatchMemOpParams* batchParams);
+
 // Re-declare the DMA-BUF export entry as a weak reference. hsa_init,
 // hsa_system_get_info and hsa_status_string are required and resolve as hard
 // dependencies, but hsa_amd_portable_export_dmabuf is optional: older ROCr
