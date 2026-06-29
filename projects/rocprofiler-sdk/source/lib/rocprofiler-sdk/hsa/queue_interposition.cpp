@@ -873,8 +873,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     tls.last_published_submit_pos = 0;
     tls.state                     = nullptr;
 
-    // PTL may block or execute inline during enqueue. Arm completion waiters only after the
-    // final doorbell is visible so they can never wait on unpublished packets.
+    // Arm completion waiters only after the final doorbell is visible
+    // so they can never wait on unpublished packets.
     lock.unlock();
 
     for(auto& itr : deferred_async_tasks)
