@@ -551,42 +551,8 @@ __device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcast_wg<T>(dst, src, nelems, pe_root_world, pe_start, stride,
+  internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
                pe_size, p_sync);
-}
-
-template <typename T>
-__device__ void IPCContext::internal_put_broadcast_wg(
-    T *dst, const T *src, int nelems, int pe_root, int pe_start,
-    int stride, int pe_size) {  // NOLINT(runtime/int)
-  if (my_pe == pe_root) {
-    int finish = pe_start + stride * pe_size;
-    for (int i = pe_start; i < finish; i += stride) {
-        put_nbi_wg(dst, src, nelems, i);
-    }
-  }
-}
-
-template <typename T>
-__device__ void IPCContext::internal_get_broadcast_wg(
-  T *dst, const T *src, int nelems, int pe_root) {  // NOLINT(runtime/int)
-    get_wg(dst, src, nelems, pe_root);
-}
-
-template <typename T>
-__device__ void IPCContext::internal_broadcast_wg(T *dst, const T *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync) {  // NOLINT(runtime/int)
-  if (constmem.num_pes < 4) {
-    internal_put_broadcast_wg(dst, src, nelems, pe_root, pe_start, stride,
-                           pe_size);
-  } else {
-    internal_get_broadcast_wg(dst, src, nelems, pe_root);
-  }
-
-  // Synchronize on completion of broadcast
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
 }
 
 template <typename T>

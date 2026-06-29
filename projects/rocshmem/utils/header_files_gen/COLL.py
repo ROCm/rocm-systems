@@ -115,6 +115,31 @@ def generate_broadcast_api():
     for type_, tname_ in types:
         expanded_code += broadcast_api(type_, tname_)
 
+    expanded_code += """
+
+/**
+ * @name ROCSHMEM_CTX_BROADCASTMEM_WG
+ * @brief Perform a broadcast between PEs in the active set. The caller
+ * is blocked until the broadcast completes.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelement     Size of buffer to participate in the broadcast.
+ * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
+ * 
+ *
+ * @return void
+ */
+__device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              void *dest, const void *source, int nelement, int PE_root);\n
+"""
+
     return expanded_code
 
 
@@ -295,16 +320,7 @@ def generate_broadcast_wave_api():
  * @return int; zero when sucessful, non-zero otherwise
  */\n"""
 
-    all_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong"),
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in all_types:
+    for type_, tname_ in types:
         expanded_code += broadcast_wave_api(type_, tname_)
 
     expanded_code += """

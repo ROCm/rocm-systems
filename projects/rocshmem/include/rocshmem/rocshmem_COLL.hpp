@@ -395,13 +395,34 @@ __host__ void rocshmem_ctx_ulonglong_broadcast(
     rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
     const unsigned long long *source, int nelems, int pe_root);
 
+/**
+ * @name ROCSHMEM_CTX_BROADCASTMEM_WG
+ * @brief Perform a broadcast between PEs in the active set. The caller
+ * is blocked until the broadcast completes.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelement     Size of buffer to participate in the broadcast.
+ * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
+ * 
+ *
+ * @return void
+ */
+__device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              void *dest, const void *source, int nelement, int PE_root);
 
 /**
  * @name ROCSHMEM_CTX_TYPE_BROADCAST_WAVE
  * @brief Perform a broadcast between PEs in the active set. The caller
  * is blocked until the broadcast completes.
  *
- * This function must be called as a wave collective.
+ * This function must be called as a work-group collective.
  *
  * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
@@ -413,8 +434,20 @@ __host__ void rocshmem_ctx_ulonglong_broadcast(
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
  * 
  *
- * @return int; zero when successful, non-zero otherwise
+ * @return int; zero when sucessful, non-zero otherwise
  */
+__device__ int rocshmem_ctx_float_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              float *dest, const float *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_double_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              double *dest, const double *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_char_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              char *dest, const char *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_schar_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              signed char *dest, const signed char *source, int nelement, int PE_root);
+
 __device__ int rocshmem_ctx_short_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
               short *dest, const short *source, int nelement, int PE_root);
 
@@ -427,12 +460,20 @@ __device__ int rocshmem_ctx_long_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_tea
 __device__ int rocshmem_ctx_longlong_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
               long long *dest, const long long *source, int nelement, int PE_root);
 
-__device__ int rocshmem_ctx_float_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
-              float *dest, const float *source, int nelement, int PE_root);
+__device__ int rocshmem_ctx_uchar_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              unsigned char *dest, const unsigned char *source, int nelement, int PE_root);
 
-__device__ int rocshmem_ctx_double_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
-              double *dest, const double *source, int nelement, int PE_root);
+__device__ int rocshmem_ctx_ushort_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              unsigned short *dest, const unsigned short *source, int nelement, int PE_root);
 
+__device__ int rocshmem_ctx_uint_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              unsigned int *dest, const unsigned int *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_ulong_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              unsigned long *dest, const unsigned long *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_ulonglong_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              unsigned long long *dest, const unsigned long long *source, int nelement, int PE_root);
 
 /**
  * @name ROCSHMEM_CTX_BROADCASTMEM_WAVE

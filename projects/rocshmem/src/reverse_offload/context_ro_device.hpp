@@ -158,6 +158,9 @@ class ROContext : public Context {
                             int pe_start, int log_pe_stride, int pe_size,
                             long *p_sync);  // NOLINT(runtime/int)
 
+  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                            int nelems, int pe_root);
+                            
   template <typename T>
   __device__ int broadcast_wave(rocshmem_team_t team,
                                 T *dest, const T* source, int nelement, int PE_root);
