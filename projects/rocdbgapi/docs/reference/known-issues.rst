@@ -16,16 +16,8 @@ The ROCdbgapi library is compatible with the following interface versions:
 
 - **AMD GPU driver version**
 
-  - See ``KFD_IOCTL_MAJOR_VERSION`` and ``KFD_IOCTL_MINOR_VERSION`` in ``src/linux/kfd_ioctl.h``, which conforms to `semver <http://semver.org/>`_.
-
-- **AMD GPU driver debug ioctl version**
-
-  - See ``KFD_IOCTL_DBG_MAJOR_VERSION`` and ``KFD_IOCTL_DBG_MINOR_VERSION`` in ``src/linux/kfd_ioctl.h``, which conforms to `semver <http://semver.org/>`_.
+  - The driver requirement is ``KFD_IOCTL_MAJOR_VERSION=1`` and ``KFD_IOCTL_MINOR_VERSION>=13`` in ``src/linux/kfd_ioctl.h``, which conforms to `semver <http://semver.org/>`_.
 
 - **ROCm runtime r_debug ABI version**
 
   - See ``ROCR_RDEBUG_VERSION`` in ``src/rocr_rdebug.h``.
-
-- **Architectures and firmware versions**
-
-  - See ``s_gfxip_lookup_table`` in ``src/os_driver.cpp``.
