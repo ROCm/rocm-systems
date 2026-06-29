@@ -17,7 +17,7 @@
 //   Paired tests share a base name (e.g. vgpr_waitcnt / vgpr_waitcnt_race).
 //
 // TODO(newling): Add wave-32 (RDNA 3.5) cross-wave LDS test. Requires:
-//   1. An amdgpu_rdna3_5_kmd.json config with wave_front_size=32
+//   1. A gfx1150_rdna3_5_kmd.json config with wave_front_size=32
 //   2. Compiling with --offload-arch=gfx1150 (or similar RDNA 3.5 target)
 //   3. A separate ctest entry pointing at the RDNA 3.5 config
 //   The test itself is the same lds_cross_wave pattern but with the

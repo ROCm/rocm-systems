@@ -845,18 +845,10 @@ def _load_test_categories() -> Optional[dict]:
     """Load and compile test_categories.yaml from rocprofsys_tests_dir.
 
     Reads the YAML that CMake installs/configures into
-    ``<build|install>/share/rocprofiler-systems/tests`` (resolved via
-    ``get_rocprof_config().rocprofsys_tests_dir``) rather than the
-    source-tree copy, so build-tree edits and the installed layout both
-    pick up the right file.
+    ``<build|install>/share/rocprofiler-systems/tests``
 
     Returns ``None`` (with a single STDERR warning) when the YAML is missing or
-    PyYAML isn't importable - the conftest stays usable in sparse / standalone
-    checkouts that don't carry the test-filter standardisation files.
-
-    Pattern semantics intentionally mirror CTest ``--tests-regex`` (substring
-    regex via ``re.search``), so legacy patterns from
-    test_rocprofiler_systems.py port over unchanged.
+    PyYAML isn't importable
     """
     if yaml is None:
         print(
@@ -890,12 +882,9 @@ def _load_test_categories() -> Optional[dict]:
     def _compile_list(patterns):
         compiled = []
         for p in patterns or []:
-            # A YAML alias of a sequence (e.g. `- *common_excludes`) substitutes
-            # the anchored list as a single element, producing a list-of-lists
-            # here. Flatten one level so callers can mix shared anchors with
-            # per-tier additions, mirroring the idiom at
-            # shared/ctest/parse_test_categories.py (`exclude_gpu.test_patterns`,
-            # see comment "test_patterns may be either a flat list or list-of-lists").
+            # Flatten one level: a YAML alias item (e.g. `- *common_excludes`)
+            # expands to a nested list, so callers can mix a shared anchor with
+            # per-tier additions.
             for pattern in p if isinstance(p, list) else [p]:
                 try:
                     compiled.append(re.compile(pattern))
@@ -907,15 +896,9 @@ def _load_test_categories() -> Optional[dict]:
         return compiled
 
     def _flatten_labels(values):
-        # Mirror _compile_list's one-level flattening for plain label lists
-        # (excluded_labels / labels). A YAML alias of a sequence (e.g.
-        # `- *heavy_labels`) substitutes the anchored list as a single element,
-        # so callers can mix a shared anchor with per-tier additions, e.g.
-        #   excluded_labels:
-        #     - *heavy_labels
-        #     - "openmp"
-        # Without flattening, set([[...], "openmp"]) raises TypeError on the
-        # unhashable inner list.
+        # One-level flatten (like _compile_list) so a YAML alias item expands
+        # to a nested list without raising TypeError on the unhashable inner
+        # list when set()-ed.
         flat = []
         for v in values or []:
             flat.extend(v if isinstance(v, list) else [v])
@@ -925,13 +908,11 @@ def _load_test_categories() -> Optional[dict]:
     for tier in TIER_ORDER:
         cfg = (data.get("test_categories", {}) or {}).get(tier) or {}
         tier_cfg[tier] = {
-            "include": _compile_list(cfg.get("test_patterns")),
-            "exclude": _compile_list(cfg.get("exclude")),
-            "excluded_labels": set(_flatten_labels(cfg.get("excluded_labels"))),
-            # Supplementary CTest labels declared by the tier (e.g. quick's
-            # `pre-commit` / `smoke`, comprehensive's `nightly`). Emitted in
-            # addition to the tier name by _resolve_tier_labels().
-            "labels": _flatten_labels(cfg.get("labels")),
+            "include": _compile_list(cfg.get("regex_includes")),
+            "exclude": _compile_list(cfg.get("regex_excludes")),
+            "label_excludes": _compile_list(cfg.get("label_excludes")),
+            "label_includes": _compile_list(cfg.get("label_includes")),
+            "labels": _flatten_labels(cfg.get("added_supplementary_labels")),
         }
 
     return {"tiers": tier_cfg}
@@ -940,23 +921,21 @@ def _load_test_categories() -> Optional[dict]:
 def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
     """Return tier labels (subset of TIER_ORDER) for *test_name*.
 
-    Each tier is evaluated independently. A test is granted tier T iff:
-      * its name matches any of T's ``test_patterns``,
-      * its name does NOT match any of T's ``exclude`` patterns, AND
-      * none of its ``existing_labels`` (pytest-marker-derived) appear in
-        T's ``excluded_labels``.
+    Each tier is evaluated independently with the *exact* CTest filter model.
+    The four YAML axes map to CTest options as (labels are pytest MARKERs):
+      * ``regex_includes`` -> ``-R``   * ``regex_excludes`` -> ``-E``
+      * ``label_includes``  -> ``-L``  * ``label_excludes`` -> ``-LE``
 
     The rocJenkins-style cascade ("matching quick also yields standard /
     comprehensive / full") is achieved by having those higher tiers use
-    broad include patterns (typically ``test_patterns: [".*"]``). Per-tier
-    ``exclude`` punches a hole through the cascade for individual tests:
-    listing ``testA`` under ``standard.exclude`` drops ``standard`` from
-    its label set even if ``quick`` / ``comprehensive`` / ``full`` match.
+    broad include patterns (typically ``regex_includes: [".*"]``). Per-tier
+    ``regex_excludes`` punches a hole through the cascade for individual
+    tests: listing ``testA`` under ``standard.regex_excludes`` drops
+    ``standard`` from its label set even if ``quick`` / ``comprehensive`` /
+    ``full`` match.
 
     In addition to the tier name, each matched tier contributes its
-    supplementary ``labels:`` (e.g. ``pre-commit`` / ``smoke`` for quick,
-    ``nightly`` for comprehensive), so ``ctest -L <alias>`` works for the
-    aliases declared in test_categories.yaml.
+    ``added_supplementary_labels:`` to the test's labels.
     """
     categories = _load_test_categories()
     if not categories:
@@ -965,11 +944,24 @@ def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
     extra_labels: set[str] = set()
     for i, tier in enumerate(TIER_ORDER):
         cfg = categories["tiers"].get(tier) or {}
-        if not any(p.search(test_name) for p in cfg.get("include", [])):
+        include_regex = cfg.get("include", [])
+        include_labels = cfg.get("label_includes", [])
+        exclude_regex = cfg.get("exclude", [])
+        exclude_labels = cfg.get("label_excludes", [])
+        # -R: an empty include is a pass-through; otherwise the NAME must match.
+        if include_regex and not any(p.search(test_name) for p in include_regex):
             continue
-        if any(p.search(test_name) for p in cfg.get("exclude", [])):
+        # -L: an empty include is a pass-through; otherwise a marker label must
+        # match. AND-combined with the -R axis above, exactly like CTest.
+        if include_labels and not any(
+            p.search(label) for p in include_labels for label in existing_labels
+        ):
             continue
-        if existing_labels & cfg.get("excluded_labels", set()):
+        # -E: NAME matching any exclude pattern vetoes the test.
+        if any(p.search(test_name) for p in exclude_regex):
+            continue
+        # -LE: any marker label matching an exclude pattern vetoes the test.
+        if any(p.search(label) for p in exclude_labels for label in existing_labels):
             continue
         matched_indices.append(i)
         extra_labels.update(cfg.get("labels", []))

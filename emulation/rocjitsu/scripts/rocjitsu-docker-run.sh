@@ -28,7 +28,7 @@
 #
 # Environment variables:
 #   RJ_BUILD_DIR   - Host build directory (default: ./build)
-#   RJ_CONFIG      - Config file (default: configs/amdgpu_cdna4_kmd.json)
+#   RJ_CONFIG      - Config file (default: configs/gfx950_cdna4_kmd.json)
 #   RJ_INSTALL_DIR - Install prefix inside container (default: /opt/rocm)
 #   RJ_INSTALLED   - Set to 1 if rocjitsu is pre-installed in the image
 
@@ -66,7 +66,7 @@ shift
 # Common environment for both modes.
 ENV_ARGS=(
     -e "LD_PRELOAD=${INSTALL_DIR}/lib/librocjitsu_kmd.so"
-    -e "RJ_CONFIG=${INSTALL_DIR}/share/rocjitsu/configs/amdgpu_cdna4_kmd.json"
+    -e "RJ_CONFIG=${INSTALL_DIR}/share/rocjitsu/configs/gfx950_cdna4_kmd.json"
     -e "HSA_ENABLE_SDMA=1"
     -e "ROCPROFILER_REGISTER_ENABLED=0"
 )
@@ -76,7 +76,7 @@ VOLUME_ARGS=()
 if [[ "${RJ_INSTALLED:-0}" != "1" ]]; then
     # Bind-mount mode: mount host files into the container at the install paths.
     BUILD_DIR="${RJ_BUILD_DIR:-${PROJECT_DIR}/build}"
-    CONFIG="${RJ_CONFIG:-${PROJECT_DIR}/configs/amdgpu_cdna4_kmd.json}"
+    CONFIG="${RJ_CONFIG:-${PROJECT_DIR}/configs/gfx950_cdna4_kmd.json}"
     SCHEMA="${PROJECT_DIR}/schemas/simulation_config.fbs"
     LIB_PATH="${BUILD_DIR}/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so"
 
@@ -92,7 +92,7 @@ if [[ "${RJ_INSTALLED:-0}" != "1" ]]; then
 
     VOLUME_ARGS=(
         -v "${LIB_PATH}:${INSTALL_DIR}/lib/librocjitsu_kmd.so:ro"
-        -v "${CONFIG}:${INSTALL_DIR}/share/rocjitsu/configs/amdgpu_cdna4_kmd.json:ro"
+        -v "${CONFIG}:${INSTALL_DIR}/share/rocjitsu/configs/gfx950_cdna4_kmd.json:ro"
         -v "${SCHEMA}:${INSTALL_DIR}/share/rocjitsu/schemas/simulation_config.fbs:ro"
     )
 
