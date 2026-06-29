@@ -41,6 +41,16 @@ if(UNIT_TESTS)
 endif()
 
 if(BUILD_INTEGRATION_TESTS)
+    find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import elftools"
+        RESULT_VARIABLE PYELFTOOLS_IMPORT_RESULT
+        OUTPUT_QUIET ERROR_QUIET)
+    if(NOT PYELFTOOLS_IMPORT_RESULT EQUAL 0)
+        message(FATAL_ERROR "Python module pyelftools is required for ATT integration tests. "
+                            "Install pyelftools or configure with -DBUILD_INTEGRATION_TESTS=OFF.")
+    endif()
+
     configure_file(unpack.sh unpack.sh COPYONLY USE_SOURCE_PERMISSIONS)
     configure_file(diff.sh diff.sh COPYONLY USE_SOURCE_PERMISSIONS)
     file(COPY "control" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/")
@@ -69,10 +79,10 @@ if(BUILD_INTEGRATION_TESTS)
     set(LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(SANITIZED_LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder-sanitized${CMAKE_SHARED_LIBRARY_SUFFIX})
 
-    add_test(NAME csv-launch COMMAND python3 ${CSV_PY} --lib ${LIB_PATH})
+    add_test(NAME csv-launch COMMAND ${Python3_EXECUTABLE} ${CSV_PY} --lib ${LIB_PATH})
     set_tests_properties(csv-launch PROPERTIES TIMEOUT 5 LABELS "integration-tests" WORKING_DIRECTORY ${TEST_BIN_DIR})
 
-    add_test(NAME att-launch COMMAND python3 ${ATT_TOOL_PY} --help)
+    add_test(NAME att-launch COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_PY} --help)
     set_tests_properties(att-launch PROPERTIES TIMEOUT 5 LABELS "integration-tests" WORKING_DIRECTORY
                                                ${TEST_BIN_DIR})
 
@@ -120,12 +130,12 @@ if(BUILD_INTEGRATION_TESTS)
         configure_file("data/${DATA}.tar.gz" "data/${DATA}.tar.gz" COPYONLY USE_SOURCE_PERMISSIONS)
         configure_file("diff.py" "diff.py" COPYONLY USE_SOURCE_PERMISSIONS)
 
-        add_test(NAME ${DATA}_csv COMMAND python3 ${CSV_PY} --lib ${LIB_PATH} "${TEST_BIN_DIR}/${DATA}/*.att"
-                                          "${TEST_BIN_DIR}/control/${DATA}/*.csv")
+        add_test(NAME ${DATA}_csv COMMAND ${Python3_EXECUTABLE} ${CSV_PY} --lib ${LIB_PATH}
+                                          "${TEST_BIN_DIR}/${DATA}/*.att" "${TEST_BIN_DIR}/control/${DATA}/*.csv")
         set_tests_properties(${DATA}_csv PROPERTIES WORKING_DIRECTORY ${TEST_BIN_DIR} FIXTURES_REQUIRED unpack_data)
 
         # Sanitized test: always use csv_test.py with the sanitized library
-        add_test(NAME ${DATA}_sanitize COMMAND python3 ${CSV_PY} --lib ${SANITIZED_LIB_PATH}
+        add_test(NAME ${DATA}_sanitize COMMAND ${Python3_EXECUTABLE} ${CSV_PY} --lib ${SANITIZED_LIB_PATH}
                                                "${TEST_BIN_DIR}/${DATA}/*.att" "${TEST_BIN_DIR}/control/${DATA}/*.csv")
         set_tests_properties(
             ${DATA}_sanitize
@@ -148,7 +158,7 @@ if(BUILD_INTEGRATION_TESTS)
 
         if(NOT USES_VCMPX)
             add_test(NAME ${DATA}_execute
-                     COMMAND python3 ${ATT_TOOL_PY} --lib ${LIB_PATH} --base-name 1_results
+                     COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_PY} --lib ${LIB_PATH} --base-name 1_results
                              ${TEST_BIN_DIR}/${DATA})
             set_tests_properties(
                 ${DATA}_execute

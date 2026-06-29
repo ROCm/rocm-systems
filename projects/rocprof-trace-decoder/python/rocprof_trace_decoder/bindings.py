@@ -23,6 +23,8 @@ from .records import (
     WaveState,
 )
 
+BytesLike = bytes | bytearray | memoryview
+
 
 class DecoderError(RuntimeError):
     def __init__(self, status: int, message: str | None = None):
@@ -274,6 +276,10 @@ class Decoder:
         self._callbacks.clear()
         self._check(status)
 
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise DecoderError(DecoderStatus.ERROR_INVALID_ARGUMENT, "Decoder handle is closed")
+
     def _configure_library(self) -> None:
         lib = self._lib
         lib.rocprof_trace_decoder_create_handle.argtypes = [ctypes.POINTER(_Handle)]
@@ -345,8 +351,66 @@ class Decoder:
         load_id: int,
         load_addr: int,
         load_size: int,
-        data: bytes | bytearray | memoryview,
+        data: BytesLike,
     ) -> None:
+        """Compatibility wrapper for the original data-loading argument order."""
+        self._load_code_object_bytes(
+            data,
+            load_id=load_id,
+            load_addr=load_addr,
+            load_size=load_size,
+        )
+
+    def load_code_object(
+        self,
+        data: BytesLike | str | os.PathLike[str],
+        load_id: int,
+        load_addr: int,
+        load_size: int,
+    ) -> None:
+        """Load a code object into this decoder handle.
+
+        *data* may be a bytes-like object or a filesystem path. New code that
+        wants to be explicit about paths can use `load_code_object_file()`.
+        """
+        if _is_bytes_like(data):
+            self._load_code_object_bytes(
+                data,
+                load_id=load_id,
+                load_addr=load_addr,
+                load_size=load_size,
+            )
+        else:
+            self.load_code_object_file(
+                data,
+                load_id=load_id,
+                load_addr=load_addr,
+                load_size=load_size,
+            )
+
+    def load_code_object_file(
+        self,
+        path: str | os.PathLike[str],
+        load_id: int,
+        load_addr: int,
+        load_size: int,
+    ) -> None:
+        self._load_code_object_bytes(
+            Path(path).read_bytes(),
+            load_id=load_id,
+            load_addr=load_addr,
+            load_size=load_size,
+        )
+
+    def _load_code_object_bytes(
+        self,
+        data: BytesLike,
+        *,
+        load_id: int,
+        load_addr: int,
+        load_size: int,
+    ) -> None:
+        self._ensure_open()
         blob = bytes(data)
         buf = ctypes.create_string_buffer(blob)
         status = self._lib.rocprof_trace_decoder_codeobj_load(
@@ -354,16 +418,8 @@ class Decoder:
         )
         self._check(status)
 
-    def load_code_object(
-        self,
-        path: str | os.PathLike[str],
-        load_id: int,
-        load_addr: int,
-        load_size: int,
-    ) -> None:
-        self.load_code_object_data(load_id, load_addr, load_size, Path(path).read_bytes())
-
     def unload_code_object(self, load_id: int) -> None:
+        self._ensure_open()
         status = self._lib.rocprof_trace_decoder_codeobj_unload(self._handle, load_id)
         self._check(status)
 
@@ -377,7 +433,7 @@ class Decoder:
 
     def parse_chunks(
         self,
-        chunks: Iterable[bytes | bytearray | memoryview],
+        chunks: Iterable[BytesLike],
         isa: IsaProvider | None = None,
         on_batch: Callable[[RecordType, list[object] | int], None] | None = None,
     ) -> TraceRecords:
@@ -389,12 +445,11 @@ class Decoder:
 
     def parse(
         self,
-        data: bytes | bytearray | memoryview,
+        data: BytesLike,
         isa: IsaProvider | None = None,
         on_batch: Callable[[RecordType, list[object] | int], None] | None = None,
     ) -> TraceRecords:
-        if self._closed:
-            raise DecoderError(DecoderStatus.ERROR_INVALID_ARGUMENT, "Decoder handle is closed")
+        self._ensure_open()
 
         raw = bytes(data)
         records = TraceRecords()
@@ -666,4 +721,8 @@ def merge_records(dst: TraceRecords, src: TraceRecords) -> TraceRecords:
     return dst
 
 
-__all__ = ["Decoder", "DecoderError", "IsaProvider", "merge_records"]
+def _is_bytes_like(value: object) -> bool:
+    return isinstance(value, (bytes, bytearray, memoryview))
+
+
+__all__ = ["BytesLike", "Decoder", "DecoderError", "IsaProvider", "merge_records"]

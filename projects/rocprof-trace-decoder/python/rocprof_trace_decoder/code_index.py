@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import csv
 import json
-import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
-from .records import Instruction, Pc, Wave
+from .records import Pc, Wave
 
 CODE_HEADER = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle"
 
@@ -43,15 +42,17 @@ class CodeIndex:
 
     @classmethod
     def from_code_json(cls, path: str | Path) -> "CodeIndex":
-        code_path = Path(path)
-        doc = json.loads(code_path.read_text())
+        return cls.from_document(json.loads(Path(path).read_text()))
+
+    @classmethod
+    def from_document(cls, doc: dict) -> "CodeIndex":
         entries: list[CodeEntry] = []
 
         for row in doc.get("code", []):
             if len(row) < 10:
                 continue
             inst = str(row[0])
-            if inst.startswith(";"):
+            if _is_code_label(inst):
                 continue
             pc = Pc(address=int(row[5]), code_object_id=int(row[4]))
             entries.append(
@@ -67,9 +68,7 @@ class CodeIndex:
                 )
             )
 
-        index = cls(entries, doc)
-        index.path = code_path
-        return index
+        return cls(entries, json.loads(json.dumps(doc)))
 
     @classmethod
     def from_stats_csv(cls, paths: Iterable[str | Path]) -> "CodeIndex":
@@ -80,9 +79,12 @@ class CodeIndex:
                 for row in reader:
                     if not row:
                         continue
-                    pc = Pc(address=int(row["Vaddr"].strip(), 0), code_object_id=int(row["CodeObj"].strip(), 0))
+                    pc = Pc(
+                        address=int(row["Vaddr"].strip(), 0),
+                        code_object_id=int(row["CodeObj"].strip(), 0),
+                    )
                     inst = row["Instruction"].strip()
-                    if inst.startswith(";"):
+                    if _is_code_label(inst):
                         continue
 
                     entry = entries.setdefault(
@@ -140,7 +142,7 @@ class CodeIndex:
         rows = []
         seen: set[Pc] = set()
         for row in self.document.get("code", []):
-            if len(row) < 10 or str(row[0]).startswith(";"):
+            if len(row) < 10 or _is_code_label(str(row[0])):
                 rows.append(row)
                 continue
             pc = Pc(address=int(row[5]), code_object_id=int(row[4]))
@@ -180,24 +182,42 @@ class CodeIndex:
     def write_stats_csv(self, path: str | Path) -> None:
         with Path(path).open("w", newline="") as fh:
             writer = csv.writer(fh)
-            writer.writerow(["CodeObj", "Vaddr", "Instruction", "Hitcount", "Latency", "Stall", "Idle", "Source"])
-            for entry in sorted(self.entries.values(), key=lambda e: (e.pc.code_object_id, e.pc.address)):
-                writer.writerow(
-                    [
-                        entry.pc.code_object_id,
-                        entry.pc.address,
-                        entry.inst,
-                        entry.hitcount,
-                        entry.latency,
-                        entry.stall,
-                        entry.idle,
-                        entry.source,
-                    ]
-                )
+            writer.writerow(
+                [
+                    "CodeObj",
+                    "Vaddr",
+                    "Instruction",
+                    "Hitcount",
+                    "Latency",
+                    "Stall",
+                    "Idle",
+                    "Source",
+                ]
+            )
+            seen: set[Pc] = set()
+            for row in self.document.get("code", []):
+                if len(row) < 10:
+                    continue
+                pc = Pc(address=int(row[5]), code_object_id=int(row[4]))
+                if _is_code_label(str(row[0])):
+                    writer.writerow([pc.code_object_id, pc.address, row[0], 0, 0, 0, 0, row[3]])
+                    continue
+                entry = self.entries.get(pc)
+                if entry is not None:
+                    _write_stats_row(writer, entry)
+                    seen.add(pc)
+            for entry in sorted(
+                (entry for pc, entry in self.entries.items() if pc not in seen),
+                key=lambda e: (e.pc.code_object_id, e.pc.address),
+            ):
+                _write_stats_row(writer, entry)
 
     def validate_expected(self) -> list[str]:
         errors = []
-        for entry in sorted(self.entries.values(), key=lambda e: (e.pc.code_object_id, e.pc.address)):
+        for entry in sorted(
+            self.entries.values(),
+            key=lambda e: (e.pc.code_object_id, e.pc.address),
+        ):
             if (
                 entry.hitcount == entry.expected_hitcount
                 and entry.latency == entry.expected_latency
@@ -233,22 +253,20 @@ def _int_cell(value: str | None) -> int:
     return int(value, 0) if value else 0
 
 
-def copy_snapshots(src_dir: str | Path, dst_dir: str | Path) -> None:
-    src = Path(src_dir)
-    dst = Path(dst_dir)
-    snap = src / "snapshots.json"
-    if snap.exists() and snap.resolve() != (dst / "snapshots.json").resolve():
-        shutil.copy2(snap, dst / "snapshots.json")
-    for path in src.glob("source_*"):
-        if path.is_file() and path.resolve() != (dst / path.name).resolve():
-            shutil.copy2(path, dst / path.name)
+def _is_code_label(inst: str) -> bool:
+    return inst.startswith(";") or inst.startswith("label")
 
 
-def touched_pcs(waves: Iterable[Wave]) -> set[Pc]:
-    pcs: set[Pc] = set()
-    for wave in waves:
-        for inst in wave.instructions:
-            if inst.pc.code_object_id == 0 and inst.pc.address == 0:
-                continue
-            pcs.add(inst.pc)
-    return pcs
+def _write_stats_row(writer: object, entry: CodeEntry) -> None:
+    writer.writerow(
+        [
+            entry.pc.code_object_id,
+            entry.pc.address,
+            entry.inst,
+            entry.hitcount,
+            entry.latency,
+            entry.stall,
+            entry.idle,
+            entry.source,
+        ]
+    )

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+import shutil
+from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from .records import (
 )
 
 TOOL_VERSION = "3.1.0"
+DEFAULT_RUN_BASE_NAME = "att"
 VALID_OUTPUT_FORMATS = frozenset({"csv", "json"})
 
 
@@ -353,3 +355,69 @@ def _stringify_nested(value: object) -> object:
 
 def _write_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2))
+
+
+def run_output_dir(
+    output_root: str | Path,
+    base_name: str,
+    run: int,
+    *,
+    use_root: bool = False,
+) -> Path:
+    root = Path(output_root)
+    if use_root:
+        return root
+    return root / f"ui_output_{base_name}{run}"
+
+
+def write_code_json(output_dir: str | Path, code_index: CodeIndex) -> None:
+    code_index.write_code_json(Path(output_dir) / "code.json")
+
+
+def write_stats_csv(output_dir: str | Path, code_index: CodeIndex, run_dir_name: str) -> None:
+    code_index.write_stats_csv(Path(output_dir) / f"stats_{run_dir_name}.csv")
+
+
+def write_source_snapshots(source_paths: Iterable[str | Path], output_dir: str | Path) -> int:
+    """Write RCV source snapshots and return the number of copied files."""
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    tree: dict = {}
+    seen: OrderedDict[Path, None] = OrderedDict()
+    for raw in source_paths:
+        path = Path(raw)
+        if path and path.is_file():
+            seen.setdefault(path, None)
+
+    for idx, source in enumerate(seen):
+        filename = f"source_{idx}_{source.name}"
+        shutil.copyfile(source, out_dir / filename)
+        _insert_snapshot_path(tree, source, filename)
+
+    if seen:
+        _write_json(out_dir / "snapshots.json", tree)
+    return len(seen)
+
+
+def copy_source_snapshots(src_dir: str | Path, dst_dir: str | Path) -> None:
+    src = Path(src_dir)
+    dst = Path(dst_dir)
+    snap = src / "snapshots.json"
+    if snap.exists() and snap.resolve() != (dst / "snapshots.json").resolve():
+        shutil.copy2(snap, dst / "snapshots.json")
+    for path in src.glob("source_*"):
+        if path.is_file() and path.resolve() != (dst / path.name).resolve():
+            shutil.copy2(path, dst / path.name)
+
+
+def _insert_snapshot_path(tree: dict, source: Path, filename: str) -> None:
+    node = tree
+    for idx, part in enumerate(source.parts):
+        if idx == len(source.parts) - 1:
+            node[part] = filename
+        else:
+            child = node.setdefault(part, {})
+            if not isinstance(child, dict):
+                return
+            node = child

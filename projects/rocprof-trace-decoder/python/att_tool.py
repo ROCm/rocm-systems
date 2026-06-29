@@ -3,26 +3,33 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from collections import defaultdict
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from rocprof_trace_decoder.att import AttTrace, generate_att_outputs
+from rocprof_trace_decoder.code_index import CodeIndex
+from rocprof_trace_decoder.codegen import CodeObject, generate_code_artifacts
+from rocprof_trace_decoder.rcv import (
+    copy_source_snapshots,
+    write_code_json,
+    write_source_snapshots,
+)
 
 ATT_RE = re.compile(r"_shader_engine_(\d+)_(\d+)\.att$", re.IGNORECASE)
 CODE_SUFFIXES = {".out", ".co", ".hsaco"}
 
 
+@dataclass
 class _Inputs:
-    def __init__(self) -> None:
-        self.att_files: list[Path] = []
-        self.code_objects: list[Path] = []
-        self.code_json: Path | None = None
+    att_files: list[Path] = field(default_factory=list)
+    code_objects: list[Path] = field(default_factory=list)
+    code_json: Path | None = None
 
 
 def generate_outputs_from_files(
@@ -36,35 +43,55 @@ def generate_outputs_from_files(
 ) -> list[Path]:
     inputs = _discover_inputs(files)
     if not inputs.att_files and not inputs.code_objects and inputs.code_json is None:
-        raise SystemExit("No .att files, code.json, or code object files were provided or discovered.")
+        raise SystemExit(
+            "No .att files, code.json, or code object files were provided or discovered."
+        )
 
     base_input = _base_input(inputs)
     output_base_name = base_name or base_input.parent.name or "att"
     base_dir = Path(output_dir).expanduser().resolve() if output_dir else base_input.parent
 
     code_json = inputs.code_json
-    code_dir = base_dir if output_dir else _code_dir(inputs)
+    code_index = None
+    source_paths: tuple[Path, ...] = ()
+    snapshot_source_dir = code_json.parent if code_json else None
+    code_dir = Path(output_dir).expanduser().resolve() if output_dir else _code_dir(inputs)
     generated_code = False
     if inputs.code_objects and (code_json is None or force_codegen):
-        code_dir.mkdir(parents=True, exist_ok=True)
-        code_json = _run_generate_code(inputs.code_objects, code_dir)
+        artifacts = generate_code_artifacts(_code_objects_from_paths(inputs.code_objects))
+        code_index = artifacts.code_index
+        source_paths = artifacts.source_paths
+        code_json = None
+        snapshot_source_dir = None
         generated_code = True
+    elif code_json is not None:
+        code_index = CodeIndex.from_code_json(code_json)
 
     if not inputs.att_files:
-        if generated_code:
-            return [code_dir]
+        if code_index is not None:
+            if generated_code or output_dir:
+                code_dir.mkdir(parents=True, exist_ok=True)
+                write_code_json(code_dir, code_index)
+                write_source_snapshots(source_paths, code_dir)
+                return [code_dir]
+            return [code_json.parent] if code_json else []
         return [code_json.parent] if code_json else []
 
     traces = _traces_from_att_paths(inputs.att_files)
-    return generate_att_outputs(
+    outputs = generate_att_outputs(
         traces,
-        code_json=code_json,
+        code_index=code_index,
+        source_paths=source_paths,
         output_dir=base_dir,
         lib_path=lib_path,
         formats=formats,
         base_name=output_base_name,
         on_warning=_print_warning,
     )
+    if snapshot_source_dir:
+        for output in outputs:
+            copy_source_snapshots(snapshot_source_dir, output)
+    return outputs
 
 
 def _print_warning(path: Path, message: str) -> None:
@@ -158,14 +185,34 @@ def _next_available_shader_engine(used: set[int], start: int) -> int:
     return shader_engine
 
 
-def _run_generate_code(code_objects: list[Path], output_dir: Path) -> Path:
-    script = Path(__file__).resolve().parent / "generate_code.py"
-    cmd = [sys.executable, str(script), *[str(p) for p in code_objects]]
-    subprocess.run(cmd, cwd=output_dir, check=True)
-    code_json = output_dir / "code.json"
-    if not code_json.exists():
-        raise RuntimeError(f"generate_code.py did not produce {code_json}")
-    return code_json
+def _code_objects_from_paths(paths: list[Path]) -> list[CodeObject]:
+    parsed = [(path, _code_object_id_from_path(path)) for path in paths]
+    untagged = [str(path) for path, codeobj_id in parsed if codeobj_id is None]
+    parsed_ids = {codeobj_id for _path, codeobj_id in parsed if codeobj_id is not None}
+    if len(untagged) > 1:
+        raise SystemExit(
+            "Cannot infer code object IDs for multiple unnamed inputs: "
+            + ", ".join(untagged)
+        )
+    if untagged and 0 in parsed_ids:
+        raise SystemExit(
+            f"Cannot assign code object id 0 to {untagged[0]}: another input already uses id 0."
+        )
+    return [
+        CodeObject(path=path, code_object_id=codeobj_id if codeobj_id is not None else 0)
+        for path, codeobj_id in parsed
+    ]
+
+
+def _code_object_id_from_path(path: Path) -> int | None:
+    stem = path.stem
+    pos = stem.rfind("_")
+    if pos == -1:
+        return None
+    try:
+        return int(stem[pos + 1:])
+    except ValueError:
+        return None
 
 
 def build_argparser() -> argparse.ArgumentParser:
