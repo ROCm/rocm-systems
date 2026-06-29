@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -70,6 +71,45 @@ std::string hash_hex(uint64_t lo, uint64_t hi) {
 const char* event_type_name(uint16_t type) {
   if (type < HRR_API_COUNT) return hrr_api_names[type];
   return "UNKNOWN";
+}
+
+static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
+  std::vector<fs::path> dirs;
+  if (!fs::exists(root) || !fs::is_directory(root)) return dirs;
+  for (const auto& ent : fs::directory_iterator(root)) {
+    if (!ent.is_directory()) continue;
+    const std::string name = ent.path().filename().string();
+    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+      dirs.push_back(ent.path());
+  }
+  std::sort(dirs.begin(), dirs.end());
+  return dirs;
+}
+
+static bool resolve_archive_path(const std::string& input, std::string& resolved) {
+  fs::path path(input);
+  if (fs::exists(path / "events.bin")) {
+    resolved = path.string();
+    return true;
+  }
+
+  std::vector<fs::path> pid_dirs = find_pid_subarchives(path);
+  if (pid_dirs.empty()) {
+    fprintf(stderr, "[HRR] Cannot open %s\n", (path / "events.bin").string().c_str());
+    return false;
+  }
+  if (pid_dirs.size() == 1) {
+    resolved = pid_dirs.front().string();
+    return true;
+  }
+
+  fprintf(stderr,
+          "[HRR] Archive root %s contains multiple process captures; "
+          "point hrr-playback at a specific pid directory:\n",
+          input.c_str());
+  for (const auto& dir : pid_dirs)
+    fprintf(stderr, "[HRR]   %s\n", dir.string().c_str());
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,9 +208,12 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
 // ---------------------------------------------------------------------------
 
 bool load_archive(const std::string& path, Archive& archive) {
-  archive.path = path;
+  std::string archive_dir;
+  if (!resolve_archive_path(path, archive_dir))
+    return false;
+  archive.path = archive_dir;
 
-  std::string events_path = path + "/events.bin";
+  std::string events_path = archive_dir + "/events.bin";
   FILE* f = fopen(events_path.c_str(), "rb");
   if (!f) {
     fprintf(stderr, "[HRR] Cannot open %s\n", events_path.c_str());
@@ -502,7 +545,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   // Enumerate blobs
-  std::string blobs_dir = path + "/blobs";
+  std::string blobs_dir = archive_dir + "/blobs";
   if (fs::exists(blobs_dir)) {
     for (auto& entry : fs::recursive_directory_iterator(blobs_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".blob") {
@@ -513,7 +556,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   // Enumerate code objects
-  std::string co_dir = path + "/code_objects";
+  std::string co_dir = archive_dir + "/code_objects";
   if (fs::exists(co_dir)) {
     for (auto& entry : fs::directory_iterator(co_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".hsaco") {

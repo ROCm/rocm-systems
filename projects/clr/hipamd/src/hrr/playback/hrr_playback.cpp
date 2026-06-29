@@ -45,12 +45,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 #define HIP_CHECK(call)                                                       \
   do {                                                                        \
@@ -86,6 +90,134 @@ static double env_double_or(const char* name, double fallback) {
 // ---------------------------------------------------------------------------
 // --info mode: print archive summary without touching the GPU
 // ---------------------------------------------------------------------------
+
+struct ProcessInfo {
+  uint64_t pid = 0;
+  uint64_t parent_pid = 0;
+  uint64_t event_count = 0;
+  uint64_t blob_count = 0;
+  bool complete = false;
+};
+
+static bool read_process_manifest(const fs::path& path, ProcessInfo& out) {
+  FILE* f = fopen(path.string().c_str(), "r");
+  if (!f) return false;
+
+  ProcessInfo info{};
+  bool saw_pid = false;
+  char line[256];
+  while (fgets(line, sizeof(line), f)) {
+    unsigned long long u = 0;
+    char b[8] = {};
+    if (sscanf(line, " \"pid\": %llu", &u) == 1) {
+      info.pid = static_cast<uint64_t>(u);
+      saw_pid = true;
+      continue;
+    }
+    if (sscanf(line, " \"parent_pid\": %llu", &u) == 1) {
+      info.parent_pid = static_cast<uint64_t>(u);
+      continue;
+    }
+    if (sscanf(line, " \"event_count\": %llu", &u) == 1) {
+      info.event_count = static_cast<uint64_t>(u);
+      continue;
+    }
+    if (sscanf(line, " \"blob_count\": %llu", &u) == 1) {
+      info.blob_count = static_cast<uint64_t>(u);
+      continue;
+    }
+    if (sscanf(line, " \"complete\": %7[^,\n ]", b) == 1) {
+      info.complete = (strcmp(b, "true") == 0);
+      continue;
+    }
+  }
+  fclose(f);
+  if (!saw_pid) return false;
+  out = info;
+  return true;
+}
+
+static bool read_root_owner_pid(const fs::path& root, uint64_t& owner_pid) {
+  FILE* f = fopen((root / "manifest.json").string().c_str(), "r");
+  if (!f) return false;
+
+  bool found = false;
+  char line[256];
+  while (fgets(line, sizeof(line), f)) {
+    unsigned long long u = 0;
+    if (sscanf(line, " \"owner_pid\": %llu", &u) == 1) {
+      owner_pid = static_cast<uint64_t>(u);
+      found = true;
+      break;
+    }
+  }
+  fclose(f);
+  return found;
+}
+
+static uint64_t derive_owner_pid(const std::vector<std::pair<fs::path, ProcessInfo>>& processes) {
+  if (processes.empty()) return 0;
+  for (const auto& candidate : processes) {
+    for (const auto& child : processes) {
+      if (child.second.parent_pid == candidate.second.pid)
+        return candidate.second.pid;
+    }
+  }
+  return processes.front().second.pid;
+}
+
+static bool print_root_info(const std::string& archive_path) {
+  fs::path root(archive_path);
+  if (fs::exists(root / "events.bin") || !fs::exists(root) || !fs::is_directory(root))
+    return false;
+
+  std::vector<std::pair<fs::path, ProcessInfo>> processes;
+  for (const auto& ent : fs::directory_iterator(root)) {
+    if (!ent.is_directory()) continue;
+    const std::string name = ent.path().filename().string();
+    if (name.rfind("pid-", 0) != 0) continue;
+    ProcessInfo info{};
+    if (!read_process_manifest(ent.path() / "manifest.json", info)) {
+      // Keep incomplete/crashed directories visible even if their manifest was
+      // never written; derive pid from the directory name when possible.
+      char* end = nullptr;
+      unsigned long long pid = std::strtoull(name.c_str() + 4, &end, 10);
+      if (end && *end == '\0') info.pid = static_cast<uint64_t>(pid);
+    }
+    processes.emplace_back(ent.path(), info);
+  }
+  if (processes.empty()) return false;
+
+  std::sort(processes.begin(), processes.end(),
+            [](const auto& a, const auto& b) {
+              return a.first.filename().string() < b.first.filename().string();
+            });
+
+  uint64_t owner_pid = 0;
+  if (!read_root_owner_pid(root, owner_pid))
+    owner_pid = derive_owner_pid(processes);
+
+  printf("HRR Archive Root: %s\n", archive_path.c_str());
+  printf("========================================\n");
+  printf("Capture Mode: in-tree\n");
+  printf("Owner PID:    %llu\n", static_cast<unsigned long long>(owner_pid));
+  printf("Processes:    %zu\n\n", processes.size());
+  printf("  %-12s %-12s %-10s %-12s %-10s %s\n",
+         "PID", "Parent PID", "Complete", "Events", "Blobs", "Path");
+  printf("  %-12s %-12s %-10s %-12s %-10s %s\n",
+         "---", "----------", "--------", "------", "-----", "----");
+  for (const auto& [path, info] : processes) {
+    printf("  %-12llu %-12llu %-10s %-12llu %-10llu %s\n",
+           static_cast<unsigned long long>(info.pid),
+           static_cast<unsigned long long>(info.parent_pid),
+           info.complete ? "yes" : "NO",
+           static_cast<unsigned long long>(info.event_count),
+           static_cast<unsigned long long>(info.blob_count),
+           path.string().c_str());
+  }
+  printf("\n");
+  return true;
+}
 
 static void print_info(const hrr::Archive& archive, bool show_events) {
   printf("HRR Archive: %s\n", archive.path.c_str());
@@ -856,6 +988,11 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // --info on an archive root prints the common process summary. Direct
+  // pid-<pid> paths continue through load_archive for detailed event info.
+  if (show_info && print_root_info(archive_path))
+    return 0;
+
   hrr::Archive archive;
   if (!hrr::load_archive(archive_path, archive)) return 1;
 
@@ -870,7 +1007,7 @@ int main(int argc, char** argv) {
     return repair_archive(archive);
   }
 
-  ctx.archive_dir = archive_path;
+  ctx.archive_dir = archive.path;
 
   printf("[HRR] Archive : %zu events, %zu kernels, %zu blobs, %zu code objects\n",
          archive.event_count, archive.kernel_count,

@@ -67,6 +67,22 @@ struct ScopedDir {
   ~ScopedDir() { fs::remove_all(path); }
 };
 
+static fs::path hrr_single_process_archive(const fs::path& root) {
+  if (fs::exists(root / "events.bin"))
+    return root;
+
+  std::vector<fs::path> archives;
+  for (const auto& ent : fs::directory_iterator(root)) {
+    if (!ent.is_directory()) continue;
+    const std::string name = ent.path().filename().string();
+    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+      archives.push_back(ent.path());
+  }
+  INFO("Process archive count: " << archives.size());
+  REQUIRE(archives.size() == 1);
+  return archives.front();
+}
+
 // ---------------------------------------------------------------------------
 // hrr_run_playback — spawn hrr-playback, capture stdout, assert:
 //   1. Exit code == 0.
@@ -162,12 +178,13 @@ HIP_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
   // -------------------------------------------------------------------------
   // Step 2: verify archive structure
   // -------------------------------------------------------------------------
-  REQUIRE(fs::exists(cap.path / "events.bin"));
-  REQUIRE(fs::exists(cap.path / "blobs"));
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "events.bin"));
+  REQUIRE(fs::exists(archive_path / "blobs"));
 
   int blob_count = 0;
   for ([[maybe_unused]] const auto& _ :
-       fs::recursive_directory_iterator(cap.path / "blobs"))
+       fs::recursive_directory_iterator(archive_path / "blobs"))
     ++blob_count;
   INFO("Blob count: " << blob_count);
   REQUIRE(blob_count >= 1);
@@ -222,12 +239,13 @@ HIP_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
   // -------------------------------------------------------------------------
   // Step 2: verify archive structure
   // -------------------------------------------------------------------------
-  REQUIRE(fs::exists(cap.path / "events.bin"));
-  REQUIRE(fs::exists(cap.path / "blobs"));
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "events.bin"));
+  REQUIRE(fs::exists(archive_path / "blobs"));
 
   int blob_count = 0;
   for ([[maybe_unused]] const auto& _ :
-       fs::recursive_directory_iterator(cap.path / "blobs"))
+       fs::recursive_directory_iterator(archive_path / "blobs"))
     ++blob_count;
   INFO("Blob count: " << blob_count);
   REQUIRE(blob_count >= 1);
@@ -276,12 +294,13 @@ HIP_TEST_CASE(Unit_HRR_HostMemRoundtrip) {
   // -------------------------------------------------------------------------
   // Step 2: verify archive structure
   // -------------------------------------------------------------------------
-  REQUIRE(fs::exists(cap.path / "events.bin"));
-  REQUIRE(fs::exists(cap.path / "blobs"));
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "events.bin"));
+  REQUIRE(fs::exists(archive_path / "blobs"));
 
   int blob_count = 0;
   for ([[maybe_unused]] const auto& _ :
-       fs::recursive_directory_iterator(cap.path / "blobs"))
+       fs::recursive_directory_iterator(archive_path / "blobs"))
     ++blob_count;
   INFO("Blob count: " << blob_count);
   REQUIRE(blob_count >= 1);
@@ -333,12 +352,13 @@ HIP_TEST_CASE(Unit_HRR_GraphRoundtrip) {
   // -------------------------------------------------------------------------
   // Step 2: verify archive structure
   // -------------------------------------------------------------------------
-  REQUIRE(fs::exists(cap.path / "events.bin"));
-  REQUIRE(fs::exists(cap.path / "blobs"));
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "events.bin"));
+  REQUIRE(fs::exists(archive_path / "blobs"));
 
   int blob_count = 0;
   for ([[maybe_unused]] const auto& _ :
-       fs::recursive_directory_iterator(cap.path / "blobs"))
+       fs::recursive_directory_iterator(archive_path / "blobs"))
     ++blob_count;
   INFO("Blob count: " << blob_count);
   REQUIRE(blob_count >= 1);
@@ -383,12 +403,13 @@ HIP_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
   // -------------------------------------------------------------------------
   // Step 2: verify archive structure
   // -------------------------------------------------------------------------
-  REQUIRE(fs::exists(cap.path / "events.bin"));
-  REQUIRE(fs::exists(cap.path / "blobs"));
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "events.bin"));
+  REQUIRE(fs::exists(archive_path / "blobs"));
 
   int blob_count = 0;
   for ([[maybe_unused]] const auto& _ :
-       fs::recursive_directory_iterator(cap.path / "blobs"))
+       fs::recursive_directory_iterator(archive_path / "blobs"))
     ++blob_count;
   INFO("Blob count: " << blob_count);
   REQUIRE(blob_count >= 1);
@@ -426,11 +447,12 @@ static void hrr_run_roundtrip(const std::string& direct_case,
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
     INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
-  REQUIRE(fs::exists(cap_path / "events.bin"));
-  REQUIRE(fs::exists(cap_path / "blobs"));
+  fs::path archive_path = hrr_single_process_archive(cap_path);
+  REQUIRE(fs::exists(archive_path / "events.bin"));
+  REQUIRE(fs::exists(archive_path / "blobs"));
   int bc = 0;
   for ([[maybe_unused]] const auto& _ :
-       fs::recursive_directory_iterator(cap_path / "blobs")) ++bc;
+       fs::recursive_directory_iterator(archive_path / "blobs")) ++bc;
   INFO("Blob count: " << bc); REQUIRE(bc >= 1);
 
   // Load the archive and assert a minimum event count.  This catches generator
@@ -466,8 +488,9 @@ static void hrr_capture_direct(const std::string& direct_case,
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
     INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
-  REQUIRE(fs::exists(cap_path / "events.bin"));
-  REQUIRE(fs::exists(cap_path / "blobs"));
+  fs::path archive_path = hrr_single_process_archive(cap_path);
+  REQUIRE(fs::exists(archive_path / "events.bin"));
+  REQUIRE(fs::exists(archive_path / "blobs"));
   hrr::Archive arc;
   bool arc_ok = hrr::load_archive(cap_path.string(), arc);
   INFO("Archive event count: " << arc.events.size());
@@ -664,11 +687,12 @@ HIP_TEST_CASE(Unit_HRR_OccupancyRoundtrip) {
     { set_proc_search_path(proc); }
     int ret = proc.run("\"Unit_HRR_Occupancy_Direct\"");
     INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
-  REQUIRE(fs::exists(cap.path / "events.bin"));
-  REQUIRE(fs::exists(cap.path / "blobs"));
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "events.bin"));
+  REQUIRE(fs::exists(archive_path / "blobs"));
   int bc = 0;
   for ([[maybe_unused]] const auto& _ :
-       fs::recursive_directory_iterator(cap.path / "blobs")) ++bc;
+       fs::recursive_directory_iterator(archive_path / "blobs")) ++bc;
   INFO("Blob count: " << bc); REQUIRE(bc >= 1);
   // KNOWN LIMITATION (Linux): fat-binary code objects are not captured at static
   // init time on Linux, so kernel replay is a no-op and D2H bytes will not match.
@@ -813,11 +837,12 @@ HIP_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   // -------------------------------------------------------------------------
   // Step 2: verify archive
   // -------------------------------------------------------------------------
-  REQUIRE(fs::exists(cap.path / "events.bin"));
-  REQUIRE(fs::exists(cap.path / "blobs"));
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "events.bin"));
+  REQUIRE(fs::exists(archive_path / "blobs"));
   int bc = 0;
   for ([[maybe_unused]] const auto& _ :
-       fs::recursive_directory_iterator(cap.path / "blobs")) ++bc;
+       fs::recursive_directory_iterator(archive_path / "blobs")) ++bc;
   INFO("Blob count: " << bc);
   REQUIRE(bc >= 1);
 
@@ -979,7 +1004,7 @@ HIP_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
     INFO("Capture exit: " << ret);
     REQUIRE(ret == 0);
   }
-  REQUIRE(fs::exists(cap.path / "events.bin"));
+  REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 
   // --replace-kernel matches the recorded name exactly; resolve the mangled
   // symbol the capture stored for hrr_vectorAdd.
@@ -1019,7 +1044,7 @@ HIP_TEST_CASE(Unit_HRR_ReplaceKernelMissingCO) {
     INFO("Capture exit: " << ret);
     REQUIRE(ret == 0);
   }
-  REQUIRE(fs::exists(cap.path / "events.bin"));
+  REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 
   std::string kname = recorded_kernel_name(cap.path, "hrr_vectorAdd");
   INFO("Recorded kernel name: " << kname);
@@ -1052,7 +1077,7 @@ HIP_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
     int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
     REQUIRE(ret == 0);
   }
-  REQUIRE(fs::exists(cap.path / "events.bin"));
+  REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 
   auto [ret, out] = run_playback_raw(cap.path, "--replace-kernel noequalshere");
   INFO("Playback stdout:\n" << out);
