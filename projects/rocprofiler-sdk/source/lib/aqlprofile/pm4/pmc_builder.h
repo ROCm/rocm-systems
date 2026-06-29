@@ -169,6 +169,21 @@ private:
     // for that SA, in increasing order. The count is just inner.size().
     std::vector<std::vector<std::vector<uint32_t>>> active_wgp_indices_;
 
+    // Uniform per-SA WGP slot count emitted by the bIsWGPcounter11 read loop.
+    //
+    // This MUST equal GetNumWGPs(): the result reader (aqlprofile iterate_data /
+    // Pm4Factory::GetBlockSamplesCount) walks the output buffer assuming a fixed
+    // GetNumWGPs() samples per SA for a WGP counter, with no knowledge of which
+    // WGPs are harvested. If the emitter wrote a per-SA-variable (sparse) count
+    // instead, every block after the first SQ-WGP counter would be read at the
+    // wrong offset, corrupting multi-counter runs (e.g. SQ_WAVES + SQ_CYCLES).
+    //
+    // Derived as max over all (SE, SA) of (highest active WGP index + 1) so the
+    // bound covers every active WGP in every SA; shorter SAs are zero-filled up
+    // to it. Falls back to wgp_per_sa_ when no bitmap is present (V0/V1 agents),
+    // matching the pre-harvesting-fix dense iteration.
+    uint32_t wgp_slots_per_sa_ = 0;
+
     void DebugTrace(uint32_t value)
     {
         CmdBuffer cmd_buffer;
@@ -297,11 +312,12 @@ private:
                    : instance_index;
     }
 
-    // Populate active_wgp_indices_[se][sa] for the per-WGP read loop in
-    // bIsWGPcounter11 below. With the DRM cu_bitmap (V2 on GFX11+) the
-    // highest set bit caps the WGP range and harvested WGPs are skipped
-    // automatically; otherwise we synthesize a fully-active mask of
-    // wgp_per_sa_ contiguous WGPs.
+    // Populate active_wgp_indices_[se][sa] (the active physical WGP indices per
+    // SA) plus the uniform wgp_slots_per_sa_ bound for the per-WGP read loop in
+    // bIsWGPcounter11 below. With the DRM cu_bitmap (V2 on GFX11+) the highest
+    // set bit caps the WGP range and harvested WGPs are recorded as gaps in the
+    // active set; otherwise we synthesize a fully-active mask of wgp_per_sa_
+    // contiguous WGPs.
     //
     // Logical -> raw translation for cu_bitmap indexing (chips with > NUM_SE
     // logical SEs fold upper banks into upper SA columns; see kernel's
@@ -354,6 +370,17 @@ private:
                 }
             }
         }
+
+        // Derive the uniform per-SA emission bound. Each SA's active list is
+        // sorted ascending, so back() is its highest active WGP index. The max
+        // (+1) across all SAs is the smallest uniform slot count that still
+        // covers every active WGP in every SA. Fall back to wgp_per_sa_ when no
+        // bitmap produced any active indices (V0/V1 / pre-GFX11 path).
+        uint32_t max_slots = 0;
+        for(const auto& se_v : active_wgp_indices_)
+            for(const auto& sa_v : se_v)
+                if(!sa_v.empty() && sa_v.back() + 1 > max_slots) max_slots = sa_v.back() + 1;
+        wgp_slots_per_sa_ = (max_slots > 0) ? max_slots : wgp_per_sa_;
     }
 
 public:
@@ -379,7 +406,12 @@ public:
 
     int GetNumWGPs() override
     {
-        if(Primitives::GFXIP_LEVEL >= 11) return wgp_per_sa_;
+        // GFX11 emits wgp_slots_per_sa_ entries per SA (dense over the active
+        // WGP range, harvested slots zero-filled) in the bIsWGPcounter11 path,
+        // so the reader must consume that same count. GFX12 (bIsWGPcounter12)
+        // still iterates wgp_per_sa_ densely, so it keeps wgp_per_sa_.
+        if(Primitives::GFXIP_LEVEL == 11) return wgp_slots_per_sa_;
+        if(Primitives::GFXIP_LEVEL >= 12) return wgp_per_sa_;
         return 1;
     };
 
@@ -908,17 +940,40 @@ public:
 
                         if(bIsWGPcounter11)
                         {
-                            const auto& indices = active_wgp_indices_.at(se_index).at(sarray);
-                            for(uint32_t wgp : indices)
+                            // Emit exactly wgp_slots_per_sa_ entries (== GetNumWGPs())
+                            // per SA so the output-buffer layout matches what
+                            // iterate_data consumes; otherwise any block after the
+                            // first SQ-WGP counter desyncs (broken multi-counter runs,
+                            // e.g. SQ_WAVES + SQ_CYCLES). Active WGPs get a real read;
+                            // harvested/inactive slots are zero-filled and never read
+                            // from hardware (reading a harvested WGP aliases onto an
+                            // active one - the original bug this fix still guards).
+                            const auto& indices    = active_wgp_indices_.at(se_index).at(sarray);
+                            uint32_t    active_pos = 0;
+                            for(uint32_t slot = 0; slot < wgp_slots_per_sa_; ++slot)
                             {
-                                grbm_value =
-                                    Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
-                                SetGrbmGfxIndex(cmd_buffer, grbm_value);
-                                builder.BuildCopyCounterDataPacket(cmd_buffer,
-                                                                   reg_info.register_addr_lo,
-                                                                   reg_info.register_addr_hi,
-                                                                   buf + read_counter,
-                                                                   1);
+                                const bool is_active =
+                                    (active_pos < indices.size() && indices[active_pos] == slot);
+                                if(is_active)
+                                {
+                                    grbm_value = Primitives::grbm_se_sh_wgp_index_value(
+                                        se_index, sarray, slot);
+                                    SetGrbmGfxIndex(cmd_buffer, grbm_value);
+                                    builder.BuildCopyCounterDataPacket(cmd_buffer,
+                                                                       reg_info.register_addr_lo,
+                                                                       reg_info.register_addr_hi,
+                                                                       buf + read_counter,
+                                                                       1);
+                                    // mask==1 writes only the low dword; clear the high
+                                    // dword so the 64-bit sample is well-defined.
+                                    if(buf != nullptr) buf[read_counter + 1] = 0;
+                                    ++active_pos;
+                                }
+                                else if(buf != nullptr)
+                                {
+                                    buf[read_counter]     = 0;
+                                    buf[read_counter + 1] = 0;
+                                }
                                 read_counter += 2;
                             }
                         }
