@@ -2,17 +2,27 @@
 // SPDX-License-Identifier: MIT
 
 /// @file interposer.cpp
-/// @brief LD_PRELOAD interposer that redirects KFD syscalls to the simulated driver.
+/// @brief LD_PRELOAD interposer that redirects KFD syscalls to rocjitsu KFD drivers.
 ///
-/// @details Intercepts open, close, ioctl, mmap, munmap, and fopen to route
-/// /dev/kfd operations and sysfs topology reads through SimulatedDriver.
-/// All mutable state is consolidated in InterposerContext.
+/// @details Intercepts open, close, ioctl, mmap, munmap, and filesystem access
+/// to route /dev/kfd operations and sysfs topology reads through one of two
+/// strategies. Normal simulation creates a VM and uses SimulatedKfd to own all
+/// visible GPU discovery and queue execution. DBT guest mode does not create a
+/// VM: GuestKfd forwards host-GPU KFD work to the real /dev/kfd while appending
+/// one synthetic guest GPU for ROCR discovery. The HSA tools hook then maps
+/// guest-agent API calls to the selected host agent and translates guest code
+/// objects before loading them. All mutable state is consolidated in
+/// InterposerContext.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
@@ -42,12 +52,16 @@ RJ_DIAGNOSTIC_POP
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <dlfcn.h>
+#include <exception>
 #include <fcntl.h>
 #include <linux/memfd.h>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <signal.h>
 #include <sstream>
 #include <string>
@@ -63,12 +77,15 @@ RJ_DIAGNOSTIC_POP
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin();
 extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin();
 
+using rocjitsu::GuestKfd;
+using rocjitsu::LinuxKfd;
 using rocjitsu::RemoteDriver;
-using rocjitsu::SimulatedDriver;
+using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
 
 static int connect_to_daemon() {
@@ -88,6 +105,27 @@ static int connect_to_daemon() {
 
 namespace {
 
+/// @brief Return the child-process rocjitsu config path.
+///
+/// @details The launcher writes the config path to the shared runtime file for
+/// both local simulation and DBT guest mode.
+std::optional<std::string> child_config_path() {
+  auto cfg_file = rocjitsu::rpc_default_config_file_path();
+  char cfg_buf[4096]{};
+  int cfg_fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0));
+  if (cfg_fd < 0)
+    return std::nullopt;
+
+  auto n = syscall(SYS_read, cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
+  syscall(SYS_close, cfg_fd);
+  if (n <= 0)
+    return std::nullopt;
+
+  while (n > 0 && (cfg_buf[n - 1] == '\n' || cfg_buf[n - 1] == '\r'))
+    cfg_buf[--n] = '\0';
+  return std::string(cfg_buf);
+}
+
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
   signal(SIGSEGV, SIG_DFL);
   raise(SIGSEGV);
@@ -100,76 +138,16 @@ __attribute__((constructor)) void rj_install_signal_handler() {
   sigaction(SIGSEGV, &sa, nullptr);
 }
 
-/// @brief Real libc function pointers resolved via dlsym(RTLD_NEXT).
-/// @details Holds the original libc implementations that our LD_PRELOAD
-/// interposer shadows. Resolved once at constructor time via resolve().
-class LibcPassthrough {
-public:
-  int (*openat)(int, const char *, int, ...) = nullptr;
-  int (*close)(int) = nullptr;
-  int (*ioctl)(int, unsigned long, ...) = nullptr;
-  void *(*mmap)(void *, size_t, int, int, int, off_t) = nullptr;
-  int (*munmap)(void *, size_t) = nullptr;
-  int (*mprotect)(void *, size_t, int) = nullptr;
-  int (*madvise)(void *, size_t, int) = nullptr;
-  int (*dup)(int) = nullptr;
-  int (*dup2)(int, int) = nullptr;
-  int (*dup3)(int, int, int) = nullptr;
-  int (*fcntl)(int, int, ...) = nullptr;
-  FILE *(*fopen)(const char *, const char *) = nullptr;
-  FILE *(*freopen)(const char *, const char *, FILE *) = nullptr;
-  DIR *(*opendir)(const char *) = nullptr;
-  int (*stat)(const char *, struct stat *) = nullptr;
-  int (*lstat)(const char *, struct stat *) = nullptr;
-  int (*access)(const char *, int) = nullptr;
-  int (*fstat_fn)(int, struct stat *) = nullptr;
-  ssize_t (*readlink_fn)(const char *, char *, size_t) = nullptr;
-  pid_t (*fork)() = nullptr;
-
-  bool ready() const { return initialized_; }
-
-  void resolve() {
-    auto *handle = RTLD_NEXT;
-    openat = util::lookup_symbol<decltype(openat)>(handle, "openat");
-    close = util::lookup_symbol<decltype(close)>(handle, "close");
-    ioctl = util::lookup_symbol<decltype(ioctl)>(handle, "ioctl");
-    mmap = util::lookup_symbol<decltype(mmap)>(handle, "mmap");
-    munmap = util::lookup_symbol<decltype(munmap)>(handle, "munmap");
-    mprotect = util::lookup_symbol<decltype(mprotect)>(handle, "mprotect");
-    madvise = util::lookup_symbol<decltype(madvise)>(handle, "madvise");
-    dup = util::lookup_symbol<decltype(dup)>(handle, "dup");
-    dup2 = util::lookup_symbol<decltype(dup2)>(handle, "dup2");
-    dup3 = util::lookup_symbol<decltype(dup3)>(handle, "dup3");
-    fcntl = util::lookup_symbol<decltype(fcntl)>(handle, "fcntl");
-    fopen = util::lookup_symbol<decltype(fopen)>(handle, "fopen");
-    freopen = util::lookup_symbol<decltype(freopen)>(handle, "freopen");
-    opendir = util::lookup_symbol<decltype(opendir)>(handle, "opendir");
-    stat = util::lookup_symbol<decltype(stat)>(handle, "stat");
-    lstat = util::lookup_symbol<decltype(lstat)>(handle, "lstat");
-    access = util::lookup_symbol<decltype(access)>(handle, "access");
-    fstat_fn = util::lookup_symbol<decltype(fstat_fn)>(handle, "fstat");
-    readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
-    fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
-    assert(openat && close && ioctl && mmap && munmap && mprotect && madvise);
-    assert(dup && dup2 && fcntl && fopen && freopen && opendir && fork);
-    assert(stat && lstat && access && fstat_fn && readlink_fn);
-    initialized_ = true;
-  }
-
-private:
-  bool initialized_ = false;
-};
-
 /// @brief All mutable interposer state.
 class InterposerContext {
 public:
-  static inline std::atomic<bool> in_construction{false};
-  static inline LibcPassthrough real{};
+  static inline thread_local bool in_construction = false;
+  static rocjitsu::LibcPassthrough &real() { return rocjitsu::libc_passthrough(); }
   static InterposerContext &ctx;
 
   static void init() {
     new (storage_) InterposerContext();
-    real.resolve();
+    real().resolve();
   }
 
   /// @brief Reset interposer state in a forked child process.
@@ -178,7 +156,11 @@ public:
   /// be locked by threads that no longer exist. We reinitialize everything so
   /// the next open("/dev/kfd") creates a fresh connection.
   void reset_after_fork() {
+    active_driver_.store(nullptr, std::memory_order_release);
     rj_vm_ = nullptr;
+    if (guest_driver_)
+      guest_driver_->reset_after_fork();
+    guest_driver_.reset();
     remote_.store(nullptr, std::memory_order_relaxed);
     remote_kfd_fd_.store(-1, std::memory_order_relaxed);
     remote_open_refs_.store(0, std::memory_order_relaxed);
@@ -192,13 +174,14 @@ public:
     in_construction = false;
   }
 
-  SimulatedDriver *driver() { return rj_vm_ ? rj_vm_->vm->driver() : nullptr; }
+  LinuxKfd *driver() { return active_driver_.load(std::memory_order_acquire); }
   int driver_fd() {
     auto *d = driver();
     return d ? d->fd() : -1;
   }
   bool initialized() const {
-    return rj_vm_ != nullptr || remote_.load(std::memory_order_acquire) != nullptr;
+    return active_driver_.load(std::memory_order_acquire) != nullptr ||
+           remote_.load(std::memory_order_acquire) != nullptr;
   }
 
   std::unique_lock<std::mutex> lock_remote() { return std::unique_lock(remote_mutex_); }
@@ -232,7 +215,7 @@ public:
   /// @brief Add one open reference for a remote (daemon-mode) KFD fd.
   /// @details Each live remote KFD fd (the primary plus every dup) holds one
   /// reference; the RPC connection is torn down only when the last reference is
-  /// dropped. Mirrors SimulatedDriver's local open refcount for the daemon path.
+  /// dropped. Mirrors SimulatedKfd's local open refcount for the daemon path.
   void retain_remote_open() { remote_open_refs_.fetch_add(1, std::memory_order_acq_rel); }
 
   /// @brief Drop one remote open reference, tearing down the connection on the
@@ -252,7 +235,7 @@ public:
     RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
     if (active_remote && remote_kfd_fd_.load(std::memory_order_acquire) >= 0) {
       // Re-open of an already-connected daemon: each open holds one reference,
-      // mirroring SimulatedDriver::open() retaining the local process.
+      // mirroring SimulatedKfd::open() retaining the local process.
       retain_remote_open();
       return active_remote;
     }
@@ -272,7 +255,7 @@ public:
     return active_remote;
   }
 
-  SimulatedDriver *lookup(int fd) {
+  LinuxKfd *lookup(int fd) {
     auto *d = driver();
     return (d && fd >= 0 && fd == d->fd()) ? d : nullptr;
   }
@@ -310,7 +293,7 @@ public:
       return;
     // Each live KFD fd (primary + every dup) holds one open reference, so the
     // process/connection is torn down only when the last fd closes. Retain on
-    // whichever backend is active (local SimulatedDriver or remote daemon RPC).
+    // whichever backend is active (local SimulatedKfd or remote daemon RPC).
     if (auto *d = driver())
       d->retain_local_open();
     else if (is_remote_mode())
@@ -365,7 +348,7 @@ public:
     delete active_remote;
     int fd = remote_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
     if (fd >= 0)
-      InterposerContext::real.close(fd);
+      InterposerContext::real().close(fd);
     std::lock_guard fd_lock(fd_mutex_);
     kfd_dup_fds_.clear();
   }
@@ -428,31 +411,45 @@ public:
     return fd;
   }
 
-  SimulatedDriver *get_or_create() {
+  LinuxKfd *get_or_create() {
     std::lock_guard lock(init_mutex_);
-    if (!rj_vm_) {
+    if (active_driver_.load(std::memory_order_acquire) == nullptr) {
       in_construction = true;
-      auto cfg_file = rocjitsu::rpc_default_config_file_path();
-      char cfg_buf[4096]{};
-      int cfg_fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0));
-      if (cfg_fd < 0) {
-        util::Logger::debug_print("rocjitsu: no config file at ", cfg_file);
+      std::optional<std::string> cfg_path = child_config_path();
+      if (!cfg_path) {
+        util::Logger::debug_print("rocjitsu: no child config path");
         in_construction = false;
         return nullptr;
       }
-      auto n = syscall(SYS_read, cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
-      syscall(SYS_close, cfg_fd);
-      if (n <= 0) {
+
+      try {
+        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(*cfg_path);
+        if (dbt_guest.enabled) {
+          auto guest_driver = std::make_unique<GuestKfd>(std::move(dbt_guest));
+          if (guest_driver->open() < 0) {
+            in_construction = false;
+            return nullptr;
+          }
+          auto *driver = guest_driver.get();
+          guest_driver_ = std::move(guest_driver);
+          active_driver_.store(driver, std::memory_order_release);
+          in_construction = false;
+          return driver;
+        }
+      } catch (const std::exception &e) {
+        util::Logger::debug_print("rocjitsu: failed to load child config: ", e.what());
         in_construction = false;
         return nullptr;
       }
-      while (n > 0 && (cfg_buf[n - 1] == '\n' || cfg_buf[n - 1] == '\r'))
-        cfg_buf[--n] = '\0';
-      if (rj_vm_create(cfg_buf, RJ_VM_MODE_LOCAL, &rj_vm_) != ROCJITSU_STATUS_SUCCESS) {
+
+      rj_vm_t *created_vm = nullptr;
+      if (rj_vm_create(cfg_path->c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
+          ROCJITSU_STATUS_SUCCESS) {
         util::Logger::debug_print("rocjitsu: failed to create VM");
         in_construction = false;
         return nullptr;
       }
+      rj_vm_ = created_vm;
 
       // Set up execution plugins based on environment variables.
       if (rj_vm_->soc) {
@@ -493,6 +490,8 @@ public:
         rj_vm_->soc->set_plugin_group(pg);
       }
 
+      LinuxKfd *driver = rj_vm_->vm->driver();
+      active_driver_.store(driver, std::memory_order_release);
       std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
       in_construction = false;
     }
@@ -513,6 +512,8 @@ public:
 
 private:
   rj_vm_t *rj_vm_ = nullptr;
+  std::unique_ptr<GuestKfd> guest_driver_;
+  std::atomic<LinuxKfd *> active_driver_{nullptr};
   /// @brief Active daemon-mode remote driver, or nullptr in local mode.
   /// @details Stored atomically so lock-free readers (`remote()`,
   /// `remote_lookup()`, `initialized()`, the AMDKFD ioctl fallback, the mmap
@@ -525,7 +526,7 @@ private:
   /// @brief Open-reference count for the remote (daemon-mode) KFD connection.
   /// @details The primary remote fd and every dup of it each hold one
   /// reference; the RPC connection is torn down only when the last reference is
-  /// released. Mirrors SimulatedDriver's local open refcount for daemon mode.
+  /// released. Mirrors SimulatedKfd's local open refcount for daemon mode.
   std::atomic<int> remote_open_refs_{0};
 
   std::mutex init_mutex_;
@@ -554,7 +555,7 @@ extern "C" {
 
 static std::string redirect_sysfs_path(const char *path);
 static std::string redirect_sys_dev_char(const char *path);
-static const Sysfs::GpuInfo *interposer_gpu_info();
+static const Sysfs::GpuInfo *interposer_gpu_info(uint32_t render_minor);
 
 struct SyntheticDrmOpenResult {
   bool handled = false;
@@ -584,13 +585,19 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
       render_minor = parsed_minor;
   }
 
+  auto *drv = InterposerContext::ctx.driver();
+  const bool local_handles_render = drv && drv->handles_drm_render_minor(render_minor);
+  const bool remote_handles_render = InterposerContext::ctx.remote_kfd_fd() >= 0;
+  if (!local_handles_render && !remote_handles_render)
+    return {};
+
   auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
   if (raw_drm_fd < 0)
     return {true, -1};
 
   int high_fd = fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
   int saved_errno = errno;
-  InterposerContext::real.close(raw_drm_fd);
+  InterposerContext::real().close(raw_drm_fd);
   if (high_fd < 0) {
     errno = saved_errno;
     return {true, -1};
@@ -609,7 +616,7 @@ int open(const char *path, int flags, ...) {
     va_end(ap);
   }
 
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   auto *volatile p = path;
   if (!p || InterposerContext::in_construction)
     return static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, flags, mode));
@@ -660,13 +667,13 @@ int open(const char *path, int flags, ...) {
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
   if (!redirected.empty()) {
-    int fd = InterposerContext::real.openat(AT_FDCWD, redirected.c_str(), flags, mode);
+    int fd = InterposerContext::real().openat(AT_FDCWD, redirected.c_str(), flags, mode);
     if (fd >= 0)
       InterposerContext::ctx.track_sysfs(fd, redirected);
     return fd;
   }
 
-  return InterposerContext::real.openat(AT_FDCWD, path, flags, mode);
+  return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
 }
 
 int open64(const char *path, int flags, ...) {
@@ -699,9 +706,9 @@ int openat(int dirfd, const char *path, int flags, ...) {
 
   auto *volatile p_at = path;
   if (!p_at)
-    return InterposerContext::real.openat(dirfd, path, flags, mode);
+    return InterposerContext::real().openat(dirfd, path, flags, mode);
   if (InterposerContext::in_construction)
-    return InterposerContext::real.openat(dirfd, path, flags, mode);
+    return InterposerContext::real().openat(dirfd, path, flags, mode);
 
   if (path[0] == '/') {
     if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
@@ -736,7 +743,7 @@ int openat(int dirfd, const char *path, int flags, ...) {
     if (redirected.empty())
       redirected = redirect_sys_dev_char(path);
     if (!redirected.empty()) {
-      int fd = InterposerContext::real.openat(AT_FDCWD, redirected.c_str(), flags, mode);
+      int fd = InterposerContext::real().openat(AT_FDCWD, redirected.c_str(), flags, mode);
       if (fd >= 0)
         InterposerContext::ctx.track_sysfs(fd, redirected);
       return fd;
@@ -745,14 +752,14 @@ int openat(int dirfd, const char *path, int flags, ...) {
     auto dir_path = InterposerContext::ctx.lookup_sysfs(dirfd);
     if (!dir_path.empty()) {
       std::string full = dir_path + "/" + path;
-      int fd = InterposerContext::real.openat(AT_FDCWD, full.c_str(), flags, mode);
+      int fd = InterposerContext::real().openat(AT_FDCWD, full.c_str(), flags, mode);
       if (fd >= 0)
         InterposerContext::ctx.track_sysfs(fd, full);
       return fd;
     }
   }
 
-  return InterposerContext::real.openat(dirfd, path, flags, mode);
+  return InterposerContext::real().openat(dirfd, path, flags, mode);
 }
 
 int openat64(int dirfd, const char *path, int flags, ...) {
@@ -767,7 +774,7 @@ int openat64(int dirfd, const char *path, int flags, ...) {
 }
 
 int close(int fd) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   if (InterposerContext::ctx.remote_lookup(fd)) {
     // Closing the primary remote KFD fd drops one open reference; the synthetic
     // fd and RPC connection are torn down only when the last reference is
@@ -778,12 +785,12 @@ int close(int fd) {
   }
   InterposerContext::ctx.untrack_sysfs(fd);
   if (InterposerContext::ctx.untrack_drm(fd)) {
-    InterposerContext::real.close(fd);
+    InterposerContext::real().close(fd);
     return 0;
   }
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
     InterposerContext::ctx.untrack_dup(fd);
-    return static_cast<int>(InterposerContext::real.close(fd));
+    return static_cast<int>(InterposerContext::real().close(fd));
   }
   if (auto *drv = InterposerContext::ctx.lookup(fd)) {
     drv->close();
@@ -791,13 +798,13 @@ int close(int fd) {
   }
   if (InterposerContext::ctx.owns_fd(fd))
     return 0;
-  return static_cast<int>(InterposerContext::real.close(fd));
+  return static_cast<int>(InterposerContext::real().close(fd));
 }
 
 __attribute__((destructor(101))) void rj_interposer_shutdown() {}
 
 int ioctl(int fd, unsigned long request, ...) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, request);
   void *arg = va_arg(ap, void *);
@@ -860,7 +867,7 @@ int ioctl(int fd, unsigned long request, ...) {
       //   READ_MMR_REG (gb_addr_cfg is mandatory for all families),
       //   VRAM_GTT, MEMORY. Failures (-1) abort device init.
       auto *info = static_cast<drm_amdgpu_info *>(arg);
-      auto *gpu = interposer_gpu_info();
+      auto *gpu = interposer_gpu_info(InterposerContext::ctx.drm_render_minor(fd));
       if (!gpu) {
         errno = ENODEV;
         return -1;
@@ -969,12 +976,12 @@ int ioctl(int fd, unsigned long request, ...) {
   if (drv)
     return drv->ioctl(request, arg);
 
-  return InterposerContext::real.ioctl(fd, request, arg);
+  return InterposerContext::real().ioctl(fd, request, arg);
 }
 
 int dup(int oldfd) {
-  assert(InterposerContext::real.ready());
-  int rc = InterposerContext::real.dup(oldfd);
+  assert(InterposerContext::real().ready());
+  int rc = InterposerContext::real().dup(oldfd);
   if (rc >= 0) {
     if (InterposerContext::ctx.is_kfd_tracked(oldfd))
       InterposerContext::ctx.track_dup(rc);
@@ -985,12 +992,12 @@ int dup(int oldfd) {
 }
 
 int dup2(int oldfd, int newfd) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   // dup2(fd, fd) is a POSIX no-op that leaves the descriptor live; mutating
   // tracking would drop a still-open ref. Forward without touching tracking.
   if (oldfd == newfd)
-    return InterposerContext::real.dup2(oldfd, newfd);
-  int rc = InterposerContext::real.dup2(oldfd, newfd);
+    return InterposerContext::real().dup2(oldfd, newfd);
+  int rc = InterposerContext::real().dup2(oldfd, newfd);
   if (rc < 0)
     return rc;
   // newfd was atomically closed and replaced; reconcile its tracking only now.
@@ -1005,10 +1012,10 @@ int dup2(int oldfd, int newfd) {
 
 #ifdef SYS_dup3
 int dup3(int oldfd, int newfd, int flags) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
   // descriptor; do not mutate tracking before the syscall confirms that.
-  int rc = InterposerContext::real.dup3(oldfd, newfd, flags);
+  int rc = InterposerContext::real().dup3(oldfd, newfd, flags);
   if (rc < 0)
     return rc;
   InterposerContext::ctx.untrack_sysfs(newfd);
@@ -1083,20 +1090,20 @@ namespace {
 // Shared implementation for fcntl / fcntl64. The variadic third argument is
 // extracted by the public entry points (which can't forward a va_list) and
 // passed here already resolved. Both fcntl and fcntl64 share the same kernel
-// ABI, so InterposerContext::real.fcntl services both.
+// ABI, so InterposerContext::real().fcntl services both.
 int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   FcntlArgKind kind = fcntl_arg_kind(cmd);
   long rc = 0;
   switch (kind) {
   case FcntlArgKind::Int:
-    rc = InterposerContext::real.fcntl(fd, cmd, int_arg);
+    rc = InterposerContext::real().fcntl(fd, cmd, int_arg);
     break;
   case FcntlArgKind::Ptr:
-    rc = InterposerContext::real.fcntl(fd, cmd, ptr_arg);
+    rc = InterposerContext::real().fcntl(fd, cmd, ptr_arg);
     break;
   case FcntlArgKind::None:
   default:
-    rc = InterposerContext::real.fcntl(fd, cmd, 0L);
+    rc = InterposerContext::real().fcntl(fd, cmd, 0L);
     break;
   }
 
@@ -1118,7 +1125,7 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
 } // namespace
 
 int fcntl(int fd, int cmd, ...) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, cmd);
   FcntlArgKind kind = fcntl_arg_kind(cmd);
@@ -1136,7 +1143,7 @@ int fcntl(int fd, int cmd, ...) {
 // interposed separately or libdrm's F_DUPFD_CLOEXEC on the render fd bypasses
 // our dup tracking and subsequent ioctls land on an untracked fd.
 int fcntl64(int fd, int cmd, ...) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, cmd);
   FcntlArgKind kind = fcntl_arg_kind(cmd);
@@ -1151,7 +1158,7 @@ int fcntl64(int fd, int cmd, ...) {
 }
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->mmap(addr, length, prot, flags, offset);
 
@@ -1173,39 +1180,39 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
       auto total = static_cast<off_t>(length) + memfd_offset;
       [[maybe_unused]] auto ft_rc = ftruncate(memfd_out, total);
       fallocate(memfd_out, 0, memfd_offset, static_cast<off_t>(length));
-      auto *raw = InterposerContext::real.mmap(
+      auto *raw = InterposerContext::real().mmap(
           addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
       if (raw != MAP_FAILED) {
 #ifdef MADV_POPULATE_WRITE
-        InterposerContext::real.madvise(raw, length, MADV_POPULATE_WRITE);
+        InterposerContext::real().madvise(raw, length, MADV_POPULATE_WRITE);
 #endif
         return raw;
       }
     }
   }
-  return InterposerContext::real.mmap(addr, length, prot, flags, fd, offset);
+  return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
 }
 
 int mprotect(void *addr, size_t length, int prot) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   auto *drv = InterposerContext::ctx.driver();
   if (drv && drv->is_doorbell_range(addr, length)) {
     errno = EPERM;
     return -1;
   }
-  return InterposerContext::real.mprotect(addr, length, prot);
+  return InterposerContext::real().mprotect(addr, length, prot);
 }
 
 int madvise(void *addr, size_t length, int advice) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   if ((advice == MADV_HUGEPAGE || advice == MADV_DONTFORK) &&
       reinterpret_cast<uintptr_t>(addr) >= 0x1000000000ULL)
     return 0;
-  return InterposerContext::real.madvise(addr, length, advice);
+  return InterposerContext::real().madvise(addr, length, advice);
 }
 
 int munmap(void *addr, size_t length) {
-  assert(InterposerContext::real.ready());
+  assert(InterposerContext::real().ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
     int ret = remote->munmap(addr, length);
     if (ret != -ENOENT)
@@ -1217,7 +1224,7 @@ int munmap(void *addr, size_t length) {
     if (ret != -ENOENT)
       return ret;
   }
-  return InterposerContext::real.munmap(addr, length);
+  return InterposerContext::real().munmap(addr, length);
 }
 
 } // extern "C"
@@ -1227,7 +1234,7 @@ extern "C" {
 // -- fopen / freopen interposition (sysfs redirect) --
 
 FILE *fopen(const char *path, const char *mode) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<FILE *(*)(const char *, const char *)>(RTLD_NEXT, "fopen");
     return fn ? fn(path, mode) : nullptr;
   }
@@ -1268,8 +1275,8 @@ FILE *fopen(const char *path, const char *mode) {
       actual = redirected.c_str();
   }
 
-  int fd = InterposerContext::real.openat(AT_FDCWD, actual,
-                                          InterposerContext::fopen_flags_from_mode(mode), 0644);
+  int fd = InterposerContext::real().openat(AT_FDCWD, actual,
+                                            InterposerContext::fopen_flags_from_mode(mode), 0644);
   if (fd < 0)
     return nullptr;
   return fdopen(fd, mode);
@@ -1295,7 +1302,7 @@ FILE *freopen64(const char *path, const char *mode, FILE *stream) {
 // -- stat/lstat/access interposition --
 
 static std::string redirect_sysfs_path(const char *path) {
-  if (!path || !InterposerContext::real.ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
     return {};
   std::string_view sv(path);
   if (!sv.starts_with("/sys/class/drm") && !sv.starts_with("/sys/devices/virtual/kfd") &&
@@ -1324,7 +1331,7 @@ static std::string redirect_sysfs_path(const char *path) {
 }
 
 static std::string redirect_sys_dev_char(const char *path) {
-  if (!path || !InterposerContext::real.ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
     return {};
   std::string_view sv(path);
   constexpr std::string_view prefix = "/sys/dev/char/";
@@ -1350,10 +1357,14 @@ static std::string redirect_sys_dev_char(const char *path) {
 
   std::string drm_base;
   auto *drv = InterposerContext::ctx.driver();
-  if (drv)
-    drm_base = drv->topology().drm_path();
-  else
+  if (drv) {
+    auto direct = drv->redirect_sysfs_path(path);
+    if (!direct.empty())
+      return direct;
+    drm_base = drv->drm_path();
+  } else {
     drm_base = InterposerContext::ctx.remote_drm_path();
+  }
   if (drm_base.empty())
     return {};
 
@@ -1366,17 +1377,17 @@ static std::string redirect_sys_dev_char(const char *path) {
   return drm_base + "/" + entry + suffix;
 }
 
-static const Sysfs::GpuInfo *interposer_gpu_info() {
+static const Sysfs::GpuInfo *interposer_gpu_info(uint32_t render_minor) {
   auto *drv = InterposerContext::ctx.driver();
   if (drv)
-    return &drv->topology().gpu_info();
+    return drv->gpu_info_for_render_minor(render_minor);
   if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
     return remote->gpu_info();
   return nullptr;
 }
 
 static std::string redirect_dev_dri(const char *path) {
-  if (!path || !InterposerContext::real.ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
     return {};
   std::string_view sv(path);
   // Redirect both the /dev/dri directory and individual node files
@@ -1393,10 +1404,14 @@ static std::string redirect_dev_dri(const char *path) {
     return {};
   std::string drm_base;
   auto *drv = InterposerContext::ctx.driver();
-  if (drv)
-    drm_base = drv->topology().drm_path();
-  else
+  if (drv) {
+    auto direct = drv->redirect_sysfs_path(path);
+    if (!direct.empty())
+      return direct;
+    drm_base = drv->drm_path();
+  } else {
     drm_base = InterposerContext::ctx.remote_drm_path();
+  }
   if (drm_base.empty())
     return {};
   if (is_dir)
@@ -1405,7 +1420,7 @@ static std::string redirect_dev_dri(const char *path) {
 }
 
 int stat(const char *path, struct stat *buf) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "stat");
     return fn ? fn(path, buf) : -1;
   }
@@ -1415,12 +1430,12 @@ int stat(const char *path, struct stat *buf) {
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
   if (!redirected.empty())
-    return InterposerContext::real.stat(redirected.c_str(), buf);
-  return InterposerContext::real.stat(path, buf);
+    return InterposerContext::real().stat(redirected.c_str(), buf);
+  return InterposerContext::real().stat(path, buf);
 }
 
 int lstat(const char *path, struct stat *buf) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "lstat");
     return fn ? fn(path, buf) : -1;
   }
@@ -1430,12 +1445,12 @@ int lstat(const char *path, struct stat *buf) {
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
   if (!redirected.empty())
-    return InterposerContext::real.lstat(redirected.c_str(), buf);
-  return InterposerContext::real.lstat(path, buf);
+    return InterposerContext::real().lstat(redirected.c_str(), buf);
+  return InterposerContext::real().lstat(path, buf);
 }
 
 int access(const char *path, int mode) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, int)>(RTLD_NEXT, "access");
     return fn ? fn(path, mode) : -1;
   }
@@ -1445,14 +1460,14 @@ int access(const char *path, int mode) {
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
   if (!redirected.empty())
-    return InterposerContext::real.access(redirected.c_str(), mode);
-  return InterposerContext::real.access(path, mode);
+    return InterposerContext::real().access(redirected.c_str(), mode);
+  return InterposerContext::real().access(path, mode);
 }
 
 // -- opendir interposition --
 
 DIR *opendir(const char *name) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<DIR *(*)(const char *)>(RTLD_NEXT, "opendir");
     return fn ? fn(name) : nullptr;
   }
@@ -1493,19 +1508,19 @@ DIR *opendir(const char *name) {
     if (redirected.empty())
       redirected = redirect_dev_dri(name);
     if (!redirected.empty())
-      return InterposerContext::real.opendir(redirected.c_str());
+      return InterposerContext::real().opendir(redirected.c_str());
   }
-  return InterposerContext::real.opendir(name);
+  return InterposerContext::real().opendir(name);
 }
 
 // -- fstat interposition (DRM memfd → synthetic st_rdev) --
 
 int fstat(int fd, struct stat *buf) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(int, struct stat *)>(RTLD_NEXT, "fstat");
     return fn ? fn(fd, buf) : -1;
   }
-  int rc = InterposerContext::real.fstat_fn(fd, buf);
+  int rc = InterposerContext::real().fstat_fn(fd, buf);
   if (rc == 0 && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
@@ -1520,7 +1535,7 @@ int fstat64(int fd, struct stat64 *buf) {
   if (!real_fstat64)
     return -1;
   int rc = real_fstat64(fd, buf);
-  if (rc == 0 && InterposerContext::real.ready() && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::real().ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1534,7 +1549,7 @@ int __fxstat(int ver, int fd, struct stat *buf) {
   if (!real_fxstat)
     return -1;
   int rc = real_fxstat(ver, fd, buf);
-  if (rc == 0 && InterposerContext::real.ready() && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::real().ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1548,7 +1563,7 @@ int __fxstat64(int ver, int fd, struct stat64 *buf) {
   if (!real_fxstat64)
     return -1;
   int rc = real_fxstat64(ver, fd, buf);
-  if (rc == 0 && InterposerContext::real.ready() && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::real().ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1559,7 +1574,7 @@ int __fxstat64(int ver, int fd, struct stat64 *buf) {
 // -- readlink interposition (redirect /sys/dev/char/) --
 
 ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
-  if (!InterposerContext::real.ready()) {
+  if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<ssize_t (*)(const char *, char *, size_t)>(RTLD_NEXT, "readlink");
     return fn ? fn(path, buf, bufsiz) : -1;
   }
@@ -1567,7 +1582,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
   if (redirected.empty())
     redirected = redirect_sysfs_path(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
-  return InterposerContext::real.readlink_fn(actual, buf, bufsiz);
+  return InterposerContext::real().readlink_fn(actual, buf, bufsiz);
 }
 
 // -- stat64/lstat64 interposition (distinct from stat on glibc 2.33+) --
@@ -1657,8 +1672,8 @@ int __lxstat64(int ver, const char *path, struct stat64 *buf) {
 }
 
 pid_t fork() {
-  assert(InterposerContext::real.ready());
-  pid_t pid = InterposerContext::real.fork();
+  assert(InterposerContext::real().ready());
+  pid_t pid = InterposerContext::real().fork();
   if (pid == 0)
     InterposerContext::ctx.reset_after_fork();
   return pid;

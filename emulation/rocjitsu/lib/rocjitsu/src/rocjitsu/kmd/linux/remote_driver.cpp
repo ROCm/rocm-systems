@@ -202,7 +202,7 @@ int RemoteDriver::open() {
 
   // Create a high-numbered synthetic KFD fd to avoid collisions with ROCR's
   // internal fd lifecycle. Use the top of the current rlimit range (same
-  // approach as SimulatedDriver::init_reserved_fd_range).
+  // approach as SimulatedKfd::init_reserved_fd_range).
   struct rlimit rl {};
   getrlimit(RLIMIT_NOFILE, &rl);
   int fd_min = static_cast<int>(rl.rlim_cur) - 64;

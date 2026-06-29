@@ -278,7 +278,7 @@ add_executable(
     vector_add_test.cpp
     gfx1250_sim_test.cpp
     simdojo_sim_test.cpp
-    simulated_driver_test.cpp
+    simulated_kfd_test.cpp
     decode_smoke_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
@@ -369,6 +369,7 @@ target_link_libraries(
     PRIVATE
         ${RJ_OBJECT_LIBS}
         rocjitsu_kmd
+        rocjitsu_dbt_config
         util
         flatbuffers
         Threads::Threads
@@ -438,6 +439,75 @@ set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
 )
+
+add_executable(guest_kfd_test guest_kfd_test.cpp)
+target_include_directories(
+    guest_kfd_test
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include ${HSA_INCLUDE_DIR}
+)
+target_link_libraries(guest_kfd_test PRIVATE Threads::Threads GTest::gtest_main)
+rj_configure_target(guest_kfd_test TEST)
+add_dependencies(guest_kfd_test rocjitsu_bin rocjitsu_shared rocjitsu_hooks)
+add_test(
+    NAME "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
+    COMMAND
+        ${RJ_CLI} --config
+        ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+add_test(
+    NAME
+        "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
+    COMMAND
+        ${RJ_CLI} --config
+        ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+add_test(
+    NAME "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+    COMMAND
+        ${RJ_CLI} --config
+        ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+set_tests_properties(
+    "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
+    "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
+    "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+    PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+)
+
+add_executable(hsa_hooks_unit_test dbt/hsa_hooks_unit_test.cpp)
+target_compile_definitions(
+    hsa_hooks_unit_test
+    PRIVATE
+        RJ_HOOK_UNIT_CONFIG_PATH="${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json"
+)
+target_include_directories(
+    hsa_hooks_unit_test
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+        ${CMAKE_SOURCE_DIR}/lib/util/include
+        ${GENERATED_DIR}
+)
+target_include_directories(
+    hsa_hooks_unit_test
+    SYSTEM
+    PRIVATE ${HSA_INCLUDE_DIR}
+)
+target_link_libraries(
+    hsa_hooks_unit_test
+    PRIVATE rocjitsu_hooks Threads::Threads GTest::gtest_main
+)
+rj_configure_target(hsa_hooks_unit_test TEST)
+gtest_discover_tests(hsa_hooks_unit_test)
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
@@ -509,6 +579,62 @@ if(ROCMINFO_EXECUTABLE)
             ${_rocminfo_install_environment_arg}
         )
     endforeach()
+
+    add_executable(dbt_guest_rocminfo_test rocminfo_test.cpp)
+    target_compile_definitions(
+        dbt_guest_rocminfo_test
+        PRIVATE
+            ROCMINFO_PATH="${ROCMINFO_EXECUTABLE}"
+            ROCJITSU_BIN="$<TARGET_FILE:rocjitsu_bin>"
+            RJ_CONFIG_PATH="${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json"
+    )
+    target_link_libraries(dbt_guest_rocminfo_test PRIVATE GTest::gtest_main)
+    add_dependencies(
+        dbt_guest_rocminfo_test
+        rocjitsu_bin
+        rocjitsu_shared
+        rocjitsu_hooks
+    )
+
+    add_test(
+        NAME "DbtGuestRocminfoTest.ExitsSuccessfully"
+        COMMAND
+            dbt_guest_rocminfo_test
+            --gtest_filter=RocminfoTest.ExitsSuccessfully
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "DbtGuestRocminfoTest.InterposerActive"
+        COMMAND
+            dbt_guest_rocminfo_test --gtest_filter=RocminfoTest.InterposerActive
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "DbtGuestRocminfoTest.HsaSystemAttributes"
+        COMMAND
+            dbt_guest_rocminfo_test
+            --gtest_filter=RocminfoTest.HsaSystemAttributes
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "DbtGuestRocminfoTest.DetectsGpuAgent"
+        COMMAND
+            dbt_guest_rocminfo_test --gtest_filter=RocminfoTest.DetectsGpuAgent
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "DbtGuestRocminfoTest.ReportsGfx950"
+        COMMAND
+            dbt_guest_rocminfo_test --gtest_filter=RocminfoTest.ReportsGfx950
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "DbtGuestRocminfoTest.ReportsWavefrontSize"
+        COMMAND
+            dbt_guest_rocminfo_test
+            --gtest_filter=RocminfoTest.ReportsWavefrontSize
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
     message(STATUS "rocminfo test enabled (found ${ROCMINFO_EXECUTABLE})")
 else()
     message(STATUS "rocminfo test disabled (rocminfo not found)")
@@ -656,7 +782,12 @@ if(HSA_RUNTIME64)
             hsa_hooks_test
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(hsa_hooks_test device_kernels rocjitsu_hooks)
+        add_dependencies(
+            hsa_hooks_test
+            device_kernels
+            rocjitsu_bin
+            rocjitsu_hooks
+        )
         rj_configure_target(hsa_hooks_test TEST)
         if(RJ_INSTALL_TESTS)
             rj_install_test_target(hsa_hooks_test)
@@ -677,7 +808,9 @@ if(HSA_RUNTIME64)
             rj_add_test(
                 NAME "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
                 COMMAND
-                    hsa_hooks_test
+                    $<TARGET_FILE:rocjitsu_bin> --config
+                    ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+                    $<TARGET_FILE:hsa_hooks_test>
                     --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 60

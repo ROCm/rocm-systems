@@ -5,9 +5,9 @@
 /// @brief KFD event ioctl implementations for the simulated driver.
 ///
 /// @details Implements the EventState methods that model KFD's event
-/// lifecycle and the SimulatedDriver ioctl wrappers that delegate to them.
+/// lifecycle and the SimulatedKfd ioctl wrappers that delegate to them.
 
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -328,10 +328,10 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
   return 0;
 }
 
-/// @brief SimulatedDriver wrapper for CREATE_EVENT.
+/// @brief SimulatedKfd wrapper for CREATE_EVENT.
 /// @details Resolves the dGPU event page from the allocation table before
 ///          delegating to EventState.
-int SimulatedDriver::create_event_ioctl(KfdProcess &proc, void *arg) {
+int SimulatedKfd::create_event_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_create_event_args *>(arg);
   if (args->event_page_offset != 0 && !proc.event_state_.page) {
     uint64_t raw = static_cast<uint64_t>(args->event_page_offset);
@@ -352,21 +352,21 @@ int SimulatedDriver::create_event_ioctl(KfdProcess &proc, void *arg) {
   return proc.event_state_.create_event(arg, gpu_id());
 }
 
-int SimulatedDriver::destroy_event_ioctl(KfdProcess &proc, void *arg) {
+int SimulatedKfd::destroy_event_ioctl(KfdProcess &proc, void *arg) {
   return proc.event_state_.destroy_event(arg);
 }
 
-int SimulatedDriver::set_event_ioctl(KfdProcess &proc, void *arg) {
+int SimulatedKfd::set_event_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_set_event_args *>(arg);
   util::Logger::cp("SET_EVENT_IOCTL: pid=", proc.process_id(), " event_id=", args->event_id);
   return proc.event_state_.set_event(arg);
 }
 
-int SimulatedDriver::reset_event_ioctl(KfdProcess &proc, void *arg) {
+int SimulatedKfd::reset_event_ioctl(KfdProcess &proc, void *arg) {
   return proc.event_state_.reset_event(arg);
 }
 
-int SimulatedDriver::wait_events_ioctl(KfdProcess &proc, void *arg) {
+int SimulatedKfd::wait_events_ioctl(KfdProcess &proc, void *arg) {
   return proc.event_state_.wait_events(arg, proc.process_id());
 }
 

@@ -1,14 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_KMD_LINUX_SIMULATED_DRIVER_H_
-#define ROCJITSU_KMD_LINUX_SIMULATED_DRIVER_H_
+#ifndef ROCJITSU_KMD_LINUX_SIMULATED_KFD_H_
+#define ROCJITSU_KMD_LINUX_SIMULATED_KFD_H_
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
-#include "rocjitsu/vm/driver.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -25,18 +25,6 @@ RJ_DIAGNOSTIC_POP
 #include <unordered_set>
 
 namespace rocjitsu {
-
-// KFD mmap offset encoding (mirrors kfd_priv.h).
-inline constexpr uint64_t KFD_MMAP_TYPE_SHIFT = 62;
-inline constexpr uint64_t KFD_MMAP_TYPE_MASK = 0x3ULL << KFD_MMAP_TYPE_SHIFT;
-inline constexpr uint64_t KFD_MMAP_TYPE_DOORBELL = 0x3ULL << KFD_MMAP_TYPE_SHIFT;
-inline constexpr uint64_t KFD_MMAP_TYPE_EVENTS = 0x2ULL << KFD_MMAP_TYPE_SHIFT;
-inline constexpr uint64_t KFD_MMAP_GPU_ID_SHIFT = 46;
-
-inline constexpr uint64_t kfd_mmap_gpu_id(uint32_t gpu_id) {
-  return (static_cast<uint64_t>(gpu_id) << KFD_MMAP_GPU_ID_SHIFT) &
-         ((1ULL << KFD_MMAP_TYPE_SHIFT) - (1ULL << KFD_MMAP_GPU_ID_SHIFT));
-}
 
 /// @brief 128-bit IPC share handle key, matching the kernel's random handle.
 struct IpcHandleKey {
@@ -76,13 +64,13 @@ struct IpcObject {
 /// the process created by open(). The daemon uses the process_id-aware
 /// overloads so each client thread identifies itself by connection, not by
 /// shared mutable state.
-class SimulatedDriver : public Driver {
+class SimulatedKfd : public LinuxKfd {
 public:
   [[nodiscard]] bool daemon_mode() const { return daemon_mode_; }
 
-  SimulatedDriver(SoC &soc, bool daemon_mode = false);
-  SimulatedDriver(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode = false);
-  ~SimulatedDriver() override;
+  SimulatedKfd(SoC &soc, bool daemon_mode = false);
+  SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode = false);
+  ~SimulatedKfd() override;
 
   /// @brief Local-mode interface (interposer). Operates on the local process.
   /// @{
@@ -94,7 +82,7 @@ public:
   /// (dup/dup2/dup3/fcntl F_DUPFD). Each live fd holds one reference so the
   /// process is torn down only when the last fd is closed, not the first.
   /// No-op when there is no local process (e.g. daemon/remote mode).
-  void retain_local_open();
+  void retain_local_open() override;
   int ioctl(unsigned long request, void *arg) override;
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
   int munmap(void *addr, size_t length) override;
@@ -123,12 +111,13 @@ public:
   void setup_topology(const Sysfs::GpuInfo &gpu);
   void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
   void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc);
-  bool is_doorbell_range(const void *addr, size_t length) const;
+  bool is_doorbell_range(const void *addr, size_t length) const override;
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
   const Sysfs &topology() const { return topology_; }
-  std::string topology_path() const { return topology_.path(); }
-  [[nodiscard]] int fd() const { return fd_; }
+  std::string topology_path() const override { return topology_.path(); }
+  std::string drm_path() const override { return topology_.drm_path(); }
+  [[nodiscard]] int fd() const override { return fd_; }
   [[nodiscard]] uint32_t local_process_id() const { return local_process_id_; }
 
   /// @brief Open-reference count of the local process, or 0 if none is alive.
@@ -136,8 +125,10 @@ public:
   /// plus every dup) holds one reference; the process is destroyed at zero.
   [[nodiscard]] uint32_t local_open_ref_count() const;
 
-  [[nodiscard]] bool owns_fd(int fd) const;
-  std::string redirect_sysfs_path(const char *path) const;
+  [[nodiscard]] bool owns_fd(int fd) const override;
+  std::string redirect_sysfs_path(const char *path) const override;
+  [[nodiscard]] bool handles_drm_render_minor(uint32_t minor) const override;
+  [[nodiscard]] const Sysfs::GpuInfo *gpu_info_for_render_minor(uint32_t minor) const override;
   [[nodiscard]] int claim_fd(int real_fd);
   [[nodiscard]] bool owns_reserved_fd(int fd) const;
 
@@ -152,6 +143,9 @@ public:
 private:
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
+
+  /// @brief Look up the local-mode process.
+  std::shared_ptr<KfdProcess> find_local_process() const;
 
   /// @brief Look up a GpuDevice by gpu_id. Returns nullptr if not found.
   GpuDevice *find_gpu(uint32_t gpu_id);
@@ -175,10 +169,15 @@ private:
   int dispatch_munmap(KfdProcess &proc, void *addr, size_t length);
   int dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const;
 
-  int get_version_ioctl(void *arg);
-  int get_clock_counters_ioctl(void *arg);
-  int get_apertures_ioctl(void *arg);
-  int acquire_vm_ioctl(void *arg);
+  int get_process_apertures_ioctl(void *arg) override;
+  int acquire_vm_ioctl(void *arg) override;
+  int get_available_memory_ioctl(void *arg) override;
+  int set_memory_policy_ioctl(void *arg) override;
+  int alloc_memory_ioctl(void *arg) override;
+  int free_memory_ioctl(void *arg) override;
+  int map_memory_ioctl(void *arg) override;
+  int unmap_memory_ioctl(void *arg) override;
+  int get_available_memory_ioctl(KfdProcess &proc, void *arg);
   int alloc_memory_ioctl(KfdProcess &proc, void *arg);
   int free_memory_ioctl(KfdProcess &proc, void *arg);
   int map_memory_ioctl(KfdProcess &proc, void *arg);
@@ -252,4 +251,4 @@ private:
 
 } // namespace rocjitsu
 
-#endif // ROCJITSU_KMD_LINUX_SIMULATED_DRIVER_H_
+#endif // ROCJITSU_KMD_LINUX_SIMULATED_KFD_H_

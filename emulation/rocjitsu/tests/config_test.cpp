@@ -6,6 +6,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -26,6 +27,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -193,6 +195,56 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->num_shader_engines(), 2u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 3u);
   EXPECT_EQ(xcd->shader_engine(1)->num_compute_units(), 3u);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "rocjitsu_dbt_only_config_test.json";
+  {
+    std::ofstream out(path);
+    out << R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx950",
+        "host_isa": "gfx1201",
+        "host_gpu_id": 8716,
+        "log_level": 2,
+        "signal_backtrace": true,
+        "guest_device": {
+          "gpu_id": 38144,
+          "gfx_target_version": 90500,
+          "vendor_id": 4098,
+          "device_id": 30112,
+          "family_id": 160,
+          "unique_id": 5929628898254127105,
+          "marketing_name": "AMD Instinct MI350X",
+          "drm_render_minor": 191,
+          "simd_count": 1024,
+          "num_shader_engines": 4,
+          "num_shader_arrays_per_engine": 2,
+          "num_cu_per_sh": 4,
+          "local_mem_size": 309237645312
+        }
+      }
+    })";
+  }
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_TRUE(dbt.enabled);
+  EXPECT_EQ(dbt.guest_isa, "gfx950");
+  EXPECT_EQ(dbt.host_isa, "gfx1201");
+  EXPECT_EQ(dbt.host_gpu_id, 8716u);
+  EXPECT_EQ(dbt.log_level, 2);
+  EXPECT_TRUE(dbt.signal_backtrace);
+  ASSERT_TRUE(dbt.guest_device.present);
+  EXPECT_EQ(dbt.guest_device.gpu_id, 38144u);
+  EXPECT_EQ(dbt.guest_device.gfx_target_version, 90500u);
+  EXPECT_EQ(dbt.guest_device.marketing_name, "AMD Instinct MI350X");
+  EXPECT_EQ(dbt.guest_device.drm_render_minor, 191u);
+  EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
 }
 
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {

@@ -3,7 +3,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "embedded_schema.h"
@@ -98,7 +98,7 @@ protected:
 
   rocjitsu::config::LoadedConfig loaded_;
   std::unique_ptr<simdojo::SimulationEngine> engine_;
-  rocjitsu::SimulatedDriver *driver_ = nullptr;
+  rocjitsu::SimulatedKfd *driver_ = nullptr;
 };
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
@@ -190,7 +190,7 @@ TEST_F(KfdIoctlTest, GetTileConfigRejectsUnknownGpuId) {
 }
 
 TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
-  rocjitsu::SimulatedDriver daemon_driver(*loaded_.soc(), true);
+  rocjitsu::SimulatedKfd daemon_driver(*loaded_.soc(), true);
   uint32_t process_id = daemon_driver.open_process();
   ASSERT_NE(process_id, 0u);
 

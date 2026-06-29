@@ -29,7 +29,7 @@ namespace rocjitsu {
 /// @brief KFD event subsystem state.
 ///
 /// @details Owns all event-related state for the simulated driver: the event
-/// table, event page, and synchronization primitives. The SimulatedDriver
+/// table, event page, and synchronization primitives. The SimulatedKfd
 /// delegates event ioctls to this class and accesses the event page and memfd
 /// for mmap/munmap operations.
 class EventState {
