@@ -27,7 +27,7 @@ def _expand(paths: list[str]) -> tuple[list[Path], list[Path]]:
             raise SystemExit(f"No matches for pattern: {arg}")
         for item in expanded:
             path = Path(item).resolve()
-            if ".att" in path.name:
+            if path.suffix == ".att":
                 att_files.append(path)
             elif path.suffix == ".csv":
                 csv_files.append(path)

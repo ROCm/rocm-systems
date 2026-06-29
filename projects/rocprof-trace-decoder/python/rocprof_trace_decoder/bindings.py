@@ -216,19 +216,14 @@ def _find_library(explicit: str | os.PathLike[str] | None = None) -> str:
         return env
 
     here = Path(__file__).resolve()
-    repo = here.parents[2]
     install_lib = next(
         (parent for parent in here.parents if parent.name in ("lib", "lib64")), None
     )
     names = ["librocprof-trace-decoder.so", "librocprof-trace-decoder.dylib"]
-    roots = [
-        repo / "build" / "lib",
-        repo / "build_coverage" / "lib",
-        repo / "build-unit" / "lib",
-    ]
+    roots = []
     if install_lib is not None:
         roots.append(install_lib)
-    roots.append(Path("/opt/rocm/lib"))
+    roots.extend(_rocm_library_roots())
     for root in roots:
         for name in names:
             candidate = root / name
@@ -237,6 +232,23 @@ def _find_library(explicit: str | os.PathLike[str] | None = None) -> str:
 
     # Let the platform loader try its normal search path.
     return "librocprof-trace-decoder.so"
+
+
+def _rocm_library_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for var in ("ROCM_HOME", "ROCM_PATH"):
+        value = os.environ.get(var)
+        if value:
+            root = Path(value).expanduser() / "lib"
+            if root not in seen:
+                roots.append(root)
+                seen.add(root)
+
+    default = Path("/opt/rocm/lib")
+    if default not in seen:
+        roots.append(default)
+    return roots
 
 
 class Decoder:

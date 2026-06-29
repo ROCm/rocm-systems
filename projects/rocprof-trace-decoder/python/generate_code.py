@@ -73,17 +73,36 @@ SEPARATOR = " -> "  # matches Instruction::separator in code_printing.hpp
 
 
 def _find_tool(name: str) -> str:
-    candidates = [
-        f"/opt/rocm/llvm/bin/{name}",
-        f"/opt/rocm-7.13.0/llvm/bin/{name}",
-        f"/opt/rocm-7.3.0/llvm/bin/{name}",
-        shutil.which(name) or "",
-        shutil.which(f"{name}-14") or "",
-    ]
-    for c in candidates:
-        if c and os.path.isfile(c):
-            return c
+    candidates: list[Path] = []
+    for root in _rocm_roots():
+        candidates.append(root / "llvm" / "bin" / name)
+        candidates.append(root / "bin" / name)
+
+    for found in (shutil.which(name), shutil.which(f"{name}-14")):
+        if found:
+            candidates.append(Path(found))
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
     raise FileNotFoundError(f"Could not locate {name}")
+
+
+def _rocm_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for var in ("ROCM_HOME", "ROCM_PATH"):
+        value = os.environ.get(var)
+        if value:
+            root = Path(value).expanduser()
+            if root not in seen:
+                roots.append(root)
+                seen.add(root)
+
+    default = Path("/opt/rocm")
+    if default not in seen:
+        roots.append(default)
+    return roots
 
 
 _LLVM_OBJDUMP: Optional[str] = None

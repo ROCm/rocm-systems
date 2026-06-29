@@ -13,7 +13,7 @@ authors = [{ name = "Advanced Micro Devices, Inc." }]
 dependencies = ["pyelftools>=0.31"]
 
 [project.scripts]
-rocprof-att-tool = "rocprof_trace_decoder.att:main"
+rocprof-att-tool = "att_tool:main"
 rocprof-trace-generate-code = "generate_code:main"
 
 [tool.setuptools]

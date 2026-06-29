@@ -77,7 +77,7 @@ if(BUILD_PYTHON)
         PATTERN "__pycache__" EXCLUDE
         PATTERN "*.pyc" EXCLUDE)
     install(
-        FILES python/generate_code.py
+        FILES python/att_tool.py python/generate_code.py
         DESTINATION ${ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}
         COMPONENT runtime)
 

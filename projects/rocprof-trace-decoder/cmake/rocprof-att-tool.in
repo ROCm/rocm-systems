@@ -9,7 +9,7 @@ from pathlib import Path
 python_dir = Path(__file__).resolve().parent.parent / "@ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR@"
 sys.path.insert(0, str(python_dir))
 
-from rocprof_trace_decoder.att import main
+from att_tool import main
 
 if __name__ == "__main__":
     raise SystemExit(main())
