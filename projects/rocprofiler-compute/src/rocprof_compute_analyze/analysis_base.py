@@ -16,6 +16,7 @@ import pandas as pd
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -323,31 +324,20 @@ class OmniAnalyze_Base:
 
         # --ml-api-trace enables every backend.
         ml_api_trace = profiling_config.get("ml_api_trace", False)
-        needs_torch_trace = getattr(
-            args, "torch_operator", None
-        ) is not None or getattr(args, "list_torch_operators", False)
-        if needs_torch_trace and not (
-            profiling_config.get("torch_trace", False) or ml_api_trace
-        ):
-            console_error(
-                "ml api trace",
-                'Workload was not profiled with "--torch-trace" or '
-                '"--ml-api-trace". '
-                "Cannot use --torch-operator or --list-torch-operators.",
-            )
-
-        needs_triton_trace = getattr(
-            args, "triton_operator", None
-        ) is not None or getattr(args, "list_triton_operators", False)
-        if needs_triton_trace and not (
-            profiling_config.get("triton_trace", False) or ml_api_trace
-        ):
-            console_error(
-                "ml api trace",
-                'Workload was not profiled with "--triton-trace" or '
-                '"--ml-api-trace". '
-                "Cannot use --triton-operator or --list-triton-operators.",
-            )
+        for backend in KNOWN_ML_API_BACKENDS:
+            needs_trace = getattr(
+                args, f"{backend}_operator", None
+            ) is not None or getattr(args, f"list_{backend}_operators", False)
+            if needs_trace and not (
+                profiling_config.get(f"{backend}_trace", False) or ml_api_trace
+            ):
+                console_error(
+                    "ml api trace",
+                    f'Workload was not profiled with "--{backend}-trace" or '
+                    '"--ml-api-trace". '
+                    f"Cannot use --{backend}-operator or "
+                    f"--list-{backend}-operators.",
+                )
 
         for dir_info in args.path:
             if not any([

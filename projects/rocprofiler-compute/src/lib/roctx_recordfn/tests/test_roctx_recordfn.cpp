@@ -142,12 +142,12 @@ std::vector<std::string> decode_marker_path(const std::string& wire)
         std::string decoded;
         for (std::size_t i = 0; i < raw.size();)
         {
-            if (raw.compare(i, 3, "%2F") == 0)
+            if (raw.compare(i, 3, kEncodedSlash) == 0)
             {
                 decoded += '/';
                 i += 3;
             }
-            else if (raw.compare(i, 3, "%25") == 0)
+            else if (raw.compare(i, 3, kEncodedPercent) == 0)
             {
                 decoded += '%';
                 i += 3;

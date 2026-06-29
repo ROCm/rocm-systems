@@ -126,6 +126,29 @@ void maybe_capture(const std::string& s)
     }
 }
 
+// Percent-encoding of the two characters that would otherwise collide with the
+// marker-path grammar. The inverse decode lives with the Python readers
+// (utils/inject_roctx/core.py decode_marker_name, utils/utils_analysis.py); the
+// C++ round-trip test reuses these same constants so the escape table has a
+// single definition.
+constexpr const char* kEncodedPercent = "%25";
+constexpr const char* kEncodedSlash   = "%2F";
+
+// Appends name to out with '%' and '/' percent-encoded so an embedded '/' is
+// not read as the frame separator in build_marker_string.
+void encode_marker_segment(const std::string& name, std::string& out)
+{
+    for (char c : name)
+    {
+        if (c == '%')
+            out += kEncodedPercent;
+        else if (c == '/')
+            out += kEncodedSlash;
+        else
+            out += c;
+    }
+}
+
 // Renders the stack as "marker1/.../markerN:context1/.../contextN". Marker names
 // are percent-encoded so an embedded '/' is not read as the frame separator.
 std::string build_marker_string(const std::vector<StackEntry>& stack)
@@ -135,6 +158,10 @@ std::string build_marker_string(const std::vector<StackEntry>& stack)
     for (const auto& e : stack)
     {
         marker_len += e.marker.size() + 1;
+        // Each '%' or '/' expands from one char to three when encoded.
+        for (char c : e.marker)
+            if (c == '%' || c == '/')
+                marker_len += 2;
         ctx_len += e.context.size() + 1;
     }
     std::string out;
@@ -145,15 +172,7 @@ std::string build_marker_string(const std::vector<StackEntry>& stack)
     {
         if (!first)
             out += '/';
-        for (char c : e.marker)
-        {
-            if (c == '%')
-                out += "%25";
-            else if (c == '/')
-                out += "%2F";
-            else
-                out += c;
-        }
+        encode_marker_segment(e.marker, out);
         first = false;
     }
     out += ':';

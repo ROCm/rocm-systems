@@ -15,7 +15,7 @@ from typing import Any, Optional, Union, cast
 import config
 import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
-from utils.inject_roctx.constants import KNOWN_BACKENDS
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -42,7 +42,7 @@ ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
 # inject_roctx appends a trailing "|<backend>" suffix to marker names.
 _UNKNOWN_BACKEND = "unknown"
 _BACKEND_SUFFIX_RE = re.compile(
-    r"\|(" + "|".join(re.escape(b) for b in KNOWN_BACKENDS) + r")$"
+    r"\|(" + "|".join(re.escape(b) for b in KNOWN_ML_API_BACKENDS) + r")$"
 )
 
 

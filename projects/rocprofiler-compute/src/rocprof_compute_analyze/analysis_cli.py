@@ -23,8 +23,8 @@ from utils.utils_analysis import (
 )
 from utils.utils_common import validate_roofline_csv
 
-# Maps each inject_roctx backend to its analyze CLI attributes and label.
-_BACKEND_CLI = {
+# Maps each ML API trace backend to its analyze CLI attributes and display label.
+_ML_API_ANALYSIS_CLI_OPTIONS = {
     "torch": {
         "filter_attr": "torch_operator",
         "list_attr": "list_torch_operators",
@@ -75,7 +75,7 @@ class cli_analysis(OmniAnalyze_Base):
 
         active_operator_filters = [
             cli["filter_attr"]
-            for cli in _BACKEND_CLI.values()
+            for cli in _ML_API_ANALYSIS_CLI_OPTIONS.values()
             if getattr(args, cli["filter_attr"], None) is not None
         ]
         if len(active_operator_filters) > 1:
@@ -87,7 +87,7 @@ class cli_analysis(OmniAnalyze_Base):
 
         active_operator_lists = [
             cli["list_attr"]
-            for cli in _BACKEND_CLI.values()
+            for cli in _ML_API_ANALYSIS_CLI_OPTIONS.values()
             if getattr(args, cli["list_attr"], False)
         ]
         if len(active_operator_lists) > 1:
@@ -142,12 +142,12 @@ class cli_analysis(OmniAnalyze_Base):
             workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
-            for backend, cli in _BACKEND_CLI.items():
+            for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
                 if getattr(args, cli["list_attr"], False):
                     self.list_operators(path_info[0], kernel_top_df, backend)
                     sys.exit(0)
 
-            for backend, cli in _BACKEND_CLI.items():
+            for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
                 if getattr(args, cli["filter_attr"], None) is not None:
                     self.apply_operator_filter(args, workload, path_info[0], backend)
 
@@ -174,7 +174,7 @@ class cli_analysis(OmniAnalyze_Base):
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
 
-        for backend, cli in _BACKEND_CLI.items():
+        for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
             if getattr(args, cli["filter_attr"], None) is not None:
                 self.handle_operator(args, workload, backend)
 
@@ -283,7 +283,7 @@ class cli_analysis(OmniAnalyze_Base):
         backend: str,
     ) -> None:
         """Render the operator call tree for a single backend."""
-        label = _BACKEND_CLI[backend]["label"]
+        label = _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"]
         consolidated_df, ml_api_trace_path = process_ml_api_trace_output(workload_path)
         if consolidated_df.empty:
             tty.list_ml_operators(workload_path, {}, framework_label=label)
@@ -314,7 +314,7 @@ class cli_analysis(OmniAnalyze_Base):
         Operator matches are intersected with the -k/--kernel filter when set;
         matched rows are stored in workload.matched_ml_api_trace_dfs[backend].
         """
-        cli = _BACKEND_CLI[backend]
+        cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
         label = cli["label"]
         ml_api_trace_dir = Path(workload_path) / "ml_api_trace"
         consolidated_path = ml_api_trace_dir / "consolidated.csv"
@@ -420,7 +420,7 @@ class cli_analysis(OmniAnalyze_Base):
         self, args: argparse.Namespace, workload: schema.Workload, backend: str
     ) -> None:
         """Display the matched operator call tree for a single backend."""
-        cli = _BACKEND_CLI[backend]
+        cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
         label = cli["label"]
         matched_df = workload.matched_ml_api_trace_dfs.get(backend)
         if matched_df is None or matched_df.empty:
