@@ -55,8 +55,8 @@ enum InstFlags : uint64_t {
   /// (e.g. s_mov). Lets EXEC-state analysis prove an all-ones EXEC write from an
   /// all-ones source.
   RESULT_COPY = (1ULL << 14),
-  /// @brief The destination value is the scalar bitwise OR of the source operands
-  /// (e.g. s_or, s_or_saveexec). OR with an all-ones operand is all-ones
+  /// @brief The destination value is the scalar bitwise pure OR of the source operands
+  /// (e.g. s_or, s_or_saveexec). Pure OR with an all-ones operand is all-ones
   /// regardless of the others.
   RESULT_OR = (1ULL << 15)
 };
