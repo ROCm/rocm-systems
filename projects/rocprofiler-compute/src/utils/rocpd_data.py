@@ -139,7 +139,10 @@ def update_rocpd_pmc_events(
 def _resolve_pmc_event_metadata(
     conn: sqlite3.Connection,
 ) -> Optional[tuple[str, str, dict[str, str]]]:
-    """Return (table_name, guid, dispatch_to_event) or None on failure."""
+    """Look up the pmc_event table and build dispatch-to-event mapping.
+
+    Returns (table_name, guid, dispatch_to_event) or None on failure.
+    """
     with closing(
         conn.execute(
             TABLE_NAME_PREFIX_QUERY.format(
@@ -150,7 +153,7 @@ def _resolve_pmc_event_metadata(
         table_name = cursor.fetchone()
 
     if table_name is None:
-        console_error("No pmc_event table found in the rocpd database")
+        console_error("No pmc_event table found in the rocpd database", exit=False)
         return None
     table_name = table_name[0]
 
@@ -161,7 +164,7 @@ def _resolve_pmc_event_metadata(
         db_rows = cursor.fetchall()
 
     if not db_rows:
-        console_error("No kernel dispatch data found.")
+        console_error("No kernel dispatch data found.", exit=False)
         return None
 
     dispatch_to_event = {
