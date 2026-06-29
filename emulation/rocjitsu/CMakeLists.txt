@@ -169,6 +169,7 @@ if(_rj_sanitizer_count GREATER 0)
         list(
             APPEND RJ_SANITIZER_COMPILE_OPTIONS
             -fsanitize=${_rj_sanitizer_arg}
+            -fno-sanitize-recover=all
         )
         list(APPEND RJ_SANITIZER_LINK_OPTIONS -fsanitize=${_rj_sanitizer_arg})
         if(
