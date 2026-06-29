@@ -54,10 +54,9 @@
   (NCCL_VER_GE(v, ROCM_VER_7_12_0) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
 // === Capability gates: prefer the CMake symbol probe, fall back to version ==
-// Method 1 (preferred): CMake check_symbol_exists() defines
-//   RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when hipMemGetHandleForAddressRange is
-//   present in the SDK headers (see CMakeLists.txt).
-// Method 2 (fallback):  the version predicate above, for builds where the probe
+// Method 1 (preferred): CMake sets RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when
+//   check_symbol_exists(hipMemGetHandleForAddressRange ...) succeeds.
+// Method 2 (fallback): the version predicate above, for builds where the probe
 //   did not run / was not wired in.
 #if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
   #define NCCL_CUMEM_DMABUF_EXPORT_GATE 1
