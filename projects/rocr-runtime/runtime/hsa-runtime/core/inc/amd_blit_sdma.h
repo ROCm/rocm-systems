@@ -563,6 +563,12 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   /// True if SDMA supports the linear wait/signal-indirect copy packet (gfx1250).
   bool indirect_copy_supported_;
+
+  /// True if the ring buffer is allocated in device memory (Large BAR).
+  bool device_mem_ring_buf_;
+
+  /// Cached HDP flush register pointer (non-null on gfx942 with device-memory ring).
+  volatile uint32_t* hdp_flush_cntl_;
 };
 
 

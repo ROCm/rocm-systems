@@ -146,7 +146,9 @@ BlitSdma<useGCR, scopeFields>::BlitSdma()
       multicast_supported_(false),
       is_gfx1250_(false),
       swap_supported_(false),
-      indirect_copy_supported_(false) {
+      indirect_copy_supported_(false),
+      device_mem_ring_buf_(false),
+      hdp_flush_cntl_(nullptr) {
   std::memset(&queue_resource_, 0, sizeof(queue_resource_));
 }
 
@@ -217,9 +219,24 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
     swap_supported_ = (minor >= 4);
   }
 
-  // Allocate queue buffer.
-  queue_start_addr_ =
-      (char*)agent_->system_allocator()(kQueueSize, 0x1000, core::MemoryRegion::AllocateExecutable);
+  // Allocate queue buffer: prefer device memory on gfx94x/gfx125x with Large BAR.
+  const bool want_dev_ring = core::Runtime::runtime_singleton_->flag().sdma_dev_ring_buf() &&
+                             agent_->LargeBarEnabled() &&
+                             ((major == 9 && minor >= 4) || is_gfx1250_);
+  if (want_dev_ring) {
+    queue_start_addr_ =
+        (char*)agent_->coarsegrain_allocator()(kQueueSize,
+            static_cast<core::MemoryRegion::AllocateFlags>(
+                core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached));
+  }
+  if (queue_start_addr_ != NULL) {
+    device_mem_ring_buf_ = true;
+    hdp_flush_cntl_ = agent_->HdpFlushCntl();
+  } else {
+    queue_start_addr_ =
+        (char*)agent_->system_allocator()(kQueueSize, 0x1000, core::MemoryRegion::AllocateExecutable);
+    device_mem_ring_buf_ = false;
+  }
 
   if (queue_start_addr_ == NULL) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -275,6 +292,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
 
   max_single_linear_copy_size_ = linear_copy_size_override;
 
+  if (device_mem_ring_buf_) {
+    LogPrint(HSA_AMD_LOG_FLAG_INFO, "SDMA queue using device-memory ring buffer (size=%zu)", kQueueSize);
+  }
+
   cleanupOnException.Dismiss();
   return HSA_STATUS_SUCCESS;
 }
@@ -292,7 +313,11 @@ template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFiel
 
   if (queue_start_addr_ != NULL) {
     // Release queue buffer.
-    agent_->system_deallocator()(queue_start_addr_);
+    if (device_mem_ring_buf_) {
+      agent_->coarsegrain_deallocator()(queue_start_addr_);
+    } else {
+      agent_->system_deallocator()(queue_start_addr_);
+    }
   }
 
   queue_start_addr_ = NULL;
@@ -1964,6 +1989,16 @@ void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr
 
       // Update write pointer and doorbell register.
       *queue_wptr_ = new_index;
+
+      // For device-memory rings (WC-mapped via Large BAR), an explicit sfence
+      // is required to flush the write-combining buffer before the doorbell.
+      // On coherent system-memory rings, release semantics suffice.
+      if (device_mem_ring_buf_) {
+        _mm_sfence();
+        if (hdp_flush_cntl_) {
+          *hdp_flush_cntl_ = 1u;
+        }
+      }
 
       // Keep compiler ordering between wptr and doorbell writes. On x86 with
       // WB/coherent queue state, hardware ordering ensures the device observes

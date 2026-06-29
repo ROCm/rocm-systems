@@ -459,6 +459,9 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
+  /// @brief Pointer to the HDP memory flush control register (may be nullptr).
+  __forceinline volatile uint32_t* HdpFlushCntl() const { return HDP_flush_.HDP_MEM_FLUSH_CNTL; }
+
   /// @brief Total number of SDMA engines (regular + XGMI) addressable via the
   /// HSA_QUEUE_SDMA_BY_ENG_ID engine-id space.
   uint32_t NumSdmaEnginesTotal() const;

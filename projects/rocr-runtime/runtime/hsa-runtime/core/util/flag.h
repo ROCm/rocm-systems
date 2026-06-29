@@ -136,6 +136,9 @@ class Flag {
     var = os::GetEnvVar("HSA_SDMA_WAIT_IDLE");
     sdma_wait_idle_ = (var == "1") ? true : false;
 
+    var = os::GetEnvVar("HSA_SDMA_DEV_RING_BUF");
+    sdma_dev_ring_buf_ = (var == "0") ? false : true;
+
     var = os::GetEnvVar("HSA_MAX_QUEUES");
     max_queues_ = static_cast<uint32_t>(atoi(var.c_str()));
 
@@ -378,6 +381,8 @@ class Flag {
 
   bool sdma_wait_idle() const { return sdma_wait_idle_; }
 
+  bool sdma_dev_ring_buf() const { return sdma_dev_ring_buf_; }
+
   bool report_tool_load_failures() const { return report_tool_load_failures_; }
 
   bool report_tool_register_failures() const { return report_tool_register_failures_; }
@@ -544,6 +549,7 @@ class Flag {
   bool enable_sdma_hdp_flush_;
   bool running_valgrind_;
   bool sdma_wait_idle_;
+  bool sdma_dev_ring_buf_;
   bool enable_queue_fault_message_;
   bool poison_sigbus_delay_set_ = false;
   uint32_t poison_sigbus_delay_ms_ = 0;
