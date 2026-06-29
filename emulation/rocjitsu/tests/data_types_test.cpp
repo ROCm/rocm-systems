@@ -238,6 +238,9 @@ TEST(Fp8E4M3Fnuz, RneNarrow) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(-0.0f), 0x00);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(1.0f), 0x40);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(240.0f), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(300.0f), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(-300.0f), 0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne(1e-12f), 0x00);
 
   float largest_denorm = util::fp8_e4m3_fnuz_to_f32(0x07);
   float smallest_normal = util::fp8_e4m3_fnuz_to_f32(0x08);
@@ -445,6 +448,9 @@ TEST(Bf8E5M2Fnuz, RneNarrow) {
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(-0.0f), 0x00);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(1.0f), 0x40);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(57344.0f), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(70000.0f), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(-70000.0f), 0xFF);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne(1e-12f), 0x00);
 }
 
 TEST(Bf8E5M2Fnuz, SrNarrow) {
