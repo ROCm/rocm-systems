@@ -320,6 +320,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "unified_memory",
         "validation_usm",
         "selective_regions",
+        "sample_cli_features",
         "minimal",
         "rank_filter",
         "pytest_impl",
