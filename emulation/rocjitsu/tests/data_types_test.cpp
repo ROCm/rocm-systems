@@ -250,6 +250,18 @@ TEST(Fp8E4M3Fnuz, SrNarrow) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x80);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(std::numeric_limits<float>::infinity(), 0), 0x7F);
 
+  const float normal_lo = util::fp8_e4m3_fnuz_to_f32(0x40);
+  const float normal_hi = util::fp8_e4m3_fnuz_to_f32(0x41);
+  const float normal_quarter = normal_lo + 0.25f * (normal_hi - normal_lo);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(normal_quarter, 0), 0x40);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(normal_quarter, 0xFFFFFFFFu), 0x41);
+
+  const float subnormal_lo = util::fp8_e4m3_fnuz_to_f32(0x01);
+  const float subnormal_hi = util::fp8_e4m3_fnuz_to_f32(0x02);
+  const float subnormal_quarter = subnormal_lo + 0.25f * (subnormal_hi - subnormal_lo);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(subnormal_quarter, 0), 0x01);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(subnormal_quarter, 0xFFFFFFFFu), 0x02);
+
   for (uint8_t code = 1; code < 8; ++code) {
     float val = util::fp8_e4m3_fnuz_to_f32(code);
     EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_sr(val, 0), code) << "code=" << int(code);
@@ -439,6 +451,18 @@ TEST(Bf8E5M2Fnuz, SrNarrow) {
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(1.0f, 0), 0x40);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x80);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(std::numeric_limits<float>::infinity(), 0), 0x7F);
+
+  const float normal_lo = util::bf8_e5m2_fnuz_to_f32(0x40);
+  const float normal_hi = util::bf8_e5m2_fnuz_to_f32(0x41);
+  const float normal_quarter = normal_lo + 0.25f * (normal_hi - normal_lo);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(normal_quarter, 0), 0x40);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(normal_quarter, 0xFFFFFFFFu), 0x41);
+
+  const float subnormal_lo = util::bf8_e5m2_fnuz_to_f32(0x01);
+  const float subnormal_hi = util::bf8_e5m2_fnuz_to_f32(0x02);
+  const float subnormal_quarter = subnormal_lo + 0.25f * (subnormal_hi - subnormal_lo);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(subnormal_quarter, 0), 0x01);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_sr(subnormal_quarter, 0xFFFFFFFFu), 0x02);
 
   for (uint8_t code = 1; code < 4; ++code) {
     float val = util::bf8_e5m2_fnuz_to_f32(code);
