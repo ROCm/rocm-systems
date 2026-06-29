@@ -77,6 +77,7 @@ struct backend
     static constexpr status_t       status_error   = Wrapper::STATUS_ERROR;
     static constexpr status_t       status_hsa_not_loaded =
         Wrapper::STATUS_ERROR_HSA_NOT_LOADED;
+    static constexpr status_t status_context_error = Wrapper::STATUS_ERROR_CONTEXT_ERROR;
 
     // ─── Helper ───────────────────────────────────────────────────────────────────
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
@@ -131,12 +132,19 @@ struct backend
 
     // ─── Business logic ───────────────────────────────────────────────────────────
 
-    /// Adapts the record-level API: extracts the instance id from a full counter
-    /// record and delegates to Wrapper::query_record_counter_id.
     static status_t query_record_counter_id(counter_record_t record,
                                             counter_id_t*    counter_id)
     {
-        return Wrapper::query_record_counter_id(record.id, counter_id);
+        if constexpr(Wrapper::compile_time_version >= 10000)
+        {
+            if(counter_id == nullptr) return Wrapper::STATUS_ERROR_INVALID_ARGUMENT;
+            counter_id->handle = record.id;
+            return status_success;
+        }
+        else
+        {
+            return Wrapper::query_record_counter_id(record.id, counter_id);
+        }
     }
 
     /// Queries the SDK for counter info and builds the SDK-agnostic counter_metadata
