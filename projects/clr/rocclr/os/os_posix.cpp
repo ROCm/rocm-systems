@@ -852,7 +852,13 @@ bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
 }
 
 bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
-                                      size_t* foffset_ptr) {
+                                      size_t* foffset_ptr, size_t* mapped_size_ptr) {
+  // Defaults to 0; only a file-backed mapping yields a meaningful bound,
+  // which is set on success below.
+  if (mapped_size_ptr != nullptr) {
+    *mapped_size_ptr = 0;
+  }
+
   // Get the list of mapped file list
   bool ret_value = false;
   std::ifstream proc_maps;
@@ -888,6 +894,12 @@ bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
 
       *fname_ptr = uri_file_path;
       *foffset_ptr = offset + address - low_address;
+      
+      // The mapping is file-backed, so its end address bounds how many bytes
+      // can be safely read starting at `image`.
+      if (mapped_size_ptr != nullptr) {
+        *mapped_size_ptr = static_cast<size_t>(high_address - address);
+      }
       ret_value = true;
       break;
     }

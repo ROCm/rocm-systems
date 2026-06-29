@@ -665,7 +665,32 @@ bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t
   return true;
 }
 
-bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size_t* foffset_ptr) {
+// Returns the number of bytes that can be safely read starting at `image`,
+// bounded by the end of the file-backed region (mapped image or file) that
+// contains it. Returns 0 for heap memory (MEM_PRIVATE), whose region
+// is shared with unrelated allocations and so is not a meaningful bound.
+static size_t MappedSizeFromAddress(const void* image) {
+  MEMORY_BASIC_INFORMATION mbi;
+  if (VirtualQuery(image, &mbi, sizeof(mbi)) == 0) {
+    return 0;
+  }
+  if (mbi.State != MEM_COMMIT || (mbi.Type != MEM_IMAGE && mbi.Type != MEM_MAPPED)) {
+    return 0;
+  }
+  const uintptr_t region_end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+  const uintptr_t address = reinterpret_cast<uintptr_t>(image);
+  if (address >= region_end) {
+    return 0;
+  }
+  return static_cast<size_t>(region_end - address);
+}
+
+bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size_t* foffset_ptr,
+                                 size_t* mapped_size_ptr) {
+  if (mapped_size_ptr != nullptr) {
+    *mapped_size_ptr = MappedSizeFromAddress(image);
+  }
+
   HMODULE hm = NULL;
   if (!GetModuleHandleExA(
           GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
