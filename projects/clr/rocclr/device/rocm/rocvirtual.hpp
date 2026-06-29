@@ -395,6 +395,26 @@ class VirtualGPU : public device::VirtualDevice {
         dyn_data_prefetch_enabled_ = false;
       }
 
+      //! Check if dynamic data prefetch is enabled
+      bool HasDynDataPrefetch() const {
+        return dyn_data_prefetch_enabled_ && dyn_data_prefetch_num_regions_ > 0;
+      }
+
+      //! Get the number of prefetch regions
+      uint32_t GetDynDataPrefetchNumRegions() const {
+        return dyn_data_prefetch_num_regions_;
+      }
+
+      //! Get the prefetch hints
+      uint8_t GetDynDataPrefetchHints() const {
+        return dyn_data_prefetch_hints_;
+      }
+
+      //! Get the prefetch regions array
+      const amd::DynDataPrefetchRegion* GetDynDataPrefetchRegions() const {
+        return dyn_data_prefetch_regions_;
+      }
+
     private:
       //! Return whether the loader is attached to a gpu queue
       bool IsAttached() const { return queue_base_ != nullptr; }
