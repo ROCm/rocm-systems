@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 include(rj_configure_target)
+include(rj_find_amdcxx)
 
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
@@ -872,10 +873,10 @@ else()
     message(STATUS "HSA init test disabled (libhsa-runtime64 not found)")
 endif()
 
-# --- HIP tests (requires hipcc + CLI launcher) ---
+# --- HIP tests (requires amdclang++ + CLI launcher) ---
 
-find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
-if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+rj_find_amdcxx(AMDCXX)
+if(AMDCXX AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
     set(RJ_HIP_SANITIZER_FLAGS)
@@ -890,11 +891,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             ${_rj_sanitizer_flag}
         )
     endforeach()
-    if(RJ_HIP_SANITIZER_FLAGS OR RJ_HIP_SANITIZER_LINK_FLAGS)
-        list(APPEND RJ_HIP_SANITIZER_FLAGS -Xarch_device -fno-sanitize=all)
-    endif()
 
-    # Helper: build a HIP test binary with hipcc + gtest.
+    # Helper: build a HIP test binary with amdclang++ + gtest.
     function(rj_add_hip_test TEST_NAME)
         cmake_parse_arguments(ARG "" "ARCH;SOURCE" "EXTRA_LIBS" ${ARGN})
         if(NOT ARG_ARCH)
@@ -921,7 +919,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
                 -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
                 ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
-            COMMENT "Building ${TEST_NAME} with hipcc (${ARG_ARCH})"
+            COMMENT "Building ${TEST_NAME} with amdclang++ -x hip (${ARG_ARCH})"
             VERBATIM
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
@@ -1208,25 +1206,28 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
 
     add_subdirectory(race-detector)
 
-    message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
+    message(STATUS "HIP tests enabled (found ${AMDCXX})")
 else()
-    message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")
+    message(
+        STATUS
+        "HIP tests disabled (amdclang++ or libhsa-runtime64 not found)"
+    )
 endif()
 
 # --- Narrow conversion HIP CTS tests ---
-# Uses hipcc (rocjitsu emulator does not yet support amdclang++ -x hip binaries).
-if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+# Uses the same HIP compiler path as the other HIP tests.
+if(AMDCXX AND HSA_RUNTIME64)
     set(CVT_NARROW_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_cvt_narrow_test)
     add_custom_command(
         OUTPUT ${CVT_NARROW_BIN}
         COMMAND
-            ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20
-            ${RJ_HIP_SANITIZER_FLAGS} -I${CMAKE_SOURCE_DIR}/lib/util/include -o
-            ${CVT_NARROW_BIN}
+            ${AMDCXX} -x hip --offload-arch=gfx950 --rocm-path=${ROCM_PATH}
+            -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
+            -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
             ${RJ_HIP_SANITIZER_LINK_FLAGS}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
-        COMMENT "Building hip_cvt_narrow_test with hipcc (gfx950)"
+        COMMENT "Building hip_cvt_narrow_test with amdclang++ -x hip (gfx950)"
         VERBATIM
     )
     add_custom_target(hip_cvt_narrow_test_target ALL DEPENDS ${CVT_NARROW_BIN})
