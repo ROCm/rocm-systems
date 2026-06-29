@@ -1102,6 +1102,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void FindStreamsReqPerDevForSegments();
   //! Pre-compute segment-to-stream-index mapping and same-stream dep flags at instantiate
   void PrecomputeStreamAssignment();
+  //! Recompute each segment's needs_completion_signal flag from its current
+  //! stream assignment. Called after the initial assignment and again if
+  //! BuildSyncPlan's collapse pass reassigns segments to a single stream.
+  void ComputeCompletionSignalFlags();
+  //! Barrier-ROI heuristic: decide whether the segment graph should be collapsed
+  //! onto a single stream because the cross-stream barriers multi-stream would
+  //! cost outweigh the work that could actually overlap. Returns true to collapse.
+  bool ShouldCollapseToSingleStream() const;
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
@@ -1202,6 +1210,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   };
 
   SyncPlan sync_plan_;
+
+  //! Set by BuildSyncPlan's collapse pass when the barrier-ROI heuristic folds
+  //! the graph onto a single stream. Read by Init() to size stream creation.
+  bool collapsed_to_single_stream_ = false;
 
   void BuildSyncPlan();
 };
@@ -1594,6 +1606,14 @@ class GraphKernelNode : public GraphNode {
   GraphKernelNode& operator=(const GraphKernelNode&) = delete;
 
   GraphNode* clone() const override { return new GraphKernelNode(*this); }
+
+  // Total threads this launch would dispatch (grid blocks * threads per block).
+  // Used as a static, instantiate-time work proxy by the single-stream gate.
+  size_t GetLaunchThreadCount() const {
+    const dim3& g = kernelParams_.gridDim;
+    const dim3& b = kernelParams_.blockDim;
+    return static_cast<size_t>(g.x) * g.y * g.z * static_cast<size_t>(b.x) * b.y * b.z;
+  }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     // Clear commands_ first, even if node is disabled

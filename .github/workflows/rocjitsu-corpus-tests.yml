@@ -223,11 +223,11 @@ jobs:
           ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
         run: |
           targets=(
-            "gfx942 amdgpu_cdna3.json iree_gfx942_hip.json"
-            "gfx950 amdgpu_cdna4.json iree_gfx950_hip.json"
-            "gfx1100 amdgpu_rdna3_gfx1100_w7900_kmd.json iree_gfx1100_hip.json"
-            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json iree_gfx1201_hip.json"
-            "gfx1250 amdgpu_gfx1250.json iree_gfx1250_hip.json"
+            "gfx942 gfx942_cdna3.json iree_gfx942_hip.json"
+            "gfx950 gfx950_cdna4.json iree_gfx950_hip.json"
+            "gfx1100 gfx1100_w7900.json iree_gfx1100_hip.json"
+            "gfx1201 gfx1201_r9700.json iree_gfx1201_hip.json"
+            "gfx1250 gfx1250.json iree_gfx1250_hip.json"
           )
 
           for target in "${targets[@]}"; do
@@ -243,9 +243,9 @@ jobs:
           done
 
           targets=(
-            "gfx942 amdgpu_cdna3_kmd.json external_kernel_gfx942.json 15"
-            "gfx950 amdgpu_cdna4_kmd.json external_kernel_gfx950.json 15"
-            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json external_kernel_gfx1201.json 60"
+            "gfx942 gfx942_cdna3_kmd.json external_kernel_gfx942.json 15"
+            "gfx950 gfx950_cdna4_kmd.json external_kernel_gfx950.json 15"
+            "gfx1201 gfx1201_r9700.json external_kernel_gfx1201.json 60"
           )
           for target in "${targets[@]}"; do
             read -r name rocjitsu_config corpus_config timeout <<< "${target}"
@@ -262,11 +262,11 @@ jobs:
 
           targets=(
             # CDNA3 FPSAN has no passing tests yet.
-            # "gfx942 amdgpu_cdna3.json fpsan_gfx942.json"
-            "gfx950 amdgpu_cdna4.json fpsan_gfx950.json"
-            "gfx1100 amdgpu_rdna3_gfx1100_w7900_kmd.json fpsan_gfx1100.json"
-            "gfx1201 amdgpu_rdna4_gfx1201_r9700_kmd.json fpsan_gfx1201.json"
-            "gfx1250 amdgpu_gfx1250.json fpsan_gfx1250.json"
+            # "gfx942 gfx942_cdna3.json fpsan_gfx942.json"
+            "gfx950 gfx950_cdna4.json fpsan_gfx950.json"
+            "gfx1100 gfx1100_w7900.json fpsan_gfx1100.json"
+            "gfx1201 gfx1201_r9700.json fpsan_gfx1201.json"
+            "gfx1250 gfx1250.json fpsan_gfx1250.json"
           )
           fpsan_status=0
           for target in "${targets[@]}"; do
