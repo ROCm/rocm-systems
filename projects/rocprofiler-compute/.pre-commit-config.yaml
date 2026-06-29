@@ -85,9 +85,9 @@ repos:
   # Local hook: YAML and metric equation formatting
   - repo: local
     hooks:
-      - id: yaml-format-check
+      - id: yaml-format-fix
         name: YAML metric equation formatting
-        entry: python projects/rocprofiler-compute/tools/format_yaml.py --check
+        entry: python projects/rocprofiler-compute/tools/format_yaml.py --fix
         language: python
         additional_dependencies: [pyyaml>=6.0]
         files: ^projects/rocprofiler-compute/.*\.ya?ml$
