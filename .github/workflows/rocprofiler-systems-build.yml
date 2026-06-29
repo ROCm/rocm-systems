@@ -1,5 +1,5 @@
-name: rocprofiler-systems Build and Test
-run-name: build-and-test
+name: rocprofiler-systems CI / Build and Test
+run-name: rocprofiler-systems build and test
 
 # Path exclusions are defined once here — this is the canonical location.
 # All four former distro-specific workflow files are replaced by this single
@@ -71,7 +71,7 @@ jobs:
   # absent from RHEL (which never passes it) so it stays per-distro.
   # ──────────────────────────────────────────────────────────────────────────
   build:
-    name: ${{ matrix.name }}
+    name: Build / ${{ matrix.name }}
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.image }}
@@ -846,7 +846,7 @@ jobs:
   # 8 matrix entries: 2 jammy + 2 noble + 4 rhel (9×2 + 10×2)
   # ──────────────────────────────────────────────────────────────────────────
   system-deps:
-    name: ${{ matrix.name }}
+    name: System deps / ${{ matrix.name }}
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.image }}
@@ -1304,7 +1304,7 @@ jobs:
           du -sh "${CCACHE_DIR}" || true
 
   publish-test-results:
-    name: Publish test result summary
+    name: CI summary / Test results
     needs: [build, system-deps]
     if: always()
     runs-on: ubuntu-latest

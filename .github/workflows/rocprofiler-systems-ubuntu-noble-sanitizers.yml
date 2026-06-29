@@ -1,5 +1,5 @@
-name: rocprofiler-systems Ubuntu 24.04 Sanitizers (GCC)
-run-name: ubuntu-noble-sanitizers
+name: rocprofiler-systems CI / Sanitizers
+run-name: rocprofiler-systems sanitizer tests
 
 on:
   push:
@@ -48,6 +48,7 @@ env:
 
 jobs:
   ubuntu-noble-sanitizers:
+    name: Sanitizer / ${{ matrix.sanitizer-type }}
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
@@ -395,7 +396,7 @@ jobs:
             projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*-instr*.json
 
   publish-sanitizer-test-results:
-    name: Publish sanitizer result summary
+    name: CI summary / Sanitizers
     needs: [ubuntu-noble-sanitizers]
     if: always()
     runs-on: ubuntu-latest
