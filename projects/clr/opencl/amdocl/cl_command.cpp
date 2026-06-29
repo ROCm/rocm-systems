@@ -96,8 +96,6 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
             return (cl_command_queue)0;
           }
           else {
-            // Device queues are validated against the on-device property mask
-            // (plus the ON_DEVICE/ON_DEVICE_DEFAULT bits), not the host mask.
             cl_command_queue_properties validMask =
                 (properties & CL_QUEUE_ON_DEVICE)
                 ? (queueonDeviceProperty | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT)
