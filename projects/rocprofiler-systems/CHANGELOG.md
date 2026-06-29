@@ -165,6 +165,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Fixed an issue where the `--rocm-domains` CLI option for `rocprof-sys-run` was not recognized.
+- Fixed invalid strongly typed configuration values for `ROCPROFSYS_MODE`,
+  `ROCPROFSYS_PERFETTO_BACKEND`, `ROCPROFSYS_TRACE`,
+  `ROCPROFSYS_TRACE_DURATION`, and `ROCPROFSYS_SAMPLING_FREQ` being silently
+  accepted or failing later during runtime instead of reporting clear
+  configuration diagnostics.
 
 ## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
 
