@@ -374,7 +374,7 @@ private:
   /// The pre-permuted lane data is held in a `MAX_LANES`-wide `uint32_t` array
   /// that is bit-layout-identical to `VgprStorage` (`simdojo::VectorReg<64,
   /// uint32_t>` — a `std::array<uint32_t,64>` with the layout `static_assert`
-  /// enforced in `ComputeUnitCore::vgpr_reg`). Unused lanes are zero (the
+  /// enforced in `ComputeUnitCore::raw_vgpr_reg`). Unused lanes are zero (the
   /// EXEC mask gates them off in the glue), so the whole array is a valid
   /// read-only register view. The cast targets the forward-declared
   /// `VgprStorage`; the glue dereferences it where the full type is visible.
