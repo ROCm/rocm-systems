@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocprof-trace-decoder"
+version = "0.2.0"
+description = "Python API and ATT tool for rocprof-trace-decoder"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Advanced Micro Devices, Inc." }]
+dependencies = ["pyelftools>=0.31"]
+
+[project.scripts]
+rocprof-att-tool = "rocprof_trace_decoder.att:main"
+rocprof-trace-generate-code = "generate_code:main"
+
+[tool.setuptools]
+package-dir = { "" = "python" }
+py-modules = ["att_tool", "generate_code"]
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["rocprof_trace_decoder*"]
+
+[tool.ruff]
+line-length = 100

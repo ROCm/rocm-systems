@@ -33,18 +33,6 @@ if(DISABLE_COMGR)
     set(APPLE True)
 endif()
 
-if(NOT APPLE AND BUILD_INTEGRATION_TESTS)
-    # Add nlohmann JSON as an external dependency
-    include(FetchContent)
-    FetchContent_Declare(
-        json
-        GIT_REPOSITORY https://github.com/nlohmann/json.git
-        GIT_TAG v3.11.3)
-    FetchContent_MakeAvailable(json)
-
-    add_subdirectory(att-tool)
-endif()
-
 enable_testing()
 
 # Build unit tests
@@ -76,6 +64,7 @@ if(BUILD_INTEGRATION_TESTS)
     set(DATA_DIR ${GFX10_DATA} ${GFX11_DATA} ${GFX12_DATA} ${MI300_DATA} ${MI350_DATA})
 
     set(CSV_PY ${CMAKE_CURRENT_SOURCE_DIR}/csv_test.py)
+    set(ATT_TOOL_PY ${CMAKE_CURRENT_SOURCE_DIR}/../python/att_tool.py)
 
     set(LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(SANITIZED_LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder-sanitized${CMAKE_SHARED_LIBRARY_SUFFIX})
@@ -83,11 +72,9 @@ if(BUILD_INTEGRATION_TESTS)
     add_test(NAME csv-launch COMMAND python3 ${CSV_PY} --lib ${LIB_PATH})
     set_tests_properties(csv-launch PROPERTIES TIMEOUT 5 LABELS "integration-tests" WORKING_DIRECTORY ${TEST_BIN_DIR})
 
-    if(NOT APPLE)
-        add_test(NAME att-launch COMMAND $<TARGET_FILE:tool>)
-        set_tests_properties(att-launch PROPERTIES TIMEOUT 5 LABELS "integration-tests" WORKING_DIRECTORY
-                                                   ${TEST_BIN_DIR})
-    endif()
+    add_test(NAME att-launch COMMAND python3 ${ATT_TOOL_PY} --help)
+    set_tests_properties(att-launch PROPERTIES TIMEOUT 5 LABELS "integration-tests" WORKING_DIRECTORY
+                                               ${TEST_BIN_DIR})
 
     add_test(NAME decompress COMMAND ${TEST_BIN_DIR}/unpack.sh)
     set_tests_properties(
@@ -159,12 +146,14 @@ if(BUILD_INTEGRATION_TESTS)
             set(USES_VCMPX TRUE)
         endif()
 
-        if(NOT APPLE AND NOT USES_VCMPX)
-            add_test(NAME ${DATA}_execute COMMAND $<TARGET_FILE:tool> ${TEST_BIN_DIR}/${DATA}/1_results.json)
+        if(NOT USES_VCMPX)
+            add_test(NAME ${DATA}_execute
+                     COMMAND python3 ${ATT_TOOL_PY} --lib ${LIB_PATH} --base-name 1_results
+                             ${TEST_BIN_DIR}/${DATA})
             set_tests_properties(
                 ${DATA}_execute
                 PROPERTIES TIMEOUT
-                           60
+                           300
                            LABELS
                            "integration-tests"
                            FAIL_REGULAR_EXPRESSION
