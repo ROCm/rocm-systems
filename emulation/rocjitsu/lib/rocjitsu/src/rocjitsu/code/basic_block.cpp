@@ -68,6 +68,7 @@ struct DeferredDirectCall {
   BasicBlock *source = nullptr;
   BasicBlock *target = nullptr;
   BasicBlock *continuation = nullptr;
+  uint64_t source_call_offset = 0;
   uint16_t return_sreg = 0;
 };
 
@@ -321,6 +322,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
             deferred_direct_calls.push_back({.source = &block,
                                              .target = target_it->second,
                                              .continuation = fallthrough_it->second,
+                                             .source_call_offset = term->src_loc(),
                                              .return_sreg = *call_sdst});
           } else if (target_it != block_by_offset.end()) {
             block.add_successor(*target_it->second);
@@ -359,7 +361,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         call.source->add_call_edge(CallEdge{.kind = CallEdgeKind::DirectCall,
                                             .callee = call.target,
                                             .continuation = call.continuation,
-                                            .source_call_offset = call.source->start_offset(),
+                                            .source_call_offset = call.source_call_offset,
                                             .return_sreg = call.return_sreg});
       } else {
         call.source->add_successor(*call.target);

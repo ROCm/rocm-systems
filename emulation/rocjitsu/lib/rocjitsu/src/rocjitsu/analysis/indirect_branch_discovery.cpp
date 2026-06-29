@@ -52,15 +52,17 @@ namespace {
 //
 // Phase 3 - Run bounded forward dataflow over block summaries. The lattice is:
 //
-//   map<sgpr_pair_low, {set<PcValue>, incomplete}>
+//   map<sgpr_pair_low, {set<PcValue>, incomplete, killed}>
 //
 // `incomplete` means at least one predecessor path is unconstrained, killed, or
-// over the target cap. Concrete values are still useful when the incompleteness
-// came from path-insensitive CFG joins: generated kernels often build a small
-// return-address set in a dispatcher and then jump into a shared body, but the
-// syntactic CFG can also contain infeasible paths into that body. We therefore
-// emit bounded concrete values even when incomplete=true, but refuse a saturated
-// value set because that means the cap may have hidden additional targets.
+// over the target cap. `killed` records the specific case where a predecessor
+// reached this point after an unmodeled write to the pair. Concrete values are
+// still useful when incompleteness came from path-insensitive CFG joins:
+// generated kernels often build a small return-address set in a dispatcher and
+// then jump into a shared body, but the syntactic CFG can also contain infeasible
+// paths into that body. We therefore emit bounded concrete values when only
+// incomplete=true, but fail closed when killed=true or when the value set is
+// saturated because either case may hide the real branch target.
 //
 // Phase 4 - Revisit deferred consumers and emit fixups when their block entry
 // fact contains a bounded concrete target set. Multiple concrete values are
@@ -80,6 +82,12 @@ namespace {
 //   * PC-builder facts do not cross an analysis block by carrying local state.
 //     Cross-block propagation exists only through PairTransfer and the lattice.
 //   * Any unrecognized write to either half of a relevant SGPR pair is a KILL.
+//   * Direct s_call_b64 is a call boundary for this analysis. The temporary CFG
+//     keeps both the callee edge and the fallthrough continuation edge so
+//     reachability is not lost, but register effects from the callee are not
+//     modeled interprocedurally. Therefore every carried PC-builder fact is
+//     killed at a direct call instead of being allowed to flow straight into the
+//     continuation.
 //   * s_setpc_b64/s_swappc_b64 read their source pair; they do not destroy it.
 //     A real kernel may build one callee address once and call it multiple
 //     times. Only the swappc destination pair is killed because it receives a
@@ -250,13 +258,14 @@ struct PendingConsumer {
 ///
 /// @details `values` is the bounded set of concrete PC-builder values the pair
 /// may hold. `incomplete` means at least one path reaches this point with an
-/// untracked value: the pair was killed, the pair came from kernel-entry state,
-/// or the target set exceeded the cap. Consumers still use a non-empty concrete
-/// set when it is below the cap; the incomplete flag then only says the analysis
-/// is path-insensitive, not that the concrete values are invalid targets.
+/// untracked value: the pair came from kernel-entry state, the target set
+/// exceeded the cap, or the pair was killed. `killed` distinguishes that last
+/// case because a concrete value from another predecessor does not prove the
+/// consumer is safe when a real unmodeled write also reaches it.
 struct LatticeValue {
   std::vector<PcValue> values;
   bool incomplete = false;
+  bool killed = false;
 
   friend bool operator==(const LatticeValue &, const LatticeValue &) = default;
 };
@@ -844,11 +853,13 @@ bool append_lattice_value(LatticeValue &dst, PcValue value) {
 }
 
 void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
-  // JOIN is monotone: concrete values only accumulate, and incomplete only
-  // changes from false to true. The finite target cap bounds the height of the
-  // lattice and guarantees worklist convergence.
+  // JOIN is monotone: concrete values only accumulate, and incomplete/killed
+  // only change from false to true. The finite target cap bounds the height of
+  // the lattice and guarantees worklist convergence.
   if (src.incomplete)
     dst.incomplete = true;
+  if (src.killed)
+    dst.killed = true;
   for (const PcValue &value : src.values)
     append_lattice_value(dst, value);
 }
@@ -1226,10 +1237,17 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
     }
 
     if (facts.call_sdst) {
-      // s_call/s_swappc destinations receive return PCs. They are statically
-      // meaningful for the hardware, but they are not editable PC builders from
-      // this analysis' perspective. We kill the pair instead of treating the
-      // return address as a target that can be rewritten.
+      // A direct s_call can execute arbitrary callee code before control reaches
+      // the fallthrough continuation. The temporary analysis CFG has no
+      // context-sensitive return edge, so allowing existing builders to PASS
+      // through this block would incorrectly preserve values that the callee may
+      // clobber. Fail closed by killing every carried builder at the call site.
+      const std::vector<uint16_t> active_pairs = state.active_pairs();
+      for (uint16_t pair_lo : active_pairs)
+        state.invalidate_pair(pair_lo);
+
+      // The call destination receives the hardware return PC. It is meaningful
+      // to the callee, but it is not an editable getpc-relative target builder.
       state.invalidate_pair(*facts.call_sdst);
       continue;
     }
@@ -1262,9 +1280,10 @@ compute_exit_facts(const std::unordered_map<uint16_t, LatticeValue> &entry,
   std::unordered_map<uint16_t, LatticeValue> exit = entry;
   for (const auto &[pair_lo, transfer] : block.transfers) {
     if (transfer.kind == PairTransfer::Kind::Set) {
-      exit[pair_lo] = LatticeValue{.values = {transfer.value}, .incomplete = false};
+      exit[pair_lo] =
+          LatticeValue{.values = {transfer.value}, .incomplete = false, .killed = false};
     } else if (transfer.kind == PairTransfer::Kind::Kill) {
-      exit[pair_lo] = LatticeValue{.values = {}, .incomplete = true};
+      exit[pair_lo] = LatticeValue{.values = {}, .incomplete = true, .killed = true};
     }
   }
   return exit;
@@ -1349,12 +1368,13 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
     const std::vector<PendingConsumer> &pending_consumers,
     std::vector<IndirectCallFixup> &recovered) {
   // Phase 4: resolve consumers that were pristine in their own block. A complete
-  // entry fact provides concrete getpc-built targets. Missing or empty facts are
-  // unresolved. Incomplete facts are still allowed when the concrete target set is
-  // below the cap: the unknown part usually comes from path-insensitive joins in
-  // shared helper code, while the concrete values are real return continuations
-  // that must be represented for relocation and liveness. A saturated set is left
-  // unresolved because the cap may have dropped valid targets.
+  // entry fact provides concrete getpc-built targets. Missing, empty, or killed
+  // facts are unresolved. Incomplete facts are still allowed when the concrete
+  // target set is below the cap and no kill participated in the join: the
+  // unknown part usually comes from path-insensitive joins in shared helper
+  // code, while the concrete values are real return continuations that must be
+  // represented for relocation and liveness. A saturated set is left unresolved
+  // because the cap may have dropped valid targets.
   size_t unresolved = 0;
   for (const PendingConsumer &consumer : pending_consumers) {
     if (consumer.block_index >= blocks.size()) {
@@ -1363,7 +1383,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
     }
     const auto &facts = entry_facts[consumer.block_index];
     auto it = facts.find(consumer.pair_lo);
-    if (it == facts.end() || it->second.values.empty()) {
+    if (it == facts.end() || it->second.values.empty() || it->second.killed) {
       ++unresolved;
       continue;
     }
