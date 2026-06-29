@@ -45,6 +45,17 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
+ * @brief Returns the number of replay passes (counter batches) to run for a replayed dispatch.
+ *
+ * Invoked by the SDK on the replay path to learn how many times to re-execute the dispatch. The
+ * tool returns the number of counter batches it wants collected (each pass collects one batch via
+ * @c dispatch_callback). A return value of 0 or 1 disables replay for the dispatch.
+ *
+ * @param [in] user_data User data supplied at configuration time.
+ */
+typedef uint64_t (*rocprofiler_kernel_replay_pass_count_cb_t)(void* user_data);
+
+/**
  * @brief Configure dispatch counting with kernel replay enabled on a context.
  *
  * @param [in] context_id Context identifier.
@@ -52,6 +63,8 @@ ROCPROFILER_EXTERN_C_INIT
  * @param [in] dispatch_callback_args User data for @p dispatch_callback.
  * @param [in] record_callback Invoked once per pass with counter records for that pass.
  * @param [in] record_callback_args User data for @p record_callback.
+ * @param [in] pass_count_callback Invoked by the SDK to learn how many replay passes to run.
+ * @param [in] pass_count_callback_args User data for @p pass_count_callback.
  *
  * @retval ::ROCPROFILER_STATUS_SUCCESS On success.
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND Invalid context id.
@@ -67,7 +80,9 @@ rocprofiler_configure_kernel_replay_counting_service(
     rocprofiler_dispatch_counting_service_cb_t dispatch_callback,
     void*                                      dispatch_callback_args,
     rocprofiler_dispatch_counting_record_cb_t  record_callback,
-    void*                                      record_callback_args) ROCPROFILER_API;
+    void*                                      record_callback_args,
+    rocprofiler_kernel_replay_pass_count_cb_t  pass_count_callback,
+    void*                                      pass_count_callback_args) ROCPROFILER_API;
 
 /** @} */
 

@@ -36,9 +36,12 @@ rocprofiler_configure_kernel_replay_counting_service(
     rocprofiler_dispatch_counting_service_cb_t dispatch_callback,
     void*                                      dispatch_callback_args,
     rocprofiler_dispatch_counting_record_cb_t  record_callback,
-    void*                                      record_callback_args)
+    void*                                      record_callback_args,
+    rocprofiler_kernel_replay_pass_count_cb_t  pass_count_callback,
+    void*                                      pass_count_callback_args)
 {
-    if(!dispatch_callback || !record_callback) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    if(!dispatch_callback || !record_callback || !pass_count_callback)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
@@ -56,7 +59,9 @@ rocprofiler_configure_kernel_replay_counting_service(
                                                                  record_callback_args);
     if(st != ROCPROFILER_STATUS_SUCCESS) return st;
 
-    ctx->kernel_replay = std::make_unique<rocprofiler::context::kernel_replay_service>();
+    ctx->kernel_replay                     = std::make_unique<rocprofiler::context::kernel_replay_service>();
+    ctx->kernel_replay->pass_count_cb      = pass_count_callback;
+    ctx->kernel_replay->pass_count_cb_args = pass_count_callback_args;
     ctx->kernel_replay->enabled.wlock([](bool& v) { v = true; });
 
     // Turn on the memory tracker so allocation/free hooks begin populating the inventory that
