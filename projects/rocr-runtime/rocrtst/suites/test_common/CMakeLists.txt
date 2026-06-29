@@ -785,7 +785,7 @@ get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime"
 
 # Keep COMGR out of rocrtst link/package dependencies. These optional build
 # runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
-set(HOTSWAP_BUILD_RPATH "$ORIGIN")
+set(HOTSWAP_BUILD_RPATH "")
 foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
   foreach(_libdir IN ITEMS lib lib64 tools/comgr/lib)
     set(_comgr_libdir "${_prefix}/${_libdir}")
@@ -853,8 +853,11 @@ target_compile_definitions(hotswap_rewrite PRIVATE ROCR_HOTSWAP_TESTING)
 target_link_libraries(hotswap_rewrite ${GOOGLE_TEST_FRWK_NAME} ${CMAKE_DL_LIBS} pthread)
 set_target_properties(hotswap_rewrite PROPERTIES
   LINK_FLAGS "-Wl,--enable-new-dtags"
-  BUILD_RPATH "${HOTSWAP_BUILD_RPATH}"
   INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../lib64")
+if(HOTSWAP_BUILD_RPATH)
+  set_property(TARGET hotswap_rewrite PROPERTY
+    BUILD_RPATH "${HOTSWAP_BUILD_RPATH}")
+endif()
 add_test(NAME hotswap_rewrite COMMAND hotswap_rewrite)
 set_tests_properties(hotswap_rewrite PROPERTIES
   LABELS "quick;standard;pr;pre-commit;hotswap"
