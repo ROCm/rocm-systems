@@ -638,7 +638,7 @@ template <typename T, typename Inst, typename BinOp>
   const uint64_t exec = wf.exec();
   // Resolve each operand's `VgprStorage*` ONCE (a single virtual
   // simd_vgpr_storage dispatch -> resolved_vgpr_offset -> the localized
-  // vgpr_reg<64> cast). The resolved register object is chunk-independent, so the
+  // raw_vgpr_reg<64> cast). The resolved register object is chunk-independent, so the
   // per-chunk loop issues a value-semantic `r->simd_load<T>(base)` off it instead
   // of re-dispatching the resolution every chunk — and no raw base pointer
   // escapes the kernel body. Operands that aren't contiguous VGPR storage

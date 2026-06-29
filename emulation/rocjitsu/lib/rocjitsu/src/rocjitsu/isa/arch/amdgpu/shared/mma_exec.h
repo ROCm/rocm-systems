@@ -1636,7 +1636,7 @@ void exec_wmma_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
 /// unroll the 16-row x 32-K matmul into straight-line AVX-512 FMAs; the f16
 /// inputs are bulk-converted once with F16C (one vector op per 16 halves)
 /// instead of branchy per-element extract_f16; VGPRs are accessed through one
-/// vgpr_data base pointer per operand and the result scatters directly (no
+/// raw_vgpr_data base pointer per operand and the result scatters directly (no
 /// Result staging vector). Falls back to the generic exec_wmma_f32 without
 /// AVX-512 / under force-scalar.
 inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
@@ -1655,9 +1655,9 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -1701,7 +1701,7 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
     }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -1731,9 +1731,9 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -1777,7 +1777,7 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
     }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -1845,10 +1845,10 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -1899,7 +1899,7 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
 }
 
 /// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
-/// F16C convert — the hoist reads each operand word straight through vgpr_data.
+/// F16C convert — the hoist reads each operand word straight through raw_vgpr_data.
 /// Compile-time M/N/K fully unroll the matmul, looped over N in zmm-width chunks
 /// (N a multiple of 16). Falls back to generic exec_wmma_f32 without AVX-512 /
 /// under force-scalar.
@@ -1922,10 +1922,10 @@ void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2361,10 +2361,10 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2485,10 +2485,10 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2583,10 +2583,10 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -3103,7 +3103,7 @@ inline void exec_wmma_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N
 /// Fast path for v_wmma_i32_16x16x64_iu8 (gfx1250, wave32, dense). Same recipe
 /// as the f16/bf16 specializations: bulk sign-/zero-extend the packed i8
 /// inputs (per the A/B sign selects from the neg bits) to int32 once, then run
-/// a constexpr-unrolled int32 matmul with direct vgpr_data access. The K-sum
+/// a constexpr-unrolled int32 matmul with direct raw_vgpr_data access. The K-sum
 /// of products is exact in int32 (|sum| <= 64 * 16384) and is added to the
 /// int32 accumulator in 64-bit at pack time, so clamp saturation matches the
 /// scalar int64 reference bit for bit; with clamp off both wrap mod 2^32.
@@ -3127,9 +3127,9 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
     // Accumulate in unsigned 32-bit (wrap is well-defined; identical mod 2^32
     // to the intended signed wrap), sign-restore via int32 cast at pack time.
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-/zero-extended bits)
@@ -3171,7 +3171,7 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     // Add the accumulator in 64-bit and pack (saturating when clamp is set),
     // scattering directly back to VGPRs.
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -3793,7 +3793,7 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
 /// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
 /// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA), and scatters
 /// directly back to VGPRs (no Result staging vector). VGPR access is batched
-/// through vgpr_data (one base pointer per operand, no per-element virtual
+/// through raw_vgpr_data (one base pointer per operand, no per-element virtual
 /// read_vgpr/write_vgpr). Falls back to the generic exec_f32 when:
 ///   - <experimental/simd> is unavailable
 ///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
@@ -3801,7 +3801,7 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
 ///   - RJ_FORCE_SCALAR is set
 /// Fast path for the f32-input MFMA shapes (v_mfma_f32_*_f32). Like the f16
 /// specialization but the inputs are already f32, so there is no F16C convert —
-/// the hoist reads each operand word straight through vgpr_data. BATCH covers
+/// the hoist reads each operand word straight through raw_vgpr_data. BATCH covers
 /// the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
 /// the matmul; it loops over N in zmm-width chunks (N must be a multiple of 16,
 /// so the 4x4 shape stays on the generic path). Falls back to the generic
@@ -3825,10 +3825,10 @@ void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     }
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -3900,10 +3900,10 @@ void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
     alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
@@ -3989,10 +3989,10 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
     alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
@@ -4078,9 +4078,9 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -4122,7 +4122,7 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
         c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
       }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     bool has_nan_or_inf = false;
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
@@ -4165,13 +4165,13 @@ void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
     // Accumulate in unsigned 32-bit (wrap is well-defined and identical mod
     // 2^32 to the intended signed wrap), so the SIMD path has no signed-
     // overflow UB.
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-extended bits, one batch block)
     alignas(64) uint32_t B_buf[K * N]; // B[k][col] (sign-extended bits, one batch block)
     alignas(64) uint32_t C_buf[M * N]; // C[row][col] (one batch block)
