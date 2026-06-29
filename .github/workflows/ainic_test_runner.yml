@@ -37,7 +37,7 @@ on:
         default: ''
   push:
     branches:
-      - rccl-ci/ainic-test-runner
+      - users/nikitaxgusev/ainic-test-runner
     paths:
       - '.github/workflows/ainic_test_runner.yml'
       - 'projects/rccl/tools/scripts/test_runner/configs/ainic_abc.json'
