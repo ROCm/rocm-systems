@@ -57,6 +57,15 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
+#ifdef ROCRTST_ASAN
+// ASAN defers the real free via its quarantine; drain it so freed VRAM is
+// returned before we query available memory.
+extern "C" void __sanitizer_purge_allocator(void);
+static inline void DrainAsanQuarantine() { __sanitizer_purge_allocator(); }
+#else
+static inline void DrainAsanQuarantine() {}
+#endif
+
 static const uint32_t kNumBufferElements = 256;
 
 #define RET_IF_HSA_ERR(err) { \
@@ -138,15 +147,8 @@ hsa_status_t MemoryTest::TestAllocate(hsa_amd_memory_pool_t pool, size_t sz) {
   err = hsa_amd_memory_pool_allocate(pool, sz, 0, &ptr);
 
   if (err == HSA_STATUS_SUCCESS) {
-#ifdef ROCRTST_ASAN
-    // Under ASAN, hsa_amd_memory_pool_allocate returns base+PAGE_SIZE (ASAN header offset).
-    // hsa_memory_free is not intercepted by the ASAN runtime, so it receives the offset pointer
-    // and fails to find it in allocation_map_. Use hsa_amd_memory_pool_free which IS intercepted
-    // and correctly strips the PAGE_SIZE offset before calling into ROCr.
+    // Free the exact pointer returned by hsa_amd_memory_pool_allocate.
     err = hsa_amd_memory_pool_free(ptr);
-#else
-    err = hsa_memory_free(ptr);
-#endif
   }
 
   return err;
@@ -456,7 +458,13 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   ASSERT_SUCCESS(hsa_amd_pointer_info(memPtr1, &info, NULL, 0, NULL));
 
   ASSERT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+#ifdef ROCRTST_ASAN
+  // ASAN adds overhead to the underlying allocation, and hsa_amd_pointer_info
+  // reports that full backing size rather than the user-requested size.
+  ASSERT_GE(info.sizeInBytes, allocate_sz1);
+#else
   ASSERT_EQ(info.sizeInBytes, allocate_sz1);
+#endif
   ASSERT_EQ(info.agentOwner.handle, ag.handle);
   // ROCR may return a smaller size of info if it is an older version of ROCr and ROCr's
   // internal definition hsa_amd_pointer_info_t is smaller than the users. But ROCr cannot
@@ -506,15 +514,10 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
 
 
   err = hsa_amd_memory_pool_allocate(pool, allocate_sz2, 0, &memPtr2);
-#ifdef ROCRTST_ASAN
-  // Under ASAN, hsa_amd_memory_pool_allocate returns base+PAGE_SIZE (ASAN header offset).
-  // hsa_memory_free is not intercepted by the ASAN runtime, so it receives the offset pointer
-  // and fails to find it in allocation_map_. Use hsa_amd_memory_pool_free which IS intercepted
-  // and correctly strips the PAGE_SIZE offset before calling into ROCr.
-  if (err != HSA_STATUS_SUCCESS) hsa_amd_memory_pool_free(memPtr1);
-#else
-  if (err != HSA_STATUS_SUCCESS) hsa_memory_free(memPtr1);
-#endif
+  if (err != HSA_STATUS_SUCCESS) {
+    hsa_status_t free_err = hsa_amd_memory_pool_free(memPtr1);
+    EXPECT_EQ(free_err, HSA_STATUS_SUCCESS) << "Cleanup of memPtr1 failed";
+  }
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_agent_get_info(ag, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
@@ -531,28 +534,13 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
     std::cout << "   Available memory after: " << ag_avail_memory_after << std::endl;
   }
 
-#ifdef ROCRTST_ASAN
-  // Under ASAN, hsa_amd_memory_pool_allocate returns base+PAGE_SIZE (ASAN header offset).
-  // hsa_memory_free is not intercepted by the ASAN runtime, so it receives the offset pointer
-  // and fails to find it in allocation_map_. Use hsa_amd_memory_pool_free which IS intercepted
-  // and correctly strips the PAGE_SIZE offset before calling into ROCr.
   err = hsa_amd_memory_pool_free(memPtr1);
-#else
-  err = hsa_memory_free(memPtr1);
-#endif
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-
-#ifdef ROCRTST_ASAN
-  // Under ASAN, hsa_amd_memory_pool_allocate returns base+PAGE_SIZE (ASAN header offset).
-  // hsa_memory_free is not intercepted by the ASAN runtime, so it receives the offset pointer
-  // and fails to find it in allocation_map_. Use hsa_amd_memory_pool_free which IS intercepted
-  // and correctly strips the PAGE_SIZE offset before calling into ROCr.
 
   err = hsa_amd_memory_pool_free(memPtr2);
-#else
-  err = hsa_memory_free(memPtr2);
-#endif
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  DrainAsanQuarantine();
 
   err = hsa_agent_get_info(ag, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
                             &ag_avail_memory_after);

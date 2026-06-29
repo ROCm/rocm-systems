@@ -36,7 +36,7 @@ The following usage notes are relevant when using the RCCL Tuner plugin API:
 
 .. note::
    
-   The `example plugin <https://github.com/ROCm/rccl/blob/develop/ext-tuner/example/plugin.c>`_
+   The `example plugin <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/plugin.c>`_
    uses math models to approximate the bandwidth and latency of the available selection of algorithms and protocols
    and select the one with the lowest calculated latency. It is customized for the AMD Instinct MI300 accelerators and RoCEv2 networks
    on a limited number of nodes. This example, which is intended for demonstration purposes only, is not meant to be inclusive of all potential AMD GPUs and network configuration.
@@ -114,17 +114,17 @@ Build and usage instructions
 ============================
 
 To use the external plugin, implement the desired algorithm and protocol selection technique using the API described above.
-As a reference, the `following example <https://github.com/ROCm/rccl/blob/develop/ext-tuner/example/plugin.c>`_ is based on the
+As a reference, the `following example <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/plugin.c>`_ is based on the
 MI300 tuning table by default.
 
 Building and using the example libnccl-tuner.so file
 -----------------------------------------------------
 
-#. Build the ``libnccl-tuner.so`` file following `the example Makefile <https://github.com/ROCm/rccl/blob/develop/ext-tuner/example/Makefile>`_.
+#. Build the ``libnccl-tuner.so`` file following `the example Makefile <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/Makefile>`_.
 
    .. code-block:: shell
 
-      cd $RCCL_HOME/ext-tuner/example/
+      cd $RCCL_HOME/plugins/tuner/example/
       make
 
 #. Tell RCCL to use the custom ``libnccl-tuner.so`` file by setting the following environment variable
@@ -132,4 +132,4 @@ Building and using the example libnccl-tuner.so file
 
    .. code-block:: shell
 
-      export NCCL_TUNER_PLUGIN=$RCCL_HOME/ext-tuner/example/libnccl-tuner.so
+      export NCCL_TUNER_PLUGIN=$RCCL_HOME/plugins/tuner/example/libnccl-tuner.so

@@ -29,7 +29,7 @@ echo "  install: $INSTALL_PREFIX" >&2
 
 docker run --rm \
     -v "${MONOREPO_DIR}:/src:ro" \
-    --tmpfs /src/experimental/rocjitsu/third_party \
+    --tmpfs /src/emulation/rocjitsu/third_party \
     --entrypoint bash \
     "$IMAGE" \
     -c '
@@ -62,7 +62,7 @@ cmake -G Ninja \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
     -DFETCHCONTENT_BASE_DIR=/tmp/deps \
     -DBUILD_TESTING=OFF \
-    /src/experimental/rocjitsu 2>&1 | tail -5
+    /src/emulation/rocjitsu 2>&1 | tail -5
 
 echo "Building..."
 ninja -j$(nproc) 2>&1 | tail -5

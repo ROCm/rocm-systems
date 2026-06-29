@@ -94,7 +94,7 @@ struct RawAST
     std::string        reduce_op{};
     ACCUMULATE_OP_TYPE accumulate_op{ACCUMULATE_OP_TYPE::NONE};
 
-    // Stores either the name or digit dependening on whether this
+    // Stores either the name or digit depending on whether this
     // is a name or number
     std::variant<std::monostate, std::string, int64_t> value{std::monostate{}};
 

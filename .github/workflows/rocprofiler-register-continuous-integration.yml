@@ -32,36 +32,48 @@ concurrency:
 
 jobs:
   ci:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     strategy:
       fail-fast: false
       matrix:
         compiler: ['clang-14', 'clang-15', 'gcc-11', 'gcc-12']
         ci-args: ['']
         ci-tag: ['']
+        runner: ['linux-gfx942-1gpu-core42-ossci-rocm']
         include:
           - compiler: 'gcc-12'
             ci-args: '--coverage'
             ci-tag: '-codecov'
+            runner: 'linux-gfx942-1gpu-core42-ossci-rocm'
           - compiler: 'clang-15'
             ci-args: '--linter clang-tidy'
             ci-tag: '-clang-tidy'
+            runner: 'linux-gfx942-1gpu-core42-ossci-rocm'
           - compiler: 'clang-13'
             ci-args: ''
             ci-tag: ''
+            runner: 'linux-gfx942-1gpu-core42-ossci-rocm'
           - compiler: 'gcc-12'
             ci-args: '--memcheck ThreadSanitizer'
             ci-tag: '-thread-sanitizer'
+            # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
+            runner: 'linux-mi325-gpu-rocm-cpu-sandbox'
           - compiler: 'gcc-12'
             ci-args: '--memcheck AddressSanitizer'
             ci-tag: '-address-sanitizer'
+            # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
+            runner: 'linux-mi325-gpu-rocm-cpu-sandbox'
           - compiler: 'gcc-12'
             ci-args: '--memcheck LeakSanitizer'
             ci-tag: '-leak-sanitizer'
+            # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
+            runner: 'linux-mi325-gpu-rocm-cpu-sandbox'
         #   - compiler: 'gcc-12'
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
+        #     runner: 'linux-mi325-8gpu-ossci-rocm-sandbox'
 
-    runs-on: linux-gfx942-1gpu-ossci-rocm
+    runs-on: ${{ matrix.runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
@@ -75,15 +87,9 @@ jobs:
       PACKAGING_INSTALL_PREFIX: /opt/rocm
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       PATH: /usr/bin:$PATH
+      SUBMODULE_PATHS: "projects/rocprofiler-register"
 
     steps:
-    - name: Install Latest Nightly ROCm
-      shell: bash
-      working-directory: /tmp
-      run: |
-        tar -xf ${{ env.PACKAGING_INSTALL_PREFIX }}-gfx94X.tar.gz -C ${{ env.PACKAGING_INSTALL_PREFIX }}
-        echo "ROCm installed to: ${{ env.PACKAGING_INSTALL_PREFIX }}"
-
     - name: Setup Git
       shell: bash
       run: |
@@ -96,8 +102,13 @@ jobs:
     - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-register
-        submodules: true
+        submodules: false
         set-safe-directory: true
+
+    - name: Init/Update submodules
+      run: |
+        git config --global --add safe.directory '*'
+        git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Install Packages
       timeout-minutes: 25

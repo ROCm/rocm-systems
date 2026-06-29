@@ -3,8 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 include(AISAddExecutable)
-include(AISUseGTest)
-find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(Threads REQUIRED)
 
 set(SHARED_SOURCE_FILES
@@ -12,6 +10,7 @@ set(SHARED_SOURCE_FILES
 )
 
 set(TEST_SOURCE_FILES
+    api_trace.cpp
     async.cpp
     backend.cpp
     batch/batch.cpp
@@ -38,6 +37,7 @@ set(TEST_SYSINCLS
     ${HIPFILE_INCLUDE_PATH}
     ${HIPFILE_TEST_COMMON_PATH}
     ${HIPFILE_AMD_TEST_PATH}
+    ${HIPFILE_THIRD_PARTY_PATH}
 )
 
 ais_add_test_executable(
@@ -50,7 +50,8 @@ ais_add_test_executable(
 # Add gtest
 target_link_libraries(internal_tests PRIVATE GTest::gmock)
 target_link_libraries(internal_tests PRIVATE GTest::gtest)
-target_link_libraries(internal_tests PRIVATE Boost::program_options)
+target_compile_options(internal_tests PRIVATE -pthread)
+target_link_options(internal_tests PRIVATE -pthread)
 
 ais_gtest_discover_tests(
     internal_tests

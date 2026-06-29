@@ -209,6 +209,67 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
         return
 
 
+class TestAmdSmiApuMetrics(unittest.TestCase):
+    """Hardware-free unit tests for the APU metrics helpers."""
+
+    def test_convert_apu_unit_na_passthrough(self):
+        self.assertEqual(amdsmi.amdsmi_interface._convert_apu_unit("N/A", 100), "N/A")
+        self.assertEqual(amdsmi.amdsmi_interface._convert_apu_unit("N/A", 1000), "N/A")
+
+    def test_convert_apu_unit_scalar(self):
+        # centidegrees -> C
+        self.assertEqual(amdsmi.amdsmi_interface._convert_apu_unit(2500, 100), 25.0)
+        # milliwatts -> W
+        self.assertEqual(amdsmi.amdsmi_interface._convert_apu_unit(15000, 1000), 15.0)
+        # result is rounded to 2 decimals
+        self.assertEqual(amdsmi.amdsmi_interface._convert_apu_unit(2533, 100), 25.33)
+
+    def test_convert_apu_unit_zero_is_valid(self):
+        # 0 is a real value, not a sentinel
+        self.assertEqual(amdsmi.amdsmi_interface._convert_apu_unit(0, 100), 0.0)
+
+    def test_convert_apu_unit_list_mixed(self):
+        self.assertEqual(
+            amdsmi.amdsmi_interface._convert_apu_unit([2500, "N/A", 0], 100), [25.0, "N/A", 0.0]
+        )
+
+    def test_populate_apu_metrics_conversions_and_sentinel(self):
+        apu = amdsmi.amdsmi_wrapper.struct_amdsmi_apu_metrics_t()
+        apu.temperature_gfx = 0xFFFF  # UINT16 sentinel -> N/A
+        apu.temperature_soc = 2500  # centidegrees -> 25.0 C
+        apu.average_socket_power = 15000  # milliwatts -> 15.0 W
+        apu.average_gfxclk_frequency = 0  # 0 is a valid MHz value
+
+        result = amdsmi.amdsmi_interface._populate_apu_metrics(apu)
+
+        self.assertEqual(result["apu_metrics.temperature_gfx"], "N/A")
+        self.assertEqual(result["apu_metrics.temperature_soc"], 25.0)
+        self.assertEqual(result["apu_metrics.average_socket_power"], 15.0)
+        self.assertEqual(result["apu_metrics.average_gfxclk_frequency"], 0)
+
+    def test_na_dict_symmetry(self):
+        na_dict_keys = {
+            k
+            for k in amdsmi.amdsmi_interface._apu_metrics_na_dict()
+            if k.startswith("apu_metrics.")
+        }
+        na_full_keys = {
+            k
+            for k in amdsmi.amdsmi_interface._NA_amdsmi_get_gpu_metrics_info()
+            if k.startswith("apu_metrics.")
+        }
+        # The live is_apu=True path must expose the same apu_metrics.* keys.
+        live_keys = {
+            k
+            for k in amdsmi.amdsmi_interface._populate_apu_metrics(
+                amdsmi.amdsmi_wrapper.struct_amdsmi_apu_metrics_t()
+            )
+            if k.startswith("apu_metrics.")
+        }
+        self.assertEqual(na_dict_keys, na_full_keys)
+        self.assertEqual(na_dict_keys, live_keys)
+
+
 class TestAmdSmiPython(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -659,6 +720,13 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name("")
         self.common.Test_API_Per_GPU(
             amdsmi_get_gpu_compute_partition=amdsmi.amdsmi_get_gpu_compute_partition
+        )
+        return
+
+    def test_get_gpu_compute_partition_mem_alloc_mode(self):
+        self.common.print_func_name("")
+        self.common.Test_API_Per_GPU(
+            amdsmi_get_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode
         )
         return
 
@@ -1522,6 +1590,15 @@ class TestAmdSmiPython(unittest.TestCase):
         )
         return
 
+    def test_set_gpu_compute_partition_mem_alloc_mode(self):
+        self.common.print_func_name("")
+
+        self.common.Test_Per_GPU_With_One_Enum(
+            amdsmi_set_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode,
+            compute_partition_mem_alloc_mode=self.common.compute_partition_mem_alloc_mode_types,
+        )
+        return
+
     def test_set_gpu_memory_partition_mode(self):
         self.common.print_func_name("")
 
@@ -1809,7 +1886,7 @@ if __name__ == "__main__":
     #       self.assertEqual(e.get_error_code(), amdsmi.AmdSmiStatus.AMDSMI_STATUS_NOT_SUPPORTED)
     # ---------------------------------------------------------------------------
 
-    runner = unittest.TextTestRunner(
+    runner = common.GTestSummaryRunner(
         stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
     )
     common.expand_glob_k_arg(globals())

@@ -90,7 +90,7 @@ public:
     // The set that keeps track of reported code object loading/unloading events.
     // At the end of the test, the sets needs to be empty.
     // Namely, each loading event will insert a code object id into the set,
-    // while each unloading event will delete a code ojbect id from the set.
+    // while each unloading event will delete a code object id from the set.
     code_object_id_set_t active_code_objects = {};
 };
 
@@ -124,7 +124,7 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
         if(_agents[i]->type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             // Instantiate the tool_agent_info.
-            // Store pointer to the rocprofiler_agent_t and instatiate a vector of
+            // Store pointer to the rocprofiler_agent_t and instantiate a vector of
             // available configurations.
             // Move the ownership to the _out_agents
             auto tool_gpu_agent           = std::make_unique<tool_agent_info>();
@@ -238,7 +238,7 @@ configure_pc_sampling_prefer_stochastic(tool_agent_info*         agent_info,
         auto success = query_avail_configs_for_agent(agent_info);
         if(!success)
         {
-            // An error occured while querying PC sampling capabilities,
+            // An error occurred while querying PC sampling capabilities,
             // so avoid trying configuring PC sampling service.
             // Instead return false to indicated a failure.
             ROCPROFILER_CALL(ROCPROFILER_STATUS_ERROR,
@@ -298,7 +298,7 @@ configure_pc_sampling_prefer_stochastic(tool_agent_info*         agent_info,
         // but before the `rocprofiler_configure_pc_sampling_service` is called,
         // then the `rocprofiler_configure_pc_sampling_service` will fail again.
         // The process P1 executing this loop can spin wait (starve) if it is unlucky enough
-        // to always be interuppted by some other process P2 that creates/destroys
+        // to always be interrupted by some other process P2 that creates/destroys
         // PC sampling service on the same device while P1 is executing the code
         // after the `query_avail_configs_for_agent` and
         // before the `rocprofiler_configure_pc_sampling_service`.
@@ -514,7 +514,7 @@ configure_pc_sampling_on_all_agents(rocprofiler_context_id_t context)
 
     if(pc_sampler->gpu_agents.empty())
     {
-        *utils::get_output_stream() << "No availabe gpu agents supporting PC sampling"
+        *utils::get_output_stream() << "No available gpu agents supporting PC sampling"
                                     << "\n";
         // Emit the message to skip the test.
         std::cerr << "PC sampling unavailable"
