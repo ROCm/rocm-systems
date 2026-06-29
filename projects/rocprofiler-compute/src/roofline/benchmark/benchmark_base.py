@@ -11,6 +11,8 @@
 import csv
 import fcntl
 import math
+import os
+import tempfile
 from abc import ABC
 from collections import namedtuple
 from collections.abc import Generator
@@ -147,7 +149,53 @@ class Bench_base(ABC):
 
         lock_file = lock_dir / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
 
-        with open(lock_file, "a", encoding="utf-8") as f:
+        def publish_lock_file() -> None:
+            if lock_file.exists():
+                return
+
+            tmp_fd = -1
+            tmp_path = None
+            try:
+                tmp_fd, tmp_name = tempfile.mkstemp(
+                    prefix=f".{lock_file.name}.",
+                    suffix=".tmp",
+                    dir=lock_dir,
+                )
+                tmp_path = Path(tmp_name)
+                os.fchmod(tmp_fd, 0o666)
+                try:
+                    os.link(tmp_path, lock_file)
+                except FileExistsError:
+                    pass  # Another process published the shared lock first.
+            finally:
+                if tmp_fd != -1:
+                    os.close(tmp_fd)
+                if tmp_path is not None:
+                    try:
+                        tmp_path.unlink()
+                    except FileNotFoundError:
+                        pass
+
+        def open_lock_file() -> tuple[int, str]:
+            nofollow = getattr(os, "O_NOFOLLOW", 0)
+            cloexec = getattr(os, "O_CLOEXEC", 0)
+            try:
+                return os.open(lock_file, os.O_RDWR | nofollow | cloexec), "r+"
+            except PermissionError:
+                # Pre-existing file owned by another user without write access
+                # to us; a read-only fd is enough for flock.
+                return os.open(lock_file, os.O_RDONLY | nofollow | cloexec), "r"
+
+        try:
+            publish_lock_file()
+            fd, mode = open_lock_file()
+        except OSError as e:
+            raise RuntimeError(
+                f"Cannot open GPU benchmark lock {lock_file}: {e}. A stale lock "
+                "file owned by another user may exist; remove it and retry."
+            ) from e
+
+        with os.fdopen(fd, mode, encoding="utf-8") as f:
             try:
                 fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:

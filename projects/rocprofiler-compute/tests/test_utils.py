@@ -5344,6 +5344,129 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     assert "Acquired lock for GPU 0" in output
 
 
+def _setup_benchmark_lock(tmp_path, monkeypatch):
+    """Shared setup for GPU benchmark lock tests.
+
+    Redirects the hardcoded lock directory to a temp path and mocks the GPU
+    UUID. Returns (testClass, lock_dir, lock_file).
+    """
+    import roofline.benchmark.benchmark_base as benchmark_base
+
+    lock_dir = tmp_path / "locks"
+    lock_dir.mkdir()
+
+    monkeypatch.setattr(
+        benchmark_base.hip,
+        "hipGetDeviceProperties",
+        lambda d: mock.Mock(uuid=mock.Mock(uuid=bytes([0x01, 0x02, 0x03, 0x04]))),
+    )
+
+    original_path = Path
+
+    def mock_path(p):
+        if p == "/tmp/rocprof-compute-benchmark":
+            return lock_dir
+        return original_path(p)
+
+    monkeypatch.setattr(benchmark_base, "Path", mock_path)
+
+    testClass = benchmark_base.Bench_base(0, {})
+    lock_file = lock_dir / "rocprof-compute-benchmark-01020304.lock"
+    return testClass, lock_dir, lock_file
+
+
+@pytest.mark.misc
+def test_gpu_benchmark_lock_file_is_world_rw(tmp_path, monkeypatch):
+    """A freshly created lock file must be world-rw (0o666) regardless of umask."""
+    import os
+    import stat
+
+    testClass, lock_dir, lock_file = _setup_benchmark_lock(tmp_path, monkeypatch)
+
+    # Force a strict umask that would otherwise leave the file owner-only.
+    old_umask = os.umask(0o077)
+    try:
+        with testClass.gpu_benchmark_lock(0):
+            assert lock_file.exists()
+    finally:
+        os.umask(old_umask)
+
+    file_mode = stat.S_IMODE(os.stat(lock_file).st_mode)
+    assert file_mode == 0o666, (
+        f"Lock file must be world-rw so any user can acquire it; got "
+        f"{oct(file_mode)}. A non-0o666 lock file locks out other users."
+    )
+    assert not list(lock_dir.glob(f".{lock_file.name}.*.tmp"))
+
+
+@pytest.mark.misc
+def test_gpu_benchmark_lock_does_not_change_process_umask(tmp_path, monkeypatch):
+    """Lock creation must not change process-global umask."""
+    import roofline.benchmark.benchmark_base as benchmark_base
+
+    testClass, _, _ = _setup_benchmark_lock(tmp_path, monkeypatch)
+
+    def fail_if_called(_mask):
+        raise AssertionError("gpu_benchmark_lock must not call os.umask()")
+
+    monkeypatch.setattr(benchmark_base.os, "umask", fail_if_called)
+
+    with testClass.gpu_benchmark_lock(0):
+        pass
+
+
+@pytest.mark.misc
+def test_gpu_benchmark_lock_existing_file_owned_by_other_user(tmp_path, monkeypatch):
+    """A lock file owned by another user (no write access) is still lockable."""
+    import os
+
+    import roofline.benchmark.benchmark_base as benchmark_base
+
+    testClass, _, lock_file = _setup_benchmark_lock(tmp_path, monkeypatch)
+
+    # Pre-create the lock file (as if another user created it first).
+    lock_file.touch()
+
+    real_os_open = os.open
+    opened_modes = []
+
+    def fake_os_open(path, flags, *args):
+        if flags & os.O_RDWR:
+            opened_modes.append("rw")
+            raise PermissionError(13, "Permission denied")
+        opened_modes.append("ro")
+        return real_os_open(path, flags, *args)
+
+    monkeypatch.setattr(benchmark_base.os, "open", fake_os_open)
+
+    acquired = False
+    with testClass.gpu_benchmark_lock(0):
+        acquired = True
+
+    assert acquired, "Lock must be acquired via read-only fallback"
+    assert opened_modes == ["rw", "ro"], (
+        "Should attempt read-write first, then fall back to read-only"
+    )
+
+
+@pytest.mark.misc
+def test_gpu_benchmark_lock_unopenable_file_raises(tmp_path, monkeypatch):
+    """If the lock file cannot be opened at all, raise an actionable error."""
+    import roofline.benchmark.benchmark_base as benchmark_base
+
+    testClass, _, lock_file = _setup_benchmark_lock(tmp_path, monkeypatch)
+    lock_file.touch()
+
+    def fake_os_open(path, flags, *args):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(benchmark_base.os, "open", fake_os_open)
+
+    with pytest.raises(RuntimeError, match="Cannot open GPU benchmark lock"):
+        with testClass.gpu_benchmark_lock(0):
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Tests for call-tree functions (build/display)
 # ---------------------------------------------------------------------------
