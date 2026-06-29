@@ -41,7 +41,7 @@ if(UNIT_TESTS)
 endif()
 
 if(BUILD_INTEGRATION_TESTS)
-    find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
+    find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -c "import elftools"
         RESULT_VARIABLE PYELFTOOLS_IMPORT_RESULT

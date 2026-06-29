@@ -62,7 +62,7 @@ option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 add_subdirectory(source)
 
 if(BUILD_PYTHON)
-    find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
+    find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_path('purelib'))"
         RESULT_VARIABLE _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_RESULT

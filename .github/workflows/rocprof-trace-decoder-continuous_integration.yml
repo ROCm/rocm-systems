@@ -98,7 +98,7 @@ jobs:
       shell: bash
       run: |
         apt-get update
-        apt-get install -y git build-essential cmake g++ python3 python3-pip libgtest-dev libgmock-dev
+        apt-get install -y git build-essential cmake g++ python3 python3-pip python3-pyelftools libgtest-dev libgmock-dev
         git config --global --add safe.directory '*'
 
     - name: List Files

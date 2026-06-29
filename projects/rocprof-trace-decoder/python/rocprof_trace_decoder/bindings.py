@@ -3,7 +3,7 @@ from __future__ import annotations
 import ctypes
 import os
 from pathlib import Path
-from typing import Callable, Iterable, Protocol
+from typing import Callable, Iterable, Protocol, Union
 
 from .records import (
     DecoderStatus,
@@ -23,7 +23,7 @@ from .records import (
     WaveState,
 )
 
-BytesLike = bytes | bytearray | memoryview
+BytesLike = Union[bytes, bytearray, memoryview]
 
 
 class DecoderError(RuntimeError):

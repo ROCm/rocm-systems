@@ -7,7 +7,7 @@ name = "rocprof-trace-decoder"
 version = "0.2.0"
 description = "Python API for rocprof-trace-decoder"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [{ name = "Advanced Micro Devices, Inc." }]
 dependencies = ["pyelftools>=0.31"]
