@@ -105,6 +105,19 @@ stream:
   Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority:
     <<: *level_2
     tags: [lifecycle]
+  Unit_hipStreamPriorityAqlLog_ChildWorkload:
+    <<: *level_2
+    # Internal helper, only invoked by the parent test via re-exec (by exact
+    # name, which still runs hidden [.] cases). Disabled everywhere so it does
+    # not run as a standalone no-op in the regular suite.
+    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    tags: [lifecycle]
+  Unit_hipStreamPriorityAqlLog_TraceReportsPriority:
+    <<: *level_2
+    # Verifies AQL packet trace reports stream priority next to HWq; relies on
+    # AMD_LOG AQL output, so AMD/Linux only.
+    disabled: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    tags: [lifecycle]
   Unit_hipStreamDestroy_Default:
     <<: *level_2
     tags: [lifecycle, smoke]

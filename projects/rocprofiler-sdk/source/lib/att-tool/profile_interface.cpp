@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 
 #include <cxxabi.h>
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 
@@ -69,6 +70,24 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     {
         PerfcounterFile(tool.config, static_cast<perfevent_t*>(trace_events), trace_size);
     }
+#if !defined(ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS)
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT)
+    {
+        ROCP_FATAL_IF(trace_size != 1) << "Expected one ATT event record, got " << trace_size;
+        const auto*   event = static_cast<const trace_event_t*>(trace_events);
+        trace_event_t rec{};
+        std::memcpy(&rec, event, std::min<size_t>(event->size, sizeof(rec)));
+        tool.config.events.emplace_back(rec);
+    }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH)
+    {
+        ROCP_FATAL_IF(trace_size != 1) << "Expected one ATT dispatch record, got " << trace_size;
+        const auto* dispatch = static_cast<const dispatch_t*>(trace_events);
+        dispatch_t  rec{};
+        std::memcpy(&rec, dispatch, std::min<size_t>(dispatch->size, sizeof(rec)));
+        tool.config.dispatches.emplace_back(rec);
+    }
+#endif
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY)
     {
         if(tool.config.realtime && trace_size != 0)

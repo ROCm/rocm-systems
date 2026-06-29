@@ -25,7 +25,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -37,6 +36,8 @@
 namespace rocjitsu {
 
 namespace {
+
+inline constexpr uint64_t kKernargPreloadSkipBytes = 256;
 
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
@@ -125,6 +126,40 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
   return offsets;
 }
 
+[[nodiscard]] std::vector<uint64_t>
+kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
+  std::vector<uint64_t> offsets;
+  offsets.reserve(kernels.size() * 2);
+  for (const KdTranslation &kernel : kernels) {
+    offsets.push_back(kernel.entry_text_offset);
+    if (kernel.has_kernarg_preload)
+      offsets.push_back(kernel.kernarg_preload_entry_text_offset);
+  }
+
+  std::ranges::sort(offsets);
+  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
+  return offsets;
+}
+
+[[nodiscard]] std::vector<uint64_t> kernel_block_leaders(std::span<const KdTranslation> kernels,
+                                                         std::span<const uint8_t> text) {
+  std::vector<uint64_t> offsets;
+  offsets.reserve(kernels.size() * 2);
+  for (const KdTranslation &kernel : kernels) {
+    offsets.push_back(kernel.entry_text_offset);
+    // AMDHSA kernarg preloading is descriptor-controlled. When
+    // kernarg_preload_spec_length is non-zero, compatible CP firmware starts at
+    // KERNEL_CODE_ENTRY_BYTE_OFFSET + 256. That address is a real hardware entry,
+    // not merely padding, so split a block there and seed reachability from it.
+    if (kernel.has_kernarg_preload && kernel.kernarg_preload_entry_text_offset < text.size())
+      offsets.push_back(kernel.kernarg_preload_entry_text_offset);
+  }
+
+  std::ranges::sort(offsets);
+  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
+  return offsets;
+}
+
 struct KernelTranslationScope {
   KdTranslation *translation = nullptr;
   BasicBlock *entry = nullptr;
@@ -133,9 +168,18 @@ struct KernelTranslationScope {
 
 [[nodiscard]] std::vector<BasicBlock *>
 reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, BasicBlock &entry,
-                        const std::unordered_set<uint64_t> &kernel_entries) {
+                        const std::unordered_set<uint64_t> &kernel_entries,
+                        const std::unordered_set<uint64_t> &own_entries) {
   std::unordered_set<const BasicBlock *> reachable;
   std::vector<BasicBlock *> stack{&entry};
+  for (const uint64_t own_entry : own_entries) {
+    if (own_entry == entry.start_offset())
+      continue;
+    if (BasicBlock *extra_entry = block_for_offset(blocks, own_entry);
+        extra_entry != nullptr && extra_entry != &entry) {
+      stack.push_back(extra_entry);
+    }
+  }
 
   while (!stack.empty()) {
     BasicBlock *block = stack.back();
@@ -146,7 +190,7 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
     for (BasicBlock *succ : block->successors()) {
       if (succ == nullptr)
         continue;
-      if (succ->start_offset() != entry.start_offset() &&
+      if (!own_entries.contains(succ->start_offset()) &&
           kernel_entries.contains(succ->start_offset()))
         continue;
       stack.push_back(succ);
@@ -170,7 +214,8 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
   if (entries.empty())
     return scopes;
 
-  std::unordered_set<uint64_t> entry_set(entries.begin(), entries.end());
+  const auto hardware_entries = kernel_hardware_entry_offsets(kernels);
+  std::unordered_set<uint64_t> entry_set(hardware_entries.begin(), hardware_entries.end());
   std::vector<KdTranslation *> ordered_kernels;
   ordered_kernels.reserve(kernels.size());
   std::unordered_set<uint64_t> seen_entries;
@@ -188,8 +233,15 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
     BasicBlock *entry = block_for_offset(blocks, kernel->entry_text_offset);
     if (entry == nullptr)
       continue;
+    std::unordered_set<uint64_t> own_entries{kernel->entry_text_offset};
+    if (kernel->has_kernarg_preload) {
+      if (block_for_offset(blocks, kernel->kernarg_preload_entry_text_offset) == nullptr)
+        continue;
+      own_entries.insert(kernel->kernarg_preload_entry_text_offset);
+    }
 
-    scopes.push_back({kernel, entry, reachable_kernel_blocks(blocks, *entry, entry_set)});
+    scopes.push_back(
+        {kernel, entry, reachable_kernel_blocks(blocks, *entry, entry_set, own_entries)});
   }
   return scopes;
 }
@@ -269,9 +321,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
 
   const auto entry_offsets = kernel_entry_offsets(descriptor_translations);
+  const auto block_leaders = kernel_block_leaders(descriptor_translations, text);
   // Phase 2: build a CFG over .text and reduce each descriptor root to the
   // source blocks that this kernel owns in the initial relocation strategy.
-  auto blocks = BasicBlock::build(obj, *decoder, entry_offsets);
+  auto blocks = BasicBlock::build(obj, *decoder, block_leaders);
   auto scopes = kernel_translation_scopes(blocks, descriptor_translations);
 
   if (scopes.size() != entry_offsets.size()) {
@@ -313,6 +366,25 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return true;
   };
 
+  auto write_words_at = [](std::vector<uint8_t> &dst, uint64_t offset,
+                           std::span<const uint32_t> words) {
+    if (words.empty())
+      return;
+    std::memcpy(dst.data() + offset, words.data(), words.size() * sizeof(uint32_t));
+  };
+
+  auto write_launch_stub = [&](KernelTextLayout &layout, uint64_t stub_offset,
+                               uint64_t target_offset) {
+    uint64_t cursor = stub_offset;
+    write_words_at(translated_text, cursor, layout.translation->prologue_words);
+    cursor += layout.translation->prologue_words.size() * sizeof(uint32_t);
+
+    const auto branch_dwords = compute_sopp_branch_simm16(cursor, target_offset);
+    assert(branch_dwords && "kernarg preload launch-window branch must fit in s_branch simm16");
+    const uint32_t branch = build_s_branch(*branch_dwords, host_arch_);
+    write_words_at(translated_text, cursor, std::span<const uint32_t>(&branch, 1));
+  };
+
   // Phase 3: fail shared reachable text up front. The plan deliberately keeps
   // duplication/removal of public references out of this first implementation.
   std::unordered_set<const BasicBlock *> translated_blocks;
@@ -343,6 +415,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     KernelTextLayout layout;
     layout.translation = scope.translation;
     layout.source_entry = scope.translation->entry_text_offset;
+    const bool has_kernarg_preload = scope.translation->has_kernarg_preload;
+    const uint64_t source_preload_entry = scope.translation->kernarg_preload_entry_text_offset;
+    const uint64_t prologue_bytes = scope.translation->prologue_words.size() * sizeof(uint32_t);
+    const uint64_t launch_stub_bytes = prologue_bytes + sizeof(uint32_t);
+    if (has_kernarg_preload && launch_stub_bytes > kKernargPreloadSkipBytes) {
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "kernel descriptor prologue does not fit in the 256-byte kernarg preload "
+                   "compatibility window; leaving code object unchanged",
+                   layout.source_entry);
+      return leave_unchanged();
+    }
 
     // The entry block is not necessarily the first reachable source block. The
     // relocated body is compact, so compute the entry delta from emitted block
@@ -366,15 +449,54 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       return leave_unchanged();
     }
 
-    const uint64_t body_padding =
-        padding_for_residue(translated_text.size() + entry_delta, layout.source_entry % 256, 256);
-    append_nop_padding(translated_text, body_padding, host_arch_);
+    if (has_kernarg_preload) {
+      // Kernarg-preload kernels have two hardware-visible entries:
+      //
+      //   compat_firmware_entry:
+      //     <compatibility preload words>
+      //     s_branch common_entry
+      //     ... // firmware_entry is 256 bytes after compat_firmware_entry
+      //   firmware_entry:
+      //     <preloaded-kernarg path words>
+      //     s_branch common_entry
+      //   common_entry:
+      //     ...
+      //
+      // Compatible CP firmware enters at descriptor entry + 256 when
+      // kernarg_preload_spec_length is non-zero. Older/incompatible firmware
+      // enters at the descriptor entry. DBT relocates the original source
+      // blocks normally, then synthesizes a fresh launch window:
+      //
+      //   new_compat_firmware_entry:
+      //     <descriptor ABI prologue words>
+      //     s_branch compat_firmware_entry_translated
+      //     ... // new_firmware_entry is exactly 256 bytes later
+      //   new_firmware_entry:
+      //     <descriptor ABI prologue words>
+      //     s_branch firmware_entry_translated
+      //
+      // The descriptor is redirected to new_compat_firmware_entry. Compatible
+      // firmware still adds 256 and lands on new_firmware_entry; older firmware
+      // executes the compatibility stub. The original 256-byte source window is
+      // no longer preserved as layout padding, because the ABI requirement is
+      // the pair of legal entries, not the original physical bytes.
+      const uint64_t launch_padding =
+          padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
+      append_nop_padding(translated_text, launch_padding, host_arch_);
+      layout.target_entry = translated_text.size();
+      const uint64_t launch_end =
+          layout.target_entry + kKernargPreloadSkipBytes + launch_stub_bytes;
+      append_nop_padding(translated_text, launch_end - translated_text.size(), host_arch_);
+    } else {
+      const uint64_t body_padding =
+          padding_for_residue(translated_text.size() + entry_delta, layout.source_entry % 256, 256);
+      append_nop_padding(translated_text, body_padding, host_arch_);
+    }
 
     layout.body_begin = translated_text.size();
     uint64_t cursor = layout.body_begin;
     layout.blocks.reserve(scope.blocks.size());
     for (BasicBlock *block : scope.blocks) {
-      cursor = preserve_entry_skip_window_offset(layout, *block, cursor);
       layout.blocks.push_back({.block = block,
                                .source_start = block->start_offset(),
                                .source_end = block->end_offset(),
@@ -399,7 +521,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
     layout.target_body_entry = *body_entry;
 
-    if (!scope.translation->prologue_words.empty()) {
+    if (has_kernarg_preload) {
+      auto preload_body_entry = target_for_source_offset(layout, source_preload_entry);
+      if (!preload_body_entry) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "kernarg preload firmware entry offset is not present in the relocated body",
+                     source_preload_entry);
+        return leave_unchanged();
+      }
+      write_launch_stub(layout, layout.target_entry, layout.target_body_entry);
+      write_launch_stub(layout, layout.target_entry + kKernargPreloadSkipBytes,
+                        *preload_body_entry);
+    } else if (!scope.translation->prologue_words.empty()) {
       // Descriptor prologues are hardware entry points. Align the cave prologue
       // to the original entry residue, then branch into the relocated body.
       const uint64_t prologue_padding =

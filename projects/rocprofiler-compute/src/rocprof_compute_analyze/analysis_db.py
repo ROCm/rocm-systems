@@ -5,7 +5,7 @@ import ast
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 import astunparse
 import numpy as np
@@ -59,6 +59,22 @@ from utils.utils_analysis import (
 )
 from utils.utils_common import get_uuid, get_version
 from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
+
+
+class MetricInfoRow(NamedTuple):
+    name: str
+    metric_id: str
+    description: Optional[str]
+    unit: Optional[str]
+    pct_of_peak: bool
+    table_name: str
+    sub_table_name: str
+
+
+class ExpressionRow(NamedTuple):
+    metric_id: str
+    value_name: str
+    value: str
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -317,7 +333,6 @@ class db_analysis(OmniAnalyze_Base):
 
     def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
-        args = self.get_args()
 
         for workload_path in self._runs.keys():
             if not (Path(workload_path) / "pmc_perf.csv").exists():
@@ -326,9 +341,6 @@ class db_analysis(OmniAnalyze_Base):
             pmc_df = utils_analysis.process_rocpd_csv(
                 pd.read_csv(Path(workload_path) / "pmc_perf.csv")
             )
-
-            if args.spatial_multiplexing:
-                pmc_df = self.spatial_multiplex_merge_counters(pmc_df)
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(
@@ -568,15 +580,18 @@ class db_analysis(OmniAnalyze_Base):
                 if isinstance(v, str) and v and v != "None"
             ],
         )
-        return expression_df.apply(
-            lambda row: db_analysis.evaluate(
-                f"{row['metric_id']} - {row['value_name']}",
-                row["value"],
-                pmc_df,
-                sys_info,
-                emit_variance_warnings=emit_variance_warnings,
-            ),
-            axis=1,
+        return pd.Series(
+            [
+                db_analysis.evaluate(
+                    f"{row.metric_id} - {row.value_name}",
+                    row.value,
+                    pmc_df,
+                    sys_info,
+                    emit_variance_warnings=emit_variance_warnings,
+                )
+                for row in expression_df.itertuples(index=False)
+            ],
+            index=expression_df.index,
         )
 
     @staticmethod
@@ -759,62 +774,73 @@ class db_analysis(OmniAnalyze_Base):
         metrics_info_data_per_workload: dict[str, pd.DataFrame] = {}
         metric_expression_data_per_workload: dict[str, pd.DataFrame] = {}
 
+        non_expression_columns = {
+            "Metric",
+            "Channel",
+            "Unit",
+            "Description",
+            "Type",
+            "Xfer",
+            "Coherency",
+            "Transaction",
+            "Percent of Peak",
+        }
+
         for workload_path in self._pmc_df_per_workload.keys():
             gfx_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
-            # for example 201 -> Wavefront
-            table_names_map = dict()
-            for panel_config in self._arch_configs[gfx_arch].panel_configs.values():
+            arch_config = self._arch_configs[gfx_arch]
+
+            # Build table_id -> title map
+            # (e.g. 700 -> "Wavefront", 701 -> "Wavefront Launch Stats").
+            table_names_map: dict[int, str] = {}
+            for panel_config in arch_config.panel_configs.values():
                 table_names_map[panel_config["id"]] = panel_config["title"]
                 for source in panel_config["data source"]:
-                    table_names_map[list(source.values())[0]["id"]] = list(
-                        source.values()
-                    )[0]["title"]
-            # Build metric data
-            non_expression_columns = [
-                "Metric",
-                "Channel",
-                "Unit",
-                "Description",
-                "Type",
-                "Xfer",
-                "Coherency",
-                "Transaction",
-                "Percent of Peak",
+                    for table in source.values():
+                        table_names_map[table["id"]] = table["title"]
+
+            # Collect metric tables with table-level fields (table_name,
+            # sub_table_name, value_columns) and rows computed once per table.
+            metric_tables = [
+                (
+                    table_names_map[table_id // 100 * 100],
+                    table_names_map[table_id],
+                    [c for c in metric_df.columns if c not in non_expression_columns],
+                    list(metric_df.iterrows()),
+                )
+                for table_id, metric_df in arch_config.dfs.items()
+                if table_id != 402  # roofline points handled in calc_roofline_data
+                if set(metric_df.columns).intersection({"Metric", "Channel"})
             ]
-            metrics_info_df = pd.DataFrame([
-                {
-                    "name": row.get("Metric") or row["Channel"].strip(),
-                    "metric_id": metric_id,
-                    "description": row.get("Description"),
-                    "unit": row.get("Unit"),
-                    "pct_of_peak": row.get("Percent of Peak") is True,
-                    "table_name": table_names_map[int(metric_id.split(".")[0]) * 100],
-                    "sub_table_name": table_names_map[
-                        int(metric_id.split(".")[0]) * 100
-                        + int(metric_id.split(".")[1])
-                    ],
-                }
-                for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
-                if metric_df_id
-                != 402  # Skip roofline data points handled in calc_roofline_data
-                if set(metric_df.columns).intersection({"Metric", "Channel"})
-                for metric_id, row in metric_df.iterrows()
-            ])
-            expression_df = pd.DataFrame([
-                {
-                    "metric_id": metric_id,
-                    "value_name": value_name,
-                    "value": row[value_name].strip(),
-                }
-                for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
-                if metric_df_id
-                != 402  # Skip roofline data points handled in calc_roofline_data
-                if set(metric_df.columns).intersection({"Metric", "Channel"})
-                for metric_id, row in metric_df.iterrows()
-                for value_name in metric_df.drop(
-                    columns=non_expression_columns, errors="ignore"
-                ).columns
-            ])
+
+            metric_info_rows = [
+                MetricInfoRow(
+                    name=row.get("Metric") or row["Channel"].strip(),
+                    metric_id=metric_id,
+                    description=row.get("Description"),
+                    unit=row.get("Unit"),
+                    pct_of_peak=row.get("Percent of Peak") is True,
+                    table_name=table_name,
+                    sub_table_name=sub_table_name,
+                )
+                for table_name, sub_table_name, _value_columns, rows in metric_tables
+                for metric_id, row in rows
+            ]
+            expression_rows = [
+                ExpressionRow(
+                    metric_id=metric_id,
+                    value_name=value_name,
+                    value=row[value_name].strip(),
+                )
+                for _table_name, _sub_table_name, value_columns, rows in metric_tables
+                for metric_id, row in rows
+                for value_name in value_columns
+            ]
+
+            metrics_info_df = pd.DataFrame(
+                metric_info_rows, columns=MetricInfoRow._fields
+            )
+            expression_df = pd.DataFrame(expression_rows, columns=ExpressionRow._fields)
 
             metrics_info_data_per_workload[workload_path] = metrics_info_df
             metric_expression_data_per_workload[workload_path] = expression_df

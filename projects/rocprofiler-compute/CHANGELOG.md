@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added ``--pc-sampling-rows`` analyze option to cap the PC sampling table at the top N rows (default 10); set ``0`` to show all. Must be non-negative.
+
 * Added ``--bench-only`` profile mode option to run the roofline microbenchmark standalone (without profiling an application or collecting performance counters). No application run is required. Useful for regenerating ``roofline.csv`` in an existing workload directory or running the microbenchmark on systems where only HIP is available but rocprofiler-sdk is not.
 
 * Added ``--overwrite`` profile mode option to explicitly allow replacing existing workload output.
@@ -21,6 +23,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations.
 
 ### Changed
+
+* `--pc-sampling-sorting-type` now defaults to `count` (was `offset`), so the PC sampling table shows the most-sampled instructions first.
 
 * Renamed the `Pct of Peak` / `PoP` analysis column to `Percent of Peak` in analysis output.
 
@@ -59,6 +63,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Removed
 
+* Removed the multi-node analysis options ``--nodes``, ``--list-nodes`` (analyze mode) and the experimental ``--spatial-multiplexing`` option (profile and analyze modes). These features did not work as expected and will be redesigned in a future release.
+
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
 
 * Removed redundant `if (X != 0) else None` divide-by-zero guards from metric equations across all analysis YAML configurations. Division by zero is already handled by the metric evaluation engine, which returns `"N/A"` for `inf` and `NaN` results.
@@ -79,11 +85,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Kernels with missing counter data after iteration multiplexing imputation are now excluded from metrics calculations. A warning at analysis time lists the affected kernels. Their execution times remain visible in Top Stats.
 
-* Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (MI 200 series) GPUs
+* Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (AMD Instinct MI200 Series) GPUs.
 
-* PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped
+* PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped.
 
 * The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
+
+* Roofline support for RDNA3.5 gfx115x devices.
 
 ### Upcoming changes
 
@@ -94,6 +102,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * On gfx1151, `$max_mclk` is not automatically populated in sysinfo, so the related bandwidth metrics may be incorrect. Use `amd-smi` to obtain the maximum memory clock and provide it via `--specs-correction`.
 
 * CLI mode block 4 Roofline plot's legend will not appear if there are too many kernels to list, in relation to the user's terminal size. Same per-kernel roofline rate metrics and AI plot point details can be read in block 4's preceding tables.
+
+* In analyze mode, `--nodes` is not suitable for multi-rank analysis. Use `--path` with the rank-specific path (such as, `--path workload/1`) instead of `--path workload --nodes 1`.
 
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
 

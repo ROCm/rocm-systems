@@ -104,6 +104,18 @@ def block_token_or_alias(s: str) -> str:
         return s
 
 
+def non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}")
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a non-negative integer (0 means all), got {parsed}"
+        )
+    return parsed
+
+
 def print_avail_arch(avail_arch: list[str], args: str) -> str:
     ret_str = f"List all available {args} for analysis on specified arch:"
     for arch in avail_arch:
@@ -170,7 +182,6 @@ def add_general_group(
             "Enable experimental feature(s):\n"
             "   GUI (--gui)\n"
             "   TUI (--tui)\n"
-            "   Spatial multiplexing (--spatial-multiplexing)\n"
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
@@ -542,21 +553,6 @@ Examples:
     ## ----------------------------
 
     profile_group.add_argument(
-        "--spatial-multiplexing",
-        dest="spatial_multiplexing",
-        required=False,
-        default=None,
-        base_action="store",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Spatial multiplexing",
-        type=int,
-        nargs="*",
-        metavar="",
-        help="\t\t\tProvide Node ID and GPU number per node.",
-    )
-
-    profile_group.add_argument(
         "--membw-analysis",
         dest="membw_analysis",
         required=False,
@@ -786,10 +782,21 @@ Examples:
         required=False,
         metavar="",
         dest="pc_sampling_sorting_type",
-        default="offset",
+        default="count",
         type=str,
+        choices=["offset", "count"],
         help="\t\tSet the sorting type of pc sampling: "
-        "offset or count (DEFAULT: offset).",
+        "offset or count (DEFAULT: count).",
+    )
+    analyze_group.add_argument(
+        "--pc-sampling-rows",
+        required=False,
+        metavar="",
+        dest="pc_sampling_rows",
+        default=10,
+        type=non_negative_int,
+        help="\t\tSpecify the maximum number of rows shown in the PC "
+        "sampling table; use 0 to show all rows (DEFAULT: 10).",
     )
 
     ## Roofline Command Line Options (analyze: visualization)
@@ -972,40 +979,10 @@ Examples:
         help="\t\tSpecify the specs to correct. e.g. "
         '--specs-correction="specname1:specvalue1,specname2:specvalue2"',
     )
-    analyze_advanced_group.add_argument(
-        "--list-nodes",
-        action="store_true",
-        help="\t\tMulti-node option: list all node names.",
-    )
-    analyze_advanced_group.add_argument(
-        "--nodes",
-        metavar="",
-        type=str,
-        dest="nodes",
-        nargs="*",
-        help=(
-            "\t\tMulti-node option: filter with node names. "
-            "Enable it without node names means ALL."
-        ),
-    )
 
     ## ----------------------------
     # Experimental Features
     ## ----------------------------
-    analyze_group.add_argument(
-        "--spatial-multiplexing",
-        dest="spatial_multiplexing",
-        required=False,
-        default=False,
-        base_action="store_const",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Spatial multiplexing",
-        nargs=0,
-        const=True,
-        help="\t\tMode of spatial multiplexing.",
-    )
-
     analyze_group.add_argument(
         "--membw-analysis",
         dest="membw_analysis",
