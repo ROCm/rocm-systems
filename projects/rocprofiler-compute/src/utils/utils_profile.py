@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import csv
 import fcntl
 import importlib
 import os
@@ -685,7 +684,7 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
     for native_path in (Path(workload_dir) / "out/pmc_1").glob(
         "*_native_counter_collection.csv"
     ):
-        groups = _stream_aggregate_counter_csv(native_path, groupby_columns)
+        aggregated_counters = _aggregate_counter_csv(native_path, groupby_columns)
 
         pid = native_path.stem.split("_")[0]
         kernel_data_filename = str(
@@ -698,7 +697,9 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
             dispatch_id = kernel_row.get("Dispatch_Id", "")
             kernel_lookup.setdefault(dispatch_id, []).append(kernel_row)
 
-        rocprofv3_counter_data = _build_rocprofv3_counter_rows(groups, kernel_lookup)
+        rocprofv3_counter_data = _build_rocprofv3_counter_rows(
+            aggregated_counters, kernel_lookup
+        )
 
         csv_ops.write_csv_from_dicts(
             kernel_data_filename.replace("kernel_trace", "counter_collection"),
@@ -706,30 +707,26 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
         )
 
 
-def _stream_aggregate_counter_csv(
+def _aggregate_counter_csv(
     csv_path: Path,
     groupby_columns: tuple[str, ...],
 ) -> dict[tuple[str, ...], dict]:
-    """Stream CSV and group rows by key columns, summing counter_value."""
-    groups: dict[tuple[str, ...], dict] = {}
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None:
-            return groups
-        for row in reader:
-            key = tuple(row.get(col, "") for col in groupby_columns)
-            if key not in groups:
-                try:
-                    row["counter_value"] = float(row.get("counter_value", 0))
-                except (ValueError, TypeError):
-                    row["counter_value"] = 0.0
-                groups[key] = row
-                continue
+    """Group CSV rows by key columns, summing counter_value."""
+    aggregated: dict[tuple[str, ...], dict] = {}
+    for row in csv_ops.iter_csv_dicts(str(csv_path)):
+        key = tuple(row.get(col, "") for col in groupby_columns)
+        if key not in aggregated:
             try:
-                groups[key]["counter_value"] += float(row.get("counter_value", 0))
+                row["counter_value"] = float(row.get("counter_value", 0))
             except (ValueError, TypeError):
-                pass
-    return groups
+                row["counter_value"] = 0.0
+            aggregated[key] = row
+            continue
+        try:
+            aggregated[key]["counter_value"] += float(row.get("counter_value", 0))
+        except (ValueError, TypeError):
+            pass
+    return aggregated
 
 
 def _build_rocprofv3_counter_rows(
