@@ -33,22 +33,28 @@ class CodeIndex:
         self.document = document or {"code": [], "header": CODE_HEADER}
         self.entries: dict[Pc, CodeEntry] = {}
         self.line_numbers: dict[Pc, int] = {}
+        self._memory_sizes_dirty = False
 
         for entry in entries:
             self.entries[entry.pc] = entry
             self.line_numbers[entry.pc] = entry.line_number
 
-        self._set_memory_sizes()
+        self._next_line_number = max(self.line_numbers.values(), default=0) + 1
+        self._mark_memory_sizes_dirty()
 
     @classmethod
-    def from_code_json(cls, path: str | Path) -> "CodeIndex":
-        return cls.from_document(json.loads(Path(path).read_text()))
+    def from_code_json(cls, path: str | Path, *, load_counts: bool = True) -> "CodeIndex":
+        return cls.from_document(json.loads(Path(path).read_text()), load_counts=load_counts)
 
     @classmethod
-    def from_document(cls, doc: dict) -> "CodeIndex":
+    def from_document(cls, doc: dict, *, load_counts: bool = True) -> "CodeIndex":
+        document = json.loads(json.dumps(doc))
+        if not load_counts:
+            _clear_document_counts(document)
+
         entries: list[CodeEntry] = []
 
-        for row in doc.get("code", []):
+        for row in document.get("code", []):
             if len(row) < 10:
                 continue
             inst = str(row[0])
@@ -61,14 +67,14 @@ class CodeIndex:
                     inst=inst,
                     line_number=int(row[2]),
                     source=str(row[3]),
-                    hitcount=int(row[6] or 0),
-                    latency=int(row[7] or 0),
-                    stall=int(row[8] or 0),
-                    idle=int(row[9] or 0),
+                    hitcount=int(row[6] or 0) if load_counts else 0,
+                    latency=int(row[7] or 0) if load_counts else 0,
+                    stall=int(row[8] or 0) if load_counts else 0,
+                    idle=int(row[9] or 0) if load_counts else 0,
                 )
             )
 
-        return cls(entries, json.loads(json.dumps(doc)))
+        return cls(entries, document)
 
     @classmethod
     def from_stats_csv(cls, paths: Iterable[str | Path]) -> "CodeIndex":
@@ -106,6 +112,7 @@ class CodeIndex:
         entry = self.entries.get(pc)
         if entry is None:
             return None
+        self._ensure_memory_sizes()
         return entry.inst, entry.memory_size
 
     def get_or_create(self, pc: Pc) -> CodeEntry:
@@ -115,14 +122,19 @@ class CodeIndex:
         entry = CodeEntry(
             pc=pc,
             inst="",
-            line_number=max(self.line_numbers.values(), default=0) + 1,
+            line_number=self._next_line_number,
         )
+        self._next_line_number += 1
         self.entries[pc] = entry
         self.line_numbers[pc] = entry.line_number
-        self._set_memory_sizes()
+        self._mark_memory_sizes_dirty()
         return entry
 
     def line_number(self, pc: Pc) -> int:
+        """Return the source line number for *pc*.
+
+        Raises KeyError if *pc* is not present in the index.
+        """
         return self.entries[pc].line_number
 
     def accumulate_wave(self, wave: Wave) -> None:
@@ -234,6 +246,14 @@ class CodeIndex:
             )
         return errors
 
+    def _mark_memory_sizes_dirty(self) -> None:
+        self._memory_sizes_dirty = True
+
+    def _ensure_memory_sizes(self) -> None:
+        if self._memory_sizes_dirty:
+            self._set_memory_sizes()
+            self._memory_sizes_dirty = False
+
     def _set_memory_sizes(self) -> None:
         by_codeobj: dict[int, list[CodeEntry]] = {}
         for entry in self.entries.values():
@@ -255,6 +275,12 @@ def _int_cell(value: str | None) -> int:
 
 def _is_code_label(inst: str) -> bool:
     return inst.startswith(";") or inst.startswith("label")
+
+
+def _clear_document_counts(document: dict) -> None:
+    for row in document.get("code", []):
+        if len(row) >= 10:
+            row[6:10] = [0, 0, 0, 0]
 
 
 def _write_stats_row(writer: object, entry: CodeEntry) -> None:

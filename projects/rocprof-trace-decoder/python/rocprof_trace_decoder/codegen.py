@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import bisect
+import logging
 import os
 import re
 import shutil
@@ -39,6 +40,7 @@ from .code_index import CodeIndex
 TOOL_VERSION = "snapshot_dwarf-1.1"
 HEADER = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle"
 SEPARATOR = " -> "  # matches Instruction::separator in code_printing.hpp
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -289,8 +291,18 @@ def _build_die_tree(die, dwarfinfo, cu, line_program) -> _Inlined:
 
 def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
     """Return sorted ``(begin, end, comment)`` source ranges."""
+    from elftools.common import exceptions as elftools_exceptions
     from elftools.elf.elffile import ELFFile
 
+    expected_errors = (
+        OSError,
+        elftools_exceptions.ELFError,
+        getattr(elftools_exceptions, "DWARFError", elftools_exceptions.ELFError),
+        AssertionError,
+        KeyError,
+        IndexError,
+        ValueError,
+    )
     range_map: list[tuple[int, int, str]] = []
 
     with Path(elf_path).open("rb") as f:
@@ -300,7 +312,10 @@ def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
                 return []
             dwarfinfo = elf.get_dwarf_info()
             cu_iter = iter(dwarfinfo.iter_CUs())
+        except expected_errors:
+            return []
         except Exception:
+            LOGGER.debug("Unexpected error reading DWARF metadata from %s", elf_path, exc_info=True)
             return []
 
         while True:
@@ -308,12 +323,18 @@ def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
                 cu = next(cu_iter)
             except StopIteration:
                 break
+            except expected_errors:
+                break
             except Exception:
+                LOGGER.debug("Unexpected error reading a DWARF CU from %s", elf_path, exc_info=True)
                 break
 
             try:
                 line_program = dwarfinfo.line_program_for_CU(cu)
+            except expected_errors:
+                line_program = None
             except Exception:
+                LOGGER.debug("Unexpected error reading a DWARF line program from %s", elf_path, exc_info=True)
                 line_program = None
             if line_program is None:
                 continue
@@ -322,13 +343,19 @@ def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
             try:
                 top = cu.get_top_DIE()
                 die_root = _build_die_tree(top, dwarfinfo, cu, line_program)
+            except expected_errors:
+                continue
             except Exception:
+                LOGGER.debug("Unexpected error reading DWARF DIEs from %s", elf_path, exc_info=True)
                 continue
 
             # Walk the line program; each entry covers [addr, next_addr).
             try:
                 entries = list(line_program.get_entries())
+            except expected_errors:
+                continue
             except Exception:
+                LOGGER.debug("Unexpected error reading DWARF line entries from %s", elf_path, exc_info=True)
                 continue
             states = [(e.state, e) for e in entries if e.state is not None]
             for i in range(len(states) - 1):

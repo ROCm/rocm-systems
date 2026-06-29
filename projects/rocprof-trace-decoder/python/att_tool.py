@@ -38,7 +38,6 @@ def generate_outputs_from_files(
     output_dir: str | Path | None = None,
     lib_path: str | Path | None = None,
     formats: str = "json,csv",
-    force_codegen: bool = False,
     base_name: str | None = None,
 ) -> list[Path]:
     inputs = _discover_inputs(files)
@@ -49,7 +48,7 @@ def generate_outputs_from_files(
 
     base_input = _base_input(inputs)
     output_base_name = base_name or base_input.parent.name or "att"
-    base_dir = Path(output_dir).expanduser().resolve() if output_dir else base_input.parent
+    decode_output_dir = Path(output_dir).expanduser().resolve() if output_dir else None
 
     code_json = inputs.code_json
     code_index = None
@@ -57,7 +56,7 @@ def generate_outputs_from_files(
     snapshot_source_dir = code_json.parent if code_json else None
     code_dir = Path(output_dir).expanduser().resolve() if output_dir else _code_dir(inputs)
     generated_code = False
-    if inputs.code_objects and (code_json is None or force_codegen):
+    if inputs.code_objects:
         artifacts = generate_code_artifacts(_code_objects_from_paths(inputs.code_objects))
         code_index = artifacts.code_index
         source_paths = artifacts.source_paths
@@ -65,7 +64,7 @@ def generate_outputs_from_files(
         snapshot_source_dir = None
         generated_code = True
     elif code_json is not None:
-        code_index = CodeIndex.from_code_json(code_json)
+        code_index = CodeIndex.from_code_json(code_json, load_counts=False)
 
     if not inputs.att_files:
         if code_index is not None:
@@ -82,7 +81,7 @@ def generate_outputs_from_files(
         traces,
         code_index=code_index,
         source_paths=source_paths,
-        output_dir=base_dir,
+        output_dir=decode_output_dir,
         lib_path=lib_path,
         formats=formats,
         base_name=output_base_name,
@@ -237,11 +236,6 @@ def build_argparser() -> argparse.ArgumentParser:
         help="Comma-separated outputs. Default: json,csv",
     )
     parser.add_argument(
-        "--force-codegen",
-        action="store_true",
-        help="Regenerate code.json even if one is provided.",
-    )
-    parser.add_argument(
         "--base-name",
         help="Base name for default ui_output_<name><run> and stats_<...>.csv output names.",
     )
@@ -255,7 +249,6 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.output_dir,
         lib_path=args.lib,
         formats=args.formats,
-        force_codegen=args.force_codegen,
         base_name=args.base_name,
     )
     for path in outputs:

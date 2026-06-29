@@ -86,7 +86,7 @@ def generate_att_outputs(
         run_dir.mkdir(parents=True, exist_ok=True)
 
         run_code_index = (
-            CodeIndex.from_document(code_index.document)
+            CodeIndex.from_document(code_index.document, load_counts=False)
             if code_index is not None
             else CodeIndex([])
         )

@@ -257,7 +257,8 @@ class Decoder:
         self._configure_library()
         self._handle = _Handle()
         self._closed = False
-        self._callbacks: list[object] = []
+        self._isa_cb: _ISA_CB | None = None
+        self._trace_cb: _TRACE_CB | None = None
 
         status = self._lib.rocprof_trace_decoder_create_handle(ctypes.byref(self._handle))
         self._check(status)
@@ -273,7 +274,8 @@ class Decoder:
             return
         status = self._lib.rocprof_trace_decoder_destroy_handle(self._handle)
         self._closed = True
-        self._callbacks.clear()
+        self._isa_cb = None
+        self._trace_cb = None
         self._check(status)
 
     def _ensure_open(self) -> None:
@@ -456,15 +458,12 @@ class Decoder:
         callback_error: list[BaseException] = []
 
         if isa is not None:
-            isa_cb = self._make_isa_callback(isa)
-            self._callbacks.append(isa_cb)
-            self._check(
-                self._lib.rocprof_trace_decoder_set_isa_callback(self._handle, isa_cb, None)
-            )
+            self._isa_cb = self._make_isa_callback(isa)
         else:
-            self._check(
-                self._lib.rocprof_trace_decoder_set_isa_callback(self._handle, _ISA_CB(), None)
-            )
+            self._isa_cb = _ISA_CB()
+        self._check(
+            self._lib.rocprof_trace_decoder_set_isa_callback(self._handle, self._isa_cb, None)
+        )
 
         def _trace(record_type: int, events: int | None, size: int, _userdata: int | None) -> int:
             try:
@@ -479,7 +478,7 @@ class Decoder:
                 return int(DecoderStatus.ERROR)
 
         trace_cb = _TRACE_CB(_trace)
-        self._callbacks.append(trace_cb)
+        self._trace_cb = trace_cb
 
         if raw:
             data_buf = (ctypes.c_uint8 * len(raw)).from_buffer_copy(raw)
