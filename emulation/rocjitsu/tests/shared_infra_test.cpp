@@ -5,11 +5,21 @@
 /// @brief Phase B unit tests: addr_calc, MMA execution, wavefront context, CU factory.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
@@ -365,6 +375,58 @@ TEST(MfmaExecTest, Gfx12Wave64SwmmacK32LocUsesSparseHardwareLayout) {
                                                /*compressed_k=*/4, 16);
   EXPECT_EQ(fp8_idx_g2s0.lane, 35u);
   EXPECT_EQ(fp8_idx_g2s0.local_compressed_k, 0u);
+}
+
+TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
+  amdgpu::GpuMemory mem("cdna3_cvt_fnuz_mem");
+  amdgpu::L2Cache l2("cdna3_cvt_fnuz_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna3_cvt_fnuz_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  wf->set_exec(~0ULL);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDstFp8 = 8;
+  constexpr uint32_t kDstBf8 = 9;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    uint8_t byte = (lane & 1u) ? 0xC0u : 0x40u;
+    cu->write_vgpr(vbase + kSrc, lane, byte);
+  }
+
+  cdna3::Vop1MachineInst raw_fp8{};
+  raw_fp8.src0 = 256 + kSrc;
+  raw_fp8.vdst = kDstFp8;
+  cdna3::VCvtF32Fp8Vop1 cvt_fp8(reinterpret_cast<const cdna3::MachineInst *>(&raw_fp8));
+  cvt_fp8.execute_impl(*wf);
+
+  cdna3::Vop1MachineInst raw_bf8{};
+  raw_bf8.src0 = 256 + kSrc;
+  raw_bf8.vdst = kDstBf8;
+  cdna3::VCvtF32Bf8Vop1 cvt_bf8(reinterpret_cast<const cdna3::MachineInst *>(&raw_bf8));
+  cvt_bf8.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    amdgpu::InputLoc loc{/*vgpr_offset=*/0, lane, /*sub_element=*/0};
+    float mfma_fp8 = amdgpu::extract_fp8_fnuz(*cu, vbase + kSrc, loc);
+    float cvt_fp8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstFp8, lane));
+    EXPECT_EQ(cvt_fp8_value, mfma_fp8) << "fp8 lane=" << lane;
+
+    float mfma_bf8 = amdgpu::extract_bf8_fnuz(*cu, vbase + kSrc, loc);
+    float cvt_bf8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstBf8, lane));
+    EXPECT_EQ(cvt_bf8_value, mfma_bf8) << "bf8 lane=" << lane;
+  }
 }
 
 void write_packed_byte(amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, uint32_t byte,
@@ -749,7 +811,50 @@ TEST(DppPermuteTest, RowShl1) {
   EXPECT_TRUE(oob);
 }
 
-TEST(DppPermuteTest, RowMirror) {
+TEST(DppPermuteTest, RowRor1) {
+  using namespace amdgpu::dpp;
+  bool oob = false;
+  // row_ror 1 = 0x121: lane K reads from lane K-1, wrapping within the row.
+  EXPECT_EQ(dpp_permute(0x121, 0, 64, oob), 15);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(0x121, 1, 64, oob), 0);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(0x121, 16, 64, oob), 31);
+  EXPECT_FALSE(oob);
+}
+
+TEST(DppPermuteTest, WaveShiftAndRotate) {
+  using namespace amdgpu::dpp;
+  bool oob = false;
+
+  EXPECT_EQ(dpp_permute(WF_SHL1, 0, 64, oob), 1);
+  EXPECT_FALSE(oob);
+  oob = false;
+  dpp_permute(WF_SHL1, 63, 64, oob);
+  EXPECT_TRUE(oob);
+
+  oob = false;
+  EXPECT_EQ(dpp_permute(WF_ROL1, 0, 64, oob), 1);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(WF_ROL1, 63, 64, oob), 0);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(WF_ROL1, 31, 32, oob), 0);
+  EXPECT_FALSE(oob);
+
+  EXPECT_EQ(dpp_permute(WF_SRL1, 1, 64, oob), 0);
+  EXPECT_FALSE(oob);
+  oob = false;
+  dpp_permute(WF_SRL1, 0, 64, oob);
+  EXPECT_TRUE(oob);
+
+  oob = false;
+  EXPECT_EQ(dpp_permute(WF_ROR1, 0, 64, oob), 63);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(WF_ROR1, 1, 64, oob), 0);
+  EXPECT_FALSE(oob);
+}
+
+TEST(DppPermuteTest, RowMirrors) {
   using namespace amdgpu::dpp;
   bool oob = false;
   // row_mirror = 0x140: reverse lane order within a row.
@@ -758,16 +863,62 @@ TEST(DppPermuteTest, RowMirror) {
   EXPECT_EQ(dpp_permute(0x140, 7, 64, oob), 8);
   // Second row.
   EXPECT_EQ(dpp_permute(0x140, 16, 64, oob), 31);
+
+  // row_half_mirror = 0x141: reverse lane order within each 8-lane half-row.
+  EXPECT_EQ(dpp_permute(0x141, 0, 64, oob), 7);
+  EXPECT_EQ(dpp_permute(0x141, 7, 64, oob), 0);
+  EXPECT_EQ(dpp_permute(0x141, 8, 64, oob), 15);
+  EXPECT_EQ(dpp_permute(0x141, 16, 64, oob), 23);
 }
 
-TEST(DppPermuteTest, RowXmask) {
+TEST(DppPermuteTest, RowShareAndXmask) {
   using namespace amdgpu::dpp;
   bool oob = false;
-  // row_xmask with mask=1 = 0x151: XOR lane offset with 1 (swap adjacent pairs).
+  // row_share with lane_sel=1 = 0x151: every lane in a row reads row lane 1.
   EXPECT_EQ(dpp_permute(0x151, 0, 64, oob), 1);
-  EXPECT_EQ(dpp_permute(0x151, 1, 64, oob), 0);
-  EXPECT_EQ(dpp_permute(0x151, 2, 64, oob), 3);
-  EXPECT_EQ(dpp_permute(0x151, 3, 64, oob), 2);
+  EXPECT_EQ(dpp_permute(0x151, 15, 64, oob), 1);
+  EXPECT_EQ(dpp_permute(0x151, 16, 64, oob), 17);
+  EXPECT_EQ(dpp_permute(0x151, 31, 64, oob), 17);
+
+  // row_xmask with mask=1 = 0x161: XOR lane offset with 1 (swap adjacent pairs).
+  EXPECT_EQ(dpp_permute(0x161, 0, 64, oob), 1);
+  EXPECT_EQ(dpp_permute(0x161, 1, 64, oob), 0);
+  EXPECT_EQ(dpp_permute(0x161, 2, 64, oob), 3);
+  EXPECT_EQ(dpp_permute(0x161, 3, 64, oob), 2);
+  EXPECT_EQ(dpp_permute(0x161, 16, 64, oob), 17);
+  EXPECT_EQ(dpp_permute(0x161, 17, 64, oob), 16);
+}
+
+TEST(DppPermuteTest, RowBroadcasts) {
+  using namespace amdgpu::dpp;
+  bool oob = false;
+
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 16, 64, oob), 15);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 31, 64, oob), 15);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 32, 64, oob), 31);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 47, 64, oob), 31);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 48, 64, oob), 47);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 63, 64, oob), 47);
+  EXPECT_FALSE(oob);
+
+  oob = false;
+  dpp_permute(ROW_BCAST15, 15, 64, oob);
+  EXPECT_TRUE(oob);
+
+  oob = false;
+  EXPECT_EQ(dpp_permute(ROW_BCAST31, 32, 64, oob), 31);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST31, 63, 64, oob), 31);
+  EXPECT_FALSE(oob);
+
+  oob = false;
+  dpp_permute(ROW_BCAST31, 31, 64, oob);
+  EXPECT_TRUE(oob);
 }
 
 TEST(DppPermuteTest, Dpp8SelectsWithinGroupsOfEight) {
@@ -817,6 +968,313 @@ TEST(DppPermuteTest, DppRead) {
   // Unmasked lane in row 1: lane 17 reads from lane 16.
   val = dpp_read(src, 17, 64, 0x111, 0xF, 0xF, 1, 999);
   EXPECT_EQ(val, 160u); // src[16] = 160
+}
+
+TEST(DppPermuteTest, WriteMaskHonorsBoundCtrlAndBroadcastValidity) {
+  using namespace amdgpu::dpp;
+
+  EXPECT_FALSE(dpp_lane_write_enabled(0, 64, ROW_SHR1, 0xF, 0xF, 0));
+  EXPECT_TRUE(dpp_lane_write_enabled(0, 64, ROW_SHR1, 0xF, 0xF, 1));
+  EXPECT_TRUE(dpp_lane_write_enabled(1, 64, ROW_SHR1, 0xF, 0xF, 0));
+
+  EXPECT_FALSE(dpp_lane_write_enabled(15, 64, ROW_BCAST15, 0xF, 0xF, 0));
+  EXPECT_TRUE(dpp_lane_write_enabled(16, 64, ROW_BCAST15, 0xF, 0xF, 0));
+  EXPECT_TRUE(dpp_lane_write_enabled(32, 64, ROW_BCAST15, 0xF, 0xF, 0));
+  EXPECT_FALSE(dpp_lane_write_enabled(31, 64, ROW_BCAST31, 0xF, 0xF, 0));
+  EXPECT_TRUE(dpp_lane_write_enabled(32, 64, ROW_BCAST31, 0xF, 0xF, 0));
+
+  EXPECT_FALSE(dpp_lane_write_enabled(16, 64, ROW_BCAST15, 0xD, 0xF, 0));
+  EXPECT_FALSE(dpp_lane_write_enabled(20, 64, ROW_BCAST15, 0xF, 0xD, 0));
+
+  uint64_t mask = dpp_write_mask(64, ROW_BCAST15, 0xF, 0xF, 0);
+  EXPECT_EQ(mask, 0xFFFFFFFFFFFF0000ULL);
+
+  mask = dpp_write_mask(64, ROW_BCAST31, 0xF, 0xF, 0);
+  EXPECT_EQ(mask, 0xFFFFFFFF00000000ULL);
+}
+
+struct Cdna1DppTraits {
+  static constexpr const char *name = "cdna1";
+  static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA1;
+  using MachineInst = cdna1::MachineInst;
+  using Vop1VopDppMachineInst = cdna1::Vop1VopDppMachineInst;
+  using VMovB32Vop1 = cdna1::VMovB32Vop1;
+  using VCmpEqU32Vopc = cdna1::VCmpEqU32Vopc;
+  using VCmpxEqU32Vopc = cdna1::VCmpxEqU32Vopc;
+};
+
+struct Cdna2DppTraits {
+  static constexpr const char *name = "cdna2";
+  static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2;
+  using MachineInst = cdna2::MachineInst;
+  using Vop1VopDppMachineInst = cdna2::Vop1VopDppMachineInst;
+  using VMovB32Vop1 = cdna2::VMovB32Vop1;
+  using VCmpEqU32Vopc = cdna2::VCmpEqU32Vopc;
+  using VCmpxEqU32Vopc = cdna2::VCmpxEqU32Vopc;
+};
+
+struct Cdna3DppTraits {
+  static constexpr const char *name = "cdna3";
+  static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA3;
+  using MachineInst = cdna3::MachineInst;
+  using Vop1VopDppMachineInst = cdna3::Vop1VopDppMachineInst;
+  using VMovB32Vop1 = cdna3::VMovB32Vop1;
+  using VCmpEqU32Vopc = cdna3::VCmpEqU32Vopc;
+  using VCmpxEqU32Vopc = cdna3::VCmpxEqU32Vopc;
+};
+
+struct Cdna4DppTraits {
+  static constexpr const char *name = "cdna4";
+  static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  using MachineInst = cdna4::MachineInst;
+  using Vop1VopDppMachineInst = cdna4::Vop1VopDppMachineInst;
+  using VMovB32Vop1 = cdna4::VMovB32Vop1;
+  using VCmpEqU32Vopc = cdna4::VCmpEqU32Vopc;
+  using VCmpxEqU32Vopc = cdna4::VCmpxEqU32Vopc;
+};
+
+template <typename Traits> void cdna_generated_vop1_uses_shared_row_broadcast() {
+  SCOPED_TRACE(Traits::name);
+  amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_broadcast_mem");
+  amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_broadcast_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = Traits::arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_dpp_broadcast_cu", cfg,
+                                            &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  wf->set_exec(~0ULL);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vbase + kSrc, lane, 0x1000u + lane);
+    cu->write_vgpr(vbase + kDst, lane, 0xDEAD0000u + lane);
+  }
+
+  typename Traits::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  typename Traits::VMovB32Vop1 inst(reinterpret_cast<const typename Traits::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 15), 0u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 16), 0x100Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 31), 0x100Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 32), 0x101Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 47), 0x101Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 48), 0x102Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x102Fu);
+}
+
+template <typename Traits> void cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl() {
+  SCOPED_TRACE(Traits::name);
+  amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_write_mask_mem");
+  amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_write_mask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = Traits::arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_dpp_write_mask_cu", cfg,
+                                            &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  wf->set_exec(~0ULL);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vbase + kSrc, lane, 0x1000u + lane);
+    cu->write_vgpr(vbase + kDst, lane, 0xDEAD0000u + lane);
+  }
+
+  typename Traits::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  typename Traits::VMovB32Vop1 inst(reinterpret_cast<const typename Traits::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0xDEAD0000u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 15), 0xDEAD000Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 16), 0x100Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 31), 0x100Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 32), 0x101Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 47), 0x101Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 48), 0x102Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x102Fu);
+}
+
+template <typename Traits> void cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl() {
+  SCOPED_TRACE(Traits::name);
+  amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vopc_write_mask_mem");
+  amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vopc_write_mask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = Traits::arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_dpp_vopc_write_mask_cu",
+                                            cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  wf->set_exec(~0ULL);
+  wf->set_vcc(0);
+
+  constexpr uint32_t kSrc0 = 4;
+  constexpr uint32_t kSrc1 = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    uint32_t src = 0x1000u + lane;
+    uint32_t cmp = src;
+    if (lane >= 16 && lane < 32)
+      cmp = 0x100Fu;
+    else if (lane >= 32 && lane < 48)
+      cmp = 0x101Fu;
+    else if (lane >= 48)
+      cmp = 0x102Fu;
+    cu->write_vgpr(vbase + kSrc0, lane, src);
+    cu->write_vgpr(vbase + kSrc1, lane, cmp);
+  }
+
+  typename Traits::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc0;
+  // VOPC reads bits [16:9] as vsrc1; those overlap the VOP_DPP op field.
+  raw.op = kSrc1;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  typename Traits::VCmpEqU32Vopc inst(reinterpret_cast<const typename Traits::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(wf->vcc(), 0xFFFFFFFFFFFF0000ULL);
+}
+
+template <typename Traits> void cdna_generated_vcmpx_dpp_write_mask_preserves_exec() {
+  SCOPED_TRACE(Traits::name);
+  amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vcmpx_exec_mask_mem");
+  amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vcmpx_exec_mask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = Traits::arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_dpp_vcmpx_exec_mask_cu",
+                                            cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+
+  constexpr uint64_t kOldExec = 0xFFFFFFFFFFFF005AULL;
+  constexpr uint64_t kOldVcc = 0x00000000000000A5ULL;
+  wf->set_exec(kOldExec);
+  wf->set_vcc(kOldVcc);
+
+  constexpr uint32_t kSrc0 = 4;
+  constexpr uint32_t kSrc1 = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    uint32_t src = 0x1000u + lane;
+    uint32_t cmp = 0xDEAD0000u + lane;
+    if (lane >= 16 && lane < 32)
+      cmp = 0x100Fu;
+    else if (lane >= 32 && lane < 48)
+      cmp = 0x101Fu;
+    else if (lane >= 48)
+      cmp = 0x102Fu;
+    if (lane == 20)
+      cmp = 0xDEAD0020u;
+    cu->write_vgpr(vbase + kSrc0, lane, src);
+    cu->write_vgpr(vbase + kSrc1, lane, cmp);
+  }
+
+  typename Traits::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc0;
+  raw.op = kSrc1;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  typename Traits::VCmpxEqU32Vopc inst(
+      reinterpret_cast<const typename Traits::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(wf->vcc(), 0xFFFFFFFFFFEF00A5ULL);
+  EXPECT_EQ(wf->exec(), 0xFFFFFFFFFFEF005AULL);
+}
+
+TEST(DppPermuteTest, CdnaGeneratedVop1UsesSharedRowBroadcast) {
+  cdna_generated_vop1_uses_shared_row_broadcast<Cdna1DppTraits>();
+  cdna_generated_vop1_uses_shared_row_broadcast<Cdna2DppTraits>();
+  cdna_generated_vop1_uses_shared_row_broadcast<Cdna3DppTraits>();
+  cdna_generated_vop1_uses_shared_row_broadcast<Cdna4DppTraits>();
+}
+
+TEST(DppPermuteTest, CdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
+  cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl<Cdna1DppTraits>();
+  cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl<Cdna2DppTraits>();
+  cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl<Cdna3DppTraits>();
+  cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl<Cdna4DppTraits>();
+}
+
+TEST(DppPermuteTest, CdnaGeneratedVopcDppWriteMaskHonorsBoundCtrl) {
+  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna1DppTraits>();
+  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna2DppTraits>();
+  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna3DppTraits>();
+  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna4DppTraits>();
+}
+
+TEST(DppPermuteTest, CdnaGeneratedVcmpxDppWriteMaskPreservesExec) {
+  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna1DppTraits>();
+  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna2DppTraits>();
+  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna3DppTraits>();
+  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna4DppTraits>();
 }
 
 // ---------------------------------------------------------------------------
