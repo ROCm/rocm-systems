@@ -19,34 +19,18 @@
 # tier below without any TheRock-side change.
 
 test_categories:
+  # legacy-tests runs in every tier via tier inheritance
+  # (quick -> quick, standard, comprehensive, full), so it only needs to be
+  # listed under quick. The tier names are also applied as explicit labels.
   quick:
-    description: "Fast sanity check via run_tests.sh (ctrl: dry-run/PMC/SQTT/PCSMP)"
+    description: "Installed ctrl harness via run_tests.sh (dry-run/PMC/SQTT/PCSMP)"
     test_patterns:
       - "legacy-tests"
     labels:
-      - "pre-commit"
-      - "smoke"
-
-  standard:
-    description: "Pre-checkin validation (same legacy ctrl scenarios for now)"
-    test_patterns:
-      - "legacy-tests"
-    labels:
-      - "pr"
-
-  comprehensive:
-    description: "Nightly run (same legacy ctrl scenarios for now)"
-    test_patterns:
-      - "legacy-tests"
-    labels:
-      - "nightly"
-
-  full:
-    description: "Complete installed test suite"
-    test_patterns:
-      - "legacy-tests"
-    labels:
-      - "all"
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
 
 execution_settings:
   default_timeout: 600
