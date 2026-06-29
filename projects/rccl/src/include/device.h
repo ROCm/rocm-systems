@@ -134,7 +134,7 @@ union ncclLLFifoLine {
   * solely as a workaround to allow RCCL to compile, since the host still compiles __device__ functions,
   * and they need to be defined. These __device__ functions will not be called from the host.
   * The host warp size is handled in src/enqueue.cc by calling hipDeviceGetAttributes(). */
-  #define WARP_SIZE 32
+  #define WARP_SIZE RCCL_HOST_WARP_SIZE
   #define NCCL_MAX_NTHREADS 256
   // Number of named barriers supported by CUDA
   #define NCCL_MAX_GROUPS (NCCL_MAX_NTHREADS/WARP_SIZE)

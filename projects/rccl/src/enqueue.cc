@@ -217,13 +217,13 @@ static void addWorkBatchToPlan(
     newBatch |= NCCL_MAX_DEV_WORK_BATCH_BYTES < chan->wipBatch.workBytes + workSize;
     if (workType == ncclDevWorkTypeP2p) {
       newBatch |= !chan->wipBatch.batchP2P;
-      newBatch |= (comm->nNodes > 2 && batchP2P)? (chan->wipBatch.nP2ps == (RCCL_P2P_MAX_NTHREADS / (2 * comm->WarpSize))) : (chan->wipBatch.nP2ps == 1);
+      newBatch |= (comm->nNodes > 2 && batchP2P)? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) : (chan->wipBatch.nP2ps == 1);
       for (int i=0; i < chan->wipBatch.nP2ps; i++) {
         newBatch |= p2pRound == chan->wipBatch.p2pRounds[i];
         INFO(NCCL_INIT, "p2p-batch-debug batch p2pOp:%i channel:%i newBatch:%i checking rounds:%i vs %i", i, channelId, newBatch, p2pRound, chan->wipBatch.p2pRounds[i]);
         // Make sure we only aggregate p2p operations within the same p2p round epoch (one epoch is NCCL_MAX_DEV_WORK_P2P_PER_BATCH ops).
         // This enforces uniform batching accross ranks in the communicator and prevents hangs.
-        newBatch |= (p2pRound / (RCCL_P2P_MAX_NTHREADS / (2 * comm->WarpSize))) != (chan->wipBatch.p2pRounds[i] / (RCCL_P2P_MAX_NTHREADS / (2 * comm->WarpSize)));
+        newBatch |= (p2pRound / NCCL_MAX_DEV_WORK_P2P_PER_BATCH) != (chan->wipBatch.p2pRounds[i] / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
       }
     }
   }
@@ -1333,7 +1333,7 @@ static ncclResult_t addP2pToPlan(
   // Each channel runs up to NCCL_MAX_DEV_WORK_P2P_PER_BATCH tasks concurrently.
   int maxConcurrent;
   int concurrentTasks[2];
-  maxConcurrent = comm->p2pnChannels / nChannelsMax * (RCCL_P2P_MAX_NTHREADS / (2 * comm->WarpSize));
+  maxConcurrent = comm->p2pnChannels / nChannelsMax * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
   concurrentTasks[0] = std::min(planTotalTasks[0], maxConcurrent);
   concurrentTasks[1] = std::min(planTotalTasks[1], maxConcurrent);
   for (int part=0; part < nChannelsMax; part++) {

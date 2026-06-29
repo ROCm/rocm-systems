@@ -202,6 +202,20 @@ if(NOT GPU_TARGETS OR "${GPU_TARGETS}" STREQUAL "NOTFOUND")
 endif()
 
 message(STATUS "Compiling for ${GPU_TARGETS}")
+# Derive host-visible warp size from GPU_TARGETS.
+# Host code is compiled once for all architectures, so pick conservatively:
+# only use warpSize=32 if every targeted architecture is a known warpSize=32 family (gfx10xx/11xx/12xx).
+# Any unrecognized or warpSize=64 target (e.g. gfx9xx) forces the conservative fallback.
+set(RCCL_HOST_WARP_SIZE 32)
+foreach(gpu_target IN LISTS GPU_TARGETS)
+  if(NOT gpu_target MATCHES "^gfx(10|11|12)")
+    set(RCCL_HOST_WARP_SIZE 64)
+    break()
+  endif()
+endforeach()
+message(STATUS "RCCL host-visible warp size: ${RCCL_HOST_WARP_SIZE}")
+add_compile_definitions(RCCL_HOST_WARP_SIZE=${RCCL_HOST_WARP_SIZE})
+
 
 ## NOTE: Reload rocm-cmake in order to update GPU_TARGETS
 include(cmake/Dependencies.cmake) # Reloading to use desired GPU_TARGETS instead of defaults
