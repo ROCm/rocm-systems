@@ -758,6 +758,15 @@ __device__ void rocshmem_fcollect_wg(rocshmem_ctx_t ctx,
   get_internal_ctx(ctx)->fcollect_wg<T>(team, dest, source, nelem);
 }
 
+__device__ void rocshmem_fcollectmem_wg(rocshmem_ctx_t ctx,
+                                      rocshmem_team_t team, void *dest,
+                                      const void *source, int nelem) {
+  LOGD_API("device::fcollectmem_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d",
+    ctx.ctx_opaque, team, dest, source, nelem);
+
+  get_internal_ctx(ctx)->fcollectmem_wg(team, dest, source, nelem);
+}
+
 template <typename T>
 __device__ int rocshmem_fcollect_wave(rocshmem_ctx_t ctx,
                                       rocshmem_team_t team, T *dest,
