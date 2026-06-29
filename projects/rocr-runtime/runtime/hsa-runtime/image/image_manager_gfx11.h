@@ -98,13 +98,30 @@ class ImageManagerGfx11 : public ImageManagerKv {
   virtual void printSwizzleMode(uint32_t sw_mode) const;
 
  protected:
+  /// Sentinel for GetAddrlibSurfaceInfoNv::forced_sw_mode meaning "ask addrlib for its preferred
+  /// swizzle" (native path). Any other value forces that swizzle mode (imported-surface path).
+  static constexpr uint32_t kAddrlibUsePreferredSwizzle = 0xFFFFFFFFu;
+
+  /// @brief Compute addrlib surface info. If forced_sw_mode == kAddrlibUsePreferredSwizzle, addrlib
+  /// picks its preferred swizzle (native allocation); otherwise the given swizzle mode is forced so
+  /// the computed tiling matches an imported surface whose layout is dictated externally (Vulkan
+  /// image interop). Returns the swizzle mode used, or (uint32_t)-1 on failure.
   uint32_t GetAddrlibSurfaceInfoNv(hsa_agent_t component,
                              const hsa_ext_image_descriptor_t& desc,
                              uint32_t num_mipmap_levels,
                              Image::TileMode tileMode,
                              size_t image_data_row_pitch,
                              size_t image_data_slice_pitch,
-                             ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out) const;
+                             ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out,
+                             uint32_t forced_sw_mode = kAddrlibUsePreferredSwizzle) const;
+
+  /// @brief Build a mipmapped-array image SRD. If forced_sw_mode == kAddrlibUsePreferredSwizzle the
+  /// native path runs (addrlib's preferred swizzle, mipmap.tile_mode). Otherwise the given swizzle
+  /// is forced and tile_swizzle (pipe-bank-XOR) is injected into the base address, reconstructing
+  /// the SRD of an imported surface whose layout is dictated externally (Vulkan image interop on
+  /// Windows, where the AMD Vulkan driver exposes no extension to query the SRD).
+  hsa_status_t BuildMipmapSrd(MipmappedArray& mipmap, uint32_t forced_sw_mode,
+                             uint32_t tile_swizzle) const;
 
   bool IsLocalMemory(const void* address) const;
   virtual const ImageLutGfx11& ImageLut() const { return image_lut_gfx11; };

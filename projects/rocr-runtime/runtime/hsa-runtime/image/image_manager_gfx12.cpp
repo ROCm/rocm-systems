@@ -688,7 +688,8 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
     Image::TileMode tileMode,
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
-    ADDR3_COMPUTE_SURFACE_INFO_OUTPUT& out) const {
+    ADDR3_COMPUTE_SURFACE_INFO_OUTPUT& out,
+    uint32_t forced_sw_mode) const {
   const ImageProperty image_prop =
       GetImageProperty(component, desc.format, desc.geometry);
 
@@ -758,7 +759,14 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
 
   in.flags.texture = 1;
 
-  if (tileMode == Image::TileMode::LINEAR)
+  if (forced_sw_mode != kAddrlibUsePreferredSwizzle)
+  {
+    // Imported surface (e.g. Vulkan image interop): use the driver-supplied ADDR3 swizzle mode
+    // instead of addrlib's best-fit one. addrlib's choice depends on per-caller heuristics and
+    // would not match the exact tiling the allocating driver chose, so the layout (pitch / mip
+    // offsets) must be computed for the imported swizzle.
+    in.swizzleMode = static_cast<Addr3SwizzleMode>(forced_sw_mode);
+  } else if (tileMode == Image::TileMode::LINEAR)
   {
     in.swizzleMode = ADDR3_LINEAR;
   } else {
@@ -956,6 +964,15 @@ hsa_status_t ImageManagerGfx12::FillImage(const Image& image, const void* patter
 }
 
 hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const {
+  return BuildMipmapSrd(mipmap, kAddrlibUsePreferredSwizzle, 0);
+}
+
+hsa_status_t ImageManagerGfx12::BuildMipmapSrd(MipmappedArray& mipmap, uint32_t forced_sw_mode,
+                                               uint32_t tile_swizzle) const {
+  // Imported surface (Vulkan image interop): force the driver-supplied ADDR3 swizzle and inject its
+  // pipe-bank-XOR, instead of letting addrlib pick its best-fit tiling.
+  const bool imported = (forced_sw_mode != kAddrlibUsePreferredSwizzle);
+
   // Map format/geometry to hardware encoding
   ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap.desc.format, mipmap.desc.geometry);
   assert(mipmap_prop.cap != HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED);
@@ -1028,12 +1045,15 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
     // Get ADDR3 surface information
     ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
-    // pMipInfo not needed - set to nullptr and AddrLib will ignore it
+    // pMipInfo not needed - set to nullptr and AddrLib will ignore it. PopulateMipLevelSrd derives
+    // per-level views from BASE_LEVEL/LAST_LEVEL, so per-level offsets are never read back.
     out.pMipInfo = nullptr;
 
+    // Imported surfaces must be tiled with the forced swizzle; native surfaces keep tile_mode.
+    const Image::TileMode tileMode = imported ? Image::TileMode::TILED : mipmap.tile_mode;
     unsigned int swizzleMode = GetAddrlibSurfaceInfoNv(mipmap.component,
-                            mipmap.desc, mipmap.num_levels, mipmap.tile_mode,
-                            mipmap.row_pitch, mipmap.slice_pitch, out);
+                            mipmap.desc, mipmap.num_levels, tileMode,
+                            mipmap.row_pitch, mipmap.slice_pitch, out, forced_sw_mode);
     if (swizzleMode == (uint32_t)(-1)) {
       return HSA_STATUS_ERROR;
     }
@@ -1046,6 +1066,12 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
 
     word0.val = 0;
     word0.f.BASE_ADDRESS = PtrLow40Shift8(mipmap_data_addr);
+    if (imported) {
+      // Inject the pipe-bank-XOR into the low bits of the (>>8) tile-aligned base, matching PAL's
+      // addr | (pipeBankXor << 8). kGfx12PbxExtraShift is to be confirmed on gfx12 hardware (0 vs 2).
+      static constexpr uint32_t kGfx12PbxExtraShift = 0;
+      word0.f.BASE_ADDRESS |= (tile_swizzle << kGfx12PbxExtraShift);
+    }
 
     word1.val = 0;
     word1.f.BASE_ADDRESS_HI = PtrHigh64Shift40(mipmap_data_addr);
@@ -1121,6 +1147,31 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
 
 hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const {
   const metadata_amd_gfx12_t* desc_gfx12 = reinterpret_cast<const metadata_amd_gfx12_t*>(desc);
+
+  // Vulkan image interop (Windows): the AMD Vulkan driver exposes no extension to query an
+  // imported image's SRD, so clr delivers only the surface's swizzle mode + pipe-bank-XOR in the
+  // descriptor's fallback slots (see HSA_WDDM_*_DATA_OFFSET in hsakmt/hsakmttypes.h). The +2
+  // skips the {version, deviceID} header preceding the data[] region. When present, reconstruct
+  // the SRD from that metadata instead of copying the (empty) SRD words below. On gfx12 the
+  // delivered swizzle mode is an ADDR3 mode (0 == ADDR3_LINEAR, up to ADDR3_MAX_TYPE-1).
+  //
+  // GUARD: only reconstruct when the descriptor carries NO valid SRD (all SRD words 0-7 are zero).
+  // GL/D3D interop fill a real SRD via CLQueryResource and may also carry swizzle metadata; those
+  // must keep their exact driver-supplied SRD and never be reconstructed here.
+  {
+    static constexpr uint32_t kWddmSwizzleModeDataOffset = 62;
+    static constexpr uint32_t kWddmTileSwizzleDataOffset = 63;
+    // gfx12 uses ADDR3 swizzle modes: ADDR3_LINEAR (== 0) up to ADDR3_MAX_TYPE - 1.
+    const uint32_t* raw = reinterpret_cast<const uint32_t*>(desc);
+    const uint32_t forced_sw_mode = raw[2 + kWddmSwizzleModeDataOffset];
+    const uint32_t tile_swizzle = raw[2 + kWddmTileSwizzleDataOffset];
+    if (ClassifyInteropDescriptor(desc, forced_sw_mode,
+                                  static_cast<uint32_t>(ADDR3_MAX_TYPE)) ==
+        InteropDescriptorContent::kSwizzleFallback) {
+      return BuildMipmapSrd(mipmap_array, forced_sw_mode, tile_swizzle);
+    }
+  }
+
   const void* mipmap_data_addr = mipmap_array.data;
   
   ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap_array.desc.format, mipmap_array.desc.geometry);
@@ -1229,7 +1280,7 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap_array, 
                              mip_info_storage[last_level].depth * 
                              mipmap_prop.element_size;
   mipmap_array.size = mip_info_storage[last_level].offset + last_level_size;
-  
+
   return HSA_STATUS_SUCCESS;
 }
 

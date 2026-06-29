@@ -182,7 +182,7 @@ class VulkanTest {
   /// @param external    If true, allocate with exportable memory.
   void CreateImage(uint32_t width, uint32_t height, uint32_t num_levels, VkFormat format,
                    VkImage& image, VkDeviceMemory& image_memory, VkDeviceSize& image_size,
-                   bool external = true);
+                   bool external = true, VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL);
 
   /// Create a VkImageView for a single mip level of an image.
   VkImageView CreateImageView(VkImage image, VkFormat format, uint32_t base_mip_level,

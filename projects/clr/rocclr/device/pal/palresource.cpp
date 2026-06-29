@@ -611,6 +611,44 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   }
   ImgSubresRange.numMips = desc().mipLevels_;
 
+  // Vulkan/D3D image interop: an image created on an imported external buffer whose parent retained
+  // a shared handle is reopened as a shared image, so PAL reads the real tiling (swizzle) from the
+  // surface descriptor. Without this the ImageExternalBuffer path below assumes Optimal tiling and
+  // addrlib picks a swizzle that mismatches the imported data layout (garbage reads). Reopening
+  // creates image_ + memRef_ with the correct tiling, bound to the shared allocation.
+  if ((memoryType() == ImageExternalBuffer) && (viewOwner_ != nullptr) &&
+      (viewOwner_->sharedHandle() != 0)) {
+    Pal::ExternalImageOpenInfo imgOpenInfo = {};
+    imgOpenInfo.resourceInfo.hExternalResource = viewOwner_->sharedHandle();
+    imgOpenInfo.resourceInfo.flags.ntHandle = viewOwner_->sharedNtHandle();
+    imgOpenInfo.swizzledFormat.format = format;
+    imgOpenInfo.swizzledFormat.swizzle = channels;
+    imgOpenInfo.usage.shaderRead = true;
+    imgOpenInfo.usage.shaderWrite = true;
+
+    Pal::ImageCreateInfo sharedImgCreateInfo = {};
+    memRef_ = GpuMemoryReference::Create(dev(), imgOpenInfo, &sharedImgCreateInfo, &image_);
+    if (memRef_ == nullptr) {
+      return false;
+    }
+
+    hwSrd_ = dev().srds().allocSrdSlot(reinterpret_cast<address*>(&hwState_));
+    if ((0 == hwSrd_) && (memoryType() != ImageView)) {
+      return false;
+    }
+    viewInfo.pImage = image_;
+    viewInfo.swizzledFormat.format = format;
+    viewInfo.swizzledFormat.swizzle = channels;
+    viewInfo.subresRange = ImgSubresRange;
+    dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
+
+    hwState_[8] = GetHSAImageFormatType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
+    hwState_[10] = static_cast<uint32_t>(desc().width_);
+    hwState_[11] = 0;  // one extra reserved field in the argument
+    return true;
+  }
+
   if ((memoryType() != ImageView) ||
       //! @todo PAL doesn't allow an SRD view creation with different pixel size
       (elementSize() != viewOwner_->elementSize())) {
@@ -822,6 +860,11 @@ bool Resource::CreateInterop(CreateParams* params) {
     mipLevel = d3dRes->mipLevel_;
   }
 #endif
+  // Retain the external handle so an image later created on this imported buffer (ImageExternalBuffer)
+  // can be reopened as a shared image, letting PAL apply the driver's real tiling (swizzle) from the
+  // surface descriptor instead of assuming Optimal (which lets addrlib pick a mismatching swizzle).
+  sharedHandle_ = openInfo.hExternalResource;
+  sharedNtHandle_ = openInfo.flags.ntHandle;
   //! @todo PAL query for image/buffer object doesn't work properly!
 #if 0
   bool    isImage = false;

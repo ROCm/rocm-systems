@@ -48,6 +48,7 @@
 #include "impl/wddm/types.h"
 #include "impl/wddm/thunks.h"
 #include "wkmi.h"
+#include "hsakmt/hsakmttypes.h"
 
 namespace wsl {
 namespace thunk {
@@ -130,6 +131,9 @@ struct GpuMemoryDesc {
     mem_flags = 0;
     engine_flag = 0;
     handle_ape_addr = 0;
+    swizzle_mode = 0;
+    tile_swizzle = 0;
+    swizzle_valid = false;
   }
 
   Wkmi::AllocDomain domain;
@@ -144,6 +148,9 @@ struct GpuMemoryDesc {
   GpuMemoryDescFlags flags;
   int mem_flags;
   int engine_flag;
+  uint32_t swizzle_mode;  // from VCAM_SURFACE_DESC.swizzleMode; 0 if not available
+  uint32_t tile_swizzle;  // from VCAM_SURFACE_DESC.ulTileSwizzle; 0 if not available
+  bool swizzle_valid;     // true if swizzle_mode/tile_swizzle are populated from driver data
 };
 
 struct SharedHandleInfo {
@@ -155,6 +162,9 @@ struct SharedHandleInfo {
   int mem_flags;
   int pid;
   gpusize gpu_addr;
+  uint32_t swizzle_mode;  // VCAM_SURFACE_DESC.swizzleMode (0 = LINEAR when valid=false)
+  uint32_t tile_swizzle;  // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
+  bool swizzle_valid;     // true if swizzle_mode/tile_swizzle were populated from driver data
 };
 
 using GpuMemoryHandle = void *;
@@ -186,6 +196,20 @@ public:
   inline bool IsVaAllocated() const { return desc_.flags.is_va_required; }
   inline bool IsBlitKernelObject() const { return desc_.flags.is_blit_kernel_object; }
   inline void forceSysMem() { desc_.domain = Wkmi::kSystem; }
+  inline bool HasSwizzleInfo() const { return desc_.swizzle_valid; }
+  inline uint32_t SwizzleMode() const { return desc_.swizzle_mode; }
+  inline uint32_t TileSwizzle() const { return desc_.tile_swizzle; }
+
+  // Returns a pointer to the stable surface metadata blob for this allocation.
+  // Valid as long as the GpuMemory object is alive. Returns nullptr if no swizzle info.
+  const HsaWddmSurfaceMetadata* GetSurfaceMetadata() const {
+    return desc_.swizzle_valid ? &surface_metadata_ : nullptr;
+  }
+  void BuildSurfaceMetadata() {
+    surface_metadata_.version = 1;
+    surface_metadata_.swizzle_mode = desc_.swizzle_mode;
+    surface_metadata_.tile_swizzle = desc_.tile_swizzle;
+  }
   inline void SetGpuAddress(uint64_t gpu_addr) { desc_.gpu_addr = gpu_addr; }
   inline void SetCpuAddress(void* cpu_addr) { desc_.cpu_addr = cpu_addr; }
 
@@ -267,8 +291,8 @@ private:
   bool is_phymem_created = false; // status of physical memory allocation
   bool is_sysmem_locked_ = false; // kSystem allocation pinned via D3DKMTLock2
 
-  // Number of outstanding GPU mappings of a user pointer.
-  uint32_t mapping_count_ = 1;
+  uint32_t mapping_count_ = 1; // Number of outstanding GPU mappings of a user pointer. 
+  HsaWddmSurfaceMetadata surface_metadata_{}; // stable storage for swizzle metadata blob
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemory);
 };

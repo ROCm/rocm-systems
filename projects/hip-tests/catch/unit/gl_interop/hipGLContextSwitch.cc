@@ -55,32 +55,26 @@ constexpr size_t kLargeBufferSize = 4096 * sizeof(float);  // For tests needing 
 // Helper Classes
 //==============================================================================
 
-// Use a separate once_flag for context switch tests to avoid conflicts
-// with the common header's glut_init_flag when multiple windows are needed
-static std::once_flag context_switch_glut_init_flag;
-
-static void initGlutForContextSwitch() {
-  static char proc_name[] = "";
-  static std::array<char*, 2> glut_argv = {proc_name, nullptr};
-  static int glut_argc = 1;
-  glutInitErrorFunc(&GlutError);  // Use GlutError from gl_interop_common.hh
-  glutInit(&glut_argc, glut_argv.data());
-  glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
-  // Use smaller window size than default (512x512) for better performance
-  // in rapid context switching tests that create many windows
-  glutInitWindowSize(64, 64);
-}
-
 /**
  * @brief RAII wrapper for a GLUT window with its own GL context.
  *
  * Extends the common GLUT initialization pattern with support for multiple
  * windows and context switching. Each window has an associated GL context.
+ *
+ * These tests deliberately create multiple windows (that is what context switching exercises), so
+ * unlike GLUTContextScopeGuard they do not share a single window. They MUST still share the single
+ * process-wide glutInit() via EnsureGlutInitialized(); a second glutInit() raises an "illegal
+ * glutInit() reinitialization attempt" error and can hang the run.
  */
 class GLUTWindow {
  public:
   GLUTWindow() {
-    std::call_once(context_switch_glut_init_flag, initGlutForContextSwitch);
+    EnsureGlutInitialized();
+    if (glut_init_failed) {
+      HIP_SKIP_TEST("GLUT Init Failed");
+    }
+    // Smaller windows for the rapid context-switching tests that create many windows.
+    glutInitWindowSize(64, 64);
     window_id_ = glutCreateWindow("");
     REQUIRE(window_id_ > 0);
 

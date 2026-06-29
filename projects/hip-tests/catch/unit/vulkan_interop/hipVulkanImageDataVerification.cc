@@ -142,13 +142,15 @@ struct VulkanMipmapImage {
 
 // ── Factory ───────────────────────────────────────────────────────────────────────────────────
 
-static VulkanMipmapImage CreateVulkanMipmapImage(VulkanTest& vkt) {
+static VulkanMipmapImage CreateVulkanMipmapImage(
+    VulkanTest& vkt, VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL) {
   VulkanMipmapImage result;
   result.device = vkt.GetDevice();
 
-  // Create VkImage with kNumLevels mip levels, DEVICE_LOCAL + externally exportable.
+  // Create VkImage with kNumLevels mip levels, DEVICE_LOCAL + externally exportable. The tiling
+  // (OPTIMAL vs LINEAR) exercises both the tiled-SRD-reconstruction and linear-layout import paths.
   vkt.CreateImage(kBaseWidth, kBaseHeight, kNumLevels, kVkFormat,
-                  result.image, result.image_memory, result.image_size, /*external=*/true);
+                  result.image, result.image_memory, result.image_size, /*external=*/true, tiling);
 
   // Create one VkImageView per mip level.
   result.level_views.resize(kNumLevels);
@@ -178,6 +180,9 @@ static VulkanMipmapImage CreateVulkanMipmapImage(VulkanTest& vkt) {
   // Map as a mipmapped array using the standard HIP API (works for both Vulkan and D3D12).
   hipExternalMemoryMipmappedArrayDesc arr_desc = {};
   arr_desc.extent      = {kBaseWidth, kBaseHeight, 0};
+  // Treat each texel as a single 32-bit element (matches the test's packed-uint32 PixelValue and
+  // surf2Dread/write<uint32_t>). A 4x8 channel format would apply RGBA channel selection in the
+  // surface SRD and reorder bytes; the layout/tiling is handled by the reconstructed SRD, not this.
   arr_desc.formatDesc  = hipCreateChannelDesc<unsigned int>();
   arr_desc.flags       = hipArraySurfaceLoadStore;
   arr_desc.numLevels   = kNumLevels;
@@ -321,6 +326,7 @@ HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_RoundTrip) {
 // the whole image and verifies every pixel.
 HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_SurfaceWrite_VulkanRead) {
   CHECK_IMAGE_SUPPORT
+  auto err = hipGetLastError();  // Remove error of previously failed tests
   VulkanTest vkt(enable_validation);
   auto img = CreateVulkanMipmapImage(vkt);
   REQUIRE(img.valid());
@@ -394,4 +400,89 @@ HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_VulkanWrite_SurfaceRe
   }
 
   img.destroy(vkt);
+}
+
+// ── Single-level LINEAR image interop ───────────────────────────────────────────────────────────
+// VK_IMAGE_TILING_LINEAR requires mipLevels == 1 (linear images cannot be mipmapped). This exercises
+// the linear import path: Vulkan writes the whole image, HIP reads it back and round-trips via HIP.
+HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_Linear_RoundTrip) {
+  CHECK_IMAGE_SUPPORT
+  VulkanTest vkt(enable_validation);
+
+  const uint32_t W = kBaseWidth, H = kBaseHeight, N = W * H;
+  VkImage image = VK_NULL_HANDLE;
+  VkDeviceMemory image_memory = VK_NULL_HANDLE;
+  VkDeviceSize image_size = 0;
+  vkt.CreateImage(W, H, /*num_levels=*/1, kVkFormat, image, image_memory, image_size,
+                  /*external=*/true, VK_IMAGE_TILING_LINEAR);
+  REQUIRE(image != VK_NULL_HANDLE);
+
+  // HOST_VISIBLE staging buffer for CPU access from the Vulkan side.
+  VkBuffer staging_buf = VK_NULL_HANDLE;
+  VkDeviceMemory staging_mem = VK_NULL_HANDLE;
+  uint32_t* host = nullptr;
+  vkt.CreateBuffer(N * sizeof(uint32_t),
+                   static_cast<VkBufferUsageFlagBits>(VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT),
+                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                   staging_buf, staging_mem, /*external=*/false);
+  VK_CHECK_RESULT(vkMapMemory(vkt.GetDevice(), staging_mem, 0, N * sizeof(uint32_t), 0,
+                              reinterpret_cast<void**>(&host)));
+
+  // Import the exported memory and map it as a single-level array.
+  hipExternalMemory_t ext_mem = nullptr;
+  auto mem_desc = vkt.BuildMemoryDescriptor(image_memory, static_cast<uint32_t>(image_size));
+  HIP_CHECK(hipImportExternalMemory(&ext_mem, &mem_desc));
+
+  hipExternalMemoryMipmappedArrayDesc arr_desc = {};
+  arr_desc.extent     = {W, H, 0};
+  arr_desc.formatDesc = hipCreateChannelDesc<unsigned int>();
+  arr_desc.flags      = hipArraySurfaceLoadStore;
+  arr_desc.numLevels  = 1;
+  arr_desc.offset     = 0;
+  hipMipmappedArray_t mip_array = nullptr;
+  HIP_CHECK(hipExternalMemoryGetMappedMipmappedArray(&mip_array, ext_mem, &arr_desc));
+  hipArray_t hip_level = nullptr;
+  HIP_CHECK(hipGetMipmappedArrayLevel(&hip_level, mip_array, 0));
+
+  // Vulkan writes the whole image via staging.
+  for (uint32_t y = 0; y < H; ++y)
+    for (uint32_t x = 0; x < W; ++x) host[y * W + x] = PixelValue(x, y, 0);
+  vkt.CopyBufferToImage(staging_buf, image, 0, W, H);
+
+  // HIP reads and verifies every pixel.
+  std::vector<uint32_t> hip_pixels(N, 0);
+  HIP_CHECK(hipMemcpyFromArray(hip_pixels.data(), hip_level, 0, 0, N * sizeof(uint32_t),
+                               hipMemcpyDeviceToHost));
+  for (uint32_t y = 0; y < H; ++y)
+    for (uint32_t x = 0; x < W; ++x)
+      REQUIRE(hip_pixels[y * W + x] == PixelValue(x, y, 0));
+
+  // HIP inverts RGB of every pixel and writes back; Vulkan reads and verifies.
+  for (auto& px : hip_pixels) {
+    const uint8_t r = 255u - (px & 0xFFu), g = 255u - ((px >> 8) & 0xFFu),
+                  b = 255u - ((px >> 16) & 0xFFu), a = (px >> 24) & 0xFFu;
+    px = pack_rgba(r, g, b, a);
+  }
+  HIP_CHECK(hipMemcpyToArray(hip_level, 0, 0, hip_pixels.data(), N * sizeof(uint32_t),
+                             hipMemcpyHostToDevice));
+  HIP_CHECK(hipDeviceSynchronize());
+  vkt.CopyImageToBuffer(image, 0, W, H, staging_buf);
+  for (uint32_t y = 0; y < H; ++y)
+    for (uint32_t x = 0; x < W; ++x) {
+      const uint32_t orig = PixelValue(x, y, 0);
+      const uint32_t expected = pack_rgba(static_cast<uint8_t>(255u - (orig & 0xFFu)),
+                                          static_cast<uint8_t>(255u - ((orig >> 8) & 0xFFu)),
+                                          static_cast<uint8_t>(255u - ((orig >> 16) & 0xFFu)),
+                                          static_cast<uint8_t>((orig >> 24) & 0xFFu));
+      REQUIRE(host[y * W + x] == expected);
+    }
+
+  HIP_CHECK(hipFreeMipmappedArray(mip_array));
+  HIP_CHECK(hipDestroyExternalMemory(ext_mem));
+  vkUnmapMemory(vkt.GetDevice(), staging_mem);
+  vkDestroyBuffer(vkt.GetDevice(), staging_buf, nullptr);
+  vkFreeMemory(vkt.GetDevice(), staging_mem, nullptr);
+  vkDestroyImage(vkt.GetDevice(), image, nullptr);
+  vkFreeMemory(vkt.GetDevice(), image_memory, nullptr);
 }

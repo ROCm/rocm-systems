@@ -617,6 +617,23 @@ typedef struct _HsaGraphicsResourceInfo {
     HSAuint64  SizeHintInBytes;     // Caller-provided size hint for foreign (non-ROCr) resources (IN, 0 if unknown)
 } HsaGraphicsResourceInfo;
 
+// Windows-only metadata populated in HsaGraphicsResourceInfo::Metadata when the imported
+// resource's VCAM_SURFACE_DESC is available. Provides swizzle mode as a fallback for when
+// the DXX extension (CLQueryResource11/CLQueryResource) is not available.
+typedef struct _HsaWddmSurfaceMetadata {
+    HSAuint32 version;           // Always 1
+    HSAuint32 swizzle_mode;      // VCAM_SURFACE_DESC.swizzleMode (union value)
+    HSAuint32 tile_swizzle;      // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
+} HsaWddmSurfaceMetadata;
+
+// Fallback slots inside the ROCr image descriptor's data[] dword array where the interop layer
+// (clr) stashes the imported surface's swizzle mode / pipe-bank-XOR when a full SRD is not
+// available (Vulkan image interop on Windows). The gfx image manager reads these to reconstruct
+// the SRD. Chosen at the tail of the 64-dword data region to avoid colliding with SRD words
+// (data[0..7]) and mip offsets (data[8..]).
+#define HSA_WDDM_SWIZZLE_MODE_DATA_OFFSET  62
+#define HSA_WDDM_TILE_SWIZZLE_DATA_OFFSET  63
+
 typedef enum _HSA_CACHING_TYPE
 {
     HSA_CACHING_CACHED        = 0,

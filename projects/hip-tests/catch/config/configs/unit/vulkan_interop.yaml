@@ -15,6 +15,7 @@ vulkan_interop:
   Unit_hipVulkanImageDataVerification_Positive_RoundTrip: *level_2
   Unit_hipVulkanImageDataVerification_Positive_SurfaceWrite_VulkanRead: *level_2
   Unit_hipVulkanImageDataVerification_Positive_VulkanWrite_SurfaceRead: *level_2
+  Unit_hipVulkanImageDataVerification_Positive_Linear_RoundTrip: *level_2
   Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Write: *level_2
   Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered: *level_2
   Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap: *level_2

@@ -468,7 +468,7 @@ void VulkanTest::CopyBuffer(VkBuffer src_buffer, VkBuffer dst_buffer, VkDeviceSi
 
 void VulkanTest::CreateImage(uint32_t width, uint32_t height, uint32_t num_levels,
                               VkFormat format, VkImage& image, VkDeviceMemory& image_memory,
-                              VkDeviceSize& image_size, bool external) {
+                              VkDeviceSize& image_size, bool external, VkImageTiling tiling) {
   VkImageCreateInfo img_info = {};
   img_info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   img_info.imageType     = VK_IMAGE_TYPE_2D;
@@ -477,7 +477,7 @@ void VulkanTest::CreateImage(uint32_t width, uint32_t height, uint32_t num_level
   img_info.mipLevels     = num_levels;
   img_info.arrayLayers   = 1;
   img_info.samples       = VK_SAMPLE_COUNT_1_BIT;
-  img_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
+  img_info.tiling        = tiling;
   img_info.usage         = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
   img_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
@@ -502,6 +502,12 @@ void VulkanTest::CreateImage(uint32_t width, uint32_t height, uint32_t num_level
   alloc_info.memoryTypeIndex = FindMemoryType(mem_req.memoryTypeBits,
                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
+  // Dedicated allocation: bind the memory exclusively to this image so the driver exports the
+  // image's native (OPTIMAL/tiled) layout instead of linearizing a generic shared allocation.
+  VkMemoryDedicatedAllocateInfo dedicated_info = {};
+  dedicated_info.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+  dedicated_info.image = image;
+
   VkExportMemoryAllocateInfoKHR export_info = {};
 #ifdef _WIN64
   WindowsSecurityAttributes win_sec_attrs;
@@ -515,9 +521,12 @@ void VulkanTest::CreateImage(uint32_t width, uint32_t height, uint32_t num_level
   if (external) {
     export_info.sType       = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR;
     export_info.handleTypes = _mem_handle_type;
+    export_info.pNext       = &dedicated_info;
 #ifdef _WIN64
-    export_info.pNext = (_mem_handle_type & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR)
-                        ? &win32_info : nullptr;
+    if (_mem_handle_type & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR) {
+      win32_info.pNext = &dedicated_info;
+      export_info.pNext = &win32_info;
+    }
 #endif
     alloc_info.pNext = &export_info;
   }
