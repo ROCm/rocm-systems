@@ -58,9 +58,8 @@ TABLE_NAME_PREFIX_QUERY = (
 )
 INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
 
-# Rows per executemany call. Sized to stay near SQLite's default 2 MB
-# page cache (cache_size=-2000, page_size=4096) while amortizing
-# per-call overhead. Community practice: 10k–100k rows per batch.
+# Rows per executemany call. Must be >1 to avoid row-by-row overhead
+# and less than the full file to preserve the streaming memory benefit.
 PMC_EVENT_INSERT_BATCH_SIZE = 50_000
 
 
