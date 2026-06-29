@@ -17,6 +17,7 @@ target_include_directories(
         ${ROCJITSU_INCLUDE_DIR}
         ${ROCJITSU_SRC_DIR}
         ${HSA_INCLUDE_DIR}
+        ${DRM_INCLUDE_DIR}
         ${GENERATED_DIR}
 )
 target_link_libraries(

@@ -1,5 +1,5 @@
 {
-  "config_name": "rdna4",
+  "config_name": "external_kernel_gfx1201",
   "architecture_family": "rdna4",
   "hip_architectures": ["gfx1201"],
   "cmake": {
