@@ -614,6 +614,15 @@ int GDABackend::buffer_unregister(void *addr) {
   return err;
 }
 
+void GDABackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
+}
+
 void GDABackend::buffer_unregister_all() {
   /* Deregister all buffers with QPs */
   for (size_t i = 0; i < num_qps; i++) {
@@ -624,13 +633,17 @@ void GDABackend::buffer_unregister_all() {
   Backend::buffer_unregister_all();
 }
 
-void GDABackend::reset_backend_stats() {
-  assert(false);
+void GDABackend::accumulate_default_host_ctx_stats() {
+  globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
 }
 
-void GDABackend::dump_backend_stats() {
-  assert(false);
+void GDABackend::reset_backend_stats() {
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemset(&ctx_array[i].ctxStats, 0, sizeof(ROCStats)));
+  }
+  default_host_ctx->ctxHostStats.resetStats();
 }
+
 
 __host__ void GDABackend::global_exit(int status) {
   if (backend_comm != MPI_COMM_NULL)
@@ -937,12 +950,6 @@ int GDABackend::backend_can_run() {
   void *handle{nullptr};
   GDAProvider requested = requested_provider();
 
-  /* Libnuma ? */
-  if (!numa.is_available()) {
-    LOG_WARN("GDA backend unavailable: libnuma support is missing");
-    return ROCSHMEM_ERROR;
-  }
-
   /* Basic verbs? */
   if (!ibv.is_initialized) return ROCSHMEM_ERROR;
 
@@ -1028,8 +1035,8 @@ void GDABackend::cleanup_ibv() {
       qp_allocator_->deallocate(bnxt_qps[i].sq_buf);
       qp_allocator_->deallocate(bnxt_qps[i].rq_buf);
 
-      close(bnxt_qps[i].sq_dmabuf_fd);
-      close(bnxt_qps[i].rq_dmabuf_fd);
+      if (bnxt_qps[i].sq_dmabuf_fd > 0) close(bnxt_qps[i].sq_dmabuf_fd);
+      if (bnxt_qps[i].rq_dmabuf_fd > 0) close(bnxt_qps[i].rq_dmabuf_fd);
 
       err = bnxt_re_dv.destroy_cq(bnxt_scqs[i].cq);
       CHECK_ZERO(err, "bnxt_re_dv_destroy_cq (SCQ)");
@@ -1043,8 +1050,8 @@ void GDABackend::cleanup_ibv() {
       err = bnxt_re_dv.umem_dereg(bnxt_rcqs[i].umem_handle);
       CHECK_ZERO(err, "bnxt_re_dv_umem_dereg (RCQ)");
 
-      close(bnxt_scqs[i].dmabuf_fd);
-      close(bnxt_rcqs[i].dmabuf_fd);
+      if (bnxt_scqs[i].dmabuf_fd > 0) close(bnxt_scqs[i].dmabuf_fd);
+      if (bnxt_rcqs[i].dmabuf_fd > 0) close(bnxt_rcqs[i].dmabuf_fd);
 
       qp_allocator_->deallocate(bnxt_scqs[i].buf);
       qp_allocator_->deallocate(bnxt_rcqs[i].buf);

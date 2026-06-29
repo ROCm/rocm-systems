@@ -84,7 +84,7 @@ add_subdirectory(rdc_modules/rdc_rocr)
 add_subdirectory(rdc_modules/rdc_rocp)
 
 # add librdc_rvs.so to RDC_LIB_MODULES
-add_subdirectory(rdc_modules/rdc_rvs)
+#add_subdirectory(rdc_modules/rdc_rvs)
 
 # Create cmake target
 # Add all targets to the build-tree export set

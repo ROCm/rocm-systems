@@ -69,7 +69,7 @@ list(PREPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
 # Use hipcc from our rocm install
 if (NOT DEFINED CMAKE_CXX_COMPILER)
-  find_program(CMAKE_CXX_COMPILER hipcc PATHS /opt/rocm)
+  find_program(CMAKE_CXX_COMPILER hipcc)
 endif()
 
 ###############################################################################

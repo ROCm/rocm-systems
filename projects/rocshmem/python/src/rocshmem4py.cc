@@ -133,10 +133,18 @@ PYBIND11_MODULE(_rocshmem4py, m) {
 
   // Synchronization
   m.def("rocshmem_barrier_all", []() { rocshmem_barrier_all(); });
+  m.def("rocshmem_barrier", [](intptr_t team) {
+    rocshmem_barrier(resolve_team_handle(team));
+  }, "Barrier across all PEs in team.", py::arg("team"));
 
   m.def("rocshmem_barrier_all_on_stream", [](intptr_t stream) {
     rocshmem_barrier_all_on_stream((hipStream_t)stream);
   }, "Stream-ordered barrier across all PEs", py::arg("stream"));
+
+  m.def("rocshmem_barrier_on_stream", [](intptr_t team, intptr_t stream) {
+    rocshmem_barrier_on_stream(resolve_team_handle(team), (hipStream_t)stream);
+  }, "Stream-ordered barrier across all PEs in team (ROCSHMEM_TEAM_INVALID is a no-op).",
+     py::arg("team"), py::arg("stream"));
 
   m.def("rocshmem_fence", []() { rocshmem_fence(); });
   m.def("rocshmem_quiet", []() { rocshmem_quiet(); });
@@ -256,9 +264,18 @@ PYBIND11_MODULE(_rocshmem4py, m) {
   m.def("rocshmem_sync_all", []() { rocshmem_sync_all(); },
     "Lighter-weight partner to barrier_all (local-store visibility).");
 
+  m.def("rocshmem_team_sync", [](intptr_t team) {
+    rocshmem_team_sync(resolve_team_handle(team));
+  }, "Lighter-weight sync across all PEs in team.", py::arg("team"));
+
   m.def("rocshmem_sync_all_on_stream", [](intptr_t stream) {
     rocshmem_sync_all_on_stream((hipStream_t)stream);
   }, "Stream-ordered sync_all.", py::arg("stream"));
+
+  m.def("rocshmem_team_sync_on_stream", [](intptr_t team, intptr_t stream) {
+    rocshmem_team_sync_on_stream(resolve_team_handle(team), (hipStream_t)stream);
+  }, "Stream-ordered lighter-weight sync across all PEs in team (ROCSHMEM_TEAM_INVALID is a no-op).",
+     py::arg("team"), py::arg("stream"));
 
   // -------------------------------------------------------------------------
   // Full host AMO matrix

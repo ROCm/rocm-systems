@@ -58,9 +58,9 @@ DEFAULT_ALLOWED_PANEL_KEYS = set(REQUIRED_PANEL_KEYS) | set(OPTIONAL_PANEL_KEYS)
 EXPERIMENTAL_PANEL_IDS = {30}  # Panel IDs that are experimental/optional
 
 
-def is_gfx11_ip_variant(arch_name: str) -> bool:
-    """True for RDNA 3.5 IP dirs: gfx115x (gfx1150 to gfx115f)."""
-    return bool(re.fullmatch(r"gfx115[0-9a-f]", arch_name, re.IGNORECASE))
+def is_gfx115x_ip_variant(arch_name: str) -> bool:
+    """True for gfx115x IP dirs (gfx1150 to gfx115f)."""
+    return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
 
 
 def normalize_panel_id(panel_id: int) -> int:
@@ -379,7 +379,7 @@ def main() -> None:
 
     gfx11_panels: list[TemplatePanel] = []
     gfx11_by_id: dict[int, TemplatePanel] = {}
-    if any(is_gfx11_ip_variant(p.name) for p in configs_dir.iterdir() if p.is_dir()):
+    if any(is_gfx115x_ip_variant(p.name) for p in configs_dir.iterdir() if p.is_dir()):
         if not gfx11_template_path.is_file():
             print(
                 f"Error: gfx115x architecture(s) present but template missing: "
@@ -403,7 +403,7 @@ def main() -> None:
             continue
         total_arches += 1
         print(f"{'=' * 80}\nValidating architecture: {arch_dir.name}\n{'=' * 80}")
-        if is_gfx11_ip_variant(arch_dir.name):
+        if is_gfx115x_ip_variant(arch_dir.name):
             tpl_panels, tpl_by_id = gfx11_panels, gfx11_by_id
             tpl_label = "gfx11"
         else:

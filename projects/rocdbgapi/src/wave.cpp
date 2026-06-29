@@ -588,12 +588,11 @@ wave_t::set_state (amd_dbgapi_wave_state_t state,
       /* Convert an amd_dbgapi_exception_t into an os_exception_mask_t.  */
       os_exception_mask_t os_exceptions = os_exception_mask_t::none;
 
-      while (exceptions)
+      utils::for_each_flag (exceptions,
+                            [&] (amd_dbgapi_exceptions_t one_exception)
         {
-          auto one_exception = exceptions ^ (exceptions & (exceptions - 1));
           os_exceptions |= convert_one_exception (one_exception);
-          exceptions ^= one_exception;
-        }
+        });
 
       /* A wave should only send queue exceptions, sometimes combined with a
          device_memory_exception.  */

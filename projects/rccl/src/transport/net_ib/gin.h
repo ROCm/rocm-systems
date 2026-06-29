@@ -13,6 +13,7 @@
 #include "nccl.h"
 
 struct ncclGinIbCollComm {
+  void*         ctx;
   int           rank;
   int           nranks;
   int           connectionId;
@@ -24,6 +25,10 @@ struct ncclGinIbCollComm {
   void**        fullSendComm;
   int           dev;
   void*         ginCtx;
+  struct {
+    struct ibv_context* context;
+    struct ibv_pd *pd;
+  }ib;
   ncclResult_t (*getProperties)(int dev, void *props);
   ncclResult_t (*allGather)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
   ncclResult_t (*allToAll)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
