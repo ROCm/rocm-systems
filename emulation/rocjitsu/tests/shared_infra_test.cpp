@@ -1226,6 +1226,8 @@ template <typename Traits> void cdna_generated_vcmpx_dpp_write_mask_preserves_ex
       cmp = 0x101Fu;
     else if (lane >= 48)
       cmp = 0x102Fu;
+    if (lane == 20)
+      cmp = 0xDEAD0020u;
     cu->write_vgpr(vbase + kSrc0, lane, src);
     cu->write_vgpr(vbase + kSrc1, lane, cmp);
   }
@@ -1243,8 +1245,8 @@ template <typename Traits> void cdna_generated_vcmpx_dpp_write_mask_preserves_ex
       reinterpret_cast<const typename Traits::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
-  EXPECT_EQ(wf->vcc(), 0xFFFFFFFFFFFF00A5ULL);
-  EXPECT_EQ(wf->exec(), 0xFFFFFFFFFFFF005AULL);
+  EXPECT_EQ(wf->vcc(), 0xFFFFFFFFFFEF00A5ULL);
+  EXPECT_EQ(wf->exec(), 0xFFFFFFFFFFEF005AULL);
 }
 
 TEST(DppPermuteTest, CdnaGeneratedVop1UsesSharedRowBroadcast) {

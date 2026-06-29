@@ -9,7 +9,7 @@ C++ code implementing the instruction's behavior in the simulator.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
@@ -287,6 +287,10 @@ def _indent(ctx: LoweringContext) -> str:
     return '  ' * ctx.indent
 
 
+def _nested_context(ctx: LoweringContext) -> LoweringContext:
+    return replace(ctx, indent=ctx.indent + 1)
+
+
 def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
     """Lower a statement node to C++ lines."""
     kind = node.kind
@@ -315,21 +319,7 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
     if kind == SemaNodeKind.WHILE:
         cond = _lower_expr(node.children[0], ctx)
         lines = [f'{_indent(ctx)}while ({cond}) {{']
-        inner_ctx = LoweringContext(
-            exec_model=ctx.exec_model,
-            operand_map=ctx.operand_map,
-            indent=ctx.indent + 1,
-            declared=ctx.declared,
-            true16_dst_select=ctx.true16_dst_select,
-            true16_src_select=ctx.true16_src_select,
-            true16_src_selects=ctx.true16_src_selects,
-            true16_dst_reg=ctx.true16_dst_reg,
-            true16_src_raw=ctx.true16_src_raw,
-            fp8_byte_select=ctx.fp8_byte_select,
-            fp8_decode_e5m3_select=ctx.fp8_decode_e5m3_select,
-            vector_sgpr_once=ctx.vector_sgpr_once,
-            clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
-        )
+        inner_ctx = _nested_context(ctx)
         lines.extend(_lower_stmt(node.children[1], inner_ctx))
         lines.append(f'{_indent(ctx)}}}')
         return lines
@@ -449,21 +439,7 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
     """Lower an IF node (supports 2, 3, or multi-branch elif chains)."""
     children = node.children
     lines: list[str] = []
-    inner_ctx = LoweringContext(
-        exec_model=ctx.exec_model,
-        operand_map=ctx.operand_map,
-        indent=ctx.indent + 1,
-        declared=ctx.declared,
-        true16_dst_select=ctx.true16_dst_select,
-        true16_src_select=ctx.true16_src_select,
-        true16_src_selects=ctx.true16_src_selects,
-        true16_dst_reg=ctx.true16_dst_reg,
-        true16_src_raw=ctx.true16_src_raw,
-        fp8_byte_select=ctx.fp8_byte_select,
-        fp8_decode_e5m3_select=ctx.fp8_decode_e5m3_select,
-        vector_sgpr_once=ctx.vector_sgpr_once,
-        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
-    )
+    inner_ctx = _nested_context(ctx)
 
     if len(children) == 2:
         cond = _lower_expr(children[0], ctx)
@@ -502,21 +478,7 @@ def _lower_for(node: SemaNode, ctx: LoweringContext) -> list[str]:
     init_lines = _lower_stmt(node.children[0], ctx)
     cond = _lower_expr(node.children[1], ctx)
     step_lines = _lower_stmt(node.children[2], ctx)
-    inner_ctx = LoweringContext(
-        exec_model=ctx.exec_model,
-        operand_map=ctx.operand_map,
-        indent=ctx.indent + 1,
-        declared=ctx.declared,
-        true16_dst_select=ctx.true16_dst_select,
-        true16_src_select=ctx.true16_src_select,
-        true16_src_selects=ctx.true16_src_selects,
-        true16_dst_reg=ctx.true16_dst_reg,
-        true16_src_raw=ctx.true16_src_raw,
-        fp8_byte_select=ctx.fp8_byte_select,
-        fp8_decode_e5m3_select=ctx.fp8_decode_e5m3_select,
-        vector_sgpr_once=ctx.vector_sgpr_once,
-        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
-    )
+    inner_ctx = _nested_context(ctx)
 
     init_str = (
         '; '.join(l.strip().rstrip(';') for l in init_lines) if init_lines else ''
