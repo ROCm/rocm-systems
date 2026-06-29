@@ -70,12 +70,55 @@ the whole load. `Archive::complete` reflects whether the trailer was found.
 archive (trimmed to the last complete record, trailer + manifest added) into a
 clean one.
 
+### Per-Process Archive Isolation (POSIX only)
+
+A single `HIP_HRR_CAPTURE_OUTPUT` directory can be inherited by multiple
+*concurrently live* processes. The motivating case is vLLM server mode: HIP is
+already initialized in the parent `api_server`, so vLLM uses the `spawn` start
+method and the spawned `EngineCore` child inherits `HIP_HRR_CAPTURE_OUTPUT` and
+finds the parent's `events.bin` already present. Two live writers must never
+interleave into one `events.bin` — they keep independent file descriptors (no
+shared offset) and independent in-memory event counters, so the on-disk event
+index would reflect only one writer even though both wrote bytes (the original
+"58 MB file but only 4094 events" corruption bug).
+
+`writer::open()` (`hip_capture_writer.cpp`) resolves this with an exclusive
+advisory lock:
+
+- Each process takes an exclusive `flock(LOCK_EX | LOCK_NB)` on
+  `<base>/events.bin`. **The first process in wins** and writes the base archive.
+- A process that finds the lock held by another **live** process redirects itself
+  to its own private sub-archive `<base>/pid-<pid>/`, a complete and
+  self-consistent archive with its own `events.bin`, `blobs/`, `code_objects/`,
+  and `manifest.json` — identical in shape to a single-process capture.
+- Two other paths land in the same `pid-<pid>` redirect: a `fork()` child
+  (`atfork_child` re-opens from the base dir while the parent still holds the
+  lock) and an EMFILE fallback (the initial lock probe failed under fd
+  exhaustion, and the resume path later discovers the base is owned).
+
+A **dead** prior process has released its `flock`, so this is *not* the
+crash-restart case: a restart re-acquires the base lock and **resumes** the base
+`events.bin` (continuing sequence IDs, stripping any trailer) rather than
+creating a new PID directory. See Crash Resilience above.
+
+This entire mechanism is POSIX-only (guarded by `#ifndef _WIN32`); Windows
+captures never create `pid-<pid>` directories.
+
+**Playback note:** `hrr-playback` reads a single archive directory's `events.bin`
++ `blobs/` + `code_objects/`. It does **not** discover or merge `pid-<pid>`
+sub-archives — point the tool at each `<base>/pid-<pid>/` individually. There is
+no built-in cross-process merge (consistent with Multi-Process Capture and
+Playback under Known Limitations).
+
 ### Archive Format (v3)
 ```
 capture.hrr/
   events.bin         hrr_file_header(8) + [EventHeader(32) + payload]* + [hrr_eof_record(44)]
+  manifest.json      { version, capture_mode, complete, event_count, blob_count }
+  writer_state.json  checkpoint cursor (present only mid-capture; removed on clean shutdown)
   blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
   code_objects/      .hsaco ELFs (unused in current fat-binary path)
+  pid-<pid>/         per-process sub-archive (POSIX only; see Per-Process Archive Isolation)
 ```
 All handle values (stream, event, module, graph, device pointer) are stored as raw `uint64_t` pointer casts. Sequence IDs are a global atomic counter providing causal ordering across threads.
 
@@ -241,9 +284,14 @@ HRR_VERSION = 3
   manifest.json      { version, capture_mode, complete, event_count, blob_count }
                      (version here is the manifest schema = 1, distinct from the
                       events.bin HRR_VERSION = 3)
+  writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
+                     size); present only mid-capture, removed on clean shutdown
   events.bin         8-byte hrr_file_header, then repeated records
   blobs/<2hex>/      FNV-1a-128 content-addressed raw buffers (.blob ext)
   code_objects/      .hsaco ELFs keyed by hash
+  pid-<pid>/         per-process sub-archive when the base archive is held by
+                     another live process (POSIX only; see Per-Process Archive
+                     Isolation). Same internal layout as <output_dir>.
 ```
 
 ### `events.bin` Layout
@@ -942,6 +990,11 @@ Replaying such workloads would require coordinating replay across multiple proce
 instances, handling inter-process communication interfaces, and re-establishing IPC
 handle relationships at replay time. This adds substantial complexity and is not
 currently supported.
+
+Note that *concurrently live* processes sharing one `HIP_HRR_CAPTURE_OUTPUT` (e.g.
+vLLM's spawned `EngineCore` child) are each captured into a separate, self-contained
+`pid-<pid>/` sub-archive rather than being merged — see Per-Process Archive Isolation.
+Each sub-archive replays independently; there is no cross-process merge.
 
 ### Single-File Archive Format
 
