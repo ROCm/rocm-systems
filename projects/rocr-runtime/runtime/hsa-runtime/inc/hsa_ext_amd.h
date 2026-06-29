@@ -971,8 +971,10 @@ typedef enum hsa_amd_agent_info_s {
    */
   HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS = 0xA123,
   /**
-   * Queries whether the agent supports allocating host memory that can be
-   * exported as a DMA-BUF file descriptor for use with virtual memory APIs.
+   * Queries whether the agent supports virtual memory API operations on
+   * host memory that can be exported as a DMA-BUF file descriptor.
+   * For CPU agents: indicates host memory can be allocated and exported.
+   * For GPU agents: indicates the GPU can access such host-allocated memory.
    * The type of this attribute is bool.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
