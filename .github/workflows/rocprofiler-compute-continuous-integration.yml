@@ -55,7 +55,7 @@ concurrency:
 env:
   ROCPROFSYS_CI: ON
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.0.0"
+  ROCM_VERSION: "7.2.3"
 
 jobs:
   prepare_matrix:
@@ -138,10 +138,11 @@ jobs:
         run: |
           ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
           ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
-          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          ROCM_PATCH=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $3}')
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100)+(${ROCM_PATCH}*1) ))
+          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}.${ROCM_VERSN}-1_all.deb
           apt-get update
-          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y amd-smi-lib libdw-dev hip-dev pkg-config
           echo "✅ amdgpu and ROCm dependencies Installed!"
@@ -202,17 +203,15 @@ jobs:
             -L full \
             -LE full_rocprofiler_compute_ci_exclude
 
-      - name: Output Logs
+      - name: Upload Test Logs (on failure)
         if: steps.test.outcome == 'failure'
-        working-directory: projects/rocprofiler-compute
-        run: |
-          echo "❌ Run Failed: Outputting available log files..."
-          for log in build/Testing/Temporary/LastTest*.log build/Testing/Temporary/LastConfigure*.log; do
-            if [ -f "$log" ]; then
-              echo "=== $log ==="
-              cat "$log"
-            fi
-          done
+        uses: actions/upload-artifact@v7
+        with:
+          name: failed-test-logs-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.arch }}
+          path: |
+            projects/rocprofiler-compute/build/ctest-results.xml
+            projects/rocprofiler-compute/build/Testing/Temporary/**
+          retention-days: 2
 
       - name: Check Test Results
         if: always()
