@@ -16,7 +16,7 @@ This module is ONLY used in profile mode. Analyze mode can use pandas freely.
 
 import csv
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from typing import Any, Optional
 
 
@@ -315,6 +315,49 @@ def pivot_table(
     return result
 
 
+def iter_merge_rows(
+    left_rows: Iterable[dict],
+    right_rows: Iterable[dict],
+    left_on: str,
+    right_on: str,
+    how: str = "inner",
+) -> Iterator[dict]:
+    """
+    Lazy merge of two row sources based on key columns.
+
+    Equivalent to: pd.merge(left_df, right_df, left_on=left_on,
+                            right_on=right_on, how=how)
+
+    Right side is materialized into a lookup dict; left side and
+    output are streamed.
+    """
+    if how not in ("inner", "left", "right", "outer"):
+        raise ValueError(f"Unsupported join type: {how}")
+
+    right_lookup: dict[Any, list[dict]] = {}
+    for row in right_rows:
+        key = row.get(right_on)
+        right_lookup.setdefault(key, []).append(row)
+
+    matched_left_keys: set[Any] = set()
+
+    for left_row in left_rows:
+        key = left_row.get(left_on)
+        matched_left_keys.add(key)
+
+        if key in right_lookup:
+            for right_row in right_lookup[key]:
+                yield {**left_row, **right_row}
+        elif how in ("left", "outer"):
+            yield left_row.copy()
+
+    if how in ("right", "outer"):
+        for key, right_row_list in right_lookup.items():
+            if key not in matched_left_keys:
+                for right_row in right_row_list:
+                    yield right_row.copy()
+
+
 def merge_rows(
     left_rows: list[dict],
     right_rows: list[dict],
@@ -329,41 +372,4 @@ def merge_rows(
                             right_on=right_on, how=how)
 
     """
-    if how not in ("inner", "left", "right", "outer"):
-        raise ValueError(f"Unsupported join type: {how}")
-
-    # Build lookup from right side (O(m))
-    right_lookup = {}
-    for row in right_rows:
-        key = row.get(right_on)
-        # Note: None keys are treated as valid join keys (matches pandas behavior)
-        if key not in right_lookup:
-            right_lookup[key] = []
-        right_lookup[key].append(row)
-
-    merged = []
-    matched_left_keys = set()
-
-    # Merge left side (O(n) with O(1) lookups)
-    for left_row in left_rows:
-        key = left_row.get(left_on)
-        matched_left_keys.add(key)
-
-        if key in right_lookup:
-            # Match found - create merged rows
-            for right_row in right_lookup[key]:
-                # Right values overwrite left values for same column names
-                merged_row = {**left_row, **right_row}
-                merged.append(merged_row)
-        elif how in ("left", "outer"):
-            # No match but left join - include left row
-            merged.append(left_row.copy())
-
-    # Handle right/outer join - add unmatched right rows
-    if how in ("right", "outer"):
-        for key, right_row_list in right_lookup.items():
-            if key not in matched_left_keys:
-                for right_row in right_row_list:
-                    merged.append(right_row.copy())
-
-    return merged
+    return list(iter_merge_rows(left_rows, right_rows, left_on, right_on, how))

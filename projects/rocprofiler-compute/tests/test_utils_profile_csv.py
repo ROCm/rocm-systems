@@ -583,6 +583,25 @@ def test_full_workflow(temp_csv_file):
 
 
 # =============================================================================
+# iter_merge_rows Tests
+# =============================================================================
+
+
+def test_iter_merge_rows_accepts_generator_input():
+    """iter_merge_rows works with non-list iterables on the left side."""
+    left_list = [{"k": "a", "v": "1"}, {"k": "b", "v": "2"}]
+    right = [{"k": "a", "w": "10"}]
+
+    def left_gen():
+        yield from left_list
+
+    result = list(csv_ops.iter_merge_rows(left_gen(), right, "k", "k", how="inner"))
+    assert len(result) == 1
+    assert result[0]["v"] == "1"
+    assert result[0]["w"] == "10"
+
+
+# =============================================================================
 # iter_csv_dicts Tests
 # =============================================================================
 
