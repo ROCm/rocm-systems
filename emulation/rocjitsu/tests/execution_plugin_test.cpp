@@ -167,8 +167,7 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t, uint32_t, uint32_t,
-                         uint8_t) override {
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
     HookEvent e{HookEvent::READ_VGPR};
     if (wf) {
       e.dispatch_id = wf->dispatch_id();
