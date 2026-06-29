@@ -198,6 +198,10 @@ test_categories:
       - "host_amo_all_pes_.*"
       - "host_amo_self_.*"
 
+      # Host P2P sync tests (non-MPI IPC TcpBootstrap path, IPC-only)
+      - "host_wait_until_.*"
+      - "host_test_.*"
+
       # Tile collective tests (IPC-only)
       - "tile_broadcast_.*"
       - "tile_allgather_.*"

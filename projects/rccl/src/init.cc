@@ -455,8 +455,9 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclSymkFinalize(comm));
-    NCCLCHECK(ncclDevrFinalize(comm));
   }
+  // RCCL: !symmetricSupport comms still init devrState via the non-sym window-register path (dev_runtime.cc), so finalize unconditionally to free lsaRankList.
+  NCCLCHECK(ncclDevrFinalize(comm));
   NCCLCHECK(ncclRasCommFini(comm));
 
   /* in commReclaim, we have guaranteed only last rank which calls ncclCommDestroy() will

@@ -12,7 +12,7 @@
    * `rocshmem_team_split_2D`
 * Added tile-granular RMA operations for the IPC backend
 * Added host-initiated RMA operations in the IPC backend for the non-MPI
-   bootstrapping path
+   bootstrapping path: put, get, fence, quiet, arithmetic AMOs, and P2P sync ops
 * Added team creation using non-contiguous parent teams in the IPC backend
 * Added Python bindings of memory-management APIs
 * Added Python bindings coverage for team APIs
