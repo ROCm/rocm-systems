@@ -1182,9 +1182,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     if (userMax != -2) {
       maxChannels = std::max(std::min(userMax, 64), 1);
       INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %d", maxChannels);
-    } else {
-      maxChannels = 48;
-      INFO(NCCL_TUNING, "RCCL MaxChannels: default capping to 48");
     }
   }
 
