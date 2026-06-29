@@ -175,58 +175,6 @@ void LoaderOptions::PrintHelp(std::ostream& out) const
 
 static const char *LOADER_DUMP_PREFIX = "amdcode";
 
-// Kernel-entry trampoline (gfx1250 / RDNA4).
-//
-// We cannot reserve space immediately in front of each kernel entry: that would
-// require a non-uniform relayout of the loaded code segment, which breaks every
-// intra-segment PC-relative reference the compiler baked in. Instead we allocate
-// a separate *executable* region (AMDGPU_HSA_SEGMENT_CODE_AGENT, which carries
-// AllocateExecutable in the loader context) and, for each kernel, emit a stub
-// that jumps to the real entry; the kernel descriptor's entry offset is then
-// rewritten so dispatch lands in the stub first.
-//
-// The jump is absolute (the pool is not within S_BRANCH range of the code), so
-// the stub loads the 64-bit entry address into a scratch SGPR pair and sets PC.
-// s[100:101] is a safe fixed scratch: RDNA gives every wave 128 physical SGPRs and
-// these indices are well above the preloaded user+system SGPRs (<= ~20), so they
-// are never a live kernel input -- the kernel writes them before it reads them.
-//
-// Dual entry points: a kernel exposes two entries, at E and E+256, where E is
-// kd + kernel_code_entry_byte_offset. Consumers of the second entry compute it as
-// (descriptor entry) + 256, so after we point the descriptor at the stub the two
-// stub entries must keep the same 256-byte spacing. We therefore reserve a
-// 512-byte slot per kernel: stub[0] (at slot+0) jumps to E, stub[1] (at slot+256)
-// jumps to E+256. The descriptor is rewritten to land on stub[0].
-//
-// gfx1250 encodings verified with: llvm-mc --arch=amdgcn --mcpu=gfx1250 --show-encoding
-//   global_wb   <scope:SCOPE_CU>       ->   0xEE0B007C, 0x00000000, 0x00000000
-//   v_nop        (padding)              ->  0x7E000000
-//   s_mov_b32    s100, <lit> + literal  ->  0xBEE400FF
-//   s_mov_b32    s101, <lit> + literal  ->  0xBEE500FF
-//   s_set_pc_i64 s[100:101]             ->  0xBE804864
-//   s_code_end   (padding)              ->  0xBF9F0000
-static constexpr size_t kTrampolineStubStride = AMD_ISA_ALIGN_BYTES;        // 256: one stub, entry-aligned
-static constexpr size_t kTrampolineEntriesPerKernel = 2;                    // entries at E and E+256
-static constexpr size_t kTrampolineEntrySpacing = AMD_ISA_ALIGN_BYTES;      // 256: matches kernel's E..E+256
-static constexpr size_t kTrampolineSlotStride =
-    kTrampolineStubStride * kTrampolineEntriesPerKernel;                    // 512 per kernel
-
-static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
-  auto* w = reinterpret_cast<uint32_t*>(buf);
-
-  w[0] = 0xEE0B007C;                          // global_wb <scope:SCOPE_CU>
-  w[1] = 0x00000000;                          // padding
-  w[2] = 0x00000000;                          // padding
-  w[3] = 0x7E000000;                          // v_nop (padding)
-  w[4] = 0xBEE400FF;                          // s_mov_b32 s100, target_lo
-  w[5] = static_cast<uint32_t>(target);
-  w[6] = 0xBEE500FF;                          // s_mov_b32 s101, target_hi
-  w[7] = static_cast<uint32_t>(target >> 32);
-  w[8] = 0xBE804864;                          // s_set_pc_i64 s[100:101]
-  for (size_t i = 9; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
-    w[i] = 0xBF9F0000;                        // s_code_end (prefetch-safe padding)
-}
-
 Loader* Loader::Create(Context* context)
 {
   return new AmdHsaCodeLoader(context);
@@ -1307,11 +1255,6 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
-  // Kernel-entry trampolines (gfx1250). Gate on this code object's ISA and reset
-  // the per-object fixup list collected by LoadDefinitionSymbol.
-  trampoline_enabled_gfx1250_ = codeIsa.find("gfx1250") != std::string::npos;
-  kd_fixups_.clear();
-
   uint32_t majorVersion, minorVersion;
   if (!code->GetCodeObjectVersion(&majorVersion, &minorVersion)) {
     logger_ << "LoaderError: failed to determine code object's version\n";
@@ -1371,14 +1314,6 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   status = ApplyRelocations(agent, code.get());
   if (status != HSA_STATUS_SUCCESS) { return status; }
-
-  // Emit kernel-entry trampolines into the host shadow now that the image is
-  // final (post-relocation) and still unfrozen. The single Freeze DMA carries
-  // them to device along with the rewritten descriptors.
-  if (trampoline_enabled_gfx1250_ && !kd_fixups_.empty()) {
-    status = InstallTrampolinesGfx1250(agent);
-    if (status != HSA_STATUS_SUCCESS) { return status; }
-  }
 
   code.reset();
 
@@ -1490,49 +1425,6 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ExecutableImpl::InstallTrampolinesGfx1250(hsa_agent_t agent) {
-  const size_t n = kd_fixups_.size();
-  const size_t pool = n * kTrampolineSlotStride;
-
-  // AMDGPU_HSA_SEGMENT_CODE_AGENT yields *executable* device memory: the loader
-  // context backs it with RegionMemory(..., is_code=true), which sets
-  // core::MemoryRegion::AllocateExecutable (see amd_loader_context.cpp).
-  void* ptr = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, pool,
-                                     AMD_ISA_ALIGN_BYTES, /*zero=*/true);
-  if (!ptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-
-  // vaddr == 0: Address()/Copy() index by raw byte offset into the pool.
-  auto tramp = std::make_shared<Segment>(this, agent, AMDGPU_HSA_SEGMENT_CODE_AGENT,
-                                         ptr, pool, /*vaddr=*/0, /*storage_offset=*/0);
-  objects.push_back(tramp);               // freed via Destroy() in ~ExecutableImpl
-  trampoline_segments_.push_back(tramp);  // frozen in ExecutableImpl::Freeze
-
-  for (size_t i = 0; i < n; ++i) {
-    const KdFixup& f = kd_fixups_[i];
-    const uint64_t slot_off = i * kTrampolineSlotStride;
-    // Device addresses are valid pre-Freeze (RegionMemory::ptr_ is set at alloc).
-    const uint64_t kd_dev    = reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr));
-    const uint64_t entry_dev = reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr + f.entry_off));
-
-    // Emit one stub per kernel entry, preserving the E..E+256 spacing: stub[e] is
-    // at slot+e*256 and jumps to entry_dev + e*256.
-    for (size_t e = 0; e < kTrampolineEntriesPerKernel; ++e) {
-      const uint64_t stub_off = slot_off + e * kTrampolineEntrySpacing;
-      uint8_t blob[kTrampolineStubStride];
-      BuildTrampolineGfx1250(blob, entry_dev + e * kTrampolineEntrySpacing);
-      tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
-    }
-
-    // Redirect dispatch onto stub[0]: kernel_object(kd_dev) + new_off == stub[0],
-    // so the second-entry consumer's (stub[0] + 256) lands on stub[1].
-    const uint64_t stub0_dev = reinterpret_cast<uint64_t>(tramp->Address(slot_off));
-    int64_t new_off = static_cast<int64_t>(stub0_dev) - static_cast<int64_t>(kd_dev);
-    f.code_seg->Copy(f.kd_vaddr + llvm::amdhsa::KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET,
-                     &new_off, sizeof(new_off)); // -> code host shadow
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
 hsa_status_t ExecutableImpl::LoadSymbol(hsa_agent_t agent,
                                         code::Symbol* sym,
                                         uint32_t majorVersion)
@@ -1580,13 +1472,6 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
     // V3.
     llvm::amdhsa::kernel_descriptor_t kd;
     sym->GetSection()->getData(sym->SectionOffset(), &kd, sizeof(kd));
-
-    if (trampoline_enabled_gfx1250_) {
-      // Record this descriptor; the trampoline is installed after relocations.
-      // sym->VAddr() is the descriptor's ELF vaddr (matches SymbolAddress below).
-      kd_fixups_.push_back({ SymbolSegment(agent, sym), sym->VAddr(),
-                             kd.kernel_code_entry_byte_offset });
-    }
 
     uint32_t kernarg_segment_size = kd.kernarg_size; // FIXME: If 0 then the compiler is not specifying the size.
     uint32_t kernarg_segment_alignment = 16;         // FIXME: Use the minumum HSA required alignment.
@@ -2067,13 +1952,6 @@ hsa_status_t ExecutableImpl::Freeze(const char *options) {
     for (auto &ls : lco->LoadedSegments()) {
       ls->Freeze();
     }
-  }
-
-  // Trampoline pools are not part of any LoadedCodeObject's segment list
-  // (that must stay size==1 for v2+); freeze them explicitly so their host->device
-  // DMA and code-cache invalidation happen alongside the code segments.
-  for (auto &ts : trampoline_segments_) {
-    ts->Freeze();
   }
 
   state_ = HSA_EXECUTABLE_STATE_FROZEN;
