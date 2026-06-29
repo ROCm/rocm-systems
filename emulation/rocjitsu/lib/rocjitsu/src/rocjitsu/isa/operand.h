@@ -245,9 +245,9 @@ private:
   }
 
   /// @brief Notify the plugin system that this operand's VGPR was read
-  /// for lanes [lane_begin, lane_end). No-op for non-VGPR operands.
-  virtual void simd_notify_read(const amdgpu::Wavefront & /*wf*/, uint32_t /*lane_begin*/,
-                                uint32_t /*lane_end*/, uint8_t /*byte_mask*/) const {}
+  /// by lanes in `lane_mask`. No-op for non-VGPR operands.
+  virtual void simd_notify_read(const amdgpu::Wavefront & /*wf*/, uint64_t /*lane_mask*/,
+                                uint8_t /*byte_mask*/) const {}
 
   /// @brief 64-bit-lane counterpart of `simd_vgpr_storage`. A per-lane f64/i64
   /// value occupies two consecutive VGPRs (reg N + reg N+1), so this returns a
@@ -323,7 +323,7 @@ private:
   amdgpu::VgprStorage *simd_vgpr_storage_mut(amdgpu::Wavefront &wf) const override;
   amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64(const amdgpu::Wavefront &wf) const override;
   amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut(amdgpu::Wavefront &wf) const override;
-  void simd_notify_read(const amdgpu::Wavefront &wf, uint32_t lane_begin, uint32_t lane_end,
+  void simd_notify_read(const amdgpu::Wavefront &wf, uint64_t lane_mask,
                         uint8_t byte_mask) const override;
 };
 
@@ -421,9 +421,9 @@ struct SimdAccess {
     return op.simd_vgpr_storage64_mut(wf);
   }
   template <typename Op>
-  static void notify_read(const Op &op, const Wavefront &wf, uint32_t lane_begin, uint32_t lane_end,
+  static void notify_read(const Op &op, const Wavefront &wf, uint64_t lane_mask,
                           uint8_t byte_mask) {
-    op.simd_notify_read(wf, lane_begin, lane_end, byte_mask);
+    op.simd_notify_read(wf, lane_mask, byte_mask);
   }
 };
 } // namespace amdgpu

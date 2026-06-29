@@ -111,12 +111,12 @@ amdgpu::VgprStorage *AmdgpuIsaOperand<Isa>::simd_vgpr_storage_mut(amdgpu::Wavefr
 }
 
 template <typename Isa>
-void AmdgpuIsaOperand<Isa>::simd_notify_read(const amdgpu::Wavefront &wf, uint32_t lane_begin,
-                                             uint32_t lane_end, uint8_t byte_mask) const {
+void AmdgpuIsaOperand<Isa>::simd_notify_read(const amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                             uint8_t byte_mask) const {
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
     uint32_t physical_reg = wf.vgpr_alloc().base + voff;
-    wf.cu().notify_vgpr_read(&wf, physical_reg, lane_begin, lane_end, byte_mask);
+    wf.cu().notify_vgpr_read(&wf, physical_reg, lane_mask, byte_mask);
   }
 }
 
