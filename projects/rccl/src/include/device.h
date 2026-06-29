@@ -540,10 +540,10 @@ __host__ __device__ constexpr int ncclMaxDevWorkBatchBytes(int cudaArch = NCCL_C
     (16<<10);
 }
 
-#define NCCL_MAX_DEV_WORK_BATCH_BYTES 192
+#define NCCL_MAX_DEV_WORK_BATCH_BYTES (NCCL_MAX_DEV_WORK_P2P_PER_BATCH * (int)sizeof(ncclDevWorkP2p))
 #define NCCL_MAX_DEV_WORK_BATCH_COLLS (NCCL_MAX_DEV_WORK_BATCH_BYTES/sizeof(ncclDevWorkColl))
-#define NCCL_MAX_DEV_WORK_P2P_PER_BATCH 2
-#define NCCL_MAX_DEV_WORK_P2P_ELEMENTS 2
+#define NCCL_MAX_DEV_WORK_P2P_PER_BATCH (NCCL_MAX_NTHREADS / (2 * WARP_SIZE))
+#define NCCL_MAX_DEV_WORK_P2P_ELEMENTS   (NCCL_MAX_NTHREADS / (2 * WARP_SIZE))
 struct alignas(16) ncclDevWorkBatch {
   union {
     struct {

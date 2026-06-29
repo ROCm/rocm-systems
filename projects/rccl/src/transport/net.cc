@@ -362,7 +362,7 @@ static void populateCommNetAttrs(struct ncclComm* comm, struct ncclConnector* co
   netAttr->recvCommAttr.minFlowsPerPeer = 1;
 
   if (conn->p2pOnly) {
-    size_t maxConcPeers = comm->p2pnChannels * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
+    size_t maxConcPeers = comm->p2pnChannels * (RCCL_P2P_MAX_NTHREADS / (2 * comm->WarpSize));
     if (comm->nRanks < maxConcPeers) maxConcPeers = comm->nRanks;
 
     netAttr->sendCommAttr.maxConcurrentPeers = maxConcPeers;

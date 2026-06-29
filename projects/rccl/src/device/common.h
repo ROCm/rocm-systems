@@ -217,7 +217,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
       }
       nWorks = nWorksLow32 + __popc(uint32_t(batch.offsetBitset>>32)); // add high 32 bits
     }
-
+    
     int workSize;
     int nPacks; // total number of packs loaded, each pack is 16 bytes
     int packInWork; // my pack index within work struct
