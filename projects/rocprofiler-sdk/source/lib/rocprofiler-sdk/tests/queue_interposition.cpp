@@ -175,8 +175,8 @@ TEST(queue_interposition, load_write_index_returns_virtual_wptr)
 
 TEST(queue_interposition, async_signal_handler_thread_count_uses_gpu_queue_count)
 {
-    common::env_store env({{"GPU_MAX_HW_QUEUES", "7", 1},
-                           {"ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", "", 1}});
+    common::env_store env(
+        {{"GPU_MAX_HW_QUEUES", "7", 1}, {"ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", "", 1}});
     ASSERT_TRUE(env.push());
 
     EXPECT_EQ(get_async_signal_handler_thread_count(), 7u);
@@ -184,8 +184,8 @@ TEST(queue_interposition, async_signal_handler_thread_count_uses_gpu_queue_count
 
 TEST(queue_interposition, async_signal_handler_thread_count_clamps_zero_gpu_queue_count)
 {
-    common::env_store env({{"GPU_MAX_HW_QUEUES", "0", 1},
-                           {"ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", "", 1}});
+    common::env_store env(
+        {{"GPU_MAX_HW_QUEUES", "0", 1}, {"ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", "", 1}});
     ASSERT_TRUE(env.push());
 
     EXPECT_EQ(get_async_signal_handler_thread_count(), 1u);
@@ -193,8 +193,8 @@ TEST(queue_interposition, async_signal_handler_thread_count_clamps_zero_gpu_queu
 
 TEST(queue_interposition, async_signal_handler_thread_count_override_takes_precedence)
 {
-    common::env_store env({{"GPU_MAX_HW_QUEUES", "0", 1},
-                           {"ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", "3", 1}});
+    common::env_store env(
+        {{"GPU_MAX_HW_QUEUES", "0", 1}, {"ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", "3", 1}});
     ASSERT_TRUE(env.push());
 
     EXPECT_EQ(get_async_signal_handler_thread_count(), 3u);

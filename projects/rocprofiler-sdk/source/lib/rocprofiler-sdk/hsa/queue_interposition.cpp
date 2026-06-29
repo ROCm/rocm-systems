@@ -210,7 +210,6 @@ get_doorbell_tls()
 using async_signal_task_t        = std::function<void()>;
 using async_signal_task_vector_t = std::vector<async_signal_task_t>;
 
-
 inline void
 publish_submitted_packets(QueueState* state, uint64_t submit_pos)
 {
@@ -305,8 +304,7 @@ get_async_signal_handler_thread_count()
 {
     constexpr auto fallback_thread_count = int64_t{4};
 
-    const auto gpu_thread_count =
-        common::get_env("GPU_MAX_HW_QUEUES", fallback_thread_count);
+    const auto gpu_thread_count = common::get_env("GPU_MAX_HW_QUEUES", fallback_thread_count);
     const auto thread_count =
         common::get_env("ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", gpu_thread_count);
 
@@ -721,8 +719,7 @@ write_interceptor(Queue*                                queue,
                 last_completion_signal.handle,
                 current_signal_value);
 
-            _shared_info_session =
-                std::make_shared<queue_info_session_t>(std::move(_info_session));
+            _shared_info_session = std::make_shared<queue_info_session_t>(std::move(_info_session));
         }
 
         // Copy packets into the real queue before creating the completion waiter. The caller
@@ -760,7 +757,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 {
     if(!state) return;
 
-    auto* state_ptr = state.get();
+    auto* state_ptr            = state.get();
     auto  deferred_async_tasks = async_signal_task_vector_t{};
 
     // gate_lock serializes doorbell processing; producers never take it, so no deadlock.
