@@ -44,6 +44,7 @@
 #include "device/devkernel.hpp"    // amd::Kernel, KernelParameterDescriptor
 #include "platform/kernel.hpp"     // amd::KernelSignature
 #include "opencl/amdocl/cl_kernel.h"  // T_POINTER enum
+#include "os/os.hpp"               // amd::Os::installExceptionHandlers()
 
 // Fat binary format structs (ClangOffloadBundleUncompressedHeader, etc.)
 #include "../hip_code_object.hpp"
@@ -52,7 +53,6 @@
 #include <algorithm>
 #include <atomic>
 #include <climits>
-#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1315,114 +1315,32 @@ static void record_fat_binary_blob(const void* blob_ptr) {
 // window while restoring a normal pre-init load path.
 
 // ---------------------------------------------------------------------------
-// Crash-time finalize — chained fatal-signal handlers.
+// Crash-time finalize through CLR exception handling.
 //
 // The archive is normally finalized from std::atexit(hip_capture_shutdown). If
-// the recorded process dies on a fatal signal (e.g. a GPU memory fault aborts
-// the host, or a host SIGSEGV), atexit never runs. These handlers best-effort
-// flush events.bin and write a manifest, then CHAIN to the previously installed
-// handler so ROCr still emits its GPU coredump (gpucore.<pid>) and the kernel
-// still produces the host core.
-//
-// Crash signals (SIGSEGV/SIGABRT/SIGBUS/SIGILL/SIGFPE) do NOT write the clean
-// trailer: its absence is exactly how the reader detects a crash-truncated
-// archive. Orderly-termination signals (SIGTERM/SIGINT) DO write the clean
-// trailer and a complete manifest, so killing a capture run with `kill -TERM`
-// is not misreported as a crash (see emergency_finalize's clean_shutdown path).
-//
-// POSIX only; on Windows the writer's periodic checkpoint still bounds loss.
-//
-// Why not reuse CLR's amd::Os::installExceptionHandlers (os/os.hpp)? That hook
-// exists but does not fit this use case:
-//   - Single callback slot, already owned by async logging
-//     (rocclr/utils/debug.cpp installs crashFlushCallback when AMD_LOG_LEVEL
-//     file logging is enabled). A second installer either clobbers the logger's
-//     flush or — because the POSIX impl guards with an "already installed" flag
-//     and returns early — never gets registered at all.
-//   - No handler chaining: it overwrites the prior sigaction (SA_RESETHAND,
-//     plain sa_handler), so it cannot forward to ROCr's gpucore handler. HRR
-//     must chain so ROCr still emits gpucore.<pid> and the kernel still dumps.
-//   - Crash signals only — no SIGTERM/SIGINT, so it cannot distinguish an
-//     orderly `kill -TERM` (write the clean trailer) from a fatal fault.
-//   - No alt-stack: it cannot run after a stack-overflow SIGSEGV, which the
-//     sigaltstack below handles.
-// Adapting Os::installExceptionHandlers to support multi-listener chaining,
-// SIGTERM/SIGINT, siginfo forwarding and an alt-stack would be a larger change
-// to shared CLR infrastructure than the self-contained handlers here, so HRR
-// keeps its own chained handlers scoped to the capture layer.
+// the recorded process dies on a fatal signal/exception, atexit does not run.
+// Use CLR's cross-platform crash hook instead of an HRR-owned Linux-only
+// sigaction chain. The callback intentionally writes an incomplete manifest
+// without the clean trailer; periodic writer checkpoints still bound event loss
+// if the process dies before the callback can run.
 // ---------------------------------------------------------------------------
-#ifndef _WIN32
 namespace {
+std::once_flag g_hrr_exception_once;
 
-// Crash signals: the process is in an undefined state — the archive trailer is
-// deliberately NOT written so its absence flags a crash-truncated archive.
-// Clean-termination signals (SIGTERM/SIGINT): the process is being asked to exit
-// in an orderly fashion — write the clean trailer so a `kill -TERM` of a capture
-// run is not misreported as a crash (see hrr_signal_is_clean).
-constexpr int    kHrrFatalSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE, SIGTERM, SIGINT};
-constexpr size_t kHrrNumSignals     = sizeof(kHrrFatalSignals) / sizeof(kHrrFatalSignals[0]);
-
-struct sigaction g_hrr_prev_sa[kHrrNumSignals];
-std::atomic_flag g_hrr_in_handler = ATOMIC_FLAG_INIT;
-// Dedicated stack so a SIGSEGV from stack overflow can still run the handler.
-char             g_hrr_altstack_mem[65536];
-
-// SIGTERM/SIGINT are orderly-termination requests, not crashes.
-inline bool hrr_signal_is_clean(int signo) {
-  return signo == SIGTERM || signo == SIGINT;
+void hrr_clr_crash_callback() {
+  hrr_cap::writer::emergency_finalize(/*clean_shutdown=*/false);
 }
 
-void hrr_fatal_signal_handler(int signo, siginfo_t* info, void* uctx) {
-  // Only the first thread into the handler finalizes the archive.
-  if (!g_hrr_in_handler.test_and_set(std::memory_order_acq_rel)) {
-    hrr_cap::writer::emergency_finalize(/*clean_shutdown=*/hrr_signal_is_clean(signo));
-  }
-
-  // Chain to the handler that was installed before us (e.g. ROCr's GPU-coredump
-  // handler), so that behavior is preserved.
-  int idx = -1;
-  for (size_t i = 0; i < kHrrNumSignals; i++)
-    if (kHrrFatalSignals[i] == signo) { idx = static_cast<int>(i); break; }
-
-  if (idx >= 0) {
-    const struct sigaction& prev = g_hrr_prev_sa[idx];
-    if ((prev.sa_flags & SA_SIGINFO) && prev.sa_sigaction &&
-        prev.sa_sigaction != hrr_fatal_signal_handler) {
-      prev.sa_sigaction(signo, info, uctx);
-      return;
+void hrr_install_clr_exception_handler() {
+  std::call_once(g_hrr_exception_once, [] {
+    if (!amd::Os::installExceptionHandlers(hrr_clr_crash_callback)) {
+      LogPrintfWarning("[HRR capture] CLR crash handler installation failed; "
+                       "periodic checkpoints remain enabled");
     }
-    if (prev.sa_handler == SIG_IGN) return;
-    if (prev.sa_handler && prev.sa_handler != SIG_DFL &&
-        prev.sa_handler != reinterpret_cast<void (*)(int)>(hrr_fatal_signal_handler)) {
-      prev.sa_handler(signo);
-      return;
-    }
-  }
-
-  // No (usable) previous handler: restore the default disposition and re-raise
-  // so the kernel terminates the process with a core dump for `signo`.
-  signal(signo, SIG_DFL);
-  raise(signo);
-}
-
-void hrr_install_signal_handlers() {
-  stack_t ss{};
-  ss.ss_sp    = g_hrr_altstack_mem;
-  ss.ss_size  = sizeof(g_hrr_altstack_mem);
-  ss.ss_flags = 0;
-  sigaltstack(&ss, nullptr);
-
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_sigaction = hrr_fatal_signal_handler;
-  sigemptyset(&sa.sa_mask);
-  sa.sa_flags = SA_SIGINFO | SA_NODEFER | SA_ONSTACK | SA_RESTART;
-  for (size_t i = 0; i < kHrrNumSignals; i++)
-    sigaction(kHrrFatalSignals[i], &sa, &g_hrr_prev_sa[i]);
+  });
 }
 
 }  // namespace
-#endif  // !_WIN32
 
 void hip_capture_init() {
   if (!hip_capture_enabled()) return;
@@ -1450,11 +1368,7 @@ void hip_capture_init() {
   // Open the events writer now — Flag::init() has run so output_dir is valid.
   if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
 
-#ifndef _WIN32
-  // Install AFTER the runtime is up so we chain on top of ROCr's signal handlers
-  // (ours runs first, flushes the archive, then forwards to ROCr for gpucore).
-  hrr_install_signal_handlers();
-#endif
+  hrr_install_clr_exception_handler();
 
   // Install compiler dispatch shims now — hip::init() has completed so
   // the compiler dispatch table is fully populated.

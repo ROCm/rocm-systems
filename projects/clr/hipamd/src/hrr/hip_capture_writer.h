@@ -31,20 +31,18 @@ void flush(const char* output_dir);
 // itself and may be called by the host. Thread-safe.
 void checkpoint();
 
-// Best-effort, async-signal-safe finalize for use from a fatal-signal handler.
-// Flushes the in-memory event buffer with raw write()+fsync (only when the
-// writer lock can be taken without blocking, so no torn record is emitted).
-// Never allocates, never uses stdio. Safe to call from SIGSEGV/SIGABRT/etc.
+// Best-effort finalize for use from CLR's crash callback.
+// Flushes the in-memory event buffer with raw write()+fsync only when no writer
+// thread is mutating it, so no torn record is emitted. Never allocates and never
+// uses stdio.
 //
-// clean_shutdown distinguishes orderly termination (SIGTERM/SIGINT) from a crash
-// (SIGSEGV/SIGABRT/...):
+// clean_shutdown distinguishes normal shutdown from a crash callback:
 //   - crash (false): writes manifest "complete": false and does NOT append the
 //     trailer — its absence is how the reader detects a crash-truncated archive.
 //   - clean (true): appends the clean-shutdown trailer (raw write of a fixed
-//     hrr_eof_record) and writes manifest "complete": true, so an orderly
-//     `kill -TERM` is not misreported as a crash. The trailer is only written
-//     when the writer lock was free (no torn record in flight); otherwise it
-//     degrades to the crash path.
+//     hrr_eof_record) and writes manifest "complete": true. The trailer is only
+//     written when the writer lock was free (no torn record in flight);
+//     otherwise it degrades to the crash path.
 void emergency_finalize(bool clean_shutdown = false);
 
 // Close and free resources.

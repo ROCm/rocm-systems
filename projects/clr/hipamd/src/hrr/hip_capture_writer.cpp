@@ -11,12 +11,12 @@
  * Binary format is compatible with hrr_reader.h / hrr_replay.cpp.
  *
  * Crash resilience: events.bin is written through a raw file descriptor with a
- * small app-managed buffer (not buffered stdio), so the buffer can be flushed
- * with a single async-signal-safe write()+fsync from a fatal-signal handler
- * (see emergency_finalize). The writer also checkpoints (flush+fsync) every
- * kCheckpointEvents events to bound how much a crash can lose. A clean shutdown
- * appends an hrr_eof_record trailer; its absence marks the archive as
- * crash-truncated for the reader, which recovers all complete records.
+ * small app-managed buffer (not buffered stdio). The writer checkpoints
+ * (flush+fsync) every kCheckpointEvents events to bound how much a crash can
+ * lose, and emergency_finalize can be called from CLR's crash callback as a
+ * final best-effort flush. A clean shutdown appends an hrr_eof_record trailer;
+ * its absence marks the archive as crash-truncated for the reader, which
+ * recovers all complete records.
  *
  * Thread-safety: write_event_raw() and write_blob() acquire the file mutex.
  * open()/close()/flush() are called from a single thread (init/shutdown).
@@ -156,19 +156,15 @@ static size_t   g_buf_len            = 0;
 static uint64_t g_events_since_ckpt  = 0;
 static bool     g_trailer_written    = false;
 
-// Async-signal-safe guard over g_buf / g_buf_len, raised by writer threads while
-// they mutate the buffer. The fatal-signal handler (emergency_finalize) runs
-// from the SIGSEGV/SIGABRT/SIGBUS chain, where pthread_mutex_trylock/unlock are
-// NOT on the POSIX async-signal-safe list: if the crash interrupts a writer
-// mid-lock, poking g_file_mu's futex from the handler is UB (deadlock/corruption).
-// std::atomic_flag is the one type the standard guarantees lock-free and usable
-// from a signal handler, so the handler probes this flag with test_and_set
-// instead of touching the mutex. Writers still hold g_file_mu for thread<->thread
-// exclusion; the flag is purely the handler<->writer signal.
+// Crash-callback guard over g_buf / g_buf_len, raised by writer threads while
+// they mutate the buffer. If the crash interrupts a writer mid-lock,
+// emergency_finalize must not poke g_file_mu's futex from the handler. Writers
+// still hold g_file_mu for thread<->thread exclusion; the flag is purely the
+// crash-callback <-> writer coordination point.
 static std::atomic_flag g_buf_busy = ATOMIC_FLAG_INIT;
 
 // RAII for writer threads: take the thread<->thread mutex AND raise g_buf_busy so
-// the async-signal handler can tell a g_buf mutation is in flight. Member order
+// the crash callback can tell a g_buf mutation is in flight. Member order
 // matters: the mutex locks first and unlocks last, with the busy window nested
 // strictly inside it.
 struct BufWriteGuard {
@@ -213,7 +209,7 @@ static bool write_all_fd(int fd, const void* data, size_t len) {
 }
 
 // Drain the app buffer to the events fd. Caller must hold g_file_mu (or be the
-// signal handler that has claimed g_buf_busy via test_and_set). Does not fsync.
+// crash callback that has claimed g_buf_busy via test_and_set). Does not fsync.
 static void flush_buffer_locked() {
   if (g_events_fd < 0 || g_buf_len == 0) { g_buf_len = 0; return; }
   write_all_fd(g_events_fd, g_buf, g_buf_len);
@@ -700,7 +696,7 @@ void close() {
 }
 
 // ---------------------------------------------------------------------------
-// emergency_finalize — async-signal-safe crash path
+// emergency_finalize — best-effort crash callback path
 // ---------------------------------------------------------------------------
 
 // Async-signal-safe unsigned-to-decimal. Writes into out (no NUL), returns len.
@@ -723,21 +719,18 @@ void emergency_finalize(bool clean_shutdown) {
   if (g_events_fd < 0) return;
 
   // Flush the in-memory buffer only if no writer thread is mid-mutation.
-  // We must NOT touch g_file_mu here: pthread_mutex_trylock/unlock are not
-  // async-signal-safe, so probing the futex from a crash handler is UB. Instead
-  // probe the async-signal-safe g_buf_busy flag with test_and_set: if it was
-  // already set a writer holds g_buf (possibly a torn record in flight) so we
-  // only fsync already-written bytes; if it was clear we now own it and can
-  // safely flush. clear() releases it on the way out.
+  // We must NOT touch g_file_mu here: if the crash interrupts a writer mid-lock,
+  // probing the futex from the crash callback can deadlock or corrupt state.
+  // Instead probe g_buf_busy with test_and_set: if it was already set a writer
+  // holds g_buf (possibly a torn record in flight) so we only fsync
+  // already-written bytes; if it was clear we now own it and can safely flush.
+  // clear() releases it on the way out.
   bool locked = !g_buf_busy.test_and_set(std::memory_order_acquire);
   if (locked) {
     flush_buffer_locked();
-    // Clean-termination signals (SIGTERM/SIGINT) are NOT crashes: the recorded
-    // process is being asked to exit, so the archive is complete up to the last
-    // record. Append the clean-shutdown trailer (raw write of a fixed-size
-    // record — no stdio, no allocation) so the reader does not mistake an
-    // orderly `kill -TERM` for a crash. We can only do this when the lock was
-    // free (no torn record in flight); otherwise we fall back to the crash path.
+    // Clean shutdowns append the fixed-size trailer so the reader does not treat
+    // the archive as crash-truncated. The CLR crash callback passes
+    // clean_shutdown=false; normal shutdown uses flush().
     if (clean_shutdown && !g_trailer_written) {
       hrr_eof_record rec = hrr_make_eof_record(
           g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
@@ -748,9 +741,9 @@ void emergency_finalize(bool clean_shutdown) {
   }
   HRR_FSYNC(g_events_fd);
 
-  // Best-effort manifest via raw open/write only (async-signal-safe). A clean
-  // termination writes complete:true (the trailer is present); a crash writes
-  // complete:false — its absence-of-trailer is how the reader detects truncation.
+  // Best-effort manifest via raw open/write only. A clean shutdown writes
+  // complete:true (the trailer is present); a crash writes complete:false — its
+  // absence-of-trailer is how the reader detects truncation.
   if (g_manifest_path[0] == '\0') return;
   bool complete = clean_shutdown && locked;
   int mfd = HRR_OPEN(g_manifest_path);
@@ -793,7 +786,7 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint16_t payload_le
   // Acquire once: assign sequence_id and buffer the record atomically so IDs are
   // only consumed for events that are actually written. A full record is always
   // appended under the lock, so the buffer never holds a torn record — which is
-  // what makes the signal-handler flush in emergency_finalize() safe.
+  // what makes the crash-callback flush in emergency_finalize() safe.
   //
   // The checkpoint flush+fsync happens inside this single lock scope. An earlier
   // version released the lock and re-acquired it for the fsync, which let two
