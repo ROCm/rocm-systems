@@ -364,18 +364,25 @@ inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_
   return apply_vop3_dst_mod<float>(v, omod, clamp);
 }
 
-/// Resolve an operand's read-side VGPR storage to a `VgprStorage*` (the
-/// per-lane register object), or null for a non-VGPR operand (SGPR / immediate
-/// / inline-const / DPP delegate). This is the single virtual dispatch
-/// (`simd_vgpr_storage`) the SIMD hot path takes to bind a source register; the
-/// per-chunk loop then issues a value-semantic `r->simd_load<T>(base)` directly
-/// off the resolved (loop-invariant) object with no further dispatch and no raw
-/// pointer in the kernel body — the storage pointer never escapes `VgprStorage`.
-template <typename Op> const VgprStorage *simd_src_reg(const Op &op, const Wavefront &wf) {
+/// Resolve an operand's read-side VGPR storage and notify plugins for the lanes
+/// being read. Returns null for non-VGPR operands (SGPR / immediate /
+/// inline-const / DPP delegate). This is the observed-read bottleneck for SIMD
+/// helpers that bind raw VGPR storage.
+template <typename Op>
+const VgprStorage *observed_simd_src_reg(const Op &op, const Wavefront &wf, uint64_t lane_mask,
+                                         uint8_t byte_mask = 0xF) {
   const VgprStorage *r = SimdAccess::vgpr_storage(op, wf);
   if (r)
-    SimdAccess::notify_read(op, wf, wf.exec(), 0xF);
+    SimdAccess::notify_read(op, wf, lane_mask, byte_mask);
   return r;
+}
+
+/// Resolve an operand's read-side VGPR storage to a `VgprStorage*` (the
+/// per-lane register object), or null for a non-VGPR operand. This observes the
+/// full active EXEC mask once when the register is bound, then the per-chunk loop
+/// issues value-semantic loads from the resolved storage.
+template <typename Op> const VgprStorage *simd_src_reg(const Op &op, const Wavefront &wf) {
+  return observed_simd_src_reg(op, wf, wf.exec());
 }
 
 /// Mutable counterpart of `simd_src_reg` for the dst write path (single
@@ -384,16 +391,24 @@ template <typename Op> VgprStorage *simd_dst_reg(const Op &op, Wavefront &wf) {
   return SimdAccess::vgpr_storage_mut(op, wf);
 }
 
+/// Resolve a 64-bit-lane source operand's lo/hi VGPR pair and notify plugins
+/// for the lanes being read.
+template <typename Op>
+ConstVgprStoragePair64 observed_simd_src_reg64(const Op &op, const Wavefront &wf,
+                                               uint64_t lane_mask, uint8_t byte_mask = 0xF) {
+  ConstVgprStoragePair64 p = SimdAccess::vgpr_storage64(op, wf);
+  if (p.lo)
+    SimdAccess::notify_read(op, wf, lane_mask, byte_mask);
+  return p;
+}
+
 /// Resolve a 64-bit-lane source operand's lo/hi register pair in one virtual
 /// dispatch (`simd_vgpr_storage64`). `{lo, hi}` are `VgprStorage*` (lo = reg N,
 /// hi = reg N+1), or `{nullptr, nullptr}` for a non-VGPR operand. The glue's
 /// 64-bit kernels structured-bind this and issue value-semantic
 /// `lo->simd_load64<T>(*hi, base)` — no raw pointer in the kernel body.
 template <typename Op> ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) {
-  ConstVgprStoragePair64 p = SimdAccess::vgpr_storage64(op, wf);
-  if (p.lo)
-    SimdAccess::notify_read(op, wf, wf.exec(), 0xF);
-  return p;
+  return observed_simd_src_reg64(op, wf, wf.exec());
 }
 
 /// Mutable counterpart of `simd_src_reg64` for the 64-bit dst write path
@@ -446,13 +461,11 @@ template <typename T, typename Op>
   requires(util::has_stdx_simd)
 inline util::native<T> read_simd(const Op &op, const Wavefront &wf, uint32_t lane_base) {
   static_assert(sizeof(T) == sizeof(uint32_t), "read_simd: T must be a 32-bit lane type");
-  if (const VgprStorage *r = SimdAccess::vgpr_storage(op, wf)) {
-    constexpr auto W = static_cast<uint32_t>(util::native_width_v<T>);
-    const uint64_t lane_mask =
-        ((wf.exec() >> lane_base) & util::mask<uint64_t>(static_cast<int>(W))) << lane_base;
-    SimdAccess::notify_read(op, wf, lane_mask, 0xF);
+  constexpr auto W = static_cast<uint32_t>(util::native_width_v<T>);
+  const uint64_t lane_mask = ((wf.exec() >> lane_base) & util::mask<uint64_t>(static_cast<int>(W)))
+                             << lane_base;
+  if (const VgprStorage *r = observed_simd_src_reg(op, wf, lane_mask))
     return r->template simd_load<T>(lane_base);
-  }
   return util::broadcast<T>(op.read_scalar(wf));
 }
 
@@ -1034,13 +1047,11 @@ template <typename T, typename Op>
   requires(util::has_stdx_simd)
 inline util::narrow32<T> read_narrow(const Op &op, const Wavefront &wf, uint32_t lane_base) {
   static_assert(sizeof(T) == sizeof(uint32_t), "read_narrow: T must be a 32-bit lane type");
-  if (const VgprStorage *r = SimdAccess::vgpr_storage(op, wf)) {
-    constexpr auto W = static_cast<uint32_t>(util::native_width64);
-    const uint64_t lane_mask =
-        ((wf.exec() >> lane_base) & util::mask<uint64_t>(static_cast<int>(W))) << lane_base;
-    SimdAccess::notify_read(op, wf, lane_mask, 0xF);
+  constexpr auto W = static_cast<uint32_t>(util::native_width64);
+  const uint64_t lane_mask = ((wf.exec() >> lane_base) & util::mask<uint64_t>(static_cast<int>(W)))
+                             << lane_base;
+  if (const VgprStorage *r = observed_simd_src_reg(op, wf, lane_mask))
     return r->template simd_load_narrow<T>(lane_base);
-  }
   return util::broadcast_narrow<T>(op.read_scalar(wf));
 }
 
