@@ -99,7 +99,7 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    hip_err = hipMemsetAsync(devbuf, 0, alloc_size, /*stream=*/0);
+    hip_err = hipMemsetAsync(devbuf, 0, alloc_size, /*stream=*/nullptr);
     if (hipSuccess != hip_err) {
         fprintf(stderr, "hipMemsetAsync failed (%d)\n", hip_err);
         goto free_devbuf;
@@ -136,8 +136,8 @@ main(int argc, char *argv[])
         hoff_t  wbuf_offset   = 0;
         ssize_t bytes_written = 0;
 
-        hipfile_err =
-            hipFileReadAsync(rhandle, devbuf, &rsize, &rfile_offset, &rbuf_offset, &bytes_read, /*stream=*/0);
+        hipfile_err = hipFileReadAsync(rhandle, devbuf, &rsize, &rfile_offset, &rbuf_offset, &bytes_read,
+                                       /*stream=*/nullptr);
         if (hipFileSuccess != hipfile_err.err) {
             fprintf(stderr, "hipFileReadAsync submit failed (%s)\n",
                     hipFileGetOpErrorString(hipfile_err.err));
@@ -145,31 +145,31 @@ main(int argc, char *argv[])
         }
 
         hipfile_err = hipFileWriteAsync(whandle, devbuf, &wsize, &wfile_offset, &wbuf_offset, &bytes_written,
-                                        /*stream=*/0);
+                                        /*stream=*/nullptr);
         if (hipFileSuccess != hipfile_err.err) {
             fprintf(stderr, "hipFileWriteAsync submit failed (%s)\n",
                     hipFileGetOpErrorString(hipfile_err.err));
             goto close_wfile;
         }
 
-        hip_err = hipStreamSynchronize(0);
+        hip_err = hipStreamSynchronize(nullptr);
         if (hipSuccess != hip_err) {
             fprintf(stderr, "hipStreamSynchronize failed (%d)\n", hip_err);
             goto close_wfile;
         }
 
-        if (bytes_read != (ssize_t)alloc_size) {
+        if (bytes_read != static_cast<ssize_t>(alloc_size)) {
             fprintf(stderr, "Async read short: %zd of %zu\n", bytes_read, alloc_size);
             goto close_wfile;
         }
-        if (bytes_written != (ssize_t)alloc_size) {
+        if (bytes_written != static_cast<ssize_t>(alloc_size)) {
             fprintf(stderr, "Async write short: %zd of %zu\n", bytes_written, alloc_size);
             goto close_wfile;
         }
     }
 
     /* 8. Trim WRITE_FILE down to the true payload size (we wrote padded). */
-    if (-1 == ftruncate(wfd, (off_t)payload_size)) {
+    if (-1 == ftruncate(wfd, static_cast<off_t>(payload_size))) {
         fprintf(stderr, "Could not truncate %s (%s)\n", write_path, strerror(errno));
         goto close_wfile;
     }

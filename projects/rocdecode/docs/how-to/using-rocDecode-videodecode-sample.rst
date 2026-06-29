@@ -231,6 +231,16 @@ The demuxer is deleted once decoding is done.
 
   delete demuxer;
 
+.. note:: 
+
+  To run the sample, you'll need to set the ``ROCM_PATH`` environment variable to point to the location of your ROCm installation, then set ``LD_PRELOAD`` and ``LIBVA_DRIVERS_PATH`` to point to the ROCm systems libraries and drivers:
+
+  .. code:: shell
+
+    export LD_PRELOAD=$ROCM_PATH/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:$ROCM_PATH/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2
+
+    export LIBVA_DRIVERS_PATH=$ROCM_PATH/lib/rocm_sysdeps/lib/
+
 .. |videodecode| replace:: ``videodecode.cpp``
 .. _videodecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/videoDecode/videodecode.cpp
 

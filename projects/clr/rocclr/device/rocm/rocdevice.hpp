@@ -27,8 +27,9 @@
 
 #include <atomic>
 #include <iostream>
-#include <vector>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 /*! \addtogroup HSA
  *  @{
@@ -653,6 +654,13 @@ class Device : public NullDevice {
   //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
   void WaitForHsaAsyncHandlersIdle() override;
 
+  //! Destroy all queues whose destroy was deferred from the async-events thread.
+  //! Must only be called on an app thread (e.g. acquireQueue, ~Device).
+  void DrainDeferredQueueDestroys();
+
+  //! Current number of queues pending deferred destroy.
+  size_t DeferredQueueCount();
+
  private:
   bool create();
 
@@ -660,6 +668,11 @@ class Device : public NullDevice {
   Device(hsa_agent_t bkendDevice);
 
   static constexpr int kDefaultNumaNode = -1;
+
+  //! Queues with destroy deferred from an async-handler-driven ~VirtualGPU, drained on app threads.
+  static constexpr size_t kDeferredQueueDrainThreshold = 8;
+  std::vector<hsa_queue_t*> deferredQueueDestroy_;
+  std::mutex deferredQueueDestroyLock_;
 
   bool SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
                            bool first_alloc = false, bool use_cpu = false,

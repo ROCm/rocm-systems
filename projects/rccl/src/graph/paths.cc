@@ -337,18 +337,20 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   #endif
   // Set intermediate GPU rank, if routing through an intermediate GPU.
   struct ncclTopoLinkList* path = gpu1->paths[GPU]+g2;
+  // xGMI fabric routes non-adjacent GPU pairs directly in hardware, so a
+  // software GPU relay is unnecessary and slower.
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (path->count == 4) { // Intermediate goes through DEV, not GPU.
     // path is GPU1 - DEV1 - DEV2 - DEV3 - GPU2, so the intermediate DEV is located at path->list[1]->remNode
     struct ncclTopoNode* intermediateNode = path->list[1]->remNode;
     if (intermediateNode->type == DEV) {
       int interRank;
       NCCLCHECK(ncclTopoDevToRank(system, NCCL_TOPO_ID_SYSTEM_ID(intermediateNode->id), intermediateNode->dev.dev, /*warn=*/true, &interRank));
-      #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
       NCCLCHECK(ncclTopoRankToIndex(system, interRank, &intermediateIndex, true));
-      #endif
       if (intermediateRank) *intermediateRank = interRank;
     }
   }
+#endif
 
   // In general, use P2P whenever we can.
   int p2pLevel = PATH_SYS;
@@ -764,6 +766,28 @@ static bool rcclPathOverride(struct ncclTopoSystem* system, uint64_t distance) {
   }
 }
 
+// Rewrite GPU<->NIC paths of type `fromType` to `toType` when the two devices share a PCI domain.
+static void rcclRewriteSameDomainNetPaths(struct ncclTopoSystem* system, int fromType, int toType) {
+  for (int g=0; g<system->nodes[GPU].count; g++) {
+    struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g;
+    int64_t gpuBusId = NCCL_TOPO_ID_LOCAL_ID(gpu->id);
+    int64_t gpuDomain = NCCL_BUSID_DOMAIN(gpuBusId);
+    for (int n=0; n<system->nodes[NET].count; n++) {
+      struct ncclTopoNode* net = system->nodes[NET].nodes+n;
+      // Skip uninitialized/invalid busIds (raw id 0), but allow domain 0000:
+      // it is a valid PCI domain and must still match.
+      if (gpuBusId == 0 || net->net.busId == 0) continue;
+      if (gpuDomain != NCCL_BUSID_DOMAIN(net->net.busId)) continue;
+      if (gpu->paths[NET] && gpu->paths[NET][n].type == fromType) {
+        gpu->paths[NET][n].type = toType;
+        INFO(NCCL_GRAPH, "Rewrote same-domain GPU %d -> NET %d path %d->%d (domain 0x%04lx)", g, n, fromType, toType, (unsigned long)gpuDomain);
+      }
+      if (net->paths[GPU] && net->paths[GPU][g].type == fromType)
+        net->paths[GPU][g].type = toType;
+    }
+  }
+}
+
 NCCL_PARAM(PxnC2c, "PXN_C2C", 0);
 
 ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm* comm) {
@@ -800,6 +824,11 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
   // Set direct paths to NVSwitches.
   for (int n=0; n<system->nodes[NVS].count; n++) {
     NCCLCHECK(ncclTopoSetPaths(system->nodes[NVS].nodes+n, system));
+  }
+
+  if (system->nodes[GPU].count > 0 &&
+      IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) {
+    rcclRewriteSameDomainNetPaths(system, PATH_PHB, PATH_PXB);
   }
 
   // Update path for GPUs when we don't want to / can't use GPU Direct P2P

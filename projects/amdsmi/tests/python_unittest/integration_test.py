@@ -1106,6 +1106,10 @@ class TestAmdSmiPython(unittest.TestCase):
                 self.common.check_ret("", "", self.common.PASS)
                 cap = int((power_cap_info["max_power_cap"] + power_cap_info["min_power_cap"]) / 2)
                 current_cap = power_cap_info["power_cap"]
+                # A power_cap of 0 means no user cap is set (driver uses default).
+                # Restoring 0 would be rejected as out-of-range, so use default_power_cap instead.
+                if current_cap == 0:
+                    current_cap = power_cap_info["default_power_cap"]
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e

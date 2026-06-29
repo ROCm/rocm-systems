@@ -40,7 +40,9 @@
 #include "log.hpp"
 
 #include <cassert>
+#include <cstdarg>
 #include <cstdint>
+#include <cstdio>
 
 namespace rocshmem {
 
@@ -157,102 +159,168 @@ Backend::~Backend() {
 }
 
 void Backend::dump_stats() {
-  printf("PE %d\n", my_pe);
+#ifndef PROFILE
+  LOG_WARN("dump_stats() called but PROFILE=ON was not set at build time; all counters are zero");
+#endif
+  // Accumulate per-context stats into the global accumulators before printing.
+  // Reset first so repeated calls to dump_stats() do not double-count.
+  globalStats.resetStats();
+  globalHostStats.resetStats();
 
+  // Device stats: each backend copies ctx_array[i].ctxStats via hipMemcpy.
+  accumulate_ctx_device_stats();
+
+  // Host stats: walk list_of_ctxs and accumulate ctxHostStats from each,
+  // then include the default host context which is not in list_of_ctxs.
+  for (auto* ctx : list_of_ctxs) {
+    globalHostStats.accumulateStats(ctx->ctxHostStats);
+  }
+  accumulate_default_host_ctx_stats();
+
+  // Build each stats section into a buffer and emit with a single LOG_INFO per section.
+  char buf[8192];
+  int pos = 0;
+  auto append = [&](const char* fmt, ...) {
+    if (pos >= static_cast<int>(sizeof(buf)) - 1) return;
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(buf + pos, sizeof(buf) - pos, fmt, args);
+    va_end(args);
+    if (n > 0) pos += n;
+  };
+
+  int n_printed = 0;
+  auto pstat = [&](const char* name, StatType val) {
+    if (val) { append("  %-30s %llu\n", name, static_cast<unsigned long long>(val)); ++n_printed; }
+  };
+
+  static_assert(NUM_STATS == 68,
+    "rocshmem_stats enum changed; update dump_stats device section");
   const auto& device_stats{globalStats};
-  printf("DEVICE STATS\n");
-  printf("Puts (Blocking/P/Nbi) %llu/%llu/%llu\n",
-         device_stats.getStat(NUM_PUT), device_stats.getStat(NUM_P),
-         device_stats.getStat(NUM_PUT_NBI));
-  printf("WG_Puts (Blocking/Nbi) %llu/%llu\n", device_stats.getStat(NUM_PUT_WG),
-         device_stats.getStat(NUM_PUT_NBI_WG));
-  printf("WAVE_Puts (Blocking/Nbi) %llu/%llu\n",
-         device_stats.getStat(NUM_PUT_WAVE),
-         device_stats.getStat(NUM_PUT_NBI_WAVE));
-  printf("Gets (Blocking/G/Nbi) %llu/%llu/%llu\n",
-         device_stats.getStat(NUM_GET), device_stats.getStat(NUM_G),
-         device_stats.getStat(NUM_GET_NBI));
-  printf("WG_Gets (Blocking/Nbi) %llu/%llu\n", device_stats.getStat(NUM_GET_WG),
-         device_stats.getStat(NUM_GET_NBI_WG));
-  printf("WAVE_Gets (Blocking/Nbi) %llu/%llu\n",
-         device_stats.getStat(NUM_GET_WAVE),
-         device_stats.getStat(NUM_GET_NBI_WAVE));
-  printf("Fences %llu\n", device_stats.getStat(NUM_FENCE));
-  printf("Quiets %llu\n", device_stats.getStat(NUM_QUIET));
-  printf("PE Quiets %llu\n", device_stats.getStat(NUM_PE_QUIET));
-  printf("ToAll %llu\n", device_stats.getStat(NUM_TO_ALL));
-  printf("BarrierAll %llu\n", device_stats.getStat(NUM_BARRIER_ALL));
-  printf("WAVE_BarrierAll %llu\n", device_stats.getStat(NUM_BARRIER_ALL_WAVE));
-  printf("WG_BarrierAll %llu\n", device_stats.getStat(NUM_BARRIER_ALL_WG));
-  printf("Barrier %llu\n", device_stats.getStat(NUM_BARRIER));
-  printf("WAVE_Barrier %llu\n", device_stats.getStat(NUM_BARRIER_WAVE));
-  printf("WG_Barrier %llu\n", device_stats.getStat(NUM_BARRIER_WG));
-  printf("Wait Until %llu\n", device_stats.getStat(NUM_WAIT_UNTIL));
-  printf("Wait Until Any %llu\n", device_stats.getStat(NUM_WAIT_UNTIL_ANY));
-  printf("Wait Until All %llu\n", device_stats.getStat(NUM_WAIT_UNTIL_ALL));
-  printf("Wait Until Some %llu\n", device_stats.getStat(NUM_WAIT_UNTIL_SOME));
-  printf("Wait Until All Vector %llu\n",
-         device_stats.getStat(NUM_WAIT_UNTIL_ALL_VECTOR));
-  printf("Wait Until Any Vector %llu\n",
-         device_stats.getStat(NUM_WAIT_UNTIL_ANY_VECTOR));
-  printf("Wait Until Some Vector %llu\n",
-         device_stats.getStat(NUM_WAIT_UNTIL_SOME_VECTOR));
-  printf("Finalizes %llu\n", device_stats.getStat(NUM_FINALIZE));
-  printf("Coalesced %llu\n", device_stats.getStat(NUM_MSG_COAL));
-  printf("Atomic_FAdd %llu\n", device_stats.getStat(NUM_ATOMIC_FADD));
-  printf("Atomic_FCswap %llu\n", device_stats.getStat(NUM_ATOMIC_FCSWAP));
-  printf("Atomic_FInc %llu\n", device_stats.getStat(NUM_ATOMIC_FINC));
-  printf("Atomic_Fetch %llu\n", device_stats.getStat(NUM_ATOMIC_FETCH));
-  printf("Atomic_Add %llu\n", device_stats.getStat(NUM_ATOMIC_ADD));
-  printf("Atomic_Set %llu\n", device_stats.getStat(NUM_ATOMIC_SET));
-  printf("Atomic_Cswap %llu\n", device_stats.getStat(NUM_ATOMIC_CSWAP));
-  printf("Atomic_Inc %llu\n", device_stats.getStat(NUM_ATOMIC_INC));
-  printf("Tests %llu\n", device_stats.getStat(NUM_TEST));
-  printf("SHMEM_PTR %llu\n", device_stats.getStat(NUM_SHMEM_PTR));
-  printf("SyncAll %llu\n", device_stats.getStat(NUM_SYNC_ALL));
-  printf("WAVE_SyncAll %llu\n", device_stats.getStat(NUM_SYNC_ALL_WAVE));
-  printf("WG_SyncAll %llu\n", device_stats.getStat(NUM_SYNC_ALL_WG));
-  printf("Sync %llu\n", device_stats.getStat(NUM_SYNC));
-  printf("WAVE_Sync %llu\n", device_stats.getStat(NUM_SYNC_WAVE));
-  printf("WG_Sync %llu\n", device_stats.getStat(NUM_SYNC_WG));
-  printf("Reduce %llu\n", device_stats.getStat(NUM_REDUCE));
+  uint64_t device_total = 0;
+  for (int i = 0; i < NUM_STATS; i++) device_total += device_stats.getStat(i);
+  if (device_total) {
+    n_printed = 0;
+    append("DEVICE STATS\n");
+    pstat("Put",                   device_stats.getStat(NUM_PUT));
+    pstat("Put_NBI",               device_stats.getStat(NUM_PUT_NBI));
+    pstat("P",                     device_stats.getStat(NUM_P));
+    pstat("WG_Put",                device_stats.getStat(NUM_PUT_WG));
+    pstat("WG_Put_NBI",            device_stats.getStat(NUM_PUT_NBI_WG));
+    pstat("WAVE_Put",              device_stats.getStat(NUM_PUT_WAVE));
+    pstat("WAVE_Put_NBI",          device_stats.getStat(NUM_PUT_NBI_WAVE));
+    pstat("Get",                   device_stats.getStat(NUM_GET));
+    pstat("Get_NBI",               device_stats.getStat(NUM_GET_NBI));
+    pstat("G",                     device_stats.getStat(NUM_G));
+    pstat("WG_Get",                device_stats.getStat(NUM_GET_WG));
+    pstat("WG_Get_NBI",            device_stats.getStat(NUM_GET_NBI_WG));
+    pstat("WAVE_Get",              device_stats.getStat(NUM_GET_WAVE));
+    pstat("WAVE_Get_NBI",          device_stats.getStat(NUM_GET_NBI_WAVE));
+    pstat("Fence",                 device_stats.getStat(NUM_FENCE));
+    pstat("Quiet",                 device_stats.getStat(NUM_QUIET));
+    pstat("PE_Quiet",              device_stats.getStat(NUM_PE_QUIET));
+    pstat("ToAll",                 device_stats.getStat(NUM_TO_ALL));
+    pstat("BarrierAll",            device_stats.getStat(NUM_BARRIER_ALL));
+    pstat("WAVE_BarrierAll",       device_stats.getStat(NUM_BARRIER_ALL_WAVE));
+    pstat("WG_BarrierAll",         device_stats.getStat(NUM_BARRIER_ALL_WG));
+    pstat("Barrier",               device_stats.getStat(NUM_BARRIER));
+    pstat("WAVE_Barrier",          device_stats.getStat(NUM_BARRIER_WAVE));
+    pstat("WG_Barrier",            device_stats.getStat(NUM_BARRIER_WG));
+    pstat("SyncAll",               device_stats.getStat(NUM_SYNC_ALL));
+    pstat("WAVE_SyncAll",          device_stats.getStat(NUM_SYNC_ALL_WAVE));
+    pstat("WG_SyncAll",            device_stats.getStat(NUM_SYNC_ALL_WG));
+    pstat("Sync",                  device_stats.getStat(NUM_SYNC));
+    pstat("WAVE_Sync",             device_stats.getStat(NUM_SYNC_WAVE));
+    pstat("WG_Sync",               device_stats.getStat(NUM_SYNC_WG));
+    pstat("Wait_Until",            device_stats.getStat(NUM_WAIT_UNTIL));
+    pstat("Wait_Until_Any",        device_stats.getStat(NUM_WAIT_UNTIL_ANY));
+    pstat("Wait_Until_All",        device_stats.getStat(NUM_WAIT_UNTIL_ALL));
+    pstat("Wait_Until_Some",       device_stats.getStat(NUM_WAIT_UNTIL_SOME));
+    pstat("Wait_Until_All_Vector", device_stats.getStat(NUM_WAIT_UNTIL_ALL_VECTOR));
+    pstat("Wait_Until_Any_Vector", device_stats.getStat(NUM_WAIT_UNTIL_ANY_VECTOR));
+    pstat("Wait_Until_Some_Vector",device_stats.getStat(NUM_WAIT_UNTIL_SOME_VECTOR));
+    pstat("Test",                  device_stats.getStat(NUM_TEST));
+    pstat("SHMEM_PTR",             device_stats.getStat(NUM_SHMEM_PTR));
+    pstat("Finalize",              device_stats.getStat(NUM_FINALIZE));
+    pstat("Msg_Coal",              device_stats.getStat(NUM_MSG_COAL));
+    pstat("Atomic_FAdd",           device_stats.getStat(NUM_ATOMIC_FADD));
+    pstat("Atomic_FCswap",         device_stats.getStat(NUM_ATOMIC_FCSWAP));
+    pstat("Atomic_FInc",           device_stats.getStat(NUM_ATOMIC_FINC));
+    pstat("Atomic_Fetch",          device_stats.getStat(NUM_ATOMIC_FETCH));
+    pstat("Atomic_Add",            device_stats.getStat(NUM_ATOMIC_ADD));
+    pstat("Atomic_Set",            device_stats.getStat(NUM_ATOMIC_SET));
+    pstat("Atomic_Swap",           device_stats.getStat(NUM_ATOMIC_SWAP));
+    pstat("Atomic_Cswap",          device_stats.getStat(NUM_ATOMIC_CSWAP));
+    pstat("Atomic_Inc",            device_stats.getStat(NUM_ATOMIC_INC));
+    pstat("Atomic_FetchAnd",       device_stats.getStat(NUM_ATOMIC_FETCH_AND));
+    pstat("Atomic_And",            device_stats.getStat(NUM_ATOMIC_AND));
+    pstat("Atomic_FetchOr",        device_stats.getStat(NUM_ATOMIC_FETCH_OR));
+    pstat("Atomic_Or",             device_stats.getStat(NUM_ATOMIC_OR));
+    pstat("Atomic_FetchXor",       device_stats.getStat(NUM_ATOMIC_FETCH_XOR));
+    pstat("Atomic_Xor",            device_stats.getStat(NUM_ATOMIC_XOR));
+    pstat("Broadcast",             device_stats.getStat(NUM_BROADCAST));
+    pstat("Alltoall",              device_stats.getStat(NUM_ALLTOALL));
+    pstat("Alltoallv",             device_stats.getStat(NUM_ALLTOALLV));
+    pstat("Fcollect",              device_stats.getStat(NUM_FCOLLECT));
+    pstat("Create",                device_stats.getStat(NUM_CREATE));
+    pstat("Put_Signal",            device_stats.getStat(NUM_PUT_SIGNAL));
+    pstat("WG_Put_Signal",         device_stats.getStat(NUM_PUT_SIGNAL_WG));
+    pstat("WAVE_Put_Signal",       device_stats.getStat(NUM_PUT_SIGNAL_WAVE));
+    pstat("Put_Signal_NBI",        device_stats.getStat(NUM_PUT_SIGNAL_NBI));
+    pstat("WG_Put_Signal_NBI",     device_stats.getStat(NUM_PUT_SIGNAL_NBI_WG));
+    pstat("WAVE_Put_Signal_NBI",   device_stats.getStat(NUM_PUT_SIGNAL_NBI_WAVE));
+    LOG_INFO("%s", buf);
+  }
 
+  static_assert(NUM_HOST_STATS == 39,
+    "rocshmem_host_stats enum changed; update dump_stats host section");
   const auto& host_stats{globalHostStats};
-  printf("HOST STATS\n");
-  printf("Puts (Blocking/P/Nbi) %llu/%llu/%llu\n",
-         host_stats.getStat(NUM_HOST_PUT), host_stats.getStat(NUM_HOST_P),
-         host_stats.getStat(NUM_HOST_PUT_NBI));
-  printf("Gets (Blocking/G/Nbi) (%llu/%llu/%llu)\n",
-         host_stats.getStat(NUM_HOST_GET), host_stats.getStat(NUM_HOST_G),
-         host_stats.getStat(NUM_HOST_GET_NBI));
-  printf("Fences %llu\n", host_stats.getStat(NUM_HOST_FENCE));
-  printf("Quiets %llu\n", host_stats.getStat(NUM_HOST_QUIET));
-  printf("ToAll %llu\n", host_stats.getStat(NUM_HOST_TO_ALL));
-  printf("BarrierAll %llu\n", host_stats.getStat(NUM_HOST_BARRIER_ALL));
-  printf("Wait Until %llu\n", host_stats.getStat(NUM_HOST_WAIT_UNTIL));
-  printf("Wait Until Any %llu\n", host_stats.getStat(NUM_HOST_WAIT_UNTIL_ANY));
-  printf("Wait Until All %llu\n", host_stats.getStat(NUM_HOST_WAIT_UNTIL_ALL));
-  printf("Wait Until Some %llu\n",
-         host_stats.getStat(NUM_HOST_WAIT_UNTIL_SOME));
-  printf("Wait Until All Vector %llu\n",
-         host_stats.getStat(NUM_HOST_WAIT_UNTIL_ALL_VECTOR));
-  printf("Wait Until Any Vector %llu\n",
-         host_stats.getStat(NUM_HOST_WAIT_UNTIL_ANY_VECTOR));
-  printf("Wait Until Some Vector %llu\n",
-         host_stats.getStat(NUM_HOST_WAIT_UNTIL_SOME_VECTOR));
-  printf("Finalizes %llu\n", host_stats.getStat(NUM_HOST_FINALIZE));
-  printf("Atomic_FAdd %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_FADD));
-  printf("Atomic_FCswap %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_FCSWAP));
-  printf("Atomic_FInc %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_FINC));
-  printf("Atomic_Fetch %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_FETCH));
-  printf("Atomic_Add %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_ADD));
-  printf("Atomic_Set %llu\n", host_stats.getStat(NUM_ATOMIC_SET));
-  printf("Atomic_Cswap %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_CSWAP));
-  printf("Atomic_Inc %llu\n", host_stats.getStat(NUM_HOST_ATOMIC_INC));
-  printf("Tests %llu\n", host_stats.getStat(NUM_HOST_TEST));
-  printf("SHMEM_PTR %llu\n", host_stats.getStat(NUM_HOST_SHMEM_PTR));
-  printf("SyncAll %llu\n", host_stats.getStat(NUM_HOST_SYNC_ALL));
-  printf("Reduce %llu\n", host_stats.getStat(NUM_HOST_REDUCE));
+  uint64_t host_total = 0;
+  for (int i = 0; i < NUM_HOST_STATS; i++) host_total += host_stats.getStat(i);
+  if (host_total) {
+    pos = 0;
+    n_printed = 0;
+    append("HOST STATS\n");
+    pstat("Put",                   host_stats.getStat(NUM_HOST_PUT));
+    pstat("Put_NBI",               host_stats.getStat(NUM_HOST_PUT_NBI));
+    pstat("P",                     host_stats.getStat(NUM_HOST_P));
+    pstat("Get",                   host_stats.getStat(NUM_HOST_GET));
+    pstat("Get_NBI",               host_stats.getStat(NUM_HOST_GET_NBI));
+    pstat("G",                     host_stats.getStat(NUM_HOST_G));
+    pstat("Fence",                 host_stats.getStat(NUM_HOST_FENCE));
+    pstat("Quiet",                 host_stats.getStat(NUM_HOST_QUIET));
+    pstat("ToAll",                 host_stats.getStat(NUM_HOST_TO_ALL));
+    pstat("BarrierAll",            host_stats.getStat(NUM_HOST_BARRIER_ALL));
+    pstat("SyncAll",               host_stats.getStat(NUM_HOST_SYNC_ALL));
+    pstat("Wait_Until",            host_stats.getStat(NUM_HOST_WAIT_UNTIL));
+    pstat("Wait_Until_Any",        host_stats.getStat(NUM_HOST_WAIT_UNTIL_ANY));
+    pstat("Wait_Until_All",        host_stats.getStat(NUM_HOST_WAIT_UNTIL_ALL));
+    pstat("Wait_Until_Some",       host_stats.getStat(NUM_HOST_WAIT_UNTIL_SOME));
+    pstat("Wait_Until_All_Vector", host_stats.getStat(NUM_HOST_WAIT_UNTIL_ALL_VECTOR));
+    pstat("Wait_Until_Any_Vector", host_stats.getStat(NUM_HOST_WAIT_UNTIL_ANY_VECTOR));
+    pstat("Wait_Until_Some_Vector",host_stats.getStat(NUM_HOST_WAIT_UNTIL_SOME_VECTOR));
+    pstat("Test",                  host_stats.getStat(NUM_HOST_TEST));
+    pstat("SHMEM_PTR",             host_stats.getStat(NUM_HOST_SHMEM_PTR));
+    pstat("Finalize",              host_stats.getStat(NUM_HOST_FINALIZE));
+    pstat("Atomic_FAdd",           host_stats.getStat(NUM_HOST_ATOMIC_FADD));
+    pstat("Atomic_FCswap",         host_stats.getStat(NUM_HOST_ATOMIC_FCSWAP));
+    pstat("Atomic_FInc",           host_stats.getStat(NUM_HOST_ATOMIC_FINC));
+    pstat("Atomic_Fetch",          host_stats.getStat(NUM_HOST_ATOMIC_FETCH));
+    pstat("Atomic_Add",            host_stats.getStat(NUM_HOST_ATOMIC_ADD));
+    pstat("Atomic_Set",            host_stats.getStat(NUM_HOST_ATOMIC_SET));
+    pstat("Atomic_Swap",           host_stats.getStat(NUM_HOST_ATOMIC_SWAP));
+    pstat("Atomic_Cswap",          host_stats.getStat(NUM_HOST_ATOMIC_CSWAP));
+    pstat("Atomic_Inc",            host_stats.getStat(NUM_HOST_ATOMIC_INC));
+    pstat("Atomic_FetchAnd",       host_stats.getStat(NUM_HOST_ATOMIC_FETCH_AND));
+    pstat("Atomic_And",            host_stats.getStat(NUM_HOST_ATOMIC_AND));
+    pstat("Atomic_FetchOr",        host_stats.getStat(NUM_HOST_ATOMIC_FETCH_OR));
+    pstat("Atomic_Or",             host_stats.getStat(NUM_HOST_ATOMIC_OR));
+    pstat("Atomic_FetchXor",       host_stats.getStat(NUM_HOST_ATOMIC_FETCH_XOR));
+    pstat("Atomic_Xor",            host_stats.getStat(NUM_HOST_ATOMIC_XOR));
+    pstat("Broadcast",             host_stats.getStat(NUM_HOST_BROADCAST));
+    pstat("Alltoall",              host_stats.getStat(NUM_HOST_ALLTOALL));
+    LOG_INFO("%s", buf);
+  }
 
   dump_backend_stats();
 }
