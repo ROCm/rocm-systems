@@ -16,7 +16,6 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
-#include <rocprofiler-sdk/deprecated/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -103,7 +102,11 @@ struct backend
     // ─── Client / registration types ────────────────────────────────────────────
     using client_id_t       = rocprofiler_client_id_t;
     using client_finalize_t = rocprofiler_client_finalize_t;
-    using client_detach_t   = rocprofiler_client_detach_t;
+#if __has_include(<rocprofiler-sdk/experimental/registration.h>)
+    using client_detach_t = rocprofiler_client_detach_t;
+#else
+    using client_detach_t = rocprofiler_client_finalize_t;
+#endif
 
     // ─── Correlation types ────────────────────────────────────────────────────────
     using correlation_id_t = rocprofiler_correlation_id_t;
@@ -132,11 +135,16 @@ struct backend
     using query_available_agents_cb_t  = rocprofiler_query_available_agents_cb_t;
     using callback_tracing_operation_args_cb_t =
         rocprofiler_callback_tracing_operation_args_cb_t;
-    using available_counters_cb_t      = rocprofiler_available_counters_cb_t;
-    using available_dimensions_cb_t    = rocprofiler_available_dimensions_cb_t;
+    using available_counters_cb_t   = rocprofiler_available_counters_cb_t;
+    using available_dimensions_cb_t = rocprofiler_available_dimensions_cb_t;
+#if ROCPROFILER_VERSION >= 10000
     using device_counting_agent_cb_t   = rocprofiler_device_counting_agent_cb_t;
     using device_counting_service_cb_t = rocprofiler_device_counting_service_cb_t;
-    using counter_flag_t               = rocprofiler_counter_flag_t;
+#else
+    using device_counting_agent_cb_t   = rocprofiler_agent_set_profile_callback_t;
+    using device_counting_service_cb_t = rocprofiler_device_counting_service_callback_t;
+#endif
+    using counter_flag_t = rocprofiler_counter_flag_t;
 
     // ─── Counter / dispatch-counting types (version-gated) ───────────────────────
 #if ROCPROFILER_VERSION >= 10000
@@ -149,8 +157,8 @@ struct backend
     using counter_config_id            = rocprofiler_profile_config_id_t;
     using counter_record               = rocprofiler_record_counter_t;
     using dispatch_counting_data       = rocprofiler_dispatch_counting_service_data_t;
-    using dispatch_counting_service_cb = rocprofiler_dispatch_counting_service_cb_t;
-    using dispatch_counting_record_cb  = rocprofiler_dispatch_counting_record_cb_t;
+    using dispatch_counting_service_cb = rocprofiler_dispatch_counting_service_callback_t;
+    using dispatch_counting_record_cb  = rocprofiler_profile_counting_record_callback_t;
 #endif
 
     // ─── Stream ID (synthesized for SDK < 700) ───────────────────────────────────
@@ -441,8 +449,10 @@ struct backend
     // ─── Counter info version constants ──────────────────────────────────────────
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_0 =
         ROCPROFILER_COUNTER_INFO_VERSION_0;
+#if ROCPROFILER_VERSION >= 10000
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_1 =
         ROCPROFILER_COUNTER_INFO_VERSION_1;
+#endif
 
     // ─── Scratch memory operation constants ──────────────────────────────────────
     static constexpr scratch_memory_operation_t SCRATCH_MEMORY_ALLOC =
