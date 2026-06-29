@@ -101,9 +101,14 @@ struct ncclIbConnectionMetadata {
   int sl;
   int isP2p;
   bool isRMA;
+
+  // QP Sharing metadata
+  int      sharedGroupIdx;      // QP sharing group index (-1 = not shared)
+  uint16_t commId;              // QP sharing comm ID (0 = not shared)
+  int      senderIbDevIdx;      // sender's IB device index
 };
 
-ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
+ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs, int depthMultiplier = 1, int groupIdx = -1);
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out);
 ncclResult_t IbCastQpInit(struct ncclIbQp* qp);
 ncclResult_t IbCastQpRtr(struct ncclIbQp* qp);

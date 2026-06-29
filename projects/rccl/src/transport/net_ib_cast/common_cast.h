@@ -369,7 +369,8 @@ struct alignas(32) ncclIbSendFifoCtsInline {
   uint16_t rxReqIndex;
   uint16_t tag;
   uint32_t idx;
-  char padding[9];
+  // TODO - adjusted padding to align to 32B
+  char padding[7];
 } __attribute__((packed));
 
 struct ncclIbQpInitAttr {
@@ -505,6 +506,13 @@ struct alignas(32) ncclIbNetCommBase {
   bool faultQpError[NCCL_IB_MAX_QPS];
 #endif
   struct ncclIbResiliency* resiliency;
+
+  // QP Sharing fields
+  uint16_t commId;              // 0 = not shared
+  bool     isSharedQpPrimary;
+  int      sharedGroupIdx;      // -1 = not shared
+  int      remIbDevIdx;
+  int      sharedPrimaryNqps;
 };
 
 struct ncclIbNetCommDevBase* IbCastGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex);
@@ -595,6 +603,7 @@ struct ncclIbSendComm {
   int ar; // Use adaptive routing when all merged devices have it enabled
   uint64_t putSignalScratchpad;
   bool useCtsOffload;
+  uint16_t remCommId;           // receiver's commId for imm_data encoding (QP sharing)
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and

@@ -12,6 +12,7 @@
 #ifdef ENABLE_FAULT_INJECTION
 #include "net_ib_ops_fault.h"
 #endif
+#include "qp_sharing.h"
 
 NCCL_PARAM(IbCastArThreshold, "IB_AR_THRESHOLD", -2);
 int64_t IbCastArThreshold = 8192;
@@ -113,7 +114,12 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     wr->wr.rdma.remote_addr = comm->useCtsOffload ? 0xdeadbeef : slots[r].addr;
     wr->next = wr + 1;
     wr_id += (uint64_t)(slot & 0xff) << (r * 8);
-    wr->wr_id = wr_id;
+    // QP Sharing: encode commId in upper 16 bits of wr_id for completion routing
+    if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
+      wr->wr_id = wr_id | ((uint64_t)comm->base.commId << 48);
+    } else {
+      wr->wr_id = wr_id;
+    }
 #ifdef NCCL_ENABLE_NET_PROFILING
     reqs[r]->pInfo[0].nEventHandles = 0;
 #endif
@@ -143,9 +149,17 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       immData = (uint32_t)(reqs[0]->id % UINT32_MAX);
     } else {
       uint32_t rxReqIdx = (uint32_t)slots[0].rxReqIndex;
-      immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT);
-      if (nqps > 1) {
-        immData |= WR_IMM_SPLIT_DATA_FLAG;
+      // QP Sharing: encode receiver's commId + rxReqIndex in imm_data
+      if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0 && comm->remCommId != 0) {
+        immData = ((uint32_t)rxReqIdx << 16) | (uint32_t)comm->remCommId;
+        if (nqps > 1) {
+          immData |= WR_IMM_SPLIT_DATA_FLAG;
+        }
+      } else {
+        immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT);
+        if (nqps > 1) {
+          immData |= WR_IMM_SPLIT_DATA_FLAG;
+        }
       }
     }
 
@@ -164,7 +178,12 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     lastWr->opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
     lastWr->imm_data = htobe32(immData);
   }
-  lastWr->wr_id = wr_id;
+  // QP Sharing: encode commId in upper 16 bits of final wr_id
+  if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
+    lastWr->wr_id = wr_id | ((uint64_t)comm->base.commId << 48);
+  } else {
+    lastWr->wr_id = wr_id;
+  }
   lastWr->next = NULL;
   lastWr->send_flags = IBV_SEND_SIGNALED;
 
@@ -537,10 +556,18 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   if (comm->useCtsOffload && (slot == ctsQp->ctsQpSlot)) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = (req - req->base->reqs);
+    // QP Sharing: encode commId in upper bits of CTS wr_id
+    if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
+      wr.wr_id |= ((uint64_t)comm->base.commId << 48);
+    }
     IbCastAddEvent(req, ctsQp->devIndex);
   } else if (!comm->useCtsOffload && (slot == ctsQp->devIndex || comm->base.resiliency)) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = slot;
+    // QP Sharing: encode commId in upper bits of CTS wr_id
+    if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
+      wr.wr_id |= ((uint64_t)comm->base.commId << 48);
+    }
     IbCastAddEventCTS(req, ctsQp->devIndex);
   }
 
@@ -762,12 +789,31 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
     *req = recvComm->recvReqs[be32toh(wc->imm_data) % NET_IB_MAX_REQUESTS];
   } else if (!base->isSend && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM && base->recvMatchingScheme == BY_INDEX) {
+    // QP Sharing: recv-side completion routing via imm_data
+    if (rcclParamIbCastCommNGroups() > 0) {
+      uint32_t immDataHost = be32toh(wc->imm_data);
+      uint16_t immCommId = immDataHost & 0xFFFF;
+      if (immCommId != 0 && immCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[immCommId].used) {
+        uint8_t reqIdx = (immDataHost >> 16) & 0xFF;
+        struct ncclIbRecvComm* targetComm = (struct ncclIbRecvComm*)g_IbCastCommTable[immCommId].comm;
+        *req = &targetComm->base.reqs[reqIdx];
+        return ncclSuccess;
+      }
+    }
     *req = &base->reqs[((be32toh(wc->imm_data) >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK)];
   } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
     NCCLCHECK(IbCastRequestRetrieveAsIndex(base->reqs, (wc->wr_id - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
   } else if (!base->isSend) {
+    // QP Sharing: extract commId from upper bits and route to correct recv comm
+    uint64_t rawWrId = wc->wr_id;
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
-    *req = recvComm->recvReqs[wc->wr_id];
+    if (rcclParamIbCastCommNGroups() > 0) {
+      uint16_t wridCommId = (rawWrId >> 48) & 0xFFFF;
+      if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
+        recvComm = (struct ncclIbRecvComm*)g_IbCastCommTable[wridCommId].comm;
+      }
+    }
+    *req = recvComm->recvReqs[rawWrId & 0xFFFF];
   } else {
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)base;
     if (base->recvMatchingScheme == BY_INDEX) {
@@ -775,12 +821,28 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
       struct ncclIbRemapWrId* remapWrId = (struct ncclIbRemapWrId*)wc->wr_id;
       assert(remapWrId != NULL);
       assert(remapWrId->state == NCCL_NET_IB_REMAP_USED);
-      *req = sendComm->sendReqs[remapWrId->origWrId & 0xff][0];
+      uint64_t origWrId = remapWrId->origWrId;
+      // QP Sharing: send-side completion routing via commId in upper bits of wr_id
+      if (rcclParamIbCastCommNGroups() > 0) {
+        uint16_t wridCommId = (origWrId >> 48) & 0xFFFF;
+        if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
+          sendComm = (struct ncclIbSendComm*)g_IbCastCommTable[wridCommId].comm;
+        }
+      }
+      *req = sendComm->sendReqs[origWrId & 0xff][0];
       if (remapWrId->parms.enable) IbCastQpSchedUpdateTxStats(remapWrId, base);
       IbCastQpSchedFreeRemap(remapWrId);
     } else {
       // BY_ID / other: wr_id is raw slot-encoded value (no remap)
-      *req = sendComm->sendReqs[wc->wr_id & 0xff][0];
+      uint64_t rawWrId = wc->wr_id;
+      // QP Sharing: send-side completion routing via commId in upper bits of wr_id
+      if (rcclParamIbCastCommNGroups() > 0) {
+        uint16_t wridCommId = (rawWrId >> 48) & 0xFFFF;
+        if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
+          sendComm = (struct ncclIbSendComm*)g_IbCastCommTable[wridCommId].comm;
+        }
+      }
+      *req = sendComm->sendReqs[rawWrId & 0xff][0];
     }
   }
   TRACE(NCCL_NET,
@@ -1008,12 +1070,13 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
            wc->opcode, wc->qp_num);
       return ncclInternalError;
     }
-    struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)commBase;
+    // QP Sharing: use the target comm from the routed request, not the polling comm
+    struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)req->base;
     struct ncclIbRequest* sendReq = NULL;
     int slot = req->id % NET_IB_MAX_REQUESTS;
     for (int j = 0; j < req->nreqs; j++) {
       sendReq = sendComm->sendReqs[slot][j];
-      if (!commBase->resiliency && (sendReq->events[devIndex] <= 0)) {
+      if (!req->base->resiliency && (sendReq->events[devIndex] <= 0)) {
         WARN("NET/IB: sendReq(%p)->events={%d,%d,%d,%d}, devIndex=%d, reqIdx=%d <= 0", sendReq, sendReq->events[0],
              sendReq->events[1], sendReq->events[2], sendReq->events[3], devIndex, j);
         return ncclInternalError;
@@ -1070,6 +1133,10 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
       }
 
       if (commBase->recvMatchingScheme == BY_INDEX) {
+        // QP Sharing: split_data_flag is in bit 23 of original layout, but for QP sharing
+        // the imm_data layout is (rxReqIdx << 16) | commId, so check WR_IMM_SPLIT_DATA_FLAG
+        // which is bit 23 — this falls in rxReqIdx area for sharing layout but the sender
+        // encodes it correctly in both layouts
         if (be32toh(wc->imm_data) & WR_IMM_SPLIT_DATA_FLAG) {
           req->events[devIndex]--;
         } else { // Single QP send path
