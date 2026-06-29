@@ -1467,21 +1467,6 @@ void hip_capture_init() {
   std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
 }
 
-// Internal explicit-flush hook for multi-process hosts (e.g. a vLLM server
-// shutdown callback). This is deliberately NOT a public ABI symbol: it has
-// hidden visibility on Linux and is not exported on Windows, has no declaration
-// in any public HIP header, and carries no stability contract. Normal shutdown
-// is covered by the atexit(hip_capture_shutdown) hook; the periodic checkpoint
-// bounds crash loss. Appends the clean trailer and manifest without uninstalling
-// the capture shims so capture can continue afterwards.
-#ifndef _WIN32
-extern "C" __attribute__((visibility("hidden"))) void hipHrrCaptureFlush();
-#endif
-extern "C" void hipHrrCaptureFlush() {
-  if (!hip_capture_enabled() || !hrr_cap::writer::is_open()) return;
-  hrr_cap::writer::flush(hip_capture_output_dir());
-}
-
 void hip_capture_shutdown() {
   hip_capture_uninstall();
   hrr_cap::writer::flush(hip_capture_output_dir());
