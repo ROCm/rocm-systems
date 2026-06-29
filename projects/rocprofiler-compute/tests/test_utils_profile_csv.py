@@ -580,3 +580,30 @@ def test_full_workflow(temp_csv_file):
 
     # Cleanup
     Path(output_file).unlink(missing_ok=True)
+
+
+# =============================================================================
+# iter_csv_dicts Tests
+# =============================================================================
+
+
+def test_iter_csv_dicts_empty_body(temp_csv_file):
+    """A CSV with only a header yields zero rows."""
+    Path(temp_csv_file).write_text("a,b,c\n", encoding="utf-8")
+    rows = list(csv_ops.iter_csv_dicts(temp_csv_file))
+    assert rows == []
+
+
+def test_iter_csv_dicts_no_header_raises(temp_csv_file):
+    """An empty file raises ValueError (no header)."""
+    Path(temp_csv_file).write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="no header row"):
+        list(csv_ops.iter_csv_dicts(temp_csv_file))
+
+
+def test_iter_csv_dicts_matches_read_csv_as_dicts(temp_csv_file, sample_csv_data):
+    """iter_csv_dicts produces identical rows to read_csv_as_dicts."""
+    csv_ops.write_csv_from_dicts(temp_csv_file, sample_csv_data)
+    expected, _ = csv_ops.read_csv_as_dicts(temp_csv_file)
+    actual = list(csv_ops.iter_csv_dicts(temp_csv_file))
+    assert actual == expected
