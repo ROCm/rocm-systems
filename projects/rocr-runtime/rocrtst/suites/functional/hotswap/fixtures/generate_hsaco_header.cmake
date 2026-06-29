@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 if(NOT DEFINED INPUT)
   message(FATAL_ERROR "INPUT is required")
 endif()

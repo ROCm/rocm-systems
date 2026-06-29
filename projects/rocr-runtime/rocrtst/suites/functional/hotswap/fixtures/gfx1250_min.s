@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
 .text
 .globl empty_kernel
