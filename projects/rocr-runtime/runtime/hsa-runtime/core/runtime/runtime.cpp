@@ -75,6 +75,7 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_memory_region.h"
+#include "core/util/poll_backoff.h"
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/host_queue.h"
@@ -1909,6 +1910,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       bool finish = false;
       bool polling = false;
       bool init_age = true;
+      uint32_t poll_nap_us = kAsyncEventsPollNapFloorUs;
 
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
@@ -1933,6 +1935,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             if (!wait_any) {
               finish = true;
               init_age = true;
+              poll_nap_us = kAsyncEventsPollNapFloorUs;
             }
           }
 
@@ -2003,6 +2006,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             break;
           }
           init_age = false;
+        } else if (polling && !finish) {
+          rocr::os::uSleep(poll_nap_us);
+          poll_nap_us = NextAsyncEventsPollNapUs(poll_nap_us);
         }
       }
     }
