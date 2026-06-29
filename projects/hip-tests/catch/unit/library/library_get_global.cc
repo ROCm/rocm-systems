@@ -378,7 +378,13 @@ HIP_TEST_CASE(Unit_hipLibraryGetKernel_CountAndEnumerate) {
   // kGlobalSrc defines two kernels (write_d_var, read_d_var).
   unsigned int count = 0;
   HIP_CHECK(hipLibraryGetKernelCount(&count, lib));
-  REQUIRE(count == 2);
+  // If user builds with ASAN, we can get 2 additional kernels (init/fini) in the code object.
+  // The thing is, it only adds in device asan and not in host asan.
+  // So this check needs to cater for both
+  constexpr int expected_count = 2;
+  constexpr int asan_expected_count = expected_count + 2;
+  INFO("The count we got is: " << count);
+  REQUIRE((count == expected_count || count == asan_expected_count));
 
   hipKernel_t writer = nullptr;
   hipKernel_t reader = nullptr;
@@ -398,13 +404,17 @@ HIP_TEST_CASE(Unit_hipLibraryGetKernel_CountAndEnumerate) {
   HIP_CHECK_ERROR(hipLibraryGetKernel(&missing, lib, "nonexistent_kernel"), hipErrorNotFound);
 
   // EnumerateKernels must return both handles (order is implementation-defined).
-  hipKernel_t enumerated[2] = {nullptr, nullptr};
-  HIP_CHECK(hipLibraryEnumerateKernels(enumerated, 2, lib));
-  REQUIRE(enumerated[0] != nullptr);
-  REQUIRE(enumerated[1] != nullptr);
-  REQUIRE(enumerated[0] != enumerated[1]);
-  const bool covers_writer = (enumerated[0] == writer) || (enumerated[1] == writer);
-  const bool covers_reader = (enumerated[0] == reader) || (enumerated[1] == reader);
+  // asan adjusted count (init/fini)
+  hipKernel_t enumerated[asan_expected_count]{};
+  HIP_CHECK(hipLibraryEnumerateKernels(enumerated, asan_expected_count, lib));
+  bool covers_writer = false, covers_reader = false;
+  for (int i = 0; i < asan_expected_count; i++) {
+    if (enumerated[i] == writer) {
+      covers_writer = true;
+    } else if (enumerated[i] == reader) {
+      covers_reader = true;
+    }
+  }
   REQUIRE(covers_writer);
   REQUIRE(covers_reader);
 

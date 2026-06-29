@@ -58,7 +58,13 @@ HIP_TEST_CASE(Unit_hip_library_load_co) {
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 9);  // 3 arithmetic + 6 d_var/m_var write/read/read_modify (see library_code_load.cc)
+    // 3 arithmetic + 6 d_var/m_var write/read/read_modify (see library_code_load.cc)
+    constexpr int expected_count = 9;
+    // If user builds with ASAN, we can get 2 additional kernels (init/fini) in the code object.
+    // The thing is, it only adds in device asan and not in host asan.
+    // So this check needs to cater for both
+    INFO("The count we got is: " << count);
+    REQUIRE((count == expected_count || count == expected_count + 2));
 
     size_t offset, paramsize;
     for (size_t k = 0; k < 3; ++k) {  // add/sub/mul_kernel each take 3 float* args
@@ -93,7 +99,13 @@ HIP_TEST_CASE(Unit_hip_library_load_co) {
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 9);  // 3 arithmetic + 6 d_var/m_var write/read/read_modify (see library_code_load.cc)
+    // 3 arithmetic + 6 d_var/m_var write/read/read_modify (see library_code_load.cc)
+    constexpr int expected_count = 9;
+    // If user builds with ASAN, we can get 2 additional kernels (init/fini) in the code object.
+    // The thing is, it only adds in device asan and not in host asan.
+    // So this check needs to cater for both
+    INFO("The count we got is: " << count);
+    REQUIRE((count == expected_count || count == expected_count + 2));
 
     size_t offset, paramsize;
     for (size_t k = 0; k < 3; ++k) {  // add/sub/mul_kernel each take 3 float* args
@@ -128,7 +140,13 @@ HIP_TEST_CASE(Unit_hip_library_load_co) {
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
-    REQUIRE(count == 9);  // 3 arithmetic + 6 d_var/m_var write/read/read_modify (see library_code_load.cc)
+    // 3 arithmetic + 6 d_var/m_var write/read/read_modify (see library_code_load.cc)
+    constexpr int expected_count = 9;
+    // If user builds with ASAN, we can get 2 additional kernels (init/fini) in the code object.
+    // The thing is, it only adds in device asan and not in host asan.
+    // So this check needs to cater for both
+    INFO("The count we got is: " << count);
+    REQUIRE((count == expected_count || count == expected_count + 2));
 
     size_t offset, paramsize;
     for (size_t k = 0; k < 3; ++k) {  // add/sub/mul_kernel each take 3 float* args
