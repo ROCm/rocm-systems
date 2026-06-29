@@ -16,6 +16,14 @@ struct Asset {
 }
 
 fn main() {
+    // The SPA is only built and embedded when the `webui` feature is
+    // enabled. Without it this crate is an empty library, so we skip
+    // the Node.js toolchain entirely and let `cargo build` stay fast
+    // and dependency-free.
+    if env::var_os("CARGO_FEATURE_WEBUI").is_none() {
+        return;
+    }
+
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let web_dir = manifest_dir.join("web");

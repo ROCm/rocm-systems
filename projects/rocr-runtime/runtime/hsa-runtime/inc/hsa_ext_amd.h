@@ -3120,6 +3120,14 @@ typedef struct hsa_amd_ipc_memory_s {
  * unique handles. The allocation needs to be on memory on an agent of type
  * HSA_DEVICE_TYPE_GPU.
  *
+ * @warning The exporter process MUST keep the allocation alive until all
+ * importers have successfully called ::hsa_amd_ipc_memory_attach. If the
+ * exporter frees the memory (via ::hsa_amd_memory_free or ::hsa_memory_free)
+ * before importers attach, subsequent attach calls will fail with
+ * HSA_STATUS_ERROR_INVALID_ARGUMENT. This follows standard IPC semantics
+ * where the exporter owns memory lifetime. A debug warning is emitted if
+ * exported memory is freed while the IPC handle is still active.
+ *
  * @param[in] ptr Pointer to device memory allocated via ROCr APIs to prepare for
  * sharing.
  *

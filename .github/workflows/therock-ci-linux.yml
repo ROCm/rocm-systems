@@ -10,9 +10,15 @@ on:
       package_version:
         type: string
         required: true
+      amdgpu_families:
+        type: string
+        default: "gfx94X-dcgpu"
       test_runs_on:
         type: string
         default: "linux-gfx942-1gpu-core42-ossci-rocm"
+      build_runs_on:
+        type: string
+        default: "azure-linux-scale-rocm"
 
 
 permissions:
@@ -21,7 +27,7 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build Linux Packages
-    runs-on: azure-linux-scale-rocm
+    runs-on: ${{ inputs.build_runs_on }}
     permissions:
       id-token: write
     container:
@@ -32,7 +38,7 @@ jobs:
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
-      AMDGPU_FAMILIES: "gfx94X-dcgpu"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
@@ -44,7 +50,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 300c0928ffba5ceb555db6ef59f4948210fe5b78 # 2026-06-17
+          ref: 177bc45e201c996e1a780e3348fd49ca2c439b8e # 2026-06-25 commit
 
       - name: Install python deps
         run: |
@@ -128,9 +134,11 @@ jobs:
   therock-test-linux:
     name: "Test"
     needs: [therock-build-linux]
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
-      amdgpu_families: "gfx94X-dcgpu"
+      amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"

@@ -17,22 +17,25 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   but cannot be combined with `--output-format` on the same command line.
 
 - Unified-memory profiling reports (`unified_memory.txt` and
-  `unified_memory.json`) summarizing KFD page-fault and page-migration events,
+  `unified_memory.json`) summarizing KFD page fault and page migration events,
   including per-GPU counts, trigger breakdown (`gpu_page_fault`,
-  `cpu_page_fault`, `prefetch`), and Host-to-Device / Device-to-Host migration
+  `cpu_page_fault`, `prefetch`), and Host-to-Device/Device-to-Host migration
   bandwidth. Enable with `ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON`; requires
-  `HSA_XNACK=1` on an XNACK-capable AMD GPU and ROCProfiler-SDK 1.2.2 or
-  later. The required KFD tracing domains are enabled automatically.
+  `HSA_XNACK=1` on an XNACK-capable AMD GPU and ROCm 7.13 or later. For standalone ROCprofiler-SDK installations, ROCProfiler-SDK 1.2.2 or later. The required KFD tracing domains are enabled automatically.
+
 - Dedicated `ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH` setting for routing
   unified-memory profiling reports to an explicit output directory.
+
 - MPI-rank-based console output filtering features controlled with CLI arguments:
   `--rank-filter-logs` and `--rank-filter-id`.
-- GPU Hardware Performance Counter (PMC) sampling via the ROCProfiler-SDK device
+
+- GPU Hardware Performance Counter (PMC) sampling via the ROCprofiler-SDK device
   counting service. Periodic per-GPU hardware counters are collected alongside
   existing PMC sources and exposed in both Perfetto and RocPD outputs. Specify
   counters with `ROCPROFSYS_GPU_PERF_COUNTERS` (comma-separated; suffix
-  `:device=N` to target a specific GPU). Requires ROCProfiler-SDK 0.6.0 or
+  `:device=N` to target a specific GPU). Requires ROCprofiler-SDK 0.6.0 or
   later (ROCm 6.4.0+).
+
 - GPU graphics and memory clock frequency metrics (`gfx_clock`, `mem_clock`) via
   AMD SMI, exposing `current_gfxclk` and `current_uclk` in MHz as PMC samples.
   Configure via `ROCPROFSYS_AMD_SMI_METRICS=gfx_clock,mem_clock`.
@@ -54,7 +57,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-- Split PMC AMD SMI, ROCProfiler-SDK, and procfs wrappers into standalone
+- Split PMC AMD SMI, ROCprofiler-SDK, and procfs wrappers into standalone
   internal backend targets under `source/lib/backends`, replacing the old
   PMC `drivers` layout.
 - Remove Boost as a Dyninst dependency by replacing Boost usage with in-tree
@@ -73,6 +76,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   v1.17.0 (bundled fmt v12).
 - Supported environment variables for rank detection: removed MPI_RANK and
   MPI_LOCALRANKID, added PMI_RANK and SLURM_PROCID.
+- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
 
 ### Resolved issues
 
@@ -110,7 +114,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Kernel Fusion Driver (KFD) event tracing support to capture page faults, page
   migrations, queue evictions, GPU unmap events, and dropped events. Requires
-  ROCProfiler-SDK 1.2.2 or later. Enable with
+  ROCprofiler-SDK 1.2.2 or later. Enable with
   `ROCPROFSYS_ROCM_DOMAINS=kfd_events`.
 - Support for pause and resume of profiling via `roctxProfilerPause` and
   `roctxProfilerResume`.
@@ -161,6 +165,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Fixed an issue where the `--rocm-domains` CLI option for `rocprof-sys-run` was not recognized.
+- Fixed invalid strongly typed configuration values for `ROCPROFSYS_MODE`,
+  `ROCPROFSYS_PERFETTO_BACKEND`, `ROCPROFSYS_TRACE`,
+  `ROCPROFSYS_TRACE_DURATION`, and `ROCPROFSYS_SAMPLING_FREQ` being silently
+  accepted or failing later during runtime instead of reporting clear
+  configuration diagnostics.
 
 ## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
 
@@ -169,7 +178,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Per-GPU RCCL communication data counters (Send/Recv) in `rocpd` output with multi-GPU device attribution using `ncclCommCuDevice` API.
 - Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
 - SDMA (System Direct Memory Access) utilization metrics support via AMD SMI, showing device-level SDMA usage percentage aggregated from all processes. Configure via `ROCPROFSYS_AMD_SMI_METRICS=sdma_usage`.
-- `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via rocprofiler-sdk rocattach API (experimental).
+- `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via ROCprofiler-SDK rocattach API (experimental).
 - Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_SHMEM=ON` configuration setting.
 
 ### Changed
