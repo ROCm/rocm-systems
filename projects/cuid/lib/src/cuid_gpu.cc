@@ -110,7 +110,8 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   info.header.fields.gpu.unit_id = CuidUtilities::get_gpu_vf_id(device_path);
 
   // check for XCP partitioning and skip if so
-  if (CuidUtilities::read_sysfs_file(device_path + "/unique_id").empty() &&
+  std::string config_file = device_path + "/config";
+  if (access(config_file.c_str(), F_OK) == -1 &&
       info.header.fields.gpu.unit_id == 0) {
     return AMDCUID_STATUS_UNSUPPORTED;
   }

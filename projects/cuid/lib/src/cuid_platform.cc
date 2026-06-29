@@ -77,7 +77,7 @@ CuidPlatform::get_hardware_fingerprint(uint64_t &fingerprint) const {
                   static_cast<uint64_t>(uuid[7]);
   } else {
     std::string serial;
-    amdcuid_status_t status = SmbiosUtil::get_system_serial(serial);
+    status = SmbiosUtil::get_system_serial(serial);
     if (status != AMDCUID_STATUS_SUCCESS) {
       fingerprint = 0;
       return AMDCUID_STATUS_UNSUPPORTED;

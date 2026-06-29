@@ -388,7 +388,11 @@ CuidUtilities::make_fallback_fingerprint(const std::string &id,
   std::string system_id;
   amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
 
-  if (geteuid() != 0) {
+  if (geteuid() == 0) {
+    // If running as root, get platform serial number
+    status = SmbiosUtil::get_system_serial(system_id);
+  }
+  if (getuid() != 0 || system_id.empty() || status != AMDCUID_STATUS_SUCCESS) {
     std::ifstream machine_id_file("/etc/machine-id");
     if (machine_id_file.is_open())
       std::getline(machine_id_file, system_id);
@@ -398,11 +402,6 @@ CuidUtilities::make_fallback_fingerprint(const std::string &id,
       if (hostname_file.is_open())
         std::getline(hostname_file, system_id);
     }
-  } else {
-    // If running as root, get platform serial number
-    status = SmbiosUtil::get_system_serial(system_id);
-    if (status != AMDCUID_STATUS_SUCCESS)
-      return status;
   }
 
   std::string id_hex;
@@ -464,7 +463,7 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
   id_bits[14] &= 0xF8;
 
   // bit 117: temp bit carried over from primary ID
-  id_bits[14] |= (primary_id->raw_bits[14] & 0x04) >> 2;
+  id_bits[14] |= (primary_id->raw_bits[14] & 0x04);
 
   // bits 118-121: reserved bits part 2 (4 bits)
   id_bits[14] |= (reserved_2 >> 2); // upper 2 bits of reserved bits part 2
