@@ -786,13 +786,28 @@ set(HOTSWAP_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/hotswap")
 # runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
 set(HOTSWAP_BUILD_RPATH "")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(HOTSWAP_SYMBOL_TOOL "${CMAKE_NM}")
+  if(NOT HOTSWAP_SYMBOL_TOOL)
+    find_program(HOTSWAP_SYMBOL_TOOL NAMES llvm-nm nm HINTS ${LLVM_TOOLS_BINARY_DIR})
+  endif()
+
   foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
     foreach(_libdir IN ITEMS lib lib64 tools/comgr/lib)
-      set(_comgr_libdir "${_prefix}/${_libdir}")
-      if(EXISTS "${_comgr_libdir}/libamd_comgr.so" OR
-         EXISTS "${_comgr_libdir}/libamd_comgr.so.3")
-        list(APPEND HOTSWAP_BUILD_RPATH "${_comgr_libdir}")
-      endif()
+      foreach(_comgr_name IN ITEMS libamd_comgr.so.3 libamd_comgr.so)
+        set(_comgr_library "${_prefix}/${_libdir}/${_comgr_name}")
+        if(HOTSWAP_SYMBOL_TOOL AND EXISTS "${_comgr_library}")
+          execute_process(
+            COMMAND "${HOTSWAP_SYMBOL_TOOL}" -D "${_comgr_library}"
+            RESULT_VARIABLE _comgr_symbol_result
+            OUTPUT_VARIABLE _comgr_symbols
+            ERROR_QUIET)
+          if(_comgr_symbol_result EQUAL 0 AND
+             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
+            list(APPEND HOTSWAP_BUILD_RPATH "${_prefix}/${_libdir}")
+            break()
+          endif()
+        endif()
+      endforeach()
     endforeach()
   endforeach()
   list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
@@ -819,8 +834,8 @@ add_custom_command(
 add_custom_command(
   OUTPUT "${HOTSWAP_GFX1250_HSACO_HDR}"
   COMMAND ${CMAKE_COMMAND}
-          -DINPUT="${HOTSWAP_GFX1250_HSACO}"
-          -DOUTPUT="${HOTSWAP_GFX1250_HSACO_HDR}"
+          -DINPUT=${HOTSWAP_GFX1250_HSACO}
+          -DOUTPUT=${HOTSWAP_GFX1250_HSACO_HDR}
           -P "${HOTSWAP_GENERATE_HSACO_HDR}"
   DEPENDS "${HOTSWAP_GFX1250_HSACO}" "${HOTSWAP_GENERATE_HSACO_HDR}"
   COMMENT "GENERATING ${HOTSWAP_GFX1250_HSACO_HDR}"
