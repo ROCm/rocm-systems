@@ -28,18 +28,19 @@ GPU code objects, so raw ``.att``/``.out`` traces collected straight from
 rocprofiler-sdk get ISA <-> source correlation.
 
 Usage:
-    generate_snapshot.py [code_object ...]
+    generate_code.py [code_object ...]
 
-The code objects are ELF files (``.hsaco``, ``.out`` or ``.o``). When no
-argument is given, every ``*.hsaco`` and ``*.out`` in the current directory is
-used. For each file we extract DWARF line ranges (with inlined call stacks) and
-disassembly, and snapshot the referenced source files into the current directory.
+The code objects are ELF files (``.hsaco``, ``.out``, ``.co`` or ``.o``). When
+no argument is given, every file with one of those suffixes in the current
+directory is used. For each file we extract DWARF line ranges (with inlined call
+stacks) and disassembly, and snapshot the referenced source files into the
+current directory.
 
 Each row is tagged with a code object id parsed from the filename (the part
 after the last ``_``, e.g. ``codeobj_12345.out`` -> 12345), matching how the
-viewer keys trace instructions by (code object id, virtual address). Only
-``.hsaco`` files may use id 0; a ``.out`` lacking an id, or any id that collides
-with another input, is skipped with a warning.
+viewer keys trace instructions by (code object id, virtual address). A single
+code object whose filename does not encode an id is tagged as id 0. Multiple
+unnamed code objects cannot be inferred from the files and are rejected.
 
 Comment format (mirrors ``code_printing.hpp``):
     "<file>:<line> -> <call_file>:<call_line> -> ..."
@@ -56,7 +57,6 @@ from __future__ import annotations
 
 import argparse
 import bisect
-import glob
 import json
 import os
 import re
@@ -78,7 +78,7 @@ def _find_tool(name: str) -> str:
         candidates.append(root / "llvm" / "bin" / name)
         candidates.append(root / "bin" / name)
 
-    for found in (shutil.which(name), shutil.which(f"{name}-14")):
+    for found in (shutil.which(name),):
         if found:
             candidates.append(Path(found))
 
@@ -116,6 +116,15 @@ def llvm_objdump() -> str:
     return _LLVM_OBJDUMP
 
 
+def default_code_object_inputs() -> list[str]:
+    suffixes = {".co", ".hsaco", ".o", ".out"}
+    return sorted(
+        path.name
+        for path in Path.cwd().iterdir()
+        if path.is_file() and path.suffix.lower() in suffixes
+    )
+
+
 def is_elf(path: str) -> bool:
     try:
         with open(path, "rb") as f:
@@ -125,18 +134,20 @@ def is_elf(path: str) -> bool:
 
 
 def codeobj_id_from_path(path: str) -> int:
-    """Derive the code object id from a filename, mirroring the viewer's
-    parseCodeobjIdFromPath: take the stem, the part after the last '_', and
-    parse it as an integer (e.g. ``codeobj_12345.out`` -> 12345). Returns 0
-    when the name doesn't carry an id, matching the decoder's fallback."""
+    """Return the filename-encoded code object id, or 0 when there is none."""
+    parsed = _parse_codeobj_id_from_path(path)
+    return parsed if parsed is not None else 0
+
+
+def _parse_codeobj_id_from_path(path: str) -> int | None:
     stem = Path(path).stem
     pos = stem.rfind("_")
     if pos == -1:
-        return 0
+        return None
     try:
         return int(stem[pos + 1:])
     except ValueError:
-        return 0
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -534,23 +545,31 @@ def snapshot_sources(
 def main(argv: List[str] | None = None) -> int:
     cwd = Path.cwd()
 
-    # Inputs: explicit list of code objects (.hsaco/.out/.o) on the command
-    # line, otherwise fall back to every .hsaco and .out in the directory.
+    # Inputs: explicit list of code objects on the command line, otherwise fall
+    # back to code-object-looking files in the current directory.
     parser = argparse.ArgumentParser(
         description="Generate code.json and source snapshots from GPU code objects."
     )
-    parser.add_argument("code_objects", nargs="*", help="ELF code objects (.hsaco, .out, .co, .o)")
+    parser.add_argument(
+        "code_objects",
+        nargs="*",
+        help="ELF code objects (.hsaco, .out, .co, .o)",
+    )
     args = parser.parse_args(argv)
-    inputs = args.code_objects or sorted(glob.glob("*.hsaco") + glob.glob("*.out"))
+    inputs = args.code_objects or default_code_object_inputs()
     if not inputs:
-        print("No code object given and no .hsaco/.out found in current directory.", file=sys.stderr)
+        print(
+            "No code object given and no .hsaco/.out/.co/.o found in current directory.",
+            file=sys.stderr,
+        )
         return 1
 
-    # Each ELF is tagged with (path, code object id). Only .hsaco may use id 0;
-    # a .out without a parseable id can't be matched against the trace, and
-    # repeated ids would alias distinct code objects, so both are dropped.
-    elf_files = []
-    seen_ids: Dict[int, str] = {}
+    # Each ELF is tagged with (path, code object id). If the filename does not
+    # carry an id, exactly one such input may use id 0. Multiple unnamed IDs
+    # would alias distinct code objects and cannot be inferred from the files.
+    input_paths = []
+    untagged_paths = []
+    parsed_ids: set[int] = set()
     for p in inputs:
         if not os.path.isfile(p):
             print(f"skipping {p}: not a file", file=sys.stderr)
@@ -558,12 +577,36 @@ def main(argv: List[str] | None = None) -> int:
         if not is_elf(p):
             print(f"skipping {p}: not an ELF file", file=sys.stderr)
             continue
-        cid = codeobj_id_from_path(p)
-        if cid == 0 and Path(p).suffix.lower() != ".hsaco":
-            print(f"skipping {p}: no code object id in filename (only .hsaco may use id 0)", file=sys.stderr)
-            continue
+        parsed = _parse_codeobj_id_from_path(p)
+        input_paths.append((p, parsed))
+        if parsed is None:
+            untagged_paths.append(p)
+        else:
+            parsed_ids.add(parsed)
+
+    if len(untagged_paths) > 1:
+        print(
+            "Cannot infer code object IDs for multiple unnamed inputs: "
+            + ", ".join(untagged_paths),
+            file=sys.stderr,
+        )
+        return 1
+    if untagged_paths and 0 in parsed_ids:
+        print(
+            f"Cannot assign code object id 0 to {untagged_paths[0]}: another input already uses id 0.",
+            file=sys.stderr,
+        )
+        return 1
+
+    elf_files = []
+    seen_ids: Dict[int, str] = {}
+    for p, parsed_id in input_paths:
+        cid = parsed_id if parsed_id is not None else 0
         if cid in seen_ids:
-            print(f"skipping {p}: code object id {cid} already used by {seen_ids[cid]}", file=sys.stderr)
+            print(
+                f"skipping {p}: code object id {cid} already used by {seen_ids[cid]}",
+                file=sys.stderr,
+            )
             continue
         seen_ids[cid] = p
         elf_files.append((p, cid))

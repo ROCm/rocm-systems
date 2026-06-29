@@ -110,7 +110,11 @@ class CodeIndex:
         entry = self.entries.get(pc)
         if entry is not None:
             return entry
-        entry = CodeEntry(pc=pc, inst="", line_number=len(self.entries) + 1)
+        entry = CodeEntry(
+            pc=pc,
+            inst="",
+            line_number=max(self.line_numbers.values(), default=0) + 1,
+        )
         self.entries[pc] = entry
         self.line_numbers[pc] = entry.line_number
         self._set_memory_sizes()
@@ -134,11 +138,13 @@ class CodeIndex:
     def write_code_json(self, path: str | Path) -> None:
         out_doc = dict(self.document)
         rows = []
+        seen: set[Pc] = set()
         for row in self.document.get("code", []):
             if len(row) < 10 or str(row[0]).startswith(";"):
                 rows.append(row)
                 continue
             pc = Pc(address=int(row[5]), code_object_id=int(row[4]))
+            seen.add(pc)
             entry = self.entries.get(pc)
             if entry is None:
                 rows.append(row)
@@ -149,6 +155,24 @@ class CodeIndex:
             updated[8] = entry.stall
             updated[9] = entry.idle
             rows.append(updated)
+        for entry in sorted(
+            (entry for pc, entry in self.entries.items() if pc not in seen),
+            key=lambda e: e.line_number,
+        ):
+            rows.append(
+                [
+                    entry.inst,
+                    0,
+                    entry.line_number,
+                    entry.source,
+                    entry.pc.code_object_id,
+                    entry.pc.address,
+                    entry.hitcount,
+                    entry.latency,
+                    entry.stall,
+                    entry.idle,
+                ]
+            )
         out_doc["code"] = rows
         out_doc.setdefault("header", CODE_HEADER)
         Path(path).write_text(json.dumps(out_doc, indent=2))

@@ -215,16 +215,8 @@ def _find_library(explicit: str | os.PathLike[str] | None = None) -> str:
     if env:
         return env
 
-    here = Path(__file__).resolve()
-    install_lib = next(
-        (parent for parent in here.parents if parent.name in ("lib", "lib64")), None
-    )
     names = ["librocprof-trace-decoder.so", "librocprof-trace-decoder.dylib"]
-    roots = []
-    if install_lib is not None:
-        roots.append(install_lib)
-    roots.extend(_rocm_library_roots())
-    for root in roots:
+    for root in _library_roots():
         for name in names:
             candidate = root / name
             if candidate.exists():
@@ -234,20 +226,25 @@ def _find_library(explicit: str | os.PathLike[str] | None = None) -> str:
     return "librocprof-trace-decoder.so"
 
 
-def _rocm_library_roots() -> list[Path]:
+def _library_roots() -> list[Path]:
     roots: list[Path] = []
     seen: set[Path] = set()
+
+    def add(path: Path) -> None:
+        if path not in seen:
+            roots.append(path)
+            seen.add(path)
+
+    for raw in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep):
+        if raw:
+            add(Path(raw).expanduser())
+
     for var in ("ROCM_HOME", "ROCM_PATH"):
         value = os.environ.get(var)
         if value:
-            root = Path(value).expanduser() / "lib"
-            if root not in seen:
-                roots.append(root)
-                seen.add(root)
+            add(Path(value).expanduser() / "lib")
 
-    default = Path("/opt/rocm/lib")
-    if default not in seen:
-        roots.append(default)
+    add(Path("/opt/rocm/lib"))
     return roots
 
 
@@ -301,7 +298,11 @@ class Decoder:
         lib.rocprof_trace_decoder_set_isa_callback.argtypes = [_Handle, _ISA_CB, ctypes.c_void_p]
         lib.rocprof_trace_decoder_set_isa_callback.restype = ctypes.c_int
 
-        lib.rocprof_trace_decoder_set_se_data_callback.argtypes = [_Handle, _SE_DATA_CB, ctypes.c_void_p]
+        lib.rocprof_trace_decoder_set_se_data_callback.argtypes = [
+            _Handle,
+            _SE_DATA_CB,
+            ctypes.c_void_p,
+        ]
         lib.rocprof_trace_decoder_set_se_data_callback.restype = ctypes.c_int
 
         lib.rocprof_trace_decoder_parse.argtypes = [
@@ -402,9 +403,13 @@ class Decoder:
         if isa is not None:
             isa_cb = self._make_isa_callback(isa)
             self._callbacks.append(isa_cb)
-            self._check(self._lib.rocprof_trace_decoder_set_isa_callback(self._handle, isa_cb, None))
+            self._check(
+                self._lib.rocprof_trace_decoder_set_isa_callback(self._handle, isa_cb, None)
+            )
         else:
-            self._check(self._lib.rocprof_trace_decoder_set_isa_callback(self._handle, _ISA_CB(), None))
+            self._check(
+                self._lib.rocprof_trace_decoder_set_isa_callback(self._handle, _ISA_CB(), None)
+            )
 
         def _trace(record_type: int, events: int | None, size: int, _userdata: int | None) -> int:
             try:
@@ -613,7 +618,11 @@ def _convert_dispatch(c: _Dispatch) -> Dispatch:
     )
 
 
-def _append_batch(records: TraceRecords, record_type: RecordType, batch: list[object] | int) -> None:
+def _append_batch(
+    records: TraceRecords,
+    record_type: RecordType,
+    batch: list[object] | int,
+) -> None:
     records.batches.append((record_type, batch))
     if record_type == RecordType.GFXIP:
         records.gfxip = int(batch)
@@ -635,8 +644,6 @@ def _append_batch(records: TraceRecords, record_type: RecordType, batch: list[ob
         records.realtime_frequency = int(batch)
     elif record_type == RecordType.INST_OTHER_SIMD:
         records.other_simd.extend(batch)  # type: ignore[arg-type]
-    elif record_type == RecordType.DISPATCH:
-        records.dispatches.extend(batch)  # type: ignore[arg-type]
     elif record_type == RecordType.DISPATCH:
         records.dispatches.extend(batch)  # type: ignore[arg-type]
 

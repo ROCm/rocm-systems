@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 
 from .code_index import CodeIndex
@@ -17,19 +18,51 @@ from .records import (
     ShaderData,
     TraceRecords,
     Wave,
-    WaveStateType,
 )
 
 TOOL_VERSION = "3.1.0"
+VALID_OUTPUT_FORMATS = frozenset({"csv", "json"})
+
+
+def normalize_output_formats(formats: str | Iterable[str]) -> frozenset[str]:
+    if isinstance(formats, str):
+        raw_items = [formats]
+    else:
+        raw_items = formats
+
+    normalized = frozenset(
+        part.strip().lower()
+        for item in raw_items
+        for part in str(item).split(",")
+        if part.strip()
+    )
+    if not normalized:
+        raise ValueError("No output formats requested.")
+
+    unknown = normalized - VALID_OUTPUT_FORMATS
+    if unknown:
+        valid = ", ".join(sorted(VALID_OUTPUT_FORMATS))
+        invalid = ", ".join(sorted(unknown))
+        raise ValueError(
+            f"Unsupported output format(s): {invalid}. Expected one or more of: {valid}"
+        )
+
+    return normalized
 
 
 class RcvOutputWriter:
     """Writes ROCprof Compute Viewer sidecar files."""
 
-    def __init__(self, output_dir: Path, code_index: CodeIndex, *, formats: str):
+    def __init__(
+        self,
+        output_dir: Path,
+        code_index: CodeIndex,
+        *,
+        formats: str | Iterable[str],
+    ):
         self.output_dir = output_dir
         self.code_index = code_index
-        self.formats = formats.lower()
+        self.formats = normalize_output_formats(formats)
         self.gfxip = 9
         self.wave_names: dict[int, dict[int, dict[int, dict[int, list[object]]]]] = {}
         self.wave_counts: dict[tuple[int, int, int], int] = defaultdict(int)
@@ -39,7 +72,6 @@ class RcvOutputWriter:
         self.dispatches: dict[int, list[Dispatch]] = defaultdict(list)
         self.realtime: dict[int, list[Realtime]] = defaultdict(list)
         self.realtime_frequency = 0
-        self.wstates: dict[int, list[tuple[int, int]]] = defaultdict(list)
         self.other_simd_files: dict[int, list[list[object]]] = defaultdict(list)
         self.shaderdata_files: dict[int, list[list[object]]] = defaultdict(list)
         self.kernel_ids: dict[Pc, int] = {Pc(0, 0): 0}
@@ -73,7 +105,6 @@ class RcvOutputWriter:
         self._write_filenames()
         self._write_occupancy()
         self._write_realtime()
-        self._write_wstates()
 
     @property
     def _want_json(self) -> bool:
@@ -100,13 +131,8 @@ class RcvOutputWriter:
             instructions.append([inst.time, inst.category, inst.stall, inst.duration, line_number])
 
         timeline = []
-        acc_time = wave.begin_time
         for state in wave.timeline:
             timeline.append([state.type, state.duration])
-            if 0 <= state.type < int(WaveStateType.LAST):
-                self.wstates[state.type].append((acc_time, 1))
-                self.wstates[state.type].append((acc_time + state.duration, -1))
-            acc_time += state.duration
 
         data = {
             "name": f"SE{se}",
@@ -257,25 +283,6 @@ class RcvOutputWriter:
             data[f"SE{se}"] = [[e.shader_clock, e.realtime_clock] for e in events]
         _write_json(self.output_dir / "realtime.json", data)
 
-    def _write_wstates(self) -> None:
-        for state, events in self.wstates.items():
-            if not events:
-                continue
-            accum = 0
-            prev_time = None
-            times = []
-            states = []
-            for time, value in sorted(events, key=lambda item: item[0]):
-                accum += value
-                if not times or time != prev_time:
-                    times.append(time)
-                    states.append(accum)
-                else:
-                    states[-1] = accum
-                prev_time = time
-            filename = f"wstates{state}.json"
-            _write_json(self.output_dir / filename, {"time": times, "state": states, "name": filename})
-
     def _kernel_id(self, pc: Pc) -> int:
         if pc in self.kernel_ids:
             return self.kernel_ids[pc]
@@ -284,8 +291,12 @@ class RcvOutputWriter:
 
     def _kernel_name(self, pc: Pc) -> str:
         for kernel in self.code_index.document.get("kernels", []):
-            if int(kernel.get("address", -1)) == pc.address and int(kernel.get("codeobj", -1)) == pc.code_object_id:
-                return str(kernel.get("name") or kernel.get("demangled") or f"{pc.code_object_id} / 0x{pc.address:x}")
+            if (
+                int(kernel.get("address", -1)) == pc.address
+                and int(kernel.get("codeobj", -1)) == pc.code_object_id
+            ):
+                name = kernel.get("name") or kernel.get("demangled")
+                return str(name or f"{pc.code_object_id} / 0x{pc.address:x}")
         return f"{pc.code_object_id} / 0x{pc.address:x}"
 
     def _dispatch_json(self, dispatch: Dispatch) -> dict[str, object]:
@@ -342,4 +353,3 @@ def _stringify_nested(value: object) -> object:
 
 def _write_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2))
-

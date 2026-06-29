@@ -56,19 +56,25 @@ set(TTD_ALL_VERSIONS ON)
 
 option(BUILD_TESTS "Enable Building Tests for ROCProf Trace Decoder" OFF)
 option(BUILD_UNIT_TESTS "Enable Building Unit Tests for ROCProf Trace Decoder" ON)
-option(BUILD_PYTHON "Install Python API and ATT tool" ON)
+option(BUILD_PYTHON "Install Python API" ON)
 option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 
 add_subdirectory(source)
 
 if(BUILD_PYTHON)
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
-    set(ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
-        "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-        CACHE STRING "Prefix-relative install directory for the rocprof-trace-decoder Python API")
-    if(IS_ABSOLUTE "${ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}")
-        message(FATAL_ERROR "ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR must be prefix-relative")
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_path('purelib'))"
+        RESULT_VARIABLE _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_RESULT
+        OUTPUT_VARIABLE _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_RESULT EQUAL 0
+       OR "${_ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}" STREQUAL "")
+        message(FATAL_ERROR "Failed to determine Python site-packages install directory")
     endif()
+    set(ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
+        "${_ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}"
+        CACHE PATH "Install directory for the rocprof-trace-decoder Python API")
 
     install(
         DIRECTORY python/rocprof_trace_decoder
@@ -76,19 +82,6 @@ if(BUILD_PYTHON)
         COMPONENT runtime
         PATTERN "__pycache__" EXCLUDE
         PATTERN "*.pyc" EXCLUDE)
-    install(
-        FILES python/att_tool.py python/generate_code.py
-        DESTINATION ${ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}
-        COMPONENT runtime)
-
-    configure_file(cmake/rocprof-att-tool.in ${CMAKE_CURRENT_BINARY_DIR}/rocprof-att-tool @ONLY)
-    configure_file(cmake/rocprof-trace-generate-code.in
-                   ${CMAKE_CURRENT_BINARY_DIR}/rocprof-trace-generate-code @ONLY)
-    install(
-        PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocprof-att-tool
-                 ${CMAKE_CURRENT_BINARY_DIR}/rocprof-trace-generate-code
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
-        COMPONENT runtime)
 endif()
 
 if(BUILD_TESTS)

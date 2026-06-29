@@ -1,14 +1,19 @@
 # Python Modules
 
 This document summarizes the Python modules added for the rocprof-trace-decoder
-API and ATT tool. The package is intentionally small: the reusable API lives in
-`rocprof_trace_decoder`, while the top-level scripts are thin command-line
-entry points.
+API and source-tree ATT helpers. The installable Python package is intentionally
+small: only the reusable API under `rocprof_trace_decoder` is installed.
 
 The Python API wraps the handle-based decoder functions from
 `rocprof_trace_decoder.h` and the record types from `trace_decoder_types.h`.
 The quick-scan and standalone trace extraction APIs are intentionally not
 wrapped here.
+
+The API can be installed with Python packaging (`python3 -m pip install .`) or
+with CMake when `BUILD_PYTHON=ON`. The CMake install path defaults to the
+active interpreter's `sysconfig.get_path("purelib")` so scripts run by that
+same `python3` can import `rocprof_trace_decoder` without script-local path
+searching. Packagers can override `ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR`.
 
 ## Module Overview
 
@@ -21,7 +26,7 @@ wrapped here.
 | `rocprof_trace_decoder.rcv` | ROCprof Compute Viewer JSON writer | Internal utility |
 | `rocprof_trace_decoder.att` | High-level ATT decode orchestration with explicit trace metadata | Public utility |
 | `generate_code.py` | Generates `code.json`, snapshots, and source copies from code objects | Tool module |
-| `att_tool.py` | CLI script for conventional rocprofiler ATT file names | Tool script |
+| `att_tool.py` | CLI script for ATT output generation | Tool script |
 
 ## `rocprof_trace_decoder`
 
@@ -95,6 +100,11 @@ The module also contains the `IsaProvider` protocol. Any object with an
 `isa_for_pc(pc) -> tuple[str, int] | None` method can provide instructions to
 the decoder callback.
 
+Shared-library lookup is ordered so user overrides win before ROCm defaults:
+explicit `lib_path`, `ROCPROF_TRACE_DECODER_LIB`, non-empty `LD_LIBRARY_PATH`
+entries, `ROCM_HOME/lib`, `ROCM_PATH/lib`, `/opt/rocm/lib`, then the platform
+loader fallback.
+
 ## `rocprof_trace_decoder.code_index`
 
 `code_index.py` is the shared bridge between static code metadata and dynamic
@@ -141,6 +151,10 @@ This module is best treated as an internal formatting layer. Its JSON schema is
 chosen to match the ROCprof Compute Viewer conventions, not to be a general
 Python API for trace analysis.
 
+`RcvOutputWriter` accepts only the exact output formats `json` and `csv`.
+Schema literals such as `navi`, `filenames.json`, and `se*_...` file names are
+viewer-format details and intentionally stay in this module.
+
 ## `rocprof_trace_decoder.att`
 
 `att.py` is the high-level orchestration module for turning already identified
@@ -152,9 +166,13 @@ The primary reusable function is `generate_att_outputs(...)`. It takes a small
 set of explicit inputs and handles the standard output file naming:
 
 - input traces: `AttTrace(path=..., shader_engine=..., run=...)`
-- existing `code.json`
+- optional existing `code.json`
 - output directories: `ui_output_<name><run>`
 - stats files: `stats_<output-dir-name>.csv`
+
+The `formats` argument accepts `json`, `csv`, or both as a comma-separated
+string or iterable. Unknown names are rejected instead of being matched as
+substrings.
 
 This boundary is intentional. The reusable API can parse an ATT buffer from any
 file name. Naming conventions such as `*_shader_engine_<se>_<run>.att` belong in
@@ -171,8 +189,13 @@ the ATT tool. It reads GPU code objects, extracts disassembly with
 - `source_*` copies for snapshotted source files
 
 The module is both an implementation detail of `rocprof_trace_decoder.att` and
-a standalone helper command. It is installed as `rocprof-trace-generate-code`
-for users who want to generate `code.json` explicitly.
+a source-tree helper command for users who want to generate `code.json`
+explicitly.
+
+When code objects are not provided explicitly, the command scans the current
+directory for `.hsaco`, `.out`, `.co`, and `.o` ELF files. Non-`.hsaco` inputs
+still need a code object id in the file stem because trace records are keyed by
+`(code_object_id, address)`.
 
 One important normalization lives here: branch operands printed by
 `llvm-objdump` as symbolic labels are converted back to the raw SOPP immediate
@@ -182,14 +205,25 @@ compatible with the decoder's PC stitching behavior.
 ## `att_tool.py`
 
 `att_tool.py` is the user-facing command-line script. It accepts a mixed list of
-`.att`, `.out`, `.co`, `.hsaco`, `code.json`, and directory inputs; generates
-`code.json` when needed; parses the conventional rocprofiler ATT file names; and
-then calls `rocprof_trace_decoder.att.generate_att_outputs()`.
+`.att`, `.out`, `.co`, `.hsaco`, `code.json`, and directory inputs. Code
+objects alone generate only `code.json`, `snapshots.json`, and source snapshots.
+ATT inputs do not require `code.json` or code object files at argument
+validation time.
 
-This is the only Python layer that assumes ATT files follow the
-`*_shader_engine_<se>_<run>.att` naming convention. Users with arbitrary trace
-file names can bypass this script and call `Decoder.parse_file()` or
-`generate_att_outputs()` with explicit `AttTrace` metadata.
+When ATT inputs are present, the script uses `code.json` or code objects only
+when they are provided by the user or found through an explicitly provided
+directory input. Otherwise it calls
+`rocprof_trace_decoder.att.generate_att_outputs()` without ISA metadata.
+Whether a given trace can be decoded without ISA metadata is determined by the
+decoder library.
+
+When an ATT file follows the conventional
+`*_shader_engine_<se>_<run>.att` naming convention, the script uses that
+metadata. Arbitrarily named `.att` files are also accepted; they default to
+run `1` and receive shader-engine ids in discovery order, skipping ids already
+claimed by conventional names. Users who need exact metadata for nonstandard
+multi-SE captures can bypass the script and call `generate_att_outputs()` with
+explicit `AttTrace` objects.
 
 Developers can run the source-tree script directly:
 
@@ -199,18 +233,19 @@ python3 python/att_tool.py trace.att code_object.out
 
 from the checkout without installing the package first.
 
-Installed users should prefer the generated `rocprof-att-tool` launcher or the
-Python packaging console script of the same name.
-
 ## Typical Flow
 
 The one-command ATT path is:
 
-1. `att_tool.py` discovers `.att` traces and code objects from CLI inputs.
-2. `att_tool.py` runs `generate_code.py` if no `code.json` was provided.
-3. `att_tool.py` parses conventional trace names into explicit `AttTrace`
-   objects.
-4. `CodeIndex` loads `code.json` and becomes the decoder ISA provider.
+1. `att_tool.py` discovers `.att` traces, `code.json`, and code objects from
+   explicit CLI inputs and directory inputs.
+2. `att_tool.py` runs `generate_code.py` when code objects are available and a
+   new `code.json` is needed. If there are no ATT traces, the command stops
+   after code metadata generation.
+3. `att_tool.py` turns trace paths into explicit `AttTrace` objects, using
+   conventional filename metadata when present and deterministic defaults
+   otherwise.
+4. When `code.json` is available, `CodeIndex` becomes the decoder ISA provider.
 5. `Decoder` parses each `.att` file and returns `TraceRecords`.
 6. `RcvOutputWriter` writes viewer JSON files and updates `CodeIndex` stats.
 7. `CodeIndex` writes the final updated `code.json` and `stats_*.csv`.

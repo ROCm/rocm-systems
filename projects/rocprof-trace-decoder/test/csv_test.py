@@ -27,9 +27,10 @@ def _expand(paths: list[str]) -> tuple[list[Path], list[Path]]:
             raise SystemExit(f"No matches for pattern: {arg}")
         for item in expanded:
             path = Path(item).resolve()
-            if path.suffix == ".att":
+            suffix = path.suffix.lower()
+            if suffix == ".att":
                 att_files.append(path)
-            elif path.suffix == ".csv":
+            elif suffix == ".csv":
                 csv_files.append(path)
 
     return att_files, csv_files
@@ -55,7 +56,11 @@ def main() -> int:
     with Decoder(args.lib) as decoder:
         for att_file in att_files:
             records = decoder.parse_file(att_file, isa=code_index)
-            if records.info and not args.suppress_warnings and os.getenv("ATT_SUPPRESS_WARNING") is None:
+            if (
+                records.info
+                and not args.suppress_warnings
+                and os.getenv("ATT_SUPPRESS_WARNING") is None
+            ):
                 for info in records.info:
                     print(f"Warning: {decoder.info_string(info)}", file=sys.stderr)
             for wave in records.waves:
