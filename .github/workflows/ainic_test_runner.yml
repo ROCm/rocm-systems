@@ -48,6 +48,9 @@ concurrency:
   group: ainic-test-runner-pinned-nodes
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
   # Shared CI root on the AINIC cluster (configs, prebuilt libs, artifacts),
   # mirroring rccl_perf_regression.yml (PR #7546).
