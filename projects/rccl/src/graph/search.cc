@@ -604,7 +604,15 @@ exit:
 
 NCCL_PARAM(MnnvlRailPerHost, "MNNVL_RAIL_PER_HOST", 0);
 
-static bool ncclTopoSearchCheckNet(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, struct ncclTopoNode* startNet, int n, int step) {
+// Internal rail-matching helper for the topology search. Kept file-local
+// (static) in optimized builds. In debug builds it is given external linkage so
+// the rccl-UnitTestsFixturesDebug target (test/graph/SearchTests.cpp) can link
+// against it directly -- the same way that target reaches other internal
+// topology symbols, which are only visible in debug builds. No Release change.
+#ifdef NDEBUG
+static
+#endif
+bool ncclTopoSearchCheckNet(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, struct ncclTopoNode* startNet, int n, int step) {
   struct ncclTopoNode* net = system->nodes[NET].nodes+n;
   if (graph->pattern == NCCL_TOPO_PATTERN_TREE && net->id != startNet->id) return false; // Trees are symmetric
   if (graph->pattern == NCCL_TOPO_PATTERN_RING && graph->crossNic == 2) {
