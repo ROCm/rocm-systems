@@ -1363,6 +1363,12 @@ def _generate_rocprofsys_config_header() -> list[str]:
     else:
         oshrun_version_str = "Not found"
 
+    oshrun_strips_str = (
+        "Yes (decoy '--' inserted)"
+        if cap.oshrun_strips_double_dash
+        else "No" if cap.oshrun_exec else "N/A"
+    )
+
     if cap.amdsmi_version is not None:
         amdsmi_version_str = f"{cap.amdsmi_version[0]}.{cap.amdsmi_version[1]}"
     else:
@@ -1419,6 +1425,7 @@ def _generate_rocprofsys_config_header() -> list[str]:
         _row("Julia:", cap.julia_exec),
         _row("Oshrun:", cap.oshrun_exec),
         _subrow("Version:", oshrun_version_str),
+        _subrow("Strips '--':", oshrun_strips_str),
         _row("Offload tool:", offload_msg),
         _row("Rocminfo:", rocminfo_path if rocminfo_path else rocminfo_err_msg),
         "-" * 70,
