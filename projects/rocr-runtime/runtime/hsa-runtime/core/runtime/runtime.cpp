@@ -4111,7 +4111,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       }
     } else if (mappedHandle->mem_handle->region) {
-      agent = mappedHandle->mem_handle->GetDrmAgent();
+      agent = mappedHandle->mem_handle->drmAgent();
       /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it is valid for mmap_fd to be -1*/
       agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
     }
@@ -4213,7 +4213,7 @@ Runtime::MemoryHandle::~MemoryHandle() {
     (drm_owner) to produce a driver_handle. The resulting driver_handle
     is owned by that GPU agent, not the CPU region, so destruction must be
     dispatched through drm_owner */
-    core::Agent* destroy_agent = GetDrmAgent();
+    core::Agent* destroy_agent = drmAgent();
     destroy_agent->driver().DestroyMemoryHandle(&driver_handle);
   }
 
@@ -4239,7 +4239,7 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
   if (!memHandle->imported && memHandle->driver_handle.dmabuf_fd == -1) {
     /* For host memory, agentOwner() is the CPU agent which cannot perform DRM exports.
      * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
-    Agent *exportAgent = memHandle->GetDrmAgent();
+    Agent *exportAgent = memHandle->drmAgent();
     int dmabuf_fd = -1;
     hsa_status_t status = exportAgent->driver().ExportMemoryHandle(
         *exportAgent, memHandle->driver_handle, ShareType::DMABUF_FD, 0, &dmabuf_fd);
@@ -4453,7 +4453,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
 
   /* For host memory, agentOwner() is the CPU agent which cannot perform DRM exports.
    * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
-  auto agentOwner = memoryHandle->GetDrmAgent();
+  auto agentOwner = memoryHandle->drmAgent();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
                                                  ShareType::DMABUF_FD,

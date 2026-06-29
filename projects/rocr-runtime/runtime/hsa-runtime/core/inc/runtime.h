@@ -1036,7 +1036,7 @@ class Runtime {
      * @brief For host owned memory, resolve to the GPU agent that imported the memory. 
      * For device owned memory, return the agent that owns the memory.
      */
-    __forceinline core::Agent* GetDrmAgent() const {
+    __forceinline core::Agent* drmAgent() const {
       return drm_owner ? drm_owner : agentOwner();
     }
 
@@ -1047,7 +1047,7 @@ class Runtime {
     bool imported; // True if this BO was imported from another process
     bool is_fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
-    core::Agent* drm_owner; // Gpu agent used for import of host memory, NULL for device memory 
+    core::Agent* drm_owner; // Gpu agent used for import of host memory, NULL for device memory/imported handles 
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
