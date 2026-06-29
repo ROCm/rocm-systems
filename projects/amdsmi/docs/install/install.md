@@ -38,7 +38,7 @@ To run AMD SMI, the following components need to be installed on your system:
 - The `amdgpu-dkms` driver
   - For current amdgpu driver installation instructions, see the [AMD GPU
     Driver (amdgpu)
-    documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html).
+    documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/31.30.0-preview/install/detailed-install/prerequisites.html).
 - The `amd_hsmp` or `hsmp_acpi` driver
   - See [amd_hsmp](https://github.com/amd/amd_hsmp) for more information.
 
