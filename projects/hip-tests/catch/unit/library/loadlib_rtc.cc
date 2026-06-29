@@ -77,12 +77,13 @@ HIP_TEST_CASE(Unit_hip_library_load_rtc) {
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
   
-    // If user builds with ASAN, we can get 2 additional kernels (init/fini) in the code object.
+    // If user builds with ASAN, we can get 2 additional kernels (init/fini) in the code object depending on the entire code object.
+    // In this case we should have just 1 since there are no `__managed__` var in code.
     // The thing is, it only adds in device asan and not in host asan.
     // So this check needs to cater for both
     constexpr int expected_count = 1;
     INFO("The count we got is: " << count);
-    REQUIRE((count == expected_count || count == expected_count + 2));
+    REQUIRE((count == expected_count || count == expected_count + 1));
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
@@ -115,7 +116,7 @@ HIP_TEST_CASE(Unit_hip_library_load_rtc) {
 
     constexpr int expected_count = 2;
     INFO("The count we got is: " << count);
-    REQUIRE((count == expected_count || count == expected_count + 2));
+    REQUIRE((count == expected_count || count == expected_count + 1));
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
@@ -148,7 +149,7 @@ HIP_TEST_CASE(Unit_hip_library_load_rtc) {
 
     constexpr int expected_count = 3;
     INFO("The count we got is: " << count);
-    REQUIRE((count == expected_count || count == expected_count + 2));
+    REQUIRE((count == expected_count || count == expected_count + 1));
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
