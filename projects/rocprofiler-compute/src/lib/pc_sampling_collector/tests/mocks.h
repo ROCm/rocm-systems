@@ -3,8 +3,12 @@
 #pragma once
 #include "code_object_translator.h"
 #include "code_object_writer.h"
+#include "filesystem_wrapper.h"
 
+#include <filesystem>
+#include <map>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -77,4 +81,59 @@ private:
     std::vector<rocprofiler_compute_tool::symbol_t>      m_symbol_descriptions;
     std::vector<rocprofiler_compute_tool::instruction_t> m_instructions;
     uint32_t                                             m_end_symbol_count = 0;
+};
+
+class mock_filesystem_wrapper_t : public rocprofiler_compute_tool::filesystem_wrapper_t
+{
+public:
+    struct status_response_t
+    {
+        std::filesystem::file_status status;
+        std::error_code              error;
+    };
+
+    struct absolute_response_t
+    {
+        std::filesystem::path result;
+        std::error_code       error;
+    };
+
+    struct copy_file_call_t
+    {
+        std::filesystem::path         source;
+        std::filesystem::path         destination;
+        std::filesystem::copy_options options = std::filesystem::copy_options::none;
+    };
+
+    std::filesystem::path absolute(const std::filesystem::path& path,
+                                   std::error_code&             error) override;
+    std::filesystem::file_status status(const std::filesystem::path& path,
+                                        std::error_code&             error) override;
+    bool create_directories(const std::filesystem::path& path, std::error_code& error) override;
+    bool copy_file(const std::filesystem::path&         source,
+                   const std::filesystem::path&         destination,
+                   std::filesystem::copy_options        options,
+                   std::error_code&                     error) override;
+
+    void set_absolute(const std::filesystem::path& path, const std::filesystem::path& result);
+    void set_absolute_error(const std::filesystem::path& path, std::error_code error);
+    void set_status(const std::filesystem::path& path, std::filesystem::file_status status);
+    void set_status_error(const std::filesystem::path& path, std::error_code error);
+    void set_create_directories_error(std::error_code error);
+    void set_copy_file_error(std::error_code error);
+
+    const std::vector<std::filesystem::path>& get_absolute_calls() const;
+    const std::vector<std::filesystem::path>& get_status_calls() const;
+    const std::vector<std::filesystem::path>& get_create_directories_calls() const;
+    const std::vector<copy_file_call_t>&      get_copy_file_calls() const;
+
+private:
+    std::map<std::filesystem::path, absolute_response_t> m_absolute_responses;
+    std::map<std::filesystem::path, status_response_t> m_status_responses;
+    std::error_code                                    m_create_directories_error;
+    std::error_code                                    m_copy_file_error;
+    std::vector<std::filesystem::path>                 m_absolute_calls;
+    std::vector<std::filesystem::path>                 m_status_calls;
+    std::vector<std::filesystem::path>                 m_create_directories_calls;
+    std::vector<copy_file_call_t>                      m_copy_file_calls;
 };

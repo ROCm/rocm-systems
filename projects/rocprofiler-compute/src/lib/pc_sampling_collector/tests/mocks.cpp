@@ -121,3 +121,104 @@ uint32_t mock_code_object_writer_t::get_end_symbol_count() const
 {
     return m_end_symbol_count;
 }
+
+std::filesystem::path mock_filesystem_wrapper_t::absolute(const std::filesystem::path& path,
+                                                          std::error_code&             error)
+{
+    m_absolute_calls.push_back(path);
+    if (const auto item = m_absolute_responses.find(path); item != m_absolute_responses.end())
+    {
+        error = item->second.error;
+        return item->second.result;
+    }
+
+    error.clear();
+    return path;
+}
+
+std::filesystem::file_status mock_filesystem_wrapper_t::status(const std::filesystem::path& path,
+                                                               std::error_code&             error)
+{
+    m_status_calls.push_back(path);
+    if (const auto item = m_status_responses.find(path); item != m_status_responses.end())
+    {
+        error = item->second.error;
+        return item->second.status;
+    }
+
+    error.clear();
+    return std::filesystem::file_status{std::filesystem::file_type::not_found};
+}
+
+bool mock_filesystem_wrapper_t::create_directories(const std::filesystem::path& path,
+                                                   std::error_code&             error)
+{
+    m_create_directories_calls.push_back(path);
+    error = m_create_directories_error;
+    return !error;
+}
+
+bool mock_filesystem_wrapper_t::copy_file(const std::filesystem::path&  source,
+                                          const std::filesystem::path&  destination,
+                                          std::filesystem::copy_options options,
+                                          std::error_code&              error)
+{
+    m_copy_file_calls.push_back({source, destination, options});
+    error = m_copy_file_error;
+    return !error;
+}
+
+void mock_filesystem_wrapper_t::set_absolute(const std::filesystem::path& path,
+                                             const std::filesystem::path& result)
+{
+    m_absolute_responses[path] = {result, std::error_code{}};
+}
+
+void mock_filesystem_wrapper_t::set_absolute_error(const std::filesystem::path& path,
+                                                   std::error_code              error)
+{
+    m_absolute_responses[path] = {std::filesystem::path{}, error};
+}
+
+void mock_filesystem_wrapper_t::set_status(const std::filesystem::path&  path,
+                                           std::filesystem::file_status status)
+{
+    m_status_responses[path] = {status, std::error_code{}};
+}
+
+void mock_filesystem_wrapper_t::set_status_error(const std::filesystem::path& path,
+                                                 std::error_code              error)
+{
+    m_status_responses[path] = {std::filesystem::file_status{}, error};
+}
+
+void mock_filesystem_wrapper_t::set_create_directories_error(std::error_code error)
+{
+    m_create_directories_error = error;
+}
+
+void mock_filesystem_wrapper_t::set_copy_file_error(std::error_code error)
+{
+    m_copy_file_error = error;
+}
+
+const std::vector<std::filesystem::path>& mock_filesystem_wrapper_t::get_absolute_calls() const
+{
+    return m_absolute_calls;
+}
+
+const std::vector<std::filesystem::path>& mock_filesystem_wrapper_t::get_status_calls() const
+{
+    return m_status_calls;
+}
+
+const std::vector<std::filesystem::path>& mock_filesystem_wrapper_t::get_create_directories_calls() const
+{
+    return m_create_directories_calls;
+}
+
+const std::vector<mock_filesystem_wrapper_t::copy_file_call_t>&
+    mock_filesystem_wrapper_t::get_copy_file_calls() const
+{
+    return m_copy_file_calls;
+}

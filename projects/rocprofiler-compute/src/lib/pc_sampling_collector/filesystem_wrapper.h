@@ -16,6 +16,8 @@ public:
 
     virtual ~filesystem_wrapper_t() = default;
 
+    virtual std::filesystem::path absolute(const std::filesystem::path& path,
+                                           std::error_code&             error) = 0;
     virtual std::filesystem::file_status status(const std::filesystem::path& path,
                                                 std::error_code&             error) = 0;
     virtual bool create_directories(const std::filesystem::path& path, std::error_code& error) = 0;
@@ -28,6 +30,8 @@ public:
 class filesystem_wrapper_impl_t : public filesystem_wrapper_t
 {
 public:
+    std::filesystem::path absolute(const std::filesystem::path& path,
+                                   std::error_code&             error) override;
     std::filesystem::file_status status(const std::filesystem::path& path,
                                         std::error_code&             error) override;
     bool create_directories(const std::filesystem::path& path, std::error_code& error) override;

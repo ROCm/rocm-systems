@@ -9,6 +9,12 @@ filesystem_wrapper_t::ptr filesystem_wrapper_t::create()
     return std::make_shared<filesystem_wrapper_impl_t>();
 }
 
+std::filesystem::path filesystem_wrapper_impl_t::absolute(const std::filesystem::path& path,
+                                                          std::error_code&             error)
+{
+    return std::filesystem::absolute(path, error);
+}
+
 std::filesystem::file_status filesystem_wrapper_impl_t::status(const std::filesystem::path& path,
                                                                std::error_code&             error)
 {

@@ -6,6 +6,8 @@ add_library(
     STATIC
     pc_sampling_collector.h
     pc_sampling_collector.cpp
+    filesystem_wrapper.h
+    filesystem_wrapper.cpp
     code_object_translator.h
     code_object_translator.cpp
     code_object_writer.h
