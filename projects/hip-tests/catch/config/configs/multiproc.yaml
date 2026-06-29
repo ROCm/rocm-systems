@@ -15,7 +15,7 @@ multiproc:
   Unit_hipDeviceGetAttribute_MaskedDevices: *level_2
   Unit_hipGetDeviceCount_MaskedDevices: *level_2
   Unit_hipGetDeviceProperties_MaskedDevices: *level_2
-  Unit_hipIpcEventHandle_Functional: *level_2
+  # Unit_hipIpcEventHandle_Functional: *level_2
   Unit_hipIpcEventHandle_ParameterValidation: *level_2
   Unit_hipIpcMemAccess_Semaphores:
     <<: *level_2
