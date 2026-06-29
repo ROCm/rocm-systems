@@ -375,10 +375,10 @@ public:
   /// @param val Value to write.
   void write_sgpr(uint32_t reg_idx, uint32_t val) { sgpr_file_[reg_idx] = val; }
 
-  void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint32_t lane_begin,
-                        uint32_t lane_end, uint8_t byte_mask = 0xF) const {
-    if (wf)
-      plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane_begin, lane_end, byte_mask);
+  void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
+                        uint8_t byte_mask = 0xF) const {
+    if (wf && lane_mask != 0)
+      plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
   /// @brief Read a vector register lane from the physical VGPR file.
@@ -621,7 +621,7 @@ public:
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
     if (auto *wf = vgpr_to_wave_[reg_idx]) {
-      this->plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1);
+      this->plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, uint64_t{1} << lane);
     }
     return vgpr_file_[reg_idx][lane];
   }

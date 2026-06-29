@@ -374,7 +374,7 @@ inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_
 template <typename Op> const VgprStorage *simd_src_reg(const Op &op, const Wavefront &wf) {
   const VgprStorage *r = SimdAccess::vgpr_storage(op, wf);
   if (r)
-    SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
+    SimdAccess::notify_read(op, wf, wf.exec(), 0xF);
   return r;
 }
 
@@ -392,7 +392,7 @@ template <typename Op> VgprStorage *simd_dst_reg(const Op &op, Wavefront &wf) {
 template <typename Op> ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) {
   ConstVgprStoragePair64 p = SimdAccess::vgpr_storage64(op, wf);
   if (p.lo)
-    SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
+    SimdAccess::notify_read(op, wf, wf.exec(), 0xF);
   return p;
 }
 
@@ -448,7 +448,9 @@ inline util::native<T> read_simd(const Op &op, const Wavefront &wf, uint32_t lan
   static_assert(sizeof(T) == sizeof(uint32_t), "read_simd: T must be a 32-bit lane type");
   if (const VgprStorage *r = SimdAccess::vgpr_storage(op, wf)) {
     constexpr auto W = static_cast<uint32_t>(util::native_width_v<T>);
-    SimdAccess::notify_read(op, wf, lane_base, lane_base + W, 0xF);
+    const uint64_t lane_mask =
+        ((wf.exec() >> lane_base) & util::mask<uint64_t>(static_cast<int>(W))) << lane_base;
+    SimdAccess::notify_read(op, wf, lane_mask, 0xF);
     return r->template simd_load<T>(lane_base);
   }
   return util::broadcast<T>(op.read_scalar(wf));
@@ -1034,7 +1036,9 @@ inline util::narrow32<T> read_narrow(const Op &op, const Wavefront &wf, uint32_t
   static_assert(sizeof(T) == sizeof(uint32_t), "read_narrow: T must be a 32-bit lane type");
   if (const VgprStorage *r = SimdAccess::vgpr_storage(op, wf)) {
     constexpr auto W = static_cast<uint32_t>(util::native_width64);
-    SimdAccess::notify_read(op, wf, lane_base, lane_base + W, 0xF);
+    const uint64_t lane_mask =
+        ((wf.exec() >> lane_base) & util::mask<uint64_t>(static_cast<int>(W))) << lane_base;
+    SimdAccess::notify_read(op, wf, lane_mask, 0xF);
     return r->template simd_load_narrow<T>(lane_base);
   }
   return util::broadcast_narrow<T>(op.read_scalar(wf));
