@@ -590,8 +590,10 @@ endif()
 
 # --- HIP tests (requires hipcc + CLI launcher) ---
 
-find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
-if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+if(RJ_ENABLE_HIP_TESTS)
+    find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
+endif()
+if(RJ_ENABLE_HIP_TESTS AND HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
     set(RJ_HIP_SANITIZER_FLAGS ${RJ_SANITIZER_COMPILE_OPTIONS})
@@ -821,13 +823,15 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     add_subdirectory(race-detector)
 
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
+elseif(NOT RJ_ENABLE_HIP_TESTS)
+    message(STATUS "HIP tests disabled (RJ_ENABLE_HIP_TESTS=OFF)")
 else()
     message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")
 endif()
 
 # --- Narrow conversion HIP CTS tests ---
 # Uses hipcc (rocjitsu emulator does not yet support amdclang++ -x hip binaries).
-if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+if(RJ_ENABLE_HIP_TESTS AND HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(CVT_NARROW_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_cvt_narrow_test)
     add_custom_command(
         OUTPUT ${CVT_NARROW_BIN}

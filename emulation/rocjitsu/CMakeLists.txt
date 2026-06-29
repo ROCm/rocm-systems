@@ -72,6 +72,19 @@ option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
+get_filename_component(_rj_cxx_compiler_name "${CMAKE_CXX_COMPILER}" NAME)
+if(_rj_cxx_compiler_name STREQUAL "amdclang++")
+    set(_rj_enable_hip_tests_default ON)
+else()
+    set(_rj_enable_hip_tests_default OFF)
+endif()
+option(
+    RJ_ENABLE_HIP_TESTS
+    "Build HIP-based integration tests"
+    ${_rj_enable_hip_tests_default}
+)
+unset(_rj_enable_hip_tests_default)
+unset(_rj_cxx_compiler_name)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
     "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
