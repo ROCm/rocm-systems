@@ -264,6 +264,7 @@ if(BUILD_TESTS)
       TransportTests.cpp
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
+      graph/SearchTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
