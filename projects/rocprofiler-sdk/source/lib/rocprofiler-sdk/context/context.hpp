@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/kernel_replay.h>
 #include <rocprofiler-sdk/registration.h>
 
 #include <array>
@@ -105,7 +106,10 @@ struct spm_dispatch_counter_collection_service
 /// the HSA queue path should run the multi-pass replay loop for this context.
 struct kernel_replay_service
 {
-    common::Synchronized<bool> enabled{false};
+    common::Synchronized<bool>                enabled{false};
+    // Returns how many replay passes (counter batches) to run for a dispatch. Supplied by the tool.
+    rocprofiler_kernel_replay_pass_count_cb_t pass_count_cb      = nullptr;
+    void*                                     pass_count_cb_args = nullptr;
 };
 
 struct device_counting_service
@@ -180,6 +184,14 @@ kernel_replay_is_enabled(const context* ctx)
     bool enabled = false;
     ctx->kernel_replay->enabled.rlock([&](const bool& v) { enabled = v; });
     return enabled;
+}
+
+/// @brief Number of replay passes the tool wants for this context (1 == no replay).
+inline uint64_t
+kernel_replay_pass_count(const context* ctx)
+{
+    if(!ctx || !ctx->kernel_replay || !ctx->kernel_replay->pass_count_cb) return 1;
+    return ctx->kernel_replay->pass_count_cb(ctx->kernel_replay->pass_count_cb_args);
 }
 
 // set the client index needs to be called before allocate_context()

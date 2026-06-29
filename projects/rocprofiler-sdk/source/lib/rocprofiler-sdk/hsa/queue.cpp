@@ -97,29 +97,14 @@ struct replay_pass_state
     hsa_signal_t              pass_done         = {.handle = 0};
 };
 
-// Number of replay passes requested. Opt-in via env so non-replay runs are unaffected; a value <= 1
-// disables replay.
-int
-kernel_replay_passes()
-{
-    static const int _v = []() {
-        if(const char* e = std::getenv("ROCPROFILER_KERNEL_REPLAY_PASSES"))
-        {
-            int v = std::atoi(e);
-            return v > 0 ? v : 1;
-        }
-        return 1;
-    }();
-    return _v;
-}
-
-// True if any active context has the kernel-replay service enabled.
-bool
-kernel_replay_active()
+// Number of replay passes for the active kernel-replay context (the tool supplies it via the
+// service's pass-count callback). Returns 1 when no replay context is active, which disables replay.
+uint64_t
+kernel_replay_pass_count()
 {
     for(const auto* ctx : context::get_active_contexts())
-        if(context::kernel_replay_is_enabled(ctx)) return true;
-    return false;
+        if(context::kernel_replay_is_enabled(ctx)) return context::kernel_replay_pass_count(ctx);
+    return 1;
 }
 
 template <typename DomainT, typename... Args>
@@ -775,8 +760,8 @@ WriteInterceptor(const void* packets,
     // thread; reuses process_packet_batch for each pass so counter collection, the serializer, the
     // async signal handler, and record_callback all behave exactly as in the single-pass path.
     // Opt-in and gated so non-replay runs are unchanged.
-    if(const int replay_n = kernel_replay_passes();
-       replay_n > 1 && pkt_count == 1 && num_dispatch_packets == 1 && kernel_replay_active())
+    if(const int replay_n = static_cast<int>(kernel_replay_pass_count());
+       replay_n > 1 && pkt_count == 1 && num_dispatch_packets == 1)
     {
         const auto& core = queue.core_api();
 

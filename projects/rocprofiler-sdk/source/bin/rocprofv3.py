@@ -2068,15 +2068,9 @@ def run(app_args, args, **kwargs):
 
     if getattr(args, "kernel_replay", None):
         # Route counter collection through the in-process kernel-replay service (consumed by the
-        # tool, config.hpp: ROCPROF_KERNEL_REPLAY) and tell the SDK how many passes to run
-        # (consumed in hsa/queue.cpp: ROCPROFILER_KERNEL_REPLAY_PASSES).
+        # tool, config.hpp: ROCPROF_KERNEL_REPLAY). The SDK derives the pass count from the number
+        # of counter groups via the tool's pass-count callback, so no pass-count env is needed.
         update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
-        passes = getattr(args, "kernel_replay_passes", None)
-        if passes is None:
-            passes = 1
-        if passes < 1:
-            fatal_error("--kernel-replay-passes must be >= 1")
-        update_env("ROCPROFILER_KERNEL_REPLAY_PASSES", passes, overwrite=True)
     elif getattr(args, "kernel_replay_passes", None) is not None:
         fatal_error("--kernel-replay-passes requires --kernel-replay")
 
@@ -2407,6 +2401,29 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+
+    # Kernel replay collects all counter groups within a SINGLE application run (the SDK replays
+    # each dispatch once per group), so it must not use the per-group child-process relaunch. Merge
+    # every counter group (from CLI --pmc and/or input-file pmc lines) into cmd_args.pmc as a
+    # list-of-lists; process_args then emits ROCPROF_COUNTER_GROUPS and the app runs once.
+    if getattr(cmd_args, "kernel_replay", None):
+        replay_groups = []
+        if cli_has_pmc:
+            for g in cmd_args.pmc:
+                replay_groups.append(g if isinstance(g, list) else [g])
+        for inp_arg in inp_args:
+            if has_set_attr(inp_arg, "pmc"):
+                pmc = inp_arg.pmc
+                replay_groups.append(pmc if isinstance(pmc, list) else [pmc])
+        if replay_groups:
+            cmd_args.pmc = replay_groups
+            inp_args = inp_args[:1] if inp_args else [dotdict({})]
+            if has_set_attr(inp_args[0], "pmc"):
+                inp_args[0].pmc = None
+        cli_has_pmc = cmd_args.pmc is not None
+        input_has_pmc = False
+        cli_multipass = False
+
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 
     if not use_multipass:

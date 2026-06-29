@@ -1787,6 +1787,16 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     }
 }
 
+// Kernel replay: how many passes to run = number of counter batches (groups) the tool wants
+// collected. Each pass collects one batch via counter_dispatch_callback. Returning 1 disables
+// replay. (Targeting/range filtering is intentionally not applied here yet.)
+uint64_t
+counter_replay_pass_count_callback(void* /*callback_data_args*/)
+{
+    const auto n = tool::get_config().counters.size();
+    return (n == 0) ? 1 : n;
+}
+
 void
 counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                         rocprofiler_counter_record_t*                record_data,
@@ -2976,6 +2986,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                      callbacks.counter_dispatch,
                                                                      nullptr,
                                                                      callbacks.counter_record,
+                                                                     nullptr,
+                                                                     counter_replay_pass_count_callback,
                                                                      nullptr),
                 "Could not setup kernel-replay counting service");
         }
