@@ -2,6 +2,12 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
+## rocDecode 1.8.1 for ROCm 7.14
+
+### Added
+
+* Invalid video size handling for AVC/HEVC.
+
 ## rocDecode 1.8.0 for ROCm 7.13
 
 ### Added

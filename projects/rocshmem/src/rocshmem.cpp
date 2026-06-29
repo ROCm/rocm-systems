@@ -640,6 +640,15 @@ __host__ void * rocshmem_ptr(const void * dest, int pe){
   VERIFY_BACKEND();
 
   /*
+   * Dump backend statistics if ROCSHMEM_DEBUG_LEVEL=...:stats was requested.
+   * Must be called before destroy_remaining_ctxs() so that list_of_ctxs
+   * is still populated for host-stats accumulation.
+   */
+  if (envvar::log_flags.show_stats) {
+    backend->dump_stats();
+  }
+
+  /*
    * Destroy all the ctxs that the user
    * created but did not manually destroy
    */

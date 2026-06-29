@@ -11,10 +11,10 @@ matrix-ubuntu-nightly:
   - { os-release: '22.04', gpu: 'mi200', arch: 'gfx90a', runner: 'linux-gfx90a-gpu-rocm' }
   - { os-release: '24.04', gpu: 'mi200', arch: 'gfx90a', runner: 'linux-gfx90a-gpu-rocm' }
   # Strix Halo
-  - { os-release: '22.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-strix-halo-gpu-rocm' }
-  - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-strix-halo-gpu-rocm' }
+  - { os-release: '22.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-gfx1151-gpu-rocm' }
+  - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-gfx1151-gpu-rocm' }
 matrix-ubuntu-ci:
   # MI355
   - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
   # Strix Halo
-  - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-strix-halo-gpu-rocm' }
+  - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-gfx1151-gpu-rocm' }

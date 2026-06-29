@@ -61,7 +61,7 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/amdgpu_gfx1250.json";
+const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250.json";
 
 constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
 constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;

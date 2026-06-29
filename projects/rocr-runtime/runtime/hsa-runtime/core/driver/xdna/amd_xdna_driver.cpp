@@ -881,11 +881,6 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
   }
 }
 
-hsa_status_t XdnaDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Nothing to do for XDNA since we have a single, non-ref counted handle.
-  return HSA_STATUS_SUCCESS;
-}
-
 hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,
                              size_t offset, size_t size,
                              hsa_access_permission_t perms, uint32_t node_id) {
