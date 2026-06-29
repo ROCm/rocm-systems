@@ -131,6 +131,10 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
+// Returns true when the CE AllReduce path should be used instead of the standard ring/tree kernels.
+// Does NOT check ceARTmpBuf initialization; the caller is responsible.
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
+                        ncclDataType_t datatype, ncclRedOp_t op);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);

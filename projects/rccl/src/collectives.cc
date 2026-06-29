@@ -552,6 +552,21 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
+  // CE AllReduce path: scatter → local-reduce → CE allgather → local copy.
+  // Only usable outside a group (ncclGroupDepth==0) and when CE is already
+  // initialized (ceARTmpBuf != NULL).  On the very first call the CE runtime
+  // may not be ready yet; ncclEnqueueCheck will trigger CE init as a side
+  // effect (because ncclCeImplemented now returns true for AllReduce), so the
+  // second and all subsequent calls use the CE path.
+  if (ncclGroupDepth == 0 &&
+      rcclUseCeAllReduce(comm, count, datatype, op) &&
+      comm->ceColl.ceARTmpBuf != NULL) {
+    if (count == 0) return ncclSuccess;
+    WARN("CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d",
+         count, (int)datatype, (int)op, comm->rank, comm->nRanks);
+    return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream);
+  }
+
   // Let the symmetric kernel take priority when the user registered these
   // buffers as symmetric windows; otherwise fall through to DDA.
   bool symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype,

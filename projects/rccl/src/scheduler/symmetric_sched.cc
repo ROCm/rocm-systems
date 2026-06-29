@@ -95,6 +95,15 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
       NCCLCHECK(ncclDevrFindWindow(comm, task->recvbuff, &task->recvWin));
       NCCLCHECK(ncclGetSymRegType(task->sendWin, task->recvWin, &task->winRegType));
+#ifndef GENERATE_SYM_KERNELS
+    // without GENERATE_SYM_KERNELS, ncclSymkGetKernelPtr()
+    // returns nullptr for AllReduce, which causes a 'invalid device function'
+    // error when the scheduler tries to launch it.  ncclSymkAvailable() does
+    // not catch this because it consults a separate kernel-mask table.  Force
+    // AllReduce out of the symmetric path so it falls back to the standard
+    // ring/tree kernels (or to the CE AllReduce path when message size fits).
+    if (task->func == ncclFuncAllReduce) symAvailable = false;
+#endif
 
       index =
         (((int)task->func * ncclNumDevRedOps + symkOp) * ncclNumTypes + (int)task->datatype) * ncclNumSymRegTypes +

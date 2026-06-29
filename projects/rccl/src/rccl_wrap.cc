@@ -42,6 +42,7 @@ RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
+RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -588,6 +589,36 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 
   // return (comm->enableCustColl && (comm->nNodes > 1) && (msgSize <= threshold) && (threshold != -1))
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
+}
+
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
+                        ncclDataType_t datatype, ncclRedOp_t op) {
+  static int enabled = rcclParamCeAllReduce();
+  if (!enabled) {
+    INFO(NCCL_INIT, "CE AllReduce not enabled. Set RCCL_CE_ALLREDUCE=1 to enable.");
+    return false;
+  }
+
+  // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
+  if (!comm->symmetricSupport) return false;
+  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) return false;
+  if (comm->nNodes != 1) return false;
+
+  // count must divide evenly so every rank owns an equal shard.
+  if (count == 0 || count % (size_t)comm->nRanks != 0) return false;
+
+  // Total message must fit within the pre-allocated staging buffer.
+  size_t msgBytes = count * ncclTypeSize(datatype);
+  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) return false;
+
+  // Only standard reduction ops with a simple kernel implementation.
+  // ncclAvg (maps to SumPostDiv) and user-defined PreMulSum fall back to ring.
+  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) return false;
+
+  // Float8 types require specialised handling not yet implemented for CE AR.
+  if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) return false;
+
+  return true;
 }
 
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {

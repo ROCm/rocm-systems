@@ -1935,6 +1935,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->func = task->func;
         plan->ceCollArgs->sendWin = task->sendWin;
         plan->ceCollArgs->recvWin = task->recvWin;
+        plan->ceCollArgs->datatype = task->datatype;
+        plan->ceCollArgs->redOp = task->opHost;
         plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
 
         if (comm->rank == 0) {
@@ -3312,14 +3314,9 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
                                      struct ncclDevrWindow* recvWin, struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner* planner = &comm->planner;
 
-  // Check if CE needs initialization
-  if (comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
-    struct ncclCeInitTask* ceTask;
-    NCCLCHECK(ncclCalloc(&ceTask, 1));
-    ceTask->comm = comm;
-    ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
-    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
-  }
+  // CE init is triggered in taskAppend() before this function is called,
+  // covering all CE-capable collectives including AllReduce (when user buffers
+  // are symmetrically registered via ncclMemAlloc / -R 2).
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
@@ -3625,7 +3622,41 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
 
-      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) {
+      // Trigger CE initialization on the first CE-capable collective.
+      // This covers collectives whose user buffers ARE registered (AllGather,
+      // AlltoAll, Scatter, Gather) as well as AllReduce, which may bypass the
+      // ceCollTaskAppend path when user buffers are not symmetrically registered.
+      // Without this trigger, CE AllReduce-only workloads would never initialize
+      // the CE runtime (ceARTmpBuf stays NULL).
+      if (ncclCeImplemented(info->coll, info->op, info->datatype) &&
+          comm->symmetricSupport && comm->nNodes == 1 &&
+          comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO &&
+          comm->ceColl.baseUCSymReadyPtr == NULL &&
+          ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
+        struct ncclCeInitTask* ceTask;
+        NCCLCHECK(ncclCalloc(&ceTask, 1));
+        ceTask->comm = comm;
+        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
+        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+      }
+
+      // Size gate for CE AllReduce: ceARTmpBuf is sized for at most
+      // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
+      bool ceAllReduceFits = true;
+      if (info->coll == ncclFuncAllReduce) {
+        if (!rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
+          ceAvailable = false;
+        } else {
+          size_t totalBytes = info->count * ncclTypeSize(info->datatype);
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES) {
+            ceAllReduceFits = false;
+            INFO(NCCL_COLL, "CE AllReduce: msg %zu B > cap %zu B, falling back to standard NCCL AllReduce",
+                 totalBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
+          }
+        }
+      }
+
+      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment && ceAllReduceFits) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       }
       // Append kernel-based collective

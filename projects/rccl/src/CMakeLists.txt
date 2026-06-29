@@ -71,6 +71,7 @@ set(SRC_FILES
   device/rccl_metadata.h
   device/sendrecv.h
   device/hierarchical_ag_shuffle.h
+  device/ce_reduce.cc
   device/common.cu
   device/onerank.cu
   device/network/unpack/unpack_defs.h
@@ -706,7 +707,12 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric\\.cu\\.cpp$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_alltoall_fabric.cu.cpp)")
+  # ce_reduce.cc contains the CE AllReduce __global__ kernel and its launcher;
+  # it is compiled with full HIP by the device linker step (ce_reduce.o) so the
+  # fat binary is properly embedded. ce_coll.cc (no __global__ call sites)
+  # stays in the main target and is compiled --offload-host-only as usual.
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "device/ce_reduce\\.cc$")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, device/ce_reduce.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_alltoall_fabric.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
