@@ -10,6 +10,11 @@ and the ROCpd (.db) database.
 
 AI NIC devices are discovered at runtime via ``amd-smi static | grep -i netdev``.
 The test is skipped automatically when no AI NIC devices are present on the system.
+
+Coverage note: these tests exercise the AMD SMI provider initialization path
+fixed in source/lib/rocprof-sys/library/pmc/device_providers/amd_smi/provider.hpp
+(AMDSMI_INIT_AMD_NICS flag, ROCM-25722). CI runners do not have AI NIC hardware,
+so the tests run only on systems with AI NIC devices present.
 """
 
 from __future__ import annotations
