@@ -147,6 +147,8 @@ SKIPPABLE_PATH_PATTERNS = [
     ".github/workflows/labeler.yml",
     ".github/workflows/amdsmi-manylinux-build.yml",
     ".github/workflows/rocjitsu-corpus-tests.yml",
+    # TEMPORARY: MI455 presubmit workflow (separate from main CI)
+    ".github/workflows/therock-mi455-presubmit.yml",
 ]
 
 

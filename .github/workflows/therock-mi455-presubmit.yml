@@ -1,6 +1,17 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+# =============================================================================
+# TEMPORARY WORKFLOW - MI455 BRINGUP
+# =============================================================================
+# This workflow is temporary and will be removed once MI455 bringup is complete.
+# After bringup, MI455 (gfx125X-dcgpu) will be onboarded into the standard
+# multi-arch CI via therock-ci-config.
+#
+# TODO(geomin12): Delete this workflow once MI455 is fully enabled in
+#                 therock-ci-config and the multi-arch CI.
+# =============================================================================
+
 # MI455 (gfx125X) Pre-submit CI
 #
 # This workflow runs MI455-specific tests when HIP or ROCR paths are updated.
@@ -26,6 +37,13 @@ on:
       - 'projects/rocr-debug-agent/**'
       # Also trigger on changes to this workflow
       - '.github/workflows/therock-mi455-presubmit.yml'
+    paths-ignore:
+      # Ignore documentation updates
+      - '**/*.md'
+      - 'docs/**'
+      - '**/README*'
+      - '**/CONTRIBUTING*'
+      - '**/LICENSE*'
   workflow_dispatch:
     inputs:
       linux_test_labels:
