@@ -160,9 +160,9 @@ LoaderOptions::LoaderOptions(std::ostream& error) :
   option_parser.AddOption(&dump_dir);
   option_parser.AddOption(&substitute);
 
-  // LOADER_ENABLE_TRAMPOLINE: set to enable gfx125x kernel-entry trampolines.
+  // LOADER_ENABLE_TRAMPOLINE=1: enable gfx125x kernel-entry trampolines.
   const char* enable_trampoline = getenv("LOADER_ENABLE_TRAMPOLINE");
-  if (enable_trampoline && std::strcmp(enable_trampoline, "0") != 0) {
+  if (enable_trampoline && std::strcmp(enable_trampoline, "1") == 0) {
     trampoline_enabled_ = true;
   }
 }
