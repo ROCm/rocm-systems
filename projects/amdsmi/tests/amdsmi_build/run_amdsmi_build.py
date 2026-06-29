@@ -1186,7 +1186,12 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
 
     # 4. Python test outputs
     fail_re = _re.compile(r"^(FAIL|ERROR):", _re.MULTILINE)
-    for test_file in ("integration_test_output.txt", "unit_test_output.txt", "perf_test_output.txt"):
+    for test_file in (
+        "integration_test_output.txt",
+        "unit_test_output.txt",
+        "perf_test_output.txt",
+        "abi_compat_output.txt",
+    ):
         full = results_dir / test_file
         if not full.exists():
             continue
