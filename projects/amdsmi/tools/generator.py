@@ -120,7 +120,7 @@ def insert_layout_ms(full_path_file_name):
     fh, abs_path = tempfile.mkstemp()
     standalone = re.compile(r"^(\s*)(\S+)\._pack_ = ")
     inline = re.compile(r"^(\s+)_pack_ = ")
-    with os.fdopen(fh, "w") as new_file:
+    with os.fdopen(fh, "w", encoding="UTF-8") as new_file:
         with open(full_path_file_name, "r", encoding="UTF-8") as old_file:
             for line in old_file:
                 new_file.write(line)
