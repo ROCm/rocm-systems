@@ -11,13 +11,11 @@
 #include "ptr__types.h"
 #ifdef __CUDACC__
 #include "nccl_device/gin/gin_device_api.h"
-#endif
 #include <new>
 
 namespace nccl {
 namespace gin {
 namespace internal {
-#ifdef __CUDACC__
 NCCL_DEVICE_INLINE size_t windowOffsetToGinOffset(ncclWindow_t window, size_t offset) {
   using nccl::utility::loadConst;
   return 4096 * size_t(loadConst(&window->ginOffset4K)) + offset;
@@ -104,10 +102,10 @@ NCCL_DEVICE_INLINE ncclResult_t waitRollingLessEq(ncclGinOffsetPtr ref, uint64_t
   }
 }
 
-#endif // __CUDACC__
 } // namespace internal
 } // namespace gin
 } // namespace nccl
+#endif // __CUDACC__
 
 #ifdef __CUDACC__
 // Common initialization helper for GIN backend

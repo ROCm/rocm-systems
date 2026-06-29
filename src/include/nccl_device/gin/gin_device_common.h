@@ -57,6 +57,7 @@ enum ncclGinOptFlags {
    ((NCCL_GIN_GPI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GPI | \
    ((NCCL_GIN_EFA_GDA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_EFA_GDA)
 
+#ifdef __CUDACC__
 // Resource sharing mode for a given ncclGin/ncclGin_C *instance*.
 // This mode is selected at construction time and is carried by the ncclGin
 // object, then copied into ncclGinCtx for each call. It is not stored as
@@ -105,6 +106,7 @@ struct ncclGinSignalDescriptor {
   };
   bool isStrong;
 };
+#endif // __CUDACC__
 
 #ifdef __CUDACC__
 

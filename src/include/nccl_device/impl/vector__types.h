@@ -11,6 +11,8 @@
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <cuda_fp16.h>
+
+#ifdef __CUDACC__
 #include <algorithm>
 
 // Forward declaration for sum reduction operator (defined in reduce_copy__types.h)
@@ -156,5 +158,6 @@ struct MinMultimemType<__nv_fp8_e5m2> {
 
 } // namespace utility
 } // namespace nccl
+#endif // __CUDACC__
 
 #endif // _NCCL_DEVICE_VECTOR__TYPES_H_
