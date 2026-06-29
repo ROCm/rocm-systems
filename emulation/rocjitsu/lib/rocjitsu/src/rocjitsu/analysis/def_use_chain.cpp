@@ -10,11 +10,7 @@ namespace rocjitsu {
 
 namespace {
 
-// A vector def (VGPR/AccVGPR) normally preserves inactive lanes under EXEC, so
-// it cannot always be treated as an unconditional kill. The exception is instructions
-// flagged IGNORES_EXEC (e.g. branch-class ops). We flag non-EXEC ignoring vector
-// def instructions as "EXEC masked def" so once the EXEC state at that instruction is
-// determined, liveness analysis can properly assign the vector def as full kill or not.
+// Checks if a RegisterRef class is a vector (VGPR/AccVGPR)
 [[nodiscard]] bool is_vector_def(RegisterRef ref) {
   return ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR;
 }
