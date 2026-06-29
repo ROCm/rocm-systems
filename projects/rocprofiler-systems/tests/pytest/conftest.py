@@ -2342,7 +2342,14 @@ def _find_perfetto_merge_script(tests_dir: Path) -> Optional[Path]:
             install_prefix / "libexec" / "rocprofiler-systems" / _PERFETTO_MERGE_SCRIPT
         )
 
-    return next((candidate for candidate in candidates if candidate.exists()), None)
+    return next(
+        (
+            candidate
+            for candidate in candidates
+            if candidate.is_file() and os.access(candidate, os.X_OK)
+        ),
+        None,
+    )
 
 
 def _recover_merged_perfetto_trace(
@@ -2395,13 +2402,16 @@ def _recover_merged_perfetto_trace(
             False, f"Recovery failed: could not execute {merge_script}: {exc}"
         )
 
-    message = (
-        "Recovery attempted with "
-        f"{merge_script}; returncode={result.returncode}\n{result.stdout}"
-    )
+    detail = f"{merge_script}; returncode={result.returncode}\n{result.stdout}"
     if result.returncode == 0 and perfetto.exists():
-        return PerfettoMergeRecoveryResult(True, message)
-    return PerfettoMergeRecoveryResult(False, message)
+        return PerfettoMergeRecoveryResult(True, f"Recovery succeeded with {detail}")
+    if result.returncode == 0:
+        return PerfettoMergeRecoveryResult(
+            False,
+            f"Recovery failed: {merge_script} exited 0 but produced no "
+            f"{MERGED_PERFETTO_FILE}\n{detail}",
+        )
+    return PerfettoMergeRecoveryResult(False, f"Recovery failed with {detail}")
 
 
 @pytest.fixture
@@ -2452,6 +2462,9 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
             else:
                 perfetto = result.perfetto_file
             if not perfetto.exists():
+                if perfetto.name != MERGED_PERFETTO_FILE:
+                    pytest.fail(f"Perfetto trace file {perfetto} not found")
+
                 recovery = _recover_merged_perfetto_trace(perfetto, tests_dir)
                 # Recovery may have produced the missing merged trace.
                 if not perfetto.exists():

@@ -96,6 +96,7 @@ class TestPerfettoMergeRecovery(RocprofsysTest):
 
         assert result.ok
         assert merged_trace.read_text() == "rank trace"
+        assert "Recovery succeeded" in result.message
         assert "returncode=0" in result.message
 
     def test_recover_merged_perfetto_trace_skips_non_merged_trace(self, tmp_path):
@@ -117,6 +118,29 @@ class TestPerfettoMergeRecovery(RocprofsysTest):
 
         assert not result.ok
         assert "no perfetto-trace-*.proto files found" in result.message
+
+    def test_recover_merged_perfetto_trace_requires_executable_merge_script(
+        self, tmp_path, monkeypatch
+    ):
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        (output_dir / "perfetto-trace-0.proto").write_text("rank trace")
+
+        script_dir = tmp_path / "scripts"
+        script_dir.mkdir()
+        merge_script = script_dir / "rocprof-sys-merge-output.sh"
+        merge_script.write_text("#!/bin/sh\nexit 0\n")
+        merge_script.chmod(0o644)
+
+        monkeypatch.setenv("ROCPROFSYS_SCRIPT_PATH", str(script_dir))
+        monkeypatch.setattr(pytest_config.time, "sleep", lambda _: None)
+
+        result = pytest_config._recover_merged_perfetto_trace(
+            output_dir / "merged.proto", tmp_path
+        )
+
+        assert not result.ok
+        assert "rocprof-sys-merge-output.sh not found" in result.message
 
     def test_recover_merged_perfetto_trace_handles_merge_timeout(
         self, tmp_path, monkeypatch
@@ -163,4 +187,29 @@ class TestPerfettoMergeRecovery(RocprofsysTest):
         )
 
         assert not result.ok
+        assert "Recovery failed" in result.message
         assert "returncode=3" in result.message
+
+    def test_recover_merged_perfetto_trace_reports_missing_output_after_success(
+        self, tmp_path, monkeypatch
+    ):
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        (output_dir / "perfetto-trace-0.proto").write_text("rank trace")
+
+        script_dir = tmp_path / "scripts"
+        script_dir.mkdir()
+        merge_script = script_dir / "rocprof-sys-merge-output.sh"
+        merge_script.write_text("#!/bin/sh\nexit 0\n")
+        merge_script.chmod(0o755)
+
+        monkeypatch.setenv("ROCPROFSYS_SCRIPT_PATH", str(script_dir))
+        monkeypatch.setattr(pytest_config.time, "sleep", lambda _: None)
+
+        result = pytest_config._recover_merged_perfetto_trace(
+            output_dir / "merged.proto", tmp_path
+        )
+
+        assert not result.ok
+        assert "exited 0 but produced no merged.proto" in result.message
+        assert "returncode=0" in result.message

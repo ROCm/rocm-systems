@@ -99,8 +99,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   `ROCPROFSYS_TRACE`; setting `ROCPROFSYS_USE_TRACE` had no effect.
 - Fixed a pre-main `rocprof-sys-run` `SIGSEGV` in `rocprofiler_configure()` when
   profiling OpenMPI GPU-aware MPI workloads.
-- Fixed UCX MPI Perfetto validation by recovering a missing `merged.proto` from
-  available per-rank Perfetto traces.
 
 ### Known issues
 
