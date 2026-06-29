@@ -786,16 +786,18 @@ get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime"
 # Keep COMGR out of rocrtst link/package dependencies. These optional build
 # runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
 set(HOTSWAP_BUILD_RPATH "")
-foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
-  foreach(_libdir IN ITEMS lib lib64 tools/comgr/lib)
-    set(_comgr_libdir "${_prefix}/${_libdir}")
-    if(EXISTS "${_comgr_libdir}/libamd_comgr.so" OR
-       EXISTS "${_comgr_libdir}/libamd_comgr.so.3")
-      list(APPEND HOTSWAP_BUILD_RPATH "${_comgr_libdir}")
-    endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+    foreach(_libdir IN ITEMS lib lib64 tools/comgr/lib)
+      set(_comgr_libdir "${_prefix}/${_libdir}")
+      if(EXISTS "${_comgr_libdir}/libamd_comgr.so" OR
+         EXISTS "${_comgr_libdir}/libamd_comgr.so.3")
+        list(APPEND HOTSWAP_BUILD_RPATH "${_comgr_libdir}")
+      endif()
+    endforeach()
   endforeach()
-endforeach()
-list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
+  list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
+endif()
 
 set(HOTSWAP_GFX1250_ASM "${ROCRTST_ROOT}/suites/functional/fixtures/gfx1250_min.s")
 set(HOTSWAP_GFX1250_HSACO "${PROJECT_BINARY_DIR}/gfx1250_min.hsaco")
@@ -851,12 +853,14 @@ target_include_directories(hotswap_rewrite PRIVATE
   ${ROCRTST_ROOT}/gtest/include)
 target_compile_definitions(hotswap_rewrite PRIVATE ROCR_HOTSWAP_TESTING)
 target_link_libraries(hotswap_rewrite ${GOOGLE_TEST_FRWK_NAME} ${CMAKE_DL_LIBS} pthread)
-set_target_properties(hotswap_rewrite PROPERTIES
-  LINK_FLAGS "-Wl,--enable-new-dtags"
-  INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../lib64")
-if(HOTSWAP_BUILD_RPATH)
-  set_property(TARGET hotswap_rewrite PROPERTY
-    BUILD_RPATH "${HOTSWAP_BUILD_RPATH}")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set_target_properties(hotswap_rewrite PROPERTIES
+    LINK_FLAGS "-Wl,--enable-new-dtags"
+    INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../lib64")
+  if(HOTSWAP_BUILD_RPATH)
+    set_property(TARGET hotswap_rewrite PROPERTY
+      BUILD_RPATH "${HOTSWAP_BUILD_RPATH}")
+  endif()
 endif()
 add_test(NAME hotswap_rewrite COMMAND hotswap_rewrite)
 set_tests_properties(hotswap_rewrite PROPERTIES
