@@ -1888,26 +1888,40 @@ __device__ inline int ipc_tile_reduce_dispatch(IPCContext* ctx,
           ctx, team, dst_data, src_data, dst_strides, src_strides,
           start_coord, boundary, ndim, root, granularity);
     case ROCSHMEM_TILE_ELEMENT_INT16:
+    case ROCSHMEM_TILE_ELEMENT_SHORT:
       return ipc_tile_reduce_typed<short, Op>(
           ctx, team, dst_data, src_data, dst_strides, src_strides,
           start_coord, boundary, ndim, root, granularity);
     case ROCSHMEM_TILE_ELEMENT_UINT16:
+    case ROCSHMEM_TILE_ELEMENT_USHORT:
       return ipc_tile_reduce_typed<unsigned short, Op>(
           ctx, team, dst_data, src_data, dst_strides, src_strides,
           start_coord, boundary, ndim, root, granularity);
     case ROCSHMEM_TILE_ELEMENT_INT32:
+    case ROCSHMEM_TILE_ELEMENT_INT:
       return ipc_tile_reduce_typed<int, Op>(
           ctx, team, dst_data, src_data, dst_strides, src_strides,
           start_coord, boundary, ndim, root, granularity);
     case ROCSHMEM_TILE_ELEMENT_UINT32:
+    case ROCSHMEM_TILE_ELEMENT_UINT:
       return ipc_tile_reduce_typed<unsigned int, Op>(
           ctx, team, dst_data, src_data, dst_strides, src_strides,
           start_coord, boundary, ndim, root, granularity);
+    case ROCSHMEM_TILE_ELEMENT_LONG:
+      return ipc_tile_reduce_typed<long, Op>(
+          ctx, team, dst_data, src_data, dst_strides, src_strides,
+          start_coord, boundary, ndim, root, granularity);
+    case ROCSHMEM_TILE_ELEMENT_ULONG:
+      return ipc_tile_reduce_typed<unsigned long, Op>(
+          ctx, team, dst_data, src_data, dst_strides, src_strides,
+          start_coord, boundary, ndim, root, granularity);
     case ROCSHMEM_TILE_ELEMENT_INT64:
+    case ROCSHMEM_TILE_ELEMENT_LONGLONG:
       return ipc_tile_reduce_typed<long long, Op>(
           ctx, team, dst_data, src_data, dst_strides, src_strides,
           start_coord, boundary, ndim, root, granularity);
     case ROCSHMEM_TILE_ELEMENT_UINT64:
+    case ROCSHMEM_TILE_ELEMENT_ULONGLONG:
       return ipc_tile_reduce_typed<unsigned long long, Op>(
           ctx, team, dst_data, src_data, dst_strides, src_strides,
           start_coord, boundary, ndim, root, granularity);

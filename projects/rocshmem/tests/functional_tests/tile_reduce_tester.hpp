@@ -13,7 +13,14 @@ using namespace rocshmem;
 
 __global__ void TileReduceThreadTest(rocshmem_team_t team, float *source,
                                      float *sum_dest, float *max_dest,
-                                     float *min_dest, int tile_extent_0,
+                                     float *min_dest, short *short_source,
+                                     short *short_sum_dest,
+                                     short *short_max_dest,
+                                     short *short_min_dest, int *int_source,
+                                     int *int_sum_dest, int *int_max_dest,
+                                     int *int_min_dest, long *long_source,
+                                     long *long_sum_dest, long *long_max_dest,
+                                     long *long_min_dest, int tile_extent_0,
                                      int tile_extent_1, int my_world_pe,
                                      int n_pes, int root,
                                      ShmemContextType ctx_type,
@@ -21,7 +28,14 @@ __global__ void TileReduceThreadTest(rocshmem_team_t team, float *source,
 
 __global__ void TileReduceWaveTest(rocshmem_team_t team, float *source,
                                    float *sum_dest, float *max_dest,
-                                   float *min_dest, int tile_extent_0,
+                                   float *min_dest, short *short_source,
+                                   short *short_sum_dest,
+                                   short *short_max_dest,
+                                   short *short_min_dest, int *int_source,
+                                   int *int_sum_dest, int *int_max_dest,
+                                   int *int_min_dest, long *long_source,
+                                   long *long_sum_dest, long *long_max_dest,
+                                   long *long_min_dest, int tile_extent_0,
                                    int tile_extent_1, int my_world_pe,
                                    int n_pes, int root,
                                    ShmemContextType ctx_type, int wf_size,
@@ -29,7 +43,13 @@ __global__ void TileReduceWaveTest(rocshmem_team_t team, float *source,
 
 __global__ void TileReduceTest(rocshmem_team_t *teams, int num_teams,
                                float *source, float *sum_dest, float *max_dest,
-                               float *min_dest, int tile_extent_0,
+                               float *min_dest, short *short_source,
+                               short *short_sum_dest, short *short_max_dest,
+                               short *short_min_dest, int *int_source,
+                               int *int_sum_dest, int *int_max_dest,
+                               int *int_min_dest, long *long_source,
+                               long *long_sum_dest, long *long_max_dest,
+                               long *long_min_dest, int tile_extent_0,
                                int tile_extent_1, int my_world_pe, int n_pes,
                                int root, ShmemContextType ctx_type,
                                int *error_flag);
@@ -59,6 +79,18 @@ class TileReduceTester : public Tester {
   float *sum_dest;
   float *max_dest;
   float *min_dest;
+  short *short_source;
+  short *short_sum_dest;
+  short *short_max_dest;
+  short *short_min_dest;
+  int *int_source;
+  int *int_sum_dest;
+  int *int_max_dest;
+  int *int_min_dest;
+  long *long_source;
+  long *long_sum_dest;
+  long *long_max_dest;
+  long *long_min_dest;
   int tile_extent_0;
   int tile_extent_1;
 

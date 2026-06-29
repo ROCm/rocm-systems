@@ -56,52 +56,49 @@ namespace rocshmem {
   template <>
   struct rocshmem_tile_element_type<short> {
     static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
-        ROCSHMEM_TILE_ELEMENT_INT16;
+        ROCSHMEM_TILE_ELEMENT_SHORT;
   };
 
   template <>
   struct rocshmem_tile_element_type<unsigned short> {
     static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
-        ROCSHMEM_TILE_ELEMENT_UINT16;
+        ROCSHMEM_TILE_ELEMENT_USHORT;
   };
 
   template <>
   struct rocshmem_tile_element_type<int> {
     static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
-        ROCSHMEM_TILE_ELEMENT_INT32;
+        ROCSHMEM_TILE_ELEMENT_INT;
   };
 
   template <>
   struct rocshmem_tile_element_type<unsigned int> {
     static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
-        ROCSHMEM_TILE_ELEMENT_UINT32;
+        ROCSHMEM_TILE_ELEMENT_UINT;
   };
 
   template <>
   struct rocshmem_tile_element_type<long> {
     static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
-        sizeof(long) == sizeof(int) ? ROCSHMEM_TILE_ELEMENT_INT32
-                                    : ROCSHMEM_TILE_ELEMENT_INT64;
+        ROCSHMEM_TILE_ELEMENT_LONG;
   };
 
   template <>
   struct rocshmem_tile_element_type<unsigned long> {
     static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
-        sizeof(unsigned long) == sizeof(unsigned int)
-            ? ROCSHMEM_TILE_ELEMENT_UINT32
-            : ROCSHMEM_TILE_ELEMENT_UINT64;
+        ROCSHMEM_TILE_ELEMENT_ULONG;
   };
 
   template <>
   struct rocshmem_tile_element_type<long long> {
     static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
-        ROCSHMEM_TILE_ELEMENT_INT64;
+        ROCSHMEM_TILE_ELEMENT_LONGLONG;
   };
 
   template <>
   struct rocshmem_tile_element_type<unsigned long long> {
     static constexpr ROCSHMEM_TILE_ELEMENT_TYPE value =
-        ROCSHMEM_TILE_ELEMENT_UINT64;
+        ROCSHMEM_TILE_ELEMENT_ULONGLONG;
   };
 
   template <>
