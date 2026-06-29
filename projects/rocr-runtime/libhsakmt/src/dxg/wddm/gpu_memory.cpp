@@ -660,12 +660,16 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
     // corrupt importer-side flag state (e.g. is_shared, is_queue_referenced).
     desc_.mem_flags = shared_info_ptr->mem_flags;
     desc_.adapter_luid = shared_info_ptr->adapter_luid;
+    desc_.swizzle_mode = shared_info_ptr->swizzle_mode;
+    desc_.tile_swizzle = shared_info_ptr->tile_swizzle;
+    desc_.swizzle_valid = shared_info_ptr->swizzle_valid;
 
     if (desc_.size == 0) {
       pr_err("import failed: could not determine allocation size from shared handle\n");
       return ErrorCode::InvalidateParams;
     }
     is_phymem_created = 1;
+    if (desc_.swizzle_valid) BuildSurfaceMetadata();
     desc_.flags.is_va_required = create_info.flags.alloc_va;
     if (desc_.flags.is_va_required) {
       desc_.flags.is_imported_vram_ipc = 1;
@@ -705,6 +709,13 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
         auto alloc_size = Wkmi::GetMemoryAllocationSize(pPrivateDriverData);
         shared_info_ptr->size += alloc_size;
         shared_info_ptr->client_size += alloc_size;
+        // Extract swizzle mode from the first allocation's surface descriptor.
+        if (alloc_index == 0) {
+          auto swizzle_info = Wkmi::GetSurfaceSwizzleInfo(pPrivateDriverData);
+          shared_info_ptr->swizzle_mode = swizzle_info.swizzle_mode;
+          shared_info_ptr->tile_swizzle = swizzle_info.tile_swizzle;
+          shared_info_ptr->swizzle_valid = swizzle_info.valid;
+        }
       }
       // If wkmi returned zero size the private data is not in UMDKMDIF format (e.g. a
       // D3D11_USAGE_DYNAMIC constant buffer). Fall back to the caller-supplied size and
@@ -745,6 +756,13 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
         auto alloc_size = Wkmi::GetMemoryAllocationSize(pPrivateDriverData);
         shared_info_ptr->size += alloc_size;
         shared_info_ptr->client_size += alloc_size;
+        // Extract swizzle mode from the first allocation's surface descriptor.
+        if (alloc_index == 0) {
+          auto swizzle_info = Wkmi::GetSurfaceSwizzleInfo(pPrivateDriverData);
+          shared_info_ptr->swizzle_mode = swizzle_info.swizzle_mode;
+          shared_info_ptr->tile_swizzle = swizzle_info.tile_swizzle;
+          shared_info_ptr->swizzle_valid = swizzle_info.valid;
+        }
       }
       // Same fallback as the KMT path: foreign D3D11 resource with non-UMDKMDIF private data.
       if (shared_info_ptr->size == 0 && create_info.size != 0) {

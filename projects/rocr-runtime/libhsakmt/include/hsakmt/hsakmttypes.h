@@ -641,6 +641,15 @@ typedef struct _HsaGraphicsResourceInfo {
     HSAuint64  SizeHintInBytes;     // Caller-provided size hint for foreign (non-ROCr) resources (IN, 0 if unknown)
 } HsaGraphicsResourceInfo;
 
+// Windows-only metadata populated in HsaGraphicsResourceInfo::Metadata when the imported
+// resource's VCAM_SURFACE_DESC is available. Provides swizzle mode as a fallback for when
+// the DXX extension (CLQueryResource11/CLQueryResource) is not available.
+typedef struct _HsaWddmSurfaceMetadata {
+    HSAuint32 version;           // Always 1
+    HSAuint32 swizzle_mode;      // VCAM_SURFACE_DESC.swizzleMode (union value)
+    HSAuint32 tile_swizzle;      // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
+} HsaWddmSurfaceMetadata;
+
 typedef enum _HSA_CACHING_TYPE
 {
     HSA_CACHING_CACHED        = 0,

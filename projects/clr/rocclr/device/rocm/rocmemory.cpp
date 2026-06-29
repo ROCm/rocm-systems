@@ -32,6 +32,7 @@
 #include "device/rocm/rocd3d11interop.hpp"
 #include "platform/interop_d3d10.hpp"
 #include "platform/interop_d3d11.hpp"
+#include "hsakmt/hsakmttypes.h"
 #endif
 
 namespace amd::roc {
@@ -209,12 +210,7 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   auto fd = fdn;
   hsa_status_t status = Hsa::interop_map_buffer_with_size(1, &agent, fd, flags, size_hint, &size,
                                                           &interop_deviceMemory_,
-#if IS_WINDOWS
-                                                          nullptr, nullptr
-#else
-                                                          &metadata_size, (const void**)&metadata
-#endif
-  );
+                                                          &metadata_size, (const void**)&metadata);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
           size);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
@@ -222,11 +218,31 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   // if map_buffer wrote a legitimate SRD, copy it to amdImageDesc_
   // Note: Check if amdImageDesc_ is valid, because VA library maps linear planes of YUV image
   // as buffers for processing in HIP later
+#if IS_WINDOWS
+  // On Windows, metadata is HsaWddmSurfaceMetadata (swizzle fallback), not a full SRD.
+  // If CLQueryResource already populated the SRD (non-zero swizzle field), skip.
+  // Otherwise store the VCAM swizzle mode in the descriptor for the image manager to use.
+  if ((amdImageDesc_ != nullptr) && (metadata_size == sizeof(HsaWddmSurfaceMetadata)) &&
+      metadata != nullptr) {
+    const auto* wddm_meta = static_cast<const HsaWddmSurfaceMetadata*>(metadata);
+    if (wddm_meta->version == 1) {
+      amdImageDesc_->version = wddm_meta->version;
+      // Store swizzle_mode and tile_swizzle in the last two slots of the 64-dword data region.
+      // The SRD occupies data[0..7]; mip SRDs follow. The image manager reads these offsets
+      // as a fallback when CLQueryResource did not populate the SRD.
+      static constexpr size_t kSwizzleModeOffset = 62;
+      static constexpr size_t kTileSwizzleOffset = 63;
+      amdImageDesc_->data[kSwizzleModeOffset] = wddm_meta->swizzle_mode;
+      amdImageDesc_->data[kTileSwizzleOffset] = wddm_meta->tile_swizzle;
+    }
+  }
+#else
   if ((amdImageDesc_ != nullptr) && (metadata_size != 0) &&
       (reinterpret_cast<hsa_amd_image_descriptor_t*>(metadata)->deviceID ==
        amdImageDesc_->deviceID)) {
     memcpy(amdImageDesc_, metadata, metadata_size);
   }
+#endif
   kind_ = MEMORY_KIND_INTEROP;
   assert(deviceMemory_ != nullptr && "Interop map failed to produce a pointer!");
   return status;
