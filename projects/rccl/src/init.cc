@@ -1633,8 +1633,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   timers[TIMER_INIT_GRAPHS] = clockNano() - timers[TIMER_INIT_GRAPHS];
 
   bool allXgmi, hasPeerAccess;
+  int localDevCount;
   allXgmi = true;
   hasPeerAccess = true;
+
+  if (cudaGetDeviceCount(&localDevCount) != cudaSuccess) localDevCount = 0;
+
   // Check that all the GPUs have peer access to one another and are XGMI connected
   for (int i = 0; i < nranks && hasPeerAccess; i++) {
     int cudaDev1 = comm->peerInfo[i].cudaDev;
@@ -1642,6 +1646,16 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       if (i == j) continue;
       int cudaDev2 = comm->peerInfo[j].cudaDev;
       int p2p;
+
+      // RCCL: under asymmetric HIP_VISIBLE_DEVICES a peer ordinal may be out
+      // of range here; hipDeviceCanAccessPeer would return hipErrorInvalidDevice
+      // and leave a sticky error. Treat such a pair as no peer access.
+      if (cudaDev1 < 0 || cudaDev1 >= localDevCount || cudaDev2 < 0 ||
+          cudaDev2 >= localDevCount) {
+        hasPeerAccess = false;
+        break;
+      }
+
       if (hipDeviceCanAccessPeer(&p2p, cudaDev1, cudaDev2) != hipSuccess || !p2p)
       {
         hasPeerAccess = false;
