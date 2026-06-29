@@ -51,6 +51,7 @@ if(HIP_PLATFORM STREQUAL "amd")
   add_subdirectory(vulkan_interop)
   add_subdirectory(gl_interop) # Disabled on NVIDIA due to defect - EXSWHTEC-246
   add_subdirectory(TDM)
+  add_subdirectory(cluster)
 endif()
 add_subdirectory(synchronization)
 add_subdirectory(launchBounds)
