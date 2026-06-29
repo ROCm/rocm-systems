@@ -451,8 +451,6 @@ aux_source_directory(${ROCRTST_ROOT}/suites/negative negativeSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/stress stressSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 
-list(FILTER functionalSources EXCLUDE REGEX ".*hotswap_(gfx_query|rewrite)_test\\.cc$")
-
 # Optional: enable NUMA async copy test (memory_async_copy_numa.cc)
 # Force disabled by default to avoid building the NUMA test source.
 set(ENABLE_COPY_NUMA OFF CACHE BOOL "Build Memory_Async_Copy_NUMA test" FORCE)
@@ -782,6 +780,7 @@ endif()
 enable_testing()
 
 get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime" ABSOLUTE)
+set(HOTSWAP_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/hotswap")
 
 # Keep COMGR out of rocrtst link/package dependencies. These optional build
 # runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
@@ -799,11 +798,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
 endif()
 
-set(HOTSWAP_GFX1250_ASM "${ROCRTST_ROOT}/suites/functional/fixtures/gfx1250_min.s")
+set(HOTSWAP_GFX1250_ASM "${HOTSWAP_TEST_ROOT}/fixtures/gfx1250_min.s")
 set(HOTSWAP_GFX1250_HSACO "${PROJECT_BINARY_DIR}/gfx1250_min.hsaco")
 set(HOTSWAP_GFX1250_HSACO_HDR "${PROJECT_BINARY_DIR}/gfx1250_min_hsaco.h")
 set(HOTSWAP_GENERATE_HSACO_HDR
-    "${ROCRTST_ROOT}/suites/functional/fixtures/generate_hsaco_header.cmake")
+    "${HOTSWAP_TEST_ROOT}/fixtures/generate_hsaco_header.cmake")
 
 add_custom_command(
   OUTPUT "${HOTSWAP_GFX1250_HSACO}"
@@ -830,7 +829,7 @@ add_custom_command(
 add_custom_target(hotswap_gfx1250_fixture DEPENDS "${HOTSWAP_GFX1250_HSACO_HDR}")
 
 add_executable(hotswap_gfx_query
-  ${ROCRTST_ROOT}/suites/functional/hotswap_gfx_query_test.cc
+  ${HOTSWAP_TEST_ROOT}/hotswap_gfx_query_test.cc
   ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp)
 target_include_directories(hotswap_gfx_query PRIVATE
   ${HSA_RUNTIME_ROOT}
@@ -842,7 +841,7 @@ set_tests_properties(hotswap_gfx_query PROPERTIES
   TIMEOUT 60)
 
 add_executable(hotswap_rewrite
-  ${ROCRTST_ROOT}/suites/functional/hotswap_rewrite_test.cc
+  ${HOTSWAP_TEST_ROOT}/hotswap_rewrite_test.cc
   ${HSA_RUNTIME_ROOT}/core/runtime/hotswap.cpp
   ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp
   "${HOTSWAP_GFX1250_HSACO_HDR}")
