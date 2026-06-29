@@ -758,7 +758,7 @@ __device__ void rocshmem_fcollect_wg(rocshmem_ctx_t ctx,
   get_internal_ctx(ctx)->fcollect_wg<T>(team, dest, source, nelem);
 }
 
-__device__ void rocshmem_fcollectmem_wg(rocshmem_ctx_t ctx,
+__device__ void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t ctx,
                                       rocshmem_team_t team, void *dest,
                                       const void *source, int nelem) {
   LOGD_API("device::fcollectmem_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d",

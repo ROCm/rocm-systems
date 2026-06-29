@@ -679,6 +679,7 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_fcollect_wg(
  * @p dest buffer.
  * Must be called as a work-group collective.
  *
+ * @param[in] ctx          The context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -688,7 +689,7 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_fcollect_wg(
  *
  * @return void
  */
-__device__ ATTR_NO_INLINE void rocshmem_fcollectmem_wg(
+__device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg( rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);
 
 /**
