@@ -40,7 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "core/runtime/hotswap.hpp"
+#include "core/inc/hotswap.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -59,7 +59,7 @@
 #include <dlfcn.h>
 #endif
 
-#include "core/runtime/hotswap_gfx_query.hpp"
+#include "core/inc/hotswap_gfx_query.hpp"
 #include "core/util/os.h"
 
 namespace rocr {

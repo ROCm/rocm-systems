@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef HSA_RUNTIME_CORE_RUNTIME_HOTSWAP_HPP_
-#define HSA_RUNTIME_CORE_RUNTIME_HOTSWAP_HPP_
+#ifndef HSA_RUNTIME_CORE_INC_HOTSWAP_HPP_
+#define HSA_RUNTIME_CORE_INC_HOTSWAP_HPP_
 
 #include <cstddef>
 #include <cstdlib>
@@ -62,16 +62,15 @@ struct CodeObjectView {
   std::string uri;
 };
 
-using LoadOriginalCodeObjectFn = hsa_status_t (*)(void* context, hsa_agent_t agent,
-                                                  hsa_code_object_t code_object,
-                                                  const char* options, const std::string& uri,
-                                                  hsa_loaded_code_object_t* loaded_code_object);
+using LoadOriginalCodeObjectFn = hsa_status_t (*)(
+    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
+    const char* options, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object);
 
-using LoadCodeObjectWithSizeFn = hsa_status_t (*)(void* context, hsa_agent_t agent,
-                                                  hsa_code_object_t code_object,
-                                                  size_t code_object_size, const char* options,
-                                                  const std::string& uri,
-                                                  hsa_loaded_code_object_t* loaded_code_object);
+using LoadCodeObjectWithSizeFn = hsa_status_t (*)(
+    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
+    size_t code_object_size, const char* options, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object);
 
 struct LoadAgentCodeObjectCallbacks {
   void* context = nullptr;
@@ -81,22 +80,26 @@ struct LoadAgentCodeObjectCallbacks {
 
 std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size);
 
-bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* source_isa,
-                        const char* target_isa, OwnedElfBuffer* out_elf_buffer,
-                        size_t* out_elf_size);
+bool RetargetCodeObject(const void* elf_data, size_t elf_size,
+                        const char* source_isa, const char* target_isa,
+                        OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
 
 bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
-                           OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
+                           OwnedElfBuffer* out_elf_buffer,
+                           size_t* out_elf_size);
 
-bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
-                           OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
+bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
+                           hsa_agent_t agent, OwnedElfBuffer* out_elf_buffer,
+                           size_t* out_elf_size);
 
-hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_agent_t agent,
-                                            const CodeObjectView& code_object, const char* options,
-                                            hsa_loaded_code_object_t* loaded_code_object,
-                                            const LoadAgentCodeObjectCallbacks& callbacks);
+hsa_status_t LoadAgentCodeObjectWithHotswap(
+    hsa_executable_t executable, hsa_agent_t agent,
+    const CodeObjectView& code_object, const char* options,
+    hsa_loaded_code_object_t* loaded_code_object,
+    const LoadAgentCodeObjectCallbacks& callbacks);
 
-void RetainRewrittenElfBuffer(hsa_executable_t executable, OwnedElfBuffer elf_buffer);
+void RetainRewrittenElfBuffer(hsa_executable_t executable,
+                              OwnedElfBuffer elf_buffer);
 void ReleaseRetainedRewrittenElfBuffers(hsa_executable_t executable);
 
 #ifdef ROCR_HOTSWAP_TESTING
@@ -106,4 +109,4 @@ size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable);
 }  // namespace hotswap
 }  // namespace rocr
 
-#endif  // HSA_RUNTIME_CORE_RUNTIME_HOTSWAP_HPP_
+#endif  // HSA_RUNTIME_CORE_INC_HOTSWAP_HPP_

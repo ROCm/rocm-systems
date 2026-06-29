@@ -64,7 +64,7 @@
 #include "core/inc/hsa_ven_amd_loader_impl.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 #include "core/inc/hsa_ext_amd_impl.h"
-#include "core/runtime/hotswap.hpp"
+#include "core/inc/hotswap.hpp"
 #include "core/util/os.h"
 
 namespace rocr {

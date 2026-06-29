@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef HSA_RUNTIME_CORE_RUNTIME_HOTSWAP_GFX_QUERY_HPP_
-#define HSA_RUNTIME_CORE_RUNTIME_HOTSWAP_GFX_QUERY_HPP_
+#ifndef HSA_RUNTIME_CORE_INC_HOTSWAP_GFX_QUERY_HPP_
+#define HSA_RUNTIME_CORE_INC_HOTSWAP_GFX_QUERY_HPP_
 
 #include <cstdint>
 #include <string>
@@ -72,4 +72,4 @@ bool IsHotswapSupportedGfxRevision(const AgentGfxRevision& gfx);
 }  // namespace hotswap
 }  // namespace rocr
 
-#endif  // HSA_RUNTIME_CORE_RUNTIME_HOTSWAP_GFX_QUERY_HPP_
+#endif  // HSA_RUNTIME_CORE_INC_HOTSWAP_GFX_QUERY_HPP_

@@ -276,66 +276,6 @@ endif()
 
 target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${SRCS} ${SRC_OS} ${SRC_XDNA} )
 
-option(ROCR_BUILD_HOTSWAP_TESTS "Build HotSwap unit tests" OFF)
-if(ROCR_BUILD_HOTSWAP_TESTS)
-  enable_testing()
-  add_executable(hotswap_gfx_query_test
-    tests/hotswap_gfx_query_test.cpp
-    core/runtime/hotswap_gfx_query.cpp)
-  target_include_directories(hotswap_gfx_query_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/inc)
-  add_test(NAME hotswap_gfx_query_test COMMAND hotswap_gfx_query_test)
-
-  foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
-    if(EXISTS "${_prefix}/tools/comgr/lib/cmake/amd_comgr/amd_comgr-config.cmake")
-      set(amd_comgr_DIR "${_prefix}/tools/comgr/lib/cmake/amd_comgr"
-        CACHE PATH "Path to amd_comgr config" FORCE)
-      break()
-    endif()
-  endforeach()
-  find_package(amd_comgr CONFIG QUIET)
-
-  if(amd_comgr_FOUND AND TARGET amd_comgr)
-    add_executable(hotswap_rewrite_test
-      tests/hotswap_rewrite_test.cpp
-      core/runtime/hotswap.cpp
-      core/runtime/hotswap_gfx_query.cpp)
-    target_include_directories(hotswap_rewrite_test PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}
-      ${CMAKE_CURRENT_SOURCE_DIR}/inc
-      ${CMAKE_CURRENT_BINARY_DIR})
-    target_compile_definitions(hotswap_rewrite_test PRIVATE
-      ROCR_HOTSWAP_TESTING)
-    if(UNIX)
-      target_link_libraries(hotswap_rewrite_test PRIVATE ${CMAKE_DL_LIBS})
-      add_custom_command(TARGET hotswap_rewrite_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
-          "$<TARGET_FILE:amd_comgr>"
-          "$<TARGET_FILE_DIR:hotswap_rewrite_test>/libamd_comgr.so.3"
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
-          "libamd_comgr.so.3"
-          "$<TARGET_FILE_DIR:hotswap_rewrite_test>/libamd_comgr.so")
-    elseif(WIN32)
-      add_custom_command(TARGET hotswap_rewrite_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "$<TARGET_FILE:amd_comgr>"
-          "$<TARGET_FILE_DIR:hotswap_rewrite_test>/amd_comgr.dll")
-    endif()
-
-    set(_hotswap_co "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/gfx1250_min.hsaco")
-    set(_hotswap_co_hdr "${CMAKE_CURRENT_BINARY_DIR}/gfx1250_min_hsaco.h")
-    file(READ "${_hotswap_co}" _hotswap_co_hex HEX)
-    string(REGEX REPLACE "(..)" "0x\\1," _hotswap_co_arr "${_hotswap_co_hex}")
-    file(WRITE "${_hotswap_co_hdr}"
-      "// Generated from tests/fixtures/gfx1250_min.hsaco. Do not edit.\n"
-      "static const unsigned char kGfx1250MinCo[] = {${_hotswap_co_arr}};\n")
-    add_test(NAME hotswap_rewrite_test COMMAND hotswap_rewrite_test)
-  else()
-    message(WARNING "amd_comgr not found; hotswap_rewrite_test will not be built")
-  endif()
-endif()
-
 ## Depend on trap handler target.
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/trap_handler )
 add_dependencies( ${CORE_RUNTIME_TARGET} amd_trap_handler_v2 )

@@ -40,7 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "core/runtime/hotswap_gfx_query.hpp"
+#include "core/inc/hotswap_gfx_query.hpp"
 
 #include <algorithm>
 #include <cctype>
