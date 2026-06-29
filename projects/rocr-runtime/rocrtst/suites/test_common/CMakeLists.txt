@@ -783,21 +783,19 @@ enable_testing()
 
 get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime" ABSOLUTE)
 
+# Keep COMGR out of rocrtst link/package dependencies. These optional build
+# runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
+set(HOTSWAP_BUILD_RPATH "$ORIGIN")
 foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
-  if(EXISTS "${_prefix}/tools/comgr/lib/cmake/amd_comgr/amd_comgr-config.cmake")
-    set(amd_comgr_DIR "${_prefix}/tools/comgr/lib/cmake/amd_comgr"
-      CACHE PATH "Path to amd_comgr config" FORCE)
-    break()
-  endif()
+  foreach(_libdir IN ITEMS lib lib64 tools/comgr/lib)
+    set(_comgr_libdir "${_prefix}/${_libdir}")
+    if(EXISTS "${_comgr_libdir}/libamd_comgr.so" OR
+       EXISTS "${_comgr_libdir}/libamd_comgr.so.3")
+      list(APPEND HOTSWAP_BUILD_RPATH "${_comgr_libdir}")
+    endif()
+  endforeach()
 endforeach()
-find_package(amd_comgr CONFIG REQUIRED)
-if(TARGET amd_comgr)
-  set(HOTSWAP_COMGR_TARGET amd_comgr)
-elseif(TARGET amd_comgr::amd_comgr)
-  set(HOTSWAP_COMGR_TARGET amd_comgr::amd_comgr)
-else()
-  message(FATAL_ERROR "amd_comgr package found without an amd_comgr target")
-endif()
+list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
 
 set(HOTSWAP_GFX1250_ASM "${ROCRTST_ROOT}/suites/functional/fixtures/gfx1250_min.s")
 set(HOTSWAP_GFX1250_HSACO "${PROJECT_BINARY_DIR}/gfx1250_min.hsaco")
@@ -855,21 +853,8 @@ target_compile_definitions(hotswap_rewrite PRIVATE ROCR_HOTSWAP_TESTING)
 target_link_libraries(hotswap_rewrite ${GOOGLE_TEST_FRWK_NAME} ${CMAKE_DL_LIBS} pthread)
 set_target_properties(hotswap_rewrite PROPERTIES
   LINK_FLAGS "-Wl,--enable-new-dtags"
-  BUILD_RPATH "$<TARGET_FILE_DIR:${HOTSWAP_COMGR_TARGET}>;$ORIGIN"
+  BUILD_RPATH "${HOTSWAP_BUILD_RPATH}"
   INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../lib64")
-if(UNIX)
-  add_custom_command(TARGET hotswap_rewrite POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E remove -f
-      "$<TARGET_FILE_DIR:hotswap_rewrite>/libamd_comgr.so.3"
-      "$<TARGET_FILE_DIR:hotswap_rewrite>/libamd_comgr.so"
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-      "$<TARGET_FILE:${HOTSWAP_COMGR_TARGET}>"
-      "$<TARGET_FILE_DIR:hotswap_rewrite>/libamd_comgr.so.3"
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-      "libamd_comgr.so.3"
-      "$<TARGET_FILE_DIR:hotswap_rewrite>/libamd_comgr.so"
-    VERBATIM)
-endif()
 add_test(NAME hotswap_rewrite COMMAND hotswap_rewrite)
 set_tests_properties(hotswap_rewrite PROPERTIES
   LABELS "quick;standard;pr;pre-commit;hotswap"

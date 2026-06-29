@@ -169,9 +169,14 @@ std::vector<std::string> GetComgrLibraryCandidates() {
   if (!runtime_dir.empty()) {
 #if defined(_WIN32) || defined(_WIN64)
     names.push_back(runtime_dir + "\\amd_comgr.dll");
+    names.push_back(runtime_dir + "\\..\\bin\\amd_comgr.dll");
 #else
     names.push_back(runtime_dir + "/libamd_comgr.so.3");
     names.push_back(runtime_dir + "/libamd_comgr.so");
+    names.push_back(runtime_dir + "/../lib/libamd_comgr.so.3");
+    names.push_back(runtime_dir + "/../lib/libamd_comgr.so");
+    names.push_back(runtime_dir + "/../lib64/libamd_comgr.so.3");
+    names.push_back(runtime_dir + "/../lib64/libamd_comgr.so");
 #endif
   }
 
