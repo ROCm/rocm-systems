@@ -16,9 +16,14 @@ find_program(LLVM_LINK llvm-link
                ${ROCM_PATH}/llvm/bin
                ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
                NO_DEFAULT_PATH QUIET)
+find_program(LLVM_OPT opt
+             PATHS
+               ${ROCM_PATH}/llvm/bin
+               ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
+             NO_DEFAULT_PATH QUIET)
 
-if(NOT LLVM_CLANG OR NOT LLVM_LINK)
-  message(WARNING "ROCm LLVM tools (clang++, llvm-link) not found under "
+if(NOT LLVM_CLANG OR NOT LLVM_LINK OR NOT LLVM_OPT)
+  message(WARNING "ROCm LLVM tools (clang++, llvm-link, opt) not found under "
                   "${ROCM_PATH}/llvm/bin; skipping device bitcode targets.")
   return()
 endif()
@@ -194,9 +199,18 @@ if(USE_GDA)
 endif()
 
 # Build bitcode for each GPU architecture
+#
+# __device__ API functions (rocshmem_quiet, rocshmem_barrier_wg, etc.) are DCE'd
+# by LLVM's -O3 passes when compiled per-TU: no amdgpu_kernel in the same TU
+# calls them, so the optimizer treats them as dead.  Fix: compile each source
+# with -Xclang -disable-llvm-passes (frontend runs at -O3, LLVM DCE is skipped,
+# all __device__ bodies are retained), then run opt -O3 over the merged BC where
+# all callers exist.  This mirrors the approach in CMakeDeviceBitcodeTester.cmake.
 set(ALL_BITCODE_OUTPUTS)
 foreach(gpu_arch ${BITCODE_GPU_ARCHS})
-  set(BITCODE_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${gpu_arch})
+  # Per-source flags: -Xclang -disable-llvm-passes suppresses DCE.
+  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${gpu_arch}
+                     -Xclang -disable-llvm-passes)
   set(BITCODE_OBJECTS_${gpu_arch})
   foreach(src_file ${BITCODE_SOURCES})
     get_filename_component(src_name ${src_file} NAME_WE)
@@ -206,21 +220,31 @@ foreach(gpu_arch ${BITCODE_GPU_ARCHS})
     add_custom_command(
       OUTPUT ${bc_file}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/bitcode/${gpu_arch}
-      COMMAND ${LLVM_CLANG} ${BITCODE_COMPILE_FLAGS} -c ${src_file} -o ${bc_file}
+      COMMAND ${LLVM_CLANG} ${_COMPILE_FLAGS} -c ${src_file} -o ${bc_file}
       DEPENDS ${src_file}
       COMMENT "Compiling ${src_name} to bitcode for ${gpu_arch}"
       VERBATIM
     )
   endforeach()
 
+  set(_UNOPT_BC ${CMAKE_CURRENT_BINARY_DIR}/bitcode/${gpu_arch}/librocshmem_device_${gpu_arch}_unopt.bc)
   set(BITCODE_OUTPUT_${gpu_arch} ${CMAKE_CURRENT_BINARY_DIR}/librocshmem_device_${gpu_arch}.bc)
   list(APPEND ALL_BITCODE_OUTPUTS ${BITCODE_OUTPUT_${gpu_arch}})
 
   add_custom_command(
-    OUTPUT ${BITCODE_OUTPUT_${gpu_arch}}
-    COMMAND ${LLVM_LINK} ${BITCODE_OBJECTS_${gpu_arch}} -o ${BITCODE_OUTPUT_${gpu_arch}}
+    OUTPUT ${_UNOPT_BC}
+    COMMAND ${LLVM_LINK} ${BITCODE_OBJECTS_${gpu_arch}} -o ${_UNOPT_BC}
     DEPENDS ${BITCODE_OBJECTS_${gpu_arch}}
     COMMENT "Linking device bitcode for ${gpu_arch}"
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT ${BITCODE_OUTPUT_${gpu_arch}}
+    COMMAND ${LLVM_OPT} -O3 -mtriple=amdgcn-amd-amdhsa -mcpu=${gpu_arch}
+            ${_UNOPT_BC} -o ${BITCODE_OUTPUT_${gpu_arch}}
+    DEPENDS ${_UNOPT_BC}
+    COMMENT "Optimizing device bitcode for ${gpu_arch}"
     VERBATIM
   )
 
