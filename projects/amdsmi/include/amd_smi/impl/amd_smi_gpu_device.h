@@ -23,14 +23,6 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 
-#include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_drm.h"
-#include "amd_smi/impl/amd_smi_processor.h"
-
-extern "C" {
-#include "ualoe_lib/ualoe_lib.h"
-}
-
 #include <map>
 #include <set>
 #include <string>
@@ -38,7 +30,12 @@ extern "C" {
 #include <type_traits>
 #include <vector>
 
-// decouple the dependency to ualoe_lib.h by using a typedef for the handle
+#include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_processor.h"
+
+// Forward declaration of UALoE handle type to keep ualoe_lib/ualoe_lib.h out
+// of the public install tree. Implementation file pulls in ualoe_lib.h.
 typedef int ualoe_handle_t;
 
 namespace amd::smi {
@@ -135,40 +132,9 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
  public:
   // UALoE requires a matching IFoE BDF under /sys/bus/pci/drivers/ifoe/;
   // otherwise ualoe_open is skipped and fabric queries return NOT_SUPPORTED.
-  AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm)
-      : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU),
-        gpu_id_(gpu_id),
-        path_(path),
-        bdf_(bdf),
-        drm_(drm) {
-    populate_ifoe_fabric_bdf_list();
-    if (has_ifoe_related_bdf() && device_has_ualink()) {
-      auto ifoe_bdf_str = get_ifoe_bdf_string();
-      if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
-        ualoe_handle_ = (-1);
-      }
-    }
-  }
-
-  AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
-      : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), drm_(drm) {
-    if (check_if_drm_is_supported()) this->get_drm_data();
-
-    populate_ifoe_fabric_bdf_list();
-    if (has_ifoe_related_bdf() && device_has_ualink()) {
-      auto ifoe_bdf_str = get_ifoe_bdf_string();
-      if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
-        ualoe_handle_ = (-1);
-      }
-    }
-  }
-
-  ~AMDSmiGPUDevice() {
-    if (ualoe_handle_ != -1) {
-      ualoe_close(ualoe_handle_);
-      ualoe_handle_ = -1;
-    }
-  }
+  AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm);
+  AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm);
+  ~AMDSmiGPUDevice();
 
   amdsmi_status_t get_drm_data();
   pthread_mutex_t* get_mutex();

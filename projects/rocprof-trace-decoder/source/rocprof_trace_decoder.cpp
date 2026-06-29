@@ -41,6 +41,22 @@
 #    include "rocprof_trace_decoder/cxx/code_printing.hpp"
 #endif
 
+static_assert(
+    sizeof(((rocprofiler_thread_trace_decoder_event_payload_t*) nullptr)->cluster_barrier) == 8,
+    "Unexpected rocprofiler_thread_trace_decoder_event_payload_t.cluster_barrier size"
+);
+static_assert(
+    sizeof(rocprofiler_thread_trace_decoder_event_payload_t) == 8,
+    "Unexpected rocprofiler_thread_trace_decoder_event_payload_t size"
+);
+static_assert(
+    sizeof(rocprofiler_thread_trace_decoder_event_t) == 40, "Unexpected rocprofiler_thread_trace_decoder_event_t size"
+);
+static_assert(
+    sizeof(rocprofiler_thread_trace_decoder_dispatch_t) == 80,
+    "Unexpected rocprofiler_thread_trace_decoder_dispatch_t size"
+);
+
 #define RADT(x) ROCPROFILER_THREAD_TRACE_DECODER_RECORD_##x
 
 // ============================================================================
@@ -71,6 +87,11 @@ public:
 
         if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
             throw std::invalid_argument("ISA Callback returned error " + std::to_string(status));
+
+        // A callback that can't determine the instruction length may report 0,
+        // which would make isa.next == isa.addr and spin the stitcher's PC walk
+        // forever. Clamp to the minimum encodable instruction size (4 bytes).
+        if (memsize < 4) memsize = 4;
 
         assemblyLine isa;
         isa.addr = pc;
@@ -321,6 +342,9 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     void* userdata
 )
 {
+    if (!se_data_callback || !trace_callback || !isa_callback)
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
     return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
 }
 
@@ -384,6 +408,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 {
     auto hd = HandleData::get_read_handle(handle);
     if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
     parse_ctx_t ctx{};
     ctx.trace_cb = trace_callback;
@@ -450,6 +476,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 {
     auto hd = HandleData::get_read_handle(handle);
     if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
     parse_ctx_t ctx{};
     ctx.trace_cb = trace_callback;

@@ -130,6 +130,9 @@ module:
   Unit_hipDrvLaunchKernelEx_With_MaxBlockDims:
     <<: *level_2
     tags: [launch]
+  Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim:
+    <<: *level_2
+    tags: [launch]
   Unit_hipExtLaunchMultiKernelMultiDevice_Functional:
     <<: *level_2
     tags: [launch]
