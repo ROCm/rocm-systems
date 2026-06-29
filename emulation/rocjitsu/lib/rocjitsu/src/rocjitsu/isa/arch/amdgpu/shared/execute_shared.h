@@ -408,7 +408,7 @@ template <typename Inst>
 inline void execute_s_add_co_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
   int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int32_t result = (s0 + s1);
+  int32_t result = static_cast<int32_t>((static_cast<uint32_t>(s0) + static_cast<uint32_t>(s1)));
   inst.sdst.write_scalar(wf, result);
   wf.write_scc(
       ((static_cast<int64_t>(s0) + static_cast<int64_t>(s1)) != static_cast<int64_t>(result)));
@@ -441,7 +441,7 @@ template <typename Inst>
 inline void execute_s_add_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
   int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int32_t result = (s0 + s1);
+  int32_t result = static_cast<int32_t>((static_cast<uint32_t>(s0) + static_cast<uint32_t>(s1)));
   inst.sdst.write_scalar(wf, result);
   wf.write_scc(
       ((static_cast<int64_t>(s0) + static_cast<int64_t>(s1)) != static_cast<int64_t>(result)));
@@ -2481,7 +2481,7 @@ template <typename Inst>
 inline void execute_s_sub_co_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
   int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int32_t result = (s0 - s1);
+  int32_t result = static_cast<int32_t>((static_cast<uint32_t>(s0) - static_cast<uint32_t>(s1)));
   inst.sdst.write_scalar(wf, result);
   wf.write_scc(
       ((static_cast<int64_t>(s0) - static_cast<int64_t>(s1)) != static_cast<int64_t>(result)));
@@ -2514,7 +2514,7 @@ template <typename Inst>
 inline void execute_s_sub_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
   int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int32_t result = (s0 - s1);
+  int32_t result = static_cast<int32_t>((static_cast<uint32_t>(s0) - static_cast<uint32_t>(s1)));
   inst.sdst.write_scalar(wf, result);
   wf.write_scc(
       ((static_cast<int64_t>(s0) - static_cast<int64_t>(s1)) != static_cast<int64_t>(result)));

@@ -507,6 +507,18 @@ class _ScalarBinop(_ScalarDeriver):
             result = SemaNode(
                 SemaNodeKind.CALL, ty=ty, call_name=fn, children=(_id(fn), src0, src1)
             )
+        elif op in ('add', 'sub') and ty.base == 'I':
+            # Perform the wrapping add/sub in unsigned to avoid signed-overflow
+            # UB. GCC13+ assumes no overflow with a bare signed `s0 + s1` and
+            # so the overflow check is always false if not done unsigned. Then,
+            # reinterpret the unsigned result back to signd for the overflow check.
+            u_ty = SemaType.U32 if ty.size == 32 else SemaType.U64
+            arith = SemaNode(
+                kind,
+                ty=u_ty,
+                children=(_cast(src0, u_ty), _cast(src1, u_ty)),
+            )
+            result = _cast(arith, ty)
         else:
             result = SemaNode(kind, ty=ty, children=(src0, src1))
 
