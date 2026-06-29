@@ -55,6 +55,12 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
+  // gfx1100 (RDNA3) lacks XGMI; IPC handles fail with hipErrorInvalidDevicePointer.
+  if (comm->archName != nullptr && strstr(comm->archName, "gfx1100") != nullptr) {
+    INFO(NCCL_INIT, "ncclDdaIpcCommInit: skipping DDA IPC on %s", comm->archName);
+    return ncclSuccess;
+  }
+
   size_t bytes = DDA_IPC_BUFFER_SIZE;
   if (bytes == 0) {
     return ncclSuccess;
