@@ -55,7 +55,7 @@ private:
     bool is_entry = false;
   };
 
-  uint8_t wave_size_ = 64;
+  uint8_t wave_size_ = 0;
   std::vector<BlockExec> states_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, ExecState> before_;
