@@ -108,7 +108,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --pre \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-            "rocm[devel,libraries]==7.14.0a20260619"
+            "rocm[devel,libraries]==7.14.0a20260624"
           ROCM_LIB="$(rocm-sdk path --root)"/lib
           echo "LD_LIBRARY_PATH=${ROCM_LIB}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
