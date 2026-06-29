@@ -34,6 +34,9 @@ class TestOperand : public Operand {
 public:
   TestOperand() = default;
   explicit TestOperand(RegisterRef ref) : Operand(ref.width * 32, ref.index), ref_(ref) {}
+  // Sub-lane operand: same RegisterRef, but a caller-chosen bit width so partial
+  // (less-than-32-bit) defs can be exercised.
+  TestOperand(RegisterRef ref, int size_bits) : Operand(size_bits, ref.index), ref_(ref) {}
 
   std::optional<RegisterRef> to_register_ref() const override { return ref_; }
 
@@ -46,13 +49,16 @@ public:
   TestInstruction(std::string_view mnemonic, std::initializer_list<RegisterRef> defs = {},
                   std::initializer_list<RegisterRef> uses = {}, uint64_t flags = 0,
                   std::optional<int64_t> branch_delta = std::nullopt,
-                  std::initializer_list<RegisterRef> implicit_uses = {})
+                  std::initializer_list<RegisterRef> implicit_uses = {}, int def_size_bits = 0)
       : Instruction(mnemonic, nullptr), implicit_uses_(implicit_uses), branch_delta_(branch_delta) {
     size_ = 4;
     flags_ = flags;
 
     for (RegisterRef ref : defs) {
-      dst_storage_[num_dst_] = TestOperand(ref);
+      // def_size_bits == 0 keeps the default full-lane width; a non-zero value
+      // models a partial (sub-32-bit) def of the same register.
+      dst_storage_[num_dst_] =
+          def_size_bits == 0 ? TestOperand(ref) : TestOperand(ref, def_size_bits);
       dst_operands_[num_dst_] = &dst_storage_[num_dst_];
       ++num_dst_;
     }
@@ -122,6 +128,7 @@ enum class TestOpcode : uint32_t {
   CBranchToElseAfterTwo = 14,
   IndirectCall = 15,
   IndirectBranch = 16,
+  PartialDefSgpr4 = 17,
 };
 
 class TestDecoder : public Decoder {
@@ -164,6 +171,10 @@ public:
       return new TestInstruction("test_indirect_call", {}, {}, INDIRECT_CALL);
     case TestOpcode::IndirectBranch:
       return new TestInstruction("test_indirect_branch", {}, {}, INDIRECT_BRANCH);
+    case TestOpcode::PartialDefSgpr4:
+      // 16-bit write to s4: defines only part of the lane, so it also reads s4.
+      return new TestInstruction("test_partial_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0,
+                                 std::nullopt, {}, /*def_size_bits=*/16);
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -661,6 +672,34 @@ TEST(LivenessAnalysis, ReadWriteRegisterStaysLiveOutWhenUsedBySuccessor) {
   EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
 }
 
+TEST(LivenessAnalysis, PartialDefKeepsRegisterLiveBeforeInstruction) {
+  auto blocks = build_test_blocks({TestOpcode::PartialDefSgpr4, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &partial_def = *blocks[0]->instructions().begin();
+  EXPECT_TRUE(liveness.is_live_before(partial_def, {RegClass::SGPR, 4, 1}));
+}
+
+TEST(LivenessAnalysis, PartialDefRegisterStaysLiveOutWhenUsedBySuccessor) {
+  std::array<uint64_t, 1> extra_leaders{4};
+  auto blocks = build_test_blocks(
+      {TestOpcode::PartialDefSgpr4, TestOpcode::UseSgpr4, TestOpcode::End}, extra_leaders);
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  ASSERT_EQ(blocks.size(), 2u);
+  const Instruction &partial_def = *blocks[0]->instructions().begin();
+  EXPECT_TRUE(liveness.is_live_before(partial_def, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
+}
+
+TEST(LivenessAnalysis, FullWidthDefKillsRegisterBeforeInstruction) {
+  auto blocks = build_test_blocks({TestOpcode::DefSgpr4, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *blocks[0]->instructions().begin();
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::SGPR, 4, 1}));
+}
+
 TEST(LivenessAnalysis, ImplicitUseIsLiveBeforeInstruction) {
   auto blocks = build_test_blocks({TestOpcode::ImplicitUseSgpr6Pair, TestOpcode::End});
   LivenessAnalysis liveness = analyze_scope(blocks);
@@ -740,6 +779,22 @@ TEST(InstDefUse, RWSgpr) {
   InstDefUse idu(test_inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
   EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 4, 1}));
+}
+
+TEST(InstDefUse, PartialDefIsAlsoUse) {
+  const TestInstruction test_inst("test_partial_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0,
+                                  std::nullopt, {}, /*def_size_bits=*/16);
+  InstDefUse idu(test_inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 4, 1}));
+}
+
+TEST(InstDefUse, FullWidthDefIsNotUse) {
+  const TestInstruction test_inst("test_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0, std::nullopt, {},
+                                  /*def_size_bits=*/32);
+  InstDefUse idu(test_inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 4, 1}));
 }
 
 TEST(InstDefUse, Predicated) {
