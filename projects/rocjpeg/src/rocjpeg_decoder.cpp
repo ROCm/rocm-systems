@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include "rocjpeg_decoder.h"
-#include <limits>
 
 RocJpegDecoder::RocJpegDecoder(RocJpegBackend backend, int device_id) :
     num_devices_{0}, device_id_ {device_id}, hip_stream_ {0}, backend_{backend} {}
@@ -483,15 +482,8 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
         }
 
         if (destination->pitch[channel_index] == hip_interop_dev_mem.pitch[channel_index]) {
-            // Use 64-bit arithmetic to detect pitch*height overflow before passing
-            // to the HIP copy API, which takes a size_t.
-            uint64_t channel_size_64 = static_cast<uint64_t>(destination->pitch[channel_index]) * static_cast<uint64_t>(channel_height);
-            if (channel_size_64 > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
-                ErrorLog(g_rocjpeg_logger, "Channel size overflows uint32_t (pitch=" +
-                    ROCJPEG_TOSTR(destination->pitch[channel_index]) + " height=" + ROCJPEG_TOSTR(channel_height) + ")!");
-                return ROCJPEG_STATUS_INVALID_PARAMETER;
-            }
-            uint32_t channel_size = static_cast<uint32_t>(channel_size_64);
+            // Compute pitch*height in 64-bit; hipMemcpyDtoDAsync takes size_t.
+            size_t channel_size = static_cast<size_t>(destination->pitch[channel_index]) * static_cast<size_t>(channel_height);
             CHECK_HIP(hipMemcpyDtoDAsync(destination->channel[channel_index], hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[channel_index] + roi_offset, channel_size, hip_stream_));
         } else {
             CHECK_HIP(hipMemcpy2DAsync(destination->channel[channel_index], destination->pitch[channel_index], hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[channel_index] + roi_offset, hip_interop_dev_mem.pitch[channel_index],
