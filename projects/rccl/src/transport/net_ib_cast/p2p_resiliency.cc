@@ -810,6 +810,11 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
   qpCreateAttrs.maxRecvWorkRequest = 0;
   // Every send request can initiate at most one probing request.
   qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+  // TODO - QP sharing:
+  //        QP sharing disabled for resiliency sender QP
+  qpCreateAttrs.isQpSharingEnabled = false;
+  qpCreateAttrs.qpSharingGroupIdx = -1;
+  qpCreateAttrs.cqDepthMultiplier = 1;
   for (int localQpIndex = 0; localQpIndex < resCtx->nProbingQps; localQpIndex++) {
     // Sender creates a single probing QP per local device.
     int localDevIndex = localQpIndex;
@@ -898,6 +903,11 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
   qpCreateAttrs.maxSendWorkRequest = 0;
+  // TODO - QP sharing:
+  //        QP sharing disabled for resiliency QP
+  qpCreateAttrs.isQpSharingEnabled = false;
+  qpCreateAttrs.qpSharingGroupIdx = -1;
+  qpCreateAttrs.cqDepthMultiplier = 1;
   for (int localQpIndex = 0; localQpIndex < resCtx->nProbingQps; localQpIndex++) {
     // When number of QPs on the receiver is larger than the number of devices
     // it has, the probing QPs on the receiver side are created in a "striped"

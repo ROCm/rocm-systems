@@ -53,6 +53,9 @@ struct ncclIbQpCreateAttr {
   int channelId;
   int ibDevN;
   bool useIonic;
+  bool isQpSharingEnabled;
+  int  cqDepthMultiplier;
+  int  qpSharingGroupIdx;
 };
 
 // Per-QP connection metatdata

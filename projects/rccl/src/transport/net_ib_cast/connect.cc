@@ -87,7 +87,7 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
   return requested;
 }
 
-ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize, int depthMultiplier = 1) {
+ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
   base->ibDevN = ibDevN;
   ncclIbDev* ibDev = IbCastDevs + ibDevN;
   {
@@ -98,8 +98,7 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
     base->pd = ibDev->pd;
   }
 
-  int scaledCqSize = cqSize * depthMultiplier;
-  NCCLCHECK(wrap_ibv_create_cq(&base->cq, ibDev->context, scaledCqSize, cq_context, NULL, 0));
+  NCCLCHECK(wrap_ibv_create_cq(&base->cq, ibDev->context, cqSize, cq_context, NULL, 0));
 
   return ncclSuccess;
 }
@@ -403,6 +402,10 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
   return ncclSuccess;
 }
 
+
+// TODO - QP sharing: Cts offload to do disabled
+//        ensure comm level useCtsOffload flag is forced to false when QP sharing is enabled
+//        that inturn ensures createQpAttr->isCtsEnabled will be set to false from wherever QP create is called.
 static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs, struct ncclIbQp* qp) {
   struct ibv_qp_init_attr qpInitAttr;
   enum ncclIbChannelType channel_type = (createQpAttrs->isDataQp ? ncclIbChannelTypeData : ncclIbChannelTypeCts);
@@ -411,8 +414,14 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   qpInitAttr.send_cq = createQpAttrs->cq;
   qpInitAttr.recv_cq = createQpAttrs->cq;
   qpInitAttr.qp_type = createQpAttrs->type;
-  qpInitAttr.cap.max_recv_wr = createQpAttrs->maxRecvWorkRequest;
-  qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
+  // Scale WR depths for QP sharing
+  if (createQpAttrs->isQpSharingEnabled) {
+    qpInitAttr.cap.max_recv_wr = createQpAttrs->maxRecvWorkRequest * createQpAttrs->cqDepthMultiplier;
+    qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest * createQpAttrs->cqDepthMultiplier;
+  } else {
+    qpInitAttr.cap.max_recv_wr = createQpAttrs->maxRecvWorkRequest;
+    qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
+  }
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
   qpInitAttr.cap.max_inline_data = IbCastUseInline ? sizeof(struct ncclIbSendFifo) * NCCL_NET_IB_MAX_RECVS : 0;
@@ -432,17 +441,23 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     qpInitAttr.sq_sig_all &= (~(1 << 19));
   }
 
-  if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
-    bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
-    nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = lud;
-    nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated = true;
-    nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type] =
-      !(nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type]);
-  }
-  if (nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId) {
-    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
+  if (createQpAttrs->isQpSharingEnabled) {
+    // For Ionic with QP sharing, use groupIdx for UDMA mask selection
+    uint8_t mask = (createQpAttrs->qpSharingGroupIdx % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
+    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
   } else {
-    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
+    if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
+      bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
+      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = lud;
+      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated = true;
+      nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type] =
+        !(nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type]);
+    }
+    if (nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId) {
+      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
+    } else {
+      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
+    }
   }
 
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
@@ -473,32 +488,12 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   }
 }
 
-ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs, int depthMultiplier, int groupIdx) {
-  // Scale WR depths for QP sharing
-  uint32_t origMaxSend = createQpAttrs->maxSendWorkRequest;
-  uint32_t origMaxRecv = createQpAttrs->maxRecvWorkRequest;
-  createQpAttrs->maxSendWorkRequest *= depthMultiplier;
-  createQpAttrs->maxRecvWorkRequest *= depthMultiplier;
-
-  // When QP sharing is active (groupIdx >= 0), disable CTS offload for shared QPs
-  if (groupIdx >= 0) {
-    createQpAttrs->isCtsEnabled = false;
-  }
-
-  ncclResult_t ret = ncclSuccess;
+ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
   if (createQpAttrs->oooRq) {
-    NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
-    return ncclSuccess;
+     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
+     return ncclSuccess;
   }
   if (createQpAttrs->useIonic && createQpAttrs->type != IBV_QPT_UD) {
-    // For Ionic with QP sharing, use groupIdx for UDMA mask selection
-    if (groupIdx >= 0) {
-      if (groupIdx % 2 == 0) {
-        wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
-      } else {
-        wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
-      }
-    }
     NCCLCHECK(ncclIbCreateQpIonic(createQpAttrs, qp));
     return ncclSuccess;
   }
@@ -638,12 +633,19 @@ fail:
 // establishment process.
 static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbConnectionMetadata* meta, int channelId) {
   uint nqps = comm->base.nqps;
+  int depthMult;
   struct ncclIbQpCreateAttr qpCreateAttrs;
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
   // Send requests are sent using at most 2 messages (RDMA Write and RDMA Write with Immediate)
   qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
+  // TODO - QP sharing:
+  //        handle settings QP sharing attributes; call only for primary/no-sharing
+  qpCreateAttrs.isQpSharingEnabled = (rcclParamIbCastCommNGroups() > 0) ? true : false;
+  qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
+  depthMult = (rcclParamIbCastCommNGroups() > 0) ? std::max((int64_t)1, rcclParamIbCastQpDepthMultiplier()) : 1;
+  qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -738,8 +740,9 @@ static ncclResult_t IbCastSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConn
   // Capture receiver's commId for QP sharing imm_data encoding
   comm->remCommId = remMeta->commId;
 
+  // TODO - QP sharing:
   // If secondary shared QP, skip RTR/RTS -- QPs are already in RTS from primary
-  if (comm->base.commId != 0 && !comm->base.isSharedQpPrimary) {
+  if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0 && !comm->base.isSharedQpPrimary) {
     // Just assign remDevIdx from remote metadata
     uint nqps = comm->base.nqps;
     for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
@@ -949,7 +952,7 @@ ib_recv_dev_list:
     if (comm->base.resiliency) {
       IbCastResiliencyDataCqSizeGet(comm->base.resiliency, i, &cqSize);
     }
-    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, cqSize, depthMult), ret, fail);
+    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, (cqSize * depthMult)), ret, fail);
     comm->ar = comm->ar && IbCastDevs[ibDevN].ar; // ADAPTIVE_ROUTING - if all merged devs have it enabled
     if (comm->base.resiliency) {
       NCCLCHECKGOTO(IbCastResiliencyDevInit(comm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
@@ -1334,6 +1337,7 @@ ncclResult_t IbCastCheckVProps(ncclNetVDeviceProps_t* vProps1, ncclNetVDevicePro
 static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct ncclIbConnectionMetadata* remMeta,
                                                  struct ncclIbConnectionMetadata* meta, int channelId) {
   uint nqps = rComm->base.nqps;
+  int depthMult;
   struct ncclIbQpCreateAttr qpCreateAttrs;
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
@@ -1344,6 +1348,14 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   // When resiliency is enabled, the number of send work requests is as the
   // number of max requests because every CTS message is signaled.
   qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2);
+
+  // TODO - QP sharing:
+  //        handle settings QP sharing attributes
+  //        skip QP creation & call to IbCastQpRtr/IbCastQpRts for secondary comm
+  qpCreateAttrs.isQpSharingEnabled = (rcclParamIbCastCommNGroups() > 0) ? true : false;
+  qpCreateAttrs.qpSharingGroupIdx = remMeta->sharedGroupIdx;
+  depthMult = (rcclParamIbCastCommNGroups() > 0) ? std::max((int64_t)1, rcclParamIbCastQpDepthMultiplier()) : 1;
+  qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -1398,6 +1410,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
         return ncclInternalError;
       }
     }
+
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
     localQp->channelId = channelId;
     localQp->isDataQp = qpCreateAttrs.isDataQp;
@@ -1484,6 +1497,10 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.channelId = channelId;
       qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
       qpCreateAttrs.useIonic = IbCastAinicRoce;
+      // QP sharing is disabled for flush QP
+      qpCreateAttrs.isQpSharingEnabled = false;
+      qpCreateAttrs.qpSharingGroupIdx = -1;
+      qpCreateAttrs.cqDepthMultiplier = 1;
 
       NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
       rCommDev->gpuFlush.qp.channelId = channelId;
@@ -1707,7 +1724,7 @@ ib_recv:
     if (rComm->base.resiliency) {
       IbCastResiliencyDataCqSizeGet(rComm->base.resiliency, i, &cqSize);
     }
-    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, cqSize, recvDepthMult), ret, fail);
+    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, (cqSize * recvDepthMult)), ret, fail);
     if (rComm->base.resiliency) {
       NCCLCHECKGOTO(IbCastResiliencyDevInit(rComm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
     }
