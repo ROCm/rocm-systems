@@ -20,7 +20,6 @@
   "system_env_variables": {
     "ainic": {
       "NCCL_SOCKET_IFNAME": "eno0",
-      "NCCL_IB_HCA": "rdma0,rdma1,rdma2,rdma3",
       "RCCL_AINIC_ROCE": "1",
       "IONIC_LOCKFREE": "all"
     }
@@ -56,7 +55,7 @@
 
     "a_netib_component": {
       "extends": "a_base",
-      "_comment": "A1-A3: core NetIb plugin init / properties / data path on AINIC (IB-CAST plugin + libionic.so).",
+      "_comment": "A1-A3: NetIb plugin init, properties, data path.",
       "tests": [
         {
           "name": "A1_NetIB_InitializePlugin",
@@ -79,7 +78,7 @@
     "a_cts_workaround": {
       "extends": "a_base",
       "timeout": 600,
-      "_comment": "A4: CTS-off P2P stress, sized to PASS cleanly. 16 conns x 64 = 1024 outstanding recvs; with RCCL_IB_P2P_DISABLE_CTS=1 all entries drain (retx=0, ack_timeout=0, 1024/1024 completions) and the test returns 0. Empirically on g27/g28 (job 9439) <=2048 outstanding drains cleanly; >=4096 stalls (drain timeout) which is the CTS match-table depth limit reproduced separately by A5. Do NOT bump CTS_QP_DEPTH back to 256 here or A4 will time out.",
+      "_comment": "A4: CTS-off P2P stress (16x64=1024 outstanding). Do NOT bump CTS_QP_DEPTH to 256 or it will time out.",
       "env_variables": {
         "RCCL_IB_P2P_DISABLE_CTS": "1",
         "CTS_NUM_CONNS": "16",
@@ -98,7 +97,7 @@
     "a_cts_overflow": {
       "extends": "a_base",
       "timeout": 600,
-      "_comment": "A5: CTS-on overflow reproducer (expected timeout/hang on AINIC).",
+      "_comment": "A5: CTS-on overflow reproducer (expected timeout).",
       "env_variables": {
         "RCCL_IB_P2P_DISABLE_CTS": "0",
         "CTS_NUM_CONNS": "16",
@@ -117,7 +116,7 @@
     "a_cast_base": {
       "extends": "a_base",
       "timeout": 120,
-      "_comment": "CAST white-box tests REQUIRE the full WRR env set (the test guard checks every var, incl. RCCL_IB_QP_SCHED_WEIGHT) or they GTEST_SKIP. Env-only base (no tests) so children that extend it do not inherit each other's test lists. Mirrors cast_base in net_ib_transport.json.",
+      "_comment": "CAST base: full WRR env required or tests GTEST_SKIP. No tests here; children extend.",
       "env_variables": {
         "RCCL_IB_QP_SCHED_ENABLE": "1",
         "RCCL_IB_QP_SCHED_WRR_ENABLE": "1",
@@ -132,7 +131,7 @@
 
     "a_cast_wrr": {
       "extends": "a_cast_base",
-      "_comment": "A7/A8: IB-CAST multi-QP WRR scheduler.",
+      "_comment": "A7/A8: CAST multi-QP WRR scheduler.",
       "tests": [
         {
           "name": "A7_Cast_EqualWeightsTwoQPsTokenCounts",
@@ -154,7 +153,7 @@
     "a_fault_inject": {
       "extends": "a_cast_base",
       "timeout": 180,
-      "_comment": "A9: per-QP fault injection on CAST path. Extends a_cast_base (NOT a_cast_wrr) so it does not inherit A7/A8.",
+      "_comment": "A9: per-QP fault injection on CAST path.",
       "tests": [
         {
           "name": "A9_Cast_FaultInjQpErrorIsFatal",
@@ -167,7 +166,7 @@
     "a_gin": {
       "extends": "a_base",
       "timeout": 180,
-      "_comment": "A10-A15: GIN one-sided proxy tests. Gated at build by RCCL_HAS_GIN_IB_PROXY; require NCCL_NET=ib-cast (else GTEST_SKIP). Parameterized fixtures use wildcard filters.",
+      "_comment": "A10-A15: GIN one-sided proxy tests. Require NCCL_NET=ib-cast.",
       "env_variables": {
         "NCCL_NET": "ib-cast"
       },
@@ -206,7 +205,7 @@
     },
 
     "b_base": {
-      "_comment": "Sweep base. command_args here (-e 8G) is inherited by the allreduce tests, which are healthy to 8G. The alltoall tests OVERRIDE command_args to -e 128M because CAST/ROCM-IB alltoall >=256M hits a real RCCL bug (IbCastCompletionEventProcess: expected 'recv' got 'Unused' -> internal error); the 8G alltoall repro lives in the disabled b_large_alltoall_repro suite. NCCL_IB_MERGE_NICS=0 isolates per-NIC behavior; do NOT set NCCL_NET_FORCE_MERGE in the ainic profile together with this (force-merge + merge-disabled => fatal 'Could not force merge NICs'). Validated on g27/g28 (job 9439).",
+      "_comment": "Sweep base: allreduce to 8G, alltoall capped at 128M (>=256M hits RCCL bug). NCCL_IB_MERGE_NICS=0 isolates per-NIC; do NOT combine with NCCL_NET_FORCE_MERGE.",
       "is_gtest": false,
       "num_ranks": 16,
       "num_nodes": 2,
@@ -300,7 +299,7 @@
 
     "b7_autodetect": {
       "extends": "b_base",
-      "_comment": "B7: out-of-the-box - NCCL_NET intentionally OMITTED (do NOT set it to '' - the runner exports -x NCCL_NET='' which breaks net init). RCCL_AINIC_ROCE=1 comes from the --system ainic profile. NOTE: on this AINIC cluster autodetect selects netIbCast with CTS on and reproduces the alltoall hang (validated on job 9437); expect TIMEOUT until the CTS fix lands.",
+      "_comment": "B7: out-of-the-box autodetect. NCCL_NET intentionally omitted (do NOT set to ''). Expect alltoall TIMEOUT until CTS fix lands.",
       "tests": [
         { "name": "B7_alltoall_autodetect", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "Out-of-the-box: auto-select netIbCast on AINIC HW, stock defaults. Capped at 128M (autodetect=>CAST alltoall >=256M repro: b_large_alltoall_repro)." },
         { "name": "B7_allreduce_autodetect", "binary": "all_reduce_perf", "description": "Out-of-the-box autodetect allreduce." }
@@ -309,7 +308,7 @@
 
     "b7a_pure_autodetect": {
       "extends": "b_base",
-      "_comment": "B7a: pure PCI autodetect. DISABLED: --system ainic always sets RCCL_AINIC_ROCE=1 via the profile and cannot be unset per-test, so this would duplicate B7. Run manually without --system ainic to test pure PCI detection (0x1dd8:0x10).",
+      "_comment": "B7a: pure PCI autodetect. DISABLED: duplicates B7 because --system ainic always sets RCCL_AINIC_ROCE=1.",
       "tests": [
         { "name": "B7a_alltoall_pure_autodetect", "binary": "alltoall_perf", "command_args": "-b 1K -e 128M -f 2 -g 1", "description": "Pure PCI autodetect (0x1dd8:0x10); libionic.so auto-loads. Capped at 128M (CAST alltoall >=256M repro: b_large_alltoall_repro)." },
         { "name": "B7a_allreduce_pure_autodetect", "binary": "all_reduce_perf", "description": "Pure PCI autodetect allreduce." }
@@ -318,7 +317,7 @@
 
     "b7b_autodetect_off": {
       "extends": "b_base",
-      "_comment": "B7b: negative control - plugin unset (NCCL_NET omitted), AINIC forced OFF via RCCL_AINIC_ROCE=0; expect fallback to plain IB/RoCE.",
+      "_comment": "B7b: AINIC forced OFF (RCCL_AINIC_ROCE=0); expect fallback to plain IB/RoCE.",
       "env_variables": {
         "RCCL_AINIC_ROCE": "0"
       },
@@ -344,7 +343,7 @@
     "b_large_alltoall_repro": {
       "extends": "b_base",
       "command_args": "-b 1K -e 8G -f 2 -g 1",
-      "_comment": "DISABLED repro of a real RCCL bug: CAST/ROCM-IB alltoall fails at >=256M with 'NET/IB: IbCastCompletionEventProcess: Receiver expected a recv request but got Unused (IBV_WC_RECV_RDMA_WITH_IMM) -> internal error', and leaves orphaned ranks on the GPUs. The plain-IB control passes to 8G, proving HW/MPI are healthy and the defect is in the CAST P2P completion path. Enable only to reproduce/triage; expect the two CAST/ROCM-IB cases to FAIL. Observed on g27/g28 (job 9439).",
+      "_comment": "DISABLED: CAST/ROCM-IB alltoall. Plain-IB control passes to 8G. Enable only to reproduce/triage.",
       "tests": [
         { "name": "BR_alltoall_IB_8G_control", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB" }, "description": "CONTROL: plain RoCE alltoall to 8G - expected PASS (HW healthy)." },
         { "name": "BR_alltoall_CAST_8G", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB-CAST", "RCCL_IB_P2P_DISABLE_CTS": "1" }, "description": "CAST alltoall to 8G - expected FAIL at >=256M (IbCastCompletionEventProcess internal error)." },

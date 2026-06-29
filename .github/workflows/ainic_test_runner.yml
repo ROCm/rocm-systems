@@ -73,11 +73,6 @@ jobs:
           WORKDIR: ${{ github.event.inputs.workdir || env.DEFAULT_WORKDIR }}
           MPI_PATH: ${{ github.event.inputs.mpi_path || env.DEFAULT_MPI_PATH }}
           RCCL_BUILD_DIR: ${{ github.event.inputs.rccl_build_dir || env.DEFAULT_RCCL_BUILD_DIR }}
-          RCCL_AINIC_ROCE: '1'
-          IONIC_LOCKFREE: 'all'
-          NCCL_IB_HCA: 'ionic_0,ionic_1,ionic_2,ionic_3,ionic_4,ionic_5,ionic_6,ionic_7'
-          NCCL_IB_TC: '96'
-          HSA_ENABLE_SDMA: '0'
           TEST_SUITES: ${{ github.event.inputs.test_suites || '' }}
         run: |
           set -o pipefail
