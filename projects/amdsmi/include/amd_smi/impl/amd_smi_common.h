@@ -41,10 +41,7 @@ extern "C" {
 }
 namespace amd::smi {
 
-// Define a map of rsmi status codes to amdsmi status codes. Declared inline
-// (C++17) so it has external linkage and is a single entity across translation
-// units, which is required for the inline rsmi_to_amdsmi_status() below to
-// legally reference it.
+// Define a map of rsmi status codes to amdsmi status codes
 inline const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
     {RSMI_STATUS_SUCCESS, AMDSMI_STATUS_SUCCESS},
     {RSMI_STATUS_INVALID_ARGS, AMDSMI_STATUS_INVAL},
