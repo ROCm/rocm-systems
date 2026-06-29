@@ -344,7 +344,10 @@ def fs_supported(mount):
         return True
     if mount.fstype == "ext4":
         data = mount.option("data")
-        # Absent data= option means ordered (ext4 default), which qualifies.
+        # A missing data= is treated as ordered to match libmount/mountinfo.cpp,
+        # which defaults to ordered when the option is absent. The effective mode
+        # also lives in /proc/fs/ext4/<dev>/options, but we deliberately mirror
+        # the C reference so our verdict matches what hipFile decides at runtime.
         return data is None or data == "ordered"
     return False
 
@@ -372,7 +375,11 @@ def probe_odirect(mountpoint):
     """
     o_direct = getattr(os, "O_DIRECT", 0)
     if o_direct == 0:
-        return None  # platform has no O_DIRECT to test
+        # os.O_DIRECT is only defined when the C library Python was built
+        # against defines O_DIRECT; its absence reflects that build, not
+        # whether the kernel/FS supports O_DIRECT. Without the flag we can't
+        # construct the test open, so we can't verify support either way.
+        return None
 
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | o_direct
     path = os.path.join(mountpoint, f".ais-odirect-{os.getpid()}-{os.urandom(4).hex()}")
@@ -436,6 +443,21 @@ def backing_storage(devno):
     return backing, name
 
 
+def backing_supported(backing):
+    """
+    Whether the backing storage allows hipFile's direct P2P-DMA path.
+
+    hipFile is limited to local NVMe (INSTALL.md), and even multipath NVMe is
+    unsupported. Any interposing layer (LVM/dm, multipath, dm-crypt, MD RAID,
+    loopback) breaks the direct path to the device, so the kernel rejects the IO
+    at runtime (pcie_p2pdma_distance < 0) even when the filesystem and O_DIRECT
+    checks pass. Returns None when the backing could not be determined.
+    """
+    if backing is None:
+        return None
+    return backing == "nvme"
+
+
 def tri(value, unknown="?"):
     """Render an Optional[bool] as a short cell."""
     if value is True:
@@ -459,10 +481,20 @@ def collect(mounts):
 
         backing, disk = backing_storage(m.devno)
         supported_fs = fs_supported(m)
+        backing_ok = backing_supported(backing)
 
         # Only probe fs types that can qualify; unsupported fs is never capable.
         odirect = probe_odirect(m.mountpoint) if supported_fs else None
-        capable = odirect if supported_fs else False
+
+        # A volume is capable only when the filesystem qualifies, the backing is
+        # a direct local NVMe (interposing layers like LVM disqualify it), and
+        # O_DIRECT works. Unknown backing leaves the verdict unverified.
+        if not supported_fs or backing_ok is False:
+            capable = False
+        elif backing_ok is None:
+            capable = None
+        else:
+            capable = odirect
 
         rows.append(
             {
@@ -516,7 +548,15 @@ def main():
     indicating whether all required components support AIS.
     """
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "O_DIRECT/HIPFILE columns are probed by opening a temp file with "
+            "O_DIRECT on each volume.\nThis needs write access to the mountpoint "
+            "(typically root); without it the result is\nshown as 'unverified' "
+            "rather than supported/unsupported. Re-run as root to verify."
+        ),
+    )
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument(
         "-q", "--quiet", action="store_true", help="Silence regular output"
