@@ -33,7 +33,9 @@ def _assert_pc_sampling_files(file_dict, expected):
     """
     keys = list(file_dict.keys())
     code_obj = [k for k in keys if k.endswith("_code_obj_info.json")]
-    assert len(code_obj) == 1, f"expected exactly one *_code_obj_info.json, got {code_obj}"
+    assert len(code_obj) == 1, (
+        f"expected exactly one *_code_obj_info.json, got {code_obj}"
+    )
     remaining = sorted(k for k in keys if k not in code_obj)
     assert remaining == sorted(expected)
 
