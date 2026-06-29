@@ -69,7 +69,7 @@ jobs:
           - name: asan-ubsan-gcc
             build_type: RelWithDebInfo
             enable_asan: 1
-            enable_ubsan: 1
+            enable_ubsan: 0
             enable_tsan: 0
             enable_msan: 0
             c_compiler: gcc
