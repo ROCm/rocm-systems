@@ -387,6 +387,66 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (BackendType::IPC_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
+    case HostAmoAddTestType:
+      test_name = "Host_Amo_Add";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilTestType:
+      test_name = "Host_Wait_Until";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostTestTestType:
+      test_name = "Host_Test";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllTestType:
+      test_name = "Host_Wait_Until_All";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyTestType:
+      test_name = "Host_Wait_Until_Any";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeTestType:
+      test_name = "Host_Wait_Until_Some";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllVectorTestType:
+      test_name = "Host_Wait_Until_All_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyVectorTestType:
+      test_name = "Host_Wait_Until_Any_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeVectorTestType:
+      test_name = "Host_Wait_Until_Some_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllStatusTestType:
+      test_name = "Host_Wait_Until_All_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyStatusTestType:
+      test_name = "Host_Wait_Until_Any_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeStatusTestType:
+      test_name = "Host_Wait_Until_Some_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
     case PutmemSignalOnStreamTestType:
       test_name = "Putmem_Signal_On_Stream";
       testers.push_back(new PutmemSignalOnStreamTester(args));
@@ -973,6 +1033,17 @@ bool Tester::peLaunchesKernel() {
     case HostIntAmoFCswapTestType:
     case HostAmoAllPesTestType:
     case HostAmoSelfTestType:
+    case HostWaitUntilTestType:
+    case HostTestTestType:
+    case HostWaitUntilAllTestType:
+    case HostWaitUntilAnyTestType:
+    case HostWaitUntilSomeTestType:
+    case HostWaitUntilAllVectorTestType:
+    case HostWaitUntilAnyVectorTestType:
+    case HostWaitUntilSomeVectorTestType:
+    case HostWaitUntilAllStatusTestType:
+    case HostWaitUntilAnyStatusTestType:
+    case HostWaitUntilSomeStatusTestType:
       is_launcher = true;
       break;
     default:

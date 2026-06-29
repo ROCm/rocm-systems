@@ -240,23 +240,19 @@ public:
 
   /// @brief Imports a memory object from a shareable handle.
   ///
-  /// @note The handle must be destroyed with @ref DestroyImportedMemoryHandle.
+  /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
   ///
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory; @p handle->size is set to the
   ///             imported allocation size in bytes
   /// @param[in] type @ref ShareType to import
-  /// @param[in] import_handle input handle; @p int* for @p DMABUF_FD,
-  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
+  /// @param[in] import_handle input handle; @p DriverMemoryHandle* whose
+  ///             @p dmabuf_fd field is read for @p DMABUF_FD and whose
+  ///             @p fabric_handle field is read for @p FABRIC_HANDLE
   /// @param[in] mem address of existing buffer, used to bypass import
   virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
                                           ShareType type, void* import_handle,
                                           void* mem = nullptr) = 0;
-
-  /// @brief Destroys the handle created during @ref ImportMemoryHandle.
-  ///
-  /// @param[in] handle handle of the object to release
-  virtual hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
