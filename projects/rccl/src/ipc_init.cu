@@ -55,9 +55,11 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  // gfx1100 (RDNA3) lacks XGMI; IPC handles fail with hipErrorInvalidDevicePointer.
-  if (comm->archName != nullptr && strstr(comm->archName, "gfx1100") != nullptr) {
-    INFO(NCCL_INIT, "ncclDdaIpcCommInit: skipping DDA IPC on %s", comm->archName);
+  // DDA IPC requires cross-GPU IPC memory mapping (hipIpcOpenMemHandle).
+  // On non-P2P topologies (e.g. RDNA3 over PCIe) this fails with
+  // hipErrorInvalidDevicePointer and poisons the HIP device context.
+  if (!comm->isAllCudaP2p) {
+    INFO(NCCL_INIT, "ncclDdaIpcCommInit: skipping DDA IPC (no P2P between all GPUs)");
     return ncclSuccess;
   }
 
