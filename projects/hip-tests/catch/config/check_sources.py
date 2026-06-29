@@ -78,7 +78,7 @@ def main():
             missing.append(f"  {group}/{name}")
 
     if missing:
-        strict = os.environ.get("THEROCK_REQUIRE_HIP_YAML_ENTRIES", "").strip()
+        strict = os.environ.get("THEROCK_REQUIRE_HIP_YAML_ENTRIES", "").strip().lower() in ("1", "true", "yes", "on")
         level = "ERROR" if strict else "WARNING"
         color = ERROR if strict else WARNING
         print(
