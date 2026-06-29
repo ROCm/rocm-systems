@@ -35,6 +35,10 @@
 #include <string_view>
 #include <utility>
 
+#include "library/rocprofiler-sdk/fwd.hpp"
+#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
+#    include <rocprofiler-sdk/counters.h>
+#endif
 #include <rocprofiler-sdk/context.h>
 
 namespace rocprofsys::trace_cache
@@ -1400,7 +1404,61 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 
 void
 perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
-{}
+{
+#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
+    auto track_it = m_pmc_track_map.find(
+        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value));
+    if(track_it == m_pmc_track_map.end()) return;
+
+    const auto&   track_info = track_it->second;
+    std::uint32_t device_id  = 0;
+    try
+    {
+        device_id = static_cast<std::uint32_t>(
+            m_agent_manager.get_agent_by_handle(_spm.agent_id_handle).device_type_index);
+    } catch(const std::exception& e)
+    {
+        LOG_WARNING("Skipping SPM Perfetto samples for unknown agent handle {}: {}",
+                    _spm.agent_id_handle, e.what());
+        return;
+    }
+
+    auto get_counter_name = [&](std::uint64_t counter_id) -> std::string {
+        if(auto it = m_spm_counter_name_cache.find(counter_id);
+           it != m_spm_counter_name_cache.end())
+            return it->second;
+
+        auto info = rocprofiler_counter_info_v0_t{};
+        auto status =
+            rocprofiler_query_counter_info(rocprofiler_counter_id_t{ counter_id },
+                                           ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
+        auto name = (status == ROCPROFILER_STATUS_SUCCESS && info.name != nullptr)
+                        ? std::string{ info.name }
+                        : fmt::format("counter_{}", counter_id);
+        m_spm_counter_name_cache.emplace(counter_id, name);
+        return name;
+    };
+
+    for(const auto& sample : _spm.samples)
+    {
+        const auto counter_name = get_counter_name(sample.counter_id);
+        const auto track_name =
+            fmt::format("GPU SPM {} [{}] XCC {} SE {} Instance {}", counter_name,
+                        device_id, sample.xcc, sample.shader_engine, sample.instance);
+        const auto track_key = std::hash<std::string>{}(
+            track_name + std::to_string(sample.counter_instance_id));
+
+        if(!track_info.exists_fn(track_key))
+        {
+            track_info.emplace_fn(track_key, track_name, track_info.default_units);
+        }
+
+        track_info.trace_fn(track_key, 0, sample.timestamp, sample.value);
+    }
+#else
+    (void) _spm;
+#endif
+}
 
 void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
