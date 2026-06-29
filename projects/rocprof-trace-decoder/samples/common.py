@@ -60,7 +60,8 @@ def expand_input_paths(patterns: list[str]) -> SampleInputs:
     att_paths: list[Path] = []
     code_paths: list[Path] = []
     for pattern in patterns:
-        matches = sorted(glob.glob(pattern)) if any(ch in pattern for ch in "*?[]") else [pattern]
+        expanded = str(Path(pattern).expanduser())
+        matches = sorted(glob.glob(expanded)) if any(ch in expanded for ch in "*?[]") else [expanded]
         if not matches:
             raise SystemExit(f"No files matched: {pattern}")
         for item in matches:

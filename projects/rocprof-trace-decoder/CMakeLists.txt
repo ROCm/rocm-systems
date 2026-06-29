@@ -56,32 +56,45 @@ set(TTD_ALL_VERSIONS ON)
 
 option(BUILD_TESTS "Enable Building Tests for ROCProf Trace Decoder" OFF)
 option(BUILD_UNIT_TESTS "Enable Building Unit Tests for ROCProf Trace Decoder" ON)
-option(BUILD_PYTHON "Install Python API" ON)
+set(BUILD_PYTHON
+    "AUTO"
+    CACHE STRING "Install Python API: AUTO, ON, or OFF")
+set_property(CACHE BUILD_PYTHON PROPERTY STRINGS AUTO ON OFF)
 option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 
 add_subdirectory(source)
 
 if(BUILD_PYTHON)
-    find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
-    execute_process(
-        COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_path('purelib'))"
-        RESULT_VARIABLE _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_RESULT
-        OUTPUT_VARIABLE _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(NOT _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_RESULT EQUAL 0
-       OR "${_ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}" STREQUAL "")
-        message(FATAL_ERROR "Failed to determine Python site-packages install directory")
+    set(Python3_FIND_UNVERSIONED_NAMES LAST)
+    if(BUILD_PYTHON STREQUAL "AUTO")
+        find_package(Python3 3.8 COMPONENTS Interpreter QUIET)
+    else()
+        find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
     endif()
-    set(ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
-        "${_ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}"
-        CACHE PATH "Install directory for the rocprof-trace-decoder Python API")
 
-    install(
-        DIRECTORY python/rocprof_trace_decoder
-        DESTINATION ${ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}
-        COMPONENT runtime
-        PATTERN "__pycache__" EXCLUDE
-        PATTERN "*.pyc" EXCLUDE)
+    if(Python3_FOUND)
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_path('purelib'))"
+            RESULT_VARIABLE _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_RESULT
+            OUTPUT_VARIABLE _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(NOT _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_RESULT EQUAL 0
+           OR "${_ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}" STREQUAL "")
+            message(FATAL_ERROR "Failed to determine Python site-packages install directory")
+        endif()
+        set(ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
+            "${_ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}"
+            CACHE PATH "Install directory for the rocprof-trace-decoder Python API")
+
+        install(
+            DIRECTORY python/rocprof_trace_decoder
+            DESTINATION ${ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}
+            COMPONENT runtime
+            PATTERN "__pycache__" EXCLUDE
+            PATTERN "*.pyc" EXCLUDE)
+    else()
+        message(STATUS "Skipping Python API install: Python 3.8+ interpreter not found")
+    endif()
 endif()
 
 if(BUILD_TESTS)

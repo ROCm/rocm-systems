@@ -294,12 +294,23 @@ def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
     range_map: list[tuple[int, int, str]] = []
 
     with Path(elf_path).open("rb") as f:
-        elf = ELFFile(f)
-        if not elf.has_dwarf_info():
+        try:
+            elf = ELFFile(f)
+            if not elf.has_dwarf_info():
+                return []
+            dwarfinfo = elf.get_dwarf_info()
+            cu_iter = iter(dwarfinfo.iter_CUs())
+        except Exception:
             return []
-        dwarfinfo = elf.get_dwarf_info()
 
-        for cu in dwarfinfo.iter_CUs():
+        while True:
+            try:
+                cu = next(cu_iter)
+            except StopIteration:
+                break
+            except Exception:
+                break
+
             try:
                 line_program = dwarfinfo.line_program_for_CU(cu)
             except Exception:
@@ -308,11 +319,17 @@ def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
                 continue
 
             # Build inlined-subroutine DIE tree once per CU.
-            top = cu.get_top_DIE()
-            die_root = _build_die_tree(top, dwarfinfo, cu, line_program)
+            try:
+                top = cu.get_top_DIE()
+                die_root = _build_die_tree(top, dwarfinfo, cu, line_program)
+            except Exception:
+                continue
 
             # Walk the line program; each entry covers [addr, next_addr).
-            entries = list(line_program.get_entries())
+            try:
+                entries = list(line_program.get_entries())
+            except Exception:
+                continue
             states = [(e.state, e) for e in entries if e.state is not None]
             for i in range(len(states) - 1):
                 st, _ = states[i]

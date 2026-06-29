@@ -118,6 +118,7 @@ jobs:
         cmake -B build -S projects/rocprof-trace-decoder \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+          -DPython3_EXECUTABLE=$(command -v python3) \
           -DBUILD_TESTS=ON \
           -DBUILD_UNIT_TESTS=ON
 

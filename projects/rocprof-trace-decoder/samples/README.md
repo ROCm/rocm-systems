@@ -7,6 +7,13 @@ from the code objects, decode the ATT buffers, and print or plot results.
 Install the Python package first, or run from the source tree with
 `PYTHONPATH=python`. Plotting samples require `matplotlib` and `numpy`.
 
+The plotting samples write their PNG output to the current directory by
+default. Use `-d DIR` to choose a different output directory.
+
+Code-object IDs are inferred from filenames containing `_code_object_id_N`.
+If exactly one code object has no ID in its filename, these samples use ID `0`.
+Multiple unnamed code objects are rejected because their IDs are ambiguous.
+
 ## ISA Hotspots
 
 Print the top 30 instructions by `latency + idle`:

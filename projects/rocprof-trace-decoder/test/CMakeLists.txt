@@ -41,6 +41,7 @@ if(UNIT_TESTS)
 endif()
 
 if(BUILD_INTEGRATION_TESTS)
+    set(Python3_FIND_UNVERSIONED_NAMES LAST)
     find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -c "import elftools"
