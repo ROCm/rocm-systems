@@ -118,6 +118,7 @@ public:
         // Retry here until it succeeds; once m_context_started is true this is a single
         // branch-predicted branch with no further work.
         if(!m_context_started) start();
+        if(!m_context_started) return m_result_cache;
 
         auto rec_count = m_record_buffer.size();
 

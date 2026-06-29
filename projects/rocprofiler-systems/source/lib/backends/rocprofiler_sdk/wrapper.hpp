@@ -21,9 +21,12 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/marker/api_id.h>
-#include <rocprofiler-sdk/ompt/api_id.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
+
+#if ROCPROFILER_VERSION >= 600
+#    include <rocprofiler-sdk/ompt/api_id.h>
+#endif
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #if __has_include(<rocprofiler-sdk/experimental/registration.h>)
 #    include <rocprofiler-sdk/experimental/registration.h>
@@ -311,6 +314,8 @@ struct backend
     static constexpr status_t STATUS_ERROR   = ROCPROFILER_STATUS_ERROR;
     static constexpr status_t STATUS_ERROR_BUFFER_BUSY =
         ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+    static constexpr status_t STATUS_ERROR_CONTEXT_ERROR =
+        ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR;
     static constexpr status_t STATUS_ERROR_HSA_NOT_LOADED =
         ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
