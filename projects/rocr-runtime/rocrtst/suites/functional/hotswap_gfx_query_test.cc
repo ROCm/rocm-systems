@@ -1,4 +1,4 @@
-//===- hotswap_gfx_query.cc - HotSwap gfx / ASIC gate tests --------------===//
+//===- hotswap_gfx_query_test.cc - HotSwap gfx / ASIC gate tests ---------===//
 //
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //

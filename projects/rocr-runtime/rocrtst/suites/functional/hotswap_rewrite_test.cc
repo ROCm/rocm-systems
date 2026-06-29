@@ -1,4 +1,4 @@
-//===- hotswap_rewrite.cc - HotSwap rewrite tests ------------------------===//
+//===- hotswap_rewrite_test.cc - HotSwap rewrite tests -------------------===//
 //
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
