@@ -6,6 +6,7 @@ import sqlite3
 from contextlib import ExitStack, closing
 from typing import Optional
 
+import utils.utils_profile_csv as csv_ops
 from utils.logger import console_error
 
 # From schema definition in source/share/rocprofiler-sdk-rocpd/data_views.sql
@@ -57,6 +58,11 @@ TABLE_NAME_PREFIX_QUERY = (
 )
 INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
 
+# Rows per executemany call. Sized to stay near SQLite's default 2 MB
+# page cache (cache_size=-2000, page_size=4096) while amortizing
+# per-call overhead. Community practice: 10k–100k rows per batch.
+PMC_EVENT_INSERT_BATCH_SIZE = 50_000
+
 
 def convert_dbs_to_csv(
     db_paths: list[str],
@@ -104,7 +110,7 @@ def convert_dbs_to_csv(
 def update_rocpd_pmc_events(
     counter_csv_path: str,
     rocpd_db_path: str,
-    batch_size: int = 50_000,
+    batch_size: int = PMC_EVENT_INSERT_BATCH_SIZE,
 ) -> None:
     """Stream counter CSV in batches into the rocpd pmc_event table."""
     try:
@@ -114,18 +120,10 @@ def update_rocpd_pmc_events(
                 return
             table_name, guid, dispatch_to_event = metadata
 
-            columns = ("guid", "event_id", "pmc_id", "value")
-            placeholders = ", ".join(["?"] * len(columns))
-            insert_sql = INSERT_QUERY.format(
-                table_name=table_name,
-                columns=", ".join(columns),
-                placeholders=placeholders,
-            )
-
             _stream_csv_to_pmc_event_table(
                 conn,
                 counter_csv_path,
-                insert_sql,
+                table_name,
                 guid,
                 dispatch_to_event,
                 batch_size,
@@ -176,29 +174,33 @@ def _resolve_pmc_event_metadata(
 def _stream_csv_to_pmc_event_table(
     conn: sqlite3.Connection,
     counter_csv_path: str,
-    insert_sql: str,
+    table_name: str,
     guid: str,
     dispatch_to_event: dict[str, str],
     batch_size: int,
 ) -> None:
     """Read counter CSV in batches and insert into the pmc_event table."""
+    columns = ("guid", "event_id", "pmc_id", "value")
+    placeholders = ", ".join(["?"] * len(columns))
+    insert_sql = INSERT_QUERY.format(
+        table_name=table_name,
+        columns=", ".join(columns),
+        placeholders=placeholders,
+    )
+
     batch: list[tuple[Optional[str], ...]] = []
     with conn:
-        with open(counter_csv_path, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            if reader.fieldnames is None:
-                return
-            for row in reader:
-                event_id = dispatch_to_event.get(row.get("dispatch_id", ""))
-                batch.append((
-                    guid,
-                    event_id,
-                    row.get("counter_id"),
-                    row.get("counter_value"),
-                ))
-                if len(batch) >= batch_size:
-                    conn.executemany(insert_sql, batch)
-                    batch.clear()
+        for row in csv_ops.iter_csv_dicts(counter_csv_path):
+            event_id = dispatch_to_event.get(row.get("dispatch_id", ""))
+            batch.append((
+                guid,
+                event_id,
+                row.get("counter_id"),
+                row.get("counter_value"),
+            ))
+            if len(batch) >= batch_size:
+                conn.executemany(insert_sql, batch)
+                batch.clear()
 
         if batch:
             conn.executemany(insert_sql, batch)
