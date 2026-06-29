@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """Tests for find_hip_runtimes()."""
 
 # The isolated_env fixture is requested by name (pytest's dependency-injection

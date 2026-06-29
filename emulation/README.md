@@ -57,7 +57,7 @@ flowchart TB
     A4 --> R1
 
     subgraph CORE["Rocjitsu"]
-    
+
         subgraph KMD["KMD Interposer"]
             K1["Intercepts driver calls, routes to simulated kernel-mode driver.<br/>Runs unmodified apps."]
         end
@@ -96,7 +96,7 @@ flowchart TB
                     D2["Instrumentation"]
                     D3["Spill/restore"]
                     D4["Patch points"]
-                end        
+                end
                 subgraph ANA["Analysis Layer"]
                     AN1["Register liveness"]
                     AN2["Hazard scheduling"]
@@ -162,7 +162,7 @@ flowchart TB
         end
 
         TOPO["Topology"]
-        
+
         SIM["Emulator"]
         PLUGINS["Plugins"]
         TOPO --> PROFILE
@@ -172,7 +172,7 @@ flowchart TB
         SESSION["Session"]
         METRICS["Metrics"]
         SESSION --> METRICS
-        METRICS --> DASHBOARD 
+        METRICS --> DASHBOARD
         EXECUTION["Execution "]
         PROFILE --> SESSION --> EXECUTION
         SESSION --> DASHBOARD

@@ -1177,9 +1177,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
               HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
-              HsaMemoryMapFlags flags)
+              HsaMemoryMapFlags flags, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
+  (void)NodeId;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
 
@@ -1201,9 +1202,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
-              HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+              HSAuint64 offset, HSAuint64 size, HSAuint64 addr, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
+  (void)NodeId;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
 

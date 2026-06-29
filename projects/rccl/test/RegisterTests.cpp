@@ -189,6 +189,44 @@ static void testDeregisterNullHandle() {
     NCCLCHECK(ncclCommDestroy(comm));
 }
 
+/**
+ * @brief Exercises the non-symmetric window register/deregister/destroy path
+ *        on a single-rank communicator.
+ *
+ * With cuMem disabled, symmetricSupport is false, so ncclCommWindowRegister
+ * takes the non-symmetric fallback path. This initializes devrState (via
+ * ncclDevrInitOnce) and then tears it down through ncclDevrFinalize when the
+ * comm is destroyed. The test verifies that register, deregister and destroy
+ * all complete cleanly on that path (no crash / error).
+ *
+ * Window register/deregister errors are tolerated (they depend on cuMem
+ * availability); the comm must still register and destroy without error.
+ * (Byte-level leak verification is done separately via the standalone ASan
+ * reproducer, since the isolated test runner _exit()s and bypasses LSan.)
+ */
+static void testWindowRegisterSingleRankNonSymTeardown() {
+    SKIP_IF_NO_GPU();
+
+    HIPCALL(hipSetDevice(0));
+
+    ncclComm_t comm;
+    NCCLCHECK(initSingleRankComm(&comm));
+
+    const size_t bufferSize = NCCL_WIN_REQUIRED_ALIGNMENT; // required alignment for window registration
+    void* buf = nullptr;
+    NCCLCHECK(ncclMemAlloc(&buf, bufferSize));
+
+    ncclWindow_t win = nullptr;
+    ncclResult_t reg = ncclCommWindowRegister(comm, buf, bufferSize, &win,
+                                              NCCL_WIN_COLL_SYMMETRIC);
+    if (reg == ncclSuccess && win != nullptr) {
+        NCCLCHECK(ncclCommWindowDeregister(comm, win));
+    }
+
+    NCCLCHECK(ncclMemFree(buf));
+    NCCLCHECK(ncclCommDestroy(comm));
+}
+
 //==============================================================================
 // Test configuration helpers
 //==============================================================================
@@ -241,7 +279,12 @@ TEST(Register, ProcessIsolatedRegisterTests)
             []() { testVariableSizeBuffers(true); }),
 
         // DeregisterNullHandle test (no enable/disable variants needed)
-        ProcessIsolatedTestRunner::TestConfig("DeregisterNullHandle", testDeregisterNullHandle)
+        ProcessIsolatedTestRunner::TestConfig("DeregisterNullHandle", testDeregisterNullHandle),
+
+        // Force the non-sym path (NCCL_CUMEM_ENABLE=0 => symmetricSupport=false) so the
+        // non-symmetric register/teardown is exercised; NCCL_LOCAL_REGISTER=1 ensures the register path runs.
+        ProcessIsolatedTestRunner::TestConfig("WindowRegisterSingleRankNonSymTeardown", testWindowRegisterSingleRankNonSymTeardown)
+            .withEnvironment({{"NCCL_CUMEM_ENABLE", "0"}, {"NCCL_LOCAL_REGISTER", "1"}})
     );
 }
 
