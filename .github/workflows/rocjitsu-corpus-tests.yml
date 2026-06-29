@@ -192,7 +192,7 @@ jobs:
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
 
-          cmake --build "${ROCJITSU_BUILD_DIR}"
+          cmake --build "${ROCJITSU_BUILD_DIR}" --verbose
 
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             -E "${EXCLUDED_TESTS}" \
