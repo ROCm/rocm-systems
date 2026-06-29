@@ -77,6 +77,7 @@ class RcvOutputWriter:
         self.other_simd_files: dict[int, list[list[object]]] = defaultdict(list)
         self.shaderdata_files: dict[int, list[list[object]]] = defaultdict(list)
         self.kernel_ids: dict[Pc, int] = {Pc(0, 0): 0}
+        self.kernel_names = _kernel_names(code_index.document)
 
     def add_shader_records(self, se: int, records: TraceRecords) -> None:
         if records.gfxip is not None:
@@ -292,14 +293,7 @@ class RcvOutputWriter:
         return self.kernel_ids[pc]
 
     def _kernel_name(self, pc: Pc) -> str:
-        for kernel in self.code_index.document.get("kernels", []):
-            if (
-                int(kernel.get("address", -1)) == pc.address
-                and int(kernel.get("codeobj", -1)) == pc.code_object_id
-            ):
-                name = kernel.get("name") or kernel.get("demangled")
-                return str(name or f"{pc.code_object_id} / 0x{pc.address:x}")
-        return f"{pc.code_object_id} / 0x{pc.address:x}"
+        return self.kernel_names.get(pc, _default_kernel_name(pc))
 
     def _dispatch_json(self, dispatch: Dispatch) -> dict[str, object]:
         kernel_id = self._kernel_id(dispatch.entry_point)
@@ -351,6 +345,22 @@ def _stringify_nested(value: object) -> object:
     if isinstance(value, list):
         return [_stringify_nested(v) for v in value]
     return value
+
+
+def _kernel_names(document: dict) -> dict[Pc, str]:
+    out: dict[Pc, str] = {}
+    for kernel in document.get("kernels", []):
+        pc = Pc(
+            address=int(kernel.get("address", -1)),
+            code_object_id=int(kernel.get("codeobj", -1)),
+        )
+        name = kernel.get("name") or kernel.get("demangled")
+        out[pc] = str(name or _default_kernel_name(pc))
+    return out
+
+
+def _default_kernel_name(pc: Pc) -> str:
+    return f"{pc.code_object_id} / 0x{pc.address:x}"
 
 
 def _write_json(path: Path, data: object) -> None:

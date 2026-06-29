@@ -283,8 +283,8 @@ def _build_die_tree(die, dwarfinfo, cu, line_program) -> _Inlined:
 
     for child in die.iter_children():
         sub = _build_die_tree(child, dwarfinfo, cu, line_program)
-        info.children.append(sub)
         if sub.children_high > sub.children_low:
+            info.children.append(sub)
             info.expand_children(sub.children_low, sub.children_high)
     return info
 
@@ -358,6 +358,7 @@ def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
                 LOGGER.debug("Unexpected error reading DWARF line entries from %s", elf_path, exc_info=True)
                 continue
             states = [(e.state, e) for e in entries if e.state is not None]
+            line_ranges: dict[int, tuple[int, str]] = {}
             for i in range(len(states) - 1):
                 st, _ = states[i]
                 nxt, _ = states[i + 1]
@@ -371,7 +372,9 @@ def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
                 if not src:
                     continue
                 line_str = f"{src}:{st.line}" if st.line != 0 else f"{src}:?"
-                # Build inlined call stack for this address.
+                line_ranges[addr] = (end_addr, line_str)
+
+            for addr, (end_addr, line_str) in line_ranges.items():
                 stack: list[str] = []
                 die_root.get_call_stack(addr, stack)
                 if stack:
