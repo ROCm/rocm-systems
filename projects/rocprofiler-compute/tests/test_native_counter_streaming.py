@@ -12,10 +12,11 @@ import textwrap
 
 import pytest
 
+import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
 from utils.utils_profile import (
     _aggregate_counter_csv,
-    _build_rocprofv3_counter_rows,
+    _build_rocprofv3_counter_row,
 )
 
 # =============================================================================
@@ -151,24 +152,25 @@ def test_aggregate_counter_csv_groups_and_sums(native_counter_csv):
 
 
 # =============================================================================
-# _build_rocprofv3_counter_rows tests
+# _build_rocprofv3_counter_row tests
 # =============================================================================
 
 
-def test_build_rocprofv3_counter_rows_joins_correctly(
+def test_build_rocprofv3_counter_row_joins_correctly(
     native_counter_csv, kernel_trace_rows
 ):
-    """Counter groups are joined with kernel trace rows by dispatch_id."""
+    """iter_merge_rows + _build_rocprofv3_counter_row produces correct output."""
     aggregated = _aggregate_counter_csv(
         native_counter_csv, ("dispatch_id", "counter_name")
     )
 
-    kernel_lookup: dict[str, list[dict]] = {}
-    for kernel_row in kernel_trace_rows:
-        dispatch_id = kernel_row.get("Dispatch_Id", "")
-        kernel_lookup.setdefault(dispatch_id, []).append(kernel_row)
-
-    rows = _build_rocprofv3_counter_rows(aggregated, kernel_lookup)
+    merged = csv_ops.iter_merge_rows(
+        aggregated.values(),
+        kernel_trace_rows,
+        left_on="dispatch_id",
+        right_on="Dispatch_Id",
+    )
+    rows = [_build_rocprofv3_counter_row(m) for m in merged]
 
     assert len(rows) == 3  # 3 unique (dispatch_id, counter_name) groups
 
@@ -188,16 +190,11 @@ def test_build_rocprofv3_counter_rows_joins_correctly(
     assert sq_waves_d1[0]["Counter_Value"] == 10.0
 
 
-def test_build_rocprofv3_counter_rows_unmatched_dispatch():
-    """Groups without a matching kernel entry are dropped (inner join)."""
-    aggregated = {
-        ("99", "SQ_WAVES"): {
-            "dispatch_id": "99",
-            "counter_name": "SQ_WAVES",
-            "counter_value": 5.0,
-        },
-    }
-    rows = _build_rocprofv3_counter_rows(aggregated, {})
+def test_iter_merge_rows_unmatched_dispatch():
+    """Unmatched left rows are dropped in inner join (default)."""
+    left = [{"dispatch_id": "99", "counter_name": "SQ_WAVES", "counter_value": 5.0}]
+    right: list[dict] = []
+    rows = list(csv_ops.iter_merge_rows(left, right, "dispatch_id", "Dispatch_Id"))
     assert rows == []
 
 
