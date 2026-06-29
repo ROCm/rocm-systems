@@ -156,18 +156,22 @@ private:
     //       after CU mask support is added to agent_info
     bool asymmetric_cu_patch;
 
-    // WGP harvesting support (GFX11+): per-(SE, SA) active WGP physical indices.
+    // WGP harvesting support (GFX11+): per-(SE, SA) WGP active mask, taken
+    // straight from the DRM cu_bitmap (2 CU bits per WGP). A harvested WGP has
+    // both of its CU bits clear; the bIsWGPcounter11 read loop below tests this
+    // mask and skips the BuildCopyCounterDataPacket() call for inactive WGPs
+    // (their slots are zero-filled) - reading a harvested WGP would alias onto
+    // an active one. We keep the mask itself (not a compacted index list) so the
+    // slot position stays == the physical WGP index: no remap, so the dimension
+    // indices / HW_IDs reported elsewhere are unchanged and the reader stays in
+    // sync with GetNumWGPs().
     //
-    // Sized in the constructor from the chip's actual se_number_ x sarrays_per_se_
-    // so we never overrun on parts that exceed the aqlprofile_cu_bitmap_t window
-    // (AQLPROFILE_DRM_CU_BITMAP_NUM_SE x AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE,
-    // e.g. Navi31: 6 SE x 2 SA = 12 SAs; MI200: 8 SE x 1 SA = 8 SAs), and so
-    // we remain forward-compatible with future GPUs whose SE x SA-per-SE
-    // topology is larger than any fixed compile-time bound.
-    //
-    // Outer: per-SE. Middle: per-SA. Inner: active (non-harvested) WGP indices
-    // for that SA, in increasing order. The count is just inner.size().
-    std::vector<std::vector<std::vector<uint32_t>>> active_wgp_indices_;
+    // Sized in the constructor from the chip's actual se_number_ x
+    // sarrays_per_se_ so we never overrun the aqlprofile_cu_bitmap_t window
+    // (e.g. Navi31: 6 SE x 2 SA; MI200: 8 SE x 1 SA). Outer: per-SE. Inner:
+    // per-SA mask (synthesized fully-active when no bitmap is present, e.g.
+    // V0/V1 agents).
+    std::vector<std::vector<uint32_t>> sa_cu_mask_;
 
     void DebugTrace(uint32_t value)
     {
@@ -297,11 +301,10 @@ private:
                    : instance_index;
     }
 
-    // Populate active_wgp_indices_[se][sa] for the per-WGP read loop in
-    // bIsWGPcounter11 below. With the DRM cu_bitmap (V2 on GFX11+) the
-    // highest set bit caps the WGP range and harvested WGPs are skipped
-    // automatically; otherwise we synthesize a fully-active mask of
-    // wgp_per_sa_ contiguous WGPs.
+    // Populate sa_cu_mask_[se][sa] (the per-SA WGP active mask) used by the
+    // bIsWGPcounter11 read loop below to skip harvested WGPs. With the DRM
+    // cu_bitmap (V2 on GFX11+) harvested WGPs show up as clear CU bits;
+    // otherwise we synthesize a fully-active mask of wgp_per_sa_ WGPs.
     //
     // Logical -> raw translation for cu_bitmap indexing (chips with > NUM_SE
     // logical SEs fold upper banks into upper SA columns; see kernel's
@@ -311,11 +314,11 @@ private:
     // The raw-coordinate bounds check is required because cu_bitmap.bits
     // is a C array sized by the kernel ABI [NUM_SE][NUM_SA_PER_SE]; reading
     // out of window is UB, not a guaranteed zero.
-    void build_active_wgp_indices(const AgentInfo* agent_info)
+    void build_sa_cu_mask(const AgentInfo* agent_info)
     {
         // Fits Navi31 (6 x 2), MI200 (8 x 1), and any future SE x SA-per-SE
         // topology too large for a hardcoded kMaxSA.
-        active_wgp_indices_.assign(se_number_, std::vector<std::vector<uint32_t>>(sarrays_per_se_));
+        sa_cu_mask_.assign(se_number_, std::vector<uint32_t>(sarrays_per_se_, 0u));
 
         constexpr uint32_t kMaxWgpPerSa  = 16;
         constexpr uint32_t bitmap_se_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
@@ -326,8 +329,6 @@ private:
         {
             for(uint32_t sa = 0; sa < sarrays_per_se_; ++sa)
             {
-                auto& indices = active_wgp_indices_.at(se).at(sa);
-
                 const uint32_t raw_se = se % bitmap_se_lim;
                 const uint32_t raw_sa = sa + (se / bitmap_se_lim) * cu_bitmap_sh_mul;
 
@@ -336,22 +337,13 @@ private:
                                      : 0u;
                 if(cu_bm == 0)
                 {
-                    // No bitmap for this SA. Guard wgp_per_sa_==0 here so the
-                    // synthesized cu_bm is always non-zero by construction and
-                    // we never hand 0 to __builtin_clz below (which is UB).
-                    // (1u << 32) is also UB; clamp when wgp_per_sa_ covers the
-                    // full 32-bit window (16 WGPs * 2 CU bits).
+                    // No bitmap for this SA: synthesize a fully-active mask so
+                    // every WGP is read. Clamp when wgp_per_sa_ covers the full
+                    // 32-bit window (16 WGPs * 2 CU bits) since (1u << 32) is UB.
                     if(wgp_per_sa_ == 0) continue;
                     cu_bm = (wgp_per_sa_ >= kMaxWgpPerSa) ? ~0u : ((1u << (wgp_per_sa_ * 2u)) - 1u);
                 }
-
-                const uint32_t max_cu_bit = 31u - __builtin_clz(cu_bm);
-                const uint32_t max_wgp    = max_cu_bit / 2u;
-                indices.reserve(max_wgp + 1);
-                for(uint32_t wgp = 0; wgp <= max_wgp; ++wgp)
-                {
-                    if(cu_bm & (3u << (wgp * 2))) indices.push_back(wgp);
-                }
+                sa_cu_mask_.at(se).at(sa) = cu_bm;
             }
         }
     }
@@ -369,7 +361,7 @@ public:
                             (se_number_ * sarrays_per_se_);
         this->wgp_per_sa_ /= agent_info->xcc_num;
 
-        build_active_wgp_indices(agent_info);
+        build_sa_cu_mask(agent_info);
 
         // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
         // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
@@ -908,17 +900,38 @@ public:
 
                         if(bIsWGPcounter11)
                         {
-                            const auto& indices = active_wgp_indices_.at(se_index).at(sarray);
-                            for(uint32_t wgp : indices)
+                            // Emit exactly wgp_per_sa_ entries (== GetNumWGPs()) per
+                            // SA so the output-buffer layout matches what iterate_data
+                            // consumes; otherwise any block after the first SQ-WGP
+                            // counter desyncs (broken multi-counter runs). Each slot
+                            // maps to its physical WGP index (no remap): an active WGP
+                            // gets a real read; a harvested WGP (both CU bits clear in
+                            // the mask) is skipped and zero-filled - reading it would
+                            // alias onto an active one (the original bug this guards).
+                            // Any active WGP at index >= wgp_per_sa_ (middle-harvest)
+                            // is never read -> undercount on parts like gfx1151.
+                            const uint32_t cu_bm = sa_cu_mask_.at(se_index).at(sarray);
+                            for(uint32_t wgp = 0; wgp < wgp_per_sa_; ++wgp)
                             {
-                                grbm_value =
-                                    Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
-                                SetGrbmGfxIndex(cmd_buffer, grbm_value);
-                                builder.BuildCopyCounterDataPacket(cmd_buffer,
-                                                                   reg_info.register_addr_lo,
-                                                                   reg_info.register_addr_hi,
-                                                                   buf + read_counter,
-                                                                   1);
+                                if(cu_bm & (3u << (wgp * 2)))
+                                {
+                                    grbm_value = Primitives::grbm_se_sh_wgp_index_value(
+                                        se_index, sarray, wgp);
+                                    SetGrbmGfxIndex(cmd_buffer, grbm_value);
+                                    builder.BuildCopyCounterDataPacket(cmd_buffer,
+                                                                       reg_info.register_addr_lo,
+                                                                       reg_info.register_addr_hi,
+                                                                       buf + read_counter,
+                                                                       1);
+                                    // mask==1 writes only the low dword; clear the high
+                                    // dword so the 64-bit sample is well-defined.
+                                    if(buf != nullptr) buf[read_counter + 1] = 0;
+                                }
+                                else if(buf != nullptr)
+                                {
+                                    buf[read_counter]     = 0;
+                                    buf[read_counter + 1] = 0;
+                                }
                                 read_counter += 2;
                             }
                         }
