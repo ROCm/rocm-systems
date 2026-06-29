@@ -660,6 +660,65 @@ TEST_F(GinMPIDeviceTests, Signal_NoPayload) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// Validates the NCCL 2.29.7 defect (AICOMRCCL-1115): "Fix a 16-bit overflow of
+// signal and counter ids with GIN proxy." Pre-fix, the proxy GPU-flush
+// descriptor packed signalId/counterId into uint16_t fields
+// (gin_proxy_device_host_common.h), so any id >= 65536 truncated to (id &
+// 0xFFFF). The fix widens those fields to uint32_t bitfields (signalId : 24,
+// counterId : 23) and grows the pools/validation to match. Here rank 0 bumps a
+// signal whose index is exactly one past the old 16-bit range; rank 1 waits on
+// that same index. With the fix the bump lands at cell 65536 and waitSignal
+// returns; pre-fix the id truncates to cell 0, the waiter on 65536 never
+// observes it, and the consumer hangs (surfaced as a timeout) -- exactly the
+// discrimination we want. This reuses the Signal_NoPayload kernels unchanged;
+// only the index and pool size differ from the in-range control above.
+TEST_F(GinMPIDeviceTests, Signal_HighIdNoOverflow) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  // Index one past the old uint16_t range. ginSignalCount must exceed it so the
+  // cell is a valid in-pool index (post-fix default pool is 512Ki).
+  constexpr ncclGinSignal_t kSigIdx          = 65536;  // > 0xFFFF
+  constexpr uint32_t        kSignalPoolCount = 65537;
+  constexpr int             kPeer            = 1;       // rank 0 -> rank 1
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = kSignalPoolCount;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  // Producer (rank 0) bumps signal cell kSigIdx; consumer (rank 1) waits for it
+  // to reach 1. The consumer's successful return IS the assertion -- pre-fix it
+  // never returns because the bump truncates to cell 0.
+  if (rank == 0) {
+    signalNoPayloadProducerKernel<<<1, 32, 0, stream>>>(kSigIdx, kPeer, devComm);
+  } else {
+    signalNoPayloadConsumerKernel<<<1, 32, 0, stream>>>(
+        kSigIdx, /*expectedSignalValue=*/1, devComm);
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // Producer-only kernel: rank 0 issues a put with no remote action and a
 // CounterInc local action, then waits on its OWN counter. The counter is
 // bumped by the local proxy thread when the IB CQE for the put lands
