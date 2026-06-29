@@ -437,34 +437,6 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
 endfunction()
 
 # ----------------------------------------------------------------------------
-# TheRock build compatibility
-#
-# When building within TheRock, certain examples must be disabled.
-# This mirrors the logic in the main project CMakeLists.txt.
-#
-option(
-    ROCPROFSYS_BUILD_FOR_THEROCK
-    "Build rocprofiler-systems examples for use with TheRock"
-    OFF
-)
-
-if(ROCPROFSYS_BUILD_FOR_THEROCK)
-    # Lulesh does not build with TheRock
-    if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
-        set(ROCPROFSYS_DISABLE_EXAMPLES
-            "lulesh"
-            CACHE STRING
-            "Disable building examples"
-            FORCE
-        )
-    else()
-        if(NOT "lulesh" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-            list(APPEND ROCPROFSYS_DISABLE_EXAMPLES "lulesh")
-        endif()
-    endif()
-endif()
-
-# ----------------------------------------------------------------------------
 # Setup GPU architecture detection for standalone builds
 #
 if(NOT DEFINED ROCPROFSYS_GFX_TARGETS OR ROCPROFSYS_GFX_TARGETS STREQUAL "")

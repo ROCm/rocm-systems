@@ -168,14 +168,19 @@ class IPCBackend : public Backend {
 
  protected:
    /**
-   * @copydoc Backend::dump_backend_stats()
+   * @copydoc Backend::accumulate_ctx_device_stats()
    */
-  void dump_backend_stats() override;
-
+  void accumulate_ctx_device_stats() override;
+  /**
+   * @copydoc Backend::accumulate_default_host_ctx_stats()
+   */
+  void accumulate_default_host_ctx_stats() override;
   /**
    * @copydoc Backend::reset_backend_stats()
    */
   void reset_backend_stats() override;
+
+
 
   /**
    * @brief Allocates uncacheable host memory for the hdp policy.

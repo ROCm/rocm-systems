@@ -163,6 +163,21 @@ class CodeGenerator:
     def _supports_simm64_literal_operands(self) -> bool:
         return 'OPR_SIMM64' in self.isa_spec.operand_types
 
+    def _constructor_operand_type(
+        self, inst_sem: InstructionSemantics | None, opnd: Operand
+    ) -> str:
+        if (
+            inst_sem
+            and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')
+            and opnd.name == 'src0'
+            and opnd.is_input
+            and 'OPR_SRC_VGPR' in self.isa_spec.operand_types
+        ):
+            return 'OPR_SRC_VGPR'
+        if inst_sem and inst_sem.accvgpr_srcs and opnd.is_input:
+            return 'OPR_SRC_VGPR_OR_ACCVGPR'
+        return opnd.operand_type
+
     @staticmethod
     def _literal_encoding_info(
         enc: InstEncoding, inst_enc_obj: InstEncoding | None, inst: Instruction
@@ -219,10 +234,79 @@ class CodeGenerator:
             inst.is_implied_literal_enc,
         )
 
+    @staticmethod
+    def _semantic_source_operands(
+        inst: Instruction, src_operands: list[Operand]
+    ) -> list[Operand]:
+        if inst.name != 'S_FMAMK_F32':
+            return src_operands
+
+        by_name = {op.name: op for op in src_operands}
+        mul_literal = by_name.get('literal') or by_name.get('src2')
+        ssrc0 = by_name.get('ssrc0')
+        ssrc1 = by_name.get('ssrc1')
+        if ssrc0 is None or ssrc1 is None or mul_literal is None:
+            return src_operands
+
+        ordered = [ssrc0, mul_literal, ssrc1]
+        ordered_names = {op.name for op in ordered}
+        ordered.extend(op for op in src_operands if op.name not in ordered_names)
+        return ordered
+
     def _has_machine_inst_struct(self, struct_name: str) -> bool:
         return struct_name in {
             f'{enc.fmt_enc_name}MachineInst' for enc in self.isa_spec.inst_encodings
         }
+
+    def _supports_vop_dpp8(self) -> bool:
+        return any(
+            self._has_machine_inst_struct(f'{base}VopDpp8MachineInst')
+            for base in ('Vop1', 'Vop2', 'Vopc')
+        )
+
+    def _vop_dpp_struct_names(self, enc_name: str) -> tuple[str | None, str | None]:
+        enc_upper = enc_name.upper()
+        dpp_bases = {
+            'ENC_VOP1': 'Vop1',
+            'ENC_VOP2': 'Vop2',
+            'ENC_VOPC': 'Vop1',
+            'ENC_VOP3': 'Vop3',
+            'ENC_VOP3P': 'Vop3p',
+            'VOP3_SDST_ENC': 'Vop3SdstEnc',
+        }
+        dpp8_bases = {
+            'ENC_VOP1': 'Vop1',
+            'ENC_VOP2': 'Vop2',
+            'ENC_VOPC': 'Vopc',
+            'ENC_VOP3': 'Vop3',
+            'ENC_VOP3P': 'Vop3p',
+            'VOP3_SDST_ENC': 'Vop3SdstEnc',
+        }
+        enc_base = dpp_bases.get(enc_upper)
+        if enc_base is None:
+            return None, None
+
+        is_rdna = any(
+            ie.enc_name.startswith('VOP1_VOP_DPP16')
+            for ie in self.isa_spec.inst_encodings
+        )
+        dpp_suffix = 'VopDpp16' if is_rdna else 'VopDpp'
+        dpp_struct = f'{enc_base}{dpp_suffix}MachineInst'
+        if not self._has_machine_inst_struct(dpp_struct):
+            dpp_struct = None
+
+        dpp8_struct = None
+        dpp8_base = dpp8_bases.get(enc_upper)
+        if dpp8_base is not None:
+            candidate = f'{dpp8_base}VopDpp8MachineInst'
+            if self._has_machine_inst_struct(candidate):
+                dpp8_struct = candidate
+
+        return dpp_struct, dpp8_struct
+
+    def _supports_vop_dpp_encoding(self, enc_name: str) -> bool:
+        dpp_struct, dpp8_struct = self._vop_dpp_struct_names(enc_name)
+        return dpp_struct is not None or dpp8_struct is not None
 
     def gen_all(self) -> None:
         """Generate all C++ objects.
@@ -239,17 +323,17 @@ class CodeGenerator:
         # VOPD is generated from a hand-written C++ template because the XML
         # describes the packed dual-slot encoding, while the normal emitters
         # model one instruction and one operand list at a time. Keeping the
-        # template here preserves one-step regeneration for gfx1250.
+        # template here preserves one-step regeneration for VOPD-capable profiles.
         self.gen_vopd()
         self.gen_insts()
         self.gen_decoder()
         self.gen_test_encodings()
 
     def _supports_generated_vopd(self) -> bool:
-        return self.isa_spec.arch_name == 'gfx1250' and self.isa_spec.profile.has_vopd
+        return self.isa_spec.profile.has_vopd
 
     def gen_vopd(self) -> None:
-        """Generate gfx1250 VOPD dual-issue decoder/executor files.
+        """Generate VOPD dual-issue decoder/executor files.
 
         VOPD is skipped by the normal XML instruction generation because it
         uses a dual-slot encoding with bespoke operand packing. Keeping the
@@ -262,269 +346,410 @@ class CodeGenerator:
         import os
 
         arch = self.isa_spec.arch_name
-        out_dir = os.path.join(self.out_path, arch)
-        os.makedirs(out_dir, exist_ok=True)
-        guard = f'ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_VOPD_H_'
+        has_vopd3 = self.isa_spec.profile.has_vopd3
 
-        header = textwrap.dedent('''
-            // Copyright (c) 2026 Advanced Micro Devices, Inc.
-            // SPDX-License-Identifier: MIT
-            //
-            // AUTO-GENERATED by the amdisa codegen pipeline. DO NOT EDIT.
-            // See lib/python/amdisa/README.md for regeneration instructions.
+        def cpp_block(text: str) -> str:
+            return textwrap.dedent(text).strip('\n')
 
-            #ifndef @GUARD@
-            #define @GUARD@
+        vopd_slot_ops = self.isa_spec.profile.vopd_slot_ops
+        if not vopd_slot_ops:
+            raise ValueError(f'{arch} has VOPD enabled without a slot opcode table')
+        vopd_slot_op_names = {op.enum_name for op in vopd_slot_ops}
 
-            #include "rocjitsu/isa/arch/amdgpu/@ARCH@/encodings.h"
-            #include "rocjitsu/isa/arch/amdgpu/@ARCH@/operand.h"
-            #include <cstdint>
-            #include <string>
+        def has_op(enum_name: str) -> bool:
+            return enum_name in vopd_slot_op_names
 
-            namespace rocjitsu {
-            namespace @ARCH@ {
+        def case_labels(enum_names: tuple[str, ...]) -> str:
+            return ''.join(
+                f'  case k{enum_name}:\n'
+                for enum_name in enum_names
+                if has_op(enum_name)
+            )
 
-            class Vopd : public IsaInstruction<Isa>
-            {
-              public:
-              explicit Vopd(const MachineInst *inst);
-              static bool is_vopd(const MachineInst *inst);
-              void execute_impl(amdgpu::Wavefront &wf);
+        def case_block(enum_names: tuple[str, ...], body: str) -> str:
+            labels = case_labels(enum_names)
+            if not labels:
+                return ''
+            return labels + cpp_block(body)
 
-              private:
-              enum class Format : uint8_t { VopdXy, Vopd3 };
+        def join_cases(*cases: str) -> str:
+            return '\n'.join(case for case in cases if case)
 
-              struct Slot {
-                uint16_t op = 0;
-                Operand *dst = nullptr;
-                Operand *src0 = nullptr;
-                Operand *src1 = nullptr;
-                Operand *src2 = nullptr;
-                uint32_t src2_imm = 0;
-                uint8_t neg = 0;
-                bool has_src2_operand = false;
-                bool src2_is_imm = false;
-                bool uses_vcc = false;
-              };
-
-              static const char *op_name(uint16_t op);
-              static bool is_float32_op(uint16_t op);
+        vopd_slot_constants = '\n'.join(
+            f'constexpr uint16_t k{op.enum_name} = {op.opcode};' for op in vopd_slot_ops
+        )
+        vopd_op_name_cases = '\n'.join(
+            f'  case k{op.enum_name}:\n    return "{op.mnemonic}";'
+            for op in vopd_slot_ops
+        )
+        vopd_src_neg_case_labels = case_labels(
+            (
+                'VopdFmacF32',
+                'VopdFmaakF32',
+                'VopdFmamkF32',
+                'VopdMulF32',
+                'VopdAddF32',
+                'VopdSubF32',
+                'VopdSubrevF32',
+                'VopdMulDx9ZeroF32',
+                'VopdMaxF32',
+                'VopdMinF32',
+                'VopdMaxNumF32',
+                'VopdMinNumF32',
+                'VopdFmaF32',
+                'VopdCndmaskB32',
+            )
+        ).rstrip()
+        vopd_execute_slot_cases = join_cases(
+            *(
+                case_block(
+                    ('VopdFmacF32',),
+                    '''
+                    {
+                      float result = std::fma(std::bit_cast<float>(src0),
+                                              std::bit_cast<float>(src1),
+                                              std::bit_cast<float>(slot.dst->read_lane(wf, lane)));
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdFmaakF32',),
+                    '''
+                    {
+                      float result = std::fma(std::bit_cast<float>(src0),
+                                              std::bit_cast<float>(src1),
+                                              std::bit_cast<float>(src2));
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdFmamkF32',),
+                    '''
+                    {
+                      float result = std::fma(std::bit_cast<float>(src0),
+                                              std::bit_cast<float>(src2),
+                                              std::bit_cast<float>(src1));
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMulF32',),
+                    '''
+                    {
+                      float result = std::bit_cast<float>(src0) * std::bit_cast<float>(src1);
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMulDx9ZeroF32',),
+                    '''
+                    {
+                      float lhs = std::bit_cast<float>(src0);
+                      float rhs = std::bit_cast<float>(src1);
+                      if (lhs == 0.0f || rhs == 0.0f)
+                        return std::bit_cast<uint32_t>(0.0f);
+                      return std::bit_cast<uint32_t>(lhs * rhs);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdAddF32',),
+                    '''
+                    {
+                      float result = std::bit_cast<float>(src0) + std::bit_cast<float>(src1);
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdSubF32',),
+                    '''
+                    {
+                      float result = std::bit_cast<float>(src0) - std::bit_cast<float>(src1);
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdSubrevF32',),
+                    '''
+                    {
+                      float result = std::bit_cast<float>(src1) - std::bit_cast<float>(src0);
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMovB32',),
+                    '''
+                      return src0;
+                    ''',
+                ),
+                case_block(
+                    ('VopdCndmaskB32',),
+                    '''
+                    {
+                      uint64_t condition = slot.uses_vcc ? wf.vcc() : slot.src2->read_scalar64(wf);
+                      return ((condition >> lane) & 1u) ? src1 : src0;
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMaxF32', 'VopdMaxNumF32'),
+                    '''
+                    {
+                      float result = std::fmax(std::bit_cast<float>(src0),
+                                               std::bit_cast<float>(src1));
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinF32', 'VopdMinNumF32'),
+                    '''
+                    {
+                      float result = std::fmin(std::bit_cast<float>(src0),
+                                               std::bit_cast<float>(src1));
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdAddNcU32',),
+                    '''
+                      return src0 + src1;
+                    ''',
+                ),
+                case_block(
+                    ('VopdLshlrevB32',),
+                    '''
+                      return src1 << (src0 & 31u);
+                    ''',
+                ),
+                case_block(
+                    ('VopdAndB32',),
+                    '''
+                      return src0 & src1;
+                    ''',
+                ),
+                case_block(
+                    ('VopdBitop2B32',),
+                    '''
+                      return bitop2(src0, src1, slot.src2_imm);
+                    ''',
+                ),
+                case_block(
+                    ('VopdFmaF32',),
+                    '''
+                    {
+                      float result = std::fma(std::bit_cast<float>(src0),
+                                              std::bit_cast<float>(src1),
+                                              std::bit_cast<float>(src2));
+                      return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdSubNcU32',),
+                    '''
+                      return src0 - src1;
+                    ''',
+                ),
+                case_block(
+                    ('VopdLshrrevB32',),
+                    '''
+                      return src1 >> (src0 & 31u);
+                    ''',
+                ),
+                case_block(
+                    ('VopdAshrrevI32',),
+                    '''
+                      return static_cast<uint32_t>(static_cast<int32_t>(src1) >> (src0 & 31u));
+                    ''',
+                ),
+                case_block(
+                    ('VopdMaxI32',),
+                    '''
+                      return static_cast<uint32_t>(std::max(static_cast<int32_t>(src0),
+                                                            static_cast<int32_t>(src1)));
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinI32',),
+                    '''
+                      return static_cast<uint32_t>(std::min(static_cast<int32_t>(src0),
+                                                            static_cast<int32_t>(src1)));
+                    ''',
+                ),
+            )
+        )
+        vopd_src2_operand_exprs = ['opx_ == kVopdCndmaskB32']
+        if has_op('VopdFmaF32'):
+            vopd_src2_operand_exprs.append('opx_ == kVopdFmaF32')
+        if has_op('VopdFmaF64'):
+            vopd_src2_operand_exprs.append('opx_ == kVopdFmaF64')
+        vopd_x_has_src2_operand = ' || '.join(vopd_src2_operand_exprs)
+        vopd_y_has_src2_operand = vopd_x_has_src2_operand.replace('opx_', 'opy_')
+        vopd_x_src2_is_imm = (
+            'opx_ == kVopdBitop2B32' if has_op('VopdBitop2B32') else 'false'
+        )
+        vopd_y_src2_is_imm = vopd_x_src2_is_imm.replace('opx_', 'opy_')
+        vopd_add_slot_source_cases = join_cases(
+            case_block(
+                ('VopdFmacF32',),
+                '''
+                  add_src(slot.dst);
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  break;
+                ''',
+            ),
+            case_block(
+                ('VopdFmaF32', 'VopdFmaF64'),
+                '''
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  add_src(slot.src2);
+                  break;
+                ''',
+            ),
+            case_block(
+                ('VopdMovB32',),
+                '''
+                  add_src(slot.src0);
+                  break;
+                ''',
+            ),
+            case_block(
+                ('VopdCndmaskB32',),
+                '''
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  if (!slot.uses_vcc)
+                    add_src(slot.src2);
+                  break;
+                ''',
+            ),
+        )
+        vopd_format_slot_cases = join_cases(
+            case_block(
+                ('VopdMovB32',),
+                '''
+                  out += slot.dst->name() + ", " + slot.src0->name();
+                  break;
+                ''',
+            ),
+            case_block(
+                ('VopdCndmaskB32',),
+                '''
+                  out += operand_list(*slot.dst, *slot.src0, *slot.src1);
+                  if (!slot.uses_vcc)
+                    out += ", " + slot.src2->name();
+                  break;
+                ''',
+            ),
+            case_block(
+                ('VopdBitop2B32',),
+                '''
+                  out += operand_list(*slot.dst, *slot.src0, *slot.src1);
+                  out += std::format(" bitop3:0x{:02x}", slot.src2_imm & 0xFF);
+                  break;
+                ''',
+            ),
+            case_block(
+                ('VopdFmaF32', 'VopdFmaF64'),
+                '''
+                  out += operand_list(*slot.dst, *slot.src0, *slot.src1) + ", " +
+                         slot.src2->name();
+                  break;
+                ''',
+            ),
+            case_block(
+                ('VopdFmaakF32',),
+                '''
+                  out += operand_list(*slot.dst, *slot.src0, *slot.src1);
+                  out += std::format(", 0x{:08x}", slot.src2_imm);
+                  break;
+                ''',
+            ),
+            case_block(
+                ('VopdFmamkF32',),
+                '''
+                  out += slot.dst->name() + ", " + slot.src0->name();
+                  out += std::format(", 0x{:08x}, ", slot.src2_imm);
+                  out += slot.src1->name();
+                  break;
+                ''',
+            ),
+        )
+        vopd_float64_case_labels = case_labels(
+            (
+                'VopdFmaF64',
+                'VopdAddF64',
+                'VopdMulF64',
+                'VopdMaxNumF64',
+                'VopdMinNumF64',
+            )
+        ).rstrip()
+        vopd3_src0_type = (
+            'OperandType::OPR_SRC_SIMPLE'
+            if 'OPR_SRC_SIMPLE' in self.isa_spec.operand_types
+            else 'OperandType::OPR_SRC'
+        )
+        vopd_src0_type_expr = (
+            vopd3_src0_type
+            if vopd3_src0_type == 'OperandType::OPR_SRC'
+            else f'vopd3 ? {vopd3_src0_type} : OperandType::OPR_SRC'
+        )
+        vopd3_unused_attr = (
+            '' if 'vopd3 ?' in vopd_src0_type_expr else '[[maybe_unused]] '
+        )
+        vopd3_header_decls = ''
+        vopd3_f64_helpers = ''
+        vopd3_execute_slot_cases = ''
+        vopd3_constructor_branch = ''
+        vopd3_constructor_close = ''
+        vopd3_init_operands_prefix = ''
+        vopd3_init_operands_suffix = ''
+        vopdxy_bits_decl = cpp_block('''
+                constexpr uint32_t x_bits = 32;
+                constexpr uint32_t y_bits = 32;
+            ''')
+        execute_impl_body = cpp_block('''
+              uint64_t exec = wf.exec();
+              for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+                if (!(exec & (1ULL << lane)))
+                  continue;
+                uint32_t x_result = execute_slot(x_, wf, lane);
+                uint32_t y_result = execute_slot(y_, wf, lane);
+                x_.dst->write_lane(wf, lane, x_result);
+                y_.dst->write_lane(wf, lane, y_result);
+              }
+            ''')
+        if has_vopd3:
+            vopd3_header_decls = cpp_block('''
               static bool is_float64_op(uint16_t op);
-              static uint32_t apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx);
               static uint64_t apply_neg64(uint64_t value, uint8_t neg_bits, uint8_t src_idx);
-              static uint32_t execute_slot(const Slot &slot, amdgpu::Wavefront &wf,
-                                           uint32_t lane);
               static uint64_t execute_slot64(const Slot &slot, amdgpu::Wavefront &wf,
                                              uint32_t lane);
-              static uint32_t bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table);
-              std::string format_slot(const Slot &slot) const;
-              void init_operands();
-
-              Format format_ = Format::VopdXy;
-              uint32_t word0_ = 0;
-              uint32_t word1_ = 0;
-              uint32_t word2_ = 0;
-              uint32_t literal_ = 0;
-              bool has_literal_ = false;
-              uint16_t opx_ = 0;
-              uint16_t opy_ = 0;
-              uint8_t negx_ = 0;
-              uint8_t negy_ = 0;
-              std::string mnemonic_storage_;
-              Operand dstx_;
-              Operand dsty_;
-              Operand srcx0_;
-              Operand srcx1_;
-              Operand srcx2_;
-              Operand srcy0_;
-              Operand srcy1_;
-              Operand srcy2_;
-              Slot x_;
-              Slot y_;
-            } ;
-
-            } // namespace @ARCH@
-            } // namespace rocjitsu
-
-            #endif // @GUARD@
-            ''').lstrip().replace('@ARCH@', arch).replace('@GUARD@', guard)
-
-        impl = textwrap.dedent('''
-            // Copyright (c) 2026 Advanced Micro Devices, Inc.
-            // SPDX-License-Identifier: MIT
-            //
-            // AUTO-GENERATED by the amdisa codegen pipeline. DO NOT EDIT.
-            // See lib/python/amdisa/README.md for regeneration instructions.
-
-            #include "rocjitsu/isa/arch/amdgpu/@ARCH@/vopd.h"
-            #include "util/except.h"
-            #include "rocjitsu/vm/amdgpu/wavefront.h"
-            #include <algorithm>
-            #include <bit>
-            #include <cmath>
-            #include <format>
-            #include <string>
-
-            namespace rocjitsu {
-            namespace @ARCH@ {
-
-            namespace {
-
-            // VOPD slot opcode values are the MRISA <Opcode> values for V_DUAL_* encodings.
-            constexpr uint16_t kVopdFmacF32 = 0;
-            constexpr uint16_t kVopdFmaakF32 = 1;
-            constexpr uint16_t kVopdFmamkF32 = 2;
-            constexpr uint16_t kVopdMulF32 = 3;
-            constexpr uint16_t kVopdAddF32 = 4;
-            constexpr uint16_t kVopdSubF32 = 5;
-            constexpr uint16_t kVopdSubrevF32 = 6;
-            constexpr uint16_t kVopdMulDx9ZeroF32 = 7;
-            constexpr uint16_t kVopdMovB32 = 8;
-            constexpr uint16_t kVopdCndmaskB32 = 9;
-            constexpr uint16_t kVopdMaxNumF32 = 10;
-            constexpr uint16_t kVopdMinNumF32 = 11;
-            constexpr uint16_t kVopdAddNcU32 = 16;
-            constexpr uint16_t kVopdLshlrevB32 = 17;
-            constexpr uint16_t kVopdBitop2B32 = 18;
-            constexpr uint16_t kVopdFmaF32 = 19;
-            constexpr uint16_t kVopdSubNcU32 = 20;
-            constexpr uint16_t kVopdLshrrevB32 = 21;
-            constexpr uint16_t kVopdAshrrevI32 = 22;
-            constexpr uint16_t kVopdMaxI32 = 23;
-            constexpr uint16_t kVopdMinI32 = 24;
-            constexpr uint16_t kVopdAddF64 = 32;
-            constexpr uint16_t kVopdMulF64 = 33;
-            constexpr uint16_t kVopdMinNumF64 = 34;
-            constexpr uint16_t kVopdMaxNumF64 = 35;
-            constexpr uint16_t kVopdFmacF64 = 36;
-
-            Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, uint32_t literal,
-                              uint16_t encoded) {
-              if (use_literal && encoded == 255)
-                return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
-              return Operand(bits, vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC,
-                             encoded);
-            }
-
-            std::string operand_list(const Operand &dst, const Operand &src0,
-                                     const Operand &src1) {
-              return dst.name() + ", " + src0.name() + ", " + src1.name();
-            }
-
-            } // namespace
-
-            bool Vopd::is_vopd(const MachineInst *inst) {
-              uint32_t word0 = *reinterpret_cast<const uint32_t *>(inst);
-              return (word0 >> 24) == 0xCF || (word0 >> 26) == 0x32;
-            }
-
-            const char *Vopd::op_name(uint16_t op) {
-              switch (op) {
-              case kVopdFmacF32:
-                return "v_dual_fmac_f32";
-              case kVopdFmaakF32:
-                return "v_dual_fmaak_f32";
-              case kVopdFmamkF32:
-                return "v_dual_fmamk_f32";
-              case kVopdMulF32:
-                return "v_dual_mul_f32";
-              case kVopdAddF32:
-                return "v_dual_add_f32";
-              case kVopdSubF32:
-                return "v_dual_sub_f32";
-              case kVopdSubrevF32:
-                return "v_dual_subrev_f32";
-              case kVopdMulDx9ZeroF32:
-                return "v_dual_mul_dx9_zero_f32";
-              case kVopdMovB32:
-                return "v_dual_mov_b32";
-              case kVopdCndmaskB32:
-                return "v_dual_cndmask_b32";
-              case kVopdMaxNumF32:
-                return "v_dual_max_num_f32";
-              case kVopdMinNumF32:
-                return "v_dual_min_num_f32";
-              case kVopdAddNcU32:
-                return "v_dual_add_nc_u32";
-              case kVopdLshlrevB32:
-                return "v_dual_lshlrev_b32";
-              case kVopdBitop2B32:
-                return "v_dual_bitop2_b32";
-              case kVopdFmaF32:
-                return "v_dual_fma_f32";
-              case kVopdSubNcU32:
-                return "v_dual_sub_nc_u32";
-              case kVopdLshrrevB32:
-                return "v_dual_lshrrev_b32";
-              case kVopdAshrrevI32:
-                return "v_dual_ashrrev_i32";
-              case kVopdMaxI32:
-                return "v_dual_max_i32";
-              case kVopdMinI32:
-                return "v_dual_min_i32";
-              case kVopdAddF64:
-                return "v_dual_add_f64";
-              case kVopdMulF64:
-                return "v_dual_mul_f64";
-              case kVopdMinNumF64:
-                return "v_dual_min_num_f64";
-              case kVopdMaxNumF64:
-                return "v_dual_max_num_f64";
-              case kVopdFmacF64:
-                return "v_dual_fmac_f64";
-              default:
-                return "v_dual_unknown";
-              }
-            }
-
-            bool Vopd::is_float32_op(uint16_t op) {
-              switch (op) {
-              case kVopdFmacF32:
-              case kVopdFmaakF32:
-              case kVopdFmamkF32:
-              case kVopdMulF32:
-              case kVopdAddF32:
-              case kVopdSubF32:
-              case kVopdSubrevF32:
-              case kVopdMulDx9ZeroF32:
-              case kVopdMaxNumF32:
-              case kVopdMinNumF32:
-              case kVopdFmaF32:
-                return true;
-              default:
-                return false;
-              }
-            }
+            ''')
+            vopd3_f64_helpers = cpp_block('''
 
             bool Vopd::is_float64_op(uint16_t op) {
               switch (op) {
-              case kVopdAddF64:
-              case kVopdMulF64:
-              case kVopdMinNumF64:
-              case kVopdMaxNumF64:
-              case kVopdFmacF64:
+            @VOPD_FLOAT64_CASES@
                 return true;
               default:
                 return false;
               }
-            }
-
-            uint32_t Vopd::apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx) {
-              return (neg_bits & (1u << src_idx)) ? (value ^ 0x80000000u) : value;
             }
 
             uint64_t Vopd::apply_neg64(uint64_t value, uint8_t neg_bits, uint8_t src_idx) {
               return (neg_bits & (1u << src_idx)) ? (value ^ 0x8000000000000000ULL) : value;
-            }
-
-            uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
-              uint32_t result = 0;
-              for (uint32_t bit = 0; bit < 32; ++bit) {
-                uint32_t idx = (((src0 >> bit) & 1u) << 2) |
-                               (((src1 >> bit) & 1u) << 1);
-                result |= ((truth_table >> idx) & 1u) << bit;
-              }
-              return result;
             }
 
             uint64_t Vopd::execute_slot64(const Slot &slot, amdgpu::Wavefront &wf,
@@ -533,6 +758,13 @@ class CodeGenerator:
               uint64_t src1 = apply_neg64(slot.src1->read_lane64(wf, lane), slot.neg, 1);
 
               switch (slot.op) {
+              case kVopdFmaF64: {
+                uint64_t src2 = apply_neg64(slot.src2->read_lane64(wf, lane), slot.neg, 2);
+                double result = std::fma(std::bit_cast<double>(src0),
+                                         std::bit_cast<double>(src1),
+                                         std::bit_cast<double>(src2));
+                return std::bit_cast<uint64_t>(result);
+              }
               case kVopdAddF64: {
                 double result = std::bit_cast<double>(src0) + std::bit_cast<double>(src1);
                 return std::bit_cast<uint64_t>(result);
@@ -551,131 +783,24 @@ class CodeGenerator:
                                           std::bit_cast<double>(src1));
                 return std::bit_cast<uint64_t>(result);
               }
-              case kVopdFmacF64: {
-                double result = std::fma(std::bit_cast<double>(src0),
-                                         std::bit_cast<double>(src1),
-                                         std::bit_cast<double>(slot.dst->read_lane64(wf, lane)));
-                return std::bit_cast<uint64_t>(result);
-              }
               default:
                 throw util::UnimplementedInst(op_name(slot.op));
               }
             }
-
-            uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf,
-                                        uint32_t lane) {
-              uint32_t src0 = slot.src0->read_lane(wf, lane);
-              uint32_t src1 = slot.src1->read_lane(wf, lane);
-              uint32_t src2 = slot.has_src2_operand ? slot.src2->read_lane(wf, lane)
-                                                     : slot.src2_imm;
-              if (is_float32_op(slot.op)) {
-                src0 = apply_neg(src0, slot.neg, 0);
-                src1 = apply_neg(src1, slot.neg, 1);
-                src2 = apply_neg(src2, slot.neg, 2);
-              }
-
-              switch (slot.op) {
-              case kVopdFmacF32: {
-                float result = std::fma(std::bit_cast<float>(src0),
-                                        std::bit_cast<float>(src1),
-                                        std::bit_cast<float>(slot.dst->read_lane(wf, lane)));
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdFmaakF32: {
-                float result = std::fma(std::bit_cast<float>(src0),
-                                        std::bit_cast<float>(src1),
-                                        std::bit_cast<float>(src2));
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdFmamkF32: {
-                float result = std::fma(std::bit_cast<float>(src0),
-                                        std::bit_cast<float>(src2),
-                                        std::bit_cast<float>(src1));
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdMulF32: {
-                float result = std::bit_cast<float>(src0) * std::bit_cast<float>(src1);
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdMulDx9ZeroF32: {
-                float lhs = std::bit_cast<float>(src0);
-                float rhs = std::bit_cast<float>(src1);
-                if (lhs == 0.0f || rhs == 0.0f)
-                  return std::bit_cast<uint32_t>(0.0f);
-                return std::bit_cast<uint32_t>(lhs * rhs);
-              }
-              case kVopdAddF32: {
-                float result = std::bit_cast<float>(src0) + std::bit_cast<float>(src1);
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdSubF32: {
-                float result = std::bit_cast<float>(src0) - std::bit_cast<float>(src1);
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdSubrevF32: {
-                float result = std::bit_cast<float>(src1) - std::bit_cast<float>(src0);
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdMovB32:
-                return src0;
-              case kVopdCndmaskB32: {
-                uint64_t condition = slot.uses_vcc ? wf.vcc() : slot.src2->read_scalar64(wf);
-                return ((condition >> lane) & 1u) ? src1 : src0;
-              }
-              case kVopdMaxNumF32: {
-                float result = std::fmax(std::bit_cast<float>(src0),
-                                         std::bit_cast<float>(src1));
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdMinNumF32: {
-                float result = std::fmin(std::bit_cast<float>(src0),
-                                         std::bit_cast<float>(src1));
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdAddNcU32:
-                return src0 + src1;
-              case kVopdLshlrevB32:
-                return src1 << (src0 & 31u);
-              case kVopdBitop2B32:
-                return bitop2(src0, src1, slot.src2_imm);
-              case kVopdFmaF32: {
-                float result = std::fma(std::bit_cast<float>(src0),
-                                        std::bit_cast<float>(src1),
-                                        std::bit_cast<float>(src2));
-                return std::bit_cast<uint32_t>(result);
-              }
-              case kVopdSubNcU32:
-                return src0 - src1;
-              case kVopdLshrrevB32:
-                return src1 >> (src0 & 31u);
-              case kVopdAshrrevI32:
-                return static_cast<uint32_t>(static_cast<int32_t>(src1) >> (src0 & 31u));
-              case kVopdMaxI32:
-                return static_cast<uint32_t>(std::max(static_cast<int32_t>(src0),
-                                                      static_cast<int32_t>(src1)));
-              case kVopdMinI32:
-                return static_cast<uint32_t>(std::min(static_cast<int32_t>(src0),
-                                                      static_cast<int32_t>(src1)));
-              default:
-                throw util::UnimplementedInst(op_name(slot.op));
-              }
-            }
-
-            Vopd::Vopd(const MachineInst *inst)
-                : IsaInstruction<Isa>("vopd", make_exec_fn<Vopd>()),
-                  dstx_(32, OperandType::OPR_VGPR, 0),
-                  dsty_(32, OperandType::OPR_VGPR, 0),
-                  srcx0_(32, OperandType::OPR_SRC, 0),
-                  srcx1_(32, OperandType::OPR_VGPR, 0),
-                  srcx2_(32, OperandType::OPR_VGPR, 0),
-                  srcy0_(32, OperandType::OPR_SRC, 0),
-                  srcy1_(32, OperandType::OPR_VGPR, 0),
-                  srcy2_(32, OperandType::OPR_VGPR, 0) {
-              const auto *words = reinterpret_cast<const uint32_t *>(inst);
-              raw_encoding_ = words;
-              word0_ = words[0];
-              word1_ = words[1];
-
+            ''')
+            vopd3_f64_helpers = vopd3_f64_helpers.replace(
+                '@VOPD_FLOAT64_CASES@', vopd_float64_case_labels
+            )
+            vopd3_execute_slot_cases = cpp_block('''
+            @VOPD_FLOAT64_CASES@
+                throw util::UnimplementedInst(
+                    std::string(op_name(slot.op)) +
+                    " (VOPD F64 execution requires 64-bit VGPR pair support)");
+            ''')
+            vopd3_execute_slot_cases = vopd3_execute_slot_cases.replace(
+                '@VOPD_FLOAT64_CASES@', vopd_float64_case_labels
+            )
+            vopd3_constructor_branch = cpp_block('''
               if ((word0_ >> 24) == 0xCF) {
                 format_ = Format::Vopd3;
                 size_ = 12;
@@ -707,6 +832,259 @@ class CodeGenerator:
                 srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
                                                    : Operand(y_bits, OperandType::OPR_VGPR, vsrcy2);
               } else {
+            ''')
+            vopd3_constructor_close = '              }'
+            vopd3_init_operands_prefix = cpp_block('''
+              const bool vopd3 = format_ == Format::Vopd3;
+
+              if (vopd3) {
+                x_.has_src2_operand = @VOPD_X_HAS_SRC2_OPERAND@;
+                y_.has_src2_operand = @VOPD_Y_HAS_SRC2_OPERAND@;
+                x_.src2_is_imm = @VOPD_X_SRC2_IS_IMM@;
+                y_.src2_is_imm = @VOPD_Y_SRC2_IS_IMM@;
+                x_.src2_imm = static_cast<uint32_t>(srcx2_.encoding_value());
+                y_.src2_imm = static_cast<uint32_t>(srcy2_.encoding_value());
+              } else {
+            ''')
+            vopd3_init_operands_prefix = (
+                vopd3_init_operands_prefix.replace(
+                    '@VOPD_X_HAS_SRC2_OPERAND@', vopd_x_has_src2_operand
+                )
+                .replace('@VOPD_Y_HAS_SRC2_OPERAND@', vopd_y_has_src2_operand)
+                .replace('@VOPD_X_SRC2_IS_IMM@', vopd_x_src2_is_imm)
+                .replace('@VOPD_Y_SRC2_IS_IMM@', vopd_y_src2_is_imm)
+            )
+            vopd3_init_operands_suffix = '              }'
+            vopdxy_bits_decl = cpp_block('''
+                uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
+                uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
+            ''')
+            execute_impl_body = cpp_block('''
+              uint64_t exec = wf.exec();
+              for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+                if (!(exec & (1ULL << lane)))
+                  continue;
+                bool x64 = is_float64_op(x_.op);
+                bool y64 = is_float64_op(y_.op);
+                uint64_t x_result64 = x64 ? execute_slot64(x_, wf, lane) : 0;
+                uint64_t y_result64 = y64 ? execute_slot64(y_, wf, lane) : 0;
+                uint32_t x_result32 = x64 ? 0 : execute_slot(x_, wf, lane);
+                uint32_t y_result32 = y64 ? 0 : execute_slot(y_, wf, lane);
+                if (x64)
+                  x_.dst->write_lane64(wf, lane, x_result64);
+                else
+                  x_.dst->write_lane(wf, lane, x_result32);
+                if (y64)
+                  y_.dst->write_lane64(wf, lane, y_result64);
+                else
+                  y_.dst->write_lane(wf, lane, y_result32);
+              }
+            ''')
+        vopd_execute_slot_cases = join_cases(
+            vopd_execute_slot_cases, vopd3_execute_slot_cases
+        )
+        out_dir = os.path.join(self.out_path, arch)
+        os.makedirs(out_dir, exist_ok=True)
+        guard = f'ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_VOPD_H_'
+
+        header = (
+            textwrap.dedent('''
+            // Copyright (c) 2026 Advanced Micro Devices, Inc.
+            // SPDX-License-Identifier: MIT
+            //
+            // AUTO-GENERATED by the amdisa codegen pipeline. DO NOT EDIT.
+            // See lib/python/amdisa/README.md for regeneration instructions.
+
+            #ifndef @GUARD@
+            #define @GUARD@
+
+            #include "rocjitsu/isa/arch/amdgpu/@ARCH@/encodings.h"
+            #include "rocjitsu/isa/arch/amdgpu/@ARCH@/operand.h"
+            #include <cstdint>
+            #include <string>
+
+            namespace rocjitsu {
+            namespace @ARCH@ {
+
+            class Vopd : public IsaInstruction<Isa>
+            {
+              public:
+              explicit Vopd(const MachineInst *inst);
+              static bool is_vopd(const MachineInst *inst);
+              void execute_impl(amdgpu::Wavefront &wf);
+
+              private:
+              enum class Format : uint8_t { VopdXy@VOPD3_FORMAT_ENUM@ };
+
+              struct Slot {
+                uint16_t op = 0;
+                Operand *dst = nullptr;
+                Operand *src0 = nullptr;
+                Operand *src1 = nullptr;
+                Operand *src2 = nullptr;
+                uint32_t src2_imm = 0;
+                uint8_t neg = 0;
+                bool has_src2_operand = false;
+                bool src2_is_imm = false;
+                bool uses_vcc = false;
+              };
+
+              static const char *op_name(uint16_t op);
+              static bool uses_src_neg_modifier(uint16_t op);
+              static uint32_t apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx);
+              static uint32_t execute_slot(const Slot &slot, amdgpu::Wavefront &wf,
+                                           uint32_t lane);
+            @VOPD3_HEADER_DECLS@
+              static uint32_t bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table);
+              std::string format_slot(const Slot &slot) const;
+              void init_operands();
+
+              Format format_ = Format::VopdXy;
+              uint32_t word0_ = 0;
+              uint32_t word1_ = 0;
+              uint32_t word2_ = 0;
+              uint32_t literal_ = 0;
+              bool has_literal_ = false;
+              uint16_t opx_ = 0;
+              uint16_t opy_ = 0;
+              uint8_t negx_ = 0;
+              uint8_t negy_ = 0;
+              std::string mnemonic_storage_;
+              Operand dstx_;
+              Operand dsty_;
+              Operand srcx0_;
+              Operand srcx1_;
+              Operand srcx2_;
+              Operand srcy0_;
+              Operand srcy1_;
+              Operand srcy2_;
+              Slot x_;
+              Slot y_;
+            } ;
+
+            } // namespace @ARCH@
+            } // namespace rocjitsu
+
+            #endif // @GUARD@
+            ''')
+            .lstrip()
+            .replace('@ARCH@', arch)
+            .replace('@GUARD@', guard)
+            .replace('@VOPD3_FORMAT_ENUM@', ', Vopd3' if has_vopd3 else '')
+            .replace('@VOPD3_HEADER_DECLS@', vopd3_header_decls)
+        )
+
+        impl = (
+            textwrap.dedent('''
+            // Copyright (c) 2026 Advanced Micro Devices, Inc.
+            // SPDX-License-Identifier: MIT
+            //
+            // AUTO-GENERATED by the amdisa codegen pipeline. DO NOT EDIT.
+            // See lib/python/amdisa/README.md for regeneration instructions.
+
+            #include "rocjitsu/isa/arch/amdgpu/@ARCH@/vopd.h"
+            #include "util/except.h"
+            #include "rocjitsu/vm/amdgpu/wavefront.h"
+            #include <algorithm>
+            #include <bit>
+            #include <cmath>
+            #include <format>
+            #include <string>
+
+            namespace rocjitsu {
+            namespace @ARCH@ {
+
+            namespace {
+
+            // VOPD slot opcode values are the MRISA <Opcode> values for V_DUAL_* encodings.
+            @VOPD_SLOT_CONSTANTS@
+
+            Operand make_src0(uint32_t bits, @VOPD3_UNUSED_ATTR@bool vopd3, bool use_literal,
+                              uint32_t literal, uint16_t encoded) {
+              if (use_literal && encoded == 255)
+                return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
+              return Operand(bits, @VOPD_SRC0_TYPE_EXPR@, encoded);
+            }
+
+            std::string operand_list(const Operand &dst, const Operand &src0,
+                                     const Operand &src1) {
+              return dst.name() + ", " + src0.name() + ", " + src1.name();
+            }
+
+            } // namespace
+
+            bool Vopd::is_vopd(const MachineInst *inst) {
+              uint32_t word0 = *reinterpret_cast<const uint32_t *>(inst);
+              return @VOPD3_IS_VOPD_CHECK@(word0 >> 26) == 0x32;
+            }
+
+            const char *Vopd::op_name(uint16_t op) {
+              switch (op) {
+            @VOPD_OP_NAME_CASES@
+              default:
+                return "v_dual_unknown";
+              }
+            }
+
+            bool Vopd::uses_src_neg_modifier(uint16_t op) {
+              switch (op) {
+            @VOPD_SRC_NEG_CASES@
+                return true;
+              default:
+                return false;
+              }
+            }
+
+            uint32_t Vopd::apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx) {
+              return (neg_bits & (1u << src_idx)) ? (value ^ 0x80000000u) : value;
+            }
+
+            uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
+              uint32_t result = 0;
+              for (uint32_t bit = 0; bit < 32; ++bit) {
+                uint32_t idx = (((src0 >> bit) & 1u) << 2) |
+                               (((src1 >> bit) & 1u) << 1);
+                result |= ((truth_table >> idx) & 1u) << bit;
+              }
+              return result;
+            }
+            @VOPD3_F64_HELPERS@
+
+            uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf,
+                                        uint32_t lane) {
+              uint32_t src0 = slot.src0->read_lane(wf, lane);
+              uint32_t src1 = slot.src1->read_lane(wf, lane);
+              uint32_t src2 = slot.has_src2_operand ? slot.src2->read_lane(wf, lane)
+                                                     : slot.src2_imm;
+              if (uses_src_neg_modifier(slot.op)) {
+                src0 = apply_neg(src0, slot.neg, 0);
+                src1 = apply_neg(src1, slot.neg, 1);
+                src2 = apply_neg(src2, slot.neg, 2);
+              }
+
+              switch (slot.op) {
+            @VOPD_EXECUTE_SLOT_CASES@
+              default:
+                throw util::UnimplementedInst(op_name(slot.op));
+              }
+            }
+
+            Vopd::Vopd(const MachineInst *inst)
+                : IsaInstruction<Isa>("vopd", make_exec_fn<Vopd>()),
+                  dstx_(32, OperandType::OPR_VGPR, 0),
+                  dsty_(32, OperandType::OPR_VGPR, 0),
+                  srcx0_(32, OperandType::OPR_SRC, 0),
+                  srcx1_(32, OperandType::OPR_VGPR, 0),
+                  srcx2_(32, OperandType::OPR_VGPR, 0),
+                  srcy0_(32, OperandType::OPR_SRC, 0),
+                  srcy1_(32, OperandType::OPR_VGPR, 0),
+                  srcy2_(32, OperandType::OPR_VGPR, 0) {
+              const auto *words = reinterpret_cast<const uint32_t *>(inst);
+              raw_encoding_ = words;
+              word0_ = words[0];
+              word1_ = words[1];
+
+            @VOPD3_CONSTRUCTOR_BRANCH@
                 format_ = Format::VopdXy;
                 encoding_id_ = 0x32;
                 opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
@@ -727,15 +1105,14 @@ class CodeGenerator:
                   literal_ = word2_;
                 }
 
-                uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
-                uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
+            @VOPDXY_BITS_DECL@
                 dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
                 dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
                 srcx0_ = make_src0(x_bits, false, has_literal_, literal_, srcx0);
                 srcy0_ = make_src0(y_bits, false, has_literal_, literal_, srcy0);
                 srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
                 srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
-              }
+            @VOPD3_CONSTRUCTOR_CLOSE@
 
               dstx_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
               dsty_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -754,20 +1131,12 @@ class CodeGenerator:
             }
 
             void Vopd::init_operands() {
-              const bool vopd3 = format_ == Format::Vopd3;
               x_ = Slot{opx_, &dstx_, &srcx0_, &srcx1_, &srcx2_, 0, negx_, false, false,
                         false};
               y_ = Slot{opy_, &dsty_, &srcy0_, &srcy1_, &srcy2_, 0, negy_, false, false,
                         false};
 
-              if (vopd3) {
-                x_.has_src2_operand = opx_ == kVopdCndmaskB32 || opx_ == kVopdFmaF32;
-                y_.has_src2_operand = opy_ == kVopdCndmaskB32 || opy_ == kVopdFmaF32;
-                x_.src2_is_imm = opx_ == kVopdBitop2B32;
-                y_.src2_is_imm = opy_ == kVopdBitop2B32;
-                x_.src2_imm = static_cast<uint32_t>(srcx2_.encoding_value());
-                y_.src2_imm = static_cast<uint32_t>(srcy2_.encoding_value());
-              } else {
+            @VOPD3_INIT_OPERANDS_PREFIX@
                 x_.uses_vcc = opx_ == kVopdCndmaskB32;
                 y_.uses_vcc = opy_ == kVopdCndmaskB32;
                 if (opx_ == kVopdFmaakF32 || opx_ == kVopdFmamkF32) {
@@ -778,7 +1147,7 @@ class CodeGenerator:
                   y_.src2_is_imm = true;
                   y_.src2_imm = literal_;
                 }
-              }
+            @VOPD3_INIT_OPERANDS_SUFFIX@
 
               dst_operands_[0] = &dstx_;
               dst_operands_[1] = &dsty_;
@@ -791,26 +1160,7 @@ class CodeGenerator:
               };
               const auto add_slot_sources = [&](const Slot &slot) {
                 switch (slot.op) {
-                case kVopdFmacF32:
-                case kVopdFmacF64:
-                  add_src(slot.dst);
-                  add_src(slot.src0);
-                  add_src(slot.src1);
-                  break;
-                case kVopdMovB32:
-                  add_src(slot.src0);
-                  break;
-                case kVopdCndmaskB32:
-                  add_src(slot.src0);
-                  add_src(slot.src1);
-                  if (!slot.uses_vcc)
-                    add_src(slot.src2);
-                  break;
-                case kVopdFmaF32:
-                  add_src(slot.src0);
-                  add_src(slot.src1);
-                  add_src(slot.src2);
-                  break;
+            @VOPD_ADD_SLOT_SOURCE_CASES@
                 default:
                   add_src(slot.src0);
                   add_src(slot.src1);
@@ -826,31 +1176,7 @@ class CodeGenerator:
               std::string out = op_name(slot.op);
               out += " ";
               switch (slot.op) {
-              case kVopdMovB32:
-                out += slot.dst->name() + ", " + slot.src0->name();
-                break;
-              case kVopdCndmaskB32:
-                out += operand_list(*slot.dst, *slot.src0, *slot.src1);
-                if (!slot.uses_vcc)
-                  out += ", " + slot.src2->name();
-                break;
-              case kVopdBitop2B32:
-                out += operand_list(*slot.dst, *slot.src0, *slot.src1);
-                out += std::format(" bitop3:0x{:02x}", slot.src2_imm & 0xFF);
-                break;
-              case kVopdFmaF32:
-                out += operand_list(*slot.dst, *slot.src0, *slot.src1) + ", " +
-                       slot.src2->name();
-                break;
-              case kVopdFmaakF32:
-                out += operand_list(*slot.dst, *slot.src0, *slot.src1);
-                out += std::format(", 0x{:08x}", slot.src2_imm);
-                break;
-              case kVopdFmamkF32:
-                out += slot.dst->name() + ", " + slot.src0->name();
-                out += std::format(", 0x{:08x}, ", slot.src2_imm);
-                out += slot.src1->name();
-                break;
+            @VOPD_FORMAT_SLOT_CASES@
               default:
                 out += operand_list(*slot.dst, *slot.src0, *slot.src1);
                 break;
@@ -859,30 +1185,36 @@ class CodeGenerator:
             }
 
             void Vopd::execute_impl(amdgpu::Wavefront &wf) {
-              uint64_t exec = wf.exec();
-              for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-                if (!(exec & (1ULL << lane)))
-                  continue;
-                bool x64 = is_float64_op(x_.op);
-                bool y64 = is_float64_op(y_.op);
-                uint64_t x_result64 = x64 ? execute_slot64(x_, wf, lane) : 0;
-                uint64_t y_result64 = y64 ? execute_slot64(y_, wf, lane) : 0;
-                uint32_t x_result32 = x64 ? 0 : execute_slot(x_, wf, lane);
-                uint32_t y_result32 = y64 ? 0 : execute_slot(y_, wf, lane);
-                if (x64)
-                  x_.dst->write_lane64(wf, lane, x_result64);
-                else
-                  x_.dst->write_lane(wf, lane, x_result32);
-                if (y64)
-                  y_.dst->write_lane64(wf, lane, y_result64);
-                else
-                  y_.dst->write_lane(wf, lane, y_result32);
-              }
+            @EXECUTE_IMPL_BODY@
             }
 
             } // namespace @ARCH@
             } // namespace rocjitsu
-            ''').lstrip().replace('@ARCH@', arch)
+            ''')
+            .lstrip()
+            .replace('@ARCH@', arch)
+            .replace('@VOPD_SRC0_TYPE_EXPR@', vopd_src0_type_expr)
+            .replace('@VOPD3_FORMAT_ENUM@', ', Vopd3' if has_vopd3 else '')
+            .replace('@VOPD3_HEADER_DECLS@', vopd3_header_decls)
+            .replace('@VOPD_SLOT_CONSTANTS@', vopd_slot_constants)
+            .replace('@VOPD3_UNUSED_ATTR@', vopd3_unused_attr)
+            .replace(
+                '@VOPD3_IS_VOPD_CHECK@',
+                '(word0 >> 24) == 0xCF || ' if has_vopd3 else '',
+            )
+            .replace('@VOPD_OP_NAME_CASES@', vopd_op_name_cases)
+            .replace('@VOPD_SRC_NEG_CASES@', vopd_src_neg_case_labels)
+            .replace('@VOPD_EXECUTE_SLOT_CASES@', vopd_execute_slot_cases)
+            .replace('@VOPD3_F64_HELPERS@', vopd3_f64_helpers)
+            .replace('@VOPD3_CONSTRUCTOR_BRANCH@', vopd3_constructor_branch)
+            .replace('@VOPD3_CONSTRUCTOR_CLOSE@', vopd3_constructor_close)
+            .replace('@VOPD3_INIT_OPERANDS_PREFIX@', vopd3_init_operands_prefix)
+            .replace('@VOPD3_INIT_OPERANDS_SUFFIX@', vopd3_init_operands_suffix)
+            .replace('@VOPD_ADD_SLOT_SOURCE_CASES@', vopd_add_slot_source_cases)
+            .replace('@VOPD_FORMAT_SLOT_CASES@', vopd_format_slot_cases)
+            .replace('@EXECUTE_IMPL_BODY@', execute_impl_body)
+            .replace('@VOPDXY_BITS_DECL@', vopdxy_bits_decl)
+        )
 
         with open(os.path.join(out_dir, 'vopd.h'), 'w') as f:
             f.write(header)
@@ -1189,15 +1521,20 @@ class CodeGenerator:
             # FLAT encoding bases need an owned string for the dynamic mnemonic.
             if rule.use_flat_mnemonic:
                 class_members.append(cgen.Statement('std::string owned_mnemonic_'))
-            # VOP1/VOP2 encoding bases store DPP control fields.
+            # VOP encoding bases store DPP control fields.
             # apply_dpp() is a free function in dpp_sdwa_ops.h.
-            if inst_enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
-                has_dpp8 = self.isa_spec.arch_name.lower() == 'gfx1250'
+            _enc_upper = inst_enc.enc_name.upper()
+            _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(_enc_upper)
+            if (
+                _dpp_struct
+                or _dpp8_struct
+                or _enc_upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC')
+            ):
                 class_members.append(cgen.Statement('uint32_t dpp_ctrl_ = 0'))
                 class_members.append(cgen.Statement('uint32_t dpp_row_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bank_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bound_ctrl_ = 0'))
-                if has_dpp8:
+                if _dpp8_struct:
                     class_members.append(cgen.Statement('uint32_t dpp8_lane_sel_ = 0'))
                 class_members.append(
                     cgen.Statement('std::unique_ptr<DppOperand> dpp_src0_')
@@ -1205,6 +1542,7 @@ class CodeGenerator:
                 class_members.append(
                     cgen.Statement('std::unique_ptr<DppOperand> dpp_src1_')
                 )
+            if _enc_upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
                 # SDWA fields (CDNA and RDNA1/2 have hardware SDWA encoding; fields
                 # are present on all ISAs for uniform codegen even if unused).
                 class_members.append(
@@ -1395,7 +1733,7 @@ class CodeGenerator:
     def _operand_uses_packed_16bit_source(
         self, enc_name: str, opnd: Operand, *, reads_dst: bool = False
     ) -> bool:
-        """Return True for gfx1250 E32 16-bit sources with packed-half selectors."""
+        """Return True for E32 16-bit sources with packed-half selectors."""
         profile = self.isa_spec.profile
         if not profile.uses_packed_16bit_e32_source_selectors:
             return False
@@ -1940,13 +2278,15 @@ class CodeGenerator:
         return textwrap.dedent('''\
             namespace {
 
+            bool isVop3pOp(const MachineInst opcode, uint32_t op) {
+              return (opcode >> 24) == 0xcc && ((opcode >> 16) & 0xff) == op;
+            }
+
             bool isWmmaScaleF32Vop3px2(const MachineInst *opcode) {
-              const auto *low = reinterpret_cast<const Vop3pMachineInst *>(opcode);
-              if (low->encoding != 0xcc || (low->op != 0x35 && low->op != 0x3a))
+              if (!isVop3pOp(opcode[0], 0x35) && !isVop3pOp(opcode[0], 0x3a))
                 return false;
 
-              const auto *high = reinterpret_cast<const Vop3pMachineInst *>(opcode + 2);
-              return high->encoding == 0xcc && (high->op == 0x33 || high->op == 0x88);
+              return isVop3pOp(opcode[2], 0x33) || isVop3pOp(opcode[2], 0x88);
             }
 
             } // namespace
@@ -1977,6 +2317,7 @@ class CodeGenerator:
         ):
             src_operands = dst_operands[1:]
             dst_operands = dst_operands[:1]
+        src_operands = self._semantic_source_operands(inst, src_operands)
         dst_ops = [op.name for op in dst_operands]
         src_ops = [op.name for op in src_operands]
         cls = sem.semantic_class
@@ -2046,14 +2387,21 @@ class CodeGenerator:
         if cls in _SEMA_CLASSES:
             sema_block = derive_sema_block(sem)
             if sema_block is not None and not sema_block.is_empty:
-                is_gfx1250_true16_mov = (
-                    self.isa_spec.arch_name.lower() == 'gfx1250'
+                profile = self.isa_spec.profile
+                uses_true16_e32 = bool(
+                    getattr(profile, 'uses_packed_16bit_e32_source_selectors', False)
+                )
+                uses_true16_vop3_opsel = bool(
+                    getattr(profile, 'uses_true16_vop3_opsel', False)
+                )
+                is_true16_mov = (
+                    uses_true16_e32
                     and inst.name == 'V_MOV_B16'
                     and cls == 'vector_mov'
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
-                if is_vop3 and is_float_op and not is_gfx1250_true16_mov:
+                if is_vop3 and is_float_op and not is_true16_mov:
                     from amdisa.sema_enrich import enrich_block
 
                     ef = {'neg'}
@@ -2088,8 +2436,11 @@ class CodeGenerator:
                     src_reg_classes,
                     dst_reg_classes,
                 )
-                lctx = LoweringContext(exec_model=sema_block.pragma, operand_map=omap)
-                is_gfx1250 = self.isa_spec.arch_name.lower() == 'gfx1250'
+                lctx = LoweringContext(
+                    exec_model=sema_block.pragma,
+                    operand_map=omap,
+                    arch_name=self.isa_spec.arch_name,
+                )
                 if cls == 'vector_cmp':
                     # V_CMP writes a fresh wave mask initialized to zero, so false
                     # lanes can remain clear without emitting redundant bit clears.
@@ -2130,9 +2481,11 @@ class CodeGenerator:
                 )
                 force_true16_vop3_value = cls in (
                     'vector_binop',
+                    'vector_ternary',
                     'vector_unary',
                 ) and dtype in (
                     'b16',
+                    'f16',
                     'i16',
                     'u16',
                 )
@@ -2150,21 +2503,24 @@ class CodeGenerator:
                     for opnd in dst_operands
                 )
                 is_true16_vop3 = (
-                    is_gfx1250
+                    uses_true16_vop3_opsel
                     and is_vop3
                     and dst_operands
                     and (has_true16_vop3_src or has_true16_vop3_dst)
                 )
                 if is_true16_vop3:
+                    vop3_opsel = 'amdgpu::vop3_opsel(inst_)'
                     for src_idx, opnd in enumerate(src_operands):
                         if opnd.is_input and (opnd.size == 16 or force_true16_vop3_src):
                             lctx.true16_src_selects[src_idx] = (
-                                f'inst_.opsel & 0x{1 << src_idx:x}u'
+                                f'{vop3_opsel} & 0x{1 << src_idx:x}u'
                             )
                     if has_true16_vop3_dst:
-                        lctx.true16_dst_select = 'inst_.opsel & 0x8u'
+                        lctx.true16_dst_select = f'{vop3_opsel} & 0x8u'
+                    if inst.name in ('V_CVT_F16_FP8', 'V_CVT_F16_BF8'):
+                        lctx.fp8_byte_select = f'({vop3_opsel} & 0x2u) >> 1'
                 elif (
-                    is_gfx1250
+                    uses_true16_e32
                     and inst.name == 'V_MOV_B16'
                     and cls == 'vector_mov'
                     and dtype in ('b16', 'u16')
@@ -2184,7 +2540,7 @@ class CodeGenerator:
                             ': src0.read_lane(wf, lane))'
                         )
                 elif (
-                    is_gfx1250
+                    uses_true16_e32
                     and enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
                     and has_true16_dst
                     and cls != 'vector_swap'
@@ -2193,6 +2549,38 @@ class CodeGenerator:
                     lctx.true16_dst_reg = 'inst_.vdst & 0x7fu'
                 if cls == 'vector_cndmask' and is_vop3 and len(src_ops) >= 3:
                     lctx.vcc_read = f'{src_ops[2]}.read_scalar64(wf)'
+                    if inst.name == 'V_CNDMASK_B32':
+                        return (
+                            '  uint64_t exec = wf.exec();\n'
+                            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
+                            '    if (!(exec & (1ULL << lane)))\n'
+                            '      continue;\n'
+                            f'    const uint32_t src0_value = apply_vop3_b32_src_mod({src_ops[0]}.read_lane(wf, lane), inst_.abs, inst_.neg, 0);\n'
+                            f'    const uint32_t src1_value = apply_vop3_b32_src_mod({src_ops[1]}.read_lane(wf, lane), inst_.abs, inst_.neg, 1);\n'
+                            f'    {dst_ops[0]}.write_lane(wf, lane, (({src_ops[2]}.read_scalar64(wf) >> lane) & 1) ? src1_value : src0_value);\n'
+                            '  }\n'
+                        )
+                if (
+                    inst.name == 'V_CVT_F32_F16'
+                    and is_true16_vop3
+                    and src_ops
+                    and dst_ops
+                ):
+                    return (
+                        '  uint64_t exec = wf.exec();\n'
+                        '  const uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);\n'
+                        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
+                        '    if (!(exec & (1ULL << lane)))\n'
+                        '      continue;\n'
+                        f'    uint32_t raw = ::rocjitsu::amdgpu::read_vop3_true16_src({src_ops[0]}, wf, lane, opsel, 0);\n'
+                        '    float src = util::f16_to_f32(static_cast<uint16_t>(raw));\n'
+                        '    if (inst_.abs & (1u << 0))\n'
+                        '      src = std::fabs(src);\n'
+                        '    if (inst_.neg & (1u << 0))\n'
+                        '      src = -src;\n'
+                        f'    {dst_ops[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(src));\n'
+                        '  }\n'
+                    )
                 if cls == 'vector_add_co':
                     if is_vop3 and len(src_ops) >= 3:
                         lctx.vcc_read = f'{src_ops[2]}.read_scalar64(wf)'
@@ -2267,8 +2655,10 @@ class CodeGenerator:
                 f'  uint16_t imm = static_cast<uint16_t>({src_ops[0]}.encoding_value_);'
             )
             wf = self.isa_spec.profile.waitcnt_family
-            if wf == 'gfx11':
-                # GFX11 (RDNA3/3.5) SIMM16 layout:
+            if wf in ('gfx11', 'gfx12'):
+                # GFX11 (RDNA3/3.5) SIMM16 layout. GFX12 uses split S_WAIT_*
+                # instructions in the XML, but LLVM still accepts the
+                # monolithic S_WAITCNT compatibility opcode with this layout.
                 #   expcnt[2:0] = bits [2:0]
                 #   lgkmcnt[5:0] = bits [9:4]
                 #   vmcnt[5:0] = bits [15:10]
@@ -2292,7 +2682,19 @@ class CodeGenerator:
             L.append(
                 f'  uint16_t cnt = static_cast<uint16_t>({src_ops[0]}.encoding_value_);'
             )
-            L.append(f'  wf.set_wait_counter("{op}", cnt);')
+            if op == 'waitcnt_vscnt':
+                L.append('  wf.set_wait_target_vscnt(static_cast<uint8_t>(cnt));')
+            elif op == 'waitcnt_vmcnt':
+                L.append('  wf.set_wait_target_loadcnt(static_cast<uint8_t>(cnt));')
+            elif op == 'waitcnt_expcnt':
+                L.append('  wf.set_wait_counter("wait_expcnt", cnt);')
+            elif op == 'waitcnt_lgkmcnt':
+                L.append('  const auto current_wait = wf.wait_target();')
+                L.append(
+                    '  wf.set_wait_target(current_wait.vmcnt, static_cast<uint8_t>(cnt), current_wait.expcnt);'
+                )
+            else:
+                L.append(f'  wf.set_wait_counter("{op}", cnt);')
             return '\n'.join(L)
 
         if cls == 'tensor_load_to_lds':
@@ -2316,11 +2718,16 @@ class CodeGenerator:
             cond_map = {
                 'scc0': '!wf.read_scc()',
                 'scc1': 'wf.read_scc()',
-                'vccz': 'wf.vcc() == 0',
-                'vccnz': 'wf.vcc() != 0',
+                'vccz': 'live_vcc == 0',
+                'vccnz': 'live_vcc != 0',
                 'execz': 'wf.exec() == 0',
                 'execnz': 'wf.exec() != 0',
             }
+            if cond in ('vccz', 'vccnz'):
+                L.append(
+                    '  const uint64_t live_vcc = wf.vcc() & '
+                    '(wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));'
+                )
             L.append(f'  if ({cond_map[cond]}) {{')
             L.append(
                 f'    int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
@@ -2359,15 +2766,11 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_mulk':
+            L.append(f'  uint32_t s0 = {dst_ops[0]}.read_scalar(wf);')
             L.append(
-                f'  int32_t s0 = static_cast<int32_t>({dst_ops[0]}.read_scalar(wf));'
+                f'  uint32_t imm = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_)));'
             )
-            L.append(
-                f'  int32_t imm = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
-            )
-            L.append(
-                f'  {dst_ops[0]}.write_scalar(wf, static_cast<uint32_t>(s0 * imm));'
-            )
+            L.append(f'  {dst_ops[0]}.write_scalar(wf, s0 * imm);')
             return '\n'.join(L)
 
         if cls == 'scalar_wrexec':
@@ -2785,7 +3188,9 @@ class CodeGenerator:
             'vector_pack_b32_f16',
         ):
             if cls == 'vector_cvt_scale':
-                return gen_vector_cvt_scale(dst_ops, src_ops, cls, op)
+                return gen_vector_cvt_scale(
+                    dst_ops, src_ops, cls, op, self.isa_spec.arch_name
+                )
             opsel = '0u'
             if is_vop3:
                 inst_fields = getattr(self, '_current_inst_fields', set())
@@ -2807,6 +3212,7 @@ class CodeGenerator:
                 op,
                 opsel=opsel,
                 fp8_format_select=fp8_format_select,
+                arch_name=self.isa_spec.arch_name,
             )
 
         # ----- VOP3P: packed / dot / mix / MFMA -----
@@ -2950,6 +3356,12 @@ class CodeGenerator:
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
+            L.append(f'  uint32_t lane_group_width = wf.wf_size();')
+            L.append(
+                f'  if (wf.wf_size() == 64 && (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 ||'
+                f' cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))'
+            )
+            L.append(f'    lane_group_width = 32;')
             L.append(f'  // Pre-read all data0 values from every lane.')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
@@ -2966,7 +3378,10 @@ class CodeGenerator:
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
                 L.append(
-                    f'    uint32_t src_lane = ((addr_val + offset) / 4) % wf.wf_size();'
+                    f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
+                )
+                L.append(
+                    f'    uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);'
                 )
                 if fetch_invalid:
                     L.append(f'    tmp[i] = src_data[src_lane];')
@@ -2992,7 +3407,10 @@ class CodeGenerator:
                 L.append(f'    if (!(exec & (1ULL << i))) continue;')
                 L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
                 L.append(
-                    f'    uint32_t dst_lane = ((addr_val + offset) / 4) % wf.wf_size();'
+                    f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
+                )
+                L.append(
+                    f'    uint32_t dst_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);'
                 )
                 L.append(f'    tmp[dst_lane] = src_data[i];')
                 L.append(f'  }}')
@@ -3006,8 +3424,8 @@ class CodeGenerator:
             # DS_SWIZZLE_B32: lane swizzle controlled by offset field.
             # The offset encodes the swizzle pattern. For QDMode (bit 15=1):
             #   for each lane in quad: dst = src[packed_2bit_selector]
-            # For BitMode (bit 15=0): full-wave swizzle via and/or/xor.
-            src_field = 'addr' if enc_name.upper() == 'ENC_VDS' else 'data0'
+            # For BitMode (bit 15=0): swizzle within 32-lane rows via and/or/xor.
+            src_field = 'addr'
             L.append(f'  auto &cu = wf.cu();')
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
@@ -3024,11 +3442,15 @@ class CodeGenerator:
                 f'      src_lane = (lane & ~0x3u) | ((offset >> (2u * (lane & 0x3u))) & 0x3u);'
             )
             L.append(f'    }} else {{')
-            L.append(f'      // BitMode: full-wave swizzle.')
+            L.append(f'      // BitMode: swizzle within 32-lane rows.')
             L.append(f'      uint32_t and_mask = offset & 0x1F;')
             L.append(f'      uint32_t or_mask = (offset >> 5) & 0x1F;')
             L.append(f'      uint32_t xor_mask = (offset >> 10) & 0x1F;')
-            L.append(f'      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;')
+            L.append(f'      uint32_t row_base = lane & ~0x1Fu;')
+            L.append(f'      uint32_t row_lane = lane & 0x1Fu;')
+            L.append(
+                f'      src_lane = row_base + (((row_lane & and_mask) | or_mask) ^ xor_mask);'
+            )
             L.append(f'    }}')
             L.append(f'    if (src_lane < wf.wf_size())')
             L.append(f'      cu.write_vgpr(vb + inst_.vdst, lane, src_data[src_lane]);')
@@ -3437,6 +3859,8 @@ class CodeGenerator:
             L.append(f'  d->transpose = {sem.transpose_kind};')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
+        if sem.name.startswith('CLUSTER_LOAD_'):
+            L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -3506,17 +3930,26 @@ class CodeGenerator:
         self._append_wait_counter_type(L, 'global_load_async_to_lds')
         L.append('  d->lds_dst = true;')
         L.append('  d->lds_per_lane_addr = true;')
+        L.append('  d->lds_base = wf.lds_base();')
+        if sem.name.startswith('CLUSTER_LOAD_ASYNC_TO_LDS_'):
+            L.append('  d->cluster_multicast = true;')
+            L.append(
+                '  d->cluster_mcast_mask = wf.m0() & amdgpu::kClusterMulticastMask;'
+            )
+            L.append('  d->request_force_l1_bypass = true;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
+        L.append(
+            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+        )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vdst')};")
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            '    d->per_lane_lds_addr[lane] = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);'
-        )
+        L.append('    uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);')
+        L.append('    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;')
         L.append('  }')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -3541,6 +3974,9 @@ class CodeGenerator:
         L.append('  auto &cu = wf.cu();')
         L.append('  const auto &lds = cu.lds();')
         L.append('  uint64_t exec = wf.exec();')
+        L.append(
+            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+        )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vsrc')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -4458,21 +4894,33 @@ class CodeGenerator:
     def _requires_arch_local_execute(
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> bool:
-        if inst is None or self.isa_spec.arch_name.lower() != 'gfx1250':
+        if inst is None:
             return False
+        profile = getattr(self.isa_spec, 'profile', None)
+        uses_true16_e32 = bool(
+            getattr(profile, 'uses_packed_16bit_e32_source_selectors', False)
+        )
+        uses_true16_vop3_opsel = bool(getattr(profile, 'uses_true16_vop3_opsel', False))
         enc_upper = (enc_name or inst.enc_name).upper()
         if (
-            enc_upper == 'ENC_VOP1'
+            uses_true16_e32
+            and enc_upper == 'ENC_VOP1'
             and inst.name == 'V_MOV_B16'
             and any(op.size == 16 for op in inst.operands)
         ):
             return True
-        if enc_upper in ('ENC_VOP1', 'ENC_VOP2') and any(
-            op.is_output and op.size == 16 for op in inst.operands
+        if (
+            uses_true16_e32
+            and enc_upper in ('ENC_VOP1', 'ENC_VOP2')
+            and any(op.is_output and op.size == 16 for op in inst.operands)
         ):
             return True
-        if enc_upper == 'ENC_VOP3' and any(
-            (op.is_input or op.is_output) and op.size == 16 for op in inst.operands
+        if (
+            uses_true16_vop3_opsel
+            and enc_upper == 'ENC_VOP3'
+            and any(
+                (op.is_input or op.is_output) and op.size == 16 for op in inst.operands
+            )
         ):
             return True
         return False
@@ -4480,7 +4928,10 @@ class CodeGenerator:
     def _e32_true16_dst_reg_expr(
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> str:
-        if inst is None or self.isa_spec.arch_name.lower() != 'gfx1250':
+        if inst is None:
+            return 'inst_.vdst'
+        profile = getattr(self.isa_spec, 'profile', None)
+        if not bool(getattr(profile, 'uses_packed_16bit_e32_source_selectors', False)):
             return 'inst_.vdst'
         enc_upper = (enc_name or inst.enc_name).upper()
         if enc_upper not in ('ENC_VOP1', 'ENC_VOP2'):
@@ -4546,6 +4997,26 @@ class CodeGenerator:
             f'{inst.mnemonic}_{enc_key}',
             self.isa_spec.profile.vop3p_opsel_fields,
         )
+
+    @staticmethod
+    def _operand_encoding_value_expr(
+        opnd_name: str, is_smem: bool, packed_16bit: bool
+    ) -> str:
+        """C++ expression for the decoded value passed to an Operand constructor.
+
+        For most operands this is just the value. SMEM SBASE is an
+        exception, as it is encoded in units of 2 SGPRs (where N gets
+        s[2N:2N+1]), so this helper scales it to the real SGPR index.
+        This keeps the operand's register-ref (disassembly, def/use, liveness)
+        consistent with execution, which scales the raw field independently
+        (addr_calc_scalar.h: ``sbase = base + inst.sbase * 2``).
+        """
+        expr = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd_name}'
+        if is_smem and opnd_name == 'sbase':
+            expr = f'({expr} * 2)'
+        if packed_16bit:
+            expr = f'static_cast<unsigned short>({expr})'
+        return expr
 
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
@@ -4695,9 +5166,7 @@ class CodeGenerator:
                                 f'reinterpret_cast<const OpEncoding*>(inst)))'
                             )
                         elif opnd.name in inst_field_names:
-                            opr_type = opnd.operand_type
-                            if inst_sem and inst_sem.accvgpr_srcs and opnd.is_input:
-                                opr_type = 'OPR_SRC_VGPR_OR_ACCVGPR'
+                            opr_type = self._constructor_operand_type(inst_sem, opnd)
                             packed_16bit_source_arg = (
                                 ', true'
                                 if self._operand_uses_packed_16bit_source(
@@ -4705,11 +5174,9 @@ class CodeGenerator:
                                 )
                                 else ''
                             )
-                            operand_value = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd.name}'
-                            if packed_16bit_source_arg:
-                                operand_value = (
-                                    f'static_cast<unsigned short>({operand_value})'
-                                )
+                            operand_value = self._operand_encoding_value_expr(
+                                opnd.name, is_smem, bool(packed_16bit_source_arg)
+                            )
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
                                 f'OperandType::{opr_type}, '
@@ -4896,37 +5363,16 @@ class CodeGenerator:
                         'ENC_VOP1': 'Vop1',
                         'ENC_VOP2': 'Vop2',
                         'ENC_VOPC': 'Vop1',
+                        'ENC_VOP3': 'Vop3',
+                        'ENC_VOP3P': 'Vop3p',
+                        'VOP3_SDST_ENC': 'Vop3SdstEnc',
                     }
-                    _DPP8_ENC_BASES = {
-                        'ENC_VOP1': 'Vop1',
-                        'ENC_VOP2': 'Vop2',
-                        'ENC_VOPC': 'Vopc',
-                    }
-                    _enable_dpp8 = self.isa_spec.arch_name.lower() == 'gfx1250'
                     _enc_base = _DPP_ENC_BASES.get(enc.enc_name.upper())
-                    _enc_base_dpp8 = (
-                        _DPP8_ENC_BASES.get(enc.enc_name.upper())
-                        if _enable_dpp8
-                        else None
-                    )
+                    _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(enc.enc_name)
                     if _enc_base:
-                        # CDNA (GFX9) uses VopDpp; RDNA (GFX10+) uses VopDpp16.
-                        _is_rdna = any(
-                            ie.enc_name.startswith('VOP1_VOP_DPP16')
-                            for ie in self.isa_spec.inst_encodings
-                        )
-                        _dpp_suffix = 'VopDpp16' if _is_rdna else 'VopDpp'
-                        _dpp_struct = f'{_enc_base}{_dpp_suffix}MachineInst'
-                        _dpp8_struct = (
-                            f'{_enc_base_dpp8}VopDpp8MachineInst'
-                            if _enc_base_dpp8
-                            else ''
-                        )
                         for opnd in inst.operands:
                             if opnd.name == 'src0' and opnd.name in enc_field_names:
-                                if _dpp8_struct and self._has_machine_inst_struct(
-                                    _dpp8_struct
-                                ):
+                                if _dpp8_struct:
                                     ctor_body_parts.append(
                                         f'if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) {{'
                                         f' auto *dp8 = reinterpret_cast<const {_dpp8_struct}*>(inst);'
@@ -4941,22 +5387,27 @@ class CodeGenerator:
                                 # fields from the ISA-specific extension dword,
                                 # storing them on the Instruction base for
                                 # apply_dpp() to use later.
-                                ctor_body_parts.append(
-                                    f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
-                                    f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
-                                    f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, dp->vsrc0);'
-                                    f' dpp_ctrl_ = dp->dpp_ctrl;'
-                                    f' dpp_row_mask_ = dp->row_mask;'
-                                    f' dpp_bank_mask_ = dp->bank_mask;'
-                                    f' dpp_bound_ctrl_ = dp->bound_ctrl;'
-                                    f'}}'
-                                )
+                                if _dpp_struct:
+                                    ctor_body_parts.append(
+                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
+                                        f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
+                                        f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, dp->vsrc0);'
+                                        f' dpp_ctrl_ = dp->dpp_ctrl;'
+                                        f' dpp_row_mask_ = dp->row_mask;'
+                                        f' dpp_bank_mask_ = dp->bank_mask;'
+                                        f' dpp_bound_ctrl_ = dp->bound_ctrl;'
+                                        f'}}'
+                                    )
                                 # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
                                 _has_sdwa = any(
                                     'SDWA' in ie.enc_name
                                     for ie in self.isa_spec.inst_encodings
                                 )
-                                if _has_sdwa:
+                                if _has_sdwa and enc.enc_name.upper() in (
+                                    'ENC_VOP1',
+                                    'ENC_VOP2',
+                                    'ENC_VOPC',
+                                ):
                                     if enc.enc_name.upper() == 'ENC_VOPC':
                                         _sdwa_struct = 'VopcVopSdwaSdstEncMachineInst'
                                     else:
@@ -5134,10 +5585,27 @@ class CodeGenerator:
                         self._current_inst_fields = inst_field_names
                         self._current_enc = enc
                         body = self._gen_execute_body(inst, sem, enc.enc_name)
-                        # VOP1/VOP2: prepend DPP preamble so the encoding
+                        # VOP: prepend DPP preamble so the encoding
                         # base's apply_dpp() runs before the ALU logic.
                         _dpp_preamble = ''
-                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
+                        _enc_upper = enc.enc_name.upper()
+                        _has_sdwa_encoding = _enc_upper in (
+                            'ENC_VOP1',
+                            'ENC_VOP2',
+                            'ENC_VOPC',
+                        )
+                        _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(
+                            _enc_upper
+                        )
+                        _uses_full_dpp_write_mask = (
+                            self.isa_spec.arch_name in _CDNA_ARCHES
+                        )
+                        _has_dpp_encoding = (
+                            _dpp_struct is not None
+                            or _dpp8_struct is not None
+                            or _has_sdwa_encoding
+                        )
+                        if _has_dpp_encoding:
                             _src0_name = next(
                                 (o.name for o in inst.operands if o.is_input), None
                             )
@@ -5146,100 +5614,147 @@ class CodeGenerator:
                                 _src_inputs[1] if len(_src_inputs) > 1 else None
                             )
                             _is_vopc = enc.enc_name.upper() == 'ENC_VOPC'
+                            _is_cmpx_vopc = (
+                                _is_vopc
+                                and sem
+                                and sem.semantic_class
+                                in (
+                                    'vector_cmpx',
+                                    'vector_cmpx_class',
+                                )
+                            )
                             _dst_reg_expr = self._e32_true16_dst_reg_expr(
                                 inst, enc.enc_name
                             )
                             _dpp_preamble = ''
-                            if _is_vopc:
-                                _dpp_preamble += (
-                                    '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
-                                    '  uint64_t dpp_write_mask_ = ~0ULL;\n'
-                                    '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                    '    dpp_write_mask_ = 0;\n'
+
+                            def _dpp_write_mask_lines(
+                                var_name: str, *, declare: bool = False
+                            ) -> str:
+                                prefix = (
+                                    f'uint64_t {var_name} = '
+                                    if declare
+                                    else f'{var_name} = '
+                                )
+                                if _uses_full_dpp_write_mask:
+                                    return (
+                                        f'    {prefix}amdgpu::dpp::dpp_write_mask(\n'
+                                        '        wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,\n'
+                                        '        dpp_bound_ctrl_);\n'
+                                    )
+                                return (
+                                    f'    {prefix}0;\n'
                                     '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                     '      uint32_t row = ln / 16;\n'
                                     '      uint32_t bank = (ln % 16) / 4;\n'
                                     '      if ((dpp_row_mask_ & (1u << row)) &&\n'
                                     '          (dpp_bank_mask_ & (1u << bank)))\n'
-                                    '        dpp_write_mask_ |= (1ULL << ln);\n'
+                                    f'        {var_name} |= (1ULL << ln);\n'
                                     '    }\n'
+                                )
+
+                            if _is_vopc:
+                                _dpp_old_exec_line = (
+                                    '  uint64_t dpp_old_exec_ = wf.exec();\n'
+                                    if _is_cmpx_vopc
+                                    else ''
+                                )
+                                _dpp_preamble += (
+                                    '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
+                                    f'{_dpp_old_exec_line}'
+                                    '  uint64_t dpp_write_mask_ = ~0ULL;\n'
+                                    '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                    f'{_dpp_write_mask_lines("dpp_write_mask_")}'
                                     '  }\n'
                                 )
                             elif not _is_vopc:
+                                if _has_sdwa_encoding:
+                                    _dpp_preamble += (
+                                        '  uint32_t sdwa_old_dst_[64] = {};\n'
+                                        '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD ||\n'
+                                        '      inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                        '    uint32_t vb = wf.vgpr_alloc().base;\n'
+                                        '    uint64_t ex = wf.exec();\n'
+                                        '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
+                                        '      if (ex & (1ULL << ln))\n'
+                                        f'        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
+                                        '  }\n'
+                                    )
+                                else:
+                                    _dpp_preamble += (
+                                        '  uint32_t sdwa_old_dst_[64] = {};\n'
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                        '    uint32_t vb = wf.vgpr_alloc().base;\n'
+                                        '    uint64_t ex = wf.exec();\n'
+                                        '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
+                                        '      if (ex & (1ULL << ln))\n'
+                                        f'        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
+                                        '  }\n'
+                                    )
+                            if _dpp_struct:
                                 _dpp_preamble += (
-                                    '  uint32_t sdwa_old_dst_[64] = {};\n'
-                                    '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD ||\n'
-                                    '      inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                    '    uint32_t vb = wf.vgpr_alloc().base;\n'
-                                    '    uint64_t ex = wf.exec();\n'
-                                    '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
-                                    '      if (ex & (1ULL << ln))\n'
-                                    f'        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
-                                    '  }\n'
+                                    '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                    '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
+                                    '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,\n'
+                                    '        dpp_src0_, wf);\n'
                                 )
-                            _dpp_preamble += (
-                                '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
-                                '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
-                                '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,\n'
-                                '        dpp_src0_, wf);\n'
-                            )
-                            if _enable_dpp8:
+                            if _dpp8_struct:
                                 _dpp_preamble += (
                                     '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                     '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_,\n'
                                     '        dpp_src0_, wf);\n'
                                 )
+                            if _has_sdwa_encoding:
+                                _dpp_preamble += (
+                                    '  if (inst_.src0 == amdgpu::SRC_SDWA) {\n'
+                                    '    auto &cu = wf.cu();\n'
+                                    '    uint32_t ws = wf.wf_size();\n'
+                                    '    if (sdwa_src0_sel_ != amdgpu::sdwa::DWORD) {\n'
+                                    '      uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;\n'
+                                    '      uint32_t result[64];\n'
+                                    '      for (uint32_t i = 0; i < ws; ++i)\n'
+                                    '        result[i] = amdgpu::sdwa::sdwa_src_select(\n'
+                                    '            cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);\n'
+                                    '      if (sdwa_src0_abs_ || sdwa_src0_neg_) {\n'
+                                    '        for (uint32_t i = 0; i < ws; ++i) {\n'
+                                    '          float sv = std::bit_cast<float>(result[i]);\n'
+                                    '          if (sdwa_src0_abs_) sv = std::fabs(sv);\n'
+                                    '          if (sdwa_src0_neg_) sv = -sv;\n'
+                                    '          result[i] = std::bit_cast<uint32_t>(sv);\n'
+                                    '        }\n'
+                                    '      }\n'
+                                    '      dpp_src0_ = std::make_unique<DppOperand>(\n'
+                                    '          *src_operands_[0], result, static_cast<int>(ws));\n'
+                                    '      src_operands_[0] = dpp_src0_.get();\n'
+                                    '    }\n'
+                                    '    if (sdwa_src1_sel_ != amdgpu::sdwa::DWORD && num_src_ > 1) {\n'
+                                    '      uint32_t vb = wf.vgpr_alloc().base + src_operands_[1]->encoding_value_;\n'
+                                    '      uint32_t result1[64];\n'
+                                    '      for (uint32_t i = 0; i < ws; ++i)\n'
+                                    '        result1[i] = amdgpu::sdwa::sdwa_src_select(\n'
+                                    '            cu.read_vgpr(vb, i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
+                                    '      if (sdwa_src1_abs_ || sdwa_src1_neg_) {\n'
+                                    '        for (uint32_t i = 0; i < ws; ++i) {\n'
+                                    '          float sv = std::bit_cast<float>(result1[i]);\n'
+                                    '          if (sdwa_src1_abs_) sv = std::fabs(sv);\n'
+                                    '          if (sdwa_src1_neg_) sv = -sv;\n'
+                                    '          result1[i] = std::bit_cast<uint32_t>(sv);\n'
+                                    '        }\n'
+                                    '      }\n'
+                                    '      dpp_src1_ = std::make_unique<DppOperand>(\n'
+                                    '          *src_operands_[1], result1, static_cast<int>(ws));\n'
+                                    '      src_operands_[1] = dpp_src1_.get();\n'
+                                    '    }\n'
+                                    '  }\n'
+                                )
                             _dpp_preamble += (
-                                '  if (inst_.src0 == amdgpu::SRC_SDWA) {\n'
-                                '    auto &cu = wf.cu();\n'
-                                '    uint32_t ws = wf.wf_size();\n'
-                                '    if (sdwa_src0_sel_ != amdgpu::sdwa::DWORD) {\n'
-                                '      uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;\n'
-                                '      uint32_t result[64];\n'
-                                '      for (uint32_t i = 0; i < ws; ++i)\n'
-                                '        result[i] = amdgpu::sdwa::sdwa_src_select(\n'
-                                '            cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);\n'
-                                '      if (sdwa_src0_abs_ || sdwa_src0_neg_) {\n'
-                                '        for (uint32_t i = 0; i < ws; ++i) {\n'
-                                '          float sv = std::bit_cast<float>(result[i]);\n'
-                                '          if (sdwa_src0_abs_) sv = std::fabs(sv);\n'
-                                '          if (sdwa_src0_neg_) sv = -sv;\n'
-                                '          result[i] = std::bit_cast<uint32_t>(sv);\n'
-                                '        }\n'
-                                '      }\n'
-                                '      dpp_src0_ = std::make_unique<DppOperand>(\n'
-                                '          *src_operands_[0], result, static_cast<int>(ws));\n'
-                                '      src_operands_[0] = dpp_src0_.get();\n'
-                                '    }\n'
-                                '    if (sdwa_src1_sel_ != amdgpu::sdwa::DWORD && num_src_ > 1) {\n'
-                                '      uint32_t vb = wf.vgpr_alloc().base + src_operands_[1]->encoding_value_;\n'
-                                '      uint32_t result1[64];\n'
-                                '      for (uint32_t i = 0; i < ws; ++i)\n'
-                                '        result1[i] = amdgpu::sdwa::sdwa_src_select(\n'
-                                '            cu.read_vgpr(vb, i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
-                                '      if (sdwa_src1_abs_ || sdwa_src1_neg_) {\n'
-                                '        for (uint32_t i = 0; i < ws; ++i) {\n'
-                                '          float sv = std::bit_cast<float>(result1[i]);\n'
-                                '          if (sdwa_src1_abs_) sv = std::fabs(sv);\n'
-                                '          if (sdwa_src1_neg_) sv = -sv;\n'
-                                '          result1[i] = std::bit_cast<uint32_t>(sv);\n'
-                                '        }\n'
-                                '      }\n'
-                                '      dpp_src1_ = std::make_unique<DppOperand>(\n'
-                                '          *src_operands_[1], result1, static_cast<int>(ws));\n'
-                                '      src_operands_[1] = dpp_src1_.get();\n'
-                                '    }\n'
-                                '  }\n'
-                                + (
-                                    f'  if (dpp_src0_) {_src0_name}.set_delegate(dpp_src0_.get());\n'
-                                    if _src0_name
-                                    else ''
-                                )
-                                + (
-                                    f'  if (dpp_src1_) {_src1_name}.set_delegate(dpp_src1_.get());\n'
-                                    if _src1_name
-                                    else ''
-                                )
+                                f'  if (dpp_src0_) {_src0_name}.set_delegate(dpp_src0_.get());\n'
+                                if _src0_name
+                                else ''
+                            ) + (
+                                f'  if (dpp_src1_) {_src1_name}.set_delegate(dpp_src1_.get());\n'
+                                if _src1_name
+                                else ''
                             )
                         # SDWA postamble: apply dst_sel merge and float clamp after ALU.
                         _sdwa_postamble = ''
@@ -5272,13 +5787,22 @@ class CodeGenerator:
                                     '  }\n'
                                 )
                         _dpp_cleanup = ''
-                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
+                        if _has_dpp_encoding:
                             if _is_vopc:
+                                _dpp_cmpx_exec_merge = (
+                                    '    uint64_t new_exec = wf.exec();\n'
+                                    '    uint64_t merged_exec = (new_exec & dpp_write_mask_) |\n'
+                                    '                           (dpp_old_exec_ & ~dpp_write_mask_);\n'
+                                    '    wf.set_exec(merged_exec);\n'
+                                    if _is_cmpx_vopc
+                                    else ''
+                                )
                                 _dpp_cleanup += (
                                     '  if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {\n'
                                     '    uint64_t new_vcc = wf.vcc();\n'
                                     '    uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);\n'
                                     '    wf.set_vcc(merged);\n'
+                                    f'{_dpp_cmpx_exec_merge}'
                                     '  }\n'
                                     '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {\n'
                                     '    uint64_t cmp_result = wf.vcc();\n'
@@ -5291,14 +5815,7 @@ class CodeGenerator:
                             else:
                                 _dpp_cleanup += (
                                     '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                    '    uint64_t dpp_write_mask = 0;\n'
-                                    '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                    '      uint32_t row = ln / 16;\n'
-                                    '      uint32_t bank = (ln % 16) / 4;\n'
-                                    '      if ((dpp_row_mask_ & (1u << row)) &&\n'
-                                    '          (dpp_bank_mask_ & (1u << bank)))\n'
-                                    '        dpp_write_mask |= (1ULL << ln);\n'
-                                    '    }\n'
+                                    f'{_dpp_write_mask_lines("dpp_write_mask", declare=True)}'
                                     '    if (dpp_write_mask != ~0ULL) {\n'
                                     '      uint64_t ex = wf.exec();\n'
                                     '      uint32_t vb = wf.vgpr_alloc().base;\n'
@@ -5548,6 +6065,25 @@ class CodeGenerator:
                             False,
                         )
                     )
+                uses_true16_write_helper = any(
+                    self.semantics
+                    and (s := self.semantics.instructions.get(i.name))
+                    and s.semantic_class
+                    in (
+                        'mad_mixlo_f16',
+                        'mad_mixhi_f16',
+                        'mad_mixlo_bf16',
+                        'mad_mixhi_bf16',
+                    )
+                    for i in all_insts
+                )
+                if uses_true16_write_helper:
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/simd_glue.h',
+                            False,
+                        )
+                    )
                 if has_sem:
                     cpp_includes.extend(
                         [
@@ -5570,8 +6106,14 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h', False)
                     )
-                # VOP1/VOP2 need DPP header for apply_dpp() in execute_impl.
-                if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
+                # VOP encodings need DPP/SDWA helpers in execute_impl.
+                if self._supports_vop_dpp_encoding(
+                    enc.enc_name
+                ) or enc.enc_name.upper() in (
+                    'ENC_VOP1',
+                    'ENC_VOP2',
+                    'ENC_VOPC',
+                ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h', False)
                     )
@@ -5946,7 +6488,7 @@ class CodeGenerator:
     ) -> None:
         unit_chunks = self._chunk_source_impl_units(units, max_bytes, chunk_overhead)
         for idx, unit_chunk in enumerate(unit_chunks):
-            chunk_stem = stem if len(unit_chunks) == 1 else f'{stem}_{idx + 1}'
+            chunk_stem = stem if idx == 0 else f'{stem}_{idx + 1}'
             logical_chunks.append(
                 (
                     f'{base_name}_{chunk_stem}',
@@ -6073,6 +6615,12 @@ class CodeGenerator:
             for opnd in inst.operands:
                 pattern = rf'(?<!\.)(?<!\w){_re.escape(opnd.name)}\.'
                 prefixed_body = _re.sub(pattern, f'inst.{opnd.name}.', prefixed_body)
+                helper_arg_pattern = (
+                    rf'(?<!\.)(?<!\w){_re.escape(opnd.name)}(?=,\s*wf,\s*lane)'
+                )
+                prefixed_body = _re.sub(
+                    helper_arg_pattern, f'inst.{opnd.name}', prefixed_body
+                )
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)inst_\.', 'inst.inst_.', prefixed_body
             )
@@ -6663,6 +7211,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
         arch = self.isa_spec.arch_name
+        scalar_null_precedes_m0 = self.isa_spec.profile.scalar_null_precedes_m0
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
@@ -7042,6 +7591,14 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         _vgpr_index_lines.append('}')
         _vgpr_index_body = '\n'.join(_vgpr_index_lines)
 
+        _read_immediate64_body = (
+            'uint64_t read_immediate64(OperandType opr_type, int ev) {\n'
+            '  if (opr_type == OperandType::OPR_SIMM32)\n'
+            '    return static_cast<uint64_t>(static_cast<uint32_t>(ev));\n'
+            '  return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));\n'
+            '}'
+        )
+
         # Single source of truth for "does this operand resolve to per-lane VGPR
         # storage, and if so what's the offset within the wavefront's VGPR
         # allocation?". Used by read_lane/read_lane64/write_lane/write_lane64
@@ -7116,6 +7673,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  }',
                 '  if (is_immediate_type(opr_type_))',
                 '    return static_cast<uint32_t>(ev);',
+                '  if (size_bits_ == 16)',
+                '    return resolve_src_scalar16(wf, ev);',
                 '  return resolve_src_scalar(wf, ev);',
                 '}',
             ]
@@ -7136,7 +7695,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (has_literal64_)\n'
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
-            '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));\n'
+            '    return read_immediate64(opr_type_, ev);\n'
             '  return resolve_src_scalar64(wf, ev);\n'
             '}'
         )
@@ -7221,7 +7780,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    return 0u; // NULL\n'
                 '  if (ev == 125)\n'
                 '    return wf.m0();\n'
-                if arch in ('rdna4', 'gfx1250')
+                if scalar_null_precedes_m0
                 else '  if (ev == 124)\n' '    return wf.m0();\n'
             )
             + '  if (ev == 126)\n'
@@ -7267,12 +7826,39 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (ev == 250)\n'
             '    return 0u; // NULL\n'
             '  if (ev == 251)\n'
-            '    return wf.vcc() == 0 ? 1u : 0u; // VCCZ\n'
-            '  if (ev == 252)\n'
-            '    return wf.exec() == 0 ? 1u : 0u; // EXECZ\n'
+            '    return (wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL))) == 0 ? 1u : 0u; // VCCZ\n'
+            '  if (ev == 252) {\n'
+            '    uint64_t active = wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL);\n'
+            '    return (wf.exec() & active) == 0 ? 1u : 0u; // EXECZ\n'
+            '  }\n'
             '  if (ev == 253)\n'
             '    return wf.read_scc() ? 1u : 0u; // SCC\n'
             '  throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));\n'
+            '}\n'
+            '\n'
+            'uint32_t resolve_src_scalar16(const amdgpu::Wavefront &wf, int ev) {\n'
+            '  switch (ev) {\n'
+            '  case 240:\n'
+            '    return 0x3800u; // 0.5h\n'
+            '  case 241:\n'
+            '    return 0xB800u; // -0.5h\n'
+            '  case 242:\n'
+            '    return 0x3C00u; // 1.0h\n'
+            '  case 243:\n'
+            '    return 0xBC00u; // -1.0h\n'
+            '  case 244:\n'
+            '    return 0x4000u; // 2.0h\n'
+            '  case 245:\n'
+            '    return 0xC000u; // -2.0h\n'
+            '  case 246:\n'
+            '    return 0x4400u; // 4.0h\n'
+            '  case 247:\n'
+            '    return 0xC400u; // -4.0h\n'
+            '  case 248:\n'
+            '    return 0x3118u; // f16 1/(2*pi)\n'
+            '  default:\n'
+            '    return resolve_src_scalar(wf, ev);\n'
+            '  }\n'
             '}\n'
             '\n'
             '// Must stay in sync with resolve_src_scalar above — returns true for\n'
@@ -7285,7 +7871,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '         ev == 124 || ev == 125 || ev == 126 || ev == 127 ||\n'
                 '         (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 ||\n'
                 '         (ev >= 235 && ev <= 238) || (ev >= 240 && ev <= 253);\n'
-                if arch in ('rdna4', 'gfx1250')
+                if scalar_null_precedes_m0
                 else '  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||\n'
                 '         ev == 124 || ev == 126 || ev == 127 ||\n'
                 '         (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) ||\n'
@@ -7313,7 +7899,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    return 0u; // NULL\n'
                 '  if (ev == 125)\n'
                 '    return wf.m0();\n'
-                if arch in ('rdna4', 'gfx1250')
+                if scalar_null_precedes_m0
                 else '  if (ev == 124)\n' '    return wf.m0();\n'
             )
             + '  if (ev == 126)\n'
@@ -7387,7 +7973,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    wf.set_m0(val);\n'
                 '    return;\n'
                 '  }\n'
-                if arch in ('rdna4', 'gfx1250')
+                if scalar_null_precedes_m0
                 else '  if (ev == 124) {\n'
                 '    wf.set_m0(val);\n'
                 '    return;\n'
@@ -7437,6 +8023,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + _is_immediate_body
             + '\n\n'
             + _vgpr_index_body
+            + '\n\n'
+            + _read_immediate64_body
             + '\n\n'
             + '\n'
             '} // namespace\n'
@@ -7496,7 +8084,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (has_literal64_)\n'
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
-            '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(encoding_value_)));\n'
+            '    return read_immediate64(opr_type_, encoding_value_);\n'
             '  return resolve_src_scalar64(wf, encoding_value_);\n'
             '}\n'
             '\n'

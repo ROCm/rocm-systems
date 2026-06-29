@@ -22,6 +22,8 @@ concept gpu_backend_contract = requires(const Backend backend) {
     { backend.get_gpu_asic_info() } -> std::same_as<asic_info>;
     { backend.get_gpu_metrics() } -> std::same_as<metrics>;
     { backend.get_memory_usage() } -> std::same_as<std::uint64_t>;
+    { backend.get_hotspot_temperature() } -> std::same_as<std::int64_t>;
+    { backend.get_edge_temperature() } -> std::same_as<std::int64_t>;
     { backend.get_raw_sdma_usage() } -> std::same_as<std::uint64_t>;
     { backend.is_sdma_supported() } -> std::same_as<bool>;
 };
@@ -76,14 +78,6 @@ public:
             if(m_supported_metrics.bits.average_socket_power)
             {
                 gpu_metrics.average_socket_power = raw.average_socket_power;
-            }
-            if(m_supported_metrics.bits.hotspot_temperature)
-            {
-                gpu_metrics.hotspot_temperature = raw.hotspot_temperature;
-            }
-            if(m_supported_metrics.bits.edge_temperature)
-            {
-                gpu_metrics.edge_temperature = raw.edge_temperature;
             }
             if(m_supported_metrics.bits.gfx_activity)
             {
@@ -168,6 +162,34 @@ public:
             }
         }
 
+        // At most one SMI temperature read per sample: prefer hotspot when it is both
+        // supported and enabled; otherwise read edge when enabled (so edge-only configs
+        // still work when the device exposes both sensors).
+        if(enabled_cfg.bits.hotspot_temperature &&
+           m_supported_metrics.bits.hotspot_temperature)
+        {
+            try
+            {
+                gpu_metrics.hotspot_temperature = m_backend->get_hotspot_temperature();
+            } catch(const std::runtime_error& e)
+            {
+                LOG_DEBUG("GPU device [{}] hotspot temperature query failed: {}", m_index,
+                          e.what());
+            }
+        }
+        else if(enabled_cfg.bits.edge_temperature &&
+                m_supported_metrics.bits.edge_temperature)
+        {
+            try
+            {
+                gpu_metrics.edge_temperature = m_backend->get_edge_temperature();
+            } catch(const std::runtime_error& e)
+            {
+                LOG_DEBUG("GPU device [{}] edge temperature query failed: {}", m_index,
+                          e.what());
+            }
+        }
+
         collect_sdma_metrics(enabled_cfg, timestamp, gpu_metrics);
 
         return gpu_metrics;
@@ -203,6 +225,25 @@ private:
             m_supported_metrics.bits.memory_usage = 0;
         }
 
+        // The API amdsmi_get_temp_metric signals "not available" with a non-success
+        // status, which the backend turns into std::runtime_error.
+        try
+        {
+            (void) m_backend->get_hotspot_temperature();
+            m_supported_metrics.bits.hotspot_temperature = 1;
+        } catch(const std::runtime_error&)
+        {
+            m_supported_metrics.bits.hotspot_temperature = 0;
+        }
+        try
+        {
+            (void) m_backend->get_edge_temperature();
+            m_supported_metrics.bits.edge_temperature = 1;
+        } catch(const std::runtime_error&)
+        {
+            m_supported_metrics.bits.edge_temperature = 0;
+        }
+
         metrics raw{};
         try
         {
@@ -216,10 +257,6 @@ private:
             is_metric_supported(raw.current_socket_power, METRIC_VALUE_NOT_SUPPORTED_16);
         m_supported_metrics.bits.average_socket_power =
             is_metric_supported(raw.average_socket_power, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.hotspot_temperature =
-            is_metric_supported(raw.hotspot_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.edge_temperature =
-            is_metric_supported(raw.edge_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
         m_supported_metrics.bits.gfx_activity =
             is_metric_supported(raw.gfx_activity, METRIC_VALUE_NOT_SUPPORTED_16);
         m_supported_metrics.bits.umc_activity =

@@ -186,30 +186,31 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
                       : core::IsaFeature::Disabled;
   }
 
+  const core::Isa* isa;
   if (node_props.OverrideEngineId.Value != 0) {
-    isa_ = (core::Isa*)core::IsaRegistry::GetIsa(
+    isa = core::IsaRegistry::GetIsa(
           core::Isa::Version(node_props.OverrideEngineId.ui32.Major, node_props.OverrideEngineId.ui32.Minor,
                              node_props.OverrideEngineId.ui32.Stepping), sramecc, xnack);
   } else {
   // Set instruction set architecture via node property, only on GPU device.
-    isa_ = (core::Isa*)core::IsaRegistry::GetIsa(
+    isa = core::IsaRegistry::GetIsa(
           core::Isa::Version(node_props.EngineId.ui32.Major, node_props.EngineId.ui32.Minor,
                              node_props.EngineId.ui32.Stepping), sramecc, xnack);
   }
 
-  assert(isa_ != nullptr && "ISA registry inconsistency.");
+  assert(isa != nullptr && "ISA registry inconsistency.");
 
-  supported_isas_.push_back(isa_);
-  if (!isa_->GetIsaGeneric().empty()) {
-    supported_isas_.push_back(core::IsaRegistry::GetIsa(isa_->GetIsaGeneric()));
+  supported_isas_.push_back(isa);
+  if (!supported_isas_[0]->GetIsaGeneric().empty()) {
+    supported_isas_.push_back(core::IsaRegistry::GetIsa(supported_isas_[0]->GetIsaGeneric()));
   }
 
-  if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
+  if (supported_isas_[0]->GetMajorVersion() == 12 && supported_isas_[0]->GetMinorVersion() >= 5) {
     extended_aql_dispatch_supported_ = true;
     workgroup_clusters_supported_ = true;
   }
 
-  if (isa_->GetMajorVersion() >= 12)
+  if (supported_isas_[0]->GetMajorVersion() >= 12)
     kern_cluster_max_dim_ = { UINT32_MAX, UINT16_MAX, UINT16_MAX };
 
   if (workgroup_clusters_supported_) {
@@ -217,7 +218,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
   }
 
-  max_wave_scratch_ = (isa_->GetMajorVersion() >= 12) ? MAX_WAVE_SCRATCH_GFX12 : MAX_WAVE_SCRATCH;
+  max_wave_scratch_ = (supported_isas_[0]->GetMajorVersion() >= 12) ? MAX_WAVE_SCRATCH_GFX12 : MAX_WAVE_SCRATCH;
 
   current_coherency_type((profile_ == HSA_PROFILE_FULL)
                              ? HSA_AMD_COHERENCY_TYPE_COHERENT
@@ -381,7 +382,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
 
   ASICShader* asic_shader = NULL;
 
-  switch (isa_->GetMajorVersion()) {
+  switch (supported_isas()[0]->GetMajorVersion()) {
     case 7:
       asic_shader = &compiled_shader_it->second.compute_7;
       break;
@@ -389,16 +390,16 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       asic_shader = &compiled_shader_it->second.compute_8;
       break;
     case 9:
-      if((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) {
+      if((supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) {
         asic_shader = &compiled_shader_it->second.compute_90a;
-      } else if(isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5) {
+      } else if(supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5) {
         asic_shader = &compiled_shader_it->second.compute_942;
       } else {
         asic_shader = &compiled_shader_it->second.compute_9;
       }
       break;
     case 10:
-      if(isa_->GetMinorVersion() == 1)
+      if(supported_isas()[0]->GetMinorVersion() == 1)
         asic_shader = &compiled_shader_it->second.compute_1010;
       else
         asic_shader = &compiled_shader_it->second.compute_10;
@@ -407,7 +408,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
         asic_shader = &compiled_shader_it->second.compute_11;
       break;
     case 12:
-        if(isa_->GetMinorVersion() >= 5)
+        if(supported_isas()[0]->GetMinorVersion() >= 5)
           asic_shader = &compiled_shader_it->second.compute_1250;
         else
           asic_shader = &compiled_shader_it->second.compute_12;
@@ -444,7 +445,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     // ENABLE_WAVEFRONT_SIZE32 must match the wavefront size used to compile blit shaders.
     AMD_HSA_BITS_SET(header->kernel_code_properties,
                      AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32,
-                     isa_->GetWavefront().IsWavefrontSize64() ? 0 : 1);
+                     supported_isas()[0]->GetWavefront().IsWavefrontSize64() ? 0 : 1);
     AMD_HSA_BITS_SET(header->compute_pgm_rsrc1,
                      AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT,
                      gran_sgprs);
@@ -461,9 +462,9 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
                      AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, 1);
 
     // gfx90a, gfx942, gfx950
-    if ((isa_->GetMajorVersion() == 9) &&
-        (((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) ||
-        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {
+    if ((supported_isas()[0]->GetMajorVersion() == 9) &&
+        (((supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) ||
+        (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5))) {
       // Program COMPUTE_PGM_RSRC3.ACCUM_OFFSET for 0 ACC VGPRs on gfx90a.
       // FIXME: Assemble code objects from source at build time
       int gran_accvgprs = ((gran_vgprs + 1) * 8) / 4 - 1;
@@ -508,7 +509,7 @@ void GpuAgent::InitRegionList() {
 
           if (region->IsLocalMemory()) {
             // Extended Fine-Grain memory
-            if (!(isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() == 0))
+            if (!(supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() == 0))
               regions_.push_back(
                   std::make_shared<MemoryRegion>(false, false, false, true, true, this, mem_props[mem_idx]));
 
@@ -811,23 +812,23 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
    */
   auto isDXG = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
 
-  switch (isa_->GetMajorVersion()) {
+  switch (supported_isas()[0]->GetMajorVersion()) {
     case 9:
       sdma = new BlitSdmaV4();
-      copy_size_override = (isa_->GetMinorVersion() >= 4 ||
-                            (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10)) ?
+      copy_size_override = (supported_isas()[0]->GetMinorVersion() >= 4 ||
+                            (supported_isas()[0]->GetMinorVersion() == 0 && supported_isas()[0]->GetStepping() == 10)) ?
                             copy_size_overrides[1] : copy_size_overrides[0];
       break;
     case 10:
       sdma = (isDXG ? static_cast<BlitSdmaBase*>(new BlitSdmaV4()) : static_cast<BlitSdmaBase*>(new BlitSdmaV5()));
-      copy_size_override = isa_->GetMinorVersion() < 3 ? copy_size_overrides[0] :
+      copy_size_override = supported_isas()[0]->GetMinorVersion() < 3 ? copy_size_overrides[0] :
                                                          copy_size_overrides[1];
       break;
     case 11:
     case 12:
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV4());
-      } else if (isa_->GetMinorVersion() >= 5) {
+      } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV6());
       } else {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV5());
@@ -852,6 +853,26 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   }
 
   return sdma;
+}
+
+uint32_t GpuAgent::NumSdmaEnginesTotal() const {
+  return static_cast<uint32_t>(properties_.NumSdmaEngines) +
+         static_cast<uint32_t>(properties_.NumSdmaXgmiEngines);
+}
+
+bool GpuAgent::SupportsSdmaQueueByEngineId() const {
+  // Targeting a specific SDMA engine at queue creation
+  // (HSA_QUEUE_SDMA_BY_ENG_ID) requires kernel interface >= 1.17.
+  const auto kfd_version = core::Runtime::runtime_singleton_->KfdVersion().version;
+  return kfd_version.KernelInterfaceMajorVersion > 1 ||
+         (kfd_version.KernelInterfaceMajorVersion == 1 &&
+          kfd_version.KernelInterfaceMinorVersion >= 17);
+}
+
+uint32_t GpuAgent::NextSdmaUserQueueEngineId() {
+  const uint32_t num_engines = NumSdmaEnginesTotal();
+  assert(num_engines != 0 && "No SDMA engines available for round-robin selection.");
+  return sdma_user_queue_rr_index_.fetch_add(1, std::memory_order_relaxed) % num_engines;
 }
 
 core::Blit* GpuAgent::CreateBlitKernel(core::Queue* queue) {
@@ -897,19 +918,19 @@ void GpuAgent::InitDma() {
 
     // User SDMA queues are unstable on gfx8 and unsupported on gfx1013.
     bool use_sdma =
-        ((isa_->GetMajorVersion() != 8) && (isa_->GetVersion() != std::make_tuple(10, 1, 3)));
+        ((supported_isas()[0]->GetMajorVersion() != 8) && (supported_isas()[0]->GetVersion() != std::make_tuple(10, 1, 3)));
     if (sdma_override != Flag::SDMA_DEFAULT) use_sdma = (sdma_override == Flag::SDMA_ENABLE);
 
     if (use_sdma && (HSA_PROFILE_BASE == profile_)) {
       // On gfx90a ensure that HostToDevice queue is created first and so is placed on SDMA0.
-      if ((!prefer_xgmi) && (!isHostToDev) && (isa_->GetMajorVersion() == 9) &&
-          (isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) {
+      if ((!prefer_xgmi) && (!isHostToDev) && (supported_isas()[0]->GetMajorVersion() == 9) &&
+          (supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) {
         GetBlitObject(BlitHostToDev);
         *blits_[BlitHostToDev];
       }
 
       // gfx94x is more efficient with reverse order of SDMA0/1 for host<->device copies
-      if (!prefer_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() >= 4)
+      if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4)
         rec_eng = (rec_eng + 1) % properties_.NumSdmaEngines;
 
       // Check support for targeted SDMA engines
@@ -921,8 +942,8 @@ void GpuAgent::InitDma() {
 
       // Observing strange behavior when fixing host<->device engines
       // on GFX9 devices older than GFX90a, so bypass engine fix.
-      if (!prefer_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() == 0
-          && isa_->GetStepping() < 10)
+      if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() == 0
+          && supported_isas()[0]->GetStepping() < 10)
         rec_eng = -1;
 
       // devices without dedicated xGMI SDMA engines should not target specific
@@ -1111,7 +1132,7 @@ void GpuAgent::RegisterRecSdmaEngIdMaskPeer(core::Agent& peer, uint32_t rec_sdma
   uses_rec_sdma_eng_id_mask_ = (kfd_version.KernelInterfaceMajorVersion > 1 ||
                                  (kfd_version.KernelInterfaceMajorVersion == 1 &&
                                   kfd_version.KernelInterfaceMinorVersion >= 17)) &&
-                               isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() >= 4 &&
+                               supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4 &&
                                IsPowerOfTwo(rec_sdma_eng_id_mask) && rec_eng_enabled;
 
   rec_sdma_eng_id_peers_info_[peer.public_handle().handle] = uses_rec_sdma_eng_id_mask_ ?
@@ -1266,13 +1287,21 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     bool use_p2p_engines = is_p2p && dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
                          num_p2p_engines_;
 
+    // On platforms with dedicated xGMI SDMA engines, a P2P copy MUST target one of
+    // those engines: a host-facing SDMA engine physically cannot drive the xGMI link,
+    // so targeting an H2D/D2H engine for P2P is a hardware error. On platforms without
+    // dedicated xGMI engines (e.g. gfx1250) every SDMA engine is equivalent and
+    // P2P-capable, so the H2D/D2H-vs-P2P split is only a load-balancing preference
+    // (steered via DmaPreferredEngine) and must not be enforced as a hard rejection.
+    bool p2p_engine_is_mandatory = use_p2p_engines && properties_.NumSdmaXgmiEngines;
+
     // Due to a RAS issue, GFX90a can only support H2D copies on SDMA0
     bool is_h2d_blit = (src_agent.device_type() == core::Agent::kAmdCpuDevice &&
       dst_agent.device_type() == core::Agent::kAmdGpuDevice);
-    bool limit_h2d_blit = isa_->GetVersion() == core::Isa::Version(9, 0, 10);
+    bool limit_h2d_blit = supported_isas()[0]->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Ensure engine selection is within proper range based on transfer type
-    if ((use_p2p_engines && !rec_sdma_eng_override_ && engine_offset <= num_h2d_d2h_engines_) ||
+    if ((p2p_engine_is_mandatory && !rec_sdma_eng_override_ && engine_offset <= num_h2d_d2h_engines_) ||
           (!is_h2d_blit && !is_same_gpu && limit_h2d_blit &&
             engine_offset == BlitHostToDev)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1291,16 +1320,14 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
   }
 
-  // gfx1250 fast path: fuse poll+copy+signal into a single WaitSignal packet.
-  if (core::Runtime::runtime_singleton_->flag().enable_sdma_fastpath_debug() && !profiling_enabled() && blit->isSDMA()) {
+  // gfx1250 fast path: fuse GCR invalidate, poll+copy+signal and the GCR
+  // writeback + mailbox notify into one ring submission (single reserve/release).
+  // The packet builder chunks large copies internally, so any size is eligible.
+  if (!profiling_enabled() && blit->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
     if (sdma_blit->IsGfx1250()) {
-      hsa_status_t stat = sdma_blit->SubmitNotifyPrologue();
-      if (stat != HSA_STATUS_SUCCESS) return stat;
-      stat = sdma_blit->SubmitLinearCopyBodyWaitSignal(
+      return sdma_blit->SubmitLinearCopyBodyWaitSignal(
           dst, src, size, dep_signals, out_signal);
-      if (stat != HSA_STATUS_SUCCESS) return stat;
-      return sdma_blit->SubmitNotifyEpilogue(out_signal);
     }
   }
 
@@ -1315,7 +1342,9 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 bool GpuAgent::DmaEngineIsFree(uint32_t engine_offset) {
   SetCopyStatusCheckRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyStatusCheckRefCount(false); });
-  bool is_free = !!!(sdma_blit_used_mask_ & (1 << engine_offset)) ||
+  // Atomic load to pair with atomic write in GetBlitObject
+  uint32_t mask = sdma_blit_used_mask_.load(std::memory_order_relaxed);
+  bool is_free = !!!(mask & (1 << engine_offset)) ||
                     (blits_[engine_offset]->isSDMA() &&
                      !!!blits_[engine_offset]->PendingBytes());
   return is_free;
@@ -1333,7 +1362,11 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
                      dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
                        num_p2p_engines_ > 0) {
     //Find a free p2p SDMA engine
-    if (rec_sdma_eng_override_) {
+    // Without dedicated xGMI engines (e.g. gfx1250) every SDMA engine is P2P-capable,
+    // so advertise all free engines rather than only the preferred P2P band. The
+    // preference toward the P2P engines is still expressed via DmaPreferredEngine;
+    // here we report the full set of engines a P2P copy may legally run on.
+    if (rec_sdma_eng_override_ || !properties_.NumSdmaXgmiEngines) {
       for (int i = 0; i < (num_h2d_d2h_engines_ + num_p2p_engines_); i++) {
         if (DmaEngineIsFree(BlitHostToDev + i)) {
           *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_0 << i);
@@ -1350,7 +1383,7 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
     bool is_h2d_blit = (src_agent.device_type() == core::Agent::kAmdCpuDevice &&
       dst_agent.device_type() == core::Agent::kAmdGpuDevice);
     // Due to a RAS issue, GFX90a can only support H2D copies on SDMA0
-    bool limit_h2d_blit = isa_->GetVersion() == core::Isa::Version(9, 0, 10);
+    bool limit_h2d_blit = supported_isas()[0]->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Check if H2D is free
     if (DmaEngineIsFree(BlitHostToDev)) {
@@ -1380,7 +1413,7 @@ hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& s
                                           uint32_t *recommended_ids_mask) {
   // gfx1250+: all SDMA engines are equivalent and there are no XGMI engines, we prefer first 2 engines
   // for h2d/d2h and remaining for p2p.
-  if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
+  if (supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5) {
     bool is_p2p = (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
                   dst_agent.device_type() == core::Agent::kAmdGpuDevice);
 
@@ -1394,8 +1427,8 @@ hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& s
   }
 
   // From the collected data, gfx94x performance is better only for first 3 SDMA engines
-  bool isGfx94x = (isa_->GetMajorVersion() == 9 &&
-                  (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5));
+  bool isGfx94x = (supported_isas()[0]->GetMajorVersion() == 9 &&
+                  (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5));
 
   if (isGfx94x &&
       ((src_agent.device_type() == core::Agent::kAmdCpuDevice &&
@@ -1474,6 +1507,22 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   if (is_indirect && !coordinator->IndirectCopySupported())
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  // Only indirect copies cannot chunk a large entry: the indirect packet has no
+  // offset field into the resolved buffer, so a single >max entry must fall back
+  // (and is ultimately rejected, since the indirect body rejects size > max).
+  // Linear copy and swap fused WaitSignal builders chunk internally via
+  // num_copy_command, so large entries stay on the fused path.
+  bool requires_multi_packet = false;
+  if (is_indirect) {
+    const size_t max_single_copy = coordinator->MaxSingleLinearCopySize();
+    for (uint32_t d = 0; d < num_entries; ++d) {
+      if (size_list[d] > max_single_copy) {
+        requires_multi_packet = true;
+        break;
+      }
+    }
+  }
+
   struct EngineSlot { BlitSdmaBase* blit; uint32_t idx; };
   std::vector<EngineSlot> engines(num_entries, {coordinator, coord_idx});
 
@@ -1538,9 +1587,11 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       is_indirect ? "Indirect" : "Copy";
 
   // GFX1250+ fast path: use wait/signal packets so bodies directly wait on
-  // dep_signals and signal out_signal. No prologue or epilogue needed when
-  // profiling is off (no timestamps to collect).
-  if ((coordinator->IsGfx1250()) && !profiling_enabled()) {
+  // dep_signals and signal out_signal, avoiding per-body prologue/epilogue
+  // timestamp collection. GCR/mailbox synchronization is still issued via the
+  // coordinator's SubmitNotifyPrologue/Epilogue below; only the profiling
+  // timestamp path is skipped.
+  if ((coordinator->IsGfx1250()) && !profiling_enabled() && !requires_multi_packet) {
     // N bodies each do a 64b-sub of 1 on out_signal. Initial value is 1,
     // so bump by (N-1) so the final value after all decrements is 0.
     out_signal.AddRelaxed(num_entries - 1);
@@ -1608,7 +1659,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       default:
         stat = engines[d].blit->SubmitLinearCopyBodyWaitSignal(
             dst_list[d], src_list[d], size_list[d],
-            *body_deps_ptr, out_signal);
+            *body_deps_ptr, out_signal, /*fused_notify=*/false);
         break;
       }
       if (stat != HSA_STATUS_SUCCESS) return stat;
@@ -1636,9 +1687,11 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   bool use_body_signals = !coordinator->PlatformAtomicSupport();
 
   // On gfx1250 with shared out_signal, use WaitSignal body to fuse
-  // poll+copy+signal into a single packet per body.
+  // poll+copy+signal per body; the builder chunks large entries internally.
+  // Only indirect bodies can't chunk (requires_multi_packet), so they fall back
+  // to the classic path here and are rejected just below.
   const bool waitsignal_body =
-      coordinator->IsGfx1250() && !use_body_signals;
+      coordinator->IsGfx1250() && !use_body_signals && !requires_multi_packet;
 
   // Indirect bodies only implement fused packets
   if (is_indirect && !waitsignal_body) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1740,7 +1793,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       stat = waitsignal_body
           ? engines[d].blit->SubmitLinearCopyBodyWaitSignal(
                 dst_list[d], src_list[d], size_list[d],
-                body_deps, out_signal)
+                body_deps, out_signal, /*fused_notify=*/false)
           : engines[d].blit->SubmitLinearCopyBody(
                 dst_list[d], src_list[d], size_list[d],
                 *prologue_raw, body_sig);
@@ -1768,9 +1821,16 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
   core::Signal& out_signal = *out_signal_obj;
 
   const uint16_t num_entries = op.num_entries;
-  constexpr size_t kBroadcastMaxSize = 256 * 1024;
 
-  // Try HW broadcast/multicast.
+  // Size thresholds for multi-destination copy path selection.
+  // kMulticastMaxSize: HW multicast/broadcast packet reliable limit (256 KB).
+  //   gfx1250 multicast drops destinations above this.
+  // kB2BMinSize: minimum per-copy size for linearB2B on non-gfx1250.
+  //   Below this, the broadcast packet (2-dst) is used instead.
+  constexpr size_t kMulticastMaxSize = 256 * 1024;
+  constexpr size_t kB2BMinSize = 16 * 1024;
+
+  // Try HW broadcast/multicast or linearB2B on one engine.
   {
     SetCopyRequestRefCount(true);
     MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -1779,46 +1839,69 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
     if (blit->isSDMA()) {
       BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
 
-      // linearB2BCopy for per-copy sizes in [16KB, 256KB].
-      // Above 256KB the fan-out path parallelises across engines.
-      // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto threshold.
-      constexpr size_t kLinearB2BMinSize = 16 * 1024;
-      const auto b2b_flag = core::Runtime::runtime_singleton_->flag().sdma_linear_b2b();
-      const bool use_linear_b2b = (b2b_flag == Flag::SDMA_ENABLE) ||
-          (b2b_flag == Flag::SDMA_DEFAULT && op.size >= kLinearB2BMinSize &&
-           op.size <= kBroadcastMaxSize);
+      // Common to every submission path below.
+      if (profiling_enabled())
+        out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
-      if (use_linear_b2b && !sdma_blit->IsGfx1250()) {
-        if (profiling_enabled())
-          out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+      if (sdma_blit->IsGfx1250()) {
+        // gfx1250: multicast for small copies (<= 256 KB). The multicast engine
+        // silently drops destinations above that limit, so larger copies fall
+        // through to fan-out, which parallelises the per-destination copies
+        // across SDMA engines. Fan-out measured ~3-5% faster than packing all
+        // destinations into a single-engine linearB2B command at large sizes.
+        // HSA_SDMA_FORCE_MULTICAST=1 forces the multicast packet regardless of
+        // size (debug only; large copies will fail validation by design).
+        const bool force_multicast =
+            core::Runtime::runtime_singleton_->flag().sdma_force_multicast();
+        if (force_multicast || op.size <= kMulticastMaxSize) {
+          // SubmitLinearCopyMulticastCommand picks the fused wait/signal packet
+          // when profiling is off and the timestamp-capable plain packet when on.
+          std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+          LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+                   "SDMA Multicast engine %02u, src=%p, num_entries=%u, size=%zu, "
+                   "dep_signal=0x%zx, completion_signal=0x%zx",
+                   BlitHostToDev, op.src, num_entries, op.size,
+                   dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+                   out_signal_obj->signal_);
+          return sdma_blit->SubmitLinearCopyMulticastCommand(
+              dsts, op.src, op.size, dep_signals, out_signal, profiling_enabled());
+        }
+        // Larger than the multicast limit: fall through to fan-out below.
+      } else {
+        // Non-gfx1250: linearB2B for [16KB, 256KB], broadcast for < 16KB,
+        // else fall through to fan-out which parallelises across engines.
+        // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto
+        // (kept consistent with DmaCopyMulti, which honors the same override).
+        const auto b2b_flag = core::Runtime::runtime_singleton_->flag().sdma_linear_b2b();
+        const bool use_linear_b2b = (b2b_flag == Flag::SDMA_ENABLE) ||
+            (b2b_flag == Flag::SDMA_DEFAULT && op.size >= kB2BMinSize &&
+             op.size <= kMulticastMaxSize);
 
-        LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-                 "SDMA linearB2BCopy using engine %02u, src=%p, num_entries=%u, size=%zu, "
-                 "dep_signal=0x%zx, completion_signal=0x%zx",
-                 BlitHostToDev, op.src, num_entries, op.size,
-                 dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
-                 out_signal_obj->signal_);
-        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
-        std::vector<const void*> srcs(num_entries, op.src);
-        std::vector<size_t> sizes(num_entries, op.size);
-        return sdma_blit->SubmitLinearCopyB2BCommand(
-            dsts, srcs, sizes, dep_signals, out_signal);
-      }
+        if (use_linear_b2b) {
+          LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+                   "SDMA linearB2B engine %02u, src=%p, num_entries=%u, size=%zu, "
+                   "dep_signal=0x%zx, completion_signal=0x%zx",
+                   BlitHostToDev, op.src, num_entries, op.size,
+                   dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+                   out_signal_obj->signal_);
+          std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+          std::vector<const void*> srcs(num_entries, op.src);
+          std::vector<size_t> sizes(num_entries, op.size);
+          return sdma_blit->SubmitLinearCopyB2BCommand(
+              dsts, srcs, sizes, dep_signals, out_signal);
+        }
 
-      if (sdma_blit->BroadcastSupported() && op.size < kLinearB2BMinSize) {
-        if (profiling_enabled())
-          out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
-
-        LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-                 "SDMA %s using engine %02u, src=%p, num_entries=%u, size=%zu, "
-                 "dep_signal=0x%zx, completion_signal=0x%zx",
-                 (sdma_blit->IsGfx1250()) ? "Multicast" : "Broadcast",
-                 BlitHostToDev, op.src, num_entries, op.size,
-                 dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
-                 out_signal_obj->signal_);
-        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
-        return sdma_blit->SubmitLinearCopyBroadcastCommand(
-            dsts, op.src, op.size, dep_signals, out_signal);
+        if (sdma_blit->BroadcastSupported() && op.size < kB2BMinSize) {
+          LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+                   "SDMA Broadcast engine %02u, src=%p, num_entries=%u, size=%zu, "
+                   "dep_signal=0x%zx, completion_signal=0x%zx",
+                   BlitHostToDev, op.src, num_entries, op.size,
+                   dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+                   out_signal_obj->signal_);
+          std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+          return sdma_blit->SubmitLinearCopyBroadcastCommand(
+              dsts, op.src, op.size, dep_signals, out_signal);
+        }
       }
     }
   }
@@ -1840,14 +1923,13 @@ hsa_status_t GpuAgent::DmaCopyMulti(
   core::Signal& out_signal = *out_signal_obj;
 
   const uint16_t num_entries = op.num_entries;
-  constexpr size_t kLinearB2BMaxSize = 256 * 1024;
-  constexpr size_t kLinearB2BMinSize = 16 * 1024;
+  constexpr size_t kB2BMaxSize = 256 * 1024;
+  constexpr size_t kB2BMinSize = 16 * 1024;
 
-  // Try linearB2B: pack all entries as back-to-back SDMA linear copy packets in
-  // one ring submission to avoid fan-out signal overhead.  Use the same size
-  // thresholds as DmaCopyBroadcast: per-entry size in [16KB, 1MB) unless the
-  // flag forces B2B on.  For large entries the fan-out path parallelises across
-  // engines and is faster.
+  // LinearB2B: pack all entries as back-to-back SDMA linear copy packets in
+  // one ring submission to avoid fan-out signal overhead.  Per-entry size must
+  // be in [kB2BMinSize, kB2BMaxSize] unless the flag forces B2B on.
+  // For large entries the fan-out path parallelises across engines.
   {
     SetCopyRequestRefCount(true);
     MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -1855,18 +1937,14 @@ hsa_status_t GpuAgent::DmaCopyMulti(
     lazy_ptr<core::Blit>& blit = GetBlitObject(BlitHostToDev);
     if (blit->isSDMA()) {
       BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
-
       const auto b2b_flag = core::Runtime::runtime_singleton_->flag().sdma_linear_b2b();
 
-      // Check that every entry qualifies for B2B.
       bool all_qualify = true;
       for (uint16_t i = 0; i < num_entries; i++) {
         const size_t sz = op.size_list[i];
-        const bool qualifies =
-            (b2b_flag == Flag::SDMA_ENABLE) ||
-            (b2b_flag == Flag::SDMA_DEFAULT && sz >= kLinearB2BMinSize &&
-             sz <= kLinearB2BMaxSize);
-        if (!qualifies) {
+        if (b2b_flag != Flag::SDMA_ENABLE &&
+            !(b2b_flag == Flag::SDMA_DEFAULT &&
+              sz >= kB2BMinSize && sz <= kB2BMaxSize)) {
           all_qualify = false;
           break;
         }
@@ -1875,17 +1953,15 @@ hsa_status_t GpuAgent::DmaCopyMulti(
       if (all_qualify) {
         if (profiling_enabled())
           out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
-
-        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
-        std::vector<const void*> srcs(op.src_list, op.src_list + num_entries);
-        std::vector<size_t> sizes(op.size_list, op.size_list + num_entries);
-
         LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-                 "SDMA multiB2BCopy using engine %02u, num_entries=%u, "
+                 "SDMA linearB2B engine %02u, num_entries=%u, "
                  "dep_signal=0x%zx, completion_signal=0x%zx",
                  BlitHostToDev, num_entries,
                  dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
                  out_signal_obj->signal_);
+        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+        std::vector<const void*> srcs(op.src_list, op.src_list + num_entries);
+        std::vector<size_t> sizes(op.size_list, op.size_list + num_entries);
         return sdma_blit->SubmitLinearCopyB2BCommand(dsts, srcs, sizes,
                                                      dep_signals, out_signal);
       }
@@ -2012,7 +2088,7 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
                                    const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
                                    std::vector<core::Signal*>& dep_signals,
                                    core::Signal& out_signal) {
-  if (isa_->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
+  if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -2092,7 +2168,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
   switch (attribute_u) {
     case HSA_AGENT_INFO_NAME: {
-      const std::string& name = isa_->GetProcessorName();
+      const std::string& name = supported_isas()[0]->GetProcessorName();
       const size_t n = std::min(name.size(), hsa_name_size);
       std::memset(value, 0, hsa_name_size + 1);
       std::memcpy(value, name.data(), n);
@@ -2118,7 +2194,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
           HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
       break;
     case HSA_AGENT_INFO_FAST_F16_OPERATION:
-      if (isa_->GetMajorVersion() >= 8) {
+      if (supported_isas()[0]->GetMajorVersion() >= 8) {
         *((bool*)value) = true;
       } else {
         *((bool*)value) = false;
@@ -2200,7 +2276,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       }
     } break;
     case HSA_AGENT_INFO_ISA:
-      *((hsa_isa_t*)value) = core::Isa::Handle(isa_);
+      *((hsa_isa_t*)value) = core::Isa::Handle(supported_isas()[0]);
       break;
     case HSA_AGENT_INFO_EXTENSIONS: {
       memset(value, 0, sizeof(uint8_t) * 128);
@@ -2247,23 +2323,23 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS:
     case HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS:
     case HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS:
-      if (!isa_->HasImageSupport())
+      if (!supported_isas()[0]->HasImageSupport())
         *((uint32_t*)value) = 0;
       else
         return hsa_amd_image_get_info_max_dim(public_handle(), attribute, value);
       break;
     case HSA_EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES:
       // TODO: hardcode based on OCL constants.
-      *((uint32_t*)value) = isa_->HasImageSupport() ? 128 : 0;
+      *((uint32_t*)value) = supported_isas()[0]->HasImageSupport() ? 128 : 0;
       break;
     case HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES:
-      *((uint32_t*)value) = isa_->HasImageSupport() ? 64 : 0;
+      *((uint32_t*)value) = supported_isas()[0]->HasImageSupport() ? 64 : 0;
       break;
     case HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS:
-      *((uint32_t*)value) = isa_->HasImageSupport() ? 16 : 0;
+      *((uint32_t*)value) = supported_isas()[0]->HasImageSupport() ? 16 : 0;
       break;
     case HSA_EXT_AGENT_INFO_IMAGE_SUPPORT:
-      *((uint32_t*)value) = isa_->HasImageSupport();
+      *((uint32_t*)value) = supported_isas()[0]->HasImageSupport();
       break;
     case HSA_AMD_AGENT_INFO_CHIP_ID:
       *((uint32_t*)value) = properties_.DeviceId;
@@ -2370,8 +2446,8 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       }
 
       if (core::Runtime::runtime_singleton_->flag().coop_cu_count() &&
-          (isa_->GetMajorVersion() == 9) && (isa_->GetMinorVersion() == 0) &&
-          (isa_->GetStepping() == 10)) {
+          (supported_isas()[0]->GetMajorVersion() == 9) && (supported_isas()[0]->GetMinorVersion() == 0) &&
+          (supported_isas()[0]->GetStepping() == 10)) {
         uint32_t count = 0;
         [[maybe_unused]] hsa_status_t cu_err =
             GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT, &count);
@@ -2494,7 +2570,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint64_t*)value) = cluster_max_dim_.x;
       break;
     case HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS:
-      if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
+      if (supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5) {
         *((uint32_t*)value) = AMD_LAUNCH_DESCRIPTOR_MAX_PREFETCH_REGIONS;
       } else {
         *((uint32_t*)value) = 0;
@@ -2654,7 +2730,7 @@ void GpuAgent::UnregisterAqlQueue(core::Queue* queue) {
 void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
   assert(scratch.main_queue_base == nullptr &&
          "AcquireQueueMainScratch called while holding scratch.");
-  bool need_queue_scratch_base = (isa_->GetMajorVersion() > 8);
+  bool need_queue_scratch_base = (supported_isas()[0]->GetMajorVersion() > 8);
 
   if (scratch.main_size == 0) {
     scratch.main_size = queue_scratch_len_;
@@ -2701,7 +2777,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
             ((scratch_pool_.size() - scratch_pool_.remaining() - scratch_cache_.free_bytes() +
              scratch.main_size) > small_limit));
 
-  if ((isa_->GetMajorVersion() < 8) ||
+  if ((supported_isas()[0]->GetMajorVersion() < 8) ||
       core::Runtime::runtime_singleton_->flag().no_scratch_reclaim()) {
     large = false;
     use_reclaim = false;
@@ -3151,7 +3227,7 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
 }
 
 void GpuAgent::BindTrapHandler() {
-  if (isa_->GetMajorVersion() == 7) {
+  if (supported_isas()[0]->GetMajorVersion() == 7) {
     // No trap handler support on Gfx7, soft error.
     return;
   }
@@ -3164,11 +3240,11 @@ void GpuAgent::BindTrapHandler() {
     AssembleShader("TrapHandlerKfdExceptions", AssembleTarget::ISA, trap_code_buf_,
                    trap_code_buf_size_);
   } else {
-    if (isa_->GetMajorVersion() >= 11 ||
-       (isa_->GetMajorVersion() == 9 &&
-        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5)) ||
-       (isa_->GetMajorVersion() == 10 && isa_->GetMinorVersion() == 3 &&
-        isa_->GetStepping() == 6)) {
+    if (supported_isas()[0]->GetMajorVersion() >= 11 ||
+       (supported_isas()[0]->GetMajorVersion() == 9 &&
+        (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5)) ||
+       (supported_isas()[0]->GetMajorVersion() == 10 && supported_isas()[0]->GetMinorVersion() == 3 &&
+        supported_isas()[0]->GetStepping() == 6)) {
       // No trap handler support without exception handling, soft error.
       // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
       return;
@@ -3200,17 +3276,17 @@ void GpuAgent::BindTrapHandler() {
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   // Check for microcode cache invalidation support.
   // This is deprecated in later microcode builds.
-  if (isa_->GetMajorVersion() == 7) {
+  if (supported_isas()[0]->GetMajorVersion() == 7) {
     if (properties_.EngineId.ui32.uCode < 420) {
       // Microcode is handling code cache invalidation.
       return;
     }
-  } else if (isa_->GetMajorVersion() == 8 && isa_->GetMinorVersion() == 0) {
+  } else if (supported_isas()[0]->GetMajorVersion() == 8 && supported_isas()[0]->GetMinorVersion() == 0) {
     if (properties_.EngineId.ui32.uCode < 685) {
       // Microcode is handling code cache invalidation.
       return;
     }
-  } else if (isa_->GetMajorVersion() > 12) {
+  } else if (supported_isas()[0]->GetMajorVersion() > 12) {
     assert(false && "Code cache invalidation not implemented for this agent");
   }
 
@@ -3218,7 +3294,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   uint32_t cache_inv[8] = {0};
   uint32_t cache_inv_size_dw;
 
-  if (isa_->GetMajorVersion() < 10) {
+  if (supported_isas()[0]->GetMajorVersion() < 10) {
       cache_inv[1] = PM4_ACQUIRE_MEM_DW1_COHER_CNTL(
           PM4_ACQUIRE_MEM_COHER_CNTL_SH_ICACHE_ACTION_ENA |
           PM4_ACQUIRE_MEM_COHER_CNTL_SH_KCACHE_ACTION_ENA |
@@ -3238,7 +3314,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   }
 
   cache_inv[0] = PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, cache_inv_size_dw,
-             isa_->GetMajorVersion());
+             supported_isas()[0]->GetMajorVersion());
 
   if (ptr) {
     size_t size_granule = (size + 0xFF) >> 8;
@@ -3256,7 +3332,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
 }
 
 lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(uint32_t engine_offset) {
-  sdma_blit_used_mask_ |= 1 << engine_offset;
+  sdma_blit_used_mask_.fetch_or(1 << engine_offset, std::memory_order_relaxed);
   return blits_[engine_offset];
 }
 
@@ -4063,7 +4139,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
    *    done.
    */
 
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_ATOMIC_MEM, atomic_ex_cmd_sz, isa_->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_ATOMIC_MEM, atomic_ex_cmd_sz, supported_isas()[0]->GetMajorVersion());
   cmd_data[i++] = PM4_ATOMIC_MEM_DW1_ATOMIC(PM4_ATOMIC_MEM_GL2_OP_ATOMIC_SWAP_RTN_64);
   cmd_data[i++] = PM4_ATOMIC_MEM_DW2_ADDR_LO(buf_write_val);
   cmd_data[i++] = PM4_ATOMIC_MEM_DW3_ADDR_HI((buf_write_val) >> 32);
@@ -4071,7 +4147,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = PM4_ATOMIC_MEM_DW5_SRC_DATA_HI(((uint64_t)reset_write_val) >> 32);
   i += 3;
   /* copy data */
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_COPY_DATA, copy_data_cmd_sz, isa_->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_COPY_DATA, copy_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
   cmd_data[i++] =
       PM4_COPY_DATA_DW1(PM4_COPY_DATA_SRC_SEL_ATOMIC_RETURN_DATA | PM4_COPY_DATA_DST_SEL_TC_12 |
                         PM4_COPY_DATA_COUNT_SEL | PM4_COPY_DATA_WR_CONFIRM);
@@ -4081,7 +4157,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   if (properties_.NumXcc > 1) {
     cmd_data[0] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, supported_isas()[0]->GetMajorVersion());
     cmd_data[1] =
       PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
@@ -4131,7 +4207,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   /* WAIT_REG_MEM, wait on buf_written_val */
   cmd_data[i++] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, isa_->GetMajorVersion());
+      PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE |
                                        PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE |
                                        PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
@@ -4145,10 +4221,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   // For GFX1200 and GFX1201 - add an ACQUIRE_MEM packet to flush L2 cache before DMA
   // This ensures that any data written by the trap handler is visible to the DMA engine.
   // On GFX1250 - The flush is needed only until we can enable MTYPE_RW.
-  if (isa_->GetMajorVersion() == 12 &&
-      (isa_->GetMinorVersion() == 0 || isa_->GetMinorVersion() == 5)) {
+  if (supported_isas()[0]->GetMajorVersion() == 12 &&
+      (supported_isas()[0]->GetMinorVersion() == 0 || supported_isas()[0]->GetMinorVersion() == 5)) {
     cmd_data[i++] =
-        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, isa_->GetMajorVersion());
+        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
     cmd_data[i++] = 0;                                // DW1: COHER_CNTL
     cmd_data[i++] = 0;                                // DW2: COHER_SIZE
     cmd_data[i++] = 0;                                // DW3: COHER_SIZE_HI
@@ -4164,7 +4240,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
        to_copy -= copy_bytes) {
 
     /* DMA_DATA PACKETS, copy buffer using CPDMA */
-    cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
     cmd_data[i++] = PM4_DMA_DATA_DW1(PM4_DMA_DATA_DST_SEL_DST_ADDR_USING_L2 |
                                      PM4_DMA_DATA_SRC_SEL_SRC_ADDR_USING_L2);
     cmd_data[i++] = PM4_DMA_DATA_DW2_SRC_ADDR_LO((uint64_t)buffer_temp);
@@ -4183,7 +4259,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   }
 
   /* WRITE_DATA, Reset buf_written_val */
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_WRITE_DATA, write_data_cmd_sz, isa_->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_WRITE_DATA, write_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
   cmd_data[i++] = PM4_WRITE_DATA_DW1(PM4_WRITE_DATA_DST_SEL_TC_L2 |
                                      PM4_WRITE_DATA_WR_CONFIRM_WAIT_CONFIRMATION);
   cmd_data[i++] = PM4_WRITE_DATA_DW2_DST_MEM_ADDR_LO(buf_written_val[which_buffer]);
@@ -4192,7 +4268,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   if (properties_.NumXcc > 1) {
     cmd_data[0] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, supported_isas()[0]->GetMajorVersion());
     cmd_data[1] =
       PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }

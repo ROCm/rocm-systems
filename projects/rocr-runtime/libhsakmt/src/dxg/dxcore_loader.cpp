@@ -85,7 +85,9 @@ bool DxcoreLoader::Initialize() {
 
 void DxcoreLoader::Shutdown() {
     if (dxcore_handle_) {
-        if (rocr::os::CloseLib(dxcore_handle_) != 0) {
+        // CloseLib follows the platform API convention: true/nonzero means the
+        // library was unloaded successfully, false means the unload failed.
+        if (!rocr::os::CloseLib(dxcore_handle_)) {
             pr_err("[DxcoreLoader] Cannot unload libdxcore.so: %s\n", rocr::os::DlError());
         } else {
             pr_info("[DxcoreLoader] libdxcore.so unloaded successfully\n");
