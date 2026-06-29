@@ -802,7 +802,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             OUTPUT_VARIABLE _comgr_symbols
             ERROR_QUIET)
           if(_comgr_symbol_result EQUAL 0 AND
-             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
+             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite_with_options")
             list(APPEND HOTSWAP_BUILD_RPATH "${_prefix}/${_libdir}")
             break()
           endif()
