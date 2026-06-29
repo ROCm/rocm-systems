@@ -18,6 +18,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import os
+import re
 import argparse
 import tempfile
 import shutil
@@ -106,6 +107,30 @@ def write_file(full_path_file_name, contents):
     with os.fdopen(fh, "w") as new_file:
         for line in contents:
             new_file.write(f"{line}\n")
+
+    shutil.copymode(full_path_file_name, abs_path)
+    os.remove(full_path_file_name)
+    shutil.move(abs_path, full_path_file_name)
+
+
+def insert_layout_ms(full_path_file_name):
+    # Python 3.14 deprecates the implicit ctypes layout when _pack_ is set
+    # (becomes an error in 3.19). _layout_ = 'ms' keeps the MSVC-compatible
+    # layout that packed structs already used pre-3.14, so the ABI is unchanged.
+    fh, abs_path = tempfile.mkstemp()
+    standalone = re.compile(r"^(\s*)(\S+)\._pack_ = ")
+    inline = re.compile(r"^(\s+)_pack_ = ")
+    with os.fdopen(fh, "w") as new_file:
+        with open(full_path_file_name, "r", encoding="UTF-8") as old_file:
+            for line in old_file:
+                new_file.write(line)
+                m = standalone.match(line)
+                if m:
+                    new_file.write(f"{m.group(1)}{m.group(2)}._layout_ = 'ms'\n")
+                    continue
+                mi = inline.match(line)
+                if mi:
+                    new_file.write(f"{mi.group(1)}_layout_ = 'ms'\n")
 
     shutil.copymode(full_path_file_name, abs_path)
     os.remove(full_path_file_name)
@@ -476,6 +501,8 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
             output_file_array = output_file_array[:-1]
 
         write_file(output_file, output_file_array)
+
+    insert_layout_ms(output_file)
 
 
 if __name__ == "__main__":
