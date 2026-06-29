@@ -599,7 +599,7 @@
         {"name": "HostApi_DestroyCommWithoutDeregister", "description": "Host API: destroy comm without deregister", "test_filter": "HostApiTest.DestroyCommWithoutDeregister"}
       ]
     },
-    "host_api_tests_symmmem": {
+    "host_api_tests_symmem": {
       "extends": "host_api_tests_base",
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1"
@@ -3551,8 +3551,8 @@
     {
       "name": "Host API Tests - SymmMem",
       "description": "Host API tests with symmetric memory support",
-      "config": "host_api_tests_symmmem",
-      "enabled": false
+      "config": "host_api_tests_symmem",
+      "enabled": true
     },
     {
       "name": "Host API Tests - Default",
