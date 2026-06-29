@@ -462,6 +462,34 @@ class ConfigureCITest(unittest.TestCase):
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_amdsmi_pr_core_build_selects_no_profiler_test_legs(
+        self, mock_get_modified
+    ):
+        """Regression test: an amdsmi (core) PR builds core-only
+        (THEROCK_ENABLE_ALL=OFF), so it must NOT select the aqlprofile/rocprofiler
+        test legs -- those components aren't built, so their artifacts
+        (run_tests.sh, tests/requirements.txt) don't exist and the legs fail at
+        setup. See PRs #7870 and #7942.
+        """
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "linux",
+        }
+
+        mock_get_modified.return_value = [
+            "projects/amdsmi/tests/python_unittest/partition_metric_unit_test.py",
+        ]
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        cmake_options = project_to_run[0]["cmake_options"]
+        self.assertIn("DTHEROCK_ENABLE_CORE=ON", cmake_options)
+        self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
+        # Core-only build must not pull in profiler test legs.
+        self.assertEqual(project_to_run[0]["projects_to_test"], "")
+
 
 if __name__ == "__main__":
     unittest.main()
