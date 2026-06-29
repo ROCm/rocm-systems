@@ -1041,8 +1041,12 @@ target_link_libraries(rccl ${_dep_vis} dl)
 target_link_libraries(rccl ${_dep_vis} hsa-runtime64::hsa-runtime64)
 target_link_libraries(rccl ${_dep_vis} ${SMI_LIBRARIES})
 # librocm-core provides getROCmVersion() for reporting the runtime ROCm version.
+# Only link if the library is actually available (not present in all build environments).
 if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
-  target_link_libraries(rccl ${_dep_vis} -L${ROCM_PATH}/lib -lrocm-core)
+  find_library(ROCM_CORE_LIB rocm-core PATHS ${ROCM_PATH}/lib NO_DEFAULT_PATH)
+  if(ROCM_CORE_LIB)
+    target_link_libraries(rccl ${_dep_vis} ${ROCM_CORE_LIB})
+  endif()
 endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
