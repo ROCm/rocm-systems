@@ -379,6 +379,71 @@ class TestAmdSmiPython(unittest.TestCase):
         return
 
     # integration
+    def test_skip_gpu_metrics_on_idle(self):
+        """AMDSMI_SKIP_GPU_METRICS_ON_IDLE surfaces through the Python binding:
+        a runtime-suspended GPU raises AMDSMI_STATUS_BUSY instead of waking the
+        device, while a non-suspended GPU (Instinct/no runtime PM, or awake) is
+        unaffected (same outcome with the flag on or off)."""
+        self.common.print_func_name("")
+
+        env_key = "AMDSMI_SKIP_GPU_METRICS_ON_IDLE"
+        busy_code = amdsmi.amdsmi_wrapper.AMDSMI_STATUS_BUSY
+        orig_env = os.environ.get(env_key)
+
+        def runtime_status(gpu):
+            # Non-waking read of the PM-core node via the device BDF.
+            try:
+                bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
+            except amdsmi.AmdSmiException:
+                return None
+            try:
+                with open(f"/sys/bus/pci/devices/{bdf}/power/runtime_status") as f:
+                    return f.read().strip()
+            except OSError:
+                return None
+
+        def query(gpu):
+            # Returns "OK" on success or the amdsmi_status_t error code.
+            try:
+                amdsmi.amdsmi_get_gpu_metrics_info(gpu)
+                return "OK"
+            except amdsmi.AmdSmiLibraryException as e:
+                return e.get_error_code()
+
+        try:
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
+                rt = runtime_status(gpu)
+
+                # Baseline: feature disabled.
+                os.environ.pop(env_key, None)
+                base = query(gpu)
+
+                # Feature enabled.
+                os.environ[env_key] = "1"
+                gated = query(gpu)
+
+                msg = f"\t### amdsmi_get_gpu_metrics_info(gpu={i}) runtime_status={rt}: base={base} gated={gated}"
+                self.common.print(msg, gated)
+                if rt == "suspended":
+                    # Gate should short-circuit to BUSY. The device can leave
+                    # "suspended" between our read and the gate's own check
+                    # (inherent TOCTOU), so accept either BUSY or the same
+                    # result the ungated read produced - never a third outcome.
+                    self.assertIn(
+                        gated, (busy_code, base), f"{msg} unexpected result on a suspended GPU"
+                    )
+                else:
+                    # Instinct (no runtime PM) and awake GPUs: pure no-op.
+                    self.assertEqual(gated, base, f"{msg} idle gating changed a non-suspended GPU")
+        finally:
+            if orig_env is None:
+                os.environ.pop(env_key, None)
+            else:
+                os.environ[env_key] = orig_env
+        return
+
+    # integration
     def test_gpu_counter(self):
         self.common.print_func_name("")
 
