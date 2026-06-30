@@ -53,6 +53,10 @@ on:
         type: string
         default: ""
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
+      test_type:
+        type: string
+        default: ""
+        description: "Test type: quick, standard, comprehensive, or full (empty = use TheRock default)"
 
 permissions:
   contents: read
@@ -78,6 +82,7 @@ jobs:
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      test_type: ${{ inputs.test_type || '' }}
       repository: ROCm/TheRock
       ref: main
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
