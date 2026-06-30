@@ -81,7 +81,8 @@ Ensure ROCm is installed and follow the steps:
    Analyze mode aborts with a clear message if launched on Python older
    than 3.9.
 
-3. Check the installation dependencies.
+3. Check the installation dependencies. These are required for analyze mode
+   only; profile mode uses the standard library and needs no extra packages.
 
    .. code-block:: shell-session
 
