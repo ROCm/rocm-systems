@@ -20,22 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #ifndef TEST_PGEN_TEST_PGEN_H_
 #define TEST_PGEN_TEST_PGEN_H_
 
 #include "pgen/test_pmgr.h"
 
 // simple_convolution: Class implements OpenCL simple_convolution sample
-class TestPGen : public TestPMgr {
- protected:
-  typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
+class TestPGen : public TestPMgr
+{
+protected:
+    typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
 
-  packet_t* PrePacket() { return reinterpret_cast<packet_t*>(&pre_packet_); }
-  packet_t* PostPacket() { return reinterpret_cast<packet_t*>(&post_packet_); }
+    packet_t* PrePacket() { return reinterpret_cast<packet_t*>(&pre_packet_); }
+    packet_t* PostPacket() { return reinterpret_cast<packet_t*>(&post_packet_); }
 
- public:
-  explicit TestPGen(TestAql* t) : TestPMgr(t) {}
+public:
+    explicit TestPGen(TestAql* t)
+    : TestPMgr(t)
+    {}
 };
 
 #endif  // TEST_PGEN_TEST_PGEN_H_

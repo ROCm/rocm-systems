@@ -16,12 +16,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+
 def sample_ex(source_str):
     spm_dump = source_str
 
     file_in = open(spm_dump, "r")
 
-    #extract valid sample data size
+    # extract valid sample data size
     line = file_in.readline()
     line.strip()
 
@@ -30,9 +31,9 @@ def sample_ex(source_str):
     line = file_in.readline()
     line.strip()
 
-    size += (int(line, 16) << 16)
+    size += int(line, 16) << 16
 
-    print("valid sampl buffer size: %d"%(size))
+    print("valid sampl buffer size: %d" % (size))
 
     file_out = open("samples.txt", "w")
 
@@ -40,7 +41,7 @@ def sample_ex(source_str):
 
     non_zero_samples = 0
 
-    while (size > 0):
+    while size > 0:
         line = file_in.readline()
         line.strip()
         if line_no >= 16:
@@ -48,11 +49,10 @@ def sample_ex(source_str):
             size -= 2
             if int(line, 16) != 0:
                 non_zero_samples += 1
-                #print("%d: sample: %s"%(line_no, line))
+                # print("%d: sample: %s"%(line_no, line))
         line_no += 1
 
-
-    print ("non_zero_samples: %d"%(non_zero_samples))
+    print("non_zero_samples: %d" % (non_zero_samples))
 
     file_in.close()
     file_out.close()

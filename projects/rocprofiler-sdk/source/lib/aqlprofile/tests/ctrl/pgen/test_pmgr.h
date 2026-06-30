@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #ifndef TEST_PGEN_TEST_PMGR_H_
 #define TEST_PGEN_TEST_PMGR_H_
 
@@ -31,41 +30,49 @@
 
 #include "ctrl/test_aql.h"
 
-enum Mode { SETUP_MODE, RUN_MODE, UNKNOWN };
+enum Mode
+{
+    SETUP_MODE,
+    RUN_MODE,
+    UNKNOWN
+};
 
 // Class implements profiling manager
-class TestPMgr : public TestAql {
- public:
-  typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
-  explicit TestPMgr(TestAql* t);
-  ~TestPMgr();
-  bool Setup();
-  bool Run();
+class TestPMgr : public TestAql
+{
+public:
+    typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
+    explicit TestPMgr(TestAql* t);
+    ~TestPMgr();
+    bool Setup();
+    bool Run();
 
- protected:
-  packet_t pre_packet_;
-  packet_t post_packet_;
-  hsa_signal_t dummy_signal_;
-  hsa_signal_t packet_signal_;
+protected:
+    packet_t     pre_packet_;
+    packet_t     post_packet_;
+    hsa_signal_t dummy_signal_;
+    hsa_signal_t packet_signal_;
 
-  const hsa_ven_amd_aqlprofile_pfn_t* api_;
+    const hsa_ven_amd_aqlprofile_pfn_t* api_;
 
-  virtual int GetMode() { return UNKNOWN; }
-  virtual bool BuildPackets() { return false; }
-  virtual bool DumpData() { return false; }
-  virtual bool Initialize(int argc, char** argv);
+    virtual int  GetMode() { return UNKNOWN; }
+    virtual bool BuildPackets() { return false; }
+    virtual bool DumpData() { return false; }
+    virtual bool Initialize(int argc, char** argv);
 
- private:
-  enum {
-    SLOT_PM4_SIZE_DW = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(uint32_t),
-    SLOT_PM4_SIZE_AQLP = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(packet_t)
-  };
-  struct slot_pm4_t {
-    uint32_t words[SLOT_PM4_SIZE_DW];
-  };
+private:
+    enum
+    {
+        SLOT_PM4_SIZE_DW   = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(uint32_t),
+        SLOT_PM4_SIZE_AQLP = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(packet_t)
+    };
+    struct slot_pm4_t
+    {
+        uint32_t words[SLOT_PM4_SIZE_DW];
+    };
 
-  bool AddPacket(const packet_t* packet);
-  bool AddWaitPacket(packet_t* packet, hsa_signal_t signal);
+    bool AddPacket(const packet_t* packet);
+    bool AddWaitPacket(packet_t* packet, hsa_signal_t signal);
 };
 
 #endif  // TEST_PGEN_TEST_PMGR_H_
