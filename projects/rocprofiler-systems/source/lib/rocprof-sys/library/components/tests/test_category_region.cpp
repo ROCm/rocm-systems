@@ -944,17 +944,16 @@ TEST_F(category_region_policy_test, flush_all_drains_orphan_via_owner_thread_id)
     using ::testing::_;
     using ::testing::Return;
 
-    mocked_region_cache_t region;
-    // Register this instance so the static cross-thread flush can reach it, mirroring what
-    // instance() does for a real per-thread instance. The handle deregisters at scope exit.
+    mocked_region_cache_t                    region;
     mocked_region_cache_t::registry_handle_t handle{ &region };
 
     // one start (start_ts 10) then the flush-all end_ts (999)
     EXPECT_CALL(*test_globals::g_clock_gmock, now())
         .WillOnce(Return(10u))
         .WillOnce(Return(999u));
-    // An orphan must be attributed to the thread that opened it via resolve_thread(owner),
-    // NOT resolve_current_thread() (which would resolve the finalizing thread instead).
+    // An orphan must be attributed to the thread that opened it via
+    // resolve_thread(owner), NOT resolve_current_thread() (which would resolve the
+    // finalizing thread instead).
     EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
     EXPECT_CALL(*test_globals::g_thread_meta_gmock,
                 resolve_thread(std::this_thread::get_id()))
@@ -989,15 +988,13 @@ TEST_F(category_region_policy_test, flush_all_emits_one_incomplete_region_per_fr
                 resolve_thread(std::this_thread::get_id()))
         .Times(1)
         .WillOnce(Return(9u));
-    EXPECT_CALL(
-        *test_globals::g_region_sink_gmock,
-        store_region(9u, std::string{ "rec [incomplete]" }, 1u, 100u, std::string{ "cat" },
-                     _))
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(9u, std::string{ "rec [incomplete]" }, 1u, 100u,
+                             std::string{ "cat" }, _))
         .Times(1);
-    EXPECT_CALL(
-        *test_globals::g_region_sink_gmock,
-        store_region(9u, std::string{ "rec [incomplete]" }, 2u, 100u, std::string{ "cat" },
-                     _))
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(9u, std::string{ "rec [incomplete]" }, 2u, 100u,
+                             std::string{ "cat" }, _))
         .Times(1);
 
     region.cache_start("rec", "cat");

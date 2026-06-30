@@ -120,8 +120,8 @@ struct thread_metadata_source
         return resolve_thread(std::this_thread::get_id());
     }
 
-    // Reads a specific thread's system_value and registers its metadata. Lets a
-    // finalizing thread attribute another thread's orphaned regions to their owner.
+    // Like resolve_current_thread(), but for a given thread id rather than the caller's.
+    // Lets the finalizing thread resolve the owner of orphaned regions it is draining
     std::uint64_t resolve_thread(std::thread::id tid) const
     {
         std::uint64_t thread_id = 0;
@@ -189,7 +189,7 @@ struct category_region
 
     static category_region& instance()
     {
-        thread_local category_region   inst;
+        thread_local category_region inst;
         // Registers this thread's instance so a cross-thread finalization flush can reach
         // it, and removes it again when the thread exits
         thread_local registry_handle_t _handle{ &inst };
@@ -405,7 +405,8 @@ struct category_region
     {
         const auto                  start_ts = clock_.now();
         std::lock_guard<std::mutex> _lk{ mutex_ };
-        // Record the owning thread's std::thread::id at push time incase no end is received
+        // Record the owning thread's std::thread::id at push time incase no end is
+        // received
         owner_tid_ = std::this_thread::get_id();
         map_name_to_args[entry_key{ name, std::string{ category } }].push_back(
             pending_cache_entry{ start_ts, std::move(args_str) });
@@ -417,8 +418,8 @@ struct category_region
         if(args_str.empty()) return;
 
         std::lock_guard<std::mutex> _lk{ mutex_ };
-        auto key = entry_key{ name, std::string{ category } };
-        auto itr = map_name_to_args.find(key);
+        auto                        key = entry_key{ name, std::string{ category } };
+        auto                        itr = map_name_to_args.find(key);
         if(itr != map_name_to_args.end() && !itr->second.empty())
         {
             auto& entry = itr->second.back();
@@ -503,13 +504,13 @@ private:
                            args_str.c_str());
     }
 
-    // Emits this thread's outstanding frames with the "[incomplete]" suffix. May run from a
-    // different (finalizing) thread, so it resolves the owner from the std::thread::id
+    // Emits this thread's outstanding frames with the "[incomplete]" suffix. May run from
+    // a different (finalizing) thread, so it resolves the owner from the std::thread::id
     // captured in cache_start() (not the current thread) and guards the map with mutex_
     void flush_pending_incomplete(timestamp_t end_ts)
     {
         static constexpr std::string_view incomplete_suffix{ "incomplete" };
-        const auto& exe_name = rocprofsys::config::get_exe_name();
+        const auto&                       exe_name = rocprofsys::config::get_exe_name();
 
         std::lock_guard<std::mutex> _lk{ mutex_ };
         const std::uint64_t         thread_id = thread_meta_.resolve_thread(owner_tid_);
@@ -533,7 +534,7 @@ private:
     typename Policy::thread_metadata_type                 thread_meta_{};
     std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args{};
     std::mutex                                            mutex_{};
-    std::thread::id owner_tid_{};
+    std::thread::id                                       owner_tid_{};
 };
 
 }  // namespace utility
