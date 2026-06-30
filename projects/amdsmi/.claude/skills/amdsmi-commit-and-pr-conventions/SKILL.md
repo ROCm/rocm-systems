@@ -1,6 +1,6 @@
 ---
 name: amdsmi-commit-and-pr-conventions
-description: "Use when writing or restructuring git commits or opening/updating a pull request for amd-smi — composing commit titles, commit message bodies, PR titles, or PR descriptions. Defines the Conventional Commits `type(amdsmi):` title convention enforced by the Systems PR bot, the rocm-systems PR template sections, the unit-test and JIRA/ISSUE-reference gates, brevity caps, and the rule that JIRA tickets appear only in the PR JIRA ID section, never in code comments or commit bodies."
+description: "Use when writing or restructuring git commits or opening/updating a pull request for amd-smi — composing commit titles, commit message bodies, PR titles, or PR descriptions. Defines the Conventional Commits `type(amdsmi):` title convention enforced by the Systems PR Bot, the rocm-systems PR template sections, the unit-test and JIRA/ISSUE-reference gates, brevity caps, and the rule that JIRA tickets appear only in the PR JIRA ID section, never in code comments or commit bodies."
 ---
 
 # Commit & PR Conventions — amd-smi
@@ -102,15 +102,16 @@ are advisory rows in the bot's results comment.
 
 | Check | Blocking? | Pass condition |
 |-------|-----------|----------------|
-| **Unit Test** | ❌ yes | Any changed `.c/.cc/.cpp/.h/.hpp/.py/.go/.rs` needs a `test_*` / `*_test.*` file in the **same** PR. Doc/config-only PRs auto-pass |
+| **Unit Test** | ❌ yes | Any changed source file (the amd-smi-relevant set is `.c/.cc/.cpp/.h/.hpp/.py/.go/.rs`; full list in `tools/systems_pr_bot/policy.yml`) needs a `test_*` / `*_test.*` file in the **same** PR. Doc/config-only PRs auto-pass |
 | **JIRA/ISSUE reference** | ❌ yes | Description has a `JIRA ID: <KEY>` / `ISSUE ID: <KEY>` line, a closing keyword (`Closes #N`), or a bare `#N`. A bare `Resolves ROCM-NNNNN` (no `#`) does **not** pass |
 | Title (Conventional Commits) | advisory | `type(scope): …`, 10–80 chars |
 | Description length | advisory | ≥ 30 chars |
 | Forbidden files | advisory | No `.pem` / `.key` / `.env` / `.crt` / private keys |
-| pre-commit | required check | `pre-commit` CI must be green |
 
 A source change with no accompanying test is the most common block — pair every
-code change with a test, or split a docs-only PR out, before opening.
+code change with a test, or split a docs-only PR out, before opening. Separately,
+`pre-commit` is a required CI status check (must be green to merge) but is not part
+of the bot's label logic above.
 
 ## Brevity Caps
 
