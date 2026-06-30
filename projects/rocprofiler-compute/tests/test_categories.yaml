@@ -257,6 +257,14 @@ test_categories:
       - "full"
       - "weekly"
 
+  sanitizer:
+    description: "Native cpp unit tests run under sanitizers (no GPU, no workload)"
+    test_patterns:
+      - test-rocprofiler-compute-tool
+      - test-pc-sampling-collector
+    labels:
+      - "sanitizer"
+
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
