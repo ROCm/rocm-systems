@@ -398,7 +398,9 @@ class _ScalarBinop(_ScalarDeriver):
     def derive(sem: InstructionSemantics) -> SemaBlock:
         op = sem.operation
         ty = _dtype_to_sema(sem.data_type)
-        raw_carry_bits = sem.sets_scc in ('carry', 'borrow') and ty.base == 'I'
+        raw_carry_bits = (
+            sem.sets_scc in ('carry', 'borrow', 'overflow') and ty.base == 'I'
+        )
         calc_ty = SemaType('U', ty.size) if raw_carry_bits else ty
         src0 = _cast(_src(0), calc_ty)
         src1 = _cast(_src(1), calc_ty)
@@ -508,22 +510,21 @@ class _ScalarBinop(_ScalarDeriver):
                 SemaNodeKind.CALL, ty=ty, call_name=fn, children=(_id(fn), src0, src1)
             )
         elif op in ('add', 'sub') and ty.base == 'I':
-            # Perform the wrapping add/sub in unsigned to avoid signed-overflow
-            # UB. GCC13+ assumes no overflow with a bare signed `s0 + s1` and
-            # so the overflow check is always false if not done unsigned. Then,
-            # reinterpret the unsigned result back to signd for the overflow check.
+            # Emulate the hardware's wrap-around arithmetic in unsigned. A bare
+            # signed `s0 + s1` is undefined on overflow, which GCC -O1+ exploits
+            # to fold away the signed-overflow SCC check. Derive SCC from the
+            # the sign-bit identity
             u_ty = SemaType.U32 if ty.size == 32 else SemaType.U64
-            arith = SemaNode(
+            result = SemaNode(
                 kind,
                 ty=u_ty,
                 children=(_cast(src0, u_ty), _cast(src1, u_ty)),
             )
-            result = _cast(arith, ty)
         else:
             result = SemaNode(kind, ty=ty, children=(src0, src1))
 
         result_ty = calc_ty if raw_carry_bits else ty
-        if op == 'mul' and ty.base == 'I':
+        if op in ('mul', 'add', 'sub') and ty.base == 'I':
             result_ty = result.ty or result_ty
         if ty.base in ('F', 'BF') and ty.size == 16:
             result_ty = SemaType.F32
@@ -558,21 +559,34 @@ class _ScalarBinop(_ScalarDeriver):
                     ),
                 )
             elif sem.sets_scc == 'overflow':
-                overflow_kind = SemaNodeKind.SUB if op == 'sub' else SemaNodeKind.ADD
-                wide = SemaNode(
-                    overflow_kind,
-                    ty=SemaType.I64,
-                    children=(
-                        _cast(src0, SemaType.I64),
-                        _cast(src1, SemaType.I64),
-                    ),
+                # Signed overflow via the sign-bit identity:
+                # For add, overflow iff the operands share a sign that differs
+                # from the result's.
+                # For sub, overflow iff the operands differ in sign and src0's
+                # sign differs from the result's.
+                res_id = _id('result', result_ty)
+                if op == 'sub':
+                    x0 = SemaNode(SemaNodeKind.XOR, ty=result_ty, children=(src0, src1))
+                    x1 = SemaNode(
+                        SemaNodeKind.XOR, ty=result_ty, children=(src0, res_id)
+                    )
+                else:
+                    x0 = SemaNode(
+                        SemaNodeKind.XOR, ty=result_ty, children=(src0, res_id)
+                    )
+                    x1 = SemaNode(
+                        SemaNodeKind.XOR, ty=result_ty, children=(src1, res_id)
+                    )
+                sign_mask = _lit(
+                    '0x80000000u' if result_ty.size == 32 else '0x8000000000000000',
+                    result_ty,
                 )
                 scc_expr = SemaNode(
-                    SemaNodeKind.NE,
-                    ty=SemaType.U1,
+                    SemaNodeKind.AND,
+                    ty=result_ty,
                     children=(
-                        wide,
-                        _cast(_id('result', ty), SemaType.I64),
+                        SemaNode(SemaNodeKind.AND, ty=result_ty, children=(x0, x1)),
+                        sign_mask,
                     ),
                 )
             elif sem.sets_scc == 'compare':
