@@ -17,9 +17,9 @@
 # NOTE: This workflow ONLY builds/tests for HIP or ROCR changes and is meant
 # to provide signal only. It is not a blocking check.
 #
-# This workflow runs MI455-specific tests when HIP or ROCR paths are updated.
-# It builds gfx125X-dcgpu and runs limited tests (hip-tests, rocrtst, sanity)
-# on the linux-mi455-gpu-rocm runner.
+# This workflow uses a custom setup job to bypass TheRock's setup_multi_arch.yml
+# which ignores family inputs for pull_request events. We hardcode the gfx125X
+# config and pass it directly to TheRock's multi_arch_ci_linux.yml.
 
 name: TheRock MI455 Pre-submit CI
 
@@ -41,11 +41,6 @@ on:
       # Also trigger on changes to this workflow
       - '.github/workflows/therock-mi455-presubmit.yml'
   workflow_dispatch:
-    inputs:
-      linux_test_labels:
-        type: string
-        description: "Test labels to run (default: hip-tests, rocrtst)"
-        default: ""
 
 permissions:
   contents: read
@@ -56,39 +51,58 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
-    with:
-      build_variant: "release"
-      # Only build gfx125X for MI455 pre-submit
-      linux_amdgpu_families: "gfx125X"
-      windows_amdgpu_families: ""
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
-      repository: ROCm/TheRock
-      ref: main
-      # Pass family_overrides to configure MI455 test runner and limited tests
-      external_repo: >-
-        {
-          "repository": "${{ github.repository }}",
-          "ref": "${{ github.sha }}",
-          "family_overrides": {
-            "gfx125x": {
-              "linux": {
-                "test-runs-on": "linux-mi455-gpu-rocm",
-                "test_labels_for_family": ["test:hip-tests", "test:rocrtst"],
-                "fetch-gfx-targets": ["gfx1250"]
-              }
-            }
+    name: Setup
+    runs-on: ubuntu-24.04
+    outputs:
+      enable_build_jobs: ${{ steps.config.outputs.enable_build_jobs }}
+      linux_build_config: ${{ steps.config.outputs.linux_build_config }}
+      test_type: ${{ steps.config.outputs.test_type }}
+      linux_test_labels: ${{ steps.config.outputs.linux_test_labels }}
+      rocm_package_version: ${{ steps.version.outputs.rocm_package_version }}
+      external_repo_config: ${{ steps.external.outputs.config_json }}
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: main
+
+      - name: Compute package version
+        id: version
+        run: |
+          python ./build_tools/compute_rocm_package_version.py --release-type=dev
+
+      - name: Output gfx125X build config
+        id: config
+        run: |
+          # Hardcoded gfx125X-dcgpu config for MI455 bringup
+          # This bypasses TheRock's setup_multi_arch.yml which ignores family inputs for PRs
+          cat >> $GITHUB_OUTPUT << 'EOF'
+          enable_build_jobs=true
+          linux_build_config={"per_family_info": [{"amdgpu_family": "gfx125X-dcgpu", "amdgpu_targets": "gfx1250", "test-runs-on": "linux-mi455-gpu-rocm", "sanity_check_only_for_family": false, "test_labels_for_family": ["test:hip-tests", "test:rocrtst"]}], "dist_amdgpu_families": "gfx125X-dcgpu", "artifact_group": "multi-arch-release", "build_variant_label": "release", "build_variant_suffix": "", "build_variant_cmake_preset": "", "build_native_linux": true, "build_pytorch": false, "test_python_packages_matrix": [], "pytorch_build_matrix": [], "build_runs_on": "aws-linux-scale-rocm-prod", "prebuilt_stages": "", "baseline_run_id": "", "linux_amdgpu_families": "gfx125X-dcgpu", "windows_amdgpu_families": ""}
+          test_type=comprehensive
+          linux_test_labels=[]
+          EOF
+
+      - name: Output external repo config
+        id: external
+        run: |
+          CONFIG_JSON=$(cat << 'EOF'
+          {
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.sha }}",
+            "checkout_path": "external-repo",
+            "source_package": "rocm-systems",
+            "fetch_sources_args": "--no-include-rocm-systems"
           }
-        }
+          EOF
+          )
+          echo "config_json=$(echo "$CONFIG_JSON" | jq -c .)" >> $GITHUB_OUTPUT
 
   linux_build_and_test:
-    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
+    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config).build_variant_label }}
     needs: setup
-    if: >-
-      ${{
-        needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
-      }}
+    if: ${{ needs.setup.outputs.enable_build_jobs == 'true' }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
     secrets: inherit
     with:
