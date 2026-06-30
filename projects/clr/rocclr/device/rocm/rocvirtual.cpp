@@ -4777,8 +4777,11 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                               (1 << HSA_PACKET_HEADER_BARRIER) |
                               (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
                               (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
-        aql_packet->setup = static_cast<uint8_t>(sizes.dimensions()
-                              << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS);
+        // For an ext-dispatch vendor packet byte+2 is amd_format, not setup; set
+        // amd_format=EXT_KERNEL_DISPATCH and shift setup (dimensions) into byte+3.
+        aql_packet->setup = static_cast<uint16_t>(HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+                              | ((sizes.dimensions()
+                                  << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
       } else {
         aql_packet->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
                               (1 << HSA_PACKET_HEADER_BARRIER) |
