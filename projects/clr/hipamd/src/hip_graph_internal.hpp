@@ -176,7 +176,7 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
-//! Per-GraphExec pool of HW event sets.
+//! Per-GraphExecBase pool of HW event sets.
 class GraphSignalManager : public amd::ReferenceCountedObject {
  public:
   GraphSignalManager() : amd::ReferenceCountedObject() {}
@@ -489,7 +489,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   void SetWait(bool wait) { wait_ = wait; }
 
  protected:
-  // Declare Graph and GraphExec as friends of node for simpler access to GraphNode fields
+  // Declare Graph and GraphExecBase as friends of node for simpler access to GraphNode fields
   friend class Graph;
   friend class GraphExecBase;
   friend class GraphExecSegmented;
@@ -1037,6 +1037,8 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
     return hipSuccess;
   }
+  //! Recycle HW event signals borrowed for a launch. No-op on classic path.
+  virtual void RecycleLaunchSignals(amd::Device* device, std::vector<void*>& signal_set) {}
 
  protected:
   uint64_t flags_ = 0;
@@ -1080,7 +1082,6 @@ class GraphExecClassic : public GraphExecBase {
 // ================================================================================================
 // GraphExecSegmented — Linux/ROCm path. Segment scheduling, AQL packet capture, multi-stream.
 class GraphExecSegmented : public GraphExecBase {
-  friend class GraphExecBase;  // allows OnLaunchComplete to access signalManager_
  public:
   bool graph_dumped_ = false;
   GraphExecSegmented(uint64_t flags = 0) : GraphExecBase(flags) {}
@@ -1109,6 +1110,12 @@ class GraphExecSegmented : public GraphExecBase {
   hipError_t UpdateAQLPacket(hip::GraphNode* node) override;
   // Handle packetBatches_ updates when nodes are enabled/disabled
   hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) override;
+  //! Recycle HW event signals borrowed for a launch back to the signal pool.
+  void RecycleLaunchSignals(amd::Device* device, std::vector<void*>& signal_set) override {
+    if (signalManager_ != nullptr && !signal_set.empty()) {
+      signalManager_->ReleaseSet(device, signal_set);
+    }
+  }
   // Kernel arg manager is for the entire graph.
   // Child graph also shares the same kernel arg manager object. some apps have 100's of
   // child graph nodes and each child graph has only one node.
@@ -1259,8 +1266,6 @@ class GraphExecSegmented : public GraphExecBase {
   void BuildSyncPlan();
 };
 
-// Backward-compatible alias: path-agnostic code uses GraphExecBase through this alias.
-using GraphExec = GraphExecBase;
 
 class ChildGraphNode : public GraphNode, public GraphExecSegmented {
  protected:

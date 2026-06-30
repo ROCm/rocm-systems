@@ -260,7 +260,7 @@ hipError_t Graph::ScheduleNodes() {
     }
   }
 
-  GraphExec* graphExec = dynamic_cast<GraphExec*>(this);
+  GraphExecBase* graphExec = dynamic_cast<GraphExecBase*>(this);
   if (graphExec && !graphExec->TopologicalOrder()) {
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] TopologicalOrder failed - invalid graph");
     return hipErrorInvalidValue;
@@ -1104,10 +1104,10 @@ void GraphExecSegmented::FindStreamsReqPerDevForSegments() {
 
   max_streams_dev_.clear();
   std::unordered_map<int, int> streams_per_dev_at_level;
-  std::vector<GraphExec*> graphs_to_process{this};
+  std::vector<GraphExecBase*> graphs_to_process{this};
 
   while (!graphs_to_process.empty()) {
-    GraphExec* graphExec = graphs_to_process.back();
+    GraphExecBase* graphExec = graphs_to_process.back();
     graphs_to_process.pop_back();
     if (graphExec == nullptr) {
       continue;
@@ -1160,7 +1160,7 @@ void GraphExecSegmented::FindStreamsReqPerDevForSegments() {
 
     for (const auto& segment : graphExec->segments_) {
       if (segment.child_graph_ptr != nullptr) {
-        auto childGraphExec = dynamic_cast<GraphExec*>(segment.child_graph_ptr);
+        auto childGraphExec = dynamic_cast<GraphExecBase*>(segment.child_graph_ptr);
         if (childGraphExec != nullptr) {
           graphs_to_process.push_back(childGraphExec);
         }
@@ -2291,12 +2291,9 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
 void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data) {
   auto* cleanup = reinterpret_cast<GraphLaunchCleanup*>(user_data);
   GraphExecBase* execBase = cleanup->exec;
-  // Re-arm and recycle the launch's signals while the GraphExec (and thus its
+  // Re-arm and recycle the launch's signals while the GraphExecBase (and thus its
   // signal pool) is still alive, then drop the launch's reference.
-  auto* segExec = dynamic_cast<GraphExecSegmented*>(execBase);
-  if (segExec != nullptr && segExec->signalManager_ != nullptr && !cleanup->signal_set.empty()) {
-    segExec->signalManager_->ReleaseSet(cleanup->device, cleanup->signal_set);
-  }
+  execBase->RecycleLaunchSignals(cleanup->device, cleanup->signal_set);
   delete cleanup;
   execBase->release();
 }
@@ -2351,7 +2348,7 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   // Pass `this` as the kernel-names owner: the command borrows kernel-name
   // strings owned by this graph's nodes (via setKernelNamesRef during dispatch)
   // and reads them in ReportActivity() at completion, after OnLaunchComplete()
-  // drops the launch's reference. Tying the GraphExec's lifetime to the command
+  // drops the launch's reference. Tying the GraphExecBase's lifetime to the command
   // keeps those strings valid through the report (no copies). We already hold a
   // launch reference here, so the retain in the constructor needs no trim lock.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr, this);
@@ -2870,7 +2867,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     repeatLaunch_ = true;
   }
 
-  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "GraphExec::Run max_streams: %d, on device: %d",
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "GraphExecSegmented::Run max_streams: %d, on device: %d",
           max_streams_, launch_stream->DeviceId());
 
   // If the launch stream lost its HW queue due to dynamic queue management,
@@ -2918,7 +2915,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     }
   } else if (captureDeviceId_ != launch_stream->DeviceId()) {
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-      "[hipGraph] GraphExec::Run: launch stream device %d does not match capture device %d",
+      "[hipGraph] GraphExecSegmented::Run: launch stream device %d does not match capture device %d",
       launch_stream->DeviceId(), captureDeviceId_);
     status = hipErrorInvalidValue;
   }
@@ -2970,7 +2967,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
 
 // ================================================================================================
 GraphSignalManager::~GraphSignalManager() {
-  // No launches can be in flight at this point (GraphExec refcount guarantees
+  // No launches can be in flight at this point (GraphExecBase refcount guarantees
   // it outlives all launches), so every set is back in the free pool.
   for (auto& dev_pool : free_sets_) {
     amd::Device* device = dev_pool.first;
