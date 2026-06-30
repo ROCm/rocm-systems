@@ -202,10 +202,10 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     const auto output_path = g_input_parameters->get_output_path();
     tool_data->output_filename = generate_output_filename(output_path, "_native_counter_collection.csv");
 
-    if (!g_input_parameters->get_pc_sampling_beta_enabled().empty())
+    const auto pc_sampling_method = g_input_parameters->get_pc_sampling_method();
+    if (!pc_sampling_method.empty())
     {
-        const auto pc_mode = parse_pc_sampling_mode(
-            std::string{g_input_parameters->get_pc_sampling_method()});
+        const auto pc_mode = parse_pc_sampling_mode(std::string{pc_sampling_method});
         tool_data->pc_sampling =
             pc_sampling_feature_t{pc_mode, generate_output_filename(output_path, "_code_obj_info.json")};
     }
