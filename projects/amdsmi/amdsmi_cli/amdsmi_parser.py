@@ -25,6 +25,7 @@ import os
 import sys
 import time
 import collections
+import textwrap
 from amdsmi import amdsmi_interface
 from typing import Optional
 from typing import Union
@@ -55,9 +56,64 @@ class AMDSMIParserHelpFormatter(argparse.HelpFormatter):
         super().__init__(prog=prog, indent_increment=2, max_help_position=24, width=90)
         self._action_max_length = 20
 
+    def start_section(self, heading):
+        # Uppercase section headings for a consistent, scannable layout.
+        super().start_section(heading.upper() if heading else heading)
+
+
+class _AMDSMIHybridHelpFormatter:
+    """Shared help layout for amd-smi subcommand screens.
+
+    Short single-line options render inline (help aligned in a column); options
+    that take arguments or carry multi-line help stack the help beneath the
+    option. A blank line separates entries, and section headings are uppercased.
+    """
+
+    INLINE_HELP_COLUMN = 26
+    STACKED_HELP_INDENT = 4
+
+    def start_section(self, heading):
+        super().start_section(heading.upper() if heading else heading)
+
+    def _fill_text(self, text, width, indent):
+        # RawText preserves author newlines; also strip trailing whitespace that
+        # line-continuations bake into multi-line description/help source strings.
+        return "\n".join((indent + line).rstrip() for line in text.splitlines())
+
+    def _format_action(self, action):
+        help_text = self._expand_help(action) if (action.help and action.help.strip()) else ""
+        invocation = self._format_action_invocation(action)
+        indent = " " * self._current_indent
+        body = " " * (self._current_indent + self.STACKED_HELP_INDENT)
+        parts = []
+
+        if help_text and "\n" not in help_text:
+            if len(indent) + len(invocation) < self.INLINE_HELP_COLUMN:
+                wrapped = textwrap.wrap(
+                    help_text, max(self._width - self.INLINE_HELP_COLUMN, 11)
+                ) or [""]
+                pad = self.INLINE_HELP_COLUMN - len(indent) - len(invocation)
+                cont = " " * self.INLINE_HELP_COLUMN
+                parts.append(f"{indent}{invocation}{' ' * pad}{wrapped[0]}\n")
+                parts.extend(f"{cont}{line}\n" for line in wrapped[1:])
+            else:
+                wrapped = textwrap.wrap(help_text, max(self._width - len(body), 11)) or [""]
+                parts.append(f"{indent}{invocation}\n")
+                parts.extend(f"{body}{line}\n" for line in wrapped)
+        else:
+            parts.append(f"{indent}{invocation}\n")
+            for line in help_text.splitlines():
+                rendered = f"{body}{line}".rstrip()
+                parts.append(f"{rendered}\n" if rendered else "\n")
+
+        for subaction in self._iter_indented_subactions(action):
+            parts.append(self._format_action(subaction))
+        parts.append("\n")
+        return "".join(parts)
+
 
 # Custom Help Formatter for not duplicating the metavar in the subparsers
-class AMDSMISubparserHelpFormatter(argparse.RawTextHelpFormatter):
+class AMDSMISubparserHelpFormatter(_AMDSMIHybridHelpFormatter, argparse.RawTextHelpFormatter):
     def __init__(self, prog):
         super().__init__(prog, indent_increment=2, max_help_position=33, width=90)
         self._action_max_length = 20
