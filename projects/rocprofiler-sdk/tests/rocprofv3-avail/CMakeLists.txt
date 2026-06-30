@@ -17,9 +17,13 @@ set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 # Disable for all sanitizers - Python tests cannot load sanitizer libs dynamically due to
 # static TLS block allocation limitations
+# On WSL (no /dev/kfd) gfx-info[0] is a synthetic CPU agent, so the arch regex above
+# misses and these tests would run and fail; disable them there so WSL matches the
+# real-gfx1150+KFD behavior (where the arch match already disables them).
 if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
    OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$"
-   OR ROCPROFILER_MEMCHECK)
+   OR ROCPROFILER_MEMCHECK
+   OR NOT EXISTS "/dev/kfd")
     set(IS_DISABLED ON)
 endif()
 
@@ -50,14 +54,19 @@ if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
 endif()
 
 # PC sampling is not available on navi2/3/4 (gfx10/11/12), gfx906, under memcheck, or when
-# arch info is missing (e.g. WSL synth-agent path).
+# arch info is missing (e.g. WSL synth-agent path). It also fundamentally requires /dev/kfd,
+# so disable it when that device is absent (e.g. WSL/dxg), otherwise it fails with
+# "Cannot open /dev/kfd for pc sampling".
 set(IS_PC_SAMPLING_DISABLED OFF)
 if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
    OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$"
    OR "${pc-sampling-gpu-0-gfx-info}" STREQUAL ""
    OR "${pc-sampling-gpu-0-gfx-info}" STREQUAL "pc-sampling-gpu-0-gfx-info-NOTFOUND"
-   OR ROCPROFILER_MEMCHECK)
+   OR ROCPROFILER_MEMCHECK
+   OR NOT EXISTS "/dev/kfd")
     set(IS_PC_SAMPLING_DISABLED ON)
+endif()
+
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 if(${IS_DISABLED})
     set(IS_SPM_DISABLED on)
@@ -127,7 +136,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    PASS_REGULAR_EXPRESSION "GPU:[0-9]*\\n*";
+    PASS_REGULAR_EXPRESSION "GPU:[0-9]*\\n*"
     DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
@@ -137,7 +146,9 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    PASS_REGULAR_EXPRESSION "GPU"[ \t\r]":[0-9]*\\n*";
+    # `list` output is column-padded ("GPU                           : 0"), so tolerate
+    # whitespace around the colon (unlike `info`, which prints a compact "GPU:0").
+    PASS_REGULAR_EXPRESSION "GPU[ \t]*:[ \t]*[0-9]*\\n*"
     DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
