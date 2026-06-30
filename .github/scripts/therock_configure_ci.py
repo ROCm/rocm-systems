@@ -180,10 +180,7 @@ def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
     hip_rocr_prefixes = [
         "projects/hip/",
         "projects/hip-tests/",
-        "projects/hipfile/",
-        "projects/hipother/",
         "projects/rocr-runtime/",
-        "projects/rocr-debug-agent/",
     ]
 
     # Patterns to ignore (docs, etc.)
