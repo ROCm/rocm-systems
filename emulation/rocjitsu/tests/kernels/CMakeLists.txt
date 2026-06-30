@@ -118,8 +118,8 @@ if(RJ_INSTALL_TESTS)
     )
 endif()
 
-# DBI no-op probe fixture. A lone __device__ function needs the
-# device-only + unbundle path (see cmake/rj_add_probe_object.cmake), which
+# DBI no-op probe fixture. A lone __device__ function needs the device-only +
+# unbundle path (rj_add_probe_object in cmake/rj_add_device_kernel.cmake), which
 # additionally requires clang-offload-bundler from the same LLVM tree.
 find_program(
     CLANG_OFFLOAD_BUNDLER
@@ -131,7 +131,6 @@ find_program(
 )
 set(HAS_PROBE_FIXTURES FALSE)
 if(CLANG_OFFLOAD_BUNDLER)
-    include(rj_add_probe_object)
     rj_add_probe_object(rj_nop_probe gfx90a OUTPUT_NAME rj_nop_probe_gfx90a)
     set(HAS_PROBE_FIXTURES TRUE)
 else()
