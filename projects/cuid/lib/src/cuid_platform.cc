@@ -117,8 +117,8 @@ amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id &id) const {
   if (status != AMDCUID_STATUS_SUCCESS) {
     std::string name = "";
     // family here not used
-    std::string family = "";
-    status = SmbiosUtil::get_product_info(name, family);
+    std::string family_dummy = "";
+    status = SmbiosUtil::get_product_info(name, family_dummy);
     CuidUtilities::make_fallback_fingerprint(name, fingerprint);
     temp = true;
   }

@@ -109,7 +109,9 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   // Falls back to 0 if VF detection is unavailable.
   info.header.fields.gpu.unit_id = CuidUtilities::get_gpu_vf_id(device_path);
 
-  // check for XCP partitioning and skip if so
+  // check for XCP partitioning by looking for pci config space file on devices
+  // where unit_id is 0 (bare metal or passthrough). If config file is missing,
+  // that indicates partition which is unsupported for CUID generation.
   std::string config_file = device_path + "/config";
   if (access(config_file.c_str(), F_OK) == -1 &&
       info.header.fields.gpu.unit_id == 0) {
