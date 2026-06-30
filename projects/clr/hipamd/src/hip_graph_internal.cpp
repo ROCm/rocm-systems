@@ -1617,6 +1617,18 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
 // ================================================================================================
 hipError_t GraphExecSegmented::Init() {
   hipError_t status = hipSuccess;
+
+  // Schedule nodes into segments for batch execution
+  status = ScheduleNodesIntoBatches();
+  if (status != hipSuccess) {
+    return status;
+  }
+
+  // Allocate kernel argument manager for packet capture
+  if (kernArgManager_ == nullptr) {
+    SetKernelArgManager(new GraphKernelArgManager());
+  }
+
   // captureDeviceId_ is set inside FindStreamsReqPerDevForSegments() from
   // max_streams_dev_ once all segments are analysed. Must run unconditionally
   // so that captureDeviceId_ is valid before CaptureAQLPackets/BuildSyncPlan.

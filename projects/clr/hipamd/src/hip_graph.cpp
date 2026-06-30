@@ -1611,14 +1611,6 @@ hipError_t ihipGraphInstantiate(hip::GraphExecBase** pGraphExec, hip::Graph* gra
   } else {
     auto* segExec = new hip::GraphExecSegmented(flags);
     graph->clone(segExec, true);
-
-    hipError_t scheduleStatus = segExec->ScheduleNodesIntoBatches();
-    if (scheduleStatus != hipSuccess) {
-      delete segExec;
-      return scheduleStatus;
-    }
-
-    segExec->SetKernelArgManager(new hip::GraphKernelArgManager());
     hipError_t initStatus = segExec->Init();
     if (initStatus != hipSuccess) {
       delete segExec;
