@@ -29,6 +29,7 @@ from utils.utils_common import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     canonical_config_arch,
+    console_error_invalid_block,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
     get_arch_alias_to_panel_id,
@@ -301,9 +302,10 @@ class OmniSoC_Base:
             pass
         else:
             alias = block_id
-            panel_alias_dict = get_arch_alias_to_panel_id(self._mspec.gpu_arch)
+            arch = self._mspec.gpu_arch
+            panel_alias_dict = get_arch_alias_to_panel_id(arch)
             if alias not in panel_alias_dict:
-                raise KeyError(f"Unknown panel alias: {alias!r}")
+                console_error_invalid_block(alias, arch, panel_alias_dict)
             block_id = str(panel_alias_dict[alias])
             console_log(f"alias: {alias}, block id: {block_id}")
 

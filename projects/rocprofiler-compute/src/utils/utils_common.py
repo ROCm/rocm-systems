@@ -884,6 +884,20 @@ def format_scientific_notation_if_needed(
     return formatted
 
 
+def console_error_invalid_block(
+    token: str, arch: Optional[str], alias_map: dict[str, str]
+) -> None:
+    """Report an invalid --block token and exit. Lists the arch's valid
+    aliases when available so alias typos are easy to correct."""
+    detail = ""
+    if arch and alias_map:
+        detail = f"\n\tValid aliases for {arch}: {', '.join(sorted(alias_map))}."
+    console_error(
+        f"Invalid --block value {token!r}.{detail} "
+        "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
+    )
+
+
 def convert_filter_blocks_to_panel_ids(
     filter_blocks: list[str], arch: Optional[str] = None
 ) -> set[int]:
@@ -902,10 +916,7 @@ def convert_filter_blocks_to_panel_ids(
         token = str(bid)
         if not METRIC_ID_RE.match(token):
             if token not in alias_map:
-                console_error(
-                    f"Invalid --block value {token}. "
-                    "Run rocprof-compute --list-blocks to see valid values."
-                )
+                console_error_invalid_block(token, arch, alias_map)
             token = alias_map[token]
         resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
     return resolved
