@@ -10,13 +10,16 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -48,15 +51,17 @@ RJ_DIAGNOSTIC_POP
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
 
 using namespace rocjitsu;
 
-const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/amdgpu_gfx1250.json";
+const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250.json";
 
 constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
 constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;
@@ -90,6 +95,29 @@ constexpr uint32_t kSdmaSubopCopyLinear = 0;
 constexpr uint32_t kSdmaSubopFence64 = 2;
 constexpr uint32_t kSdmaSubopPollMem64 = 5;
 
+class TestMemoryInstruction : public Instruction {
+public:
+  explicit TestMemoryInstruction(std::unique_ptr<DynamicInstState> state)
+      : Instruction("test_mem", nullptr) {
+    flags_ |= MEMORY_OP;
+    set_data(std::move(state));
+  }
+};
+
+class DeferredClusterLdsMulticastEngine : public amdgpu::ClusterLdsMulticastEngine {
+public:
+  amdgpu::ClusterLdsMulticastResult
+  submit(amdgpu::ClusterLdsMulticastTransaction submitted,
+         amdgpu::ClusterLdsMulticastCompletion submitted_completion) override {
+    txn = std::move(submitted);
+    completion = std::move(submitted_completion);
+    return amdgpu::ClusterLdsMulticastResult::Deferred;
+  }
+
+  amdgpu::ClusterLdsMulticastTransaction txn;
+  amdgpu::ClusterLdsMulticastCompletion completion;
+};
+
 struct Gfx1250Sim {
   config::LoadedConfig loaded;
   SoC *soc = nullptr;
@@ -97,6 +125,15 @@ struct Gfx1250Sim {
   std::unique_ptr<simdojo::SimulationEngine> engine;
 
   Gfx1250Sim() : loaded(config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema)) {
+    build();
+  }
+
+  explicit Gfx1250Sim(const std::string &config_json)
+      : loaded(config::load_config_from_string(config_json, rocjitsu::kEmbeddedSchema)) {
+    build();
+  }
+
+  void build() {
     soc = loaded.soc();
     memory = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
@@ -144,6 +181,36 @@ struct Gfx1250Sim {
     return addr;
   }
 };
+
+std::string make_single_se_gfx1250_config(uint32_t num_cus) {
+  std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
+  std::string links;
+  for (uint32_t i = 0; i < num_cus; ++i) {
+    if (i > 0)
+      links += ",";
+    links += R"({"src":"xcd0.cp.req_)" + std::to_string(i) + R"(","dst":"xcd0.se0.cu)" +
+             std::to_string(i) + R"(.cpl","latency":1,"weight":2})";
+    links += R"(,{"src":"xcd0.se0.cu)" + std::to_string(i) + R"(.req","dst":"xcd0.l2.cpl_)" +
+             std::to_string(i) + R"(","latency":1,"weight":10})";
+  }
+
+  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"gfx1250"},)"
+         R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
+         R"({"name":"vram","type":"gpu_memory"},)"
+         R"({"name":"xcd0","type":"xcd","children":[)"
+         R"({"name":"l2","type":"l2_cache"},)"
+         R"({"name":"cp","type":"command_processor"},)"
+         R"({"name":"se0","type":"shader_engine","children":[)"
+         R"({"name":")" +
+         cu_range +
+         R"(","type":"compute_unit","config":[)"
+         R"({"key":"num_wf_slots","value":"80"},)"
+         R"({"key":"sgprs_per_wf","value":"128"},)"
+         R"({"key":"vgprs_per_wf","value":"1024"},)"
+         R"({"key":"lds_size_kb","value":"160"})"
+         R"(]}]}]}]},"links":[)" +
+         links + R"(]}})";
+}
 
 class HostSdmaQueueForTest {
 public:
@@ -1114,6 +1181,978 @@ TEST(Gfx1250ExecutionTest, Wave32ScalarVccHiWritePreservesUpperHalf) {
   cu->execute_instruction(inst.get(), *wf);
 
   EXPECT_EQ(wf->vcc(), 0xffff0000'00000000ULL);
+}
+
+TEST(Gfx1250ExecutionTest, ClusterLoadsDecodeAndPopulateVectorMemState) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_m0(0xffff0003u);
+
+  constexpr uint64_t kGlobalBase = 0x180000u;
+  write_wave_sgpr(*cu, *wf, 0, static_cast<uint32_t>(kGlobalBase));
+  write_wave_sgpr(*cu, *wf, 1, static_cast<uint32_t>(kGlobalBase >> 32));
+
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  auto write_vgpr_lane_offsets = [&](uint32_t reg, uint32_t stride) {
+    cu->write_vgpr(vgpr_base + reg, 0, 0);
+    cu->write_vgpr(vgpr_base + reg, 1, stride);
+  };
+  auto write_vgpr_lane_indices = [&](uint32_t reg) {
+    cu->write_vgpr(vgpr_base + reg, 0, 0);
+    cu->write_vgpr(vgpr_base + reg, 1, 1);
+  };
+
+  struct LoadCase {
+    std::array<uint32_t, 3> words;
+    std::string_view mnemonic;
+    uint32_t num_elems;
+    uint32_t dst_reg;
+    bool scale_offset;
+  };
+
+  const LoadCase load_cases[] = {
+      {{0xEE19C000u, 0x00000001u, 0x00000000u}, "cluster_load_b32", 1, 1, false},
+      {{0xEE1A0000u, 0x00000000u, 0x00000002u}, "cluster_load_b64", 2, 0, false},
+      {{0xEE1A4000u, 0x00010002u, 0x00000000u}, "cluster_load_b128", 4, 2, true},
+  };
+
+  for (const LoadCase &tc : load_cases) {
+    if (tc.scale_offset)
+      write_vgpr_lane_indices(0);
+    else
+      write_vgpr_lane_offsets(tc.words[2] & 0xffu, 16);
+
+    auto inst = decode_gfx1250(tc.words, tc.mnemonic);
+    ASSERT_NE(inst, nullptr);
+    inst->execute(*inst, wf);
+    auto *state = inst->data_as<amdgpu::VectorMemState>();
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->tag(), amdgpu::GLOBAL_MEM);
+    EXPECT_EQ(state->dst_reg_base, vgpr_base + tc.dst_reg);
+    EXPECT_EQ(state->elem_size, 4u);
+    EXPECT_EQ(state->num_elems, tc.num_elems);
+    EXPECT_TRUE(state->is_load);
+    EXPECT_EQ(state->wait_counter_type, amdgpu::WaitCounterType::LOADCNT);
+    EXPECT_FALSE(state->lds_dst);
+    EXPECT_FALSE(state->cluster_multicast);
+    EXPECT_TRUE(state->request_force_l1_bypass);
+    EXPECT_EQ(state->lane_mask, 0x3u);
+    EXPECT_EQ(state->per_lane_addr[0], kGlobalBase);
+    EXPECT_EQ(state->per_lane_addr[1], kGlobalBase + 16);
+  }
+
+  struct AsyncCase {
+    std::array<uint32_t, 3> words;
+    std::string_view mnemonic;
+    uint32_t elem_size;
+    uint32_t num_elems;
+    uint32_t lds_addr_reg;
+    uint32_t global_stride;
+    uint32_t lds_stride;
+    uint32_t offset;
+    bool scale_offset;
+    bool cluster_multicast;
+  };
+
+  const AsyncCase async_cases[] = {
+      {{0xEE1A8000u, 0x00000000u, 0x00000000u},
+       "cluster_load_async_to_lds_b8",
+       1,
+       1,
+       0,
+       1,
+       1,
+       0,
+       false,
+       true},
+      {{0xEE180000u, 0x00000000u, 0x00000800u},
+       "global_load_async_to_lds_b32",
+       4,
+       1,
+       0,
+       16,
+       16,
+       8,
+       false,
+       false},
+      {{0xEE1AC000u, 0x00000000u, 0x00000800u},
+       "cluster_load_async_to_lds_b32",
+       4,
+       1,
+       0,
+       16,
+       16,
+       8,
+       false,
+       true},
+      {{0xEE1B0000u, 0x00000004u, 0x00000004u},
+       "cluster_load_async_to_lds_b64",
+       4,
+       2,
+       4,
+       16,
+       16,
+       0,
+       false,
+       true},
+      {{0xEE1B4000u, 0x00010001u, 0x00000000u},
+       "cluster_load_async_to_lds_b128",
+       4,
+       4,
+       1,
+       16,
+       16,
+       0,
+       true,
+       true},
+  };
+
+  for (const AsyncCase &tc : async_cases) {
+    if (tc.scale_offset) {
+      write_vgpr_lane_indices(0);
+      write_vgpr_lane_offsets(tc.lds_addr_reg, 16);
+    } else {
+      write_vgpr_lane_offsets(tc.lds_addr_reg, tc.global_stride);
+    }
+
+    auto inst = decode_gfx1250(tc.words, tc.mnemonic);
+    ASSERT_NE(inst, nullptr);
+    inst->execute(*inst, wf);
+    auto *state = inst->data_as<amdgpu::VectorMemState>();
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->tag(), amdgpu::GLOBAL_MEM);
+    EXPECT_EQ(state->elem_size, tc.elem_size);
+    EXPECT_EQ(state->num_elems, tc.num_elems);
+    EXPECT_TRUE(state->is_load);
+    EXPECT_TRUE(state->lds_dst);
+    EXPECT_TRUE(state->lds_per_lane_addr);
+    EXPECT_EQ(state->lds_base, wf->lds_base());
+    EXPECT_EQ(state->cluster_multicast, tc.cluster_multicast);
+    EXPECT_EQ(state->cluster_mcast_mask, tc.cluster_multicast ? 0x3u : 0u);
+    EXPECT_EQ(state->request_force_l1_bypass, tc.cluster_multicast);
+    EXPECT_EQ(state->wait_counter_type, amdgpu::WaitCounterType::ASYNCCNT);
+    EXPECT_EQ(state->lane_mask, 0x3u);
+    EXPECT_EQ(state->per_lane_addr[0], kGlobalBase + tc.offset);
+    EXPECT_EQ(state->per_lane_addr[1], kGlobalBase + tc.offset + tc.global_stride);
+    EXPECT_EQ(state->per_lane_lds_addr[0], wf->lds_base());
+    EXPECT_EQ(state->per_lane_lds_addr[1], wf->lds_base() + tc.lds_stride);
+  }
+}
+
+TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsKeepsIoffsetOnGlobalDestination) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobalBase = 0x190000u;
+  constexpr uint32_t kLane0Value = 0x12345678u;
+  constexpr uint32_t kLane1Value = 0xabcdef01u;
+  constexpr uint32_t kIoffset = 8;
+  write_wave_sgpr(*cu, *wf, 0, static_cast<uint32_t>(kGlobalBase));
+  write_wave_sgpr(*cu, *wf, 1, static_cast<uint32_t>(kGlobalBase >> 32));
+
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base, 0, 0);
+  cu->write_vgpr(vgpr_base, 1, 16);
+  cu->lds().write32(wf->lds_base(), kLane0Value);
+  cu->lds().write32(wf->lds_base() + 16, kLane1Value);
+
+  auto inst =
+      decode_gfx1250({0xEE190000u, 0x00000000u, 0x00000800u}, "global_store_async_from_lds_b32");
+  ASSERT_NE(inst, nullptr);
+  inst->execute(*inst, wf);
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->tag(), amdgpu::GLOBAL_MEM);
+  EXPECT_FALSE(state->is_load);
+  EXPECT_EQ(state->wait_counter_type, amdgpu::WaitCounterType::ASYNCCNT);
+  EXPECT_EQ(state->lane_mask, 0x3u);
+  EXPECT_EQ(state->per_lane_addr[0], kGlobalBase + kIoffset);
+  EXPECT_EQ(state->per_lane_addr[1], kGlobalBase + 16 + kIoffset);
+  ASSERT_GE(state->store_data.size(), 8u);
+
+  uint32_t lane0_value = 0;
+  uint32_t lane1_value = 0;
+  std::memcpy(&lane0_value, &state->store_data[0], sizeof(lane0_value));
+  std::memcpy(&lane1_value, &state->store_data[4], sizeof(lane1_value));
+  EXPECT_EQ(lane0_value, kLane0Value);
+  EXPECT_EQ(lane1_value, kLane1Value);
+}
+
+TEST(Gfx1250ExecutionTest, DispatchEntryClusterMathCoversMultiDimensionalShapes) {
+  amdgpu::DispatchEntry entry{};
+  entry.grid_wgs_x = 4;
+  entry.grid_wgs_y = 4;
+  entry.grid_wgs_z = 4;
+  entry.cluster_count_x = 2;
+  entry.cluster_count_y = 2;
+  entry.cluster_count_z = 2;
+  entry.cluster_size_x = 2;
+  entry.cluster_size_y = 2;
+  entry.cluster_size_z = 2;
+
+  EXPECT_TRUE(entry.cluster_grid_is_complete());
+  EXPECT_EQ(entry.cluster_size(), 8u);
+  EXPECT_EQ(entry.cluster_rank_for_local_wg(0), 0u);
+  EXPECT_EQ(entry.cluster_rank_for_local_wg(5), 3u);
+  EXPECT_EQ(entry.cluster_rank_for_local_wg(21), 7u);
+  EXPECT_EQ(entry.cluster_peer_local_wg_id(0, 0), 0u);
+  EXPECT_EQ(entry.cluster_peer_local_wg_id(0, 1), 1u);
+  EXPECT_EQ(entry.cluster_peer_local_wg_id(0, 2), 4u);
+  EXPECT_EQ(entry.cluster_peer_local_wg_id(0, 3), 5u);
+  EXPECT_EQ(entry.cluster_peer_local_wg_id(0, 4), 16u);
+  EXPECT_EQ(entry.cluster_peer_local_wg_id(0, 7), 21u);
+  EXPECT_EQ(entry.cluster_peer_local_wg_id(42, 0), 42u);
+  EXPECT_EQ(entry.cluster_peer_local_wg_id(42, 7), 63u);
+  EXPECT_EQ(entry.cluster_base_local_wg_id_for_ordinal(0), 0u);
+  EXPECT_EQ(entry.cluster_base_local_wg_id_for_ordinal(1), 2u);
+  EXPECT_EQ(entry.cluster_base_local_wg_id_for_ordinal(2), 8u);
+  EXPECT_EQ(entry.cluster_base_local_wg_id_for_ordinal(4), 32u);
+
+  entry.grid_wgs_x = 3;
+  entry.grid_wgs_y = 2;
+  entry.grid_wgs_z = 1;
+  entry.cluster_count_x = 2;
+  entry.cluster_count_y = 2;
+  entry.cluster_count_z = 1;
+  entry.cluster_size_x = 2;
+  entry.cluster_size_y = 1;
+  entry.cluster_size_z = 1;
+  EXPECT_FALSE(entry.cluster_grid_is_complete());
+}
+
+TEST(Gfx1250ExecutionTest, ClusterLdsMulticastTransactionCapturesRemapState) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(9, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(7);
+  wf->set_cluster_info(/*rank=*/1, /*size=*/4);
+  wf->set_lds_base(0x100);
+
+  amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+  state.elem_size = 4;
+  state.num_elems = 2;
+  state.wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  state.lds_base = wf->lds_base();
+  state.lds_per_lane_addr = true;
+  state.cluster_multicast = true;
+  state.cluster_mcast_mask = 0xa;
+  state.wf_size = 32;
+  state.lane_mask = 0x3;
+  state.per_lane_addr[0] = 0x8000;
+  state.per_lane_addr[1] = 0x8020;
+  state.per_lane_lds_addr[0] = state.lds_base + 0x10;
+  state.per_lane_lds_addr[1] = state.lds_base + 0x24;
+  state.response_data.resize(state.wf_size * state.num_elems * state.elem_size);
+
+  std::vector<amdgpu::ClusterLdsTarget> targets = {{cu, /*wg_id=*/11, /*lds_base=*/0x400,
+                                                    /*cluster_rank=*/3}};
+  auto txn = amdgpu::make_cluster_lds_multicast_transaction(state, *wf, std::move(targets));
+
+  EXPECT_EQ(txn.dispatch_id, 7u);
+  EXPECT_EQ(txn.source_wg_id, 9u);
+  EXPECT_EQ(txn.source_cluster_rank, 1u);
+  EXPECT_EQ(txn.source_lds_base, 0x100u);
+  EXPECT_EQ(txn.mcast_mask, 0xau);
+  EXPECT_EQ(txn.wait_counter_type, amdgpu::WaitCounterType::ASYNCCNT);
+  EXPECT_EQ(txn.bytes_per_lane, 8u);
+  // Retained for deferred/timing backends that model global request coalescing.
+  EXPECT_EQ(txn.per_lane_global_addr[0], 0x8000u);
+  EXPECT_EQ(txn.per_lane_global_addr[1], 0x8020u);
+  ASSERT_EQ(txn.targets.size(), 1u);
+  EXPECT_EQ(txn.targets[0].wg_id, 11u);
+  EXPECT_EQ(amdgpu::cluster_lds_lane_addr(txn, 0, txn.targets[0].lds_base), 0x410u);
+  EXPECT_EQ(amdgpu::cluster_lds_lane_addr(txn, 1, txn.targets[0].lds_base), 0x424u);
+  EXPECT_THROW((void)amdgpu::remap_cluster_lds_addr(0x100, 0x400, 0xfc), std::runtime_error);
+}
+
+TEST(Gfx1250ExecutionTest, ClusterLdsSourceRankSelectionCoversDefaultAndMasks) {
+  amdgpu::ClusterLdsMulticastTransaction txn{};
+  txn.source_cluster_rank = 2;
+
+  txn.mcast_mask = 0;
+  EXPECT_TRUE(amdgpu::cluster_lds_source_rank_selected(txn));
+
+  txn.mcast_mask = amdgpu::cluster_multicast_rank_mask(2);
+  EXPECT_TRUE(amdgpu::cluster_lds_source_rank_selected(txn));
+
+  txn.mcast_mask = amdgpu::cluster_multicast_rank_mask(1);
+  EXPECT_FALSE(amdgpu::cluster_lds_source_rank_selected(txn));
+}
+
+TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineWritesOnlyIssuingParticipant) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  cu->clear_lds();
+
+  amdgpu::ClusterLdsMulticastTransaction txn{};
+  txn.source_wg_id = 1;
+  txn.source_cluster_rank = 1;
+  txn.source_lds_base = 0x300;
+  txn.mcast_mask = 0x3;
+  txn.bytes_per_lane = 4;
+  txn.wf_size = 4;
+  txn.lane_mask = 0x5;
+  txn.per_lane_addr = true;
+  txn.per_lane_lds_addr[0] = 0x304;
+  txn.per_lane_lds_addr[2] = 0x30c;
+  txn.payload.resize(txn.wf_size * txn.bytes_per_lane);
+  const uint32_t lane0 = 0x11223344;
+  const uint32_t lane2 = 0xaabbccdd;
+  std::memcpy(&txn.payload[0 * txn.bytes_per_lane], &lane0, sizeof(lane0));
+  std::memcpy(&txn.payload[2 * txn.bytes_per_lane], &lane2, sizeof(lane2));
+  txn.targets = {{cu, /*wg_id=*/0, /*lds_base=*/0x200, /*cluster_rank=*/0},
+                 {cu, /*wg_id=*/1, /*lds_base=*/0x300, /*cluster_rank=*/1}};
+
+  amdgpu::ImmediateClusterLdsMulticastEngine engine;
+  bool deferred_callback_called = false;
+  EXPECT_EQ(engine.submit(std::move(txn), [&]() { deferred_callback_called = true; }),
+            amdgpu::ClusterLdsMulticastResult::Complete);
+  EXPECT_FALSE(deferred_callback_called);
+  EXPECT_EQ(cu->lds().read32(0x204), 0u);
+  EXPECT_EQ(cu->lds().read32(0x20c), 0u);
+  EXPECT_EQ(cu->lds().read32(0x304), lane0);
+  EXPECT_EQ(cu->lds().read32(0x30c), lane2);
+  EXPECT_EQ(cu->lds().read32(0x208), 0u);
+}
+
+TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineSkipsUnissuedSelectedPeer) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  cu->clear_lds();
+
+  constexpr uint32_t kValue = 0x55667788;
+  amdgpu::ClusterLdsMulticastTransaction txn{};
+  txn.source_wg_id = 1;
+  txn.source_cluster_rank = 1;
+  txn.source_lds_base = 0x300;
+  txn.mcast_mask = 0x1; // Selects rank 0, not the issuing rank 1.
+  txn.bytes_per_lane = sizeof(kValue);
+  txn.wf_size = 1;
+  txn.lane_mask = 0x1;
+  txn.per_lane_addr = true;
+  txn.per_lane_lds_addr[0] = 0x310;
+  txn.payload.resize(sizeof(kValue));
+  std::memcpy(txn.payload.data(), &kValue, sizeof(kValue));
+  txn.targets = {{cu, /*wg_id=*/0, /*lds_base=*/0x200, /*cluster_rank=*/0}};
+
+  amdgpu::ImmediateClusterLdsMulticastEngine engine;
+  EXPECT_EQ(engine.submit(std::move(txn), []() {}), amdgpu::ClusterLdsMulticastResult::Complete);
+  EXPECT_EQ(cu->lds().read32(0x210), 0u);
+  EXPECT_EQ(cu->lds().read32(0x310), 0u);
+}
+
+TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineUsesRecipientOwnedDestinations) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  cu->clear_lds();
+
+  constexpr uint32_t kWg0Value = 0x11112222;
+  constexpr uint32_t kWg1Value = 0x33334444;
+
+  auto make_txn = [&](uint32_t wg_id, uint32_t rank, uint32_t lds_base, uint32_t lds_offset,
+                      uint32_t value) {
+    amdgpu::ClusterLdsMulticastTransaction txn{};
+    txn.source_wg_id = wg_id;
+    txn.source_cluster_rank = rank;
+    txn.source_lds_base = lds_base;
+    txn.mcast_mask = 0x3;
+    txn.bytes_per_lane = sizeof(value);
+    txn.wf_size = 1;
+    txn.lane_mask = 0x1;
+    txn.per_lane_addr = true;
+    txn.per_lane_lds_addr[0] = lds_base + lds_offset;
+    txn.payload.resize(sizeof(value));
+    std::memcpy(txn.payload.data(), &value, sizeof(value));
+    txn.targets = {{cu, /*wg_id=*/0, /*lds_base=*/0x100, /*cluster_rank=*/0},
+                   {cu, /*wg_id=*/1, /*lds_base=*/0x200, /*cluster_rank=*/1}};
+    return txn;
+  };
+
+  amdgpu::ImmediateClusterLdsMulticastEngine engine;
+  EXPECT_EQ(engine.submit(make_txn(/*wg_id=*/0, /*rank=*/0, /*lds_base=*/0x100,
+                                   /*lds_offset=*/0x10, kWg0Value),
+                          []() {}),
+            amdgpu::ClusterLdsMulticastResult::Complete);
+  EXPECT_EQ(engine.submit(make_txn(/*wg_id=*/1, /*rank=*/1, /*lds_base=*/0x200,
+                                   /*lds_offset=*/0x30, kWg1Value),
+                          []() {}),
+            amdgpu::ClusterLdsMulticastResult::Complete);
+
+  EXPECT_EQ(cu->lds().read32(0x110), kWg0Value);
+  EXPECT_EQ(cu->lds().read32(0x230), kWg1Value);
+  EXPECT_EQ(cu->lds().read32(0x210), 0u);
+  EXPECT_EQ(cu->lds().read32(0x130), 0u);
+}
+
+TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsUndersizedPayload) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+
+  amdgpu::ClusterLdsMulticastTransaction txn{};
+  txn.bytes_per_lane = 4;
+  txn.wf_size = 2;
+  txn.lane_mask = 0x3;
+  txn.payload.resize(4);
+  txn.targets = {{cu, /*wg_id=*/0, /*lds_base=*/0x200, /*cluster_rank=*/0}};
+
+  amdgpu::ImmediateClusterLdsMulticastEngine engine;
+  EXPECT_THROW((void)engine.submit(std::move(txn), []() {}), std::runtime_error);
+}
+
+TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsOutOfRangeTarget) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+
+  amdgpu::ClusterLdsMulticastTransaction txn{};
+  txn.source_lds_base = 0;
+  txn.bytes_per_lane = 4;
+  txn.wf_size = 1;
+  txn.lane_mask = 0x1;
+  txn.per_lane_addr = true;
+  txn.per_lane_lds_addr[0] = 0;
+  txn.payload.resize(4);
+  txn.targets = {{cu, /*wg_id=*/0, static_cast<uint32_t>(cu->lds().size_bytes()) - 2,
+                  /*cluster_rank=*/0}};
+
+  amdgpu::ImmediateClusterLdsMulticastEngine engine;
+  EXPECT_THROW((void)engine.submit(std::move(txn), []() {}), std::runtime_error);
+}
+
+TEST(Gfx1250ExecutionTest, ClusterLdsPinPreventsAllocatorReuseUntilClusterCompletes) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+
+  EXPECT_EQ(cu->allocate_lds(257), 0u);
+  cu->pin_lds_until_cluster_retired(7);
+  cu->retire_halted_wfs();
+
+  EXPECT_EQ(cu->allocate_lds(257), 512u);
+  cu->unpin_lds_for_cluster(7);
+  cu->retire_halted_wfs();
+  EXPECT_EQ(cu->allocate_lds(257), 0u);
+}
+
+TEST(Gfx1250ExecutionTest, OrdinaryLdsDstLoadWritesDirectlyAndCompletesAsyncCounter) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(3);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobalAddr = 0x9000;
+  constexpr uint32_t kLoadedValue = 0x12345678;
+  for (uint32_t byte = 0; byte < sizeof(kLoadedValue); ++byte) {
+    sim.memory->write8(kGlobalAddr + byte,
+                       static_cast<uint8_t>((kLoadedValue >> (byte * 8)) & 0xffu));
+  }
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  state->lds_dst = true;
+  state->lds_per_lane_addr = true;
+  state->lds_base = wf->lds_base();
+  state->wf_size = 32;
+  state->lane_mask = 0x1;
+  state->exec_mask = 0x1;
+  state->per_lane_addr[0] = kGlobalAddr;
+  state->per_lane_lds_addr[0] = wf->lds_base() + 0x20;
+
+  DeferredClusterLdsMulticastEngine deferred_engine;
+  cu->set_cluster_lds_multicast_engine(&deferred_engine);
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+
+  EXPECT_EQ(wf->wait_counters().asynccnt, 0u);
+  EXPECT_FALSE(static_cast<bool>(deferred_engine.completion));
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0x20), kLoadedValue);
+  cu->set_cluster_lds_multicast_engine(nullptr);
+}
+
+TEST(Gfx1250ExecutionTest, NonClusterClusterLdsLoadDowngradesToOrdinaryAsyncToLds) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(5);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobalAddr = 0x9080;
+  constexpr uint32_t kLoadedValue = 0x78563412;
+  for (uint32_t byte = 0; byte < sizeof(kLoadedValue); ++byte) {
+    sim.memory->write8(kGlobalAddr + byte,
+                       static_cast<uint8_t>((kLoadedValue >> (byte * 8)) & 0xffu));
+  }
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  state->lds_dst = true;
+  state->lds_per_lane_addr = true;
+  state->lds_base = wf->lds_base();
+  state->wf_size = 32;
+  state->lane_mask = 0x1;
+  state->exec_mask = 0x1;
+  state->cluster_multicast = true;
+  state->cluster_mcast_mask = 0x2; // Excludes rank 0, but non-clustered loads downgrade.
+  state->per_lane_addr[0] = kGlobalAddr;
+  state->per_lane_lds_addr[0] = wf->lds_base() + 0x24;
+
+  DeferredClusterLdsMulticastEngine deferred_engine;
+  cu->set_cluster_lds_multicast_engine(&deferred_engine);
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+
+  EXPECT_EQ(wf->wait_counters().asynccnt, 0u);
+  EXPECT_FALSE(static_cast<bool>(deferred_engine.completion));
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0x24), kLoadedValue);
+  cu->set_cluster_lds_multicast_engine(nullptr);
+}
+
+TEST(Gfx1250ExecutionTest, ClusterLoadRequestBypassesStaleL1VectorLine) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(6);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobalAddr = 0xa000;
+  constexpr uint32_t kOldValue = 0x11111111;
+  constexpr uint32_t kNewValue = 0x22222222;
+  for (uint32_t byte = 0; byte < sizeof(kOldValue); ++byte) {
+    sim.memory->write8(kGlobalAddr + byte, static_cast<uint8_t>((kOldValue >> (byte * 8)) & 0xffu));
+  }
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kGlobalAddr;
+  uint8_t l1_fill[64 * sizeof(kOldValue)] = {};
+  cu->l1_vector().load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, l1_fill,
+                       amdgpu::Mtype::RW, /*non_temporal=*/false,
+                       /*request_l1_bypass=*/false, /*vmid=*/0);
+  uint32_t filled_value = 0;
+  std::memcpy(&filled_value, l1_fill, sizeof(filled_value));
+  ASSERT_EQ(filled_value, kOldValue);
+
+  cu->l2()->write(kGlobalAddr, reinterpret_cast<const uint8_t *>(&kNewValue), sizeof(kNewValue),
+                  amdgpu::Mtype::RW, /*vmid=*/0);
+
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+
+  auto ordinary = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  ordinary->elem_size = 4;
+  ordinary->num_elems = 1;
+  ordinary->is_load = true;
+  ordinary->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  ordinary->wf_size = 32;
+  ordinary->lane_mask = 0x1;
+  ordinary->exec_mask = 0x1;
+  ordinary->dst_reg_base = wf->vgpr_alloc().base;
+  ordinary->per_lane_addr[0] = kGlobalAddr;
+  pipeline.issue(new TestMemoryInstruction(std::move(ordinary)), *wf);
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, 0), kOldValue);
+
+  auto cluster = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  cluster->elem_size = 4;
+  cluster->num_elems = 1;
+  cluster->is_load = true;
+  cluster->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  cluster->request_force_l1_bypass = true;
+  cluster->lds_dst = true;
+  cluster->lds_per_lane_addr = true;
+  cluster->lds_base = wf->lds_base();
+  cluster->wf_size = 32;
+  cluster->lane_mask = 0x1;
+  cluster->exec_mask = 0x1;
+  cluster->cluster_multicast = true;
+  cluster->cluster_mcast_mask = 0x1;
+  cluster->per_lane_addr[0] = kGlobalAddr;
+  cluster->per_lane_lds_addr[0] = wf->lds_base() + 0x40;
+  pipeline.issue(new TestMemoryInstruction(std::move(cluster)), *wf);
+
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0x40), kNewValue);
+}
+
+TEST(Gfx1250ExecutionTest, ClusterLdsFallbackSkipsSelfWhenMaskExcludesSource) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/3, /*pc=*/0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(17);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_cluster_info(/*rank=*/1, /*size=*/2);
+
+  constexpr uint64_t kGlobalAddr = 0x9100;
+  constexpr uint32_t kLoadedValue = 0xabcdef01;
+  for (uint32_t byte = 0; byte < sizeof(kLoadedValue); ++byte) {
+    sim.memory->write8(kGlobalAddr + byte,
+                       static_cast<uint8_t>((kLoadedValue >> (byte * 8)) & 0xffu));
+  }
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  state->lds_dst = true;
+  state->lds_per_lane_addr = true;
+  state->lds_base = wf->lds_base();
+  state->wf_size = 32;
+  state->lane_mask = 0x1;
+  state->exec_mask = 0x1;
+  state->cluster_multicast = true;
+  state->cluster_mcast_mask = 0x1; // Selects rank 0, not the source rank 1.
+  state->per_lane_addr[0] = kGlobalAddr;
+  state->per_lane_lds_addr[0] = wf->lds_base() + 0x20;
+
+  DeferredClusterLdsMulticastEngine deferred_engine;
+  cu->set_cluster_lds_multicast_engine(&deferred_engine);
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+
+  EXPECT_EQ(wf->wait_counters().asynccnt, 1u);
+  ASSERT_TRUE(static_cast<bool>(deferred_engine.completion));
+  EXPECT_TRUE(deferred_engine.txn.targets.empty());
+
+  deferred_engine.completion();
+  EXPECT_EQ(wf->wait_counters().asynccnt, 0u);
+  cu->set_cluster_lds_multicast_engine(nullptr);
+}
+
+TEST(Gfx1250SimulationTest, ClusterLdsTargetsCoversMasksAndLifetime) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  constexpr uint32_t lds_bytes_per_wg = 256;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/32, /*kernarg_addr=*/0, lds_bytes_per_wg);
+
+  ASSERT_TRUE(sim.engine->step());
+
+  auto all = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0x3);
+  ASSERT_EQ(all.size(), 2u);
+  EXPECT_EQ(all[0].wg_id, 0u);
+  EXPECT_EQ(all[1].wg_id, 1u);
+
+  auto self = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0x1);
+  ASSERT_EQ(self.size(), 1u);
+  EXPECT_EQ(self[0].wg_id, 0u);
+
+  auto peer = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0x2);
+  ASSERT_EQ(peer.size(), 1u);
+  EXPECT_EQ(peer[0].wg_id, 1u);
+
+  auto peer_from_rank1 =
+      sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/1, /*mcast_mask=*/0x1);
+  ASSERT_EQ(peer_from_rank1.size(), 1u);
+  EXPECT_EQ(peer_from_rank1[0].wg_id, 0u);
+
+  auto zero_mask = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0);
+  ASSERT_EQ(zero_mask.size(), 1u);
+  EXPECT_EQ(zero_mask[0].wg_id, 0u);
+
+  auto out_of_range =
+      sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0x4);
+  EXPECT_TRUE(out_of_range.empty());
+
+  auto mixed_range =
+      sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0x5);
+  ASSERT_EQ(mixed_range.size(), 1u);
+  EXPECT_EQ(mixed_range[0].wg_id, 0u);
+
+  EXPECT_TRUE(sim.cp()
+                  ->cluster_lds_targets(/*dispatch_id=*/999, /*wg_id=*/0,
+                                        /*mcast_mask=*/0x3)
+                  .empty());
+
+  sim.engine->run();
+  EXPECT_TRUE(sim.cp()
+                  ->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
+                                        /*mcast_mask=*/0x3)
+                  .empty());
+}
+
+TEST(Gfx1250SimulationTest, ClusterLdsTargetsUseMultiDimensionalClusterPlacement) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  constexpr uint32_t lds_bytes_per_wg = 256;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+
+  amdgpu::AmdExtKernelDispatchPacket pkt{};
+  pkt.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  pkt.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  pkt.setup = 2;
+  pkt.workgroup_size_x = 32;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.cluster_count_x = 2;
+  pkt.cluster_count_y = 2;
+  pkt.cluster_count_z = 1;
+  pkt.cluster_size_x = 2;
+  pkt.cluster_size_y = 2;
+  pkt.cluster_size_z = 1;
+  pkt.group_segment_size = lds_bytes_per_wg;
+  pkt.kernel_object = kernel_object;
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.submit(pkt);
+  ASSERT_TRUE(sim.engine->step());
+
+  auto cluster0 = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0xf);
+  ASSERT_EQ(cluster0.size(), 4u);
+  EXPECT_EQ(cluster0[0].wg_id, 0u);
+  EXPECT_EQ(cluster0[1].wg_id, 1u);
+  EXPECT_EQ(cluster0[2].wg_id, 4u);
+  EXPECT_EQ(cluster0[3].wg_id, 5u);
+
+  auto targets = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/5, /*mcast_mask=*/0x5);
+  ASSERT_EQ(targets.size(), 2u);
+  EXPECT_EQ(targets[0].wg_id, 0u);
+  EXPECT_EQ(targets[1].wg_id, 4u);
+
+  auto source = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/5, /*mcast_mask=*/0x8);
+  ASSERT_EQ(source.size(), 1u);
+  EXPECT_EQ(source[0].wg_id, 5u);
+
+  constexpr uint32_t kValue = 0xfeed1234;
+  amdgpu::ClusterLdsMulticastTransaction txn{};
+  txn.source_wg_id = source[0].wg_id;
+  txn.source_cluster_rank = source[0].cluster_rank;
+  txn.source_lds_base = source[0].lds_base;
+  txn.mcast_mask = 0x8;
+  txn.bytes_per_lane = sizeof(kValue);
+  txn.wf_size = 1;
+  txn.lane_mask = 0x1;
+  txn.per_lane_addr = true;
+  txn.per_lane_lds_addr[0] = source[0].lds_base + 0x10;
+  txn.payload.resize(sizeof(kValue));
+  std::memcpy(txn.payload.data(), &kValue, sizeof(kValue));
+  txn.targets = source;
+
+  amdgpu::ImmediateClusterLdsMulticastEngine engine;
+  bool deferred_callback_called = false;
+  EXPECT_EQ(engine.submit(std::move(txn), [&]() { deferred_callback_called = true; }),
+            amdgpu::ClusterLdsMulticastResult::Complete);
+  EXPECT_FALSE(deferred_callback_called);
+  EXPECT_EQ(targets[0].cu->lds().read32(targets[0].lds_base + 0x10), 0u);
+  EXPECT_EQ(targets[1].cu->lds().read32(targets[1].lds_base + 0x10), 0u);
+  EXPECT_EQ(source[0].cu->lds().read32(source[0].lds_base + 0x10), kValue);
+
+  sim.engine->run();
+}
+
+TEST(Gfx1250SimulationTest, ClusterLdsDoesNotRemapIntoNonParticipatingPeerLdsBase) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  constexpr uint32_t lds_bytes_per_wg = 256;
+  constexpr uint32_t cluster_size = 8;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+
+  Gfx1250Sim sim(make_single_se_gfx1250_config(/*num_cus=*/4));
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, cluster_size,
+                           /*workgroup_size_x=*/32, /*kernarg_addr=*/0, lds_bytes_per_wg);
+  ASSERT_TRUE(sim.engine->step());
+
+  struct RemapCase {
+    amdgpu::ClusterLdsTarget source;
+    amdgpu::ClusterLdsTarget target;
+  };
+  std::optional<RemapCase> remap_case;
+  for (uint32_t wg_id = 0; wg_id < cluster_size && !remap_case; ++wg_id) {
+    auto source = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, wg_id, /*mcast_mask=*/0);
+    ASSERT_EQ(source.size(), 1u);
+    ASSERT_NE(source[0].cu, nullptr);
+
+    auto targets = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, wg_id,
+                                                 /*mcast_mask=*/(1u << cluster_size) - 1);
+    for (const auto &target : targets) {
+      if (target.wg_id == wg_id)
+        continue;
+      if (target.cu == source[0].cu && target.lds_base != source[0].lds_base) {
+        remap_case = RemapCase{source[0], target};
+        break;
+      }
+    }
+  }
+  ASSERT_TRUE(remap_case.has_value());
+  const auto source = remap_case->source;
+  const auto target = remap_case->target;
+  ASSERT_NE(target.cu, nullptr);
+  EXPECT_EQ(target.cu, source.cu);
+  EXPECT_NE(target.lds_base, source.lds_base);
+
+  constexpr uint32_t kValue = 0x13579bdf;
+  amdgpu::ClusterLdsMulticastTransaction txn{};
+  txn.source_wg_id = source.wg_id;
+  txn.source_cluster_rank = source.cluster_rank;
+  txn.source_lds_base = source.lds_base;
+  txn.mcast_mask = (1u << cluster_size) - 1;
+  txn.bytes_per_lane = sizeof(kValue);
+  txn.wf_size = 1;
+  txn.lane_mask = 0x1;
+  txn.per_lane_addr = true;
+  txn.per_lane_lds_addr[0] = source.lds_base + 0x20;
+  txn.payload.resize(sizeof(kValue));
+  std::memcpy(txn.payload.data(), &kValue, sizeof(kValue));
+  txn.targets = {target};
+
+  amdgpu::ImmediateClusterLdsMulticastEngine engine;
+  EXPECT_EQ(engine.submit(std::move(txn), []() {}), amdgpu::ClusterLdsMulticastResult::Complete);
+  EXPECT_EQ(target.cu->lds().read32(target.lds_base + 0x20), 0u);
+  EXPECT_EQ(source.cu->lds().read32(source.lds_base + 0x20), 0u);
+
+  sim.engine->run();
+}
+
+TEST(Gfx1250SimulationTest, RejectsUnsupportedClusterSize) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1,
+                           /*cluster_size_x=*/amdgpu::kClusterMulticastMaskBits + 1,
+                           /*workgroup_size_x=*/32);
+
+  EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
+}
+
+TEST(Gfx1250SimulationTest, RejectsIncompleteClusterGrid) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/0);
+
+  EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
+}
+
+TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsDoesNotWriteMaskExcludedParticipant) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  constexpr uint64_t input_addr = 0x2000;
+  constexpr uint32_t lds_bytes_per_wg = 256;
+
+  const uint32_t code[] = {
+      0xBE8000FFu,    static_cast<uint32_t>(input_addr), // s_mov_b32 s0, input_addr
+      0xBE810080u,                                       // s_mov_b32 s1, 0
+      0xBEFD0081u,                                       // s_mov_b32 m0, 0x1
+      0x30000082u,                                       // v_lshlrev_b32_e32 v0, 2, v0
+      0xEE1AC000u,    0x00000000u,
+      0x00000000u, // cluster_load_async_to_lds_b32 v0, v0, s[0:1]
+      0xBFCA0000u, // s_wait_asynccnt 0
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+  for (uint32_t byte = 0; byte < 256; ++byte)
+    sim.memory->write8(input_addr + byte, static_cast<uint8_t>(0x40u + byte));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/32, /*kernarg_addr=*/0, lds_bytes_per_wg);
+  ASSERT_TRUE(sim.engine->step());
+
+  auto targets = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0x3);
+  ASSERT_EQ(targets.size(), 2u);
+  ASSERT_NE(targets[0].cu, nullptr);
+  ASSERT_NE(targets[1].cu, nullptr);
+  EXPECT_NE(targets[0].cu, targets[1].cu);
+  sim.engine->run();
+  EXPECT_TRUE(sim.cp()
+                  ->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
+                                        /*mcast_mask=*/0x3)
+                  .empty());
+
+  auto read_unaligned_input = [&](uint32_t byte_offset) {
+    uint32_t value = 0;
+    for (uint32_t byte = 0; byte < 4; ++byte)
+      value |= static_cast<uint32_t>(sim.memory->read8(input_addr + byte_offset + byte))
+               << (byte * 8);
+    return value;
+  };
+
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    uint32_t value0 = targets[0].cu->lds().read32(targets[0].lds_base + lane * 4);
+    uint32_t value1 = targets[1].cu->lds().read32(targets[1].lds_base + lane * 4);
+    uint32_t wg0_value = read_unaligned_input(lane * 4);
+    EXPECT_EQ(value0, wg0_value) << "lane " << lane;
+    EXPECT_EQ(value1, 0u) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsWritesEachIssuingParticipant) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  constexpr uint64_t input_addr = 0x2400;
+  constexpr uint32_t lds_bytes_per_wg = 256;
+
+  const uint32_t code[] = {
+      0xBE8000FFu,    static_cast<uint32_t>(input_addr), // s_mov_b32 s0, input_addr
+      0xBE810080u,                                       // s_mov_b32 s1, 0
+      0xBEFD0083u,                                       // s_mov_b32 m0, 0x3
+      0x30000082u,                                       // v_lshlrev_b32_e32 v0, 2, v0
+      0xEE1AC000u,    0x00000000u,
+      0x00000000u, // cluster_load_async_to_lds_b32 v0, v0, s[0:1]
+      0xBFCA0000u, // s_wait_asynccnt 0
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+  for (uint32_t byte = 0; byte < 256; ++byte)
+    sim.memory->write8(input_addr + byte, static_cast<uint8_t>(0x80u + byte));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/32, /*kernarg_addr=*/0, lds_bytes_per_wg);
+  ASSERT_TRUE(sim.engine->step());
+
+  auto targets = sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0x3);
+  ASSERT_EQ(targets.size(), 2u);
+  ASSERT_NE(targets[0].cu, nullptr);
+  ASSERT_NE(targets[1].cu, nullptr);
+  EXPECT_NE(targets[0].cu, targets[1].cu);
+  sim.engine->run();
+
+  auto read_unaligned_input = [&](uint32_t byte_offset) {
+    uint32_t value = 0;
+    for (uint32_t byte = 0; byte < 4; ++byte)
+      value |= static_cast<uint32_t>(sim.memory->read8(input_addr + byte_offset + byte))
+               << (byte * 8);
+    return value;
+  };
+
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    uint32_t value0 = targets[0].cu->lds().read32(targets[0].lds_base + lane * 4);
+    uint32_t value1 = targets[1].cu->lds().read32(targets[1].lds_base + lane * 4);
+    uint32_t expected_value = read_unaligned_input(lane * 4);
+    EXPECT_EQ(value0, expected_value) << "lane " << lane;
+    EXPECT_EQ(value1, expected_value) << "lane " << lane;
+  }
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {

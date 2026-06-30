@@ -4,6 +4,17 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.14 for ROCm 7.14
 
+### Optimizations
+
+* `hipMemcpy2D`/`hipMemcpy2DAsync`: avoid a severe slowdown for copies that have a small row width but a large number of rows (for example a `width` of 1 byte with a row count in the millions). When the row/slice pitch is not 4-byte aligned, `KernelBlitManager::copyBufferRect` previously fell back to issuing a separate copy for every row, so a 1&nbsp;MB transfer of 1,048,576 rows &times; 1 byte on MI300 took several seconds, while the equivalent NVIDIA/CUDA path completes in a few milliseconds. Such copies are now performed in a single shader-based copy. Measured before/after on MI300 / ROCm 7.2 (1,048,576 rows):
+    - width=1, H2D pinned: 8615.79 ms &rarr; 0.283 ms
+    - width=1, H2D pageable: 8627.17 ms &rarr; 0.284 ms
+    - width=1, D2H pinned: 7908.23 ms &rarr; 0.334 ms
+    - width=1, D2H pageable: 7912.22 ms &rarr; 0.335 ms
+    - dword-aligned widths (4 / 8 / 128 bytes) &rarr; unchanged
+
+  Copies at or below the 256-row threshold are unaffected.
+
 ### Added
 * New HIP APIs
     - Execution Context Management: Support for the following APIs for parity with corresponding CUDA APIs.
@@ -32,6 +43,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipDrvMemDiscardAndPrefetchBatchAsync` driver API variant of `hipMemDiscardAndPrefetchBatchAsync`, using `hipDeviceptr_t` pointers. Mirrors `cuMemDiscardAndPrefetchBatchAsync`.
 * Support for non-Host Transparent (nHT) fabric handles in HIP Virtual Memory Management (VMM) APIs, enabling efficient cross-device memory sharing over IFoE (Infinity Fabric over Ethernet).
 This allows peer devices to directly access shared memory without host staging, reducing data movement overhead and improving performance for multi-GPU and distributed workloads.
+* Introduced an exported no-op function `__hipOnError(void *err_info)`, invoked from `HIP_UPDATE_ERROR_STATE` when an API returns a non-success status,
+enabling debuggers to set breakpoints on a stable symbol. The symbol is exported on ELF (Executable and Linkable Format) platforms via a version script and on Windows via amdhip.def.
+The `err_info` parameter is a pointer to a struct containing the error code, name, and descriptive string.
 
 ### Resolved issues
 

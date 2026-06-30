@@ -777,6 +777,110 @@ if(HAVE_HWLOC)
   target_link_libraries(${ROCRTST} ${HWLOC_TARGET})
 endif()
 
+enable_testing()
+
+get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime" ABSOLUTE)
+set(HOTSWAP_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/hotswap")
+
+# Keep COMGR out of rocrtst link/package dependencies. These optional build
+# runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
+set(HOTSWAP_BUILD_RPATH "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(HOTSWAP_SYMBOL_TOOL "${CMAKE_NM}")
+  if(NOT HOTSWAP_SYMBOL_TOOL)
+    find_program(HOTSWAP_SYMBOL_TOOL NAMES llvm-nm nm HINTS ${LLVM_TOOLS_BINARY_DIR})
+  endif()
+
+  foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+    foreach(_libdir IN ITEMS lib lib64 tools/comgr/lib)
+      foreach(_comgr_name IN ITEMS libamd_comgr.so.3 libamd_comgr.so)
+        set(_comgr_library "${_prefix}/${_libdir}/${_comgr_name}")
+        if(HOTSWAP_SYMBOL_TOOL AND EXISTS "${_comgr_library}")
+          execute_process(
+            COMMAND "${HOTSWAP_SYMBOL_TOOL}" -D "${_comgr_library}"
+            RESULT_VARIABLE _comgr_symbol_result
+            OUTPUT_VARIABLE _comgr_symbols
+            ERROR_QUIET)
+          if(_comgr_symbol_result EQUAL 0 AND
+             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
+            list(APPEND HOTSWAP_BUILD_RPATH "${_prefix}/${_libdir}")
+            break()
+          endif()
+        endif()
+      endforeach()
+    endforeach()
+  endforeach()
+  list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
+endif()
+
+set(HOTSWAP_GFX1250_ASM "${HOTSWAP_TEST_ROOT}/fixtures/gfx1250_min.s")
+set(HOTSWAP_GFX1250_HSACO "${PROJECT_BINARY_DIR}/gfx1250_min.hsaco")
+set(HOTSWAP_GFX1250_HSACO_HDR "${PROJECT_BINARY_DIR}/gfx1250_min_hsaco.h")
+set(HOTSWAP_GENERATE_HSACO_HDR
+    "${HOTSWAP_TEST_ROOT}/fixtures/generate_hsaco_header.cmake")
+
+add_custom_command(
+  OUTPUT "${HOTSWAP_GFX1250_HSACO}"
+  COMMAND ${CLANG}
+          -x assembler
+          -target amdgcn-amd-amdhsa
+          -mcpu=gfx1250
+          -o "${HOTSWAP_GFX1250_HSACO}"
+          "${HOTSWAP_GFX1250_ASM}"
+  DEPENDS "${HOTSWAP_GFX1250_ASM}" ${CLANG}
+  COMMENT "BUILDING ${HOTSWAP_GFX1250_HSACO}"
+  VERBATIM)
+
+add_custom_command(
+  OUTPUT "${HOTSWAP_GFX1250_HSACO_HDR}"
+  COMMAND ${CMAKE_COMMAND}
+          -DINPUT=${HOTSWAP_GFX1250_HSACO}
+          -DOUTPUT=${HOTSWAP_GFX1250_HSACO_HDR}
+          -P "${HOTSWAP_GENERATE_HSACO_HDR}"
+  DEPENDS "${HOTSWAP_GFX1250_HSACO}" "${HOTSWAP_GENERATE_HSACO_HDR}"
+  COMMENT "GENERATING ${HOTSWAP_GFX1250_HSACO_HDR}"
+  VERBATIM)
+
+add_custom_target(hotswap_gfx1250_fixture DEPENDS "${HOTSWAP_GFX1250_HSACO_HDR}")
+
+add_executable(hotswap_gfx_query
+  ${HOTSWAP_TEST_ROOT}/hotswap_gfx_query_test.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp)
+target_include_directories(hotswap_gfx_query PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_link_libraries(hotswap_gfx_query ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME hotswap_gfx_query COMMAND hotswap_gfx_query)
+set_tests_properties(hotswap_gfx_query PROPERTIES
+  LABELS "quick;standard;pr;pre-commit;hotswap"
+  TIMEOUT 60)
+
+add_executable(hotswap_rewrite
+  ${HOTSWAP_TEST_ROOT}/hotswap_rewrite_test.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap.cpp
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp
+  "${HOTSWAP_GFX1250_HSACO_HDR}")
+add_dependencies(hotswap_rewrite hotswap_gfx1250_fixture)
+target_include_directories(hotswap_rewrite PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${PROJECT_BINARY_DIR}
+  ${ROCRTST_ROOT}/gtest/include)
+target_compile_definitions(hotswap_rewrite PRIVATE ROCR_HOTSWAP_TESTING)
+target_link_libraries(hotswap_rewrite ${GOOGLE_TEST_FRWK_NAME} ${CMAKE_DL_LIBS} pthread)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set_target_properties(hotswap_rewrite PROPERTIES
+    LINK_FLAGS "-Wl,--enable-new-dtags"
+    INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../lib64")
+  if(HOTSWAP_BUILD_RPATH)
+    set_property(TARGET hotswap_rewrite PROPERTY
+      BUILD_RPATH "${HOTSWAP_BUILD_RPATH}")
+  endif()
+endif()
+add_test(NAME hotswap_rewrite COMMAND hotswap_rewrite)
+set_tests_properties(hotswap_rewrite PROPERTIES
+  LABELS "quick;standard;pr;pre-commit;hotswap"
+  TIMEOUT 120)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -794,6 +898,9 @@ set_target_properties(${ROCRTST} PROPERTIES
 install(TARGETS ${ROCRTST}
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin)
+
+install(TARGETS hotswap_gfx_query hotswap_rewrite
         RUNTIME DESTINATION bin)
 
 # Install platform configuration file
@@ -840,6 +947,16 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
       "${TEST_CATEGORIES_YAML}"
       "${PROJECT_BINARY_DIR}"
       "${INSTALL_TEST_FILE}"
+    )
+
+    file(
+        APPEND
+        "${INSTALL_TEST_FILE}"
+        "\n"
+        "add_test(hotswap_gfx_query \"../hotswap_gfx_query\")\n"
+        "set_tests_properties(hotswap_gfx_query PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 60)\n\n"
+        "add_test(hotswap_rewrite \"../hotswap_rewrite\")\n"
+        "set_tests_properties(hotswap_rewrite PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 120)\n\n"
     )
 
     install(
