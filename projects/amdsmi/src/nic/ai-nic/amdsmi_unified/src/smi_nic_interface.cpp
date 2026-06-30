@@ -169,7 +169,10 @@ smi_nic_status_t smi_get_nic_driver_info(smi_nic_ctx_t ctx, uint64_t device,
 
   int ret = smi_ethtool_ioctl(ports[0].interface(), &drvinfo);
   if (ret != 0) {
-    return SMI_NIC_STATUS_ERROR;
+    // ethtool unavailable (e.g. simulation or missing driver) — return empty info
+    std::snprintf(info->name, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
+    std::snprintf(info->version, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
+    return SMI_NIC_STATUS_SUCCESS;
   }
 
   std::snprintf(info->name, SMI_NIC_MAX_STRING_LENGTH, "%s", drvinfo.driver);

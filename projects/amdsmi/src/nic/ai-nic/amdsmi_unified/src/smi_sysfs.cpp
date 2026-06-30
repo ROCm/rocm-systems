@@ -23,9 +23,18 @@
 #include "smi_sysfs.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+
+const std::string& smi_sysfs_root() {
+  static const std::string root = [] {
+    const char* env = std::getenv("SMI_NIC_SYSFS_ROOT");
+    return env ? std::string(env) : std::string("");
+  }();
+  return root;
+}
 
 SmiSysfsReader::SysfsStatus SmiSysfsReader::readAll(const std::string& filepath,
                                                     std::vector<SysfsValue>& content) {

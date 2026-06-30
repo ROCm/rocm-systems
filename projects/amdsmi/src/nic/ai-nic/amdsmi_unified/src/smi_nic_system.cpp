@@ -56,7 +56,9 @@ uint64_t parse_bdf(const std::string& bdf) {
   }
 }
 
-SmiNicSystem::SmiNicSystem() : net_path_("/sys/class/net"), pci_path_("/sys/bus/pci/devices") {
+SmiNicSystem::SmiNicSystem()
+    : net_path_(smi_sysfs_root() + "/sys/class/net"),
+      pci_path_(smi_sysfs_root() + "/sys/bus/pci/devices") {
   register_subsystem(std::make_unique<SmiNicSubsystemPensando>());
   // TODO: broadcom
   // register_subsystem(std::make_unique<SmiNicSubsystemBroadcom>());

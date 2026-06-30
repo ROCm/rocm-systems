@@ -27,6 +27,20 @@
 #include <variant>
 #include <vector>
 
+/**
+ * @brief Return the sysfs root prefix.
+ *
+ * Normally empty (""), which means all paths start directly at "/sys/...".
+ * When the environment variable SMI_NIC_SYSFS_ROOT is set, its value is
+ * prepended to every sysfs path, allowing a fake sysfs tree to be used
+ * for simulation and testing without real hardware.
+ *
+ * Example:
+ *   SMI_NIC_SYSFS_ROOT=/tmp/fake-sysfs
+ *   -> "/sys/class/net" becomes "/tmp/fake-sysfs/sys/class/net"
+ */
+const std::string& smi_sysfs_root();
+
 class SmiSysfsReader {
  public:
   using SysfsValue = std::variant<int, std::string>;

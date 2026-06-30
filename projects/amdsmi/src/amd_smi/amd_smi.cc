@@ -1192,6 +1192,14 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
 }
 #endif  // BRCM_NIC
 
+static const std::string& nic_sysfs_root() {
+  static const std::string root = [] {
+    const char* env = std::getenv("SMI_NIC_SYSFS_ROOT");
+    return env ? std::string(env) : std::string("");
+  }();
+  return root;
+}
+
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
                                                     uint32_t rdma_port_index, uint32_t* num_stats,
                                                     amdsmi_nic_stat_t* stats) {
@@ -1241,9 +1249,10 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
   std::string rdmadev(nic_info.rdma_dev.rdma_dev_info[0].rdma_dev);
   int port_num = nic_info.rdma_dev.rdma_dev_info[0].rdma_port_info[rdma_port_index].rdma_port;
 
-  std::string directory_path = "/sys/class/net/" + netdev + "/device/infiniband/" + rdmadev +
-                               "/subsystem/" + rdmadev + "/subsystem/" + rdmadev + "/ports/" +
-                               std::to_string(port_num) + "/hw_counters/";
+  std::string directory_path = nic_sysfs_root() + "/sys/class/net/" + netdev +
+                               "/device/infiniband/" + rdmadev + "/subsystem/" + rdmadev +
+                               "/subsystem/" + rdmadev + "/ports/" + std::to_string(port_num) +
+                               "/hw_counters/";
   if (!std::filesystem::exists(directory_path)) {
     ss << __PRETTY_FUNCTION__ << " | Directory does not exist: " << directory_path;
     LOG_ERROR(ss);

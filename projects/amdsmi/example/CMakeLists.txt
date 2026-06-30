@@ -96,6 +96,14 @@ target_include_directories(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ${ROCM_DIR}/include 
 target_link_libraries(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ${_AMDSMI_LINK_TARGET})
 target_link_directories(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ${ROCM_DIR}/lib)
 
+# amd_smi_ainic_info: standalone AI NIC info tool.
+# Uses only public <amd_smi/amdsmi.h> — no internal headers.
+# Works against real hardware and against a simulated sysfs tree
+# (set SMI_NIC_SYSFS_ROOT; see run_simulated_ainic.sh).
+set(SMI_AINIC_INFO_EXE "amd_smi_ainic_info")
+add_executable(${SMI_AINIC_INFO_EXE} "amd_smi_ainic_example.cc")
+target_link_libraries(${SMI_AINIC_INFO_EXE} PRIVATE ${_AMDSMI_LINK_TARGET})
+
 set(SMI_FABRIC_EXAMPLE_EXE "amd_smi_fabric_ex")
 add_executable(${SMI_FABRIC_EXAMPLE_EXE} "amd_smi_fabric_example.cc")
 target_link_libraries(${SMI_FABRIC_EXAMPLE_EXE} PRIVATE ${_AMDSMI_LINK_TARGET})

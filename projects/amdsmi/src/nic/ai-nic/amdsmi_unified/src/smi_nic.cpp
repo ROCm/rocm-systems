@@ -562,7 +562,8 @@ std::optional<uint8_t> SmiNic::numa_node() const {
 }
 
 std::optional<std::string> SmiNic::numa_affinity(uint8_t node) const {
-  std::string path = "/sys/devices/system/node/node" + std::to_string(node) + "/cpulist";
+  std::string path =
+      smi_sysfs_root() + "/sys/devices/system/node/node" + std::to_string(node) + "/cpulist";
   return get_sysfs_data<std::string>(path);
 }
 

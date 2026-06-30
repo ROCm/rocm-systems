@@ -87,10 +87,10 @@ bool SmiNicSubsystemPensando::driver_loaded(const std::string& bdf, DriverType d
 
   switch (driver_type) {
     case DriverType::IONIC:
-      driver_dir = "/sys/bus/pci/drivers/ionic";
+      driver_dir = smi_sysfs_root() + "/sys/bus/pci/drivers/ionic";
       break;
     case DriverType::IONIC_RDMA:
-      driver_dir = "/sys/bus/auxiliary/drivers/ionic_rdma.rdma";
+      driver_dir = smi_sysfs_root() + "/sys/bus/auxiliary/drivers/ionic_rdma.rdma";
       break;
     default:
       return false;
