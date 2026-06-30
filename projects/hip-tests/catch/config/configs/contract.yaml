@@ -354,3 +354,15 @@ contract:
   Contract_Array3D_FreeArray_Succeeds:
     <<: *level_0
     tags: [array3d]
+  Contract_MemoryPoolLifecycle_CreateDestroy_SucceedsWhenSupported:
+    <<: *level_0
+    tags: [memory_pool_lifecycle]
+  Contract_MemoryPoolLifecycle_GetSetReleaseThreshold_RoundTripsValue:
+    <<: *level_0
+    tags: [memory_pool_lifecycle]
+  Contract_MemoryPoolLifecycle_TrimTo_SucceedsOnEmptyPool:
+    <<: *level_0
+    tags: [memory_pool_lifecycle]
+  Contract_MemoryPoolLifecycle_MallocFromCreatedPoolAsync_SucceedsWhenSupported:
+    <<: *level_0
+    tags: [memory_pool_lifecycle]
