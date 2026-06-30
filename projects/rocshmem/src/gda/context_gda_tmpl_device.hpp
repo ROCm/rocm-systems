@@ -759,7 +759,7 @@ __device__ void GDAContext::internal_broadcast(T *dst, const T *src,
 template <typename T>
 __device__ void GDAContext::alltoall_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  alltoall_linear_thread_puts_wg(team, dst, src, nelems);
+  alltoallmem_linear_thread_puts_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
@@ -947,50 +947,6 @@ __device__ void GDAContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
 
   // wait until everyone has obtained their designated data
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
-}
-
-template <typename T>
-__device__ void GDAContext::alltoall_linear_thread_puts_wg(rocshmem_team_t team,
-    T *dst, const T *src, int nelems) {
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-
-  int pe_size = team_obj->num_pes;
-  long *pSync = team_obj->alltoall_pSync;
-  int my_pe_in_team = team_obj->my_pe;
-  uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
-
-  int tid = get_flat_block_id();
-  int step_size = min(get_flat_block_size(), WF_SIZE);
-
-  // Have each PE put their designated data to the other PEs
-  for (int j = tid; j < pe_size; j += step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-    qps[dest_pe].put_nbi_single(
-      reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
-      &src[j * nelems], nelems * sizeof(T), false);
-    qps[dest_pe].atomic_nofetch_single(
-      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
-      base_heap_offset, 1);
-  }
-
-  // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(sync_flags) != 1) { }
-
-    qps[dest_pe].quiet_single();
-
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
-  }
-
-  if (is_thread_zero_in_block()) {
-    team_obj->alltoall_sequence_number++;
-  }
-
-  __syncthreads();
 }
 
 template <typename T>

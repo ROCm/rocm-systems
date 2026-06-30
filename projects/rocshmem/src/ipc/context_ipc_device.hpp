@@ -162,6 +162,9 @@ class IPCContext : public Context {
   __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
+  __device__ void alltoallmem_wg(rocshmem_team_t team, void* dest,
+                                   const void* source, int nelems);
+
   template <typename T>
   __device__ void alltoallv(rocshmem_team_t team,
                             T *dest, const size_t dest_nelems[],
@@ -414,12 +417,14 @@ class IPCContext : public Context {
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems);
 
-  template <typename T>
-  __device__ void alltoall_wg_linear(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems);
-  template <typename T>
-  __device__ void alltoall_wg_linear_thread_puts(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems);
+  __device__ void internal_alltoallmem_wg(rocshmem_team_t team, void *dst,
+                                          const void *src, int nelems);
+
+  __device__ void alltoallmem_wg_linear(rocshmem_team_t team, void *dest,
+                                        const void *source, int nelems);
+
+  __device__ void alltoallmem_wg_linear_thread_puts(rocshmem_team_t team, void *dest,
+                                                    const void *source, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
                                 int64_t *pSync);
@@ -463,6 +468,9 @@ class IPCContext : public Context {
 
   __device__ void internal_getmem_wave(void *dest, const void *source,
                                       size_t nelems, int pe);
+
+  __device__ void internal_alltoallmem_wave(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems);
 
   __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
                                             const void *src, int nelems);

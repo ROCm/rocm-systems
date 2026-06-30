@@ -166,6 +166,9 @@ class GDAContext : public Context {
   __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
+  __device__ void alltoallmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
+
   template <typename T>
   __device__ void alltoallv(rocshmem_team_t team,
                             T *dest, const size_t dest_nelems[],
@@ -315,9 +318,8 @@ class GDAContext : public Context {
   __device__ void alltoall_linear_wg(rocshmem_team_t team, T *dest,
     const T *source, int nelems);
 
-  template <typename T>
-  __device__ void alltoall_linear_thread_puts_wg(rocshmem_team_t team, T *dest,
-                                              const T *source, int nelems);
+  __device__ void alltoallmem_linear_thread_puts_wg(rocshmem_team_t team, void *dest,
+                                              const void *source, int nelems);
 
   __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
                                           const void *src, int nelems);

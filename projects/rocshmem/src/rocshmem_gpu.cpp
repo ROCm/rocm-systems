@@ -707,6 +707,14 @@ __device__ void rocshmem_alltoall_wg(rocshmem_team_t team, T *dest,
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->alltoall_wg<T>(team, dest, source, nelem);
 }
 
+__device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx,
+          rocshmem_team_t team, void *dest, const void *source, int nelems){
+  LOGD_API("device::ctx_alltoallmem_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d)",
+              ctx.ctx_opaque, team, dest, source, nelem);
+
+  get_internal_ctx(ctx)->alltoallmem_wg(team, dest, source, nelems);
+}
+
 template <typename T>
 __device__ void rocshmem_alltoallv_wg(rocshmem_team_t team,
                                       T *dest, const size_t dest_nelems[],

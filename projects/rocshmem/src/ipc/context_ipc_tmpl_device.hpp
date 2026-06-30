@@ -574,21 +574,18 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
 template <typename T>
 __device__ void IPCContext::alltoall_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-#if defined(USE_SDMA)
-  if (sizeof(T) * nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
-#else
-  if (sizeof(T) * nelems < 512)
-#endif
-    alltoall_wg_linear_thread_puts(team, dst, src, nelems);
-  else
-    alltoall_wg_linear(team, dst, src, nelems);
+  internal_alltoallmem_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
 __device__ int IPCContext::alltoall_wave(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems) {
+  if (dest == nullptr || source == nullptr || team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
 
-  return alltoallmem_wave(team, dest, source, nelems * sizeof(T));
+  internal_alltoallmem_wave(team, dest, source, nelems * sizeof(T));
+
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename T>
@@ -601,6 +598,7 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
 }
 
 template <typename T>
+<<<<<<< HEAD
 __device__ void IPCContext::alltoall_wg_linear(rocshmem_team_t team, T *dst,
                                             const T *src, int nelems) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
@@ -671,6 +669,8 @@ __device__ void IPCContext::alltoall_wg_linear_thread_puts(rocshmem_team_t team,
 }
 
 template <typename T>
+=======
+>>>>>>> 9ea5144de0 (add alltoallmem_wg)
 __device__ void IPCContext::fcollect(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
   fcollect_linear(team, dst, src, nelems);

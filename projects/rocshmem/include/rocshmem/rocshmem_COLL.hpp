@@ -135,6 +135,26 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoall_wg(
     rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source, int nelems);
 
 /**
+ * @name ROCSHMEM_ALLTOALLMEM_WG
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int; zero on success, non-zero otherwise
+ */
+__device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+
+/**
  * @name ROCSHMEM_CTX_ALLTOALL_WAVE
  * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
  * of PEs participating in the collective routine.
