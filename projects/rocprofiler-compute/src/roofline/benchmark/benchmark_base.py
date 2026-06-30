@@ -9,7 +9,6 @@
 # -----------------------------------------------------------------------------
 
 import csv
-import fcntl
 import math
 from abc import ABC
 from collections import namedtuple
@@ -34,6 +33,7 @@ from typing import Any
 
 import utils.hip_interface as hip
 import utils.hiprtc_interface as hiprtc
+from utils import utils_profile
 
 # =============================================================================
 # GLOBAL VARIABLES
@@ -148,18 +148,16 @@ class Bench_base(ABC):
 
         lock_file = lock_dir / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
 
-        with open(lock_file, "a", encoding="utf-8") as f:
-            try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                msg = (
-                    f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
-                    "another rocprof-compute benchmark is in progress..."
-                )
-                print(msg, flush=True)
-                fcntl.flock(f, fcntl.LOCK_EX)  # Blocking wait
-                msg = f"Acquired lock for GPU {device}, proceeding with benchmark."
-                print(msg, flush=True)
+        with utils_profile.file_lock(
+            lock_file,
+            wait_message=(
+                f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
+                "another rocprof-compute benchmark is in progress..."
+            ),
+            acquired_message=(
+                f"Acquired lock for GPU {device}, proceeding with benchmark."
+            ),
+        ):
             yield
 
     def show_progress(self, pct: float) -> None:
