@@ -78,6 +78,10 @@ constexpr std::array<uint32_t, 2> encode_vop2(uint32_t op, uint32_t vdst, uint32
           0u};
 }
 
+constexpr std::array<uint32_t, 2> encode_sop1(uint32_t op, uint32_t sdst, uint32_t ssrc0) {
+  return {(ssrc0 & 0xFFu) | ((op & 0xFFu) << 8) | ((sdst & 0x7Fu) << 16) | 0xBE800000u, 0u};
+}
+
 constexpr std::array<uint32_t, 2> encode_sop2(uint32_t op, uint32_t sdst, uint32_t ssrc0,
                                               uint32_t ssrc1) {
   return {(ssrc0 & 0xFFu) | ((ssrc1 & 0xFFu) << 8) | ((sdst & 0x7Fu) << 16) | ((op & 0x7Fu) << 23) |
@@ -330,6 +334,66 @@ TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
   run(add, "s_add_co_i32", 0x7FFFFFFFu, 0u, 0x7FFFFFFFu, false);
   run(sub, "s_sub_co_i32", 0x80000000u, 1u, 0x7FFFFFFFu, true);
   run(sub, "s_sub_co_i32", 5u, 3u, 2u, false);
+
+  cu->reset_all_wf();
+}
+
+TEST(Gfx1250ScalarSccTest, ScalarCvtPreservesScc) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_s_cvt_scc_mem");
+  amdgpu::L2Cache l2("gfx1250_s_cvt_scc_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t one_f32 = std::bit_cast<uint32_t>(1.0f);
+  const uint32_t one_f16 = util::f32_to_f16(1.0f);
+
+  struct Case {
+    uint32_t op;
+    const char *mnemonic;
+    uint32_t src;
+    uint32_t expected;
+  };
+  const std::array<Case, 7> cases{{
+      {0x64u, "s_cvt_f32_i32", 1u, one_f32},
+      {0x65u, "s_cvt_f32_u32", 1u, one_f32},
+      {0x66u, "s_cvt_i32_f32", one_f32, 1u},
+      {0x67u, "s_cvt_u32_f32", one_f32, 1u},
+      {0x68u, "s_cvt_f16_f32", one_f32, one_f16},
+      {0x69u, "s_cvt_f32_f16", one_f16, one_f32},
+      {0x6Au, "s_cvt_hi_f32_f16", one_f16 << 16, one_f32},
+  }};
+
+  for (const auto &tc : cases) {
+    const auto words = encode_sop1(tc.op, /*sdst=*/1, /*ssrc0=*/0);
+    for (bool initial_scc : std::array<bool, 2>{false, true}) {
+      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(std::string_view(inst->mnemonic()), tc.mnemonic);
+
+      cu->write_sgpr(sb + 0, tc.src);
+      cu->write_sgpr(sb + 1, 0u);
+      wf->write_scc(initial_scc);
+      cu->execute_instruction(inst.get(), *wf);
+
+      EXPECT_EQ(cu->read_sgpr(sb + 1), tc.expected) << tc.mnemonic;
+      EXPECT_EQ(wf->read_scc(), initial_scc) << tc.mnemonic << " initial_scc=" << initial_scc;
+    }
+  }
 
   cu->reset_all_wf();
 }

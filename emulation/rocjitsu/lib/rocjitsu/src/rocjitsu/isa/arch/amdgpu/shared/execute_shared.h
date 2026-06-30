@@ -1485,7 +1485,6 @@ inline void execute_s_cvt_f16_f32_sop1([[maybe_unused]] Inst &inst,
   uint32_t result =
       util::f32_to_f16(std::bit_cast<float>(static_cast<uint32_t>(inst.ssrc0.read_scalar(wf))));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1494,7 +1493,6 @@ inline void execute_s_cvt_f32_f16_sop1([[maybe_unused]] Inst &inst,
   uint32_t result =
       std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1503,7 +1501,6 @@ inline void execute_s_cvt_f32_i32_sop1([[maybe_unused]] Inst &inst,
   uint32_t result =
       std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf))));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1511,7 +1508,6 @@ inline void execute_s_cvt_f32_u32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(inst.ssrc0.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1520,7 +1516,6 @@ inline void execute_s_cvt_hi_f32_f16_sop1([[maybe_unused]] Inst &inst,
   uint32_t result = std::bit_cast<uint32_t>(
       util::f16_to_f32(static_cast<uint16_t>((inst.ssrc0.read_scalar(wf)) >> 16)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1537,7 +1532,6 @@ inline void execute_s_cvt_i32_f32_sop1([[maybe_unused]] Inst &inst,
     return static_cast<uint32_t>(static_cast<int32_t>(s));
   }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1562,7 +1556,6 @@ inline void execute_s_cvt_u32_f32_sop1([[maybe_unused]] Inst &inst,
     return static_cast<uint32_t>(s);
   }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
