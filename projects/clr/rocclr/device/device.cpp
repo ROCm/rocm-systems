@@ -1554,7 +1554,7 @@ void Device::reportDeviceMemoryLeaks() {
   }
 
   for (const auto& pair : uriCache) {
-    close(pair.second.fd);
+    amd::Os::CloseFileHandle(pair.second.fd);
   }
 
   delete uriLocator;
