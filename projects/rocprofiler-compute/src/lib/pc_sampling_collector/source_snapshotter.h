@@ -5,6 +5,7 @@
 #include "filesystem_wrapper.h"
 
 #include <filesystem>
+#include <memory>
 #include <set>
 
 namespace rocprofiler_compute_tool
@@ -12,6 +13,8 @@ namespace rocprofiler_compute_tool
 class source_snapshotter_t
 {
 public:
+    using ptr = std::shared_ptr<source_snapshotter_t>;
+
     virtual ~source_snapshotter_t() = default;
     virtual void snapshot(const std::set<std::filesystem::path>& source_paths,
                           const std::filesystem::path&           destination_root) = 0;

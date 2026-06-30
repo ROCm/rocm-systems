@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 #include "pc_sampling_collector.h"
+#include "source_snapshotter.h"
 
 #include <filesystem>
 #include <string>
@@ -17,7 +18,9 @@ public:
     pc_sampling_feature_t(PcSamplingMode mode, std::filesystem::path output_path);
     pc_sampling_feature_t(PcSamplingMode               mode,
                           std::filesystem::path        output_path,
-                          pc_sampling_collector_t::ptr collector);
+                          code_object_translator_t::ptr translator,
+                          pc_sampling_collector_t::ptr  collector,
+                          source_snapshotter_t::ptr     snapshotter);
 
     bool enabled() const { return m_enabled; }
 
@@ -32,6 +35,8 @@ private:
     bool                         m_enabled = false;
     PcSamplingMode               m_mode    = PcSamplingMode::Disabled;
     std::filesystem::path        m_output_path;
-    pc_sampling_collector_t::ptr m_collector;
+    code_object_translator_t::ptr m_translator;
+    pc_sampling_collector_t::ptr  m_collector;
+    source_snapshotter_t::ptr     m_snapshotter;
 };
 }  // namespace rocprofiler_compute_tool
