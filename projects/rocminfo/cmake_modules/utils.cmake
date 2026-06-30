@@ -89,7 +89,6 @@ function(get_version_from_tag DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
                           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                           OUTPUT_VARIABLE GIT_TAG_STRING
                           OUTPUT_STRIP_TRAILING_WHITESPACE
-                          ERROR_QUIET
                           RESULT_VARIABLE RESULT )
         if ( ${RESULT} EQUAL 0 )
             parse_version ( ${GIT_TAG_STRING} )
@@ -106,18 +105,17 @@ function(num_change_since_prev_pkg VERSION_PREFIX)
     find_program(get_commits NAMES version_util.sh
                  PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
     if (get_commits)
-        execute_process( COMMAND ${get_commits} -c ${VERSION_PREFIX}
-                           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                           OUTPUT_VARIABLE NUM_COMMITS
-                           OUTPUT_STRIP_TRAILING_WHITESPACE
-                           ERROR_QUIET
-                           RESULT_VARIABLE RESULT )
+       execute_process( COMMAND ${get_commits} -c ${VERSION_PREFIX}
+                          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                          OUTPUT_VARIABLE NUM_COMMITS
+                          OUTPUT_STRIP_TRAILING_WHITESPACE
+                          RESULT_VARIABLE RESULT )
+
+        set(NUM_COMMITS "${NUM_COMMITS}" PARENT_SCOPE )
 
         if ( ${RESULT} EQUAL 0 )
-          set(NUM_COMMITS "${NUM_COMMITS}" PARENT_SCOPE )
           message("${NUM_COMMITS} were found since previous release")
         else()
-          set(NUM_COMMITS "0" PARENT_SCOPE )
           message("Unable to determine number of commits since previous release")
         endif()
     else()
