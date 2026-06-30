@@ -21,16 +21,20 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# Validates kernel-replay counter collection (JSON output) produced by:
-#   rocprofv3 --pmc <counter> --kernel-replay --kernel-replay-passes N -- kernel-replay ...
+# Validates multi-pass kernel-replay counter collection (JSON output) produced by:
+#   rocprofv3 --pmc <grp0> --pmc <grp1> ... --kernel-replay -- kernel-replay
+# where each --pmc group shares the same sanity counters (SQ_WAVES, SQ_INSTS_VALU) plus one unique
+# counter. The number of groups drives the number of replay passes.
 #
-# Integration-test equivalent of the manual snap/restore loop. Key validation metrics:
-#   1. Counters across replay passes are approximately the same for a given kernel (restore makes
-#      every pass run against identical inputs, so per-pass counters should match within tolerance).
-#   2. Counters differ between different kernels (vecAdd vs saxpy), proving the counters are
-#      meaningful per-dispatch and not a constant artifact.
-#   3. We expect exactly N replay passes per dispatch in the output file.
-# (The app verifies its own results in the generate step, guarding the data itself.)
+# Key validation metrics:
+#   1. Every dispatch is replayed exactly N times (replay_pass 0..N-1, one per --pmc group).
+#   2. The shared sanity counters are CONSTANT across a given kernel's replay passes -- the
+#      determinism snapshot/restore guarantees (each pass runs against identical inputs).
+#   3. Each pass collects a DISTINCT batch (the unique counters differ pass-to-pass), proving real
+#      multi-pass rather than one repeated batch.
+#   4. Counters differ between the three kernels (vecAdd / saxpy / vecScale), so they are real
+#      per-dispatch measurements, not a constant artifact.
+# (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
 import sys
@@ -40,21 +44,28 @@ import pytest
 # Tolerate the in-flight rename of the per-pass index field (replay_pass <-> n).
 _PASS_KEYS = ("replay_pass", "n")
 
-# Expected launch dimensions for the kernel-replay app's fixed configs (grid_size = grid blocks x
-# block threads, workgroup_size = block threads): vecAdd<<<1024,1024>>>, saxpy<<<512,512>>>.
+# Launch dims of the kernel-replay app's three kernels (grid_size = grid blocks x block threads):
+#   vecAdd<<<1024,1024>>>, saxpy<<<512,512>>>, vecScale<<<256,256>>>.
 EXPECTED_DIMS = {
     "vecAdd": {"grid_size": 1024 * 1024, "workgroup_size": 1024},
     "saxpy": {"grid_size": 512 * 512, "workgroup_size": 512},
+    "vecScale": {"grid_size": 256 * 256, "workgroup_size": 256},
 }
 
-# Acceptable relative deviation for the launch-dimension checks.
+EXPECTED_KERNELS = ("vecAdd", "saxpy", "vecScale")
+
+# Union of every counter across all --pmc groups; all must appear in the collected records.
+EXPECTED_COUNTERS = (
+    "SQ_WAVES",
+    "SQ_INSTS_VALU",
+    "GRBM_COUNT",
+    "GRBM_GUI_ACTIVE",
+    "SQ_INSTS_SALU",
+    "SQ_INSTS_SMEM",
+    "SQ_INSTS_LDS",
+)
+
 DIM_TOLERANCE = 0.05
-
-# Counters requested via --pmc; all must appear in the collected counter records.
-EXPECTED_COUNTERS = ("SQ_WAVES", "SQ_INSTS_VALU")
-
-# Acceptable relative deviation when comparing counter values (same kernel across passes, and to
-# decide whether two kernels' counters are "the same").
 COUNTER_TOLERANCE = 0.10
 
 
@@ -148,100 +159,102 @@ def _kernel_id_to_name(sdk):
     return mapping
 
 
-def test_every_dispatch_replayed_n_passes(json_data, expected_passes):
-    records = _counter_records(_sdk(json_data))
-    passes_by_dispatch = collections.defaultdict(set)
-    for rec in records:
-        passes_by_dispatch[_dispatch_id(rec)].add(_pass_index(rec))
+def _records_by_dispatch(sdk):
+    """dispatch_id -> {"kernel": name, "passes": {pass_index: {counter_name: value}}}."""
+    counter_id_to_name = _counter_id_to_name(sdk)
+    kernel_id_to_name = _kernel_id_to_name(sdk)
+    table = {}
+    for rec in _counter_records(sdk):
+        did = _dispatch_id(rec)
+        entry = table.setdefault(
+            did,
+            {
+                "kernel": kernel_id_to_name.get(int(_dispatch_info(rec)["kernel_id"]), ""),
+                "passes": {},
+            },
+        )
+        entry["passes"][_pass_index(rec)] = _aggregated_named_counters(rec, counter_id_to_name)
+    assert table, "no counter records found"
+    return table
 
-    assert passes_by_dispatch, "no dispatches found in counter records"
+
+def test_every_dispatch_replayed_n_passes(json_data, expected_passes):
+    table = _records_by_dispatch(_sdk(json_data))
     want = set(range(expected_passes))
-    for dispatch_id, passes in passes_by_dispatch.items():
+    for dispatch_id, entry in table.items():
+        passes = set(entry["passes"])
         assert (
             passes == want
-        ), f"dispatch {dispatch_id} replay passes={sorted(passes)}, expected {sorted(want)}"
+        ), f"dispatch {dispatch_id} ({entry['kernel']}) passes={sorted(passes)}, expected {sorted(want)}"
 
 
-def test_counters_consistent_across_passes(json_data):
-    # Metric 1: for a given kernel (dispatch), each counter is approximately the same across all
-    # replay passes -- the determinism that snapshot/restore guarantees.
-    sdk = _sdk(json_data)
-    counter_id_to_name = _counter_id_to_name(sdk)
-
-    # dispatch_id -> counter_name -> [value per pass]
-    by_dispatch = collections.defaultdict(lambda: collections.defaultdict(list))
-    for rec in _counter_records(sdk):
-        for name, value in _aggregated_named_counters(rec, counter_id_to_name).items():
-            by_dispatch[_dispatch_id(rec)][name].append(value)
-
-    assert by_dispatch, "no counter values found"
-    for dispatch_id, counters in by_dispatch.items():
-        for name, values in counters.items():
+def test_common_counters_constant_across_passes(json_data, common_counters):
+    # Metric 2: the shared sanity counters appear in every pass and are constant for a kernel.
+    table = _records_by_dispatch(_sdk(json_data))
+    for dispatch_id, entry in table.items():
+        passes = entry["passes"]
+        for counter in common_counters:
+            values = [batch[counter] for batch in passes.values() if counter in batch]
+            assert len(values) == len(passes), (
+                f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} missing in "
+                f"some passes: present in {len(values)}/{len(passes)}"
+            )
             assert _approx_equal(min(values), max(values)), (
-                f"dispatch {dispatch_id} counter {name} varies across replay passes beyond "
-                f"{COUNTER_TOLERANCE:.0%}: {values}"
+                f"dispatch {dispatch_id} ({entry['kernel']}) counter {counter} varies across "
+                f"replay passes beyond {COUNTER_TOLERANCE:.0%}: {values}"
             )
 
 
-def test_counters_differ_between_kernels(json_data):
-    # Metric 2: vecAdd and saxpy are different kernels, so at least one shared counter must differ
-    # beyond tolerance (otherwise the counters aren't actually measuring the dispatch).
-    sdk = _sdk(json_data)
-    counter_id_to_name = _counter_id_to_name(sdk)
-    kernel_id_to_name = _kernel_id_to_name(sdk)
+def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_counters):
+    # Metric 3: ignoring the shared counters, each pass contributes a distinct unique counter.
+    table = _records_by_dispatch(_sdk(json_data))
+    common = set(common_counters)
+    for dispatch_id, entry in table.items():
+        unique_per_pass = set()
+        for batch in entry["passes"].values():
+            unique_per_pass.update(c for c in batch if c not in common)
+        assert len(unique_per_pass) == expected_passes, (
+            f"dispatch {dispatch_id} ({entry['kernel']}) expected {expected_passes} distinct "
+            f"per-pass counters, got {sorted(unique_per_pass)}"
+        )
 
-    per_kernel = {}
-    for rec in _counter_records(sdk):
-        name = kernel_id_to_name.get(int(_dispatch_info(rec)["kernel_id"]), "") or ""
-        for target in ("vecAdd", "saxpy"):
-            if target in name and target not in per_kernel:
-                per_kernel[target] = _aggregated_named_counters(rec, counter_id_to_name)
 
-    assert (
-        "vecAdd" in per_kernel and "saxpy" in per_kernel
-    ), f"need both vecAdd and saxpy counter records; found {sorted(per_kernel)}"
-    vecadd, saxpy = per_kernel["vecAdd"], per_kernel["saxpy"]
-    shared = set(vecadd) & set(saxpy)
-    assert shared, "no shared counters between vecAdd and saxpy to compare"
-    differing = [c for c in shared if not _approx_equal(vecadd[c], saxpy[c])]
-    assert differing, (
-        f"vecAdd and saxpy counters are indistinguishable within {COUNTER_TOLERANCE:.0%}: "
-        f"vecAdd={vecadd} saxpy={saxpy}"
+def test_counters_differ_between_kernels(json_data, common_counters):
+    # Metric 4: each kernel has a distinct signature over the shared counters.
+    table = _records_by_dispatch(_sdk(json_data))
+    signatures = {}
+    for entry in table.values():
+        first_pass = entry["passes"][min(entry["passes"])]
+        sig = tuple(round(first_pass.get(c, float("nan")), 3) for c in common_counters)
+        signatures[entry["kernel"]] = sig
+    values = list(signatures.values())
+    assert len(set(values)) == len(values), (
+        f"kernels are not distinguishable by common counters {common_counters}: {signatures}"
     )
 
 
 def test_replayed_kernels_present(json_data):
-    sdk = _sdk(json_data)
-    id_to_name = _kernel_id_to_name(sdk)
-    names = {
-        id_to_name.get(int(_dispatch_info(rec)["kernel_id"]))
-        for rec in _counter_records(sdk)
-    }
-    assert any(n and "vecAdd" in n for n in names), f"vecAdd not found in {names}"
-    assert any(n and "saxpy" in n for n in names), f"saxpy not found in {names}"
+    names = {entry["kernel"] for entry in _records_by_dispatch(_sdk(json_data)).values()}
+    for kernel in EXPECTED_KERNELS:
+        assert any(kernel in (n or "") for n in names), f"{kernel} not found in {names}"
 
 
 def test_expected_counters_present(json_data):
     sdk = _sdk(json_data)
     id_to_name = _counter_id_to_name(sdk)
-
     seen = set()
     for rec in _counter_records(sdk):
         for sub in rec.get("records", []):
             name = id_to_name.get(int(sub["counter_id"]["handle"]))
             if name:
                 seen.add(name)
-
     for counter in EXPECTED_COUNTERS:
-        assert (
-            counter in seen
-        ), f"counter {counter} not found in collected counters: {sorted(seen)}"
+        assert counter in seen, f"counter {counter} not collected; seen={sorted(seen)}"
 
 
 def test_launch_dimensions(json_data):
     sdk = _sdk(json_data)
     id_to_name = _kernel_id_to_name(sdk)
-
     checked = set()
     for rec in _counter_records(sdk):
         info = _dispatch_info(rec)
@@ -259,7 +272,6 @@ def test_launch_dimensions(json_data):
                 f"{expected['workgroup_size']}"
             )
             checked.add(key)
-
     missing = set(EXPECTED_DIMS) - checked
     assert not missing, f"expected kernels not found for dimension check: {missing}"
 
