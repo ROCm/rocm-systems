@@ -232,14 +232,19 @@ rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target,
   return revision;
 }
 
-TEST(HotswapRewriteDecision, A0RetargetsWhenEntryTrampolinesDisabled) {
-  const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
-      MakeRevision("gfx1250", 0), kGfx1250Isa, kGfx1250Isa, {false});
+TEST(HotswapRewriteDecision, A0RetargetsThroughLegacyPathRegardlessOfOptions) {
+  const rocr::hotswap::RewriteOptions options[] = {{}, {false}};
+  for (const auto& option : options) {
+    SCOPED_TRACE(option.gfx12_5_rewrite_enabled ? "entry trampolines enabled"
+                                                : "entry trampolines disabled");
+    const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
+        MakeRevision("gfx1250", 0), kGfx1250Isa, kGfx1250Isa, option);
 
-  ASSERT_TRUE(decision.has_value());
-  EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
-  EXPECT_EQ(decision->target_isa, kGfx1250A0Isa);
-  EXPECT_FALSE(decision->request_entry_trampolines);
+    ASSERT_TRUE(decision.has_value());
+    EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
+    EXPECT_EQ(decision->target_isa, kGfx1250A0Isa);
+    EXPECT_FALSE(decision->request_entry_trampolines);
+  }
 }
 
 TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOnRoutesNonA0Gfx1250) {
