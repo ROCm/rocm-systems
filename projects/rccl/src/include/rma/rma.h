@@ -19,7 +19,7 @@ typedef enum {
   NCCL_SIGNAL = 1              // Default signal operation
 } ncclSignalMode_t;
 
-struct ncclRmaArgs{
+struct ncclRmaArgs {
   int ctx;
   ncclFunc_t func;
   int nRmaTasks;

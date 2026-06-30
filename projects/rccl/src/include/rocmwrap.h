@@ -18,8 +18,7 @@
 
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
-ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps,
-                                    CUstreamBatchMemOpParams* batchParams);
+ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);
 
 // Re-declare the DMA-BUF export entry as a weak reference. hsa_init,
 // hsa_system_get_info and hsa_status_string are required and resolve as hard
@@ -29,8 +28,8 @@ ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps,
 // undefined symbol), and pfn_hsa_amd_portable_export_dmabuf below stays the
 // runtime feature gate. This declaration must precede every use of the symbol
 // so all references (including the HSACHECK* macro call sites) are emitted weak.
-extern "C" hsa_status_t hsa_amd_portable_export_dmabuf(
-    const void* ptr, size_t size, int* dmabuf, uint64_t* offset) __attribute__((weak));
+extern "C" hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf, uint64_t* offset)
+  __attribute__((weak));
 
 // hsa_init, hsa_system_get_info and hsa_status_string are called directly via the
 // hsa-runtime64 library that librccl links against. Only the DMA-BUF export entry
@@ -49,63 +48,69 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 // hsa_amd_portable_export_dmabuf stays gated by its function pointer and is not
 // referenced as a symbol in every consumer TU. hsa_status_string is a required
 // HSA entry point and is called directly.
-#define HSACHECK(cmd) do {				      \
-    hsa_status_t err = pfn_##cmd;				      \
-    if( err != HSA_STATUS_SUCCESS ) {				      \
-      const char *errStr;				      \
-      hsa_status_string(err, &errStr);	      \
+#define HSACHECK(cmd) \
+  do { \
+    hsa_status_t err = pfn_##cmd; \
+    if (err != HSA_STATUS_SUCCESS) { \
+      const char* errStr; \
+      hsa_status_string(err, &errStr); \
       WARN("HSA failure '%s' at %s:%d", errStr, __FILE__, __LINE__); \
-      return ncclUnhandledCudaError;			      \
-    }							      \
-} while(false)
+      return ncclUnhandledCudaError; \
+    } \
+  } while (false)
 
-#define HSACHECKGOTO(cmd, res, label) do {		      \
-    hsa_status_t err = pfn_##cmd;				      \
-    if( err != HSA_STATUS_SUCCESS ) {				      \
-      const char *errStr;				      \
-      hsa_status_string(err, &errStr);	      \
+#define HSACHECKGOTO(cmd, res, label) \
+  do { \
+    hsa_status_t err = pfn_##cmd; \
+    if (err != HSA_STATUS_SUCCESS) { \
+      const char* errStr; \
+      hsa_status_string(err, &errStr); \
       WARN("HSA failure '%s' at %s:%d", errStr, __FILE__, __LINE__); \
-      res = ncclUnhandledCudaError;			      \
-      goto label;					      \
-    }							      \
-} while(false)
+      res = ncclUnhandledCudaError; \
+      goto label; \
+    } \
+  } while (false)
 
 // Check CUDA PFN driver calls
-#define CUCHECK(cmd) do {				      \
-    hipError_t err = cmd;				      \
-    if( err != hipSuccess ) {				      \
-      WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__);		      \
-      (void)hipGetLastError(); /* clear sticky HIP error state */   \
-      return ncclUnhandledCudaError;			      \
-    }							      \
-} while(false)
+#define CUCHECK(cmd) \
+  do { \
+    hipError_t err = cmd; \
+    if (err != hipSuccess) { \
+      WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__); \
+      (void)hipGetLastError(); /* clear sticky HIP error state */ \
+      return ncclUnhandledCudaError; \
+    } \
+  } while (false)
 
-#define CUCHECKGOTO(cmd, res, label) do {		      \
-    hipError_t err = cmd;				      \
-    if( err != hipSuccess ) {				      \
-      WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__);		      \
-      (void)hipGetLastError(); /* clear sticky HIP error state */   \
-      res = ncclUnhandledCudaError;			      \
-      goto label;					      \
-    }							      \
-} while(false)
+#define CUCHECKGOTO(cmd, res, label) \
+  do { \
+    hipError_t err = cmd; \
+    if (err != hipSuccess) { \
+      WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__); \
+      (void)hipGetLastError(); /* clear sticky HIP error state */ \
+      res = ncclUnhandledCudaError; \
+      goto label; \
+    } \
+  } while (false)
 
 // Report failure but clear error and continue
-#define CUCHECKIGNORE(cmd) do {						\
-    hipError_t err = cmd;						\
-    if( err != hipSuccess ) {						\
-      INFO(NCCL_ALL,"%s:%d HIP failure '%s'", __FILE__, __LINE__, hipGetErrorString(err));	\
-    }									\
-} while(false)
+#define CUCHECKIGNORE(cmd) \
+  do { \
+    hipError_t err = cmd; \
+    if (err != hipSuccess) { \
+      INFO(NCCL_ALL, "%s:%d HIP failure '%s'", __FILE__, __LINE__, hipGetErrorString(err)); \
+    } \
+  } while (false)
 
-#define CUCHECKTHREAD(cmd, args) do {					\
-    hsa_status_t err = pfn_##cmd;						\
-    if (err != HSA_STATUS_SUCCESS) {						\
-      INFO(NCCL_INIT,"%s:%d -> %d [Async thread]", __FILE__, __LINE__, err); \
-      args->ret = ncclUnhandledCudaError;				\
-      return args;							\
-    }									\
-} while(0)
+#define CUCHECKTHREAD(cmd, args) \
+  do { \
+    hsa_status_t err = pfn_##cmd; \
+    if (err != HSA_STATUS_SUCCESS) { \
+      INFO(NCCL_INIT, "%s:%d -> %d [Async thread]", __FILE__, __LINE__, err); \
+      args->ret = ncclUnhandledCudaError; \
+      return args; \
+    } \
+  } while (0)
 
 #define DECLARE_ROCM_PFN_EXTERN(symbol) extern PFN_##symbol pfn_##symbol
 
