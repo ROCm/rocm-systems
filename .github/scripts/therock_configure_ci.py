@@ -147,8 +147,6 @@ SKIPPABLE_PATH_PATTERNS = [
     ".github/workflows/labeler.yml",
     ".github/workflows/amdsmi-manylinux-build.yml",
     ".github/workflows/rocjitsu-corpus-tests.yml",
-    # TEMPORARY: MI455 presubmit workflow (separate from main CI)
-    ".github/workflows/therock-mi455-presubmit.yml",
 ]
 
 
@@ -169,6 +167,24 @@ def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
     if modified_paths is None:
         return False
     return any(path.startswith("projects/rccl/") for path in modified_paths)
+
+
+def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
+    """Returns true if any HIP or ROCR files were modified."""
+    if modified_paths is None:
+        return False
+    hip_rocr_prefixes = [
+        "projects/hip/",
+        "projects/hip-tests/",
+        "projects/hipfile/",
+        "projects/hipother/",
+        "projects/rocr-runtime/",
+        "projects/rocr-debug-agent/",
+    ]
+    return any(
+        any(path.startswith(prefix) for prefix in hip_rocr_prefixes)
+        for path in modified_paths
+    )
 
 
 def is_rccl_path(path: str) -> bool:
@@ -405,6 +421,19 @@ def run(args):
                 outputs["run_linux_rccl_ci"] = "true"
             else:
                 outputs["run_linux_rccl_ci"] = "false"
+
+    # Determine if MI455 CI should run (only for PRs on Linux when HIP/ROCR changes)
+    if args.get("platform") == "linux":
+        if args.get("is_pull_request"):
+            base_ref = args.get("base_ref")
+            modified_paths = get_modified_paths(base_ref)
+            if check_hip_rocr_changes(modified_paths):
+                outputs["run_mi455_ci"] = "true"
+            else:
+                outputs["run_mi455_ci"] = "false"
+        else:
+            # MI455 CI only runs on PRs, not push/nightly/workflow_dispatch
+            outputs["run_mi455_ci"] = "false"
 
     set_github_output(outputs)
     return outputs

@@ -47,6 +47,7 @@ jobs:
       linux_projects: ${{ steps.linux_projects.outputs.projects }}
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
+      run_mi455_ci: ${{ steps.linux_projects.outputs.run_mi455_ci }}
       package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
@@ -182,6 +183,37 @@ jobs:
         -DTHEROCK_ENABLE_ROCPROFV3=ON
         -DTHEROCK_ENABLE_MPI=ON
 
+  # =============================================================================
+  # TEMPORARY JOB - MI455 BRINGUP
+  # =============================================================================
+  # This job is temporary and will be removed once MI455 bringup is complete.
+  # After bringup, MI455 (gfx125X-dcgpu) will be onboarded into the standard
+  # multi-arch CI via therock-ci-config.
+  #
+  # TODO(geomin12): Delete this job once MI455 is fully enabled in
+  #                 therock-ci-config and the multi-arch CI.
+  # =============================================================================
+  therock-mi455-ci-linux:
+    name: MI455 Linux (hip-tests, rocrtst | gfx125X-dcgpu)
+    needs: setup
+    # Only run on PRs when HIP or ROCR files are modified
+    if: ${{ github.event_name == 'pull_request' && needs.setup.outputs.run_mi455_ci == 'true' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/therock-ci-linux.yml
+    secrets: inherit
+    with:
+      cmake_options: >
+        -DTHEROCK_ENABLE_ALL=OFF
+        -DTHEROCK_BUILD_TESTING=ON
+        -DTHEROCK_ENABLE_CORE=ON
+      projects_to_test: "hip-tests, rocrtst"
+      package_version: ${{ needs.setup.outputs.package_version }}
+      amdgpu_families: "gfx125X-dcgpu"
+      test_runs_on: "linux-mi455-gpu-rocm"
+      build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
+
   therock-ci-windows:
     name: Windows (${{ matrix.projects.projects_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
     permissions:
@@ -211,6 +243,7 @@ jobs:
       - setup
       - therock-ci-linux
       - therock-rccl-ci-linux
+      - therock-mi455-ci-linux
       - therock-ci-windows
     runs-on: ubuntu-24.04
     steps:
