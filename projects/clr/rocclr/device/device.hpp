@@ -1466,8 +1466,15 @@ class MemObjMap : public AllStatic {
   //!< add the host mem pointer and buffer in the container
   static void AddMemObj(const void* k, amd::Memory* v);
 
-  //!< Remove an entry of mem object from the container
+  //!< Remove an entry of mem object from the container. Range-aware and fatal:
+  //!< a miss aborts, signalling a double free / freed-without-de-index.
   static void RemoveMemObj(const void* k);
+
+  //!< Non-fatal, range-aware removal for user-facing frees where the pointer
+  //!< may legitimately be absent from the global map (per-device VA on Windows,
+  //!< or external/host-registered memory). Warns instead of aborting on a miss.
+  //!< Returns true iff a covering entry was removed.
+  static bool TryRemoveMemObj(const void* k);
 
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);

@@ -163,7 +163,11 @@ hipError_t ihipFree(void* ptr) {
 
       // Non SVM memory free, such as external memory
       if (memory_object->getSvmPtr() == nullptr) {
-        amd::MemObjMap::RemoveMemObj(ptr);
+        // User-facing free: the pointer may live only in a per-device VA map
+        // (Windows) or be external memory not indexed in the global map, so a
+        // miss is a logged no-op rather than a fatal guarantee. The object
+        // itself is still released exactly once below.
+        amd::MemObjMap::TryRemoveMemObj(ptr);
         memory_object->release();
       } else {
         amd::SvmBuffer::free(memory_object->getContext(), ptr);
