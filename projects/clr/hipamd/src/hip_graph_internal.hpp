@@ -317,6 +317,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   ) {
     assert(stream_id_ != -1 && "Stream ID wasn't initialized");
     stream_ = streams[stream_id_];
+    launch_id_ = -1;
   }
   /// Create amd::command for the graph node
   virtual hipError_t CreateCommand(hip::Stream* stream) {
@@ -502,6 +503,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int32_t stream_id_ = -1;  //! Stream ID on which this node will be executed
   int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
+  int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
   static std::atomic<int> nextID;
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
@@ -610,6 +612,9 @@ class Graph {
     graphSet_.insert(this);
     mem_pool_ = device->GetGraphMemoryPool();
     graphInstantiated_ = false;
+    roots_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+    leafs_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+    wait_order_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     streams_dev_.reserve(g_devices.size());
   }
   void RemoveUserObjectFromOwingGraphs(UserObject* uObj) {
@@ -687,6 +692,7 @@ class Graph {
   size_t GetNodeCount() const { return vertices_.size(); }
   /// returns all the nodes in the graph
   const std::vector<Node>& GetNodes() const { return vertices_; }
+  const std::vector<Node>& GetTopoOrder() const { return topoOrder_; }
   /// returns all the edges in the graph
   std::vector<std::pair<Node, Node>> GetEdges() const;
   // returns the original graph ptr if cloned
@@ -736,6 +742,24 @@ class Graph {
     std::vector<HierarchicalPath> paths;  //!< All execution paths at this level only
     std::vector<GraphExecutionPaths> child_graph_paths;  //!< Child graph execution paths
   };
+
+  //! DFS-based stream assignment for a single node and its subtree
+  void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
+                       int stream_id  //!< A virtual stream for scheduling
+  );
+
+  //! Schedule all nodes in the graph (classic or segment path)
+  hipError_t ScheduleNodes();
+
+  //! Runs one node on the assigned stream
+  bool RunOneNode(Node node);
+
+  //! Runs all nodes from the execution graph on the assigned streams
+  bool RunNodes(
+      int32_t base_stream = 0,
+      const std::vector<hip::Stream*>* streams = nullptr,
+      const amd::Command::EventWaitList* parent_waitlist = nullptr
+  );
 
   //! Schedules nodes into batches for optimized execution
   hipError_t ScheduleNodesIntoBatches();
@@ -896,6 +920,8 @@ class Graph {
 
  protected:
   int max_streams_ = 0;  //!< Maximum number of streams used in the graph launch
+  //!< Maps stream ID to the set of device IDs that use that stream.
+  std::unordered_map<int, std::set<int>> streams_dev_ids_;
   int captureDeviceId_ = -1;
     //! Topological order of the graph doesn't include nodes embedded as part of the child graph
   std::vector<Node> topoOrder_;
@@ -940,7 +966,11 @@ class Graph {
   unsigned int id_;
   static std::atomic<int> nextID;
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
+  std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
+  std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream
+  std::vector<Node> wait_order_; //!< Temporary storage for waiting nodes
   std::vector<hip::Stream*> streams_;  //!< The list of streams, used in the execution
+  int32_t current_id_ = 0;             //!< The current node ID in the graph execution sequence
   hip::Device* device_;                //!< HIP device object
   hip::MemoryPool* mem_pool_;          //!< Memory pool, associated with this graph
   std::unordered_set<GraphNode*> capturedNodes_;
@@ -1010,41 +1040,26 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
 
  protected:
   uint64_t flags_ = 0;
+  bool repeatLaunch_ = false;
+  //! parallel streams per device
+  std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
+
+  //! Create parallel streams for a device
+  hipError_t CreateStreams(uint32_t num_streams, int devId);
+  //! Compute per-device stream requirements from streams_dev_ids_ mappings
+  void FindStreamsReqPerDev();
+  //! Update streams_[0] to the launch stream and resolve HW queue collisions
+  void UpdateStreams(hip::Stream* launch_stream);
 };
 
 // ================================================================================================
 // GraphExecClassic — PAL/Windows path. No segment scheduling, no AQL packet capture.
-// Uses a simple topological-order walk over nodes for both instantiation and launch.
+// Uses classic DFS scheduling + RunNodes for multi-stream execution.
 class GraphExecClassic : public GraphExecBase {
  public:
-  GraphExecClassic(uint64_t flags = 0) : GraphExecBase(flags) {}
-  ~GraphExecClassic() = default;
-
-  hipError_t Init() override;
-  hipError_t Run(hip::Stream* launch_stream) override;
-
-  //! Schedule a single node: assign stream and create its commands.
-  hipError_t ScheduleOneNode(GraphNode* node, hip::Stream* stream);
-  //! Schedule all nodes in topological order.
-  hipError_t ScheduleNodes(hip::Stream* stream);
-  //! Enqueue a single node's already-created commands onto the stream.
-  void RunOneNode(GraphNode* node, hip::Stream* stream);
-  //! Enqueue all nodes in topological order.
-  void RunNodes(hip::Stream* stream);
-
- protected:
-  bool repeatLaunch_ = false;
-};
-
-// ================================================================================================
-// GraphExecSegmented — Linux/ROCm path. Segment scheduling, AQL packet capture, multi-stream.
-class GraphExecSegmented : public GraphExecBase {
-  friend class GraphExecBase;  // allows OnLaunchComplete to access signalManager_
- public:
   bool graph_dumped_ = false;
-  GraphExecSegmented(uint64_t flags = 0) : GraphExecBase(flags) {}
-
-  ~GraphExecSegmented() {
+  GraphExecClassic(uint64_t flags = 0) : GraphExecBase(flags) {}
+  ~GraphExecClassic() {
     for (auto& streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
@@ -1056,6 +1071,21 @@ class GraphExecSegmented : public GraphExecBase {
       }
     }
     parallel_streams_.clear();
+  }
+
+  hipError_t Init() override;
+  hipError_t Run(hip::Stream* launch_stream) override;
+};
+
+// ================================================================================================
+// GraphExecSegmented — Linux/ROCm path. Segment scheduling, AQL packet capture, multi-stream.
+class GraphExecSegmented : public GraphExecBase {
+  friend class GraphExecBase;  // allows OnLaunchComplete to access signalManager_
+ public:
+  bool graph_dumped_ = false;
+  GraphExecSegmented(uint64_t flags = 0) : GraphExecBase(flags) {}
+
+  ~GraphExecSegmented() {
     if (kernArgManager_ != nullptr) {
       kernArgManager_->release();
     }
@@ -1073,7 +1103,6 @@ class GraphExecSegmented : public GraphExecBase {
   void SetHiddenHeap() { hasHiddenHeap_ = true; }
 
   hipError_t Init() override;
-  hipError_t CreateStreams(uint32_t num_streams, int devId = 0);
   hipError_t Run(hip::Stream* stream) override;
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
@@ -1102,8 +1131,6 @@ class GraphExecSegmented : public GraphExecBase {
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
                             amd::AccumulateCommand* accumulate);
 
-  //! Update streams for the graph execution with launch stream from application
-  void UpdateStreams(hip::Stream* launch_stream);
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   void FindStreamsReqPerDevForSegments();
@@ -1127,13 +1154,10 @@ class GraphExecSegmented : public GraphExecBase {
   }
 
  protected:
-  //! parallel streams per device
-  std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
   GraphSignalManager* signalManager_ = nullptr;      //!< HW event signal pool for graph launches.
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   std::unordered_set<int> hiddenHeapInitializedDevices_;
-  bool repeatLaunch_ = false;
 
   // PacketBatch structure
   struct PacketBatch {
