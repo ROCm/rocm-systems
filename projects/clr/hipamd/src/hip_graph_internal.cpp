@@ -616,6 +616,8 @@ void GraphExec::BuildSyncPlan() {
           firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
           firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
                                                 kBarrierKernelNamePtr);
+          firstBatch.dispatchMetadataPackets.insert(
+              firstBatch.dispatchMetadataPackets.begin(), nullptr);
         }
 
         // nodeRanges[i].startIndex was recorded before barrier packets were prepended.
@@ -641,6 +643,7 @@ void GraphExec::BuildSyncPlan() {
 
       lastBatch.dispatchPackets.push_back(completion_barrier);
       lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
+      lastBatch.dispatchMetadataPackets.push_back(nullptr);
 
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, hw_slot,
@@ -1618,11 +1621,14 @@ void GraphExec::PacketBatch::rebuildFilteredLists(
   enabledKernelNames.clear();
   filteredFlatPacketData.clear();
   filteredValidPacketFullHeaders.clear();
+  filteredFlatMetadataData.clear();
 
   enabledPackets.reserve(dispatchPackets.size());
   enabledKernelNames.reserve(dispatchPackets.size());
   filteredFlatPacketData.reserve(dispatchPackets.size() * kAqlPktSize);
   filteredValidPacketFullHeaders.reserve(dispatchPackets.size());
+
+  const bool hasMetadata = !dispatchMetadataPackets.empty();
 
   // packet pointer -> index in the filtered flat buffer, built during the
   // single pass below so patch_list resolution is O(patches) not O(p*n).
@@ -1635,6 +1641,15 @@ void GraphExec::PacketBatch::rebuildFilteredLists(
       enabledKernelNames.push_back(dispatchKernelNames[i]);
       appendPacketToFlatBuffer(dispatchPackets[i], filteredFlatPacketData,
                                filteredValidPacketFullHeaders);
+      // Append corresponding metadata slot (zero-filled for barriers)
+      if (hasMetadata) {
+        size_t metaOff = filteredFlatMetadataData.size();
+        filteredFlatMetadataData.resize(metaOff + kMetadataPktSize, 0);
+        if (i < dispatchMetadataPackets.size() && dispatchMetadataPackets[i] != nullptr) {
+          std::memcpy(filteredFlatMetadataData.data() + metaOff,
+                      dispatchMetadataPackets[i], kMetadataPktSize);
+        }
+      }
       packetToFilteredIndex[dispatchPackets[i]] = filteredIdx;
     }
   }
@@ -1738,8 +1753,9 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           // Capture packets for this node
           std::vector<uint8_t*> nodePackets;
           std::vector<const std::string*> nodeKernelNames;
+          std::vector<uint8_t*> nodeMetadataPackets;
           status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &nodePackets,
-                                                     &nodeKernelNames);
+                                                     &nodeKernelNames, &nodeMetadataPackets);
 
           if (status != hipSuccess || nodePackets.empty()) {
             LogError("Packet capture failed");
@@ -1755,12 +1771,16 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           // Reserve space to avoid reallocations during insertion
           newBatch.dispatchPackets.reserve(startIndex + packetCount);
           newBatch.dispatchKernelNames.reserve(startIndex + packetCount);
+          newBatch.dispatchMetadataPackets.reserve(startIndex + packetCount);
 
           // Add to dispatch lists (initially all enabled)
           newBatch.dispatchPackets.insert(newBatch.dispatchPackets.end(), nodePackets.begin(),
                                           nodePackets.end());
           newBatch.dispatchKernelNames.insert(newBatch.dispatchKernelNames.end(),
                                               nodeKernelNames.begin(), nodeKernelNames.end());
+          newBatch.dispatchMetadataPackets.insert(newBatch.dispatchMetadataPackets.end(),
+                                                  nodeMetadataPackets.begin(),
+                                                  nodeMetadataPackets.end());
 
           // Store node mapping with range info
           newBatch.nodeRanges.push_back({startIndex, packetCount, true});
@@ -2058,11 +2078,23 @@ void GraphExec::PacketBatch::rebuildFlatBuffer() {
   const size_t n = dispatchPackets.size();
   flatPacketData.clear();
   validPacketFullHeaders.clear();
+  flatMetadataData.clear();
   filteredCacheValid = false;
   flatPacketData.reserve(n * kAqlPktSize);
   validPacketFullHeaders.reserve(n);
   for (const uint8_t* pkt_raw : dispatchPackets) {
     appendPacketToFlatBuffer(pkt_raw, flatPacketData, validPacketFullHeaders);
+  }
+  // Build flat metadata buffer (kMetadataPktSize per slot).
+  // Entries without metadata (barriers) are zero-filled.
+  if (!dispatchMetadataPackets.empty()) {
+    flatMetadataData.resize(n * kMetadataPktSize, 0);
+    for (size_t i = 0; i < n && i < dispatchMetadataPackets.size(); ++i) {
+      if (dispatchMetadataPackets[i] != nullptr) {
+        std::memcpy(flatMetadataData.data() + i * kMetadataPktSize,
+                    dispatchMetadataPackets[i], kMetadataPktSize);
+      }
+    }
   }
 }
 
@@ -2306,11 +2338,15 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
     const std::vector<const std::string*>* kernelNamesToDispatch;
     const std::vector<uint8_t>* flatData;
     const std::vector<uint32_t>* flatHdrs;
+    const std::vector<uint8_t>* metaData = nullptr;
 
     if (packetBatch.disabledNodeCount == 0) {
       kernelNamesToDispatch = &packetBatch.dispatchKernelNames;
       flatData = &packetBatch.flatPacketData;
       flatHdrs = &packetBatch.validPacketFullHeaders;
+      if (!packetBatch.flatMetadataData.empty()) {
+        metaData = &packetBatch.flatMetadataData;
+      }
     } else {
       // Guard against stale filtered buffers: rebuildFlatBuffer (called from
       // UpdateAQLPacket) invalidates the cache. This is a no-op when valid.
@@ -2318,11 +2354,15 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
       kernelNamesToDispatch = &packetBatch.enabledKernelNames;
       flatData = &packetBatch.filteredFlatPacketData;
       flatHdrs = &packetBatch.filteredValidPacketFullHeaders;
+      if (!packetBatch.filteredFlatMetadataData.empty()) {
+        metaData = &packetBatch.filteredFlatMetadataData;
+      }
     }
 
     if (!flatData->empty()) {
       bool batchStatus = stream->vdev()->dispatchAqlPacketBatchFlat(
-          *flatData, *flatHdrs, accumulate, attach_signal, kernelNamesToDispatch, true);
+          *flatData, *flatHdrs, accumulate, attach_signal, kernelNamesToDispatch, true,
+          false, metaData);
       if (!batchStatus) {
         return hipErrorUnknown;
       }

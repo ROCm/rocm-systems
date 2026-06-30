@@ -327,6 +327,7 @@ class Command : public Event {
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
+  std::vector<uint8_t*>* gpuMetadataPackets_ = nullptr;  //!< Metadata packets (parallel to gpuPackets_)
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
   const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
@@ -377,9 +378,11 @@ class Command : public Event {
   //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
-                            const std::string** capturedKernelName) {
+                            const std::string** capturedKernelName,
+                            std::vector<uint8_t*>* metadataPackets = nullptr) {
     packetCapturing_ = state;
     gpuPackets_ = packet;
+    gpuMetadataPackets_ = metadataPackets;
     graphKernArgMgr_ = graphKernArgMgr;
     capturedKernelName_ = capturedKernelName;
   }
@@ -395,6 +398,17 @@ class Command : public Event {
   const uint8_t* getAqlPacket() const {
     uint8_t* packet = new uint8_t[64];
     gpuPackets_->push_back(packet);
+    return packet;
+  }
+
+  //! Allocates and returns a metadata packet buffer for graph capture.
+  //! Returns nullptr if metadata capture is not enabled.
+  uint8_t* getMetadataPacket() const {
+    if (gpuMetadataPackets_ == nullptr) {
+      return nullptr;
+    }
+    uint8_t* packet = new uint8_t[256]();
+    gpuMetadataPackets_->push_back(packet);
     return packet;
   }
 
