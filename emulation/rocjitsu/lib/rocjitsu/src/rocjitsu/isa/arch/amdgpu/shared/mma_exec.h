@@ -660,32 +660,14 @@ inline int32_t extract_u4(amdgpu::ComputeUnitCore &cu, uint32_t base, const Inpu
   return static_cast<int32_t>(read_packed(cu, base, loc));
 }
 
-inline float extract_fp8_ocp(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return util::fp8_e4m3_ocp_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
-}
-
-inline float extract_bf8_ocp(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return util::bf8_e5m2_ocp_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
-}
-
-inline float extract_fp8_fnuz(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return util::fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
-}
-
-inline float extract_bf8_fnuz(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return util::bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
-}
-
 inline float extract_fp8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return extract_fp8_ocp(cu, base, loc);
+  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+  return util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
 }
 
 inline float extract_bf8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return extract_bf8_ocp(cu, base, loc);
+  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+  return util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
 }
 
 inline float extract_fp4(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
@@ -1786,34 +1768,14 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
   }
 }
 
-// CDNA3 uses the AMD FNUZ format for fp8/bf8
-template <bool FP8, bool FNUZ> constexpr auto f8_extract_fn() {
-  if constexpr (FP8) {
-    if constexpr (FNUZ)
-      return &extract_fp8_fnuz;
-    else
-      return &extract_fp8_ocp;
-  } else {
-    if constexpr (FNUZ)
-      return &extract_bf8_fnuz;
-    else
-      return &extract_bf8_ocp;
-  }
-}
-
-/// Compile-time fp8 (e4m3) vs bf8 (e5m2), OCP vs FNUZ bulk-convert selector for
-/// the f8 spec kernels: converts `n` packed bytes starting at `words` to f32
-/// through 256-entry LUTs matching the selected extractor.
-template <bool FP8, bool FNUZ = false>
-void f8_to_f32_block(const uint32_t *words, float *dst, size_t n) {
-  if constexpr (FP8 && FNUZ)
-    util::fp8_e4m3_fnuz_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
-  else if constexpr (FP8)
-    util::fp8_e4m3_ocp_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
-  else if constexpr (FNUZ)
-    util::bf8_e5m2_fnuz_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
+/// Compile-time fp8 (e4m3) vs bf8 (e5m2) bulk-convert selector for the f8 spec
+/// kernels: converts `n` packed bytes starting at `words` to f32 through the
+/// 256-entry LUTs (bit-exact with extract_fp8/extract_bf8 by construction).
+template <bool FP8> void f8_to_f32_block(const uint32_t *words, float *dst, size_t n) {
+  if constexpr (FP8)
+    util::fp8_e4m3_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
   else
-    util::bf8_e5m2_ocp_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
+    util::bf8_e5m2_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
 }
 
 /// Fast path for the dense f32-out fp8/bf8-input WMMA shapes
@@ -1822,14 +1784,14 @@ void f8_to_f32_block(const uint32_t *words, float *dst, size_t n) {
 /// gather; A/B formats are compile-time selected. Sparse SWMMAC stays generic.
 /// Falls back to the generic exec_wmma_f32_mixed without AVX-512 / under
 /// force-scalar.
-template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8, bool FNUZ = false>
+template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8>
 void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                            uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                            uint32_t c_modifier = 0) {
   constexpr uint32_t in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 WMMA assumes N is a multiple of the zmm width");
-  constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
-  constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
+  constexpr auto ea = A_FP8 ? &extract_fp8 : &extract_bf8;
+  constexpr auto eb = B_FP8 ? &extract_fp8 : &extract_bf8;
   auto fallback = [&]() {
     exec_wmma_f32_mixed(cu, M, N, K, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc,
                         c_modifier);
@@ -1856,8 +1818,8 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     // pure f32 index-shuffle (byte of word w lane l sub s -> (w*wf+l)*4+s).
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    f8_to_f32_block<A_FP8, FNUZ>(a_words, A_f32, M * K);
-    f8_to_f32_block<B_FP8, FNUZ>(b_words, B_f32, N * K);
+    f8_to_f32_block<A_FP8>(a_words, A_f32, M * K);
+    f8_to_f32_block<B_FP8>(b_words, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -2562,13 +2524,13 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
 /// input convert is the f8 LUT gather; A/B formats are compile-time selected.
 /// Falls back to the generic exec_wmma_f16 without AVX-512 / under
 /// force-scalar.
-template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8, bool FNUZ = false>
+template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8>
 void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                            uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 WMMA assumes N is a multiple of the zmm width");
-  constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
-  constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
+  constexpr auto ea = A_FP8 ? &extract_fp8 : &extract_bf8;
+  constexpr auto eb = B_FP8 ? &extract_fp8 : &extract_bf8;
   auto fallback = [&]() {
     exec_wmma_f16(cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb, const_acc);
   };
@@ -2592,8 +2554,8 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     alignas(64) float C_buf[M * N];
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    f8_to_f32_block<A_FP8, FNUZ>(a_words, A_f32, M * K);
-    f8_to_f32_block<B_FP8, FNUZ>(b_words, B_f32, N * K);
+    f8_to_f32_block<A_FP8>(a_words, A_f32, M * K);
+    f8_to_f32_block<B_FP8>(b_words, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
@@ -3284,7 +3246,7 @@ inline void exec_swmmac_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t
 /// MFMA execute for f64 output with f64 input: D = C + A x B.
 inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
                      uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                     uint32_t const_acc = ACC_FROM_VGPR, uint32_t neg = 0) {
+                     uint32_t const_acc = ACC_FROM_VGPR) {
   struct Result {
     uint32_t reg;
     uint32_t lane;
@@ -3293,10 +3255,6 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
   };
   std::vector<Result> results;
   results.reserve(M * N * B);
-  auto apply_neg = [neg](double value, uint32_t bit) {
-    return (neg & bit) ? std::bit_cast<double>(std::bit_cast<uint64_t>(value) ^ (uint64_t{1} << 63))
-                       : value;
-  };
 
   auto run_scalar = [&]() {
     for (uint32_t b = 0; b < B; ++b) {
@@ -3312,12 +3270,10 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
             uint32_t hi = cu.read_vgpr(s2 + out.reg + 1, out.lane);
             acc = std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
           }
-          acc = apply_neg(acc, 0x4u);
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 64);
             auto bl = input_loc(N, K, B, col, k, b, 64);
-            acc +=
-                apply_neg(extract_f64(cu, s0, al), 0x1u) * apply_neg(extract_f64(cu, s1, bl), 0x2u);
+            acc += extract_f64(cu, s0, al) * extract_f64(cu, s1, bl);
           }
           uint64_t bits = std::bit_cast<uint64_t>(acc);
           results.push_back(
@@ -3361,17 +3317,16 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
               Cbuf[row * stride + col] =
                   std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
             }
-            Cbuf[row * stride + col] = apply_neg(Cbuf[row * stride + col], 0x4u);
           }
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 64);
-            Abuf[row * K + k] = apply_neg(extract_f64(cu, s0, al), 0x1u);
+            Abuf[row * K + k] = extract_f64(cu, s0, al);
           }
         for (uint32_t k = 0; k < K; ++k)
           for (uint32_t col = 0; col < N; ++col) {
             auto bl = input_loc(N, K, B, col, k, b, 64);
-            Bbuf[k * stride + col] = apply_neg(extract_f64(cu, s1, bl), 0x2u);
+            Bbuf[k * stride + col] = extract_f64(cu, s1, bl);
           }
         for (uint32_t row = 0; row < M; ++row) {
           uint32_t col = 0;
@@ -3420,36 +3375,14 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
 // Each 4-bit nibble in the index encodes two 2-bit position selectors (p0, p1).
 // ---------------------------------------------------------------------------
 
-inline float smfmac_read_fp8_ocp(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx,
-                                 uint32_t lane) {
-  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
-  return util::fp8_e4m3_ocp_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
-}
-
-inline float smfmac_read_bf8_ocp(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx,
-                                 uint32_t lane) {
-  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
-  return util::bf8_e5m2_ocp_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
-}
-
-inline float smfmac_read_fp8_fnuz(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx,
-                                  uint32_t lane) {
-  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
-  return util::fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
-}
-
-inline float smfmac_read_bf8_fnuz(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx,
-                                  uint32_t lane) {
-  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
-  return util::bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
-}
-
 inline float smfmac_read_fp8(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) {
-  return smfmac_read_fp8_ocp(cu, base, byte_idx, lane);
+  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
+  return util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
 }
 
 inline float smfmac_read_bf8(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) {
-  return smfmac_read_bf8_ocp(cu, base, byte_idx, lane);
+  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
+  return util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
 }
 
 inline float smfmac_read_f16(ComputeUnitCore &cu, uint32_t base, uint32_t elem, uint32_t lane) {
@@ -4059,14 +3992,14 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
 /// (bit-exact with extract_fp8/extract_bf8 by construction); A/B formats are
 /// compile-time selected. Falls back to the generic exec_f32 without AVX-512 /
 /// under force-scalar / with cbsz|blgp.
-template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8, bool FNUZ = false>
+template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8>
 void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                            uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
                            uint32_t blgp) {
   constexpr uint32_t B = 1, in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 MFMA assumes N is a multiple of the zmm width");
-  constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
-  constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
+  constexpr auto ea = A_FP8 ? &extract_fp8 : &extract_bf8;
+  constexpr auto eb = B_FP8 ? &extract_fp8 : &extract_bf8;
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid, blgp);
     return;
@@ -4089,8 +4022,8 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     // (w*wf+l)*4+s).
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    f8_to_f32_block<A_FP8, FNUZ>(a_words, A_f32, M * K);
-    f8_to_f32_block<B_FP8, FNUZ>(b_words, B_f32, N * K);
+    f8_to_f32_block<A_FP8>(a_words, A_f32, M * K);
+    f8_to_f32_block<B_FP8>(b_words, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = output_loc_32(M, N, row, col, 0);
