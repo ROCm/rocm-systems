@@ -1756,8 +1756,15 @@ bool Device::populateOCLDeviceConstants() {
 
   // this is required for clustered kernel launches; but it might not be supported in older rocr,
   // so invalid argument might no be necessarily an error
-  if (HSA_STATUS_SUCCESS != hsaStatus && HSA_STATUS_ERROR_INVALID_ARGUMENT != hsaStatus)
+  if (HSA_STATUS_SUCCESS != hsaStatus && HSA_STATUS_ERROR_INVALID_ARGUMENT != hsaStatus) {
     LogError("HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE query failed");
+  } else {
+    // this is a temporary override of the ROCr result (when there is cluster support). This line
+    // will be removed as soon as ROCr provides the correct result
+    info_.clusterMaxSize_ = info_.clusterMaxSize_ > 1?
+                            info_.maxComputeUnits_ / info_.numberOfShaderEngines_ :
+                            1;
+  }
 
   info_.gpuDirectRdmaWithHipVmmSupported_ =
       info_.virtualMemoryManagement_ && info_.dmabufSupported_;

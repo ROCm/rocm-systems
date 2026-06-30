@@ -13,6 +13,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
+#include "../test_paths.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/executable.h"
@@ -39,7 +40,7 @@ using namespace rocjitsu;
 
 namespace {
 
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+using test::kernel_path;
 
 // Find a GPU agent whose ISA name contains "gfx90a". Returns {handle=0} if
 // no such agent is present.

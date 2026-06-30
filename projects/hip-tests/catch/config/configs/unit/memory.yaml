@@ -400,6 +400,9 @@ memory:
   Unit_hipHostRegister_DuplicateAndDisjoint:
     <<: *level_2
     tags: [alloc]
+  Unit_hipHostRegister_with_hipExtHostRegisterCoarseGrained:
+    <<: *level_2
+    tags: [alloc]
   Unit_hipHostRegister_Capture:
     <<: *level_2
     tags: [alloc]

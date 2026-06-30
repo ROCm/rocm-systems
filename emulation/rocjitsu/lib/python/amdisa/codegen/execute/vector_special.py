@@ -10,7 +10,6 @@ dot products, bitop3, permlane variants, and packed type conversion.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
     vop3_dst_mod,
@@ -117,8 +116,7 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
     D.u64 = S0.u32 * S1.u32 + S2.u64 (unsigned)
 
     Sources S0 and S1 are 32-bit; the accumulator S2 and result D are
-    64-bit VGPR pairs. The unsigned SDST-encoded form also writes the per-lane
-    carry-out mask to SDST.
+    64-bit VGPR pairs.
     """
     writes_carry = len(dst) > 1
     L = []
@@ -737,7 +735,6 @@ def gen_vector_cvt_pk(
     *,
     opsel: str = '0u',
     fp8_format_select: str | None = None,
-    arch_name: str = '',
 ) -> str:
     """Generate pack/convert instructions."""
     L = []
@@ -791,13 +788,10 @@ def gen_vector_cvt_pk(
         L.append(f'    {dst[0]}.write_lane(wf, lane, lo | (hi << 16));')
     elif cls == 'vector_cvt_pk':
         if op in ('fp8_f32', 'bf8_f32', 'fp8_f16', 'bf8_f16'):
-            conv = fp8_helper_name(
-                arch_name,
-                (
-                    'util::f32_to_fp8_e4m3_rne'
-                    if op.startswith('fp8_')
-                    else 'util::f32_to_bf8_e5m2_rne'
-                ),
+            conv = (
+                'util::f32_to_fp8_e4m3_rne'
+                if op.startswith('fp8_')
+                else 'util::f32_to_bf8_e5m2_rne'
             )
             conv_e5m3 = (
                 'util::f32_to_fp8_e5m3_rne'
@@ -834,13 +828,10 @@ def gen_vector_cvt_pk(
                 f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed);'
             )
         elif op in ('f32_fp8', 'f32_bf8', 'f16_fp8', 'f16_bf8'):
-            conv = fp8_helper_name(
-                arch_name,
-                (
-                    'util::fp8_e4m3_to_f32'
-                    if op.endswith('_fp8')
-                    else 'util::bf8_e5m2_to_f32'
-                ),
+            conv = (
+                'util::fp8_e4m3_to_f32'
+                if op.endswith('_fp8')
+                else 'util::bf8_e5m2_to_f32'
             )
             L.append(f'    uint32_t packed = {src[0]}.read_lane(wf, lane);')
             L.append(f'    bool src_hi = {opsel} & 1;')
@@ -961,8 +952,7 @@ def gen_vector_cvt_pk(
                 f'    uint8_t result = ({fp8_format_select}) ? util::f32_to_fp8_e5m3_sr(s0, seed) : util::f32_to_fp8_e4m3_sr(s0, seed);'
             )
         else:
-            cvt_fn = fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_sr')
-            L.append(f'    uint8_t result = {cvt_fn}(s0, seed);')
+            L.append('    uint8_t result = util::f32_to_fp8_e4m3_sr(s0, seed);')
         L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
         L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
         L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
@@ -975,8 +965,7 @@ def gen_vector_cvt_pk(
         )
         L.append('    float s0 = util::f16_to_f32(static_cast<uint16_t>(raw));')
         L.append(f'    uint32_t seed = {src[1]}.read_lane(wf, lane);')
-        cvt_fn = fp8_helper_name(arch_name, 'util::f32_to_bf8_e5m2_sr')
-        L.append(f'    uint8_t result = {cvt_fn}(s0, seed);')
+        L.append('    uint8_t result = util::f32_to_bf8_e5m2_sr(s0, seed);')
         L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
         L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
         L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
@@ -987,7 +976,7 @@ def gen_vector_cvt_pk(
     return '\n'.join(L)
 
 
-def _scale_decode_call(fmt: str, raw_expr: str, arch_name: str = '') -> str:
+def _scale_decode_call(fmt: str, raw_expr: str) -> str:
     if fmt == 'fp4':
         return f'util::fp4_e2m1_to_f32(static_cast<uint8_t>({raw_expr}))'
     if fmt == 'fp6':
@@ -995,13 +984,13 @@ def _scale_decode_call(fmt: str, raw_expr: str, arch_name: str = '') -> str:
     if fmt == 'bf6':
         return f'util::bf6_e3m2_to_f32(static_cast<uint8_t>({raw_expr}))'
     if fmt == 'fp8':
-        return f"{fp8_helper_name(arch_name, 'util::fp8_e4m3_to_f32')}(static_cast<uint8_t>({raw_expr}))"
+        return f'util::fp8_e4m3_to_f32(static_cast<uint8_t>({raw_expr}))'
     if fmt == 'bf8':
-        return f"{fp8_helper_name(arch_name, 'util::bf8_e5m2_to_f32')}(static_cast<uint8_t>({raw_expr}))"
+        return f'util::bf8_e5m2_to_f32(static_cast<uint8_t>({raw_expr}))'
     raise ValueError(f'unsupported scaled conversion input format: {fmt}')
 
 
-def _scale_encode_call(fmt: str, value_expr: str, arch_name: str = '') -> str:
+def _scale_encode_call(fmt: str, value_expr: str) -> str:
     if fmt == 'fp4':
         return f'util::f32_to_fp4_e2m1_rne({value_expr})'
     if fmt == 'fp6':
@@ -1009,19 +998,13 @@ def _scale_encode_call(fmt: str, value_expr: str, arch_name: str = '') -> str:
     if fmt == 'bf6':
         return f'util::f32_to_bf6_e3m2_rne({value_expr})'
     if fmt == 'fp8':
-        return (
-            f"{fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_rne')}({value_expr})"
-        )
+        return f'util::f32_to_fp8_e4m3_rne({value_expr})'
     if fmt == 'bf8':
-        return (
-            f"{fp8_helper_name(arch_name, 'util::f32_to_bf8_e5m2_rne')}({value_expr})"
-        )
+        return f'util::f32_to_bf8_e5m2_rne({value_expr})'
     raise ValueError(f'unsupported scaled conversion output format: {fmt}')
 
 
-def _scale_sr_encode_call(
-    fmt: str, value_expr: str, seed_expr: str, arch_name: str = ''
-) -> str:
+def _scale_sr_encode_call(fmt: str, value_expr: str, seed_expr: str) -> str:
     if fmt == 'fp4':
         return f'util::f32_to_fp4_e2m1_sr({value_expr}, {seed_expr})'
     if fmt == 'fp6':
@@ -1029,9 +1012,9 @@ def _scale_sr_encode_call(
     if fmt == 'bf6':
         return f'util::f32_to_bf6_e3m2_sr({value_expr}, {seed_expr})'
     if fmt == 'fp8':
-        return f"{fp8_helper_name(arch_name, 'util::f32_to_fp8_e4m3_sr')}({value_expr}, {seed_expr})"
+        return f'util::f32_to_fp8_e4m3_sr({value_expr}, {seed_expr})'
     if fmt == 'bf8':
-        return f"{fp8_helper_name(arch_name, 'util::f32_to_bf8_e5m2_sr')}({value_expr}, {seed_expr})"
+        return f'util::f32_to_bf8_e5m2_sr({value_expr}, {seed_expr})'
     raise ValueError(f'unsupported scaled SR conversion output format: {fmt}')
 
 
@@ -1053,21 +1036,21 @@ def _scale_read_vgpr_base(L: list[str], var: str, operand: str) -> None:
     )
 
 
-def _scale_unpack_element_raw(fmt: str, arch_name: str = '') -> list[str]:
+def _scale_unpack_element_raw(fmt: str) -> list[str]:
     bits = _scale_lowp_bits(fmt)
     mask = f'0x{((1 << bits) - 1):x}u'
     if bits == 4:
         return [
             '    auto read_scaled_src = [&](uint32_t index) -> float {',
             f'      uint32_t raw = (src_payload >> (index * 4u)) & {mask};',
-            f"      return {_scale_decode_call(fmt, 'raw', arch_name)};",
+            f"      return {_scale_decode_call(fmt, 'raw')};",
             '    };',
         ]
     if bits == 8:
         return [
             '    auto read_scaled_src = [&](uint32_t index) -> float {',
             f'      uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & {mask});',
-            f"      return {_scale_decode_call(fmt, 'raw', arch_name)};",
+            f"      return {_scale_decode_call(fmt, 'raw')};",
             '    };',
         ]
     return [
@@ -1079,7 +1062,7 @@ def _scale_unpack_element_raw(fmt: str, arch_name: str = '') -> list[str]:
         '      if (shift > 26u)',
         '        raw |= src_words[word + 1u] << (32u - shift);',
         f'      raw &= {mask};',
-        f"      return {_scale_decode_call(fmt, 'raw', arch_name)};",
+        f"      return {_scale_decode_call(fmt, 'raw')};",
         '    };',
     ]
 
@@ -1117,11 +1100,7 @@ def _scale_e8m0_unpack_scale(scale_src: str) -> list[str]:
 
 
 def gen_vector_cvt_scale(
-    dst: list[str],
-    src: list[str],
-    cls: str,
-    op: str | None,
-    arch_name: str = '',
+    dst: list[str], src: list[str], cls: str, op: str | None
 ) -> str:
     """Generate gfx1250 scaled packed low-precision conversions."""
     if cls != 'vector_cvt_scale' or op is None:
@@ -1172,7 +1151,7 @@ def gen_vector_cvt_scale(
         else:
             raise ValueError(f'unsupported scaled unpack operation: {op}')
 
-        L.extend(_scale_unpack_element_raw(in_fmt, arch_name))
+        L.extend(_scale_unpack_element_raw(in_fmt))
         if out_fmt == 'f32':
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
             L.append('      float value = read_scaled_src(index) * scale;')
@@ -1217,12 +1196,12 @@ def gen_vector_cvt_scale(
         L.append('      float value = read_scaled_input(index) / scale;')
         if stochastic:
             L.append(
-                f"      pack_scaled_dst(index, {_scale_sr_encode_call(out_fmt, 'value', 'seed', arch_name)});"
+                f"      pack_scaled_dst(index, {_scale_sr_encode_call(out_fmt, 'value', 'seed')});"
             )
             L.append('      seed = util::prng_advance(seed);')
         else:
             L.append(
-                f"      pack_scaled_dst(index, {_scale_encode_call(out_fmt, 'value', arch_name)});"
+                f"      pack_scaled_dst(index, {_scale_encode_call(out_fmt, 'value')});"
             )
         L.append('    }')
         L.append(f'    for (uint32_t word = 0; word < {out_words}u; ++word)')
@@ -1287,53 +1266,29 @@ def gen_cvt_fp8(ctx) -> str:
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_rne'),
+            'util::f32_to_fp8_e4m3_rne',
             opsel,
             fp8_format_select=fp8_format_select,
             fp8_format_fn='util::f32_to_fp8_e5m3_rne',
         )
     elif op == 'pk_bf8_f32':
-        _gen_pk_narrow_fp8(
-            L,
-            dst,
-            src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_rne'),
-            opsel,
-        )
+        _gen_pk_narrow_fp8(L, dst, src, 'util::f32_to_bf8_e5m2_rne', opsel)
     elif op == 'sr_fp8_f32':
         _gen_sr_narrow_fp8(
             L,
             dst,
             src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_sr'),
+            'util::f32_to_fp8_e4m3_sr',
             opsel,
             fp8_format_select=fp8_format_select,
             fp8_format_fn='util::f32_to_fp8_e5m3_sr',
         )
     elif op == 'sr_bf8_f32':
-        _gen_sr_narrow_fp8(
-            L,
-            dst,
-            src,
-            fp8_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_sr'),
-            opsel,
-        )
+        _gen_sr_narrow_fp8(L, dst, src, 'util::f32_to_bf8_e5m2_sr', opsel)
     elif op == 'pk_f32_fp8':
-        _gen_pk_widen_fp8(
-            L,
-            dst,
-            src,
-            fp8_helper_name(ctx.arch_name, 'util::fp8_e4m3_to_f32'),
-            opsel,
-        )
+        _gen_pk_widen_fp8(L, dst, src, 'util::fp8_e4m3_to_f32', opsel)
     elif op == 'pk_f32_bf8':
-        _gen_pk_widen_fp8(
-            L,
-            dst,
-            src,
-            fp8_helper_name(ctx.arch_name, 'util::bf8_e5m2_to_f32'),
-            opsel,
-        )
+        _gen_pk_widen_fp8(L, dst, src, 'util::bf8_e5m2_to_f32', opsel)
 
     L.append('  }')
     return '\n'.join(L)
@@ -1448,18 +1403,6 @@ _F32_TO_NARROW_SR = {
 }
 
 
-def _narrow_to_f32_name(arch_name: str, fmt: str) -> str:
-    return fp8_helper_name(arch_name, _NARROW_TO_F32[fmt])
-
-
-def _f32_to_narrow_rne_name(arch_name: str, fmt: str) -> str:
-    return fp8_helper_name(arch_name, _F32_TO_NARROW_RNE[fmt])
-
-
-def _f32_to_narrow_sr_name(arch_name: str, fmt: str) -> str:
-    return fp8_helper_name(arch_name, _F32_TO_NARROW_SR[fmt])
-
-
 def _parse_scalef32_op(op: str):
     """Parse a CVT_SCALEF32 operation suffix into components.
 
@@ -1562,7 +1505,7 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     """Narrowing: F32/F16/BF16 → FP8/BF8/FP4, with scale, RNE."""
     dst = ctx.dst_ops
     src = ctx.src_ops
-    cvt_fn = _f32_to_narrow_rne_name(ctx.arch_name, dst_fmt)
+    cvt_fn = _F32_TO_NARROW_RNE[dst_fmt]
     nan_val = _nan_for_fmt(dst_fmt)
 
     L = []
@@ -1688,7 +1631,7 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     """Narrowing with stochastic rounding: scale + SR."""
     dst = ctx.dst_ops
     src = ctx.src_ops
-    cvt_fn = _f32_to_narrow_sr_name(ctx.arch_name, dst_fmt)
+    cvt_fn = _F32_TO_NARROW_SR[dst_fmt]
     op = ctx.op
 
     L = []
@@ -1805,7 +1748,7 @@ def _gen_widen_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     """Widening: FP8/BF8/FP4 → F32/F16/BF16, with scale."""
     dst = ctx.dst_ops
     src = ctx.src_ops
-    cvt_fn = _narrow_to_f32_name(ctx.arch_name, src_fmt)
+    cvt_fn = _NARROW_TO_F32[src_fmt]
     nan_val = _nan_for_fmt(dst_fmt)
 
     L = []
@@ -1974,9 +1917,7 @@ def _gen_wide_scalef32(
 
     if direction == 'narrow':
         cvt_fn = (
-            _f32_to_narrow_sr_name(ctx.arch_name, dst_fmt)
-            if stochastic
-            else _f32_to_narrow_rne_name(ctx.arch_name, dst_fmt)
+            _F32_TO_NARROW_SR[dst_fmt] if stochastic else _F32_TO_NARROW_RNE[dst_fmt]
         )
         n_elems = 32
         bits_per_elem = 6
@@ -2057,7 +1998,7 @@ def _gen_wide_scalef32(
 
     else:
         # Widening: FP6/BF6 → F32/F16/BF16
-        cvt_fn = _narrow_to_f32_name(ctx.arch_name, src_fmt)
+        cvt_fn = _NARROW_TO_F32[src_fmt]
         n_elems = 32
 
         L.append('    uint32_t src_dwords[6];')
