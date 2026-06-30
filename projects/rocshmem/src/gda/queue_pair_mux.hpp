@@ -94,27 +94,25 @@ public:
   __host__ ~QueuePairMux();
 
 public:
-  template <OpCode Op,
-            bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
+  template <OpCode Op, typename... Options>
   __device__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
                                uintptr_t raddr, uint32_t rkey, size_t size,
-                               const ActiveWFInfo& wf_info);
+                               const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
-  template <OpCode Op,
-            bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
+  template <OpCode Op, typename... Options>
   __device__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                                      uintptr_t raddr, uint32_t rkey, size_t size);
+                                      uintptr_t raddr, uint32_t rkey, size_t size,
+                                      PostOpt<Options...> = {});
 
-  template <OpCode Op, AMOFetchType Fetch,
-            bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
+  template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
                                            uint64_t value, uint64_t cond,
-                                           const ActiveWFInfo& wf_info);
+                                           const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
-  template <OpCode Op, AMOFetchType Fetch,
-            bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
+  template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                                  uint64_t value, uint64_t cond);
+                                                  uint64_t value, uint64_t cond,
+                                                  PostOpt<Options...> = {});
 
   __device__ void quiet_single();
 
@@ -275,25 +273,25 @@ __host__ __device__ constexpr typename Provider::OpCode QueuePairMux::provider_o
   }
 }
 
-template <QueuePairMux::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
+template <QueuePairMux::OpCode Op, typename... Options>
 __device__ void QueuePairMux::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info) {
+    const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.post_wqe_rma<provider_op<Op, QueuePairIONIC>(),
-                                 RingDB, ThreadSafe, CheckCQ>(laddr, lkey, raddr, rkey, size, wf_info);
+    return qp.ionic.post_wqe_rma<provider_op<Op, QueuePairIONIC>()>(
+                                 laddr, lkey, raddr, rkey, size, wf_info, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.post_wqe_rma<provider_op<Op, QueuePairBNXT>(),
-                                RingDB, ThreadSafe, CheckCQ>(laddr, lkey, raddr, rkey, size, wf_info);
+    return qp.bnxt.post_wqe_rma<provider_op<Op, QueuePairBNXT>()>(
+                                laddr, lkey, raddr, rkey, size, wf_info, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.post_wqe_rma<provider_op<Op, QueuePairMLX5>(),
-                                RingDB, ThreadSafe, CheckCQ>(laddr, lkey, raddr, rkey, size, wf_info);
+    return qp.mlx5.post_wqe_rma<provider_op<Op, QueuePairMLX5>()>(
+                                laddr, lkey, raddr, rkey, size, wf_info, options);
 #endif
   default:
     assert(false /* invalid GDAProvider */);
@@ -301,24 +299,25 @@ __device__ void QueuePairMux::post_wqe_rma(
   }
 }
 
-template <QueuePairMux::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
+template <QueuePairMux::OpCode Op, typename... Options>
 __device__ void QueuePairMux::post_wqe_rma_single(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
+    PostOpt<Options...> options) {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.post_wqe_rma_single<provider_op<Op, QueuePairIONIC>(),
-                                        RingDB, ThreadSafe, CheckCQ>(laddr, lkey, raddr, rkey, size);
+    return qp.ionic.post_wqe_rma_single<provider_op<Op, QueuePairIONIC>()>(
+                                        laddr, lkey, raddr, rkey, size, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.post_wqe_rma_single<provider_op<Op, QueuePairBNXT>(),
-                                       RingDB, ThreadSafe, CheckCQ>(laddr, lkey, raddr, rkey, size);
+    return qp.bnxt.post_wqe_rma_single<provider_op<Op, QueuePairBNXT>()>(
+                                       laddr, lkey, raddr, rkey, size, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.post_wqe_rma_single<provider_op<Op, QueuePairMLX5>(),
-                                       RingDB, ThreadSafe, CheckCQ>(laddr, lkey, raddr, rkey, size);
+    return qp.mlx5.post_wqe_rma_single<provider_op<Op, QueuePairMLX5>()>(
+                                       laddr, lkey, raddr, rkey, size, options);
 #endif
   default:
     assert(false /* invalid GDAProvider */);
@@ -326,27 +325,26 @@ __device__ void QueuePairMux::post_wqe_rma_single(
   }
 }
 
-template <QueuePairMux::OpCode Op, AMOFetchType Fetch,
-          bool RingDB, bool ThreadSafe, bool CheckCQ>
+template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
-    const ActiveWFInfo& wf_info) {
+    const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.post_wqe_amo<provider_op<Op, QueuePairIONIC>(), Fetch,
-                                 RingDB, ThreadSafe, CheckCQ>(raddr, rkey, value, cond, wf_info);
+    return qp.ionic.post_wqe_amo<provider_op<Op, QueuePairIONIC>(), Fetch>(
+                                 raddr, rkey, value, cond, wf_info, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.post_wqe_amo<provider_op<Op, QueuePairBNXT>(), Fetch,
-                                RingDB, ThreadSafe, CheckCQ>(raddr, rkey, value, cond, wf_info);
+    return qp.bnxt.post_wqe_amo<provider_op<Op, QueuePairBNXT>(), Fetch>(
+                                raddr, rkey, value, cond, wf_info, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.post_wqe_amo<provider_op<Op, QueuePairMLX5>(), Fetch,
-                                RingDB, ThreadSafe, CheckCQ>(raddr, rkey, value, cond, wf_info);
+    return qp.mlx5.post_wqe_amo<provider_op<Op, QueuePairMLX5>(), Fetch>(
+                                raddr, rkey, value, cond, wf_info, options);
 #endif
   default:
     assert(false /* invalid GDAProvider */);
@@ -354,26 +352,26 @@ __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
   }
 }
 
-template <QueuePairMux::OpCode Op, AMOFetchType Fetch,
-          bool RingDB, bool ThreadSafe, bool CheckCQ>
+template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond) {
+    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
+    PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.post_wqe_amo_single<provider_op<Op, QueuePairIONIC>(), Fetch,
-                                        RingDB, ThreadSafe, CheckCQ>(raddr, rkey, value, cond);
+    return qp.ionic.post_wqe_amo_single<provider_op<Op, QueuePairIONIC>(), Fetch>(
+                                        raddr, rkey, value, cond, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.post_wqe_amo_single<provider_op<Op, QueuePairBNXT>(), Fetch,
-                                       RingDB, ThreadSafe, CheckCQ>(raddr, rkey, value, cond);
+    return qp.bnxt.post_wqe_amo_single<provider_op<Op, QueuePairBNXT>(), Fetch>(
+                                       raddr, rkey, value, cond, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.post_wqe_amo_single<provider_op<Op, QueuePairMLX5>(), Fetch,
-                                       RingDB, ThreadSafe, CheckCQ>(raddr, rkey, value, cond);
+    return qp.mlx5.post_wqe_amo_single<provider_op<Op, QueuePairMLX5>(), Fetch>(
+                                       raddr, rkey, value, cond, options);
 #endif
   default:
     assert(false /* invalid GDAProvider */);

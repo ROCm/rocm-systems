@@ -213,6 +213,186 @@ class ActiveWFInfo {
 template <typename Provider>
 struct QueuePairTraits;
 
+namespace QueuePairOption {
+  /*
+   * @brief Helper alias for option tag types before C++26 std::constant_wrapper.
+   *
+   * Options are defined as types derived from constant_t<V>
+   * so that type-based tag dispatching can be used.
+   */
+  template <auto V>
+  using constant_t = std::integral_constant<decltype(V), V>;
+
+  enum class UpdateThread {
+    All,
+    Last,
+    None,
+  };
+
+  /*
+   * @brief Option: whether the send queue doorbell will be rung.
+   */
+  template <bool ring_db>
+  struct ring_db_tag : constant_t<ring_db> { };
+
+  /*
+   * @brief Option: whether thread safety will be enforced.
+   */
+  template <bool thread_safe>
+  struct thread_safe_tag : constant_t<thread_safe> { };
+
+  /*
+   * @brief Option: whether the number of available send queue entries will be checked.
+   */
+  template <bool check_sq>
+  struct check_sq_tag : constant_t<check_sq> { };
+
+  /*
+   * @brief Option: which threads' WQEs will generate CQEs.
+   */
+  template <UpdateThread update_cq>
+  struct update_cq_tag : constant_t<update_cq> { };
+
+  /* forward declaration */
+  template <typename... Options> struct PostOpt;
+
+  /* deduction guide, required before C++20 */
+  template <typename... Options> __host__ __device__ PostOpt(Options...) -> PostOpt<Options...>;
+
+  /* Base case with all options defined */
+  template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq>
+  struct PostOpt<ring_db_tag<ring_db>,
+                 thread_safe_tag<thread_safe>,
+                 check_sq_tag<check_sq>,
+                 update_cq_tag<update_cq>> {
+    /* empty constructor for type deduction from tags */
+    template <typename... Options> __host__ __device__ constexpr PostOpt(Options...) { }
+
+    /* static constexpr data members to simplify option access */
+    static constexpr auto RingDB     = ring_db;
+    static constexpr auto ThreadSafe = thread_safe;
+    static constexpr auto CheckSQ    = check_sq;
+    static constexpr auto UpdateCQ   = update_cq;
+
+    static __device__ constexpr inline bool signal_completion(const ActiveWFInfo& wf_info) {
+      if constexpr (UpdateCQ == UpdateThread::All) {
+        // all WQEs update the CQ
+        return true;
+      } else if constexpr (UpdateCQ == UpdateThread::Last) {
+        // only the last WQE in each group updates the CQ
+        return wf_info.is_pe_group_last;
+      } else {
+        // no WQEs update the CQ
+        return false;
+      }
+    }
+
+    static __device__ constexpr inline bool signal_completion_single() {
+      if constexpr (UpdateCQ == UpdateThread::All) {
+        // all WQEs update the CQ
+        return true;
+      } else if constexpr (UpdateCQ == UpdateThread::Last) {
+        // singleton groups, so all threads are "last": all WQEs update the CQ
+        return true;
+      } else {
+        // no WQEs update the CQ
+        return false;
+      }
+    }
+  };
+
+  /* Extraneous parameters,
+   * else matches PostOpt<ring_db_tag, thread_safe_tag, check_sq_tag, update_cq_tag> */
+  template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq, typename... Options>
+  struct PostOpt<ring_db_tag<ring_db>,
+                 thread_safe_tag<thread_safe>,
+                 check_sq_tag<check_sq>,
+                 update_cq_tag<update_cq>,
+                 Options...> {
+    static_assert(sizeof...(Options) == 0, "Too many or invalid options");
+  };
+
+  /* Missing update_cq_tag,
+   * else matches PostOpt<ring_db_tag, thread_safe_tag, check_sq_tag, update_cq_tag, Options...> */
+  template <bool ring_db, bool thread_safe, bool check_sq, typename... Options>
+  struct PostOpt<ring_db_tag<ring_db>,
+                 thread_safe_tag<thread_safe>,
+                 check_sq_tag<check_sq>,
+                 Options...>
+       : PostOpt<ring_db_tag<ring_db>,
+                 thread_safe_tag<thread_safe>,
+                 check_sq_tag<check_sq>,
+                 update_cq_tag</* default: all WQEs update the CQ */ UpdateThread::All>,
+                 Options...> {
+    /* inherit constructor */
+    using PostOpt<ring_db_tag<ring_db>,
+                  thread_safe_tag<thread_safe>,
+                  check_sq_tag<check_sq>,
+                  update_cq_tag<UpdateThread::All>,
+                  Options...
+                 >::PostOpt;
+  };
+
+  /* Missing check_sq_tag,
+   * else matches PostOpt<ring_db_tag, thread_safe_tag, check_sq_tag, Options...> */
+  template <bool ring_db, bool thread_safe, typename... Options>
+  struct PostOpt<ring_db_tag<ring_db>,
+                 thread_safe_tag<thread_safe>,
+                 Options...>
+       : PostOpt<ring_db_tag<ring_db>,
+                 thread_safe_tag<thread_safe>,
+                 check_sq_tag</* default: DO check the SQ */ true>,
+                 Options...> {
+    /* inherit constructor */
+    using PostOpt<ring_db_tag<ring_db>,
+                  thread_safe_tag<thread_safe>,
+                  check_sq_tag<true>,
+                  Options...
+                 >::PostOpt;
+  };
+
+  /* Missing thread_safe_tag,
+   * else matches PostOpt<ring_db_tag, thread_safe_tag, Options...> */
+  template <bool ring_db, typename... Options>
+  struct PostOpt<ring_db_tag<ring_db>,
+                 Options...>
+       : PostOpt<ring_db_tag<ring_db>,
+                 thread_safe_tag</* default: DO use thread safety */ true>,
+                 Options...> {
+    /* inherit constructor */
+    using PostOpt<ring_db_tag<ring_db>,
+                  thread_safe_tag<true>,
+                  Options...
+                 >::PostOpt;
+  };
+
+  /* Missing ring_db_tag,
+   * else matches PostOpt<ring_db_tag, Options...> */
+  template <typename... Options>
+  struct PostOpt
+       : PostOpt<ring_db_tag</* default: DO ring the doorbell */ true>,
+                 Options...> {
+    /* inherit constructor */
+    using PostOpt<ring_db_tag<true>,
+                  Options...
+                 >::PostOpt;
+  };
+}
+
+/*
+ * @brief Type alias helper for WQE posting options.
+ */
+using QueuePairOption::PostOpt;
+
+/* bring QueuePairOption::UpdateThread into scope */
+using QueuePairOption::UpdateThread;
+
+/* constexpr variable templates to simplify usage */
+template <auto V> constexpr inline auto RingDB     = QueuePairOption::ring_db_tag<V>{};
+template <auto V> constexpr inline auto ThreadSafe = QueuePairOption::thread_safe_tag<V>{};
+template <auto V> constexpr inline auto CheckSQ    = QueuePairOption::check_sq_tag<V>{};
+template <auto V> constexpr inline auto UpdateCQ   = QueuePairOption::update_cq_tag<V>{};
+
 /*
  * @brief Atomic Memory Operation fetching behavior.
  */
@@ -276,34 +456,38 @@ public:
  */
 public:
   /**
-   * @brief Create and enqueue a non-blocking put work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking put work queue entry (WQE).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] source Source address for data transmission.
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell.
+   * @tparam Options Options to use when posting these WQEs.
    */
-  template <bool RingDB = true>
+  template <typename... PostOptions>
   __device__ void put_nbi(void *dest, const void *source, size_t nelems,
-                          const ActiveWFInfo& wf_info);
-  template <bool RingDB = true>
-  __device__ void put_nbi_single(void *dest, const void *source, size_t nelems);
+                          const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  template <typename... PostOptions>
+  __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
+                                 PostOpt<PostOptions...> = {});
 
   /**
-   * @brief Create and enqueue a non-blocking get work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking get work queue entry (WQE).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] source Source address for data transmission.
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
+   *
+   * @tparam Options Options to use when posting these WQEs.
    */
-  template <bool RingDB = true>
+  template <typename... PostOptions>
   __device__ void get_nbi(void *dest, const void *source, size_t nelems,
-                          const ActiveWFInfo& wf_info);
-  template <bool RingDB = true>
-  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems);
+                          const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  template <typename... PostOptions>
+  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems,
+                                 PostOpt<PostOptions...> = {});
 /**@}*/
 
 
@@ -315,76 +499,82 @@ public:
  */
 public:
   /**
-   * @brief Create and enqueue a blocking atomic fetch-and-add work queue entry (wqe).
+   * @brief Create and enqueue a blocking atomic fetch-and-add work queue entry (WQE).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell.
+   * @tparam Options Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <bool RingDB = true>
-  __device__ uint64_t atomic_fetch_add(void *dest, uint64_t value, const ActiveWFInfo& wf_info);
-  template <bool RingDB = true>
-  __device__ uint64_t atomic_fetch_add_single(void *dest, uint64_t value);
+  template <typename... PostOptions>
+  __device__ uint64_t atomic_fetch_add(void *dest, uint64_t value,
+                                       const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  template <typename... PostOptions>
+  __device__ uint64_t atomic_fetch_add_single(void *dest, uint64_t value,
+                                              PostOpt<PostOptions...> = {});
 
 #if 0
   /**
-   * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (WQE).
    *
    * @param[in] fetch Address for fetched value.
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell.
+   * @tparam Options Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <bool RingDB = true>
+  template <typename... PostOptions>
   __device__ void atomic_fetch_add_nbi(uint64_t *fetch, void *dest, uint64_t value,
-                                       const ActiveWFInfo& wf_info);
-  template <bool RingDB = true>
-  __device__ void atomic_fetch_add_nbi_single(uint64_t *fetch, void *dest, uint64_t value);
+                                       const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  template <typename... PostOptions>
+  __device__ void atomic_fetch_add_nbi_single(uint64_t *fetch, void *dest, uint64_t value,
+                                              PostOpt<PostOptions...> = {});
 #endif
 
   /**
-   * @brief Create and enqueue a non-blocking atomic add work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking atomic add work queue entry (WQE).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell.
+   * @tparam Options Options to use when posting these WQEs.
    */
-  template <bool RingDB = true>
-  __device__ void atomic_add_nbi(void *dest, uint64_t value, const ActiveWFInfo& wf_info);
-  template <bool RingDB = true>
-  __device__ void atomic_add_nbi_single(void *dest, uint64_t value);
+  template <typename... PostOptions>
+  __device__ void atomic_add_nbi(void *dest, uint64_t value,
+                                 const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  template <typename... PostOptions>
+  __device__ void atomic_add_nbi_single(void *dest, uint64_t value,
+                                        PostOpt<PostOptions...> = {});
 
   /**
-   * @brief Create and enqueue a blocking atomic compare-and-swap work queue entry (wqe).
+   * @brief Create and enqueue a blocking atomic compare-and-swap work queue entry (WQE).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] cond Used in atomic comparisons.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell.
+   * @tparam Options Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <bool RingDB = true>
+  template <typename... PostOptions>
   __device__ uint64_t atomic_cas(void *dest, uint64_t cond, uint64_t value,
-                                 const ActiveWFInfo& wf_info);
-  template <bool RingDB = true>
-  __device__ uint64_t atomic_cas_single(void *dest, uint64_t cond, uint64_t value);
+                                 const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  template <typename... PostOptions>
+  __device__ uint64_t atomic_cas_single(void *dest, uint64_t cond, uint64_t value,
+                                        PostOpt<PostOptions...> = {});
 
 #if 0
   /**
-   * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (WQE).
    *
    * @param[in] fetch Address for fetched value.
    * @param[in] dest Destination address for data transmission.
@@ -392,34 +582,37 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell.
+   * @tparam Options Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <bool RingDB = true>
+  template <typename... PostOptions>
   __device__ void atomic_cas_nbi(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
-                                 const ActiveWFInfo& wf_info);
-  template <bool RingDB = true>
-  __device__ void atomic_cas_nbi_single(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value);
+                                 const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  template <typename... PostOptions>
+  __device__ void atomic_cas_nbi_single(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
+                                        PostOpt<PostOptions...> = {});
 #endif
 
   /**
-   * @brief Create and enqueue a non-fetching atomic compare-and-swap work queue entry (wqe).
+   * @brief Create and enqueue a non-fetching atomic compare-and-swap work queue entry (WQE).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] cond Used in atomic comparisons.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam RingDB Whether to ring the doorbell.
+   * @tparam Options Options to use when posting these WQEs.
+   *
    *
    * @return An atomic value.
    */
-  template <bool RingDB = true>
+  template <typename... PostOptions>
   __device__ void atomic_cas_nbi_nofetch(void *dest, uint64_t cond, uint64_t value,
-                                         const ActiveWFInfo& wf_info);
-  template <bool RingDB = true>
-  __device__ void atomic_cas_nbi_nofetch_single(void *dest, uint64_t cond, uint64_t value);
+                                         const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  template <typename... PostOptions>
+  __device__ void atomic_cas_nbi_nofetch_single(void *dest, uint64_t cond, uint64_t value,
+                                                PostOpt<PostOptions...> = {});
 /**@}*/
 
 
@@ -464,305 +657,331 @@ private:
 
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::put_nbi(
-    void *dest, const void *source, size_t nelems, const ActiveWFInfo& wf_info) {
+    void *dest, const void *source, size_t nelems,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::RDMA_WRITE;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   /* only need lkey when RDMA_WRITE can't be inlined */
   uint32_t lkey = !Provider::template can_inline<Op>(nelems) ? provider().get_lkey(laddr) : 0;
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_rma<Op, RingDB>(laddr, lkey, raddr, rkey, nelems, wf_info);
+  provider().template post_wqe_rma<Op>(laddr, lkey, raddr, rkey, nelems, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::put_nbi_single(
-    void *dest, const void *source, size_t nelems) {
+    void *dest, const void *source, size_t nelems,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::RDMA_WRITE;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   /* only need lkey when RDMA_WRITE can't be inlined */
   uint32_t lkey = !Provider::template can_inline<Op>(nelems) ? provider().get_lkey(laddr) : 0;
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_rma_single<Op, RingDB>(laddr, lkey, raddr, rkey, nelems);
+  provider().template post_wqe_rma_single<Op>(laddr, lkey, raddr, rkey, nelems, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::get_nbi(
-    void *dest, const void *source, size_t nelems, const ActiveWFInfo& wf_info) {
+    void *dest, const void *source, size_t nelems,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::RDMA_READ;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_rma<Op, RingDB>(laddr, lkey, raddr, rkey, nelems, wf_info);
+  provider().template post_wqe_rma<Op>(laddr, lkey, raddr, rkey, nelems, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::get_nbi_single(
-    void *dest, const void *source, size_t nelems) {
+    void *dest, const void *source, size_t nelems,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::RDMA_READ;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_rma_single<Op, RingDB>(laddr, lkey, raddr, rkey, nelems);
+  provider().template post_wqe_rma_single<Op>(laddr, lkey, raddr, rkey, nelems, post_options);
 }
 
 #if 0
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
-    void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+    void *dest, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0, wf_info);
+  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, wf_info, post_options);
   quiet(wf_info);
   return *reinterpret_cast<uint64_t*>(laddr);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
-    void *dest, uint64_t value) {
+    void *dest, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0);
+  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, post_options);
   provider().quiet_single();
   return *reinterpret_cast<uint64_t*>(laddr);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi(
-    uint64_t *fetch, void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+    uint64_t *fetch, void *dest, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0, wf_info);
+  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi_single(
-    uint64_t *fetch, void *dest, uint64_t value) {
+    uint64_t *fetch, void *dest, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0);
+  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
-    void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+    void *dest, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0, wf_info);
+  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
-__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(void *dest, uint64_t value) {
+template <typename... PostOptions>
+__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(
+    void *dest, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, 0);
+  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
-    void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+    void *dest, uint64_t cond, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond, wf_info);
+  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, wf_info, post_options);
   quiet(wf_info);
   return *reinterpret_cast<uint64_t*>(laddr);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
-    void *dest, uint64_t cond, uint64_t value) {
+    void *dest, uint64_t cond, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t laddr = /* TODO */
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond);
+  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, post_options);
   quiet_single();
   return *reinterpret_cast<uint64_t*>(laddr);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi(
-    uint64_t *fetch, void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+    uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond, wf_info);
+  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_single(
-    uint64_t *fetch, void *dest, uint64_t cond, uint64_t value) {
+    uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond);
+  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch(
-    void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+    void *dest, uint64_t cond, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond, wf_info);
+  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch_single(
-    void *dest, uint64_t cond, uint64_t value) {
+    void *dest, uint64_t cond, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t lkey = provider().get_lkey(laddr);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, lkey, raddr, rkey, value, cond);
+  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, post_options);
 }
 #endif
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
-    void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+    void *dest, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
-  return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, 0, wf_info);
+  return provider().template post_wqe_amo<Op, Fetch>(raddr, rkey, value, 0, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
-    void *dest, uint64_t value) {
+    void *dest, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
-  return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, 0);
+  return provider().template post_wqe_amo_single<Op, Fetch>(raddr, rkey, value, 0, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
-    void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+    void *dest, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, 0, wf_info);
+  provider().template post_wqe_amo<Op, Fetch>(raddr, rkey, value, 0, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
-__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(void *dest, uint64_t value) {
+template <typename... PostOptions>
+__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(
+    void *dest, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, 0);
+  provider().template post_wqe_amo_single<Op, Fetch>(raddr, rkey, value, 0, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
-    void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+    void *dest, uint64_t cond, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
-  return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, cond, wf_info);
+  return provider().template post_wqe_amo<Op, Fetch>(raddr, rkey, value, cond, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
-    void *dest, uint64_t cond, uint64_t value) {
+    void *dest, uint64_t cond, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
-  return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, cond);
+  return provider().template post_wqe_amo_single<Op, Fetch>(raddr, rkey, value, cond, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch(
-    void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+    void *dest, uint64_t cond, uint64_t value,
+    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, rkey, value, cond, wf_info);
+  provider().template post_wqe_amo<Op, Fetch>(raddr, rkey, value, cond, wf_info, post_options);
 }
 
 template <typename Provider>
-template <bool RingDB>
+template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch_single(
-    void *dest, uint64_t cond, uint64_t value) {
+    void *dest, uint64_t cond, uint64_t value,
+    PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
   static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
   uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
   uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, rkey, value, cond);
+  provider().template post_wqe_amo_single<Op, Fetch>(raddr, rkey, value, cond, post_options);
 }
 
 template <typename Provider>

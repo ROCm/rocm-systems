@@ -65,27 +65,25 @@ public:
   __host__ ~QueuePairIONIC()                                      = default;
 
 public:
-  template <OpCode Op,
-            bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
+  template <OpCode Op, typename... Options>
   __device__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
                                uintptr_t raddr, uint32_t rkey, size_t size,
-                               const ActiveWFInfo& wf_info);
+                               const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
-  template <OpCode Op,
-            bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
+  template <OpCode Op, typename... Options>
   __device__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                                      uintptr_t raddr, uint32_t rkey, size_t size);
+                                      uintptr_t raddr, uint32_t rkey, size_t size,
+                                      PostOpt<Options...> = {});
 
-  template <OpCode Op, AMOFetchType Fetch,
-            bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
+  template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
                                            uint64_t value, uint64_t cond,
-                                           const ActiveWFInfo& wf_info);
+                                           const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
-  template <OpCode Op, AMOFetchType Fetch,
-            bool RingDB = true, bool ThreadSafe = true, bool CheckCQ = true>
+  template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                                  uint64_t value, uint64_t cond);
+                                                  uint64_t value, uint64_t cond,
+                                                  PostOpt<Options...> = {});
 
   __device__ void quiet_single();
 
@@ -157,10 +155,11 @@ private:
 };
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-template <QueuePairIONIC::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
+template <QueuePairIONIC::OpCode Op, typename... Options>
 __device__ void QueuePairIONIC::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info) {
+    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
+  //using PostOptions = PostOpt<Options...>;
   uint32_t num_wqes = 1;
   if (wf_info.scope == ThreadScope::thread) {
     num_wqes = wf_info.num_pe_group_lanes;
@@ -222,9 +221,10 @@ __device__ void QueuePairIONIC::post_wqe_rma(
 }
 
 // precondition: called with all active lanes using different QPs
-template <QueuePairIONIC::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
+template <QueuePairIONIC::OpCode Op, typename... Options>
 __device__ void QueuePairIONIC::post_wqe_rma_single(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, PostOpt<Options...>) {
+  //using PostOptions = PostOpt<Options...>;
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
@@ -278,12 +278,12 @@ __device__ void QueuePairIONIC::post_wqe_rma_single(
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch,
-          bool RingDB, bool ThreadSafe, bool CheckCQ>
+template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
-    const ActiveWFInfo& wf_info) {
+    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
+  //using PostOptions = PostOpt<Options...>;
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
   uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
@@ -349,11 +349,11 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
 }
 
 // precondition: called with all active lanes using different QPs
-template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch,
-          bool RingDB, bool ThreadSafe, bool CheckCQ>
+template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond) {
+    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
+  //using PostOptions = PostOpt<Options...>;
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;

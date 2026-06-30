@@ -788,7 +788,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     if (nelems != 0) {
       T* src = (T*)((char*)source + (source_displs[j] * sizeof(T)));
       T* dst = (T*)((char*)&tmp_buf[constmem.my_pe * tmp_buf_off] + base_heap_offset);
-      qps[dest_pe].put_nbi_single<false>(dst, src, nelems);
+      qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
     }
 
     qps[dest_pe].atomic_add_nbi_single(amo_dst, 1);
@@ -866,7 +866,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     static_assert(QueuePair::can_inline<QueuePair::OpCode::RDMA_WRITE>(sizeof(ctrl_msg)),
                   "alltoallv_get control message must be posted inline");
-    qps[dest_pe].put_nbi_single<true>(dst, src, sizeof(uint64_t));
+    qps[dest_pe].put_nbi_single(dst, src, sizeof(uint64_t), PostOpt{RingDB<true>});
 
     /* Wait for Ctrl Message */
     uint64_t ctrl_value;
@@ -883,7 +883,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     src = (uint64_t*)((char*)source + (displ_bits * sizeof(T)) + base_heap_offset);
     dst = (uint64_t*)((char*)dest + (dest_displs[j] * sizeof(T)));
 
-    qps[dest_pe].get_nbi_single<true>(dst, src, nelems);
+    qps[dest_pe].get_nbi_single(dst, src, nelems, PostOpt{RingDB<true>});
 
     /* Put Completion */
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
@@ -952,9 +952,9 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-    qps[dest_pe].put_nbi_single<false>(
+    qps[dest_pe].put_nbi_single(
       reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
-      &src[j * nelems], nelems * sizeof(T));
+      &src[j * nelems], nelems * sizeof(T), PostOpt{RingDB<false>});
     qps[dest_pe].atomic_add_nbi_single(
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);
