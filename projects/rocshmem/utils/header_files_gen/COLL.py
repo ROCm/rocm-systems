@@ -203,7 +203,7 @@ def generate_fcollect_api():
 
     expanded_code += """
 /**
- * @name ROCSSHMEM_CTX_FCOLLECTMEM_WG
+ * @name ROCSHMEM_CTX_FCOLLECTMEM_WG
  * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
  * @p dest buffer.
  * Must be called as a work-group collective.
@@ -217,7 +217,7 @@ def generate_fcollect_api():
  *
  * @return void
  */
-__device__ ATTR_NO_INLINE void rocshmem_fcollectmem_wg(
+__device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t
     rocshmem_team_t team, void *dest, const void *source, int nelems);\n
 """
 
@@ -256,7 +256,7 @@ def generate_fcollect_wave_api():
 
     expanded_code += """
 /**
- * @name ROCSSHMEM_CTX_FCOLLECTMEM_WAVE
+ * @name ROCSHMEM_CTX_FCOLLECTMEM_WAVE
  * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
  * @p dest buffer.
  * Must be called as a wave-level collective.
@@ -270,7 +270,7 @@ def generate_fcollect_wave_api():
  *
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */
-__device__ ATTR_NO_INLINE int rocshmem_fcollectmem_wave(
+__device__ ATTR_NO_INLINE int rocshmem_ctx_fcollectmem_wave(rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);\n
 """
 

@@ -674,7 +674,7 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_fcollect_wg(
     const unsigned long long *source, int nelems);
 
 /**
- * @name ROCSSHMEM_CTX_FCOLLECTMEM_WG
+ * @name ROCSHMEM_CTX_FCOLLECTMEM_WG
  * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
  * @p dest buffer.
  * Must be called as a work-group collective.
@@ -689,11 +689,11 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_fcollect_wg(
  *
  * @return void
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg( rocshmem_ctx_t ctx,
+__device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);
 
 /**
- * @name ROCSSHMEM_CTX_FCOLLECT_WAVE
+ * @name ROCSHMEM_CTX_FCOLLECT_WAVE
  * @brief Concatenates blocks of data from multiple PEs to an array in every
  * PE participating in the collective routine.
  *
@@ -762,11 +762,12 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_fcollect_wave(
     const unsigned long long *source, int nelems);
 
 /**
- * @name ROCSSHMEM_CTX_FCOLLECTMEM_WAVE
+ * @name ROSSHMEM_CTX_FCOLLECTMEM_WAVE
  * @brief Concatenates @p nelems bytes from each PE's @p source into every PE's
  * @p dest buffer.
  * Must be called as a wave-level collective.
  *
+ * @param[in] ctx          The context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -776,7 +777,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_fcollect_wave(
  *
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */
-__device__ ATTR_NO_INLINE int rocshmem_fcollectmem_wave(
+__device__ ATTR_NO_INLINE int rocshmem_ctx_fcollectmem_wave(rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);
 
 

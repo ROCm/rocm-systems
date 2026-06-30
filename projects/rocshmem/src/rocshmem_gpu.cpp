@@ -759,8 +759,7 @@ __device__ void rocshmem_fcollect_wg(rocshmem_ctx_t ctx,
 }
 
 __device__ void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t ctx,
-                                      rocshmem_team_t team, void *dest,
-                                      const void *source, int nelem) {
+    rocshmem_team_t team, void *dest, const void *source, int nelem) {
   LOGD_API("device::fcollectmem_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d",
     ctx.ctx_opaque, team, dest, source, nelem);
 
@@ -769,8 +768,7 @@ __device__ void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t ctx,
 
 template <typename T>
 __device__ int rocshmem_fcollect_wave(rocshmem_ctx_t ctx,
-                                      rocshmem_team_t team, T *dest,
-                                      const T *source, int nelem) {
+    rocshmem_team_t team, T *dest, const T *source, int nelem) {
   LOGD_API("device::fcollect_wave (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d",
     ctx.ctx_opaque, team, dest, source, nelem);
 
@@ -778,14 +776,12 @@ __device__ int rocshmem_fcollect_wave(rocshmem_ctx_t ctx,
 }
 
 __device__ int rocshmem_ctx_fcollectmem_wave(rocshmem_ctx_t ctx,
-                                      rocshmem_team_t team, void *dest,
-                                      const void *source, int nelem) {
+    rocshmem_team_t team, void *dest, const void *source, int nelem) {
   LOGD_API("device::fcollectmem_wave (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d",
     ctx.ctx_opaque, team, dest, source, nelem);
 
   return get_internal_ctx(ctx)->fcollectmem_wave(team, dest, source, nelem);
 }
-
 
 template <typename T>
 __device__ void rocshmem_wait_until(T *ivars, int cmp, T val) {
