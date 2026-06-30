@@ -914,11 +914,12 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
                 ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
-                --rocm-path=${ROCM_PATH} -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
-                -isystem ${GTEST_INC} -I${CMAKE_CURRENT_SOURCE_DIR} -o
-                ${HIP_TEST_BIN} ${HIP_TEST_SRC} ${HIP_EXTRA_LIBS}
-                -L${GTEST_LIB_DIR} -lgtest -lpthread -Wl,-rpath,${GTEST_LIB_DIR}
-                -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} ${RJ_HIP_SANITIZER_LINK_FLAGS}
+                --rocm-path=${ROCM_PATH} -std=c++20 -O2
+                ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
+                -I${CMAKE_CURRENT_SOURCE_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
+                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
+                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+                ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
             COMMENT "Building ${TEST_NAME} with hipcc (${ARG_ARCH})"
             VERBATIM
