@@ -1634,14 +1634,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         }
         if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
              IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
-            kernelNames != nullptr && i < kernelNames->size() &&
-            (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH || pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC)) {
+            kernelNames != nullptr && i < kernelNames->size() && isKernelDispatch) {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
                   (*kernelNames)[i] != nullptr ? (*kernelNames)[i]->c_str() : "<null>",
                   dev().index());
-          // Select the layout per-packet: ext kernel-dispatch packets can be
-          // emitted opportunistically regardless of the global ext_dispatch_packet_
-          // setting, so the base helper would misread their fields.
           if (isBaseKernelDispatch) {
             logAqlDispatchPacket(roc_device_, gpu_queue_, hdr, slot, slotIdx, priority_);
           } else {
@@ -1650,6 +1646,16 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
                 reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(slot), slotIdx,
                 priority_);
           }
+        } else if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+                    IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
+                   pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                   amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE) {
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2,
+                  "Graph ShaderName : [Graph vendor barrier value], device id : %u",
+                  dev().index());
+          logAqlBarrierValuePacket(
+              roc_device_, gpu_queue_, hdr,
+              reinterpret_cast<const hsa_amd_barrier_value_packet_t*>(slot), slotIdx, priority_);
         } else if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
                     IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
                    (pktType == HSA_PACKET_TYPE_BARRIER_AND ||
@@ -4174,7 +4180,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
   ClPrint(amd::LOG_INFO, amd::LOG_KERN2, "ShaderName : %s", gpuKernel.getDemangledName().c_str());
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-          "argSize = %u, KernargSegmentByteSize = %u, KernargSegmentAlignment = %u",
+          "argSize = %zu, KernargSegmentByteSize = %zu, KernargSegmentAlignment = %zu",
           std::min(gpuKernel.KernargSegmentByteSize(), signature.paramsSize()),
           gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment());
 
