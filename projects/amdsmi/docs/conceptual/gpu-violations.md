@@ -345,7 +345,7 @@ in the ROCm AMDGPU kernel driver. AMD SMI passes the raw `uint64_t` value throug
 
 - **For violation fields (`metric --violation`) returning N/A:** The violation API is only supported on MI3x+ (MI300X and newer). On older ASICs (Navi/MI1x/MI2x), use `amd-smi metric --power` and check `THROTTLE_STATUS` instead.
 - **For `THROTTLE_STATUS` in `metric --power` showing N/A:** This field is available on Navi/MI1x/MI2x (gpu_metrics v1.3) but not on MI3x+. On MI3x+, use `amd-smi metric --violation` or `amd-smi monitor --violation` instead.
-- **For gpu_metrics-sourced fields (violations, `SOCKET_POWER`, clocks) returning N/A:** If your amdgpu driver reports gpu_metrics v1.9, AMD SMI versions before ROCm 7.13 don't have explicit support for the changed layout. Try upgrading to ROCm 7.13 or later to resolve this.
+- **For gpu_metrics-sourced fields (violations, `SOCKET_POWER`, engine usage, etc.) returning N/A:** If your amdgpu driver reports gpu_metrics v1.9, AMD SMI versions before ROCm 7.13 don't have explicit support for the changed layout. Try upgrading to ROCm 7.13 or later to resolve this.
 - Check your ASIC generation with {c:func}`amdsmi_get_gpu_asic_info` or
   `amd-smi static --asic`
 

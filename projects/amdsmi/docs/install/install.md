@@ -52,7 +52,7 @@ To run AMD SMI, the following components need to be installed on your system:
       recognize new data formats (for example, newer `gpu_metrics` versions)
       and can report N/A for affected fields.
 
-    To maximize compatibility, we recommend using the amdgpu driver version
+    To maximize compatibility, we recommend using the latest amdgpu driver version
     that matches your AMD SMI or ROCm release. See {ref}`About N/A values
     <cli-output-na>` for more information.
     :::
