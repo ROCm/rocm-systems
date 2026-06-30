@@ -23,10 +23,10 @@ std::unordered_set<hipArray*> hipArraySet;
 namespace {
   // Helper function to apply arena memory fallback if memory object not found
   inline void applyArenaFallback(hip::Device* device, const void* ptr, amd::Memory*& memory,
-                                  size_t& offset, size_t size) {
+                                  size_t& offset, size_t size, bool allowPageable = false) {
     if (memory == nullptr) {
       if (device != nullptr) {
-        memory = (device->asContext()->svmDevices()[0])->GetArenaMemObj(ptr, offset, size);
+        memory = (device->asContext()->svmDevices()[0])->GetArenaMemObj(ptr, offset, size, allowPageable);
       }
     }
   }
@@ -51,11 +51,12 @@ namespace {
 }
 
 // ================================================================================================
-amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset, size_t size) {
+amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset, size_t size,
+                             bool allowPageable) {
   amd::Device* currentDev = (device != nullptr) ? device->devices()[0] : nullptr;
   auto memObj = amd::MemObjMap::FindMemObj(ptr, &offset, currentDev);
 
-  applyArenaFallback(device, ptr, memObj, offset, size);
+  applyArenaFallback(device, ptr, memObj, offset, size, allowPageable);
   applyWindowsOffsetAdjustment(device, ptr, memObj, offset);
 
   return memObj;
@@ -103,16 +104,16 @@ void getMemoryObjectBatchPairs(hip::Device* device, void* const* srcs, void* con
 
 void getMemoryObjectPairs(hip::Device* device, const void* src, const void* dst,
                           amd::Memory*& src_memory, amd::Memory*& dst_memory,
-                          size_t& src_offset, size_t& dst_offset) {
+                          size_t& src_offset, size_t& dst_offset, bool allowPageable) {
   amd::Device* currentDev = (device != nullptr) ? device->devices()[0] : nullptr;
 
   amd::MemObjMap::FindMemObjPairs(src, dst, src_memory, dst_memory, src_offset, dst_offset,
                                    currentDev);
 
-  applyArenaFallback(device, src, src_memory, src_offset, 0);
+  applyArenaFallback(device, src, src_memory, src_offset, 0, allowPageable);
   applyWindowsOffsetAdjustment(device, src, src_memory, src_offset);
 
-  applyArenaFallback(device, dst, dst_memory, dst_offset, 0);
+  applyArenaFallback(device, dst, dst_memory, dst_offset, 0, allowPageable);
   applyWindowsOffsetAdjustment(device, dst, dst_memory, dst_offset);
 }
 
@@ -508,6 +509,11 @@ bool IsHtoHMemcpyValid(void* dst, const void* src, hipMemcpyKind kind) {
 // ================================================================================================
 hipError_t ihipMemcpy_validate_memory(amd::Device& device, amd::Memory* memObj, size_t sizeBytes,
                                       size_t offset, bool read_write) {
+  // Pageable host target (arena): no real allocation size or VMM range to validate.
+  if (memObj->isArena()) {
+    return hipSuccess;
+  }
+
   // Validate Mem Access in case of VMM Memory
   if (!memObj->ValidateMemAccess(device, read_write)) {
     return hipErrorUnknown;
@@ -727,7 +733,15 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   size_t dOffset = 0;
   amd::Memory* srcDeviceMemory = nullptr;
   amd::Memory* dstDeviceMemory = nullptr;
-  getMemoryObjectPairs(dev, src, dst, srcDeviceMemory, dstDeviceMemory, sOffset, dOffset);
+  getMemoryObjectPairs(dev, src, dst, srcDeviceMemory, dstDeviceMemory, sOffset, dOffset,
+                       /*allowPageable=*/true);
+
+  // Two pageable host buffers under XNACK both resolve to the arena: this is a host-to-host copy.
+  if (srcDeviceMemory != nullptr && srcDeviceMemory->isArena() &&
+      dstDeviceMemory != nullptr && dstDeviceMemory->isArena()) {
+    ihipHtoHMemcpy(dst, src, sizeBytes, stream);
+    return hipSuccess;
+  }
 
   // Handle kind vs memobject miss matches
   if (kind == hipMemcpyDeviceToHost && srcDeviceMemory == nullptr) {
@@ -776,6 +790,12 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
     }
     IHIP_RETURN_ONFAIL(ihipMemcpyCommand(command, dstDeviceMemory, srcDeviceMemory, sizeBytes, kind, stream,
                                dOffset, sOffset, isHostAsync));
+  }
+
+  // Pageable host buffers require synchronous completion for host-visible coherence.
+  if ((srcDeviceMemory != nullptr && srcDeviceMemory->isArena()) ||
+      (dstDeviceMemory != nullptr && dstDeviceMemory->isArena())) {
+    isHostAsync = false;
   }
 
   command->enqueue();
@@ -3254,6 +3274,11 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
 
 hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t valueSize,
                                size_t sizeBytes, size_t offset) {
+  // Pageable host target (arena): no real allocation size or VMM range to validate.
+  if (dstMemory->isArena()) {
+    return hipSuccess;
+  }
+
   // Validate Mem Access in case of VMM Memory
   if (!dstMemory->ValidateMemAccess(*hip::getCurrentDevice()->devices()[0], true)) {
     return hipErrorUnknown;
@@ -3345,7 +3370,8 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
   }
 
   size_t offset = 0;
-  amd::Memory* memObj = getMemoryObject(hip::getCurrentDevice(), dst, offset);
+  amd::Memory* memObj = getMemoryObject(hip::getCurrentDevice(), dst, offset,
+                                        /*size=*/0, /*allowPageable=*/true);
   if (memObj == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -3365,6 +3391,10 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
          !(flags & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS | CL_MEM_USE_HOST_PTR)))) {
       isAsync = true;
     }
+  }
+  // Pageable host target must complete synchronously so the host sees the fill.
+  if (memObj->isArena()) {
+    isAsync = false;
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {

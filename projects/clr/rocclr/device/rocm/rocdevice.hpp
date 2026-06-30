@@ -608,14 +608,16 @@ class Device : public NullDevice {
 
   static void RegisterBackendErrorCb();
 
-  virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0) override;
+  virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0,
+                                      bool allowPageable = false) override;
 
   virtual uint32_t getPreferredNumaNode() const final { return preferred_numa_node_; }
 
   const bool isFineGrainSupported() const override;
 
   //! Returns True if memory pointer is known to ROCr (excludes HMM allocations)
-  bool IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer_info_t* ptr_info);
+  bool IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer_info_t* ptr_info,
+                         bool allowPageable = false);
 
   //! Allocates hidden heap for device memory allocations
   void HiddenHeapAlloc(const VirtualGPU& gpu);

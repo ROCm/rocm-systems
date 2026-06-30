@@ -3718,13 +3718,13 @@ void Device::RegisterBackendErrorCb() {
   }
 }
 // ================================================================================================
-amd::Memory* Device::GetArenaMemObj(const void* ptr, size_t& offset, size_t size) {
+amd::Memory* Device::GetArenaMemObj(const void* ptr, size_t& offset, size_t size, bool allowPageable) {
   // Only create arena_mem_object if CPU memory is accessible from HMM
   // or if runtime received an interop from another ROCr's client
   // Disable arena for XNACK
   hsa_amd_pointer_info_t ptr_info = {};
   ptr_info.size = sizeof(hsa_amd_pointer_info_t);
-  if (!IsValidAllocation(ptr, size, &ptr_info)) {
+  if (!IsValidAllocation(ptr, size, &ptr_info, allowPageable)) {
     return nullptr;
   }
 
@@ -3895,7 +3895,8 @@ void Device::SetUserEvent(amd::UserEvent* event) const {
 }
 
 // ================================================================================================
-bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer_info_t* ptr_info) {
+bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer_info_t* ptr_info,
+                               bool allowPageable) {
   // Query ptr type to see if it's a HMM allocation
   hsa_status_t status =
       Hsa::pointer_info(const_cast<void*>(dev_ptr), ptr_info, nullptr, nullptr, nullptr);
@@ -3921,7 +3922,8 @@ bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer
     }
     return true;
   }
-  return false;
+  // UNKNOWN == pageable system memory: only valid under XNACK, and only when explicitly opted in.
+  return allowPageable && isFineGrainedSystem(true);
 }
 
 // ================================================================================================

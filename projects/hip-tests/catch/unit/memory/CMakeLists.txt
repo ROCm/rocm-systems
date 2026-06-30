@@ -51,6 +51,7 @@ set(TEST_SRC
     hipMallocManaged_MultiScenario.cc
     hipMemsetNegative.cc
     hipMemset.cc
+    hipMemsetPageable.cc
     hipMemset3D.cc
     hipMemset2D.cc
     hipHostMallocTests.cc
@@ -160,6 +161,7 @@ set(TEST_SRC
     hipMemsetAsyncAndKernel.cc
     hipMemset2DAsyncMultiThreadAndKernel.cc
     hipMemcpyDtoD.cc
+    hipMemcpyPageable.cc
     hipMemcpyDtoDAsync.cc
     hipHostMalloc.cc
     hipMemcpy_EdgeCases.cc

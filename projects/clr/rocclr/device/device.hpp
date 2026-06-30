@@ -2382,7 +2382,8 @@ class Device : public RuntimeObject {
 
   void SetActiveWait(bool state) { activeWait_ = state; }
 
-  virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0) {
+  virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0,
+                                      bool allowPageable = false) {
     return nullptr;
   }
 

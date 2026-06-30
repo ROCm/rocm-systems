@@ -695,7 +695,7 @@ namespace hip {
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,
-                                       size_t size = 0);
+                                       size_t size = 0, bool allowPageable = false);
   extern std::vector<amd::Memory*> getMemoryObjectBatch(hip::Device* device, void* const* ptrs,
                                                          size_t count,
                                                          std::vector<size_t>& offsets);
@@ -707,7 +707,8 @@ namespace hip {
                                          std::vector<size_t>& dst_offsets);
   extern void getMemoryObjectPairs(hip::Device* device, const void* src, const void* dst,
                                     amd::Memory*& src_memory, amd::Memory*& dst_memory,
-                                    size_t& src_offset, size_t& dst_offset);
+                                    size_t& src_offset, size_t& dst_offset,
+                                    bool allowPageable = false);
   extern amd::Memory* getMemoryObjectWithOffset(hip::Device* device, const void* ptr,
                                                  const size_t size = 0);
 

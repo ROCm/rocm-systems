@@ -550,6 +550,18 @@ memory:
   Unit_hipMemset_2AsyncOperations:
     <<: *level_2
     tags: [memset]
+  Unit_hipMemset_Pageable_Malloc:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemset_Pageable_MallocAsync:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemset_Pageable_MmapUnaligned:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemset_Pageable_RejectsWhenDisabled:
+    <<: *level_2
+    tags: [memset]
   Unit_hipMemset_Capture: *level_2
   Unit_hipMemsetD8_Capture: *level_2
   Unit_hipMemset3D_BasicFunctional:
@@ -1395,6 +1407,18 @@ memory:
     disabled: [nvidia_windows]
     tags: [transfer]
   Unit_hipMemcpy_Negative_Parameters:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy_Pageable_HtoD:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy_Pageable_AsDevice_DtoD:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy_Pageable_CoherenceAfterKernel:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy_Pageable_RejectsWhenDisabled:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyWithStream_Capture:
