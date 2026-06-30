@@ -893,7 +893,7 @@ def console_error_invalid_block(
     if arch and alias_map:
         detail = f"\n\tValid aliases for {arch}: {', '.join(sorted(alias_map))}."
     console_error(
-        f"Invalid --block value {token!r}.{detail} "
+        f"Invalid --block value {token!r}.{detail}"
         "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
     )
 
