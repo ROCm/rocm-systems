@@ -183,6 +183,9 @@ def add_general_group(
             "   GUI (--gui)\n"
             "   TUI (--tui)\n"
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
+            "   Triton trace (--triton-trace, --list-triton-operators, "
+            "--triton-operator)\n"
+            "   ML API trace (--ml-api-trace)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
         ),
@@ -553,6 +556,40 @@ Examples:
     ## ----------------------------
 
     profile_group.add_argument(
+        "--triton-trace",
+        dest="triton_trace",
+        required=False,
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Triton trace",
+        help=(
+            "\t\t\tTriton Trace, maps Triton kernels to performance counters.\n"
+            "\t\t\tUse when profiling Triton kernels, including those generated\n"
+            "\t\t\tby torch.compile / Inductor.\n"
+            "\t\t\tCan be combined with --torch-trace."
+        ),
+    )
+    profile_group.add_argument(
+        "--ml-api-trace",
+        dest="ml_api_trace",
+        required=False,
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="ML API trace",
+        help=(
+            "\t\t\tML API Trace, enables tracing for all supported machine\n"
+            "\t\t\tlearning framework backends (e.g. PyTorch, Triton)."
+        ),
+    )
+    profile_group.add_argument(
         "--membw-analysis",
         dest="membw_analysis",
         required=False,
@@ -707,6 +744,44 @@ Examples:
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --torch-operator *relu,*conv*,*linear\n"
             "\t\t\t  --torch-operator */*conv2d */*relu\n"
+            "\t\t\tCombine with -k to intersect with kernel IDs."
+        ),
+    )
+    analyze_group.add_argument(
+        "--list-triton-operators",
+        dest="list_triton_operators",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="List triton operators",
+        help=(
+            "\t\tList Triton kernels as a unified call tree grouped by "
+            "source location with kernel launch stats. "
+            "Recreates ml_api_trace output directory."
+        ),
+    )
+    analyze_group.add_argument(
+        "--triton-operator",
+        metavar="",
+        type=str,
+        dest="triton_operator",
+        nargs="*",
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Triton operator filter",
+        help=(
+            "\t\tFilter Triton kernels using shell-style glob patterns\n"
+            "\t\t\t(fnmatch), select their GPU kernels, and display metrics.\n"
+            "\t\t\tWith no arguments, matches all kernels (default: **).\n"
+            "\t\t\tExamples:\n"
+            "\t\t\t  *matmul*            contains matmul\n"
+            "\t\t\t  all  or  '*'        match every kernel\n"
+            "\t\t\tMultiple patterns (space or comma-separated):\n"
+            "\t\t\t  --triton-operator *matmul*,*softmax*\n"
             "\t\t\tCombine with -k to intersect with kernel IDs."
         ),
     )

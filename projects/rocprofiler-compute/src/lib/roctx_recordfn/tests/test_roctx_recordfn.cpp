@@ -120,6 +120,89 @@ TEST(LeafContext, BackwardWithoutSeqLeafIsAutogradEngine)
                  roctx_recordfn::kAutogradEngineLeaf);
 }
 
+namespace
+{
+
+// Reverses build_marker_string: split the operator path on the '/' separator,
+// then decode each segment ('%2F' -> '/', then '%25' -> '%'), matching
+// utils_analysis.build_call_trees.
+std::vector<std::string> decode_marker_path(const std::string& wire)
+{
+    const auto        colon = wire.find(':');
+    const std::string path  = (colon == std::string::npos) ? wire : wire.substr(0, colon);
+
+    std::vector<std::string> segments;
+    std::size_t              start = 0;
+    while (true)
+    {
+        const auto sep = path.find('/', start);
+        const std::string raw = path.substr(start,
+                                            sep == std::string::npos ? std::string::npos : sep - start);
+
+        std::string decoded;
+        for (std::size_t i = 0; i < raw.size();)
+        {
+            if (raw.compare(i, 3, kEncodedSlash) == 0)
+            {
+                decoded += '/';
+                i += 3;
+            }
+            else if (raw.compare(i, 3, kEncodedPercent) == 0)
+            {
+                decoded += '%';
+                i += 3;
+            }
+            else
+            {
+                decoded += raw[i];
+                ++i;
+            }
+        }
+        segments.push_back(decoded);
+
+        if (sep == std::string::npos)
+            return segments;
+        start = sep + 1;
+    }
+}
+
+}  // namespace
+
+TEST(MarkerEncoding, EscapesSlashAndPercentWithinNames)
+{
+    // '/' encodes to %2F and '%' to %25 within a name; the '/' between frames
+    // remains the separator.
+    const std::vector<StackEntry> stack = {
+        {"Torch-Compiled Region: 0/0", "#1@a:1"},
+        {"k%2F%name", "#2@b:2"},
+    };
+
+    const std::string wire = build_marker_string(stack);
+
+    EXPECT_EQ(wire, "Torch-Compiled Region: 0%2F0/k%252F%25name:#1@a:1/#2@b:2");
+}
+
+TEST(MarkerEncoding, RoundTripsThroughBuildCallTreesDecode)
+{
+    // Encoding then decoding returns the original names.
+    const std::vector<std::string> names = {
+        "Torch-Compiled Region 0/0",
+        "k%2F%name",
+        "plain_kernel",
+        "literal%2Fnot_a_slash",
+        "100%/sec",
+    };
+
+    std::vector<StackEntry> stack;
+    stack.reserve(names.size());
+    for (const auto& name : names)
+        stack.push_back(StackEntry{name, "ctx"});
+
+    const std::vector<std::string> decoded = decode_marker_path(build_marker_string(stack));
+
+    EXPECT_EQ(decoded, names);
+}
+
 TEST_F(RoctxRecordFnTest, SaveThenConsumeReturnsSavedStack)
 {
     const std::vector<StackEntry> stack = {{"A", "a"}, {"B", "b"}};

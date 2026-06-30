@@ -346,51 +346,54 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
-        torch_operator = args.torch_operator
-        list_torch_operators = args.list_torch_operators
+        operator_filter = (
+            args.torch_operator is not None or args.triton_operator is not None
+        )
+        operator_listing = args.list_torch_operators or args.list_triton_operators
 
-        if torch_operator is not None or list_torch_operators:
+        if operator_filter or operator_listing:
             if args.gui is not None:
                 console_error(
                     "ml api trace",
-                    "--torch-operator and --list-torch-operators are not "
+                    "Operator flags (--torch-operator, --triton-operator, "
+                    "--list-torch-operators, --list-triton-operators) are not "
                     "supported in --gui mode. Please remove --gui or run "
-                    "without the torch-operator flags.",
+                    "without the operator flags.",
                 )
             if args.tui:
                 console_error(
                     "ml api trace",
-                    "--torch-operator and --list-torch-operators are not "
+                    "Operator flags (--torch-operator, --triton-operator, "
+                    "--list-torch-operators, --list-triton-operators) are not "
                     "supported in --tui mode. Please remove --tui or run "
-                    "without the torch-operator flags.",
+                    "without the operator flags.",
                 )
             if args.output_format != "stdout":
                 console_error(
                     "ml api trace",
-                    "--torch-operator and --list-torch-operators are only "
+                    "Operator flags (--torch-operator, --triton-operator, "
+                    "--list-torch-operators, --list-triton-operators) are only "
                     "supported with --output-format stdout (the default). "
                     "The matched operator call tree is printed directly to "
                     "stdout and is not captured in txt, csv, or db output. "
-                    "Remove the --output-format option or drop the "
-                    "torch-operator flags.",
+                    "Remove the --output-format option or drop the operator flags.",
                 )
 
-            if torch_operator is not None:
+            if operator_filter:
                 if args.list_stats:
                     console_warning(
                         "ml api trace",
-                        "--torch-operator is ignored by --list-stats; the "
+                        "Operator filters are ignored by --list-stats; the "
                         "full kernel stats table will be shown regardless "
                         "of the operator filter.",
                     )
-                if list_torch_operators:
+                if operator_listing:
                     console_warning(
                         "ml api trace",
-                        "--torch-operator is ignored when "
-                        "--list-torch-operators is used; the full operator "
-                        "tree will be shown. Drop --list-torch-operators to "
-                        "apply the operator filter to the analysis, or drop "
-                        "--torch-operator to list all operators.",
+                        "Operator filters are ignored when a --list-*-operators "
+                        "flag is used; the full operator tree will be shown. "
+                        "Drop the listing flag to apply the operator filter, or "
+                        "drop the filter to list all operators.",
                     )
 
     @demarcate
