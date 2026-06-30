@@ -38,7 +38,14 @@ def pytest_addoption(parser):
         action="store",
         type=int,
         required=True,
-        help="value passed to --kernel-replay-passes",
+        help="expected number of replay passes per dispatch (number of --pmc groups)",
+    )
+    parser.addoption(
+        "--common-counters",
+        action="store",
+        nargs="+",
+        default=["SQ_WAVES", "SQ_INSTS_VALU"],
+        help="counters shared by every --pmc group; must be constant across a kernel's passes",
     )
 
 
@@ -53,3 +60,8 @@ def json_data(request):
 @pytest.fixture
 def expected_passes(request):
     return request.config.getoption("--passes")
+
+
+@pytest.fixture
+def common_counters(request):
+    return list(request.config.getoption("--common-counters"))

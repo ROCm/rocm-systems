@@ -23,18 +23,22 @@ set(rocprofv3-validate-env
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
 
-# Collect a counter for each dispatch via in-process kernel replay: every dispatch is
-# replayed 3 times with device memory restored between passes. The kernel-replay app
-# verifies its own results, so a broken restore fails this generate step.
-set(REPLAY_PASSES 3)
+# Collect counters via in-process kernel replay. The number of --pmc groups drives the number of
+# replay passes (one batch per pass), with device memory restored between passes. Each group shares
+# SQ_WAVES and SQ_INSTS_VALU (the sanity counters that must be constant across a kernel's passes)
+# plus one unique counter (so the batches are genuinely distinct). The kernel-replay app verifies
+# its own results, so a broken restore fails this generate step.
+set(REPLAY_PASSES 5)
 
 add_test(
     NAME rocprofv3-test-kernel-replay-generate
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU
-        --kernel-replay --kernel-replay-passes ${REPLAY_PASSES} --output-format csv json
-        -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out --
-        $<TARGET_FILE:kernel-replay> 1048576 1)
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
+        --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
+        SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
+        SQ_INSTS_VALU SQ_INSTS_LDS --kernel-replay --output-format csv json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out -- $<TARGET_FILE:kernel-replay>
+        1048576 1)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-generate
@@ -49,14 +53,14 @@ set_tests_properties(
                FIXTURES_SETUP
                rocprofv3-test-kernel-replay-data)
 
-# Validate replay structure: each dispatch replayed 3 times with identical counter values
-# per pass.
+# Validate replay structure: each dispatch replayed REPLAY_PASSES times, the shared sanity counters
+# (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, and the kernels are present.
 add_test(
     NAME rocprofv3-test-kernel-replay-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes
-        ${REPLAY_PASSES})
+        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-validate
