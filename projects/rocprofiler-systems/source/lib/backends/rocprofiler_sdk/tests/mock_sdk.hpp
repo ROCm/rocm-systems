@@ -21,11 +21,12 @@ namespace rocprofsys::backends::rocprofiler_sdk::testing
 // Types used exclusively inside uninstantiated bodies (counter_info_v0/v1_t,
 // compile_time_version, COUNTER_INFO_VERSION_*) are intentionally omitted.
 
-using status_t                                    = int;
-static constexpr status_t k_status_success        = 0;
-static constexpr status_t k_status_error          = -1;
-static constexpr status_t k_status_buffer_busy    = -2;
-static constexpr status_t k_status_hsa_not_loaded = -3;
+using status_t                                            = int;
+static constexpr status_t k_status_success                = 0;
+static constexpr status_t k_status_error                  = -1;
+static constexpr status_t k_status_buffer_busy            = -2;
+static constexpr status_t k_status_hsa_not_loaded         = -3;
+static constexpr status_t k_status_error_invalid_argument = -4;
 
 struct context_id
 {
@@ -56,11 +57,9 @@ struct callback_thread_id
     std::uint64_t handle{};
     bool          operator==(const callback_thread_id&) const = default;
 };
-struct counter_instance_id
-{
-    std::uint64_t id{};
-    bool          operator==(const counter_instance_id&) const = default;
-};
+// Real SDK defines rocprofiler_counter_instance_id_t as plain std::uint64_t;
+// match that so backend<mock_sdk> type-checks cleanly.
+using counter_instance_id = std::uint64_t;
 struct counter_record
 {
     counter_instance_id id;
@@ -282,6 +281,8 @@ struct mock_sdk
     static constexpr status_t STATUS_ERROR                = k_status_error;
     static constexpr status_t STATUS_ERROR_BUFFER_BUSY    = k_status_buffer_busy;
     static constexpr status_t STATUS_ERROR_HSA_NOT_LOADED = k_status_hsa_not_loaded;
+    static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
+        k_status_error_invalid_argument;
 
     // ── Counter constants ─────────────────────────────────────────────────────
     static constexpr counter_flag_t            COUNTER_FLAG_NONE      = 0;
