@@ -2350,6 +2350,63 @@ void Device::deviceVmemRelease(uint64_t mem_handle) const {
   }
 }
 
+bool Device::hostVmemSupported(int numaNode) const {
+  if (cpu_agents_.empty()) {
+    return false;
+  }
+  int node = numaNode;
+  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
+    node = static_cast<int>(numa::getCurrentNumaNode());
+  }
+  hsa_agent_t cpu = getCpuAgent(node);
+  bool supported = false;
+  hsa_status_t hsa_status = Hsa::agent_get_info(
+      cpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED),
+      &supported);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    // Older ROCr predates this query: treat host-NUMA VMM as unsupported.
+    return false;
+  }
+  return supported;
+}
+
+uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const {
+  // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
+  int node = numaNode;
+  if (node < 0) {
+    node = static_cast<int>(numa::getCurrentNumaNode());
+  }
+  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
+    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
+                   cpu_agents_.size());
+    return 0;
+  }
+
+  if (!hostVmemSupported(node)) {
+    LogError("hostVmemAlloc: host memory VMM not supported on this CPU agent");
+    return 0;
+  }
+
+  // PHYMEM: ROCCLR_MEM_HSA_UNCACHED is passed as HSA_AMD_MEMORY_POOL_UNCACHED_FLAG in |flags|.
+  const bool uncached = (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG) != 0;
+  const MemorySegment mem_seg = uncached ? kUncachedAtomics : kAtomics;
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, &cpu_agents_[node]);
+  if (pool.handle == 0) {
+    LogPrintfError("hostVmemAlloc: no host memory pool for NUMA node %d", node);
+    return 0;
+  }
+
+  hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
+  hsa_status_t hsa_status =
+      Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, 0, &hsa_vmem_handle);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError("hostVmemAlloc: hsa_amd_vmem_handle_create failed with status: %d", hsa_status);
+    return 0;
+  }
+
+  return hsa_vmem_handle.handle;
+}
+
 void* Device::reserveMemory(size_t size, size_t alignment) const {
   void* ptr = nullptr;
   // Reserves non registered VA memory using HSA APIs.
@@ -2589,12 +2646,29 @@ cl_int Device::virtualUnmap(void* va, size_t size) {
 
 // ================================================================================================
 bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                          VmmLocationType access_location) {
+                          VmmLocationType access_location, int numaNode) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_memory_access_desc_t desc;
   desc.permissions = static_cast<hsa_access_permission_t>(access_flags);
-  desc.agent_handle =
-      access_location == VmmLocationType::kDevice ? getBackendDevice() : getCpuAgent();
+  // Resolve the agent granted access: the GPU backend for device access, the
+  // default CPU agent for generic/current host access, or the CPU agent of a
+  // specific NUMA node for HostNuma. getCpuAgent(int) clamps an out-of-range node
+  // to the default agent (the HIP layer validates the node id beforehand).
+  switch (access_location) {
+    case VmmLocationType::kDevice:
+      desc.agent_handle = getBackendDevice();
+      break;
+    case VmmLocationType::kHostNuma:
+      desc.agent_handle = getCpuAgent(numaNode);
+      break;
+    case VmmLocationType::kHostNumaCurrent:
+      desc.agent_handle = getCpuAgent(static_cast<int>(numa::getCurrentNumaNode()));
+      break;
+    case VmmLocationType::kHost:
+    default:
+      desc.agent_handle = getCpuAgent();
+      break;
+  }
 
   if ((hsa_status = Hsa::vmem_set_access(va_addr, va_size, &desc, 1)) != HSA_STATUS_SUCCESS) {
     LogPrintfError("Failed hsa_amd_vmem_set_access. Failed with status:%d", hsa_status);
