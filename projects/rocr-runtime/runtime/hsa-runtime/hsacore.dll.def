@@ -234,7 +234,4 @@ EXPORTS
   hsa_ext_image_create_v2
   hsa_ext_image_data_get_info_v2
   hsa_ext_image_destroy_v2
-  hsa_amd_svm_discard_batch_async
-  hsa_amd_vmem_export_fabric_handle
-  hsa_amd_vmem_import_fabric_handle
   hsa_amd_agent_preload
