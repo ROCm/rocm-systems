@@ -354,6 +354,27 @@ contract:
   Contract_Array3D_FreeArray_Succeeds:
     <<: *level_0
     tags: [array3d]
+  Contract_Texture_CreateAndDestroy_LinearResource_Succeeds:
+    <<: *level_0
+    tags: [texture]
+  Contract_Texture_GetResourceDesc_RoundTripsLinearResource:
+    <<: *level_0
+    tags: [texture]
+  Contract_Texture_GetTextureDesc_RoundTripsReadMode:
+    <<: *level_0
+    tags: [texture]
+  Contract_Texture_CreateAndDestroy_ArrayResource_Succeeds:
+    <<: *level_0
+    tags: [texture]
+  Contract_Texture_GetChannelDesc_MatchesArrayFormat:
+    <<: *level_0
+    tags: [texture]
+  Contract_Surface_CreateAndDestroy_ArrayResource_Succeeds:
+    <<: *level_0
+    tags: [texture]
+  Contract_Surface_GetChannelDesc_RoundTripsArrayResource:
+    <<: *level_0
+    tags: [texture]
   Contract_MemoryPoolLifecycle_CreateDestroy_SucceedsWhenSupported:
     <<: *level_0
     tags: [memory_pool_lifecycle]

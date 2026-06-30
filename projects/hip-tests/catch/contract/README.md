@@ -31,6 +31,7 @@ The first domains are:
 - `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
 - `copy3d`: 3D pitched allocation and host-device 3D copy contracts
 - `array3d`: 3D array allocation and 3D copy-to/from-array contracts
+- `texture`: texture and surface object creation and descriptor-introspection contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
 - `memory_pool_access`: current-device memory pool access-control contracts
 
