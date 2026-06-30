@@ -88,7 +88,8 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
     ],
     "gfx1150": [
         "FP16",
-        "BF16",
+        # "BF16", # Technically BF16 is a supported matrix precision on this arch,
+        # but we are turning it off because we lack the metrics counters
         "FP32",
         "FP64",
         "I8",
@@ -97,7 +98,8 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
     ],  # Unsupported: F4, F6, F8
     "gfx1151": [
         "FP16",
-        "BF16",
+        # "BF16", # Technically BF16 is a supported matrix precision on this arch,
+        # but we are turning it off because we lack the metrics counters
         "FP32",
         "FP64",
         "I8",
@@ -106,7 +108,8 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
     ],  # Unsupported: F4, F6, F8
     "gfx1152": [
         "FP16",
-        "BF16",
+        # "BF16", # Technically BF16 is a supported matrix precision on this arch,
+        # but we are turning it off because we lack the metrics counters
         "FP32",
         "FP64",
         "I8",

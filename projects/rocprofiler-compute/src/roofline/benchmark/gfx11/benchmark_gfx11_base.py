@@ -25,9 +25,6 @@ class Bench_gfx11(benchmark_base.Bench_base):
 
         self.unsupported_data_types = [
             "HBM",
-            "I8",
-            "I32",
-            "I64",
             "WMMA-F4",
             "WMMA-F6",
             "WMMA-F6F4",
