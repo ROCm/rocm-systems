@@ -450,7 +450,6 @@ static void record_launch(
     hipStream_t stream,
     void** kernel_params, void** extra)
 {
-  if (!hip_capture_enabled()) return;
   amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) return;
 
@@ -508,7 +507,7 @@ hipError_t capture_hipMemcpyAsync(void* dst, const void* src,
                                           size_t sizeBytes, hipMemcpyKind kind,
                                           hipStream_t stream) {
   hipError_t r = g_real_table.hipMemcpyAsync_fn(dst, src, sizeBytes, kind, stream);
-  if (r == hipSuccess && hip_capture_enabled()) {
+  if (r == hipSuccess) {
     hrr_cap::Hash128 h{0, 0};
     if (kind == hipMemcpyHostToDevice && src && sizeBytes > 0) {
       h = hrr_cap::writer::write_blob(src, sizeBytes);
@@ -595,7 +594,7 @@ hipError_t capture_hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t sizeBytes
 hipError_t capture_hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src,
                                       size_t sizeBytes, hipStream_t stream) {
   hipError_t r = g_real_table.hipMemcpyDtoHAsync_fn(dst, src, sizeBytes, stream);
-  if (r == hipSuccess && hip_capture_enabled()) {
+  if (r == hipSuccess) {
     hrr_cap::Hash128 h{0, 0};
     if (dst && sizeBytes > 0) {
       // Sync the stream so host dst is valid before we snapshot it.
@@ -838,7 +837,7 @@ hipError_t capture_hipLaunchKernel(const void* function_address,
                                            hipStream_t stream) {
   hipError_t r = g_real_table.hipLaunchKernel_fn(
       function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
-  if (r == hipSuccess && hip_capture_enabled()) {
+  if (r == hipSuccess) {
     // function_address is a host stub pointer, not hipFunction_t — resolve via dispatch table
     hipFunction_t f = nullptr;
     if (g_real_table.hipGetFuncBySymbol_fn &&
@@ -909,7 +908,7 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
   }
 
   hipError_t r = g_real_table.hipLaunchByPtr_fn(func);
-  if (r == hipSuccess && hip_capture_enabled()) {
+  if (r == hipSuccess) {
     // func is a host stub pointer — resolve to real hipFunction_t first
     hipFunction_t f = nullptr;
     if (g_real_table.hipGetFuncBySymbol_fn &&
@@ -1128,7 +1127,6 @@ template <typename T>
 static void capture_memcpy3d_impl(
     T& a, hrr_api_id_t api_id,
     const struct hipMemcpy3DParms* p, hipStream_t stream, bool is_async) {
-  if (!hip_capture_enabled()) return;
   if (!p) {
     hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
     return;
@@ -1217,7 +1215,6 @@ static void capture_memcpy2d_impl(
     T& a, hrr_api_id_t api_id, const void* dst, size_t dpitch,
     const void* src, size_t spitch, size_t width, size_t height,
     hipMemcpyKind kind, hipStream_t stream, bool is_async) {
-  if (!hip_capture_enabled()) return;
   if (kind == hipMemcpyHostToDevice && src) {
     size_t n = memcpy2d_host_byte_count(spitch, width, height);
     if (n > 0) {
