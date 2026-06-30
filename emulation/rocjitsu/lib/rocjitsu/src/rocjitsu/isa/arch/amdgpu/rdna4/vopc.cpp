@@ -9017,7 +9017,6 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
 
 void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -9094,9 +9093,6 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -9143,7 +9139,6 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
 
 void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -9220,9 +9215,6 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -9269,7 +9261,6 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
 
 void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -9346,9 +9337,6 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -9395,7 +9383,6 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
 
 void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -9472,9 +9459,6 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -9521,7 +9505,6 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
 
 void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -9598,9 +9581,6 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -9647,7 +9627,6 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
 
 void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -9724,9 +9703,6 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -9773,7 +9749,6 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
 
 void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -9850,9 +9825,6 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -9899,7 +9871,6 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
 
 void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -9976,9 +9947,6 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -10025,7 +9993,6 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
 
 void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -10102,9 +10069,6 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -10151,7 +10115,6 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
 
 void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -10228,9 +10191,6 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -10277,7 +10237,6 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
 
 void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -10354,9 +10313,6 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -10403,7 +10359,6 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
 
 void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -10480,9 +10435,6 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -10529,7 +10481,6 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
 
 void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -10606,9 +10557,6 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -10655,7 +10603,6 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
 
 void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -10732,9 +10679,6 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -10779,7 +10723,6 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
 
 void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -10856,9 +10799,6 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -10903,7 +10843,6 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
 
 void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -10980,9 +10919,6 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -11027,7 +10963,6 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
 
 void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -11104,9 +11039,6 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -11151,7 +11083,6 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
 
 void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -11228,9 +11159,6 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -11275,7 +11203,6 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
 
 void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -11352,9 +11279,6 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -11399,7 +11323,6 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
 
 void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -11476,9 +11399,6 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -11523,7 +11443,6 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
 
 void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -11600,9 +11519,6 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -11647,7 +11563,6 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
 
 void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -11724,9 +11639,6 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -11771,7 +11683,6 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
 
 void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -11848,9 +11759,6 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -11895,7 +11803,6 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
 
 void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -11972,9 +11879,6 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -12019,7 +11923,6 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
 
 void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -12096,9 +11999,6 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -12143,7 +12043,6 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
 
 void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -12220,9 +12119,6 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -12267,7 +12163,6 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
 
 void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -12344,9 +12239,6 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -12391,7 +12283,6 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
 
 void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -12468,9 +12359,6 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -12515,7 +12403,6 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
 
 void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -12592,9 +12479,6 @@ void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -12639,7 +12523,6 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
 
 void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -12716,9 +12599,6 @@ void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -12763,7 +12643,6 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
 
 void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -12840,9 +12719,6 @@ void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -12887,7 +12763,6 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
 
 void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -12964,9 +12839,6 @@ void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -13011,7 +12883,6 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
 
 void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -13088,9 +12959,6 @@ void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -13135,7 +13003,6 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
 
 void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -13212,9 +13079,6 @@ void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -13259,7 +13123,6 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
 
 void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -13336,9 +13199,6 @@ void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -13383,7 +13243,6 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
 
 void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -13460,9 +13319,6 @@ void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -13507,7 +13363,6 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
 
 void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -13584,9 +13439,6 @@ void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -13631,7 +13483,6 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
 
 void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -13708,9 +13559,6 @@ void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -13755,7 +13603,6 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
 
 void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -13832,9 +13679,6 @@ void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -13879,7 +13723,6 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
 
 void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -13956,9 +13799,6 @@ void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -14003,7 +13843,6 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
 
 void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -14080,9 +13919,6 @@ void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -14127,7 +13963,6 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
 
 void VCmpxNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -14204,9 +14039,6 @@ void VCmpxNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -14253,7 +14085,6 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
 
 void VCmpxLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -14330,9 +14161,6 @@ void VCmpxLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -14379,7 +14207,6 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
 
 void VCmpxEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -14456,9 +14283,6 @@ void VCmpxEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -14505,7 +14329,6 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
 
 void VCmpxLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -14582,9 +14405,6 @@ void VCmpxLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -14631,7 +14451,6 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
 
 void VCmpxGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -14708,9 +14527,6 @@ void VCmpxGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -14757,7 +14573,6 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
 
 void VCmpxNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -14834,9 +14649,6 @@ void VCmpxNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -14883,7 +14695,6 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
 
 void VCmpxGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -14960,9 +14771,6 @@ void VCmpxGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -15009,7 +14817,6 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
 
 void VCmpxLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -15086,9 +14893,6 @@ void VCmpxLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -15135,7 +14939,6 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
 
 void VCmpxEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -15212,9 +15015,6 @@ void VCmpxEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -15261,7 +15061,6 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
 
 void VCmpxLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -15338,9 +15137,6 @@ void VCmpxLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -15387,7 +15183,6 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
 
 void VCmpxGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -15464,9 +15259,6 @@ void VCmpxGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -15513,7 +15305,6 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
 
 void VCmpxNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -15590,9 +15381,6 @@ void VCmpxNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -15639,7 +15427,6 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
 
 void VCmpxGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -15716,9 +15503,6 @@ void VCmpxGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -15763,7 +15547,6 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
 
 void VCmpxLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -15840,9 +15623,6 @@ void VCmpxLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -15887,7 +15667,6 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
 
 void VCmpxEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -15964,9 +15743,6 @@ void VCmpxEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -16011,7 +15787,6 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
 
 void VCmpxLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -16088,9 +15863,6 @@ void VCmpxLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -16135,7 +15907,6 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
 
 void VCmpxGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -16212,9 +15983,6 @@ void VCmpxGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -16259,7 +16027,6 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
 
 void VCmpxNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -16336,9 +16103,6 @@ void VCmpxNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -16383,7 +16147,6 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
 
 void VCmpxGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -16460,9 +16223,6 @@ void VCmpxGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -16507,7 +16267,6 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
 
 void VCmpxLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -16584,9 +16343,6 @@ void VCmpxLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -16631,7 +16387,6 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
 
 void VCmpxEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -16708,9 +16463,6 @@ void VCmpxEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -16755,7 +16507,6 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
 
 void VCmpxLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -16832,9 +16583,6 @@ void VCmpxLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -16879,7 +16627,6 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
 
 void VCmpxGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -16956,9 +16703,6 @@ void VCmpxGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -17003,7 +16747,6 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
 
 void VCmpxNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -17080,9 +16823,6 @@ void VCmpxNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -17127,7 +16867,6 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
 
 void VCmpxGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -17204,9 +16943,6 @@ void VCmpxGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -17251,7 +16987,6 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
 
 void VCmpxLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -17328,9 +17063,6 @@ void VCmpxLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -17375,7 +17107,6 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
 
 void VCmpxEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -17452,9 +17183,6 @@ void VCmpxEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -17499,7 +17227,6 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
 
 void VCmpxLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -17576,9 +17303,6 @@ void VCmpxLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -17623,7 +17347,6 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
 
 void VCmpxGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -17700,9 +17423,6 @@ void VCmpxGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -17747,7 +17467,6 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
 
 void VCmpxNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -17824,9 +17543,6 @@ void VCmpxNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -17871,7 +17587,6 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
 
 void VCmpxGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -17948,9 +17663,6 @@ void VCmpxGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -17995,7 +17707,6 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
 
 void VCmpxLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -18072,9 +17783,6 @@ void VCmpxLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -18119,7 +17827,6 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
 
 void VCmpxEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -18196,9 +17903,6 @@ void VCmpxEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -18243,7 +17947,6 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
 
 void VCmpxLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -18320,9 +18023,6 @@ void VCmpxLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -18367,7 +18067,6 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
 
 void VCmpxGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -18444,9 +18143,6 @@ void VCmpxGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -18491,7 +18187,6 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
 
 void VCmpxNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -18568,9 +18263,6 @@ void VCmpxNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -18615,7 +18307,6 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
 
 void VCmpxGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -18692,9 +18383,6 @@ void VCmpxGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -18741,7 +18429,6 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
 
 void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -18847,9 +18534,6 @@ void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -18894,7 +18578,6 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
 
 void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -18994,9 +18677,6 @@ void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();
@@ -19041,7 +18721,6 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
 
 void VCmpxClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_ = 0;
@@ -19143,9 +18822,6 @@ void VCmpxClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t new_vcc = wf.vcc();
     uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);
     wf.set_vcc(merged);
-    uint64_t new_exec = wf.exec();
-    uint64_t merged_exec = (new_exec & dpp_write_mask_) | (dpp_old_exec_ & ~dpp_write_mask_);
-    wf.set_exec(merged_exec);
   }
   if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
     uint64_t cmp_result = wf.vcc();

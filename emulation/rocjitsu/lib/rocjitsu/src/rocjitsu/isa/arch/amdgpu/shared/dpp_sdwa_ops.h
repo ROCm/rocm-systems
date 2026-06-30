@@ -52,17 +52,14 @@ enum DppCtrl : uint32_t {
   ROW_ROR1 = 0x121, // row rotate right 1..15
   ROW_ROR_MAX = 0x12F,
   WF_SHL1 = 0x130,
-  WF_ROL1 = 0x134, // wave rotate left 1
   WF_SRL1 = 0x138, // wave shift right 1
   WF_ROR1 = 0x13C, // wave rotate right 1
   ROW_MIRROR = 0x140,
   ROW_HALF_MIRROR = 0x141,
-  ROW_BCAST15 = 0x142,    // broadcast lane 15 of each row to the following row
-  ROW_BCAST31 = 0x143,    // broadcast lane 31 to the upper half-wave
-  ROW_SHARE_BASE = 0x150, // row_share/row_newbcast: broadcast one lane within each row
-  ROW_SHARE_MAX = 0x15F,
-  ROW_XMASK_BASE = 0x160, // row_xmask (GFX10+)
-  ROW_XMASK_MAX = 0x16F,
+  ROW_BCAST15 = 0x142,    // broadcast lane 15 of row
+  ROW_BCAST31 = 0x143,    // broadcast lane 31 of half-wave
+  ROW_XMASK_BASE = 0x150, // row_xmask (GFX10+)
+  ROW_XMASK_MAX = 0x15F,
 };
 
 /// @brief Compute the source lane index for a DPP permutation.
@@ -125,11 +122,6 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
     return src < wf_size ? src : lane;
   }
 
-  if (dpp_ctrl == WF_ROL1) {
-    // Wave rotate left 1: lane K reads from lane (K+1) % wf_size.
-    return (lane + 1) % wf_size;
-  }
-
   if (dpp_ctrl == WF_SRL1) {
     // Wave shift right 1: lane K reads from lane K-1.
     int src = lane - 1;
@@ -154,29 +146,14 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
   }
 
   if (dpp_ctrl == ROW_BCAST15) {
-    // Broadcast lane 15 of each row to the following row. Row 0 has invalid
-    // shared data.
-    if (lane < ROW_SIZE) {
-      out_of_bounds = true;
-      return lane;
-    }
-    return row_num * ROW_SIZE - 1;
+    // Broadcast lane 15 of the current row to all lanes in the row.
+    return row_num * ROW_SIZE + 15;
   }
 
   if (dpp_ctrl == ROW_BCAST31) {
-    // Broadcast lane 31 to lanes 32-63. Lanes 0-31 have invalid shared data.
-    if (lane < 32 || wf_size <= 32) {
-      out_of_bounds = true;
-      return lane;
-    }
-    return 31;
-  }
-
-  if (dpp_ctrl >= ROW_SHARE_BASE && dpp_ctrl <= ROW_SHARE_MAX) {
-    // row_share/row_newbcast: broadcast one selected source lane within the
-    // destination row.
-    int lane_sel = dpp_ctrl - ROW_SHARE_BASE;
-    return row_num * ROW_SIZE + lane_sel;
+    // Broadcast lane 31 of the current half-wave.
+    int half = (lane >= 32) ? 1 : 0;
+    return half * 32 + 31;
   }
 
   if (dpp_ctrl >= ROW_XMASK_BASE && dpp_ctrl <= ROW_XMASK_MAX) {
@@ -208,50 +185,11 @@ inline bool dpp_lane_masked(int lane, uint32_t row_mask, uint32_t bank_mask) {
   return ((row_mask & (1u << row)) == 0) || ((bank_mask & (1u << bank)) == 0);
 }
 
-/// @brief Check if a DPP instruction writes the destination lane.
-///
-/// Row/bank masks always disable writes. When the DPP permutation has invalid
-/// shared data, BOUND_CTRL=0 disables the write and BOUND_CTRL=1 writes using a
-/// zero source value.
-inline bool dpp_lane_write_enabled(int lane, int wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
-                                   uint32_t bank_mask, uint32_t bound_ctrl) {
-  if (dpp_lane_masked(lane, row_mask, bank_mask))
-    return false;
-
-  bool oob = false;
-  (void)dpp_permute(dpp_ctrl, lane, wf_size, oob);
-  return !oob || bound_ctrl != 0;
-}
-
-/// @brief Compute the destination write mask for a DPP instruction.
-///
-/// Includes only lanes enabled by row_mask/bank_mask and, when the DPP
-/// permutation reads invalid shared data, only lanes whose BOUND_CTRL behavior
-/// still writes a zero source value.
-///
-/// @param wf_size Wavefront size in lanes.
-/// @param dpp_ctrl 9-bit DPP control value.
-/// @param row_mask 4-bit row mask.
-/// @param bank_mask 4-bit bank mask.
-/// @param bound_ctrl If 1, invalid shared data writes zero; if 0, write is disabled.
-/// @returns Bit mask with one bit per destination lane that should be written.
-inline uint64_t dpp_write_mask(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
-                               uint32_t bank_mask, uint32_t bound_ctrl) {
-  uint64_t mask = 0;
-  for (uint32_t ln = 0; ln < wf_size; ++ln)
-    if (dpp_lane_write_enabled(static_cast<int>(ln), static_cast<int>(wf_size), dpp_ctrl, row_mask,
-                               bank_mask, bound_ctrl))
-      mask |= (1ULL << ln);
-  return mask;
-}
-
 /// @brief Apply a complete DPP read for one lane.
 ///
 /// Reads the permuted source value from a VGPR across the wavefront.
 /// Handles out-of-bounds (returns 0 if bound_ctrl=1, else returns old_val),
-/// and row/bank masking (returns old_val if masked). Callers must still apply
-/// dpp_write_mask() after the ALU operation so lanes disabled by masks or
-/// BOUND_CTRL=0 invalid shared data keep their old destination values.
+/// and row/bank masking (returns old_val if masked).
 ///
 /// @param src_data Array of wf_size source values (one per lane).
 /// @param lane Current lane index.

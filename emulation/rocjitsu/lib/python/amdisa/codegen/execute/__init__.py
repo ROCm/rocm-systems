@@ -220,10 +220,9 @@ def _register_handlers() -> None:
             and c.arch_name == 'gfx1250'
             else None
         ),
-        arch_name=c.arch_name,
     )
     DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
-        c.dst_ops, c.src_ops, c.cls, c.op, c.arch_name
+        c.dst_ops, c.src_ops, c.cls, c.op
     )
     DISPATCH['cvt_fp8'] = lambda c: gen_cvt_fp8(c)
     DISPATCH['cvt_scalef32'] = lambda c: gen_cvt_scalef32(c)
