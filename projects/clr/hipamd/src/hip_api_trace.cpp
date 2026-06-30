@@ -1558,25 +1558,26 @@ template <typename Tp> void ToolsInit(Tp* table) {
 #endif
 }
 
-template <typename Tp> Tp& GetDispatchTableImpl() {
+template <typename Tp> Tp& GetDispatchTableImpl(std::atomic<bool>& registered) {
   // using a static inside a function prevents static initialization fiascos
-  static auto dispatch_table = Tp{};
+  static auto dispatch_table = [] {
+    auto table = Tp{};
 
-  // Change all the function pointers to point to the HIP runtime implementation functions
-  UpdateDispatchTable(&dispatch_table);
+    // Change all the function pointers to point to the HIP runtime implementation functions
+    UpdateDispatchTable(&table);
 
-  // ToolsInit deferred to RegisterDispatchTableOnce()
-  return dispatch_table;
-}
+    return table;
+  }();
 
-// Register profiler once, after the getter's static guard is released. Uses a namespace-scope
-// atomic claimed by a single CAS (not a function-local once-flag, whose own guard would re-enter
-// the same way), so a re-entrant call sees the initialized table and returns without recursing.
-template <typename Tp> void RegisterDispatchTableOnce(Tp* table, std::atomic<bool>& registered) {
+  // Register profiler once, after the dispatch table's static guard is released. Uses a
+  // namespace-scope atomic claimed by a single CAS, so a re-entrant call sees the initialized table
+  // and returns without recursing.
   bool expected = false;
   if (registered.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-    ToolsInit(table);
+    ToolsInit(&dispatch_table);
   }
+
+  return dispatch_table;
 }
 
 std::atomic<bool> hip_dispatch_registered{false};
@@ -1595,19 +1596,13 @@ std::atomic<bool> hip_tools_dispatch_registered{false};
 #define NO_VECTORIZE
 #endif
 NO_VECTORIZE const HipDispatchTable* GetHipDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipDispatchTable>();
-  RegisterDispatchTableOnce(_v, hip_dispatch_registered);
-  return _v;
+  return &GetDispatchTableImpl<HipDispatchTable>(hip_dispatch_registered);
 }
 NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipCompilerDispatchTable>();
-  RegisterDispatchTableOnce(_v, hip_compiler_dispatch_registered);
-  return _v;
+  return &GetDispatchTableImpl<HipCompilerDispatchTable>(hip_compiler_dispatch_registered);
 }
 const HipToolsDispatchTable* GetHipToolsDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipToolsDispatchTable>();
-  RegisterDispatchTableOnce(_v, hip_tools_dispatch_registered);
-  return _v;
+  return &GetDispatchTableImpl<HipToolsDispatchTable>(hip_tools_dispatch_registered);
 }
 }  // namespace hip
 
