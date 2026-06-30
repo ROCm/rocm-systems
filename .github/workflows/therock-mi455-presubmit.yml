@@ -40,13 +40,6 @@ on:
       - 'projects/rocr-debug-agent/**'
       # Also trigger on changes to this workflow
       - '.github/workflows/therock-mi455-presubmit.yml'
-    paths-ignore:
-      # Ignore documentation updates
-      - '**/*.md'
-      - 'docs/**'
-      - '**/README*'
-      - '**/CONTRIBUTING*'
-      - '**/LICENSE*'
   workflow_dispatch:
     inputs:
       linux_test_labels:
