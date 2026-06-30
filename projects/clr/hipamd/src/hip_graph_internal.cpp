@@ -6,8 +6,6 @@
 
 #include "hip_graph_internal.hpp"
 
-hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned int flags);
-
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
     case_string = #C;                                                                              \
@@ -38,6 +36,8 @@ const char* GetGraphNodeTypeString(uint32_t op) {
 }  // namespace
 
 namespace hip {
+
+hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned int flags);
 
 std::atomic<int> GraphNode::nextID{0};
 std::atomic<int> Graph::nextID{0};
@@ -2915,8 +2915,6 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
 
   return true;
 }
-
-hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned int flags);
 
 // ================================================================================================
 hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
