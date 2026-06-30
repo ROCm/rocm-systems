@@ -752,7 +752,10 @@ TestColl() {
   ExecTest  "teamreducescatter" 2      1            64        32768
   ExecTest  "teamreducescatter" 4      1            64        32768
   ExecTest  "teamreducescatter" 8      1            64        32768
-  ExecTest  "broadcast_wave"   2       1            64        32768
+
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-432: wave tests not supported on RO
+    ExecTest  "broadcast_wave"   2       1            64        32768
+  else echo "Skip:   *_wave (AIROCSHMEM-408: wave tests not supported on RO)"; fi
 }
 
 TestOnStream() {
