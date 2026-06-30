@@ -366,3 +366,12 @@ contract:
   Contract_MemoryPoolLifecycle_MallocFromCreatedPoolAsync_SucceedsWhenSupported:
     <<: *level_0
     tags: [memory_pool_lifecycle]
+  Contract_MemoryPoolAccess_SetAccessCurrentDevice_SucceedsWhenSupported:
+    <<: *level_0
+    tags: [memory_pool_access]
+  Contract_MemoryPoolAccess_GetAccessCurrentDevice_ReturnsGrantedFlags:
+    <<: *level_0
+    tags: [memory_pool_access]
+  Contract_MemoryPoolAccess_SetAccessNoneCurrentDevice_IsRejected:
+    <<: *level_0
+    tags: [memory_pool_access]
