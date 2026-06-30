@@ -44,7 +44,7 @@ def wrap_kernel_name(name: str) -> str:
 def scale_bw_columns(
     df: pd.DataFrame, value_columns: list[str], decimal: int = 2
 ) -> pd.DataFrame:
-    """Scale Bytes/s rows to human-readable units; recalculate Pct of Peak."""
+    """Scale Bytes/s rows to human-readable units; recalculate Percent of Peak."""
     if "Unit" not in df.columns:
         return df
 
@@ -54,7 +54,7 @@ def scale_bw_columns(
     if not bw_rows.any():
         return df_copy
 
-    pct_cols = ["Pct of Peak", "PoP"]
+    pct_cols = ["Percent of Peak"]
     value_col = "Value" if "Value" in df_copy.columns else "Avg"
     peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df_copy.columns else "Peak"
 
@@ -299,18 +299,23 @@ def is_roofline_shown(
     return True
 
 
-def list_torch_operators(
+def list_ml_operators(
     workload_path: str,
     call_trees: dict[str, CallTreeNode],
+    framework_label: str = "PyTorch",
 ) -> None:
-    """Display PyTorch operators as a unified call tree grouped by source location."""
+    """Display operators as a unified call tree grouped by source location.
+
+    ``framework_label`` sets the heading text (for example "PyTorch" or
+    "Triton").
+    """
     if not call_trees:
-        print(f"\nPyTorch Operators in: {workload_path}")
+        print(f"\n{framework_label} Operators in: {workload_path}")
         print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"PyTorch Operator Call Tree: {workload_path}")
+    print(f"{framework_label} Operator Call Tree: {workload_path}")
     print("Grouped by source location, sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
@@ -653,6 +658,9 @@ def process_table_data(
 
                 if args.time_unit and has_time_data(base_df):
                     cur_df = convert_time_columns(cur_df, args.time_unit)
+
+                if header not in cur_df.columns:
+                    continue
 
                 if (table_type == "raw_csv_table") or (
                     table_type == "metric_table" and header not in hidden_cols
