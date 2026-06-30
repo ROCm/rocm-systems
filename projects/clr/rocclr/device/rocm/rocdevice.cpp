@@ -3742,7 +3742,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
     return HSA_STATUS_ERROR;
   }
 
-  gpu_error_ = gpu_error;
+  gpu_error_.store(gpu_error, std::memory_order_relaxed);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4268,7 +4268,7 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
     if (should_abort) {
       abort();
     }
-    amd::Device::gpu_error_ = ConvertHSAErrorIntoCLError(status);
+    amd::Device::gpu_error_.store(ConvertHSAErrorIntoCLError(status), std::memory_order_relaxed);
   }
 }
 
