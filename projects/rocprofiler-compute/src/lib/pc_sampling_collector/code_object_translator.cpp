@@ -102,7 +102,32 @@ instruction_t code_object_translator_impl_t::get_instruction(size_t object_id, u
     return {};
 }
 
-std::vector<std::filesystem::path> code_object_translator_impl_t::get_source_paths(
+std::set<std::filesystem::path> code_object_translator_impl_t::get_source_paths() const
+{
+    std::set<std::filesystem::path> source_paths;
+
+    for (const auto& id : get_code_object_ids())
+    {
+        const auto symbols = get_symbols(id);
+        for (const auto& sym : symbols)
+        {
+            uint64_t       pc  = sym.virtual_address;
+            const uint64_t end = sym.virtual_address + sym.size;
+            while (pc < end)
+            {
+                const auto inst = get_instruction(id, pc);
+                Expects(inst.size);
+                const auto paths = source_paths_from_comment(inst.comment);
+                source_paths.insert(paths.cbegin(), paths.cend());
+                pc += inst.size;
+            }
+        }
+    }
+
+    return source_paths;
+}
+
+std::vector<std::filesystem::path> code_object_translator_impl_t::source_paths_from_comment(
     std::string_view comment) const
 {
     std::vector<std::filesystem::path> source_paths;
