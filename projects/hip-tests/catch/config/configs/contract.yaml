@@ -375,6 +375,24 @@ contract:
   Contract_Surface_GetChannelDesc_RoundTripsArrayResource:
     <<: *level_0
     tags: [texture]
+  Contract_Context_DeviceGet_ReturnsHandleForOrdinalZero:
+    <<: *level_0
+    tags: [context]
+  Contract_Context_DeviceComputeCapability_IsPositive:
+    <<: *level_0
+    tags: [context]
+  Contract_Context_DeviceTotalMem_MatchesProperties:
+    <<: *level_0
+    tags: [context]
+  Contract_Context_DeviceGetUuidAndPciBusId_Succeed:
+    <<: *level_0
+    tags: [context]
+  Contract_Context_PrimaryCtxRetainRelease_RoundTrips:
+    <<: *level_0
+    tags: [context]
+  Contract_Context_CtxGetCurrentAndDevice_AreConsistent:
+    <<: *level_0
+    tags: [context]
   Contract_MemoryPoolLifecycle_CreateDestroy_SucceedsWhenSupported:
     <<: *level_0
     tags: [memory_pool_lifecycle]
