@@ -19,6 +19,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <hip_test_process.hh>
 #include "hrr_reader.h"
 #include "hrr_api_args.h"
 
@@ -30,6 +31,12 @@
 #include <string>
 
 namespace fs = std::filesystem;
+
+#ifdef _WIN32
+static constexpr char kPathSep = ';';
+#else
+static constexpr char kPathSep = ':';
+#endif
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -97,6 +104,70 @@ struct TmpArchive {
 
   void finish() { f.flush(); f.close(); }
 };
+
+struct TmpRootArchive {
+  fs::path root;
+
+  explicit TmpRootArchive(const std::string& name) {
+    root = fs::temp_directory_path() / ("hrr_rec_" + name);
+    fs::remove_all(root);
+    fs::create_directories(root);
+  }
+
+  ~TmpRootArchive() { fs::remove_all(root); }
+
+  fs::path add_process(uint64_t pid, uint64_t parent_pid, int records,
+                       bool trailer = true, bool manifest = true) {
+    fs::path proc = root / ("pid-" + std::to_string(pid));
+    fs::create_directories(proc / "blobs");
+    fs::create_directories(proc / "code_objects");
+
+    std::ofstream events(proc / "events.bin", std::ios::binary);
+    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
+    events.write(reinterpret_cast<const char*>(&fh), sizeof(fh));
+    for (int i = 0; i < records; ++i) {
+      hrr_event_header h = make_min_record(static_cast<uint64_t>(i));
+      events.write(reinterpret_cast<const char*>(&h), sizeof(h));
+    }
+    if (trailer) {
+      hrr_eof_record eof = hrr_make_eof_record(static_cast<uint64_t>(records),
+                                               static_cast<uint64_t>(records));
+      events.write(reinterpret_cast<const char*>(&eof), sizeof(eof));
+    }
+    events.close();
+
+    if (manifest) {
+      std::ofstream mf(proc / "manifest.json");
+      mf << "{\n"
+         << "  \"pid\": " << pid << ",\n"
+         << "  \"parent_pid\": " << parent_pid << ",\n"
+         << "  \"complete\": " << (trailer ? "true" : "false") << ",\n"
+         << "  \"event_count\": " << records << ",\n"
+         << "  \"blob_count\": 0\n"
+         << "}\n";
+    }
+    return proc;
+  }
+};
+
+static void set_proc_search_path(hip::SpawnProc& proc) {
+  const char* cur_path = getenv("PATH");
+  proc.setEnv("PATH",
+              std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
+}
+
+static std::pair<int, std::string> run_hrr_playback(const fs::path& archive,
+                                                    const std::string& args) {
+  hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  set_proc_search_path(proc);
+#ifdef _WIN32
+  std::string path_arg = "\"" + archive.string() + "\"";
+#else
+  std::string path_arg = archive.string();
+#endif
+  int ret = proc.run(path_arg + (args.empty() ? "" : " " + args));
+  return {ret, proc.getOutput()};
+}
 
 }  // namespace
 
@@ -184,4 +255,74 @@ HIP_TEST_CASE(Unit_HRR_Recovery_NoTrailer) {
   CHECK(a.events.size() == 4);
   CHECK_FALSE(a.complete);
   CHECK_FALSE(a.truncated);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A crash-style per-process archive has no clean trailer and an old
+ *     root-shaped manifest that lacks pid/parent_pid.
+ *   - hrr-playback --repair appends a clean trailer and rewrites manifest.json
+ *     using the per-process schema consumed by root info aggregation.
+ */
+HIP_TEST_CASE(Unit_HRR_Recovery_RepairWritesProcessManifest) {
+  TmpRootArchive root("repair_manifest");
+  fs::path proc = root.add_process(/*pid=*/4242, /*parent_pid=*/0,
+                                   /*records=*/3, /*trailer=*/false,
+                                   /*manifest=*/false);
+  {
+    std::ofstream mf(proc / "manifest.json");
+    mf << "{\n"
+       << "  \"version\": 1,\n"
+       << "  \"capture_mode\": \"in-tree\",\n"
+       << "  \"complete\": false,\n"
+       << "  \"event_count\": 3,\n"
+       << "  \"blob_count\": 0\n"
+       << "}\n";
+  }
+
+  auto [ret, out] = run_hrr_playback(proc, "--repair");
+  INFO("hrr-playback --repair stdout:\n" << out);
+  INFO("hrr-playback --repair exit code: " << ret);
+  REQUIRE(ret == 0);
+
+  hrr::Archive repaired;
+  REQUIRE(hrr::load_archive(proc.string(), repaired));
+  CHECK(repaired.complete);
+  CHECK_FALSE(repaired.truncated);
+  CHECK(repaired.events.size() == 3);
+
+  std::ifstream mf(proc / "manifest.json");
+  std::string manifest((std::istreambuf_iterator<char>(mf)),
+                       std::istreambuf_iterator<char>());
+  INFO("manifest.json:\n" << manifest);
+  CHECK(manifest.find("\"pid\": 4242") != std::string::npos);
+  CHECK(manifest.find("\"parent_pid\": 0") != std::string::npos);
+  CHECK(manifest.find("\"complete\": true") != std::string::npos);
+  CHECK(manifest.find("\"capture_mode\"") == std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A root directory containing multiple pid-* sub-archives must not be loaded
+ *     as a single replay archive.
+ *   - hrr-playback --info should still aggregate and list both process
+ *     manifests, which guards the multi-process root path.
+ */
+HIP_TEST_CASE(Unit_HRR_Recovery_MultiProcessRootInfo) {
+  TmpRootArchive root("multi_process_root");
+  root.add_process(/*pid=*/111, /*parent_pid=*/0, /*records=*/2);
+  root.add_process(/*pid=*/222, /*parent_pid=*/111, /*records=*/4);
+
+  hrr::Archive archive;
+  CHECK_FALSE(hrr::load_archive(root.root.string(), archive));
+
+  auto [ret, out] = run_hrr_playback(root.root, "--info");
+  INFO("hrr-playback --info stdout:\n" << out);
+  INFO("hrr-playback --info exit code: " << ret);
+  REQUIRE(ret == 0);
+  CHECK(out.find("Processes:    2") != std::string::npos);
+  CHECK(out.find("111") != std::string::npos);
+  CHECK(out.find("222") != std::string::npos);
 }

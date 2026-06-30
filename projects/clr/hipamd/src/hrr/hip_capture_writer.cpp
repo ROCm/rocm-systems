@@ -663,6 +663,14 @@ bool open(const char* output_dir) {
   }
 
   // Fresh per-process archive.
+  g_seq_id.store(0, std::memory_order_relaxed);
+  g_event_count.store(0, std::memory_order_relaxed);
+  g_blob_count.store(0, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    g_written_blobs.clear();
+  }
+
   if (g_events_fd < 0) {
 #ifndef _WIN32
     g_events_fd = ::open(events_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);

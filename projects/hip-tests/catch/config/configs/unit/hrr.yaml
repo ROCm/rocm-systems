@@ -51,6 +51,12 @@ hrr:
   Unit_HRR_Recovery_NoTrailer:
     <<: *level_2
     tags: [format, recovery, cpu]
+  Unit_HRR_Recovery_RepairWritesProcessManifest:
+    <<: *level_2
+    tags: [format, recovery, repair, cpu]
+  Unit_HRR_Recovery_MultiProcessRootInfo:
+    <<: *level_2
+    tags: [format, recovery, multiprocess, cpu]
   Unit_HRR_AllApisRoundtrip:
     <<: *level_2
     tags: [capture, allapis, playback, roundtrip]
