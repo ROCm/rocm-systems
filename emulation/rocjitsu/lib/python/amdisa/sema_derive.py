@@ -916,6 +916,14 @@ _BINOP_KIND_MAP: dict[str, SemaNodeKind] = {
 }
 
 
+def _uses_unsigned_arithmetic(ty: SemaType) -> bool:
+    return ty.base in ('I', 'U') and ty.size <= 64
+
+
+def _unsigned_arithmetic_ty(ty: SemaType) -> SemaType:
+    return SemaType.U64 if ty.size == 64 else SemaType.U32
+
+
 def _vec_unary_expr(op: str | None, src0: SemaNode, ty: SemaType) -> SemaNode:
     if op is None:
         return src0
@@ -934,8 +942,16 @@ def _vec_binop_expr(
     ty: SemaType,
 ) -> SemaNode:
     if op is None:
+        if _uses_unsigned_arithmetic(ty):
+            ty = _unsigned_arithmetic_ty(ty)
+            src0 = _cast(src0, ty)
+            src1 = _cast(src1, ty)
         return SemaNode(SemaNodeKind.ADD, ty=ty, children=(src0, src1))
     if op in ('subrev', 'rsub'):
+        if _uses_unsigned_arithmetic(ty):
+            ty = _unsigned_arithmetic_ty(ty)
+            src0 = _cast(src0, ty)
+            src1 = _cast(src1, ty)
         return SemaNode(SemaNodeKind.SUB, ty=ty, children=(src1, src0))
     if op in ('lshlrev', 'lshrrev', 'shl', 'shr'):
         base = {
@@ -988,6 +1004,15 @@ def _vec_binop_expr(
         return SemaNode(
             SemaNodeKind.CALL, ty=ty, call_name=fn, children=(_id(fn), src0, src1)
         )
+    if _uses_unsigned_arithmetic(ty) and kind in (
+        SemaNodeKind.ADD,
+        SemaNodeKind.SUB,
+        SemaNodeKind.MUL,
+    ):
+        ty = _unsigned_arithmetic_ty(ty)
+        src0 = _cast(src0, ty)
+        src1 = _cast(src1, ty)
+        return SemaNode(kind, ty=ty, children=(src0, src1))
     return SemaNode(kind, ty=ty, children=(src0, src1))
 
 
@@ -1219,8 +1244,16 @@ class _VectorTernary(_ScalarDeriver):
         src1 = _cast(_src(1), ty)
         src2 = _cast(_src(2), ty)
         if op == 'mad':
-            mul = SemaNode(SemaNodeKind.MUL, ty=ty, children=(src0, src1))
-            result = SemaNode(SemaNodeKind.ADD, ty=ty, children=(mul, src2))
+            if _uses_unsigned_arithmetic(ty):
+                u_ty = _unsigned_arithmetic_ty(ty)
+                u_src0 = _cast(src0, u_ty)
+                u_src1 = _cast(src1, u_ty)
+                u_src2 = _cast(src2, u_ty)
+                mul = SemaNode(SemaNodeKind.MUL, ty=u_ty, children=(u_src0, u_src1))
+                result = SemaNode(SemaNodeKind.ADD, ty=u_ty, children=(mul, u_src2))
+            else:
+                mul = SemaNode(SemaNodeKind.MUL, ty=ty, children=(src0, src1))
+                result = SemaNode(SemaNodeKind.ADD, ty=ty, children=(mul, src2))
         elif op in ('fma', 'fmac'):
             result = SemaNode(SemaNodeKind.FMA, ty=ty, children=(src0, src1, src2))
         else:

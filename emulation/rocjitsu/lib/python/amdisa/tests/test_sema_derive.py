@@ -1021,6 +1021,19 @@ class TestDeriveVectorBinop:
         assert '::rocjitsu::amdgpu::mul_i24_u32' in cpp
         assert 'a * b' not in cpp
 
+    def test_signed_add_lowers_through_unsigned_wrap(self):
+        sem = _FakeSem('V_ADD_I32', 'vector_binop', 'add', 'i32')
+        block = derive_sema_block(sem)
+        nodes = list(block.body.walk())
+        cpp = lower_sema_block(block)
+
+        assert any(n.kind == SemaNodeKind.ADD and n.ty == SemaType.U32 for n in nodes)
+        assert cpp.count('static_cast<uint32_t>(static_cast<int32_t>(') >= 2
+        assert (
+            'static_cast<int32_t>(inst.src0.read_lane(wf, lane)) + '
+            'static_cast<int32_t>(inst.src1.read_lane(wf, lane))'
+        ) not in cpp
+
     def test_min_max_use_call(self):
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_F32', 'vector_binop', op, 'f32')
@@ -1143,6 +1156,20 @@ class TestDeriveVectorTernary:
 
         assert '::rocjitsu::amdgpu::mad_i24_u32' in cpp
         assert 'a * b' not in cpp
+
+    def test_u16_mad_lowers_through_unsigned_wrap(self):
+        sem = _FakeSem('V_MAD_LEGACY_U16', 'vector_ternary', 'mad', 'u16')
+        block = derive_sema_block(sem)
+        nodes = list(block.body.walk())
+        cpp = lower_sema_block(block)
+
+        assert any(n.kind == SemaNodeKind.ADD and n.ty == SemaType.U32 for n in nodes)
+        assert any(n.kind == SemaNodeKind.MUL and n.ty == SemaType.U32 for n in nodes)
+        assert cpp.count('static_cast<uint32_t>(static_cast<uint16_t>(') >= 3
+        assert (
+            'static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) * '
+            'static_cast<uint16_t>(inst.src1.read_lane(wf, lane))'
+        ) not in cpp
 
     def test_signed_bfe_keeps_braced_one_literal(self):
         sem = _FakeSem('V_BFE_I32', 'vector_ternary', 'bfe_i', 'i32')
