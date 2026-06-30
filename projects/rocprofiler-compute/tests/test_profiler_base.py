@@ -323,6 +323,100 @@ def test_rocprofv3_live_attach_uses_sync_output():
 
 
 # ---------------------------------------------------------------------------
+# get_pc_sampling_profiler_options(): sdk + v3 backends
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "native_tool_path, method, expected_unit, expected_ld_preload",
+    [
+        pytest.param(None, "host_trap", "time", ["/opt/sdk/tool.so"], id="sdk_only"),
+        pytest.param(
+            "/n/native.so",
+            "stochastic",
+            "cycles",
+            ["/opt/sdk/tool.so", "/n/native.so"],
+            id="native_appended",
+        ),
+    ],
+)
+def test_sdk_pc_sampling_options(
+    tmp_path, native_tool_path, method, expected_unit, expected_ld_preload
+):
+    """sdk PC sampling options set the PC sampling env, json/ps_file output, and
+    append the native tool (when given) to the upstream LD_PRELOAD."""
+    args = _make_sanitize_args(
+        ["/bin/true"],
+        rocprofiler_sdk_tool_path="/opt/sdk/tool.so",
+        format_rocprof_output="csv",
+        output_directory=str(tmp_path),
+        pc_sampling_method=method,
+        pc_sampling_interval=1000,
+        kokkos_trace=False,
+    )
+    args.remaining = "/bin/true"
+    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+
+    options = profiler.get_pc_sampling_profiler_options(
+        native_tool_path=native_tool_path
+    )
+
+    assert options["ROCPROF_COUNTER_COLLECTION"] == "0"
+    assert options["ROCPROF_KERNEL_TRACE"] == "1"
+    assert options["ROCPROF_OUTPUT_FORMAT"] == "json"
+    assert options["ROCPROF_OUTPUT_PATH"] == str(tmp_path)
+    assert options["ROCPROF_OUTPUT_FILE_NAME"] == "ps_file"
+    assert options["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] == "1"
+    assert options["ROCPROF_PC_SAMPLING_METHOD"] == method
+    assert options["ROCPROF_PC_SAMPLING_UNIT"] == expected_unit
+    assert options["ROCPROF_PC_SAMPLING_INTERVAL"] == "1000"
+    ld_preload = options["LD_PRELOAD"].split(":")
+    assert all(part in ld_preload for part in expected_ld_preload)
+
+
+@pytest.mark.parametrize(
+    "method, expected_unit, attach_pid, attach_duration_msec",
+    [
+        pytest.param("host_trap", "time", None, None, id="app_cmd"),
+        pytest.param("stochastic", "cycles", "1234", "500", id="live_attach"),
+    ],
+)
+def test_v3_pc_sampling_options(
+    tmp_path, method, expected_unit, attach_pid, attach_duration_msec
+):
+    """v3 PC sampling options build the CLI flags and append either the -- app
+    cmd or the live-attach flags."""
+    args = _make_sanitize_args(
+        ["./myapp", "arg1"],
+        output_directory=str(tmp_path),
+        pc_sampling_method=method,
+        pc_sampling_interval=1000,
+        attach_pid=attach_pid,
+        attach_duration_msec=attach_duration_msec,
+    )
+    args.remaining = "./myapp arg1"
+    profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
+
+    options = profiler.get_pc_sampling_profiler_options()
+
+    assert "--kernel-trace" in options
+    assert "--pc-sampling-beta-enabled" in options
+    assert options[options.index("--pc-sampling-method") + 1] == method
+    assert options[options.index("--pc-sampling-unit") + 1] == expected_unit
+    assert options[options.index("--pc-sampling-interval") + 1] == "1000"
+    assert options[options.index("-d") + 1] == str(tmp_path)
+    assert options[options.index("-o") + 1] == "ps_file"
+    if attach_pid:
+        assert "--attach-sync-output" in options
+        assert options[options.index("--pid") + 1] == attach_pid
+        assert options[options.index("--attach-duration-msec") + 1] == (
+            attach_duration_msec
+        )
+        assert "--" not in options
+    else:
+        sep = options.index("--")
+        assert options[sep:] == ["--", "./myapp", "arg1"]
+
+
+# ---------------------------------------------------------------------------
 # RocProfCompute.sanitize(): block 21 / block 30 experimental-gating
 # ---------------------------------------------------------------------------
 def _make_rpc_args(
@@ -550,6 +644,12 @@ def test_run_profiling_pc_sampling_gating(
     )
     monkeypatch.setattr(f"{base}.get_job_rank_and_size", Mock(return_value=ranks))
     monkeypatch.setattr(RocProfCompute_Base, "profile", Mock(return_value=0.0))
+    monkeypatch.setattr(
+        RocProfCompute_Base,
+        "get_pc_sampling_profiler_options",
+        Mock(return_value=[]),
+        raising=False,
+    )
 
     profiler.run_profiling(version="1.0.0", prog="rocprof-compute")
 
@@ -599,3 +699,180 @@ def test_sanitize_pc_sampling_interval(
     else:
         instance.sanitize()
         assert args.pc_sampling_interval == expected_interval
+
+
+# ---------------------------------------------------------------------------
+# run_profiling(): native_tool_path reaches get_pc_sampling_profiler_options
+# ---------------------------------------------------------------------------
+def _make_sdk_run_profiling_profiler(
+    tmp_path,
+    monkeypatch,
+    *,
+    filter_blocks,
+    perfmon_files=0,
+    rocm_version="7.0.0",
+    profiler_mode="rocprofiler-sdk",
+    no_native_tool=False,
+    attach_pid=None,
+    native_finder_raises=False,
+):
+    """Drive run_profiling() on the sdk native-tool path; returns (profiler, mocks)."""
+    if perfmon_files:
+        perfmon_dir = Path(tmp_path) / "perfmon"
+        perfmon_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(perfmon_files):
+            (perfmon_dir / f"pmc_perf_{i}.yaml").write_text("")
+
+    args = _make_sanitize_args(
+        ["./app"],
+        filter_blocks=filter_blocks,
+        output_directory=str(tmp_path),
+        no_native_tool=no_native_tool,
+        attach_pid=attach_pid,
+        pc_sampling_method="host_trap",
+        pc_sampling_interval=1000,
+    )
+    args.remaining = "-- ./app"
+    soc = SimpleNamespace(
+        _mspec=SimpleNamespace(gpu_model="MI300", rocm_version=rocm_version)
+    )
+    profiler = RocProfCompute_Base(args, profiler_mode=profiler_mode, soc=soc)
+    profiler._filter_blocks = filter_blocks
+
+    base = "rocprof_compute_profile.profiler_base"
+
+    mock_pc_cls = Mock()
+    mock_pc_cls.return_value.is_requested.return_value = any(
+        block in ("21", "pc_sampling") for block in filter_blocks
+    )
+
+    mock_finder_cls = Mock()
+    finder_instance = mock_finder_cls.return_value
+    if native_finder_raises:
+        finder_instance.get_collector_library_path.side_effect = RuntimeError("boom")
+    else:
+        finder_instance.get_collector_library_path.return_value = "/n/native.so"
+
+    mock_profile = Mock(return_value=0.0)
+
+    monkeypatch.setattr(f"{base}.PCSamplingProfile", mock_pc_cls)
+    monkeypatch.setattr(f"{base}.NativeToolFinder", mock_finder_cls)
+    monkeypatch.setattr(f"{base}.print_status", Mock())
+    monkeypatch.setattr(
+        f"{base}.get_job_rank_and_size", Mock(return_value=(None, None))
+    )
+    consoles = common.patch_console(
+        monkeypatch, base, "log", "debug", "warning", "error"
+    )
+    monkeypatch.setattr(RocProfCompute_Base, "profile", mock_profile)
+    # Base get_profiler_options ignores native_tool_path kwarg passed in sdk mode.
+    monkeypatch.setattr(
+        RocProfCompute_Base,
+        "get_profiler_options",
+        lambda self, *a, **k: {},
+    )
+    mock_pc_options = Mock(return_value={})
+    monkeypatch.setattr(
+        RocProfCompute_Base,
+        "get_pc_sampling_profiler_options",
+        mock_pc_options,
+        raising=False,
+    )
+
+    mocks = SimpleNamespace(
+        pc_cls=mock_pc_cls,
+        pc_options=mock_pc_options,
+        finder_cls=mock_finder_cls,
+        profile=mock_profile,
+        console_error=consoles["error"],
+    )
+    return profiler, mocks
+
+
+def _pc_native_tool_path(mock_pc_options):
+    """native_tool_path passed to get_pc_sampling_profiler_options (or None)."""
+    assert mock_pc_options.called, "get_pc_sampling_profiler_options was never called"
+    return mock_pc_options.call_args.kwargs.get("native_tool_path")
+
+
+@pytest.mark.parametrize(
+    "kwargs, expect_native_path, expect_profile_called, expect_error",
+    [
+        # PC-sampling-only: native tool threaded, no counter pass.
+        pytest.param(
+            dict(filter_blocks=["21"], perfmon_files=0),
+            True,
+            False,
+            None,
+            id="pc_only_threads_path_no_counter_pass",
+        ),
+        # Mixed blocks: native tool threaded and the counter pass runs.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1),
+            True,
+            True,
+            None,
+            id="mixed_threads_and_runs_counter_pass",
+        ),
+        # --no-native-tool: native tool not threaded.
+        pytest.param(
+            dict(filter_blocks=["21"], perfmon_files=0, no_native_tool=True),
+            False,
+            None,
+            None,
+            id="no_native_tool_threads_none",
+        ),
+        # Live attach: native tool not threaded.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1, attach_pid="123"),
+            False,
+            None,
+            None,
+            id="attach_pid_threads_none",
+        ),
+        # ROCm major < 7: native tool not threaded.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1, rocm_version="6.4.0"),
+            False,
+            None,
+            None,
+            id="rocm_major_lt_7_threads_none",
+        ),
+        # rocprofv3 backend: native tool not threaded.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1, profiler_mode="rocprofv3"),
+            False,
+            None,
+            None,
+            id="rocprofv3_threads_none",
+        ),
+        # Native finder failure: console_error fires.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1, native_finder_raises=True),
+            None,
+            None,
+            True,
+            id="native_resolution_failure_errors",
+        ),
+    ],
+)
+def test_run_profiling_native_tool_path(
+    tmp_path,
+    monkeypatch,
+    kwargs,
+    expect_native_path,
+    expect_profile_called,
+    expect_error,
+):
+    """run_profiling() threads native_tool_path only on the supported sdk path,
+    runs the counter pass for non-PC blocks, and errors on finder failure."""
+    profiler, mocks = _make_sdk_run_profiling_profiler(tmp_path, monkeypatch, **kwargs)
+    profiler.run_profiling(version="1.0.0", prog="rocprof-compute")
+
+    if expect_native_path is not None:
+        path = _pc_native_tool_path(mocks.pc_options)
+        assert (path is not None) is expect_native_path
+    if expect_profile_called is not None:
+        assert mocks.profile.called is expect_profile_called
+    if expect_error is not None:
+        assert mocks.console_error.called is expect_error
