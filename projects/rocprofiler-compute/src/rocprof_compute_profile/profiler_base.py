@@ -391,12 +391,6 @@ class RocProfCompute_Base:
         else:
             console_log("Filtered sections: All")
 
-        pc_sampling = PCSamplingProfile(
-            args=args,
-            profiler=self.__profiler,
-            workload_dir=args.output_directory,
-        )
-
         # Run profiling on each input file
         input_files = sorted(
             Path(args.output_directory).glob("perfmon/pmc_perf_*.yaml")
@@ -414,6 +408,10 @@ class RocProfCompute_Base:
         print_status(status_msg)
 
         native_tool_path = self.__get_native_tool_path(args)
+        pc_sampling = PCSamplingProfile(
+            args=args,
+            profiler=self.__profiler,
+        )
         if self.__profiler == "rocprofiler-sdk":
             options = self.get_profiler_options(native_tool_path=native_tool_path)
         else:
@@ -508,10 +506,15 @@ class RocProfCompute_Base:
             )
             return
 
-        # No native tool for pc sampling
-        pc_sampling.run(self.get_profiler_options(), total_runs)
+        if self.__profiler == "rocprofiler-sdk":
+            pc_sampling_options = self.get_pc_sampling_profiler_options(
+                native_tool_path=native_tool_path
+            )
+        else:
+            pc_sampling_options = self.get_pc_sampling_profiler_options()
+        pc_sampling.run(pc_sampling_options, total_runs)
 
-    def __get_native_tool_path(self, args: argparse.Namespace) -> str | None:
+    def __get_native_tool_path(self, args: argparse.Namespace) -> Optional[str]:
         try:
             if (
                 self.__is_native_tool_requested(args)  # noqa: E501
@@ -532,18 +535,12 @@ class RocProfCompute_Base:
         return self.__profiler == "rocprofiler-sdk" and not args.no_native_tool
 
     def __is_native_tool_supported(self, args: argparse.Namespace) -> bool:
-        # Native counter collection tool is only compatible with
-        # rocprofiler-sdk public API for ROCm version >= 7.x.x
-
-        # PC sampling only profile does not need native tool
-
-        # Do not use native tool in attach
-        # mode until we figure out how multiple tools can attach
-        # TODO: Figure out how multiple tools can attach
+        # Native tool is compatible with the rocprofiler-sdk public API for
+        # ROCm >= 7.x.x. It is used for both counter collection and PC sampling.
+        # Do not use the native tool in attach mode.
         return (
             int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
             and not args.attach_pid
-            and not is_only_pc_sampling(args.filter_blocks)
         )
 
     @abstractmethod
