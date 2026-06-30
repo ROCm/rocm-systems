@@ -5,7 +5,38 @@
 #include "gsl_assert.h"
 #include "rocprofiler-sdk/cxx/codeobj/code_printing.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 using namespace rocprofiler_compute_tool;
+
+namespace
+{
+constexpr std::string_view source_frame_separator = " -> ";
+
+bool is_source_line_token(std::string_view token)
+{
+    if (token == "?")
+        return true;
+
+    return !token.empty() && std::all_of(token.cbegin(), token.cend(), [](char ch) {
+               return std::isdigit(static_cast<unsigned char>(ch)) != 0;
+           });
+}
+
+std::string_view path_from_source_frame(std::string_view frame)
+{
+    const auto separator_position = frame.rfind(':');
+    if (separator_position == std::string_view::npos)
+        return frame;
+
+    const auto line_token = frame.substr(separator_position + 1);
+    if (!is_source_line_token(line_token))
+        return frame;
+
+    return frame.substr(0, separator_position);
+}
+}  // namespace
 
 code_object_translator_impl_t::code_object_translator_impl_t()
     : m_translator(std::make_unique<rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate>())
@@ -69,4 +100,31 @@ instruction_t code_object_translator_impl_t::get_instruction(size_t object_id, u
     std::clog << "Could not get instruction for object id " << object_id << " at virtual address "
               << virtual_address << std::endl;
     return {};
+}
+
+std::vector<std::filesystem::path> code_object_translator_impl_t::get_source_paths(
+    std::string_view comment) const
+{
+    std::vector<std::filesystem::path> source_paths;
+    size_t                             frame_start = 0;
+
+    while (frame_start <= comment.size())
+    {
+        const auto separator_position = comment.find(source_frame_separator, frame_start);
+        const auto frame_end = separator_position == std::string_view::npos ? comment.size()
+                                                                            : separator_position;
+        const auto frame = comment.substr(frame_start, frame_end - frame_start);
+        const auto path  = path_from_source_frame(frame);
+        if (!path.empty())
+        {
+            source_paths.emplace_back(std::string{path});
+        }
+
+        if (separator_position == std::string_view::npos)
+            break;
+
+        frame_start = separator_position + source_frame_separator.size();
+    }
+
+    return source_paths;
 }
