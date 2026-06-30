@@ -72,6 +72,7 @@ def create_df_kernel_top_stats(
     filter_dispatch_ids: Optional[list[str]],
     time_unit: str,
     kernel_verbose: int,
+    filter_kernel_names: Optional[list[str]] = None,
     sortby: str = "sum",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -104,6 +105,17 @@ def create_df_kernel_top_stats(
         else:
             filter_strings = [str(f) for f in filter_dispatch_ids]
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
+
+    if filter_kernel_names:
+        selected_kernel_names = {
+            str(kernel_name).strip() for kernel_name in filter_kernel_names
+        }
+        cleaned_kernel_names = df["Kernel_Name"].apply(
+            lambda kernel_name: (
+                kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
+            )
+        )
+        df = df.loc[cleaned_kernel_names.isin(selected_kernel_names)]
 
     # First, create a dispatches file used to populate global vars
     dispatch_columns = ["Kernel_Name", "GPU_ID"]

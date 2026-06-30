@@ -8,6 +8,7 @@
 import os
 
 import common
+import pandas as pd
 import pytest
 
 config = {}
@@ -22,6 +23,38 @@ TRITON_TRACE_WORKLOAD = "tests/workloads/triton_trace/MI300A"
 # Cached ML API trace workload (torch_compile_triton.py): both PyTorch and
 # Triton operators in a single run.
 ML_API_TRACE_WORKLOAD = "tests/workloads/ml_api_trace/MI300A"
+
+
+def expected_kernel_names_for_operator(
+    workload_dir: str,
+    operator_name_substring: str,
+    backend: str = "torch",
+) -> set[str]:
+    trace_df = pd.read_csv(f"{workload_dir}/ml_api_trace/consolidated.csv")
+    if "Backend" in trace_df.columns:
+        trace_df = trace_df[trace_df["Backend"] == backend]
+
+    matched_trace_df = trace_df[
+        trace_df["Operator_Name"].str.contains(operator_name_substring, na=False)
+    ]
+    return set(matched_trace_df["Kernel_Name"].dropna().str.strip())
+
+
+def assert_top_stats_kernel_names(
+    workload_dir: str,
+    expected_kernel_names: set[str],
+) -> None:
+    kernel_top_df = pd.read_csv(f"{workload_dir}/pmc_kernel_top.csv")
+    dispatch_info_df = pd.read_csv(f"{workload_dir}/pmc_dispatch_info.csv")
+
+    kernel_top_names = set(kernel_top_df["Kernel_Name"].dropna().str.strip())
+    dispatch_kernel_names = set(dispatch_info_df["Kernel_Name"].dropna().str.strip())
+
+    assert kernel_top_names
+    assert dispatch_kernel_names
+    assert kernel_top_names.issubset(expected_kernel_names)
+    assert dispatch_kernel_names.issubset(expected_kernel_names)
+
 
 # 30 workloads common to MI100, MI200, MI300A_A1, MI300X_A1.
 CDNA_WORKLOADS = [
@@ -173,6 +206,8 @@ def test_analyze_torch_trace_filter_operator_MI300X_A1(
     assert "relu" in output
     assert "dispatches:" in output
     assert "total:" in output
+    expected_kernel_names = expected_kernel_names_for_operator(workload_dir, "relu")
+    assert_top_stats_kernel_names(workload_dir, expected_kernel_names)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -465,5 +500,7 @@ def test_analyze_ml_api_trace_filter_torch_operator_MI300A(
 
     assert "Matched PyTorch Operators:" in output
     assert "randn" in output
+    expected_kernel_names = expected_kernel_names_for_operator(workload_dir, "randn")
+    assert_top_stats_kernel_names(workload_dir, expected_kernel_names)
 
     common.clean_output_dir(config["cleanup"], workload_dir)

@@ -1650,6 +1650,19 @@ def test_create_df_kernel_top_stats_filters():
         assert len(dispatch_df) == 2
         assert all(dispatch_df["Dispatch_ID"] > 2)
 
+        # Test kernel name filter
+        kernel_top_df, dispatch_df = create_df_kernel_top_stats(
+            df_in=raw_pmc_with_node,
+            raw_data_dir=temp_dir,
+            filter_gpu_ids=None,
+            filter_dispatch_ids=None,
+            time_unit="ns",
+            kernel_verbose=0,
+            filter_kernel_names=["kernel_a"],
+        )
+        assert set(kernel_top_df["Kernel_Name"]) == {"kernel_a"}
+        assert set(dispatch_df["Kernel_Name"]) == {"kernel_a"}
+
         # Test dispatch ID filter with specific IDs
         kernel_top_df, dispatch_df = create_df_kernel_top_stats(
             df_in=raw_pmc_with_node,
