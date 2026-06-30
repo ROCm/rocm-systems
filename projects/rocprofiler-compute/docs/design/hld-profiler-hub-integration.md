@@ -1,4 +1,34 @@
-# Write rocpd from the native tool via profiler-hub
+# Integration of Profiler Hub in rocprof-compute for profiling phase
+
+## System context
+[Profiler Hub](https://github.com/ROCm/rocm-systems/tree/develop/profilers/profiler-hub) is a data storage level which abstract profiling tools from concrete data format on disk.
+
+Rocprof-compute produces two types of artifacts:
+- Profiling data - raw unprocessed data from target application and system.
+- Analysis data - processed data according to specific analysis type selected by user.
+
+Profiler Hub is targeted to abstract both of these types of data. However, only profiling data is a focus of this HLD at the first step.
+
+Profiling phase currently supports two output formats CSV and ROCPD. Currently CSV format is planned to be deprecated as part of another HLD (TODO: add link). **Therefore, scope of HLD is ROCPD data collection on profiling phase only.**
+
+
+### Profiling phase
+During profiling phase `ROCm Compute` loads two collectors via `LD_PRELOAD`:
+- rocprofiler-sdk-tool.so - `ROCm SDK`-provided library which collects profiling data inside target process:
+    - Collection result is in `rocpd` format containing kernel dispatches, agents info, kernel symbols.
+    - Counters collection is disabled.
+    - Separate databases are produced per each process and each run. Because many analysis types require ~10-20 passes and complex workloads could spawn multiple processes, this could produce ~100+ databases.
+    - At the end of each collection pass individual databases are merged into a resulting database.
+- rocprofiler-compute-tool.so - `ROCm Compute`-provided library which collects profiling data inside target process.
+    - Collection result is in `csv` format containing hardware counters.
+    - Collected data is accumulated in memory and is flushed on disk at the process end.
+    - After each collection pass, the data from csv is merged into resulting database.
+![](assets/profiler-hub-integration/profiler-hub-integration-current-profiling-flow.png)
+
+### Analysis phase
+During analysis phase `ROCm Compute` loads merges all per-pass rocpd databases into a single Pandas dataframe in the memory.
+
+
 
 ## Motivation
 
