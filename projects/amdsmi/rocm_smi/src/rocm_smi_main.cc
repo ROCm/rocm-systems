@@ -321,7 +321,7 @@ void RocmSMI::Initialize(uint64_t flags) {
 
   // Sort index based on BDF (BDF values are unique per device).
 #pragma clang diagnostic push
-  // stable sort uses a deprecated function, get_termporary_buffer() which is slated
+  // stable sort uses a deprecated function, get_temporary_buffer() which is slated
   // to be removed in C++ 2026
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
   std::stable_sort(
@@ -450,7 +450,7 @@ void RocmSMI::Initialize(uint64_t flags) {
 
     // Sort index based on BDF (BDF values are unique per device).
 #pragma clang diagnostic push
-    // stable sort uses a deprecated function, get_termporary_buffer() which is slated
+    // stable sort uses a deprecated function, get_temporary_buffer() which is slated
     // to be removed in C++ 2026
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     std::stable_sort(
@@ -515,7 +515,7 @@ void RocmSMI::Initialize(uint64_t flags) {
 
     // Sort index based on BDF (BDF values are unique per device).
 #pragma clang diagnostic push
-    // stable sort uses a deprecated function, get_termporary_buffer() which is slated
+    // stable sort uses a deprecated function, get_temporary_buffer() which is slated
     // to be removed in C++ 2026
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     std::stable_sort(
@@ -604,7 +604,10 @@ static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char* ev_
 
     while (std::getline(ev_str_ss, parsedVal, ',')) {
       int parsedInt = std::stoi(parsedVal);
-      assert(parsedInt >= 0);
+      // Skip negative values instead of relying on assert
+      if (parsedInt < 0) {
+        continue;
+      }
       uint32_t parsedUInt = static_cast<uint32_t>(parsedInt);
       returnSet.insert(parsedUInt);
     }
@@ -1360,10 +1363,13 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
           "host" + std::to_string(cardId) + "/scsi_host/" + "host" + std::to_string(cardId) + "/";
       path.erase(path.length() - suffixDel.length());
 
-      auto first = path.begin();
       constexpr auto MAX_BDF_LENGTH = std::size_t(12);
-      auto end = path.begin() + static_cast<long>(path.length()) - MAX_BDF_LENGTH;
-      path.erase(first, end);
+      // Only erase prefix if path is longer than BDF length to avoid iterator UB
+      if (path.length() > MAX_BDF_LENGTH) {
+        auto first = path.begin();
+        auto end = path.begin() + static_cast<long>(path.length() - MAX_BDF_LENGTH);
+        path.erase(first, end);
+      }
 
       std::string prefixAdd = kPathPciDevices;
       path = prefixAdd.append(path);

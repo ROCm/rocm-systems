@@ -511,7 +511,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
       sockets_.push_back(socket);
     }
 
-    auto device = std::make_unique<AMDSmiAINICDevice>(nic_idx, bdf_info, ai_nic_info);
+    auto device = std::make_unique<AMDSmiAINICDevice>(ai_nic_info);
     socket->add_processor(device.get());
     ainic_processors_.insert(device.get());
     device.release();
