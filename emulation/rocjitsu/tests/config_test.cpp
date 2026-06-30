@@ -35,7 +35,7 @@ const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 using namespace rocjitsu;
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
-  std::string json = CONFIG_DIR_PATH + "/amdgpu_cdna4.json";
+  std::string json = CONFIG_DIR_PATH + "/gfx950_cdna4.json";
   auto loaded = config::load_config(json, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
 
@@ -48,8 +48,8 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
-  auto rdna4 = config::load_config(CONFIG_DIR_PATH + "/amdgpu_rdna4_gfx1201_r9700_kmd.json",
-                                   rocjitsu::kEmbeddedSchema);
+  auto rdna4 =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rocjitsu::kEmbeddedSchema);
   EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
   EXPECT_EQ(rdna4.device.gpu_id, 8716u);
   EXPECT_EQ(rdna4.device.device_id, 0x7551u);
@@ -90,8 +90,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
-  auto rdna3 = config::load_config(CONFIG_DIR_PATH + "/amdgpu_rdna3_gfx1100_w7900_kmd.json",
-                                   rocjitsu::kEmbeddedSchema);
+  auto rdna3 =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rocjitsu::kEmbeddedSchema);
   EXPECT_EQ(rdna3.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3);
   EXPECT_EQ(rdna3.device.gpu_id, 7019u);
   EXPECT_EQ(rdna3.device.device_id, 0x7448u);

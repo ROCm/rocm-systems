@@ -27,4 +27,4 @@ jobs:
         with:
           workflow: therock-multi-arch-ci.yml
           ref: develop
-          inputs: '{ "linux_amdgpu_families": "gfx94X,gfx950", "windows_amdgpu_families": "gfx1151" }'
+          inputs: '{ "linux_amdgpu_families": "gfx94X,gfx950,gfx125X", "windows_amdgpu_families": "gfx1151" }'

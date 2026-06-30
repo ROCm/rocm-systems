@@ -21,6 +21,7 @@ import msgpack
 from ..kpack_transform import NotFatBinaryError
 from .surgery import ElfSurgery, SectionInfo, AddSectionResult
 from .operations import map_section_to_load, set_pointer
+from .phdr_manager import normalize_phdr_vaddr
 from .verify import ElfVerifier
 from .zero_page import conservative_zero_page
 from .types import SHT_PROGBITS
@@ -383,6 +384,10 @@ def kpack_offload_binary(
                 "\nPhases 2-3: No .hip_fatbin section, skipping semantic "
                 "transformation and zero-page"
             )
+
+    # Pin the relocated PHDR table to p_vaddr == p_offset so the binary execs
+    # on old kernels (e.g. EL8 4.18). Must run after all size-changing phases.
+    normalize_phdr_vaddr(surgery)
 
     # Post-transform verification: catch structural corruption at build time
     verify_result = ElfVerifier.verify_data(surgery.data)

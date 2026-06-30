@@ -44,7 +44,7 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
 
 std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
 
