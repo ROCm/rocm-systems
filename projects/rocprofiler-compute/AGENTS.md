@@ -19,14 +19,6 @@ nesting, and code organization.
 All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff-tooling.md`](.ai/rules/ruff-tooling.md)**
 for enforced rules including type annotations, f-strings, and `pathlib` usage.
 
-## YAML Metric Equation Formatting
-
-Metric equations in YAML config files follow a canonical format (operator spacing,
-constant factoring, minimal parentheses). Read
-**[`.ai/rules/yaml-equation-format.md`](.ai/rules/yaml-equation-format.md)** before
-editing metric YAML files under `src/rocprof_compute_soc/analysis_configs/` or
-`src/rocprof_compute_tui/utils/`.
-
 ## Git Workflows
 
 Prefer the **`gh` CLI** for all GitHub interactions (pull requests, issues,

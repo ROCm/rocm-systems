@@ -629,14 +629,6 @@ add_test(
         tests/test_metrics_common.py ${WORKING_DIR_OPTION}
 )
 
-add_test(
-    NAME test_analysis_config_yaml_format
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_analysis_config_yaml_format.xml ${COV_OPTION}
-        tests/test_analysis_config_yaml_format.py ${WORKING_DIR_OPTION}
-)
-
 # -----------------------------------
 # CLI options unit tests
 # -----------------------------------
@@ -857,7 +849,6 @@ if(${ENABLE_COVERAGE})
         test_analyze_workloads
         test_metric_utils
         test_parser
-        test_analysis_config_yaml_format
         test_argparser
         test_L1_cache_counters
         test_num_xcds_spec_class
