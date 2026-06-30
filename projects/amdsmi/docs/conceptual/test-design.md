@@ -175,8 +175,12 @@ term such as `perf_determinism` or `dynamic_metrics`.
 | `GpuFunctionalReadWrite` | functional | GPU tests that modify device state; root typically required |
 | `GpuUnit` | unit | Pure unit tests under `unit/gpu/`; no device required |
 
-The suite name scheme is `<Component><Type><Operation>`, making component, type, and operation
-all independently filterable via `--gtest_filter` wildcards.
+The full suite name scheme is `<Component><Type>[<Operation>]`. Use the PascalCase component name
+from the source path as the suite prefix. Functional suites include an operation suffix, so they use
+`<Component>Functional<Operation>`, where operation is `ReadOnly` or `ReadWrite`. Unit suites omit
+the operation suffix and use `<Component>Unit`, for example `GpuUnit`, `CpuUnit`, or `NicUnit`.
+This keeps component, type, and functional operation independently filterable via
+`--gtest_filter` wildcards.
 
 ### Mocked unit tests and fixtures
 
@@ -236,10 +240,10 @@ add_executable(amdsmitst
 All examples use `amdsmitst` directly with `--gtest_filter`. The binary is at
 `<build>/tests/amd_smi_test/amdsmitst` or `/opt/rocm/share/amd_smi/tests/amdsmitst` after install.
 
-The suite name scheme `<Component><Type><Operation>` makes every axis independently filterable:
+The suite naming scheme `<Component><Type>[<Operation>]` keeps every axis independently filterable:
 - **Component**: `Gpu*`, `Cpu*`, `Nic*`, `Ifoe*`, `System*`
 - **Type**: `*Unit*`, `*Functional*`
-- **Operation**: `*ReadOnly*`, `*ReadWrite*`
+- **Operation**: `*ReadOnly*`, `*ReadWrite*` for functional suites
 
 ```shell
 # List all available tests
@@ -276,6 +280,9 @@ sudo ./amdsmitst --gtest_filter="GpuFunctional*"
 
 # GPU unit only
 ./amdsmitst --gtest_filter="GpuUnit*"
+
+# Any component unit tests
+./amdsmitst --gtest_filter="*Unit*"
 
 # CPU tests (when added)
 ./amdsmitst --gtest_filter="Cpu*"
