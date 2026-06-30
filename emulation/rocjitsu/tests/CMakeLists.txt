@@ -613,14 +613,18 @@ if(AMDCXX AND HSA_RUNTIME64)
             set(HIP_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}.cpp)
         endif()
         set(HIP_TEST_BIN ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
+        set(HIP_EXTRA_LIBS)
+        if(ARG_EXTRA_LIBS)
+            set(HIP_EXTRA_LIBS -x none ${ARG_EXTRA_LIBS})
+        endif()
         add_custom_command(
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
                 ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
                 --rocm-path=${ROCM_PATH} -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
                 -isystem ${GTEST_INC} -I${CMAKE_CURRENT_SOURCE_DIR} -o
-                ${HIP_TEST_BIN} ${HIP_TEST_SRC} -x none -L${GTEST_LIB_DIR}
-                -lgtest -lpthread ${ARG_EXTRA_LIBS} -Wl,-rpath,${GTEST_LIB_DIR}
+                ${HIP_TEST_BIN} ${HIP_TEST_SRC} ${HIP_EXTRA_LIBS}
+                -L${GTEST_LIB_DIR} -lgtest -lpthread -Wl,-rpath,${GTEST_LIB_DIR}
                 -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
             COMMENT "Building ${TEST_NAME} with amdclang++ -x hip (${ARG_ARCH})"
