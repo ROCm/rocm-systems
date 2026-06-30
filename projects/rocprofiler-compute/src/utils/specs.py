@@ -35,10 +35,6 @@ from utils.logger import (
 from utils.mi_gpu_spec import MIGPUSpecs, mi_gpu_specs
 from utils.utils_common import format_table_ascii, get_version
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 T = TypeVar("T")
 
 VERSION_LOC: list[str] = [
@@ -52,77 +48,16 @@ VERSION_LOC: list[str] = [
     "version-utils",
 ]
 
-_SPEC_DISPLAY_ORDER: tuple[str, ...] = (
-    # Workload and metadata
-    "workload_path",
-    "command",
-    "ip_blocks",
-    "timestamp",
-    "version",
-    # Host system
-    "hostname",
-    "cpu_model",
-    "sbios",
-    "linux_distro",
-    "linux_kernel_version",
-    "amd_gpu_kernel_version",
-    "cpu_memory",
-    "gpu_memory",
-    # ROCm and firmware
-    "rocm_version",
-    "vbios",
-    # Partitioning (CDNA only)
-    "compute_partition",
-    "memory_partition",
-    # GPU identification
-    "gpu_series",
-    "gpu_model",
-    "gpu_arch",
-    "gpu_chip_id",
-    # Cache hierarchy
-    "gpu_l1",
-    "gpu_l2",
-    # Compute resources
-    "cu_per_gpu",
-    "simd_per_cu",
-    "se_per_gpu",
-    "sa_per_se",
-    "wave_size",
-    "workgroup_max_size",
-    "max_waves_per_cu",
-    # Clock speeds
-    "max_sclk",
-    "max_mclk",
-    "cur_sclk",
-    "cur_mclk",
-    # Memory and interconnect
-    "l2_banks",
-    "total_l2_chan",
-    "lds_banks_per_cu",
-    "sqc_per_gpu",
-    "pipes_per_gpu",
-    "num_xcd",
-    "num_memory_channels",
-    "num_gl1c",
-)
-
-
-# ---------------------------------------------------------------------------
-# Public functions
-# ---------------------------------------------------------------------------
-
 
 def spec_family_for_arch(gpu_arch: Optional[str]) -> type[MachineSpecs]:
     """Return the MachineSpecs subclass for a GPU arch (by series).
 
-    Series starting with "rdna" (case-insensitive) map to RDNA;
-    everything else (mi100, mi200, mi300, etc.) maps to CDNA.
+    The "RDNA3.5" series maps to RDNA 3.5; everything else (mi100, mi200,
+    mi300, etc.) maps to CDNA.
     """
     series = mi_gpu_specs.get_gpu_series(gpu_arch) if gpu_arch else None
-    if not series:
-        return MachineSpecsCDNA
-    if series.upper().startswith("RDNA"):
-        return MachineSpecsRDNA
+    if series and series.upper() == "RDNA3.5":
+        return MachineSpecsRDNA35
     return MachineSpecsCDNA
 
 
@@ -242,11 +177,6 @@ def set_cache_sizes(
     return cache_sizes
 
 
-# ---------------------------------------------------------------------------
-# Private helper functions
-# ---------------------------------------------------------------------------
-
-
 def _kw_only(cls: T) -> T:
     """Enforce keyword-only dataclass initialization (Python 3.9 compatible)."""
 
@@ -264,7 +194,7 @@ def _kw_only(cls: T) -> T:
 
 
 def _run_command(cmd: list[str]) -> Optional[str]:
-    """Run a command and return stdout, returning None on failure."""
+    """Run a command and return stdout, aborting on execution failures."""
     cmd_str = " ".join(cmd)
     try:
         completed = subprocess.run(
@@ -362,20 +292,8 @@ def _reconstruct_specs_from_sysinfo(sysinfo: dict[str, Any]) -> MachineSpecs:
                 "You need to reprofile to update data."
             )
 
-        sysinfo_norm = dict(sysinfo)
-        gpu_arch = sysinfo_norm.get("gpu_arch")
-        sysinfo_norm["gpu_arch"] = {"gfx1152": "gfx1151"}.get(gpu_arch, gpu_arch)
-
-        spec_cls = spec_family_for_arch(sysinfo_norm.get("gpu_arch"))
-        known_fields = {f.name for f in fields(spec_cls)}
-
-        for stale_key in list(set(sysinfo_norm) - known_fields):
-            console_warning(
-                f"Unrecognised field {stale_key!r} ignored. Re-profiling recommended."
-            )
-            sysinfo_norm.pop(stale_key)
-
-        return spec_cls(**sysinfo_norm)
+        spec_cls = spec_family_for_arch(sysinfo.get("gpu_arch"))
+        return spec_cls(**sysinfo)
 
     except KeyError:
         console_error(
@@ -552,11 +470,6 @@ def _extract_soc_info() -> dict[str, Any]:
     result["gpu_chip_id"] = _detect_gpu_chip_id(rocminfo_lines)
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# Classes
-# ---------------------------------------------------------------------------
 
 
 @_kw_only
@@ -962,15 +875,6 @@ class MachineSpecs:
         },
     )
 
-    def _ordered_table_fields(self) -> list[Any]:
-        """Return show_in_table fields ordered by _SPEC_DISPLAY_ORDER."""
-        field_map = {
-            f.name: f for f in fields(self) if f.metadata.get("show_in_table", True)
-        }
-        ordered = [field_map.pop(n) for n in _SPEC_DISPLAY_ORDER if n in field_map]
-        ordered.extend(field_map.values())
-        return ordered
-
     def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         """Derive shared SoC-dependent fields. Subclasses override and call super()."""
         self.total_l2_chan = totall2_banks(
@@ -994,7 +898,10 @@ class MachineSpecs:
         data: dict[str, Any] = {}
         missing_required_fields: list[str] = []
 
-        for class_field in self._ordered_table_fields():
+        for class_field in fields(self):
+            if not class_field.metadata.get("show_in_table", True):
+                continue
+
             name = class_field.name
             value = getattr(self, name)
             data[name] = value
@@ -1021,7 +928,7 @@ class MachineSpecs:
         has_description = False
         has_unit = False
 
-        for class_field in self._ordered_table_fields():
+        for class_field in fields(self):
             name = class_field.name
             if class_field.metadata.get("show_in_table", True):
                 _data: dict[str, Any] = {}
@@ -1126,8 +1033,8 @@ class MachineSpecsCDNA(MachineSpecs):
 
 @_kw_only
 @dataclass(repr=False)
-class MachineSpecsRDNA(MachineSpecs):
-    """RDNA specs: adds GL1 cache count field."""
+class MachineSpecsRDNA35(MachineSpecs):
+    """RDNA 3.5 specs: adds GL1 cache count field."""
 
     num_gl1c: Optional[str] = field(
         default=None,
@@ -1155,10 +1062,6 @@ class MachineSpecsRDNA(MachineSpecs):
         else:
             self.num_memory_channels = self.total_l2_chan
 
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     specs = generate_machine_specs(None, None)

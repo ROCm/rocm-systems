@@ -23,7 +23,6 @@
 #           |-- design:
 #               | -- physical_aid # Number of physical AIDs (CDNA)
 #               | -- logical_partitions_per_die # Logical AID partitions per physical AID (CDNA)
-#               | -- memory_die # Number of memory dies / MCDs (RDNA)
 #               | -- memory_levels # Cache and memory levels supported by the arch
 #
 # --------------------------------------------------------------------------------
@@ -446,7 +445,6 @@ mi_gpu_spec:
         models:
           - gpu_model: rdna35_point_1
             design:
-              memory_die: 1
               memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
               physical: 5390
@@ -487,7 +485,6 @@ mi_gpu_spec:
         models:
           - gpu_model: rdna35_point_2
             design:
-              memory_die: 1
               memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
               physical: 4372

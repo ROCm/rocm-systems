@@ -174,15 +174,7 @@ class TestMIGPUSpecs:
         ):
             assert MIGPUSpecs.get_num_dies("gfx942", "testmodel") == 4
 
-    def test_get_num_dies_rdna_with_memory_die(self):
-        design = {"rdna_model": {"memory_die": 3}}
-        with (
-            patch.object(MIGPUSpecs, "_gpu_design", design),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "rdna3.5"}),
-        ):
-            assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 3
-
-    def test_get_num_dies_rdna_no_memory_die(self):
+    def test_get_num_dies_rdna_single_die(self):
         design = {"rdna_model": {}}
         with (
             patch.object(MIGPUSpecs, "_gpu_design", design),

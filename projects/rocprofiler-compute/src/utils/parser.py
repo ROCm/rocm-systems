@@ -1,12 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from __future__ import annotations
-
 import argparse
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -22,6 +20,7 @@ from utils.pc_sampling_analysis import (
     enrich_with_metadata,
     load_pc_sample_records,
 )
+from utils.specs import MachineSpecs
 from utils.utils_common import (
     METRIC_ID_RE,
     SUPPORTED_FIELD,
@@ -30,11 +29,6 @@ from utils.utils_common import (
     expand_placeholder_ranges,
     normalize_filter_to_str_list,
 )
-
-# MachineSpecs is only needed for type annotations in correct_sys_info().
-# Guard it under TYPE_CHECKING to break specs -> tty -> parser -> specs cycle.
-if TYPE_CHECKING:
-    from utils.specs import MachineSpecs
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
