@@ -59,12 +59,17 @@ class AMDSMIParserHelpFormatter(argparse.HelpFormatter):
 # Custom Help Formatter for not duplicating the metavar in the subparsers
 class AMDSMISubparserHelpFormatter(argparse.RawTextHelpFormatter):
     def __init__(self, prog):
-        super().__init__(prog, indent_increment=2, max_help_position=80, width=90)
+        super().__init__(prog, indent_increment=2, max_help_position=33, width=90)
         self._action_max_length = 20
 
     def _format_action_invocation(self, action):
         if not action.option_strings or action.nargs == 0:
             return super()._format_action_invocation(action)
+        # nargs="+" otherwise renders as "X [X ...]"; let an action opt into a
+        # literal metavar string that shows the real argument grammar.
+        display_metavar = getattr(action, "display_metavar", None)
+        if display_metavar is not None:
+            return ", ".join(action.option_strings) + " " + display_metavar
         default = self._get_default_metavar_for_optional(action)
         args_string = self._format_args(action, default)
         return ", ".join(action.option_strings) + " " + args_string
@@ -1790,53 +1795,66 @@ class AMDSMIParser(argparse.ArgumentParser):
         xgmi_help = "Table of current XGMI metrics information"
 
         # Help text for cpu options
-        cpu_power_metrics_help = "CPU power metrics"
-        cpu_proc_help = "Displays prochot status"
-        cpu_freq_help = "Displays currentFclkMemclk frequencies and cclk frequency limit"
+        cpu_power_metrics_help = "Displays CPU power metrics"
+        cpu_proc_help = "Displays PROCHOT status"
+        cpu_freq_help = "Displays current FCLK/MCLK frequencies and CCLK frequency limit"
         cpu_c0_res_help = "Displays C0 residency"
-        cpu_lclk_dpm_help = "Displays lclk dpm level range. Requires socket ID and NBOID as inputs"
-        cpu_pwr_eff_mode_help = "Displays current power efficiency mode.\
-        \n For Family 1Ah Models 50h-57h onwards and MODE= 4 or 5, displays utilization percentage and PPT limit in Watts."
-        cpu_pwr_svi_telemetry_rails_help = "Displays svi based telemetry for all rails"
-        cpu_io_bandwidth_help = "Displays current IO bandwidth for the selected CPU.\
-        \n input parameters are bandwidth type(1) and link ID encodings\
-        \n i.e. P2, P3, G0 - G7"
-        cpu_xgmi_bandwidth_help = "Displays current XGMI bandwidth for the selected CPU\
-        \n input parameters are bandwidth type(1,2,4) and link ID encodings\
-        \n i.e. P2, P3, G0 - G7"
-        cpu_metrics_ver_help = "Displays metrics table version"
-        cpu_metrics_table_help = "Displays metric table"
-        cpu_socket_energy_help = "Displays socket energy for the selected CPU socket"
-        cpu_ddr_bandwidth_help = "Displays per socket max ddr bw, current utilized bw,\
-        \n and current utilized ddr bw in percentage"
-        cpu_temp_help = "Displays cpu socket temperature"
-        cpu_dimm_temp_range_rate_help = "Displays dimm temperature range and refresh rate"
-        cpu_dimm_pow_consumption_help = "Displays dimm power consumption"
-        cpu_dimm_thermal_sensor_help = "Displays dimm thermal sensor"
-        cpu_xgmi_pstate_range_help = (
-            "Displays XGMI pstate range, min and max values for the selected CPU"
+        cpu_lclk_dpm_help = "Displays LCLK DPM level range for the given NBIO"
+        cpu_pwr_eff_mode_help = (
+            "Displays current power efficiency mode\n"
+            "For Family 1Ah Models 50h-57h+ with MODE 4 or 5, also\n"
+            "displays utilization percentage and PPT limit in Watts"
         )
+        cpu_pwr_svi_telemetry_rails_help = "Displays SVI-based telemetry for all rails"
+        cpu_io_bandwidth_help = (
+            "Displays IO bandwidth for the selected CPU\n"
+            "BW_TYPE: bandwidth type (1)\n"
+            "LINK_ID: link ID encoding (P2, P3, G0-G7)"
+        )
+        cpu_xgmi_bandwidth_help = (
+            "Displays XGMI bandwidth for the selected CPU\n"
+            "BW_TYPE: bandwidth type (1, 2, 4)\n"
+            "LINK_ID: link ID encoding (P2, P3, G0-G7)"
+        )
+        cpu_metrics_ver_help = "Displays metrics table version"
+        cpu_metrics_table_help = "Displays metrics table"
+        cpu_socket_energy_help = "Displays socket energy for the selected CPU socket"
+        cpu_ddr_bandwidth_help = (
+            "Displays per-socket DDR bandwidth: max, current utilized,\n"
+            "and current utilized percentage"
+        )
+        cpu_temp_help = "Displays CPU socket temperature"
+        cpu_dimm_temp_range_rate_help = "Displays DIMM temperature range and refresh rate"
+        cpu_dimm_pow_consumption_help = "Displays DIMM power consumption"
+        cpu_dimm_thermal_sensor_help = "Displays DIMM thermal sensor"
+        cpu_xgmi_pstate_range_help = "Displays XGMI pstate range (min, max) for the selected CPU"
         cpu_railisofreq_policy_help = "Displays CPU ISO frequency policy"
         cpu_dfcstate_ctrl_help = "Displays DFCState control status"
         cpu_pc6_enable_help = "Displays PC6 enable control"
         cpu_cc6_enable_help = "Displays CC6 enable control"
         cpu_dimm_sb_reg_help = (
-            "Read DIMM sideband register.Requires DIMM_ADDR, LID(0x2->TS0,0x6->TS1,0x9->PMIC0,0xA->SPDHub)\
-        \n REG_OFFSET (hex), REG_SPACE (REGSPACE:0->Volatile,1->NVM)"
+            "Read DIMM sideband register\n"
+            "LID: 0x2=TS0  0x6=TS1  0x9=PMIC0  0xA=SPDHub\n"
+            "OFFSET in hex; SPACE: 0=Volatile, 1=NVM"
         )
-        cpu_tdelta_help = "Displays CPU thermal delta (TDELTA) value for the selected CPU socket"
-        cpu_svi3_vr_controller_temp_help = "Get SVI3 VR controller temperature. TYPE: 0=HottestRail, 1=IndividualRail, RAIL_INDEX:\
-        \n (RAIL_INDEX:0->VDDCR_CPU0,1->VDDCR_CPU1,2->VDDCR_SOC,3->VDDIO,4->VDDIO_MEM_S3) must be, specified if TYPE is 1"
+        cpu_tdelta_help = "Displays CPU thermal delta (TDELTA) for the selected socket"
+        cpu_svi3_vr_controller_temp_help = (
+            "Displays SVI3 VR controller temperature\n"
+            "TYPE: 0=HottestRail, 1=IndividualRail\n"
+            "RAIL_INDEX (when TYPE=1):\n"
+            "  0=VDDCR_CPU0  1=VDDCR_CPU1  2=VDDCR_SOC\n"
+            "  3=VDDIO  4=VDDIO_MEM_S3"
+        )
         cpu_enabled_commands_help = (
-            "Displays HSMP enabled commands bit masks (Read/Write EnabledCommandsBitMask0-2)"
+            "Displays HSMP enabled commands bit masks (EnabledCommandsBitMask0-2)"
         )
         cpu_sdps_limit_help = "Displays CPU SDPS limit for the selected CPU socket in Watts"
 
         # Help text for core options
         core_energy_help = "Displays core energy for the selected core"
-        core_boost_limit_help = "Get boost limit for the selected cores"
-        core_curr_active_freq_core_limit_help = "Get Current CCLK limit set per Core"
-        core_ccd_power_help = "Displays ccd power consumption for the selected core"
+        core_boost_limit_help = "Displays boost limit for the selected cores"
+        core_curr_active_freq_core_limit_help = "Displays current CCLK limit per core"
+        core_ccd_power_help = "Displays CCD power consumption for the selected core"
         core_floor_limit_help = "Displays floor limit frequency for the selected core in MHz"
         core_eff_floor_limit_help = (
             "Displays effective floor limit frequency for the selected core in MHz"
@@ -2011,7 +2029,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 action="append",
                 required=False,
                 nargs=2,
-                metavar=("IO_BW", "LINKID_NAME"),
+                metavar=("BW_TYPE", "LINK_ID"),
                 help=cpu_io_bandwidth_help,
             )
             cpu_group.add_argument(
@@ -2019,7 +2037,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 action="append",
                 required=False,
                 nargs=2,
-                metavar=("XGMI_BW", "LINKID_NAME"),
+                metavar=("BW_TYPE", "LINK_ID"),
                 help=cpu_xgmi_bandwidth_help,
             )
             cpu_group.add_argument(
@@ -2109,21 +2127,22 @@ class AMDSMIParser(argparse.ArgumentParser):
                 required=False,
                 type=lambda x: int(x, 0),
                 nargs=4,
-                metavar=("DIMM_ADDR", "LID", "REG_OFFSET", "REG_SPACE"),
+                metavar=("DIMM_ADDR", "LID", "OFFSET", "SPACE"),
                 help=cpu_dimm_sb_reg_help,
             )
             cpu_group.add_argument(
                 "--cpu-tdelta", action="store_true", required=False, help=cpu_tdelta_help
             )
-            cpu_group.add_argument(
+            svi3_vr_temp_action = cpu_group.add_argument(
                 "--cpu-svi3-vr-controller-temp",
                 action=self._cpu_svi3_vr_controller_temp_options(),
                 required=False,
                 type=int,
                 nargs="+",
-                metavar=("TYPE [RAIL_INDEX]"),
+                metavar="TYPE",
                 help=cpu_svi3_vr_controller_temp_help,
             )
+            svi3_vr_temp_action.display_metavar = "TYPE [RAIL_INDEX]"
             cpu_group.add_argument(
                 "--cpu-enabled-commands",
                 action="store_true",
@@ -2426,45 +2445,51 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n    0 for disable and 1 for enable.\n"
 
         # Help text for CPU set options
-        set_cpu_pwr_limit_help = (
-            "Set power limit for the given socket. Input parameter is power limit value."
+        set_cpu_pwr_limit_help = "Sets power limit for the given socket (PWR_LIMIT value)"
+        set_cpu_xgmi_link_width_help = f"Sets min and max XGMI link width (MAX >= MIN, values {_cpu_set_range_label(CPU_XGMI_LINK_WIDTH_RANGE)})"
+        set_cpu_lclk_dpm_level_help = (
+            "Sets the min and max DPM level on a given NBIO\n"
+            f"Inputs are NBIO ID, min DPM, max DPM (MAX >= MIN, values {_cpu_set_range_label(CPU_LCLK_DPM_LEVEL_RANGE)})"
         )
-        set_cpu_xgmi_link_width_help = f"Set min and max linkwidth. Input parameters are min and max link width values (MAX >= MIN, values {_cpu_set_range_label(CPU_XGMI_LINK_WIDTH_RANGE)})"
-        set_cpu_lclk_dpm_level_help = f"Sets the min and max dpm level on a given NBIO.\
-        \n Input parameters are die_index, min dpm, max dpm (MAX >= MIN, values {_cpu_set_range_label(CPU_LCLK_DPM_LEVEL_RANGE)})."
-        set_cpu_pwr_eff_mode_help = "Sets the power efficiency mode policy. Input parameters,\
-        \n MODE(0=HighPerformance, 1=PowerEfficiency, 2=IOPerformance, 3=BalancedMemory, 4=BalancedCore, 5=BalancedCoreMemory),\n For Family 1Ah Models 50h-57h onwards, UTIL(%%)(0-100) and PPT_limit (in mW) required if MODE= 4 or 5"
-        set_cpu_gmi3_link_width_help = f"Sets min and max gmi3 link width range (MAX >= MIN, values {_cpu_set_range_label(CPU_GMI3_LINK_WIDTH_RANGE)})"
-        set_cpu_pcie_link_rate_help = "Sets pcie link rate"
-        set_cpu_df_pstate_range_help = "Sets min and max df-pstates (MAX <= MIN)"
-        set_cpu_enable_apb_help = "Enables the DF p-state performance boost algorithm"
-        set_cpu_disable_apb_help = f"Disables the DF p-state performance boost algorithm. Input parameter is DFPstate ({_cpu_set_range_label(CPU_DISABLE_APB_RANGE)})"
-        set_soc_boost_limit_help = (
-            "Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value"
+        set_cpu_pwr_eff_mode_help = (
+            "Sets the power efficiency mode policy\n"
+            "MODE: 0=HighPerformance, 1=PowerEfficiency, 2=IOPerformance,\n"
+            "      3=BalancedMemory, 4=BalancedCore, 5=BalancedCoreMemory\n"
+            "For Family 1Ah Models 50h-57h+, UTIL (0-100) and PPT_LIMIT\n"
+            "(in mW) are required if MODE is 4 or 5"
         )
+        set_cpu_gmi3_link_width_help = f"Sets min and max GMI3 link width (MAX >= MIN, values {_cpu_set_range_label(CPU_GMI3_LINK_WIDTH_RANGE)})"
+        set_cpu_pcie_link_rate_help = "Sets PCIe link rate"
+        set_cpu_df_pstate_range_help = "Sets min and max DF pstates (MAX <= MIN)"
+        set_cpu_enable_apb_help = "Enables the DF pstate performance boost algorithm"
+        set_cpu_disable_apb_help = f"Disables the DF pstate performance boost algorithm (DF_PSTATE {_cpu_set_range_label(CPU_DISABLE_APB_RANGE)})"
+        set_soc_boost_limit_help = "Sets the boost limit for the given socket (BOOST_LIMIT value)"
         set_cpu_xgmi_pstate_range_help = (
-            "Sets xgmi pstate range. Input parameters are min (0-1) and max (0-1), (MAX <= MIN)"
+            "Sets XGMI pstate range, min (0-1) and max (0-1) (MAX <= MIN)"
         )
-        set_cpu_railisofreq_policy_help = (
-            "Sets the CPU ISO frequency policy. Input parameter is value (0-1)"
+        set_cpu_railisofreq_policy_help = "Sets the CPU ISO frequency policy (value 0-1)"
+        set_cpu_dfcstate_ctrl_help = "Sets the DFCState control (value 0-1)"
+        set_cpu_pc6_enable_help = "Sets PC6 enable control (value 0-1)"
+        set_cpu_cc6_enable_help = "Sets CC6 enable control (value 0-1)"
+        set_cpu_floor_limit_help = (
+            "Sets the floor limit for the given CPU socket (FLOOR_LIMIT in MHz)"
         )
-        set_cpu_dfcstate_ctrl_help = "Sets the DFCState control. Input parameter is value (0-1)"
-        set_cpu_pc6_enable_help = "Sets PC6 enable control. Input parameter is value (0-1)"
-        set_cpu_cc6_enable_help = "Sets CC6 enable control. Input parameter is value (0-1)"
-        set_cpu_floor_limit_help = "Sets the floor limit for the given CPU socket. Input parameter is CPU FLOOR_LIMIT value in MHz"
-        cpu_msr_floor_limit_help = "Sets the CPU MSR floor limit frequency for the given socket. Input parameter is MSR_FLOOR_LIMIT value in MHz"
+        cpu_msr_floor_limit_help = (
+            "Sets the CPU MSR floor limit frequency for the given socket (MSR_FLOOR_LIMIT in MHz)"
+        )
         cpu_dimm_sb_reg_write_help = (
-            "Write data to DIMM sideband register. Requires DIMM_ADDR, LID(0x2->TS0,0x6->TS1,0x9->PMIC0,0xA->SPDHub)\
-        \n REG_OFFSET (hex), REG_SPACE (REGSPACE:0->Volatile,1->NVM), WRITE_DATA (hex)"
+            "Write data to DIMM sideband register\n"
+            "LID: 0x2=TS0  0x6=TS1  0x9=PMIC0  0xA=SPDHub\n"
+            "OFFSET in hex; SPACE: 0=Volatile, 1=NVM; WRITE_DATA in hex"
         )
-        set_cpu_sdps_limit_help = "Set CPU SDPS limit for the given socket. Input parameter is SDPS limit value in milliwatts (mW)."
+        set_cpu_sdps_limit_help = "Sets CPU SDPS limit for the given socket (SDPS limit in mW)"
 
         # Help text for CPU Core set options
-        set_core_boost_limit_help = (
-            "Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value"
+        set_core_boost_limit_help = "Sets the boost limit for the given core (BOOST_LIMIT value)"
+        set_core_floor_limit_help = "Sets the floor limit for the given core (FLOOR_LIMIT in MHz)"
+        set_core_msr_floor_limit_help = (
+            "Sets the MSR floor limit for the given core (MSR_FLOOR_LIMIT in MHz)"
         )
-        set_core_floor_limit_help = "Sets the floor limit for the given core. Input parameter is core FLOOR_LIMIT value in MHz"
-        set_core_msr_floor_limit_help = "Sets the MSR floor limit for the given core. Input parameter is core MSR_FLOOR_LIMIT value in MHz"
 
         # Create set_value subparser
         set_value_parser = subparsers.add_parser(
@@ -2686,15 +2711,16 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar=("NBIOID", "MIN_DPM", "MAX_DPM"),
                     help=set_cpu_lclk_dpm_level_help,
                 )
-                cpu_group.add_argument(
+                pwr_eff_mode_action = cpu_group.add_argument(
                     "--cpu-pwr-eff-mode",
                     action=self._cpu_power_eff_mode_options(),
                     required=False,
                     type=self._not_negative_int,
                     nargs="+",
-                    metavar="MODE [UTIL PPT_LIMIT]",
+                    metavar="MODE",
                     help=set_cpu_pwr_eff_mode_help,
                 )
+                pwr_eff_mode_action.display_metavar = "MODE [UTIL PPT_LIMIT]"
                 cpu_group.add_argument(
                     "--cpu-gmi3-link-width",
                     action="append",
@@ -2702,7 +2728,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     type=self._not_negative_int,
                     nargs=2,
                     choices=CPU_GMI3_LINK_WIDTH_RANGE,
-                    metavar=("MIN_LW", "MAX_LW"),
+                    metavar=("MIN_WIDTH", "MAX_WIDTH"),
                     help=set_cpu_gmi3_link_width_help,
                 )
                 cpu_group.add_argument(
@@ -2817,7 +2843,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     type=lambda x: int(x, 0),
                     nargs=5,
-                    metavar=("DIMM_ADDR", "LID", "REG_OFFSET", "REG_SPACE", "WRITE_DATA"),
+                    metavar=("DIMM_ADDR", "LID", "OFFSET", "SPACE", "WRITE_DATA"),
                     help=cpu_dimm_sb_reg_write_help,
                 )
                 cpu_group.add_argument(
