@@ -24,7 +24,7 @@ rocprofiler-compute/
 │       │   └── 0000_top_stats.yaml
 │       ├── gfx90a/
 │       ├── gfx940/
-│       ├── gfx950/                      # latest_arch for CDNA (gfx9)
+│       ├── gfx950/
 │       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
 │       └── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
@@ -42,18 +42,6 @@ rocprofiler-compute/
 ```
 
 ## Core Concepts
-### Latest Architecture
-
-- The CDNA gfx9 line has one *latest* architecture for delta workflows.
-- It is defined in:
-```bash
-src/rocprof_compute_soc/analysis_configs/gfx9_config_template.yaml
-```
-- RDNA 3.5 configs (`gfx115*`) use the shared `gfx115x` directory along with a
-  separate template (`gfx11_config_template.yaml`) and do not participate in
-  gfx9 deltas. Regenerate it with `parse_config_template.py` from the shared
-  RDNA 3.5 config directory.
-
 ### Panel YAMLs
 
 - Live under:

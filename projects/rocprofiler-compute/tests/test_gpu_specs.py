@@ -207,7 +207,7 @@ def test_run_fails_fast(mock_kwargs):
         patch.object(specs.subprocess, "run", **mock_kwargs),
         pytest.raises(SystemExit),
     ):
-        specs.run(["rocminfo"])
+        specs._run_command(["rocminfo"])
 
 
 @pytest.mark.misc

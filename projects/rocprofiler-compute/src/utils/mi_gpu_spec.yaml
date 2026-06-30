@@ -426,9 +426,9 @@ mi_gpu_spec:
               virtual: 30136
 
   #########################################################
-  # RDNA 3.5 family (gfx115x APU architectures)
+  # RDNA 3.5 family (gfx115x)
   - gpu_series: rdna3.5
-    # APUs do not have separate MCDs like dGPU; mark as unified memory
+    # gfx115x parts use unified memory (no separate MCDs like a dGPU)
     gpu_archs:
       - gpu_arch: gfx1150
         perfmon_config:

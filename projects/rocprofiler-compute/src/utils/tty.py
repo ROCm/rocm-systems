@@ -25,7 +25,7 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids
+from utils.utils_common import convert_filter_blocks_to_panel_ids, is_gfx115x
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
@@ -792,9 +792,8 @@ def format_table_output(
     # For single run and gfx115x, format BW metrics (Bytes/s) to human-readable
     # For multiple runs (baseline comparison), keep Bytes for accurate comparison
     is_single_run = len(runs) == 1
-    is_gfx115x = gpu_arch and gpu_arch.startswith("gfx115")
 
-    if is_single_run and is_gfx115x and "Unit" in df.columns:
+    if is_single_run and is_gfx115x(gpu_arch) and "Unit" in df.columns:
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
@@ -820,7 +819,7 @@ def format_table_output(
                 .to_dict()["Value"]
             )
 
-        if gpu_arch and gpu_arch.startswith("gfx115"):
+        if is_gfx115x(gpu_arch):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
                     args.normal_unit,
@@ -986,9 +985,8 @@ def show_all(
                 is_mem_chart = table_config.get(
                     "cli_style"
                 ) == "mem_chart" and not _tty_view_is_table(args)
-                is_gfx115x = gpu_arch and gpu_arch.startswith("gfx115")
 
-                if is_mem_chart and is_gfx115x and len(runs) == 1:
+                if is_mem_chart and is_gfx115x(gpu_arch) and len(runs) == 1:
                     has_cols = (
                         "Metric" in processed_df.columns
                         and "Value" in processed_df.columns

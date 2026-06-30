@@ -52,8 +52,6 @@ VERSION_LOC: list[str] = [
     "version-utils",
 ]
 
-_APU_ARCH_PREFIX = "gfx115"
-
 _SPEC_DISPLAY_ORDER: tuple[str, ...] = (
     # Workload and metadata
     "workload_path",
@@ -112,11 +110,6 @@ _SPEC_DISPLAY_ORDER: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 # Public functions
 # ---------------------------------------------------------------------------
-
-
-def is_apu_arch(gpu_arch: Optional[str]) -> bool:
-    """Return True if gpu_arch is an APU (gfx115x family)."""
-    return bool(gpu_arch and gpu_arch.startswith(_APU_ARCH_PREFIX))
 
 
 def spec_family_for_arch(gpu_arch: Optional[str]) -> type[MachineSpecs]:
@@ -945,7 +938,7 @@ class MachineSpecs:
     num_memory_channels: Optional[str] = field(
         default=None,
         metadata={
-            "doc": "Number of memory channels (HBM for CDNA, LPDDR for RDNA APUs)",
+            "doc": "Number of memory channels (HBM for CDNA, LPDDR for RDNA 3.5)",
             "name": "Memory Channels",
             "show_in_table": True,
         },

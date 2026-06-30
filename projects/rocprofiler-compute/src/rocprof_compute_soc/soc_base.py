@@ -512,8 +512,8 @@ class OmniSoC_Base:
         counters, matching perfmon allocation.
         """
         out = set(counters)
-        # num_xcd is CDNA-only; RDNA/APU specs omit it (single die -> 1).
-        num_xcd = int(getattr(self._mspec, "num_xcd", None) or 1)
+        # num_xcd is absent on single-die gfx115x; default to 1.
+        num_xcd = int(getattr(self._mspec, "num_xcd", 1) or 1)
         l2_banks = int(self._mspec.l2_banks)
         for counter_name in counters.copy():
             if counter_name.startswith("TCC") and counter_name.endswith("["):
