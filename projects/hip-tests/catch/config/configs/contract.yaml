@@ -432,3 +432,18 @@ contract:
   Contract_Extension_ExtGetLastError_TracksErrorState:
     <<: *level_0
     tags: [extension]
+  Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation:
+    <<: *level_0
+    tags: [ipc]
+  Contract_Ipc_MemHandle_SameProcessRoundTrip:
+    <<: *level_0
+    tags: [ipc]
+  Contract_Ipc_GetMemHandle_NullArgs_AreRejected:
+    <<: *level_0
+    tags: [ipc]
+  Contract_Ipc_GetEventHandle_RequiresInterprocessFlag:
+    <<: *level_0
+    tags: [ipc]
+  Contract_Ipc_EventHandle_SameProcessRoundTrip:
+    <<: *level_0
+    tags: [ipc]
