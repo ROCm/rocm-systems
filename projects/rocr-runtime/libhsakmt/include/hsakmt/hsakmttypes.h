@@ -1586,7 +1586,7 @@ typedef struct _HsaHandleImportFlags {
 typedef struct _HsaStructureSizes {
   HSAuint16 StructureSizes;           // sizeof(HsaStructureSizes) used for check overflow
   HSAuint16 SizeOfHsaNodeProperties;  // sizeof(HsaNodeProperties)
-  HSAuint16 SizeOfHsaExternalHandleDesc; // sizeof(HsaExternalHandleDesc)
+  HSAuint16 SizeOfHsaExternalHandleDesc; // Historical name; sizeof(HsaHandleImportDesc)
   HSAuint16 Reserved[5];
 } HsaStructureSizes;
 
