@@ -444,7 +444,40 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type, uint32_t 
 
 static bool is_power_of_2(uint64_t n) { return n && !(n & (n - 1)); }
 
+// ROCM-966: rocm-smi deprecation kill-switch.
+// When the environment variable ROCM_SMI_DISABLE is set to a truthy value
+// (1/true/yes/on, case-insensitive), rsmi_init() refuses to initialize the
+// library and returns RSMI_STATUS_NOT_SUPPORTED. This lets CI sweeps identify
+// which components still depend on rocm-smi at runtime. When the variable is
+// unset (the default) the library behaves exactly as before, so normal users
+// are unaffected.
+static bool rocm_smi_is_disabled_by_env(void) {
+  const char* ev = getenv("ROCM_SMI_DISABLE");
+  if (ev == nullptr) {
+    return false;
+  }
+  std::string val(ev);
+  std::transform(val.begin(), val.end(), val.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return (val == "1" || val == "true" || val == "yes" || val == "on");
+}
+
 rsmi_status_t rsmi_init(uint64_t flags) {
+  if (rocm_smi_is_disabled_by_env()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Fail "
+       << " | Cause: ROCM_SMI_DISABLE is set; rocm-smi is deprecated and has"
+          " been disabled via environment variable"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED)
+       << " |";
+    LOG_ERROR(ss);
+    std::cerr << "[rocm-smi] ROCM_SMI_DISABLE is set: refusing rsmi_init(); "
+                 "rocm-smi is deprecated (see ROCM-966). Returning "
+                 "RSMI_STATUS_NOT_SUPPORTED."
+              << std::endl;
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   TRY amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
   std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
 
