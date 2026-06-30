@@ -259,54 +259,19 @@ set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
 set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
-    # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-5.2.1.1")
+    include(FetchContent)
 
-    if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
-        # TODO: use ExternalProject_Add instead or a submodule
-        message(STATUS "Adding esmi_ib_library...")
-        execute_process(
-            COMMAND
-                git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                ${PROJECT_SOURCE_DIR}/esmi_ib_library
-        )
-    else()
-        message(STATUS "esmi_ib_library already installed, checking version...")
-
-        # Grab latest commit and get the tag
-        execute_process(
-            COMMAND git rev-list --tags --max-count=1
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
-            OUTPUT_VARIABLE latest_commit
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-        execute_process(
-            COMMAND git describe --tags ${latest_commit} --match "*pkg*"
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
-            OUTPUT_VARIABLE latest_esmi_tag
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-
-        # Update to latest tags if not matched
-        if(NOT latest_esmi_tag STREQUAL current_esmi_tag)
-            message(STATUS "Updating esmi_ib_library...")
-            execute_process(
-                COMMAND
-                    git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                    ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp
-                RESULT_VARIABLE clone_result
-            )
-            if(clone_result EQUAL 0)
-                file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library)
-                file(RENAME ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp ${PROJECT_SOURCE_DIR}/esmi_ib_library)
-                message(STATUS "Successfully cloned updated esmi_ib_library")
-            else()
-                file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp)
-                message(FATAL_ERROR "Failed to clone updated esmi_ib_library")
-            endif()
-        else()
-            message(STATUS "esmi_ib_library is the latest version: ${current_esmi_tag}...")
-        endif()
+    FetchContent_Declare(
+        esmi_ib_library
+        GIT_REPOSITORY https://github.com/amd/esmi_ib_library.git
+        GIT_TAG d494a3194ceb4cc4dbb2debf9fcbe8773c6d3bef
+        GIT_SHALLOW FALSE
+        SOURCE_DIR
+        ${PROJECT_SOURCE_DIR}/esmi_ib_library
+    )
+    FetchContent_GetProperties(esmi_ib_library)
+    if(NOT esmi_ib_library_POPULATED)
+        FetchContent_Populate(esmi_ib_library)
     endif()
 
     # Make sure to update the amd_hsmp.h file with the corresponding esmi version
