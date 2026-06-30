@@ -670,6 +670,23 @@ target_link_libraries(
 rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
 
+# --- Interposer loader initialization regression tests ---
+
+add_library(early_mmap_preload SHARED early_mmap_preload_test.cpp)
+rj_configure_target(early_mmap_preload TEST)
+add_dependencies(early_mmap_preload rocjitsu_kmd_shim)
+
+add_test(
+    NAME "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
+    COMMAND /bin/true
+)
+set_tests_properties(
+    "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
+    PROPERTIES
+        ENVIRONMENT
+            "LD_PRELOAD=$<TARGET_FILE:early_mmap_preload>:$<TARGET_FILE:rocjitsu_kmd_shim>"
+)
+
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
 
