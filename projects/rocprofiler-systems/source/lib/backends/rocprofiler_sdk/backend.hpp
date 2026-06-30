@@ -22,7 +22,7 @@ sdk_check(typename Wrapper::status_t status)
 {
     if(status != Wrapper::STATUS_SUCCESS)
     {
-        throw std::runtime_error{ std::string{ Wrapper::get_status_string(status) } };
+        throw std::runtime_error{ Wrapper::get_status_string(status) };
     }
 }
 
@@ -35,7 +35,6 @@ sdk_check(typename Wrapper::status_t status)
 template <typename Wrapper>
 struct backend
 {
-    // ─── Type aliases from Wrapper ───────────────────────────────────────────────
     using status_t                     = Wrapper::status_t;
     using context_id_t                 = Wrapper::context_id;
     using agent_id_t                   = Wrapper::agent_id;
@@ -71,7 +70,6 @@ struct backend
     using dispatch_counting_service_cb_t = Wrapper::dispatch_counting_service_cb;
     using dispatch_counting_record_cb_t  = Wrapper::dispatch_counting_record_cb;
 
-    // ─── Constants from Wrapper ──────────────────────────────────────────────────
     static constexpr counter_flag_t flag_none      = Wrapper::COUNTER_FLAG_NONE;
     static constexpr status_t       status_success = Wrapper::STATUS_SUCCESS;
     static constexpr status_t       status_error   = Wrapper::STATUS_ERROR;
@@ -79,10 +77,7 @@ struct backend
         Wrapper::STATUS_ERROR_HSA_NOT_LOADED;
     static constexpr status_t status_context_error = Wrapper::STATUS_ERROR_CONTEXT_ERROR;
 
-    // ─── Helper ───────────────────────────────────────────────────────────────────
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
-
-    // ─── Pure SDK delegations ─────────────────────────────────────────────────────
 
     static status_t create_context(context_id_t* ctx)
     {
@@ -130,8 +125,6 @@ struct backend
         return Wrapper::configure_device_counting_service(ctx, buf, agent, cb, user_data);
     }
 
-    // ─── Business logic ───────────────────────────────────────────────────────────
-
     static status_t query_record_counter_id(counter_record_t record,
                                             counter_id_t*    counter_id)
     {
@@ -164,7 +157,11 @@ struct backend
                info.name == nullptr)
                 return {};
 
-            auto result = std::vector<counter_metadata>{};
+            auto result   = std::vector<counter_metadata>{};
+            auto name_str = std::string{ info.name };
+            auto desc_str = safe_str(info.description);
+            auto blk_str  = safe_str(info.block);
+            auto expr_str = safe_str(info.expression);
             result.reserve(info.dimensions_instances_count);
 
             for(std::uint64_t i = 0; i < info.dimensions_instances_count; ++i)
@@ -179,9 +176,8 @@ struct backend
                           dim_inst->dimensions[d]->index });
                 }
                 result.push_back(counter_metadata{
-                    dim_inst->instance_id, std::string{ info.name },
-                    safe_str(info.description), safe_str(info.block),
-                    safe_str(info.expression), static_cast<bool>(info.is_constant),
+                    dim_inst->instance_id, name_str, desc_str, blk_str, expr_str,
+                    static_cast<bool>(info.is_constant),
                     static_cast<bool>(info.is_derived), std::move(dims) });
             }
             return result;
@@ -204,8 +200,6 @@ struct backend
                                        {} } };
         }
     }
-
-    // ─── Buffer and callback thread management ────────────────────────────────────
 
     static void create_buffer(context_id_t ctx, size_t size, size_t watermark,
                               buffer_policy_t policy, buffer_tracing_cb_t cb, void* data,
@@ -241,8 +235,6 @@ struct backend
     {
         sdk_check<Wrapper>(Wrapper::assign_callback_thread(buf, thread));
     }
-
-    // ─── Tracing service configuration ───────────────────────────────────────────
 
     static void configure_callback_tracing_service(
         context_id_t ctx, callback_tracing_kind_t kind, tracing_operation_t* ops,
@@ -285,24 +277,25 @@ struct backend
             Wrapper::at_internal_thread_create(pre, post, libs, user_data));
     }
 
-    // ─── Context queries — return bool, never throw ───────────────────────────────
-
-    static bool context_is_active(context_id_t ctx)
+    static bool context_is_active(context_id_t ctx) noexcept
     {
-        int  out  = 0;
-        auto errc = Wrapper::context_is_active(ctx, &out);
-        return (errc == Wrapper::STATUS_SUCCESS && out > 0);
+        return query_context_flag<Wrapper::context_is_active>(ctx);
     }
 
-    static bool context_is_valid(context_id_t ctx)
+    static bool context_is_valid(context_id_t ctx) noexcept
     {
-        int  out  = 0;
-        auto errc = Wrapper::context_is_valid(ctx, &out);
-        return (errc == Wrapper::STATUS_SUCCESS && out > 0);
+        return query_context_flag<Wrapper::context_is_valid>(ctx);
     }
 
-    // ─── Tracing queries ──────────────────────────────────────────────────────────
+private:
+    template <auto WrapperFn>
+    static bool query_context_flag(context_id_t ctx) noexcept
+    {
+        int out = 0;
+        return (WrapperFn(ctx, &out) == Wrapper::STATUS_SUCCESS && out > 0);
+    }
 
+public:
     static void query_callback_op_name(callback_tracing_kind_t kind,
                                        tracing_operation_t op, const char** name,
                                        std::uint64_t* name_len)
@@ -336,10 +329,8 @@ struct backend
         sdk_check<Wrapper>(Wrapper::query_counter_info(id, version, info));
     }
 
-    // ─── Version / timestamp / status — noexcept, never throw ───────────────────
-
     static status_t get_version(std::uint32_t* major, std::uint32_t* minor,
-                                std::uint32_t* patch) noexcept
+                                std::uint32_t* patch)
     {
         return Wrapper::get_version(major, minor, patch);
     }
