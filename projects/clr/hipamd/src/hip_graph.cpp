@@ -1608,26 +1608,23 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
       delete classicExec;
       return initStatus;
     }
-    // Return via the GraphExec alias (= GraphExecSegmented) — safe because hip_graph.cpp
-    // only uses the virtual Run/Init interface and the shared-base statics through this pointer.
-    *pGraphExec = reinterpret_cast<hip::GraphExec*>(classicExec);
+    *pGraphExec = classicExec;
     return hipSuccess;
   }
 
-  *pGraphExec = new hip::GraphExecSegmented(flags);
-  graph->clone(*pGraphExec, true);
+  auto* segExec = new hip::GraphExecSegmented(flags);
+  graph->clone(segExec, true);
 
-  hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodesIntoBatches();
+  hipError_t scheduleStatus = segExec->ScheduleNodesIntoBatches();
   if (scheduleStatus != hipSuccess) {
-    delete *pGraphExec;
-    *pGraphExec = nullptr;
+    delete segExec;
     return scheduleStatus;
   }
   if (DEBUG_HIP_GRAPH_DOT_PRINT == 1) {
     static int i = 1;
     std::string filename =
         "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_" + std::to_string(i++);
-    hipError_t status = ihipGraphDebugDotPrint(*pGraphExec, filename.c_str(), 0);
+    hipError_t status = ihipGraphDebugDotPrint(segExec, filename.c_str(), 0);
     if (status == hipSuccess) {
       LogPrintfInfo("[hipGraph] graph dump:%s", filename.c_str());
     }
@@ -1635,8 +1632,9 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
 
   graph->SetGraphInstantiated(true);
 
-  (*pGraphExec)->SetKernelArgManager(new hip::GraphKernelArgManager());
-  return (*pGraphExec)->Init();
+  segExec->SetKernelArgManager(new hip::GraphKernelArgManager());
+  *pGraphExec = segExec;
+  return segExec->Init();
 }
 
 hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,

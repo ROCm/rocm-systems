@@ -1687,7 +1687,7 @@ void GraphExecSegmented::GetKernelArgSizeForGraph(std::unordered_map<int, size_t
     for (const auto& segment : segments_) {
       // Handle child graph segments - skip node iteration, process recursively
       if (segment.child_graph_ptr != nullptr) {
-        auto childGraphExec = dynamic_cast<GraphExec*>(segment.child_graph_ptr);
+        auto childGraphExec = dynamic_cast<GraphExecSegmented*>(segment.child_graph_ptr);
         if (childGraphExec != nullptr) {
           // Child graphs share the same kernel arg manager as parent
           if (childGraphExec->GetKernelArgManager() == nullptr) {
@@ -1960,7 +1960,7 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
   // Recursively process child graphs to capture their packets
   for (const auto& segment : segments_) {
     if (segment.child_graph_ptr != nullptr) {
-      auto childGraphExec = dynamic_cast<GraphExec*>(segment.child_graph_ptr);
+      auto childGraphExec = dynamic_cast<GraphExecSegmented*>(segment.child_graph_ptr);
       if (childGraphExec != nullptr) {
         // Propagate instantiation device ID so BuildSyncPlan can
         // access the device for barrier packet creation.
@@ -2515,7 +2515,7 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
     status = dispatchCurrentBatch();
     if (status != hipSuccess) return status;
 
-    auto childGraphExec = dynamic_cast<GraphExec*>(segment.child_graph_ptr);
+    auto childGraphExec = dynamic_cast<GraphExecSegmented*>(segment.child_graph_ptr);
     if (childGraphExec != nullptr) {
       // Child graphs share the same kernel arg manager as parent (for packet capture)
       if (childGraphExec->GetKernelArgManager() == nullptr) {

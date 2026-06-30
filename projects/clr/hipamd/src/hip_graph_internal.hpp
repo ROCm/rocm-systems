@@ -1259,8 +1259,8 @@ class GraphExecSegmented : public GraphExecBase {
   void BuildSyncPlan();
 };
 
-// Backward-compatible alias: code that refers to GraphExec gets GraphExecSegmented.
-using GraphExec = GraphExecSegmented;
+// Backward-compatible alias: path-agnostic code uses GraphExecBase through this alias.
+using GraphExec = GraphExecBase;
 
 class ChildGraphNode : public GraphNode, public GraphExecSegmented {
  protected:
