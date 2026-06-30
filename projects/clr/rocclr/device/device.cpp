@@ -1400,7 +1400,7 @@ extern "C" void __asan_report_nonself_leak(uint64_t alloc_pc, uint64_t alloc_siz
 // Helper structures and functions for leak detection
 namespace {
   struct CachedUri {
-    int fd;
+    amd::Os::FileDesc fd;
     uint64_t offset;
     uint64_t size;
   };
