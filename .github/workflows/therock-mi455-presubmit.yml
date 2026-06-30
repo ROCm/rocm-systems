@@ -14,6 +14,9 @@
 
 # MI455 (gfx125X) Pre-submit CI
 #
+# NOTE: This workflow ONLY builds/tests for HIP or ROCR changes and is meant
+# to provide signal only. It is not a blocking check.
+#
 # This workflow runs MI455-specific tests when HIP or ROCR paths are updated.
 # It builds gfx125X-dcgpu and runs limited tests (hip-tests, rocrtst, sanity)
 # on the linux-mi455-gpu-rocm runner.
