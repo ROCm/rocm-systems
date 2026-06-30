@@ -1558,25 +1558,9 @@ template <typename Tp> void ToolsInit(Tp* table) {
 #endif
 }
 
-template <typename Tp> Tp& GetDispatchTableImpl(std::atomic<bool>& registered) {
+template <typename Tp> Tp& GetDispatchTableImpl() {
   // using a static inside a function prevents static initialization fiascos
-  static auto dispatch_table = [] {
-    auto table = Tp{};
-
-    // Change all the function pointers to point to the HIP runtime implementation functions
-    UpdateDispatchTable(&table);
-
-    return table;
-  }();
-
-  // Register profiler once, after the dispatch table's static guard is released. Uses a
-  // namespace-scope atomic claimed by a single CAS, so a re-entrant call sees the initialized table
-  // and returns without recursing.
-  bool expected = false;
-  if (registered.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-    ToolsInit(&dispatch_table);
-  }
-
+  static auto dispatch_table = Tp{};
   return dispatch_table;
 }
 
@@ -1596,13 +1580,49 @@ std::atomic<bool> hip_tools_dispatch_registered{false};
 #define NO_VECTORIZE
 #endif
 NO_VECTORIZE const HipDispatchTable* GetHipDispatchTable() {
-  return &GetDispatchTableImpl<HipDispatchTable>(hip_dispatch_registered);
+  static auto* _v = [] {
+    auto* table = &GetDispatchTableImpl<HipDispatchTable>();
+    UpdateDispatchTable(table);
+    return table;
+  }();
+  if (!hip_dispatch_registered.load(std::memory_order_acquire)) {
+    bool expected = false;
+    if (hip_dispatch_registered.compare_exchange_strong(expected, true,
+                                                        std::memory_order_acq_rel)) {
+      ToolsInit(_v);
+    }
+  }
+  return _v;
 }
 NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
-  return &GetDispatchTableImpl<HipCompilerDispatchTable>(hip_compiler_dispatch_registered);
+  static auto* _v = [] {
+    auto* table = &GetDispatchTableImpl<HipCompilerDispatchTable>();
+    UpdateDispatchTable(table);
+    return table;
+  }();
+  if (!hip_compiler_dispatch_registered.load(std::memory_order_acquire)) {
+    bool expected = false;
+    if (hip_compiler_dispatch_registered.compare_exchange_strong(expected, true,
+                                                                 std::memory_order_acq_rel)) {
+      ToolsInit(_v);
+    }
+  }
+  return _v;
 }
 const HipToolsDispatchTable* GetHipToolsDispatchTable() {
-  return &GetDispatchTableImpl<HipToolsDispatchTable>(hip_tools_dispatch_registered);
+  static auto* _v = [] {
+    auto* table = &GetDispatchTableImpl<HipToolsDispatchTable>();
+    UpdateDispatchTable(table);
+    return table;
+  }();
+  if (!hip_tools_dispatch_registered.load(std::memory_order_acquire)) {
+    bool expected = false;
+    if (hip_tools_dispatch_registered.compare_exchange_strong(expected, true,
+                                                              std::memory_order_acq_rel)) {
+      ToolsInit(_v);
+    }
+  }
+  return _v;
 }
 }  // namespace hip
 
