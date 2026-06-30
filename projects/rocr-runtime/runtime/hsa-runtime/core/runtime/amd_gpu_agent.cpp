@@ -66,6 +66,7 @@
 #include "core/inc/isa.h"
 #include "core/inc/runtime.h"
 #include "core/util/os.h"
+#include "core/util/atomic_helpers.h"
 #include "inc/hsa_ext_image.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 #include "inc/hsa_ven_amd_pc_sampling.h"
@@ -4390,9 +4391,9 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
   next_buffer = (which_buffer + 1) % 2;
   reset_write_val = (uint64_t)next_buffer << 63;
 
-  uint64_t sample_count = __atomic_exchange_n(
+  uint64_t sample_count = rocr::atomic::Exchange(
       reinterpret_cast<uint64_t*>(&pcs_data->xcc_data[xcc_id].device_data->buf_write_val), reset_write_val,
-      __ATOMIC_ACQ_REL);
+      std::memory_order_acq_rel);
 
   // Mask off upper bit to get sample count from old value
   sample_count &= (ULLONG_MAX >> 1);
@@ -4415,8 +4416,8 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
   size_t bytes_copied = 0;
 
   if (to_copy > 0) {
-    // Use atomics for synchronization with GPU - no volatile needed since
-    // __atomic_load_n/__atomic_store_n provide the required memory ordering.
+    // Use atomics for synchronization with GPU - rocr::atomic provides
+    // cross-platform atomic operations with proper memory ordering.
     uint32_t* bwv_written = (which_buffer == 0)
         ? &pcs_data->xcc_data[xcc_id].device_data->buf_written_val0
         : &pcs_data->xcc_data[xcc_id].device_data->buf_written_val1;
@@ -4425,11 +4426,11 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
     // Check session.isActive() to avoid spinning forever if GPU hangs or session is stopping.
     uint32_t expected_written = (uint32_t)sample_count;
 
-    while (__atomic_load_n(bwv_written, __ATOMIC_ACQUIRE) < expected_written) {
+    while (rocr::atomic::Load(bwv_written, std::memory_order_acquire) < expected_written) {
       // Exit early if session is being stopped - prevents infinite spin on GPU hang
       if (!session.isActive()) {
         // Treat remaining expected samples as lost
-        uint32_t actual_written = __atomic_load_n(bwv_written, __ATOMIC_ACQUIRE);
+        uint32_t actual_written = rocr::atomic::Load(bwv_written, std::memory_order_acquire);
         if (actual_written < expected_written) {
           pcs_data->xcc_data[xcc_id].lost_sample_count.fetch_add(
               expected_written - actual_written, std::memory_order_relaxed);
@@ -4438,7 +4439,9 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
         to_copy = sample_count * session.sample_size();
         break;
       }
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(_MSC_VER)
+      _mm_pause();
+#elif defined(__x86_64__) || defined(__i386__)
       __builtin_ia32_pause();
 #endif
     }
@@ -4473,7 +4476,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
     }
 
     // Reset written counter so trap handler can reuse this buffer
-    __atomic_store_n(bwv_written, 0U, __ATOMIC_RELEASE);
+    rocr::atomic::Store(bwv_written, 0U, std::memory_order_release);
   }
 
   which_buffer = next_buffer;
