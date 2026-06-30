@@ -591,6 +591,23 @@ OMPT is a rocpd-only trace: records are written to the rocpd database (the defau
 
    Requires an OMPT-capable OpenMP runtime that implements ``ompt_start_tool`` — for example the LLVM-based ``libomp`` shipped with ROCm / AOMP. GCC's ``libgomp`` does not implement the OMPT interface (see the `GOMP status page <https://www.gnu.org/software/gcc/projects/gomp/>`_), so ``g++ -fopenmp`` binaries do not produce OMPT records.
 
+rocSHMEM trace
++++++++++++++++
+
+`rocSHMEM <https://github.com/ROCm/rocSHMEM>`_ is an intra-kernel networking runtime that provides GPU-centric, OpenSHMEM-style communication for AMD GPUs. This option traces the rocSHMEM host-stream API.
+
+.. code-block:: shell
+
+    rocprofv3 --rocshmem-trace --output-format csv -- <application_path>
+
+The above command generates a ``rocshmem_api_trace`` file prefixed with the process ID.
+
+.. code-block:: shell
+
+    $ cat 41688_rocshmem_api_trace.csv
+
+The trace records each rocSHMEM host-stream API call together with its arguments and return value. Perfetto will also show rocSHMEM API arguments. Pointers will not be dereferenced and only the address will be displayed.
+
 Dynamic process attachment
 +++++++++++++++++++++++++++
 

@@ -466,14 +466,17 @@ def test_internal_correlation_ids(input_data):
 
 
 def test_retired_correlation_ids(input_data):
-    """Every memory-allocation correlation id is eventually retired with
-    retired_ts > end_ts.
+    """Every API correlation id is eventually retired with retired_ts > end_ts.
 
     Mirrors ``tests/rocdecode/validate.py:test_retired_correlation_ids``. The
     SDK populates the ``retired_correlation_ids`` buffer stream once the
-    pipeline drains; every memory-allocation corr_id must appear there with
-    a timestamp strictly greater than the originating record's
+    pipeline drains; every API + memory-allocation corr_id must appear there
+    with a timestamp strictly greater than the originating record's
     ``end_timestamp``.
+
+    No skip-on-empty: even when rocSHMEM tracing isn't supported on the host
+    (rocshmem_api_traces empty), this test still validates the HSA + HIP
+    retired-id invariants. Matches rocdecode/rocjpeg semantics.
     """
     sdk_data = _get_sdk_data(input_data)
 
@@ -519,6 +522,22 @@ def test_retired_correlation_ids(input_data):
             f"retired_ts ({retired_ts}) <= end_ts ({end_ts}) "
             f"for alloc corr_id {cid}: {itr}"
         )
+
+    for cid, itr in api_corr_ids.items():
+        assert cid in retired_corr_ids, f"api corr_id {cid} never retired: {itr}"
+        retired_ts = retired_corr_ids[cid]["timestamp"]
+        end_ts = itr["end_timestamp"]
+        assert retired_ts - end_ts > 0, (
+            f"retired_ts ({retired_ts}) <= end_ts ({end_ts}) "
+            f"for api corr_id {cid}: {itr}"
+        )
+
+    # alloc corr_ids are a subset of api corr_ids (allocs reuse the triggering
+    # API's id), so api == retired counts.
+    assert len(api_corr_ids) == len(retired_corr_ids), (
+        f"corr_id count mismatch: api={len(api_corr_ids)}, "
+        f"retired={len(retired_corr_ids)}"
+    )
 
 
 def test_perfetto_data(request, input_data):
