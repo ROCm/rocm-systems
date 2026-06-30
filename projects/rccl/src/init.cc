@@ -80,7 +80,7 @@
 #include  <cpuid.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/utsname.h>
+#include "kernel_config.h"
 
 #ifndef STR2
   #define STR2(v) #v
@@ -269,63 +269,6 @@ static void initOnceFunc() {
 exit:;
 }
 
-// Return true when IOMMU passthrough is configured (explicit cmdline or kernel default).
-static bool ncclKernelHasConfigOption(const char* option) {
-  struct utsname utsname;
-  if (uname(&utsname) == -1) return false;
-
-  const char* possiblePaths[] = {
-    "/proc/config.gz",
-    "/boot/config-%s",
-    "/usr/src/linux-%s/.config",
-    "/usr/src/linux/.config",
-    "/usr/lib/modules/%s/config",
-    "/usr/lib/ostree-boot/config-%s",
-    "/usr/lib/kernel/config-%s",
-    "/usr/src/linux-headers-%s/.config",
-    "/lib/modules/%s/build/.config",
-  };
-
-  char kernelConfFile[128];
-  char buf[256];
-  int hasZcat = (system("which zcat > /dev/null 2>&1") == 0);
-
-  for (const auto& path : possiblePaths) {
-    snprintf(kernelConfFile, sizeof(kernelConfFile), path, utsname.release);
-
-    FILE* fp = NULL;
-    if (strstr(path, "/proc/config.gz") != NULL) {
-      if (!hasZcat || access("/proc/config.gz", R_OK) != 0) continue;
-      fp = popen("zcat /proc/config.gz 2>/dev/null", "r");
-    } else {
-      fp = fopen(kernelConfFile, "r");
-    }
-    if (fp == NULL) continue;
-
-    bool found = false;
-    while (fgets(buf, sizeof(buf), fp) != NULL) {
-      if (strstr(buf, option) != NULL) {
-        found = true;
-        break;
-      }
-    }
-
-    if (strstr(path, "/proc/config.gz") != NULL) {
-      pclose(fp);
-    } else {
-      fclose(fp);
-    }
-
-    if (found) return true;
-  }
-  return false;
-}
-
-static bool ncclIommuPassthroughOk(const char* cmdline) {
-  if (cmdline && strstr(cmdline, "iommu=pt") != NULL) return true;
-  return ncclKernelHasConfigOption("CONFIG_IOMMU_DEFAULT_PASSTHROUGH=y");
-}
-
 static ncclResult_t ncclInit() {
     // Register atexit handler to detect process shutdown. This must happen
     // early so the handler runs BEFORE HIP runtime static destructors.
@@ -350,15 +293,18 @@ static ncclResult_t ncclInit() {
       NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
       // Check BIOS string and hypervisor presence on ecx bit 31
       if (strncmp("Hyper-V UEFI Release", strValue, 20) != 0 && (ecx & (1u << 31)) == 0) {
-        FILE* file;
-        if ((file = fopen("/proc/cmdline", "r")) != NULL) {
-          if (feof(file) == 0 && ferror(file) == 0) {
-            int len = fread(strValue, 1, 2047, file);
-            strValue[len] = '\0';
+        char cmdline[2048] = {0};
+        const char* cmdlinePtr = NULL;
+        FILE* file = fopen("/proc/cmdline", "r");
+        if (file != NULL) {
+          size_t len = fread(cmdline, 1, sizeof(cmdline) - 1, file);
+          if (len > 0 && ferror(file) == 0) {
+            cmdline[len] = '\0';
+            cmdlinePtr = cmdline;
           }
           fclose(file);
         }
-        if (!ncclIommuPassthroughOk(strValue))
+        if (!ncclIommuPassthroughOk(cmdlinePtr))
           WARN("Missing \"iommu=pt\" from kernel command line which can lead to system instablity or hang!");
       }
 #ifndef HIP_UNCACHED_MEMORY
