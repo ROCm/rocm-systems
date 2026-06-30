@@ -39,7 +39,11 @@ SAddCoU32Sop2::SAddCoU32Sop2(const MachineInst *inst)
 }
 
 void SAddCoU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_co_u32_sop2(*this, wf);
+  uint32_t s0 = ssrc0.read_scalar(wf);
+  uint32_t s1 = ssrc1.read_scalar(wf);
+  uint32_t result = (s0 + s1);
+  sdst.write_scalar(wf, result);
+  wf.write_scc(((static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1)) > 4294967295ULL));
 }
 
 SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
@@ -64,7 +68,11 @@ SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
 }
 
 void SSubCoU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_co_u32_sop2(*this, wf);
+  uint32_t s0 = ssrc0.read_scalar(wf);
+  uint32_t s1 = ssrc1.read_scalar(wf);
+  uint32_t result = (s0 - s1);
+  sdst.write_scalar(wf, result);
+  wf.write_scc((s0 < s1));
 }
 
 SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
@@ -89,7 +97,12 @@ SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
 }
 
 void SAddCoI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_co_i32_sop2(*this, wf);
+  int32_t s0 = static_cast<int32_t>(ssrc0.read_scalar(wf));
+  int32_t s1 = static_cast<int32_t>(ssrc1.read_scalar(wf));
+  int32_t result = (s0 + s1);
+  sdst.write_scalar(wf, result);
+  wf.write_scc(
+      ((static_cast<int64_t>(s0) + static_cast<int64_t>(s1)) != static_cast<int64_t>(result)));
 }
 
 SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
@@ -114,7 +127,12 @@ SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
 }
 
 void SSubCoI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_co_i32_sop2(*this, wf);
+  int32_t s0 = static_cast<int32_t>(ssrc0.read_scalar(wf));
+  int32_t s1 = static_cast<int32_t>(ssrc1.read_scalar(wf));
+  int32_t result = (s0 - s1);
+  sdst.write_scalar(wf, result);
+  wf.write_scc(
+      ((static_cast<int64_t>(s0) - static_cast<int64_t>(s1)) != static_cast<int64_t>(result)));
 }
 
 SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
@@ -139,7 +157,14 @@ SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
 }
 
 void SAddCoCiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_co_ci_u32_sop2(*this, wf);
+  uint32_t result = [&]() {
+    uint64_t w = static_cast<uint64_t>(ssrc0.read_scalar(wf)) +
+                 static_cast<uint64_t>(ssrc1.read_scalar(wf)) +
+                 static_cast<uint64_t>(wf.read_scc());
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  sdst.write_scalar(wf, result);
 }
 
 SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
@@ -164,7 +189,13 @@ SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
 }
 
 void SSubCoCiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_co_ci_u32_sop2(*this, wf);
+  uint32_t result = [&]() {
+    uint32_t a = ssrc0.read_scalar(wf), b = ssrc1.read_scalar(wf);
+    uint32_t cin = wf.read_scc() ? 1u : 0u;
+    wf.write_scc(static_cast<uint64_t>(a) < static_cast<uint64_t>(b) + cin);
+    return a - b - cin;
+  }();
+  sdst.write_scalar(wf, result);
 }
 
 SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
@@ -1316,7 +1347,9 @@ SMinNumF32Sop2::SMinNumF32Sop2(const MachineInst *inst)
 }
 
 void SMinNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_min_num_f32_sop2(*this, wf);
+  float result = std::fmin(std::bit_cast<float>(ssrc0.read_scalar(wf)),
+                           std::bit_cast<float>(ssrc1.read_scalar(wf)));
+  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 SMaxNumF32Sop2::SMaxNumF32Sop2(const MachineInst *inst)
@@ -1341,7 +1374,9 @@ SMaxNumF32Sop2::SMaxNumF32Sop2(const MachineInst *inst)
 }
 
 void SMaxNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_max_num_f32_sop2(*this, wf);
+  float result = std::fmax(std::bit_cast<float>(ssrc0.read_scalar(wf)),
+                           std::bit_cast<float>(ssrc1.read_scalar(wf)));
+  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 SMulF32Sop2::SMulF32Sop2(const MachineInst *inst)
@@ -1548,7 +1583,9 @@ SMinNumF16Sop2::SMinNumF16Sop2(const MachineInst *inst)
 }
 
 void SMinNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_min_num_f16_sop2(*this, wf);
+  float result = std::fmin(util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf))),
+                           util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf))));
+  sdst.write_scalar(wf, util::f32_to_f16(result));
 }
 
 SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
@@ -1573,7 +1610,9 @@ SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
 }
 
 void SMaxNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_max_num_f16_sop2(*this, wf);
+  float result = std::fmax(util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf))),
+                           util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf))));
+  sdst.write_scalar(wf, util::f32_to_f16(result));
 }
 
 SMulF16Sop2::SMulF16Sop2(const MachineInst *inst)
@@ -1645,7 +1684,16 @@ SMinimumF32Sop2::SMinimumF32Sop2(const MachineInst *inst)
 }
 
 void SMinimumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_minimum_f32_sop2(*this, wf);
+  float result = [&]() {
+    auto a = std::bit_cast<float>(ssrc0.read_scalar(wf));
+    auto b = std::bit_cast<float>(ssrc1.read_scalar(wf));
+    if (std::isnan(a) || std::isnan(b))
+      return std::numeric_limits<decltype(a)>::quiet_NaN();
+    if (a == b)
+      return std::signbit(a) ? a : b;
+    return a < b ? a : b;
+  }();
+  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 SMaximumF32Sop2::SMaximumF32Sop2(const MachineInst *inst)
@@ -1670,7 +1718,16 @@ SMaximumF32Sop2::SMaximumF32Sop2(const MachineInst *inst)
 }
 
 void SMaximumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_maximum_f32_sop2(*this, wf);
+  float result = [&]() {
+    auto a = std::bit_cast<float>(ssrc0.read_scalar(wf));
+    auto b = std::bit_cast<float>(ssrc1.read_scalar(wf));
+    if (std::isnan(a) || std::isnan(b))
+      return std::numeric_limits<decltype(a)>::quiet_NaN();
+    if (a == b)
+      return std::signbit(a) ? b : a;
+    return a > b ? a : b;
+  }();
+  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 SMinimumF16Sop2::SMinimumF16Sop2(const MachineInst *inst)
@@ -1695,7 +1752,16 @@ SMinimumF16Sop2::SMinimumF16Sop2(const MachineInst *inst)
 }
 
 void SMinimumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_minimum_f16_sop2(*this, wf);
+  float result = [&]() {
+    auto a = util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf)));
+    auto b = util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf)));
+    if (std::isnan(a) || std::isnan(b))
+      return std::numeric_limits<decltype(a)>::quiet_NaN();
+    if (a == b)
+      return std::signbit(a) ? a : b;
+    return a < b ? a : b;
+  }();
+  sdst.write_scalar(wf, util::f32_to_f16(result));
 }
 
 SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
@@ -1720,7 +1786,16 @@ SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
 }
 
 void SMaximumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_maximum_f16_sop2(*this, wf);
+  float result = [&]() {
+    auto a = util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf)));
+    auto b = util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf)));
+    if (std::isnan(a) || std::isnan(b))
+      return std::numeric_limits<decltype(a)>::quiet_NaN();
+    if (a == b)
+      return std::signbit(a) ? b : a;
+    return a > b ? a : b;
+  }();
+  sdst.write_scalar(wf, util::f32_to_f16(result));
 }
 
 SAddNcU64Sop2::SAddNcU64Sop2(const MachineInst *inst)
@@ -1745,7 +1820,9 @@ SAddNcU64Sop2::SAddNcU64Sop2(const MachineInst *inst)
 }
 
 void SAddNcU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_nc_u64_sop2(*this, wf);
+  uint64_t result = (static_cast<uint64_t>(ssrc0.read_scalar64(wf)) +
+                     static_cast<uint64_t>(ssrc1.read_scalar64(wf)));
+  sdst.write_scalar64(wf, result);
 }
 
 SSubNcU64Sop2::SSubNcU64Sop2(const MachineInst *inst)
@@ -1770,7 +1847,9 @@ SSubNcU64Sop2::SSubNcU64Sop2(const MachineInst *inst)
 }
 
 void SSubNcU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_nc_u64_sop2(*this, wf);
+  uint64_t result = (static_cast<uint64_t>(ssrc0.read_scalar64(wf)) -
+                     static_cast<uint64_t>(ssrc1.read_scalar64(wf)));
+  sdst.write_scalar64(wf, result);
 }
 
 SMulU64Sop2::SMulU64Sop2(const MachineInst *inst)
@@ -1793,7 +1872,11 @@ SMulU64Sop2::SMulU64Sop2(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMulU64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_u64_sop2(*this, wf); }
+void SMulU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t result = (static_cast<uint64_t>(ssrc0.read_scalar64(wf)) *
+                     static_cast<uint64_t>(ssrc1.read_scalar64(wf)));
+  sdst.write_scalar64(wf, result);
+}
 
 } // namespace rdna4
 } // namespace rocjitsu

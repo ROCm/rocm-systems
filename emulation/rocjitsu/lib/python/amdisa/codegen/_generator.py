@@ -4951,6 +4951,16 @@ class CodeGenerator:
             return '(inst_.vdst & 0x7fu)'
         return 'inst_.vdst'
 
+    def _shared_execute_key_denied(
+        self, mnemonic: str, inst: Instruction | None, enc_name: str | None = None
+    ) -> bool:
+        enc_key = enc_name or (inst.enc_name if inst else None)
+        if enc_key is None:
+            return False
+        config = getattr(self, 'config', None)
+        denied = getattr(config, 'unshared_execute_keys', frozenset())
+        return (mnemonic, enc_key) in denied
+
     def _can_share_execute(
         self,
         mnemonic: str,
@@ -4968,6 +4978,8 @@ class CodeGenerator:
         if self.shared_plan is None:
             return False
         if self._requires_arch_local_execute(inst, enc_name):
+            return False
+        if self._shared_execute_key_denied(mnemonic, inst, enc_name):
             return False
         if mnemonic in self._NON_SHAREABLE_MNEMONICS:
             return False
@@ -4996,6 +5008,8 @@ class CodeGenerator:
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> bool:
         if inst is None or self._requires_arch_local_execute(inst, enc_name):
+            return False
+        if self._shared_execute_key_denied(inst.mnemonic, inst, enc_name):
             return False
 
         from amdisa.codegen.execute.simd_codegen import simd_probe_arch_portable
