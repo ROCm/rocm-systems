@@ -1456,6 +1456,14 @@ bool VirtualGPU::dispatchAqlPacket(hsa_kernel_dispatch_packet_t* packet, uint16_
       packet->setup = rest;
     }
     std::memcpy(const_cast<uint8_t*>(aqlPacket), packet, sizeof(hsa_kernel_dispatch_packet_t));
+
+    // Capture the metadata prefetch packet into a host buffer (if supported).
+    if (metadata_preloader_.HasMetadataQueue() && command_ != nullptr) {
+      uint8_t* metaBuf = command_->getMetadataPacket();
+      if (metaBuf != nullptr) {
+        metadata_preloader_.CaptureMetadata(packet, header, metaBuf);
+      }
+    }
     return true;
   } else {
     dispatchBlockingWait(packet);
@@ -1479,7 +1487,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
                                             const std::vector<uint32_t>& validFullHeaders,
                                             amd::AccumulateCommand* vcmd, bool attach_signal,
                                             const std::vector<const std::string*>* kernelNames,
-                                            bool pre_patched, bool blocking) {
+                                            bool pre_patched, bool blocking,
+                                            const std::vector<uint8_t>* flatMetadataData) {
   if (vcmd == nullptr || flatPacketData.empty() || validFullHeaders.empty()) {
     return false;
   }
@@ -1559,6 +1568,21 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
       memcpy(queueBase + chunkSlot * kPacketSize, srcData, firstCount * kPacketSize);
       memcpy(queueBase, srcData + firstCount * kPacketSize,
              (thisChunk - firstCount) * kPacketSize);
+    }
+
+    // Copy this chunk's metadata packets to the metadata ring buffer.
+    if (flatMetadataData != nullptr && metadata_preloader_.HasMetadataQueue()) {
+      static constexpr size_t kMetaSize = 256;
+      auto* metaBase = static_cast<uint8_t*>(metadata_preloader_.GetQueueBase());
+      const uint8_t* metaSrc = flatMetadataData->data() + chunkStart * kMetaSize;
+      if (chunkSlot + thisChunk <= queueSize) {
+        memcpy(metaBase + chunkSlot * kMetaSize, metaSrc, thisChunk * kMetaSize);
+      } else {
+        const size_t firstCount = queueSize - chunkSlot;
+        memcpy(metaBase + chunkSlot * kMetaSize, metaSrc, firstCount * kMetaSize);
+        memcpy(metaBase, metaSrc + firstCount * kMetaSize,
+               (thisChunk - firstCount) * kMetaSize);
+      }
     }
 
     // Attach signal to the last packet when requested (before per-packet logging).
