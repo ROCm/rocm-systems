@@ -35,8 +35,9 @@ The first domains are:
 - `context`: driver-style device and context query contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
 - `memory_pool_access`: current-device memory pool access-control contracts
+- `extension`: proc-address resolution and AMD extension API contracts (`hipGetProcAddress`, `hipApiName`, `hipGetStreamDeviceId`, `hipExtGetLastError`)
 
-Some domains are capability-gated. For example, `array_memory` skips on devices without image/array support, and `pitched_memory` skips on runtime paths where `hipMallocPitch` reports out of memory for tiny allocations. These skips indicate an unsupported local capability, not a contract failure.
+Some domains are capability-gated. For example, `array_memory` skips on devices without image/array support, and `pitched_memory` skips on runtime paths where `hipMallocPitch` reports out of memory for tiny allocations. The AMD-specific extension contracts in `extension` are compiled only on the AMD backend, while the portable `hipGetProcAddress` contracts run on both backends. These gates indicate an unsupported local capability, not a contract failure.
 
 Run the layer with:
 

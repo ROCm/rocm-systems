@@ -414,3 +414,21 @@ contract:
   Contract_MemoryPoolAccess_SetAccessNoneCurrentDevice_IsRejected:
     <<: *level_0
     tags: [memory_pool_access]
+  Contract_Extension_GetProcAddress_ResolvesKnownSymbol:
+    <<: *level_0
+    tags: [extension]
+  Contract_Extension_GetProcAddress_UnknownSymbol_ReportsNotFound:
+    <<: *level_0
+    tags: [extension]
+  Contract_Extension_GetProcAddress_NullArgs_AreRejected:
+    <<: *level_0
+    tags: [extension]
+  Contract_Extension_ApiName_ReturnsNonEmptyString:
+    <<: *level_0
+    tags: [extension]
+  Contract_Extension_GetStreamDeviceId_MatchesCurrentDevice:
+    <<: *level_0
+    tags: [extension]
+  Contract_Extension_ExtGetLastError_TracksErrorState:
+    <<: *level_0
+    tags: [extension]
