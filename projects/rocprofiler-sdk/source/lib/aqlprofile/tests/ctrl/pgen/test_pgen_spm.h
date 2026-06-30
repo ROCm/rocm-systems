@@ -51,7 +51,7 @@ string_format(const std::string& format, Args... args)
 }
 
 hsa_status_t
-TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t   /*info_type*/,
+TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t /*info_type*/,
                     hsa_ven_amd_aqlprofile_info_data_t* info_data,
                     void*                               callback_data)
 {
@@ -90,7 +90,10 @@ public:
             unsigned event_id    = 0;
             sscanf(arg_list[i], "%u:%u:%u", &block_id, &block_index, &event_id);
             const hsa_ven_amd_aqlprofile_event_t event = {
-                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block_id), block_index, event_id,};
+                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block_id),
+                block_index,
+                event_id,
+            };
             event_vec.push_back(event);
         }
 
@@ -111,8 +114,7 @@ public:
         for(const auto& it : event_vec)
         {
             bool         result = false;
-            hsa_status_t status =
-                api_->hsa_ven_amd_aqlprofile_validate_event(agent, &it, &result);
+            hsa_status_t status = api_->hsa_ven_amd_aqlprofile_validate_event(agent, &it, &result);
             if(status != HSA_STATUS_SUCCESS)
             {
                 const char* str = "";
@@ -217,8 +219,9 @@ public:
         SpmBufferDesc* desc     = static_cast<SpmBufferDesc*>(profile_.output_buffer.ptr);
         uint32_t       seg_size = (desc->global_num_line + desc->se_num_line * desc->num_se) * 32;
         uint16_t*      buffer   = static_cast<uint16_t*>(malloc(seg_size));
-        uint64_t*      counter  = static_cast<uint64_t*>(malloc(profile_.event_count * sizeof(uint64_t)));
-        uint64_t*      counter_total = static_cast<uint64_t*>(calloc(profile_.event_count, sizeof(uint64_t)));
+        uint64_t* counter = static_cast<uint64_t*>(malloc(profile_.event_count * sizeof(uint64_t)));
+        uint64_t* counter_total =
+            static_cast<uint64_t*>(calloc(profile_.event_count, sizeof(uint64_t)));
         if(!buffer || !counter || !counter_total)
         {
             if(buffer) free(buffer);
@@ -265,14 +268,15 @@ public:
                     break;
                 }
                 timestamp_last = timestamp_this;
-                for(int i = 0; i < profile_.event_count; i++)
+                for(uint32_t i = 0; i < profile_.event_count; i++)
                 {
                     uint16_t index = desc->get_counter_map()[i] & 0x7FFF;
                     uint16_t index_j;
-                    bool     is_global = ((desc->get_counter_map()[i] & 0x8000) != 0) ? true : false;
+                    bool is_global = ((desc->get_counter_map()[i] & 0x8000) != 0) ? true : false;
                     if(is_global)
                     {
-                        if((buffer[index] != 0u) && buffer[index] != 0xFFFF) counter[i] += buffer[index];
+                        if((buffer[index] != 0u) && buffer[index] != 0xFFFF)
+                            counter[i] += buffer[index];
                     }
                     else
                     {
@@ -291,7 +295,7 @@ public:
 
             for(uint32_t i = 0; i < profile_.event_count; i++)
             {
-                const auto *it = &profile_.events[i];
+                const auto* it = &profile_.events[i];
                 std::cout << string_format("block %d-index %d counter %3d = 0x%lX\n",
                                            it->block_name,
                                            it->block_index,
@@ -306,7 +310,7 @@ public:
             std::cout << "SUM(XCC0:XCC" << num_xcc_ - 1 << "):\n";
             for(uint32_t i = 0; i < profile_.event_count; i++)
             {
-                const auto *it = &profile_.events[i];
+                const auto* it = &profile_.events[i];
                 std::cout << string_format("block %d-index %d counter %3d = 0x%lX\n",
                                            it->block_name,
                                            it->block_index,

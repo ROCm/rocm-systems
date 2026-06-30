@@ -58,7 +58,7 @@ protected:
     virtual int  GetMode() { return UNKNOWN; }
     virtual bool BuildPackets() { return false; }
     virtual bool DumpData() { return false; }
-    bool Initialize(int argc, char** argv) override;
+    bool         Initialize(int argc, char** argv) override;
 
 private:
     enum

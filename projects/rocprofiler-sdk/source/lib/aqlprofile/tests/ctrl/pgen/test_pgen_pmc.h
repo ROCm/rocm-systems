@@ -32,7 +32,7 @@
 typedef std::vector<hsa_ven_amd_aqlprofile_info_data_t> callback_data_t;
 
 hsa_status_t
-TestPGenPmcCallback(hsa_ven_amd_aqlprofile_info_type_t   /*info_type*/,
+TestPGenPmcCallback(hsa_ven_amd_aqlprofile_info_type_t /*info_type*/,
                     hsa_ven_amd_aqlprofile_info_data_t* info_data,
                     void*                               callback_data)
 {
@@ -66,7 +66,10 @@ public:
             unsigned event_id    = 0;
             sscanf(arg_list[i], "%u:%u:%u", &block_id, &block_index, &event_id);
             const hsa_ven_amd_aqlprofile_event_t event = {
-                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block_id), block_index, event_id,};
+                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block_id),
+                block_index,
+                event_id,
+            };
             event_vec.push_back(event);
         }
 
@@ -87,8 +90,7 @@ public:
         for(const auto& it : event_vec)
         {
             bool         result = false;
-            hsa_status_t status =
-                api_->hsa_ven_amd_aqlprofile_validate_event(agent, &it, &result);
+            hsa_status_t status = api_->hsa_ven_amd_aqlprofile_validate_event(agent, &it, &result);
             if(status != HSA_STATUS_SUCCESS)
             {
                 const char* str = "";
@@ -192,8 +194,8 @@ private:
         {
             std::cout << std::dec << "event(block(" << it.pmc_data.event.block_name << "_"
                       << it.pmc_data.event.block_index << "), id(" << it.pmc_data.event.counter_id
-                      << ")), sample(" << it.sample_id << "), result(" << it.pmc_data.result
-                      << ")" << '\n';
+                      << ")), sample(" << it.sample_id << "), result(" << it.pmc_data.result << ")"
+                      << '\n';
         }
 
         return true;

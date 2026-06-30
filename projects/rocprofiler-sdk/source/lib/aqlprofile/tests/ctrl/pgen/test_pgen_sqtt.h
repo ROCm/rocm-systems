@@ -34,7 +34,7 @@
 typedef std::vector<hsa_ven_amd_aqlprofile_info_data_t> callback_data_t;
 
 hsa_status_t
-TestPGenSqttCallback(hsa_ven_amd_aqlprofile_info_type_t   /*info_type*/,
+TestPGenSqttCallback(hsa_ven_amd_aqlprofile_info_type_t /*info_type*/,
                      hsa_ven_amd_aqlprofile_info_data_t* info_data,
                      void*                               callback_data)
 {
@@ -132,8 +132,7 @@ public:
                       << std::dec << '\n';
 
             if(it.trace_data.size == 0) continue;
-            void* sys_buf =
-                GetRsrcFactory()->AllocateSysMemory(GetAgentInfo(), it.trace_data.size);
+            void* sys_buf = GetRsrcFactory()->AllocateSysMemory(GetAgentInfo(), it.trace_data.size);
             TEST_ASSERT(sys_buf != nullptr);
             if(sys_buf == nullptr) return false;
 
@@ -149,7 +148,9 @@ public:
 
                     // Write the buffer in terms of shorts (16 bits)
                     uint16_t* trace_data = static_cast<uint16_t*>(sys_buf);
-                    for(uint32_t i = 0; i < static_cast<uint32_t>(it.trace_data.size / sizeof(uint16_t)); ++i)
+                    for(uint32_t i = 0;
+                        i < static_cast<uint32_t>(it.trace_data.size / sizeof(uint16_t));
+                        ++i)
                         out_file << std::setw(4) << std::setfill('0') << trace_data[i] << "\n";
                     out_file << std::dec;
                 }

@@ -117,7 +117,7 @@ TestPMgr::Initialize(int argc, char** argv)
 
 TestPMgr::TestPMgr(TestAql* t)
 : TestAql(t)
- 
+
 {
     memset(&pre_packet_, 0, sizeof(pre_packet_));
     memset(&post_packet_, 0, sizeof(post_packet_));

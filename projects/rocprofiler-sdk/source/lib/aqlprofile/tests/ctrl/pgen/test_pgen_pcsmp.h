@@ -41,9 +41,9 @@ struct pcsmp_callback_data_t
 };
 
 hsa_status_t
-TestPGenPcsmpCallback(hsa_ven_amd_aqlprofile_info_type_t   /*info_type*/,
-                      hsa_ven_amd_aqlprofile_info_data_t*  /*info_data*/,
-                      void*                               callback_data)
+TestPGenPcsmpCallback(hsa_ven_amd_aqlprofile_info_type_t /*info_type*/,
+                      hsa_ven_amd_aqlprofile_info_data_t* /*info_data*/,
+                      void* callback_data)
 {
     hsa_status_t           status     = HSA_STATUS_SUCCESS;
     pcsmp_callback_data_t* pcsmp_data = reinterpret_cast<pcsmp_callback_data_t*>(callback_data);

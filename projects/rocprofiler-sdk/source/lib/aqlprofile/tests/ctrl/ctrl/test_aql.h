@@ -35,15 +35,12 @@ public:
     explicit TestAql(TestAql* t = nullptr)
     : test_(t)
     {}
-    virtual ~TestAql()
-    {
-        delete test_;
-    }
+    virtual ~TestAql() { delete test_; }
 
     TestAql*                 Test() { return test_; }
     virtual const AgentInfo* GetAgentInfo() { return (test_) ? test_->GetAgentInfo() : nullptr; }
     virtual hsa_queue_t*     GetQueue() { return (test_) ? test_->GetQueue() : nullptr; }
-    virtual HsaRsrcFactory*  GetRsrcFactory() { return (test_) ? test_->GetRsrcFactory() : nullptr; }
+    virtual HsaRsrcFactory* GetRsrcFactory() { return (test_) ? test_->GetRsrcFactory() : nullptr; }
 
     // Initialize application environment including setting
     // up of various configuration parameters based on

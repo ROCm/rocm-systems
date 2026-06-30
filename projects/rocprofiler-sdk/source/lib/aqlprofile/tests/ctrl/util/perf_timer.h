@@ -81,7 +81,7 @@ private:
 
     // AMD timing method
     static uint64_t CoarseTimestampUs();
-    uint64_t MeasureTSCFreqHz();
+    uint64_t        MeasureTSCFreqHz();
 
     static void Error(const std::string& str);
 };

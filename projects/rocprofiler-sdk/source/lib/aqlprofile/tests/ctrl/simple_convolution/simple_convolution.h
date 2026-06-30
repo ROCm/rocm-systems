@@ -79,12 +79,12 @@ private:
     // @param mask_dimensions  dimensions of the mask matrix
     // @return bool true on success and false on failure
     static bool ReferenceImplementation(uint32_t*       output,
-                                 const uint32_t* input,
-                                 const float*    mask,
-                                 const uint32_t  width,
-                                 const uint32_t  height,
-                                 const uint32_t  maskWidth,
-                                 const uint32_t  maskHeight);
+                                        const uint32_t* input,
+                                        const float*    mask,
+                                        const uint32_t  width,
+                                        const uint32_t  height,
+                                        const uint32_t  maskWidth,
+                                        const uint32_t  maskHeight);
 
     // Width of the Input array
     uint32_t width_;

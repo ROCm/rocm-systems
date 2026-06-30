@@ -120,6 +120,7 @@ main(int argc, char* argv[])
             int events_count = 0;
             if(TestHsa::HsaAgentName() == "gfx9")
             {
+                // clang-format off
                 const hsa_ven_amd_aqlprofile_event_t events_arr1[] = {
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 2 /*CYCLES*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 3 /*BUSY_CYCLES*/},
@@ -137,40 +138,32 @@ main(int argc, char* argv[])
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 8},  /*PDE0_CACHE_HITS*/
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 13}, /*BANK0_4K_PTE_CACHE_MISSES*/
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 14}, /*BANK0_BIGK_PTE_CACHE_HITS*/
-                    {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 15},                                            /*BANK0_BIGK_PTE_CACHE_MISSES*/
+                    {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 15}, /*BANK0_BIGK_PTE_CACHE_MISSES*/
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2, 0, 0}, /*CYCLE*/
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2, 0, 2}, /*BANK0_REQUESTS*/
                 };
+                // clang-format on
                 events_count = sizeof(events_arr1) / sizeof(hsa_ven_amd_aqlprofile_event_t);
                 events_arr   = events_arr1;
             }
             else if(TestHsa::HsaAgentName() == "gfx12")
             {
+                // clang-format off
                 const hsa_ven_amd_aqlprofile_event_t events_arr1[] = {
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CHA),
-                     0,
-                     25 /*ALWAYS*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CHA),
-                     0,
-                     0 /*BUSY*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CHC),
-                     0,
-                     0 /*ALWAYS*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CHC),
-                     0,
-                     1 /*BUSY*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CHA), 0, 25 /*ALWAYS*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CHA), 0, 0 /*BUSY*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CHC), 0, 0 /*ALWAYS*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CHC), 0, 1 /*BUSY*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 0 /*ALWAYS*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 25 /*BUSY*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF, 0, 0 /*ALWAYS*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF, 0, 24 /*BUSY*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CPG),
-                     0,
-                     0 /*ALWAYS*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CPG),
-                     0,
-                     51 /*BUSY*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_GC_UTCL2), 0, 1},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_GC_VML2), 0, 5},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CPG), 0, 0 /*ALWAYS*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_CPG), 0, 51 /*BUSY*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
+                         AQLPROFILE_BLOCK_NAME_GC_UTCL2), 0, 1},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
+                         AQLPROFILE_BLOCK_NAME_GC_VML2), 0, 5},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA, 0, 3},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA, 0, 4},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCR, 0, 6},
@@ -187,25 +180,21 @@ main(int argc, char* argv[])
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 0, 2 /*BUSY*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 1, 0 /*ALWAYS*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 1, 2 /*BUSY*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_GC_UTCL1), 0, 1},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_GC_UTCL1), 0, 2},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_GCEA_SE), 0, 3},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_GCEA_SE), 0, 4},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_GRBMH),
-                     0,
-                     0 /*ALWAYS*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
+                         AQLPROFILE_BLOCK_NAME_GC_UTCL1), 0, 1},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
+                         AQLPROFILE_BLOCK_NAME_GC_UTCL1), 0, 2},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
+                         AQLPROFILE_BLOCK_NAME_GCEA_SE), 0, 3},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
+                         AQLPROFILE_BLOCK_NAME_GCEA_SE), 0, 4},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_GRBMH), 0, 0 /*ALWAYS*/},
                     {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_GRBMH), 0, 19},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 46 /*CSN_BUSY*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 47 /*CSN_NUM_THREADGROUPS*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG),
-                     0,
-                     14 /*ALWAYS*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG),
-                     0,
-                     15 /*BUSY*/},
-                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG),
-                     0,
-                     19 /*WAVES*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG), 0, 14 /*ALWAYS*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG), 0, 15 /*BUSY*/},
+                    {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG), 0, 19 /*WAVES*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1A, 0, 21 /*ALWAYS*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1A, 0, 0 /*BUSY*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1C, 0, 0 /*ALWAYS*/},
@@ -222,6 +211,7 @@ main(int argc, char* argv[])
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP, 1, 10 /*REQ_READ*/},
                     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP, 1, 14 /*REQ_WRITE*/},
                 };
+                // clang-format on
                 events_count = sizeof(events_arr1) / sizeof(hsa_ven_amd_aqlprofile_event_t);
                 events_arr   = events_arr1;
             }
@@ -257,7 +247,10 @@ main(int argc, char* argv[])
                         fprintf(stderr, " %d %d %d                 \r", i, j, k);
                         fflush(stderr);
                         hsa_ven_amd_aqlprofile_event_t event = {
-                            static_cast<hsa_ven_amd_aqlprofile_block_name_t>(i), j, k,};
+                            static_cast<hsa_ven_amd_aqlprofile_block_name_t>(i),
+                            j,
+                            k,
+                        };
                         if(!RunKernel<simple_convolution, TestPGenPmc<RUN_MODE> >(
                                1, pmc_argv(1, &event)))
                         {
@@ -318,13 +311,14 @@ main(int argc, char* argv[])
         }
         else
         {
+            // clang-format off
             const hsa_ven_amd_aqlprofile_event_t events_arr1[] = {
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 0}, /*CYCLE*/
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 2}, /*BANK0_PTE_CACHE_HITS*/
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB, 0, 0},  /*CYCLE*/
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB, 0, 1},  /*CORRECTABLE_GECC_ERR_CNT_CHAN0*/
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB, 0, 2},  /*CORRECTABLE_GECC_ERR_CNT_CHAN1*/
-                {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB, 0, 3}, /*UNCORRECTABLE_GECC_ERR_CNT_CHAN0*/
+                {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB, 0, 3},  /*UNCORRECTABLE_GECC_ERR_CNT_CHAN0*/
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB, 0, 0},   /*CYCLE*/
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB, 0, 1},   /*ACPG_WRRET_VLD*/
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB, 0, 2},   /*ACPO_WRRET_VLD*/
@@ -346,6 +340,7 @@ main(int argc, char* argv[])
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 7},     /*WR_REQ_QUEUE2_IN*/
                 {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 8},     /*WR_REQ_QUEUE3_IN*/
             };
+            // clang-format on
             events_count = sizeof(events_arr1) / sizeof(hsa_ven_amd_aqlprofile_event_t);
             events_arr   = events_arr1;
         }

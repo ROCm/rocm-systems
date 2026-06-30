@@ -82,7 +82,7 @@ TestHsa::HsaShutdown()
 }
 
 bool
-TestHsa::Initialize(int  /*arg_cnt*/, char**  /*arg_list*/)
+TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/)
 {
     std::clog << "TestHsa::Initialize :" << '\n';
 
@@ -129,7 +129,7 @@ TestHsa::Setup()
     }
 
     mem_map_t& mem_map = test_->GetMemMap();
-    for(auto & it : mem_map)
+    for(auto& it : mem_map)
     {
         mem_descr_t& des = it.second;
         switch(des.id)
@@ -336,8 +336,10 @@ TestHsa::RunSdma(size_t sdma_size)
     }
 
     for(size_t i = 0; i < 10; ++i)
-        std::cout << i << ": src_buf = " << static_cast<unsigned>((static_cast<char*>(src_buf))[i] & 0xFF)
-                  << ", dest_buf = " << static_cast<unsigned>((static_cast<char*>(dest_buf))[i] & 0xFF) << '\n';
+        std::cout << i << ": src_buf = "
+                  << static_cast<unsigned>((static_cast<char*>(src_buf))[i] & 0xFF)
+                  << ", dest_buf = "
+                  << static_cast<unsigned>((static_cast<char*>(dest_buf))[i] & 0xFF) << '\n';
 
     hsa_status_t status;
 
