@@ -15,7 +15,7 @@ on:
   #   https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target
   #   https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
   pull_request_target:
-    branches: [develop, pr-bot-test]
+    branches: [main, pr-bot-test]
     types: [opened, synchronize, reopened, ready_for_review, edited]
 
 # Least privilege. Writes are needed to post the results comment and manage the
