@@ -4,6 +4,9 @@
 
 #include "code_object_writer.h"
 
+#include <memory>
+#include <utility>
+
 using namespace rocprofiler_compute_tool;
 
 PcSamplingMode rocprofiler_compute_tool::parse_pc_sampling_mode(const std::string& mode)
@@ -16,7 +19,10 @@ PcSamplingMode rocprofiler_compute_tool::parse_pc_sampling_mode(const std::strin
 }
 
 pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode mode, std::filesystem::path output_path)
-    : pc_sampling_feature_t(mode, std::move(output_path), pc_sampling_collector_t::create())
+    : pc_sampling_feature_t(
+          mode,
+          std::move(output_path),
+          pc_sampling_collector_t::create(std::make_shared<code_object_translator_impl_t>()))
 {
 }
 

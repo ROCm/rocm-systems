@@ -4,21 +4,19 @@
 
 #include "gsl_assert.h"
 
-#include <ios>
-#include <iostream>
+#include <utility>
 
 using namespace rocprofiler_compute_tool;
 
-pc_sampling_collector_t::ptr pc_sampling_collector_t::create()
+pc_sampling_collector_t::ptr pc_sampling_collector_t::create(code_object_translator_t::ptr translator)
 {
-    return std::make_shared<pc_sampling_collector_impl_t>(
-        std::make_shared<code_object_translator_impl_t>());
+    return std::make_shared<pc_sampling_collector_impl_t>(std::move(translator));
 }
 
-pc_sampling_collector_impl_t::pc_sampling_collector_impl_t(
-    const std::shared_ptr<code_object_translator_t>& translator)
-    : m_translator(translator)
+pc_sampling_collector_impl_t::pc_sampling_collector_impl_t(code_object_translator_t::ptr translator)
+    : m_translator(std::move(translator))
 {
+    Expects(m_translator);
 }
 
 void pc_sampling_collector_impl_t::on_code_object_load(
