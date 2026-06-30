@@ -180,6 +180,7 @@ if(BUILD_TESTS)
     ScatterTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    DdaIpcTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
