@@ -654,16 +654,10 @@ def install_dispatcher_hook() -> str:
         location = core.resolve_user_caller_location()
         marker_stack = core.get_marker_stack()
         context_stack = core.get_context_stack()
-        # Mirror the _push_scope wire format, including the backend suffix.
-        full_marker = (
-            "/".join([*marker_stack, op_name])
-            + ":"
-            + "/".join([*context_stack, f"#{idx}@{location}"])
-            + f"|{_BACKEND_NAME}"
-        )
-        rangePush(full_marker)
+        context = f"#{idx}@{location}"
+        rangePush(core.compose_marker(op_name, context, _BACKEND_NAME))
         marker_stack.append(op_name)
-        context_stack.append(f"#{idx}@{location}")
+        context_stack.append(context)
 
     def end_disp() -> None:
         marker_stack = core.get_marker_stack()

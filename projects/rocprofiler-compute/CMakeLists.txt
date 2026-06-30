@@ -441,6 +441,14 @@ add_test(
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_profile_triton_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m triton_trace
+        --junitxml=tests/test_profile_triton_trace.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -456,6 +464,7 @@ set_tests_properties(
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
+    test_profile_triton_trace
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -842,6 +851,7 @@ if(${ENABLE_COVERAGE})
         test_torch_trace_analysis
         test_torch_trace_coverage
         test_profile_torch_trace
+        test_profile_triton_trace
         test_torch_cpp_loader
         test_inject_roctx_package
     )

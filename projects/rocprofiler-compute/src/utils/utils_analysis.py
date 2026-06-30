@@ -202,6 +202,11 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
     )
 
 
+def decode_marker_name(name: str) -> str:
+    """Decode a percent-encoded marker segment ('%2F' -> '/', '%25' -> '%')."""
+    return name.replace("%2F", "/").replace("%25", "%")
+
+
 def build_call_trees(
     df: pd.DataFrame,
 ) -> dict[str, CallTreeNode]:
@@ -254,7 +259,6 @@ def build_call_trees(
             call_trees[location] = CallTreeNode(name=location)
         location_root = call_trees[location]
 
-        op_segments = op_path.split("/")
         ctx_segments = (
             str(context_id).split("/")
             if has_context_id and context_id is not None and pd.notna(context_id)
@@ -262,7 +266,8 @@ def build_call_trees(
         )
 
         current_node = location_root
-        for i, path_segment in enumerate(op_segments):
+        for i, encoded_segment in enumerate(op_path.split("/")):
+            path_segment = decode_marker_name(encoded_segment)
             if path_segment not in current_node.children:
                 current_node.children[path_segment] = CallTreeNode(name=path_segment)
             current_node = current_node.children[path_segment]
