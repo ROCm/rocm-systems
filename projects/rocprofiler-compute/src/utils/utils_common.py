@@ -976,18 +976,29 @@ def load_yaml(filepath: Union[str, os.PathLike]) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def _load_panel_templates() -> list[tuple[str, list[dict[str, Any]]]]:
+    """Return (filename, panels) for each *_config_template.yaml, name-sorted.
+
+    Centralizes the analysis_configs glob and YAML parse shared by the panel
+    alias lookups so the directory path and loading live in one place.
+    """
+    analysis_dir = (
+        config.rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
+    )
+    templates: list[tuple[str, list[dict[str, Any]]]] = []
+    for path in sorted(analysis_dir.glob("*_config_template.yaml")):
+        panel_yaml = load_yaml(path) or {}
+        templates.append((path.name, panel_yaml.get("panels") or []))
+    return templates
+
+
 def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
     """Return panel_id_str -> alias from the *_config_template.yaml whose
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
-    analysis_dir = (
-        Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
-    )
-    for path in sorted(analysis_dir.glob("*_config_template.yaml")):
-        m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)
+    for name, panels in _load_panel_templates():
+        m = re.match(r"(gfx\d+)_config_template\.yaml$", name)
         if m and arch.startswith(m.group(1)):
-            panel_yaml = load_yaml(path) or {}
-            panels = panel_yaml.get("panels") or []
             return {str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels}
     return {}
 
@@ -999,6 +1010,23 @@ def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
     return {
         alias: pid for pid, alias in get_arch_panel_id_to_alias(arch).items() if alias
     }
+
+
+def get_common_panel_aliases() -> list[str]:
+    """Return panel aliases declared by every *_config_template.yaml, sorted.
+
+    These aliases are valid on any arch thus safe examples for help
+    message.
+    Returns [] when no templates exist.
+    """
+    per_template = [
+        {p["panel_alias"] for p in panels if p.get("panel_alias")}
+        for _name, panels in _load_panel_templates()
+    ]
+    per_template = [aliases for aliases in per_template if aliases]
+    if not per_template:
+        return []
+    return sorted(set.intersection(*per_template))
 
 
 def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
