@@ -28,6 +28,9 @@ class Memory;
 struct ProfilingSignal;
 class Timestamp;
 
+//! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
+bool InAsyncSignalHandler();
+
 // Initial HSA signal value
 constexpr static hsa_signal_value_t kInitSignalValueOne = 1;
 
@@ -392,6 +395,35 @@ class VirtualGPU : public device::VirtualDevice {
         dyn_data_prefetch_enabled_ = false;
       }
 
+      //! Whether the preloader has a metadata queue attached
+      bool HasMetadataQueue() const { return IsAttached(); }
+
+      //! Returns the metadata ring buffer base (nullptr if not attached)
+      void* GetQueueBase() const { return queue_base_; }
+
+      //! Capture a metadata packet into a host buffer (for graph capture).
+      //! Fills the 256-byte buffer with the same content that Set() would write
+      //! to the queue metadata ring, but targets an arbitrary host pointer instead.
+      template <class AqlPacket>
+      void CaptureMetadata(AqlPacket* packet, uint16_t header, uint8_t* host_metadata) {
+        if (host_metadata == nullptr || !IsAttached()) {
+          return;
+        }
+        if constexpr (std::is_same_v<AqlPacket, hsa_kernel_dispatch_packet_t>) {
+          if (pending_descriptor_ == nullptr) {
+            return;
+          }
+          auto* metadata = reinterpret_cast<hsa_amd_metadata_kernel_dispatch_packet_t*>(
+              host_metadata);
+          SetPacket(packet, header, metadata);
+        } else if constexpr (std::is_same_v<AqlPacket, hsa_barrier_and_packet_t> ||
+                             std::is_same_v<AqlPacket, hsa_amd_barrier_value_packet_t>) {
+          auto* metadata = reinterpret_cast<hsa_amd_metadata_barrier_packet_t*>(
+              host_metadata);
+          SetPacket(packet, header, metadata);
+        }
+      }
+
     private:
       //! Return whether the loader is attached to a gpu queue
       bool IsAttached() const { return queue_base_ != nullptr; }
@@ -636,7 +668,8 @@ class VirtualGPU : public device::VirtualDevice {
                                   bool attach_signal = false,
                                   const std::vector<const std::string*>* kernelNames = nullptr,
                                   bool pre_patched = false,
-                                  bool blocking = false) override;
+                                  bool blocking = false,
+                                  const std::vector<uint8_t>* flatMetadataData = nullptr) override;
 
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
