@@ -413,6 +413,13 @@ metadata::get_att_filenames() const
     return data;
 }
 
+att_trace_chunk_info_vec_t
+metadata::get_att_trace_chunks() const
+{
+    return att_trace_chunks.rlock(
+        [](const auto& _data_v) -> att_trace_chunk_info_vec_t { return _data_v; });
+}
+
 const kernel_symbol_info*
 metadata::get_kernel_symbol(uint64_t kernel_id) const
 {

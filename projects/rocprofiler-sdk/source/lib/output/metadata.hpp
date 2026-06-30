@@ -104,6 +104,23 @@ using att_dispatch_agent_key_t =
     std::pair<rocprofiler_dispatch_id_t, uint64_t>;  // (dispatch_id, agent_handle)
 using att_filenames_map_t         = std::map<att_dispatch_agent_key_t, std::vector<std::string>>;
 using code_object_load_info_vec_t = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>;
+
+struct att_trace_chunk_info
+{
+    rocprofiler_dispatch_id_t dispatch_id      = 0;
+    uint64_t                  agent_id         = 0;
+    int64_t                   shader_engine_id = 0;
+    uint32_t                  chunk_id         = 0;
+    uint32_t                  flags            = 0;
+    uint64_t                  time_begin       = 0;
+    uint64_t                  time_end         = 0;
+    bool                      dispatch_mode    = true;
+    uint64_t                  correlation_id   = 0;
+    uint64_t                  data_size        = 0;
+    std::string               filename         = {};
+};
+
+using att_trace_chunk_info_vec_t = std::vector<att_trace_chunk_info>;
 template <typename Tp>
 using synced_map = common::Synchronized<Tp, true>;
 template <typename Tp>
@@ -167,6 +184,7 @@ struct metadata
     synced_map<code_object_load_info_vec_t>  code_object_load           = {};
     synced_map<kernel_rename_map_t>          kernel_rename_map          = {};
     att_filenames_map_t                      att_filenames              = {};
+    synced_map<att_trace_chunk_info_vec_t>   att_trace_chunks           = {};
     synced_obj<pc_sampling_stats_t>          pc_sampling_stats          = {};
     synced_obj<runtime_initialization_set_t> runtime_initialization_set = {};
     node_info                                node_data                  = {};
@@ -199,6 +217,7 @@ struct metadata
     const counter_dimension_info_vec_t* get_counter_dimension_info(uint64_t instance_id) const;
 
     std::vector<std::string> get_att_filenames() const;
+    att_trace_chunk_info_vec_t get_att_trace_chunks() const;
     code_object_data_vec_t   get_code_objects() const;
     kernel_symbol_data_vec_t get_kernel_symbols() const;
     host_function_data_vec_t get_host_symbols() const;

@@ -137,3 +137,24 @@ SELECT
     *
 FROM
     `rocpd_memory_allocate{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_gpu_thread_trace_chunk` AS
+SELECT
+    *
+FROM
+    `rocpd_gpu_thread_trace_chunk{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_info_text_blob` AS
+SELECT
+    *
+FROM
+    `rocpd_info_text_blob{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_gpu_thread_trace_text_link` AS
+SELECT
+    *
+FROM
+    `rocpd_gpu_thread_trace_text_link{{uuid}}`;

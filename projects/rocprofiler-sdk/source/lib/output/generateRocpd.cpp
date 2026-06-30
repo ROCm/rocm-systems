@@ -24,6 +24,7 @@
 #include "lib/common/uuid_v7.hpp"
 #include "metadata.hpp"
 #include "output_stream.hpp"
+#include "lib/rocprofiler-sdk-tool/config.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"
 #include "timestamps.hpp"
@@ -65,10 +66,13 @@
 #include <cctype>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <set>
 #include <type_traits>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -109,7 +113,7 @@ using function_args_t = std::vector<argument_info>;
 struct sql_insert_value
 {
     std::string_view                                                                     name  = {};
-    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t> value = {};
+    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::vector<uint8_t>, std::nullptr_t> value = {};
 };
 
 struct pending_insert_batch
@@ -224,6 +228,76 @@ auto
 replace_uuid(const rocpd_db& db, std::string_view inp)
 {
     return replace_all(std::string{inp}, std::string_view{"{{uuid}}"}, db.uuid);
+}
+
+std::optional<std::string>
+read_text_file(const fs::path& inp)
+{
+    std::ifstream ifs{inp};
+    if(!ifs) return std::nullopt;
+
+    auto ss = std::stringstream{};
+    ss << ifs.rdbuf();
+    return ss.str();
+}
+
+std::optional<std::vector<uint8_t>>
+read_binary_file(const fs::path& inp)
+{
+    std::ifstream ifs{inp, std::ios::binary};
+    if(!ifs) return std::nullopt;
+
+    return std::vector<uint8_t>{std::istreambuf_iterator<char>{ifs}, std::istreambuf_iterator<char>{}};
+}
+
+std::optional<std::string>
+to_output_relative_path(const fs::path& output_root, const fs::path& file_path)
+{
+    if(file_path.empty()) return std::nullopt;
+
+    auto preferred_file = file_path.lexically_normal();
+    auto preferred_root = output_root.lexically_normal();
+    if(preferred_file.string().find(preferred_root.string()) == 0)
+        return preferred_file.lexically_relative(preferred_root).string();
+
+    return preferred_file.string();
+}
+
+template <typename Tp>
+std::string
+to_command_line_arg_string(const Tp& arg)
+{
+    using arg_type = common::mpl::unqualified_type_t<Tp>;
+
+    if constexpr(std::is_same_v<arg_type, std::string>)
+    {
+        return arg;
+    }
+    else if constexpr(std::is_same_v<arg_type, std::string_view>)
+    {
+        return std::string{arg};
+    }
+    else if constexpr(std::is_pointer_v<arg_type> &&
+                      std::is_same_v<std::remove_cv_t<std::remove_pointer_t<arg_type>>, char>)
+    {
+        return (arg) ? std::string{arg} : std::string{};
+    }
+    else
+    {
+        return fmt::format("{}", arg);
+    }
+}
+
+template <typename ContainerT>
+std::string
+join_command_line_args(const ContainerT& command_line)
+{
+    auto safe_args = std::vector<std::string>{};
+    safe_args.reserve(command_line.size());
+    for(const auto& itr : command_line)
+        safe_args.emplace_back(to_command_line_arg_string(itr));
+
+    return fmt::format("{}", fmt::join(safe_args, " "));
 }
 
 template <typename... Args>
@@ -361,6 +435,10 @@ insert_value(std::string_view _name, const Tp& _value, TraitT = {})
     {
         return sql_insert_value{_name, static_cast<double>(_value)};
     }
+    else if constexpr(std::is_same_v<value_type, std::vector<uint8_t>>)
+    {
+        return sql_insert_value{_name, _value};
+    }
     else
     {
         return sql_insert_value{_name, fmt::format("{}", _value)};
@@ -440,6 +518,15 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
             else if constexpr(common::mpl::is_string_type<value_type>::value)
             {
                 return sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_TRANSIENT);
+            }
+            else if constexpr(std::is_same_v<value_type, std::vector<uint8_t>>)
+            {
+                if(val.empty()) return sqlite3_bind_null(stmt, idx);
+                return sqlite3_bind_blob(stmt,
+                                         idx,
+                                         reinterpret_cast<const void*>(val.data()),
+                                         static_cast<int>(val.size()),
+                                         SQLITE_TRANSIENT);
             }
             else
             {
@@ -1288,9 +1375,7 @@ write_rocpd(
             }
         });
 
-        auto command = fmt::format(
-            "{}",
-            fmt::join(tool_metadata.command_line.begin(), tool_metadata.command_line.end(), " "));
+        auto command = join_command_line_args(tool_metadata.command_line);
 
         get_insert_statement(db,
                              "rocpd_info_process{{uuid}}",
@@ -2021,6 +2106,175 @@ write_rocpd(
             }
         };
 
+    auto insert_thread_trace_chunks = [&db, &tool_metadata, &cfg, node_id, this_pid]() {
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_thread_trace_chunks");
+
+        const auto chunks = tool_metadata.get_att_trace_chunks();
+        if(chunks.empty()) return;
+
+        auto params = std::vector<std::string>{};
+        params.emplace_back("trace_mode=mixed");
+
+        auto perf_values = std::vector<std::string>{};
+        for(const auto& ctr : tool::get_config().att_param_perfcounters)
+        {
+            if(ctr.simd_mask != 0xF)
+                perf_values.emplace_back(fmt::format("{}:{:#x}", ctr.counter_name, ctr.simd_mask));
+            else
+                perf_values.emplace_back(ctr.counter_name);
+        }
+
+        if(!perf_values.empty())
+            params.emplace_back(fmt::format("att_perfcounters={}", fmt::join(perf_values, ",")));
+
+        params.emplace_back(
+            fmt::format("serialize_all={}", tool::get_config().att_serialize_all ? 1 : 0));
+        params.emplace_back(fmt::format("shader_engine_mask={:#x}",
+                                        tool::get_config().att_param_shader_engine_mask));
+        params.emplace_back(
+            fmt::format("store_chunk_inline={}", tool::get_config().att_param_store_chunk_inline ? 1 : 0));
+
+        auto output_root = fs::path{tool::format_path(cfg.output_path)};
+        auto params_text = fmt::format("{}", fmt::join(params, ";"));
+        auto inline_blob = tool::get_config().att_param_store_chunk_inline;
+
+        // index chunk row id by chunk identity to support text linkage
+        auto chunk_id_map = std::map<std::tuple<uint64_t, int64_t, uint32_t, uint64_t>, uint64_t>{};
+
+        auto _deferred = sql::deferred_transaction{db.conn};
+        for(const auto& chunk : chunks)
+        {
+            auto file_path = fs::path{chunk.filename};
+            auto rel_path  = to_output_relative_path(output_root, file_path).value_or(std::string{});
+
+            auto att_blob_id = fmt::format("{}:{}:{}:{}",
+                                           chunk.dispatch_id,
+                                           chunk.agent_id,
+                                           chunk.shader_engine_id,
+                                           chunk.chunk_id);
+
+            auto row_id = static_cast<uint64_t>(db.get_event_id());
+            chunk_id_map.emplace(std::make_tuple(chunk.agent_id,
+                                                 chunk.shader_engine_id,
+                                                 chunk.chunk_id,
+                                                 chunk.dispatch_id),
+                                 row_id);
+
+            auto row = std::vector<sql_insert_value>{
+                insert_value("id", row_id),
+                insert_value("nid", node_id),
+                insert_value("pid", this_pid),
+                insert_value("agent_id", chunk.agent_id),
+                insert_value("shader_engine_id", chunk.shader_engine_id),
+                insert_value("chunk_id", chunk.chunk_id),
+                insert_value("time_begin", chunk.time_begin),
+                insert_value("time_end", chunk.time_end),
+                insert_value("trace_mode", chunk.dispatch_mode ? "dispatch" : "agent"),
+                insert_value("parameters", params_text),
+                insert_value("correlation_id", chunk.correlation_id),
+                insert_value("dispatch_begin", chunk.dispatch_id),
+                insert_value("dispatch_end", chunk.dispatch_id),
+                insert_value("att_blob_id", att_blob_id),
+                insert_value("flags", chunk.flags),
+                insert_value("binary_chunk_size", chunk.data_size),
+            };
+
+            if(inline_blob && !file_path.empty())
+            {
+                if(auto blob = read_binary_file(file_path); blob.has_value())
+                {
+                    row.emplace_back(insert_value("binary_chunk", blob.value()));
+                }
+                else
+                {
+                    row.emplace_back(insert_value("binary_chunk_path", rel_path));
+                }
+            }
+            else
+            {
+                row.emplace_back(insert_value("binary_chunk_path", rel_path));
+            }
+
+            get_insert_statement(db, "rocpd_gpu_thread_trace_chunk{{uuid}}", std::move(row));
+        }
+
+        // ATT decoder emits text artifacts under ui_output_agent_*_dispatch_* directories.
+        // Persist text content and link to thread-trace chunks so DB consumers can resolve snapshots.
+        auto text_blob_id_counter = uint64_t{1};
+        auto text_blob_by_path    = std::unordered_map<std::string, uint64_t>{};
+
+        for(const auto& chunk : chunks)
+        {
+            auto ui_dir = output_root / fmt::format("ui_output_agent_{}_dispatch_{}",
+                                                    chunk.agent_id,
+                                                    chunk.dispatch_id);
+            if(!fs::exists(ui_dir) || !fs::is_directory(ui_dir)) continue;
+
+            auto chunk_key = std::make_tuple(
+                chunk.agent_id, chunk.shader_engine_id, chunk.chunk_id, chunk.dispatch_id);
+            auto chunk_row_itr = chunk_id_map.find(chunk_key);
+            if(chunk_row_itr == chunk_id_map.end()) continue;
+            auto chunk_row_id = chunk_row_itr->second;
+
+            auto link_text_file = [&](const fs::path& pth, const char* kind, int ordinal) {
+                if(!fs::exists(pth) || !fs::is_regular_file(pth)) return;
+
+                auto rel = to_output_relative_path(output_root, pth).value_or(pth.string());
+                auto itr = text_blob_by_path.find(rel);
+                auto text_id = uint64_t{0};
+                if(itr != text_blob_by_path.end())
+                {
+                    text_id = itr->second;
+                }
+                else
+                {
+                    auto txt = read_text_file(pth);
+                    if(!txt.has_value()) return;
+
+                    text_id = text_blob_id_counter++;
+                    text_blob_by_path.emplace(rel, text_id);
+
+                    get_insert_statement(db,
+                                         "rocpd_info_text_blob{{uuid}}",
+                                         {
+                                             insert_value("id", text_id),
+                                             insert_value("nid", node_id),
+                                             insert_value("pid", this_pid),
+                                             insert_value("path", rel),
+                                             insert_value("md5", common::compute_md5sum(txt.value())),
+                                             insert_value("size", static_cast<uint64_t>(txt->size())),
+                                             insert_value("text", txt.value(), allow_empty_string{}),
+                                         });
+                }
+
+                get_insert_statement(db,
+                                     "rocpd_gpu_thread_trace_text_link{{uuid}}",
+                                     {
+                                         insert_value("chunk_id", chunk_row_id),
+                                         insert_value("text_blob_id", text_id),
+                                         insert_value("kind", std::string_view{kind}),
+                                         insert_value("ordinal", ordinal),
+                                     });
+            };
+
+            link_text_file(ui_dir / "code.json", "code_json", 0);
+            link_text_file(ui_dir / "snapshots.json", "snapshot_manifest", 0);
+
+            auto src_idx       = 0;
+            auto source_paths = std::vector<fs::path>{};
+            for(const auto& entry : fs::directory_iterator{ui_dir})
+            {
+                if(!entry.is_regular_file()) continue;
+                auto fname = entry.path().filename().string();
+                if(fname.rfind("source_", 0) != 0) continue;
+                source_paths.emplace_back(entry.path());
+            }
+            std::sort(source_paths.begin(), source_paths.end());
+            for(const auto& pth : source_paths)
+                link_text_file(pth, "snapshot_source", src_idx++);
+        }
+    };
+
     auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
 
     insert_node_data();
@@ -2058,6 +2312,8 @@ write_rocpd(
         insert_kfd_data(kfd_pmc_ids);
         insert_kfd_event_data(kfd_gen, kfd_pmc_ids);
     }
+
+    insert_thread_trace_chunks();
 
     {
         auto _deferred = sql::deferred_transaction{db.conn};

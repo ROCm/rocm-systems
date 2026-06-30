@@ -98,6 +98,7 @@
 #include <future>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
@@ -281,6 +282,8 @@ auto  att_device_context     = rocprofiler_context_id_t{0};
 auto  att_device_trace_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
 std::mutex att_shader_data;
+auto       att_trace_chunk_counters =
+    std::map<std::pair<uint64_t, int64_t>, uint32_t>{};
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
 thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
@@ -1659,8 +1662,38 @@ att_shader_data_callback(rocprofiler_agent_id_t                       agent,
     std::string output_filename = get_output_filename(tool::get_config(), filename.str(), ".att");
 
     output_stream.stream->write(reinterpret_cast<char*>(se_data), data_size);
+
+    auto ts_begin = rocprofiler_timestamp_t{};
+    auto ts_end   = rocprofiler_timestamp_t{};
+    rocprofiler_get_timestamp(&ts_begin);
+    rocprofiler_get_timestamp(&ts_end);
+
+    const auto chunk_key = std::make_pair(agent.handle, se_id);
+    auto       chunk_id  = uint32_t{0};
+    if(auto itr = att_trace_chunk_counters.find(chunk_key); itr != att_trace_chunk_counters.end())
+    {
+        chunk_id = itr->second++;
+    }
+    else
+    {
+        att_trace_chunk_counters.emplace(chunk_key, 1);
+    }
+
     auto key = tool::att_dispatch_agent_key_t{dispatch_id, agent.handle};
     tool_metadata->att_filenames[key].emplace_back(output_filename);
+    tool_metadata->att_trace_chunks.wlock([&](auto& _chunks) {
+        _chunks.emplace_back(tool::att_trace_chunk_info{dispatch_id,
+                                                        agent.handle,
+                                                        se_id,
+                                                        chunk_id,
+                                                        static_cast<uint32_t>(flags),
+                                                        ts_begin,
+                                                        ts_end,
+                                                        userdata.value != 0,
+                                                        static_cast<uint64_t>(dispatch_id),
+                                                        static_cast<uint64_t>(data_size),
+                                                        output_filename});
+    });
 }
 
 rocprofiler_thread_trace_control_flags_t
@@ -3504,6 +3537,40 @@ generate_output(cleanup_mode _cleanup_mode)
                              rocjpeg_output.get_generator());
     }
 
+    if(tool::get_config().advanced_thread_trace)
+    {
+        auto decoder = rocprofiler::att_wrapper::ATTDecoder(tool::get_config().att_library_path);
+        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found!";
+
+        auto codeobj     = tool_metadata->get_code_object_load_info();
+        auto output_path = tool::format_path(tool::get_config().output_path);
+
+        std::vector<std::string> perf{};
+        for(auto& counter : tool::get_config().att_param_perfcounters)
+        {
+            std::stringstream ss;
+            ss << counter.counter_name;
+
+            if(counter.simd_mask != 0xF) ss << ':' << std::hex << counter.simd_mask;
+
+            perf.emplace_back(ss.str());
+        }
+
+        for(auto& [key, att_files] : tool_metadata->att_filenames)
+        {
+            auto [dispatch_id, agent_handle] = key;
+            std::string formats              = "json,csv";
+
+            auto ui_name = std::stringstream{};
+            ui_name << fmt::format(
+                "ui_output_agent_{}_dispatch_{}", std::to_string(agent_handle), dispatch_id);
+            auto out_path = fmt::format("{}/{}", output_path, ui_name.str());
+            auto in_path  = std::string(".");
+
+            decoder.parse(in_path, out_path, att_files, codeobj, perf, formats);
+        }
+    }
+
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
@@ -3561,39 +3628,7 @@ generate_output(cleanup_mode _cleanup_mode)
         tool::generate_stats(tool::get_config(), *tool_metadata, contributions);
     }
 
-    if(tool::get_config().advanced_thread_trace)
-    {
-        auto decoder = rocprofiler::att_wrapper::ATTDecoder(tool::get_config().att_library_path);
-        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found!";
 
-        auto codeobj     = tool_metadata->get_code_object_load_info();
-        auto output_path = tool::format_path(tool::get_config().output_path);
-
-        std::vector<std::string> perf{};
-        for(auto& counter : tool::get_config().att_param_perfcounters)
-        {
-            std::stringstream ss;
-            ss << counter.counter_name;
-
-            if(counter.simd_mask != 0xF) ss << ':' << std::hex << counter.simd_mask;
-
-            perf.emplace_back(ss.str());
-        }
-
-        for(auto& [key, att_files] : tool_metadata->att_filenames)
-        {
-            auto [dispatch_id, agent_handle] = key;
-            std::string formats              = "json,csv";
-
-            auto ui_name = std::stringstream{};
-            ui_name << fmt::format(
-                "ui_output_agent_{}_dispatch_{}", std::to_string(agent_handle), dispatch_id);
-            auto out_path = fmt::format("{}/{}", output_path, ui_name.str());
-            auto in_path  = std::string(".");
-
-            decoder.parse(in_path, out_path, att_files, codeobj, perf, formats);
-        }
-    }
 
     run_cleanup();
 }

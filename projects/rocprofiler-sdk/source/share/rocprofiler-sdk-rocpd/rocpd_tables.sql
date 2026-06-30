@@ -363,3 +363,58 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (queue_id) REFERENCES `rocpd_info_queue{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
+
+CREATE TABLE IF NOT EXISTS
+    `rocpd_gpu_thread_trace_chunk{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "nid" INTEGER NOT NULL,
+        "pid" INTEGER NOT NULL,
+        "agent_id" INTEGER NOT NULL,
+        "shader_engine_id" INTEGER NOT NULL,
+        "chunk_id" INTEGER NOT NULL,
+        "time_begin" BIGINT,
+        "time_end" BIGINT,
+        "trace_mode" TEXT,
+        "parameters" TEXT,
+        "correlation_id" INTEGER,
+        "dispatch_begin" INTEGER,
+        "dispatch_end" INTEGER,
+        "att_blob_id" TEXT,
+        "flags" INTEGER,
+        "binary_chunk_path" TEXT,
+        "binary_chunk" BLOB,
+        "binary_chunk_size" BIGINT,
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+CREATE TABLE IF NOT EXISTS
+    `rocpd_info_text_blob{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "nid" INTEGER NOT NULL,
+        "pid" INTEGER NOT NULL,
+        "path" TEXT,
+        "md5" TEXT,
+        "size" BIGINT,
+        "text" TEXT NOT NULL,
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+CREATE TABLE IF NOT EXISTS
+    `rocpd_gpu_thread_trace_text_link{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "chunk_id" INTEGER NOT NULL,
+        "text_blob_id" INTEGER NOT NULL,
+        "kind" TEXT,
+        "ordinal" INTEGER,
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (chunk_id) REFERENCES `rocpd_gpu_thread_trace_chunk{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (text_blob_id) REFERENCES `rocpd_info_text_blob{{uuid}}` (id) ON UPDATE CASCADE
+    );

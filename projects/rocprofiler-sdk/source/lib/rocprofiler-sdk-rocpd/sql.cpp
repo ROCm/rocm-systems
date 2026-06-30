@@ -52,6 +52,7 @@
 #include <cstddef>
 #include <initializer_list>
 #include <unordered_map>
+#include <vector>
 
 bool
 operator==(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
@@ -165,12 +166,22 @@ build_schema_paths_string(const char** schema_path_hints, uint64_t num_schema_pa
 {
     const auto _lib_schema_path = get_install_path();
     const auto _env_schema_path = rocprofiler::common::get_env("ROCPD_SCHEMA_PATH", "");
+
+    auto _usr_paths = std::vector<std::string>{};
+    if(schema_path_hints && num_schema_path_hints > 0)
+    {
+        _usr_paths.reserve(static_cast<size_t>(num_schema_path_hints));
+        for(uint64_t i = 0; i < num_schema_path_hints; ++i)
+        {
+            const char* hint = schema_path_hints[i];
+            if(!hint || hint[0] == '\0') continue;
+            _usr_paths.emplace_back(hint);
+        }
+    }
+
     const auto _usr_schema_path =
-        (schema_path_hints)
-            ? fmt::format(
-                  "{}",
-                  fmt::join(schema_path_hints, schema_path_hints + num_schema_path_hints, ":"))
-            : std::string{};
+        _usr_paths.empty() ? std::string{} : fmt::format("{}", fmt::join(_usr_paths, ":"));
+
     return fmt::format("{}:{}:{}", _usr_schema_path, _env_schema_path, _lib_schema_path);
 }
 

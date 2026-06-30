@@ -137,6 +137,8 @@ struct config : output_config
     bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
     bool   att_serialize_all             = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
+    bool   att_param_store_chunk_inline  =
+        get_env("ROCPROF_ATT_PARAM_STORE_CHUNK_INLINE", false);
     bool   enable_signal_handlers        = get_env("ROCPROF_SIGNAL_HANDLERS", true);
     bool   enable_process_sync           = get_env("ROCPROF_PROCESS_SYNC", false);
     bool   selected_regions              = get_env("ROCPROF_SELECTED_REGIONS", false);
@@ -231,6 +233,7 @@ config::get_attach_invariants() const
                            att_library_path,
                            att_param_perfcounters,
                            att_param_perf_ctrl,
+                           att_param_store_chunk_inline,
                            pc_sampling_method,
                            pc_sampling_unit,
                            kernel_filter_include,
@@ -337,6 +340,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(att_library_path);
     CFG_SERIALIZE_MEMBER(att_param_perfcounters);
     CFG_SERIALIZE_MEMBER(att_param_perf_ctrl);
+    CFG_SERIALIZE_MEMBER(att_param_store_chunk_inline);
     CFG_SERIALIZE_MEMBER(att_consecutive_kernels);
 
     // serialize the base class

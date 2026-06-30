@@ -24,3 +24,4 @@ rocprofiler-sdk-rocpd:
 # Version 3.0.1
 # - rocpd_info_pmc.target_arch added NIC type
 # - rocpd_info_agent.type added NIC type
+
