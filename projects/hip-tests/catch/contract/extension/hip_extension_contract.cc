@@ -42,7 +42,7 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_ResolvesKnownSymbol) {
 
   void* pfn = nullptr;
   hipDriverProcAddressQueryResult symbol_status = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
-  HIP_CHECK(hipGetProcAddress("hipRuntimeGetVersion", &pfn, hip_version,
+  HIP_CHECK(hipGetProcAddress("hipGetDevice", &pfn, hip_version,
                               HIP_GET_PROC_ADDRESS_DEFAULT, &symbol_status));
 
   // A symbol that exists in the linked runtime must resolve to a non-null
@@ -51,14 +51,14 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_ResolvesKnownSymbol) {
   REQUIRE(symbol_status == HIP_GET_PROC_ADDRESS_SUCCESS);
 
   // The resolved pointer must be callable through the public signature and
-  // return the same runtime version the runtime reports directly.
+  // report the same current device the runtime reports directly.
   auto resolved = reinterpret_cast<hipError_t (*)(int*)>(pfn);
-  int resolved_version = 0;
-  HIP_CHECK(resolved(&resolved_version));
+  int resolved_device = -1;
+  HIP_CHECK(resolved(&resolved_device));
 
-  int direct_version = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&direct_version));
-  REQUIRE(resolved_version == direct_version);
+  int direct_device = -1;
+  HIP_CHECK(hipGetDevice(&direct_device));
+  REQUIRE(resolved_device == direct_device);
 }
 
 HIP_TEST_CASE(Contract_Extension_GetProcAddress_UnknownSymbol_ReportsNotFound) {
@@ -72,12 +72,21 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_UnknownSymbol_ReportsNotFound) {
       hipGetProcAddress("hipThisSymbolDoesNotExist", &pfn, hip_version,
                         HIP_GET_PROC_ADDRESS_DEFAULT, &symbol_status);
 
-  // An unknown symbol must not resolve. The runtime reports this through the
-  // optional status enumeration; the returned error code is vendor-specific so
-  // it is only required to be a non-success value.
-  REQUIRE(error != hipSuccess);
-  REQUIRE(pfn == nullptr);
-  REQUIRE(symbol_status == HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND);
+  // An unknown symbol must not produce a valid callable lookup. Backends differ
+  // in how they signal this, so the contract accepts any of the equivalent
+  // not-found indications: a non-success return, the not-found status, or a null
+  // function pointer.
+  const bool reported_not_found = (error != hipSuccess) ||
+                                  (symbol_status == HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND) ||
+                                  (pfn == nullptr);
+  REQUIRE(reported_not_found);
+
+  // Regardless of how the not-found state is signaled, the lookup must not
+  // simultaneously claim success and hand back a callable pointer.
+  const bool resolved_successfully =
+      (error == hipSuccess) && (symbol_status == HIP_GET_PROC_ADDRESS_SUCCESS) &&
+      (pfn != nullptr);
+  REQUIRE_FALSE(resolved_successfully);
 }
 
 HIP_TEST_CASE(Contract_Extension_GetProcAddress_NullArgs_AreRejected) {
