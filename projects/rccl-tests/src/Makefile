@@ -142,6 +142,14 @@ ifeq ($(ENABLE_DEVICE_API), 1)
 HIPCUFLAGS += -DENABLE_DEVICE_API
 endif
 
+# Statically link against a librccl.a that was built with -fgpu-rdc.
+# This requires compiling the test objects with -fgpu-rdc as well and
+# performing the HIP device link step (--hip-link) at final link time.
+ifeq ($(STATIC_RCCL), 1)
+HIPCUFLAGS += -fgpu-rdc
+HIPLDFLAGS += -fgpu-rdc --hip-link $(GPU_TARGETS_FLAGS) -lroctx64
+endif
+
 LIBRARIES += rccl dl
 HIPLDFLAGS += $(LIBRARIES:%=-l%)
 

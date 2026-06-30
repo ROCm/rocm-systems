@@ -59,7 +59,7 @@ static void loadRcclSyms() {
 
 // RCCL_FLOAT8 support
 bool rccl_float8_useFnuz = false;
-bool IsArchMatch(char const* arch, char const* target) {
+static bool IsArchMatch(char const* arch, char const* target) {
   // helper function to reduce clutter in code elsewhere.  Returns true on match.
   return (strncmp(arch, target, strlen(target)) == 0);
 }
