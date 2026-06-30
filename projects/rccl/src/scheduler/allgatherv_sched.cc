@@ -80,20 +80,17 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     if (proto == NCCL_PROTO_LL128) chunkSize = (chunkSize / NCCL_LL128_LINEELEMS) * NCCL_LL128_DATAELEMS;
     size_t grainSize = rcclProtoGrainSize(proto, comm);
     nChannels = tcoll.nMaxChannels;
-    chunkSize = chunkSize / grainSize * grainSize;
-
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    // Cap fused works so batchTasks*stepsPerWork <= NCCL_STEPS; excess spills to a
-    // follow-up kernel. Prevents FIFO overrun and cross-root data corruption.
-    {
-      size_t partBytes = divUp(maxBcastBytes, (size_t)nChannels);
-      int stepsPerWork = (partBytes > (size_t)chunkSize) ? 2 : 1;
-      int maxFusedTasks = std::max(1, NCCL_STEPS / stepsPerWork);
-      if ((int)batchTasks > maxFusedTasks) batchTasks = maxFusedTasks;
+#ifdef ENABLE_WARP_SPEED
+    // AllGatherV launches grid=nChannels without WarpSpeed, so undo the tuner's
+    // warpSpeedChannelMultiplier inflation (else the oversized grid faults on gfx950).
+    if (comm->warpSpeedChannelMultiplier > 1) {
+      nChannels = std::max(1, nChannels / comm->warpSpeedChannelMultiplier);
     }
 #endif
+    chunkSize = chunkSize / grainSize * grainSize;
 
-    // Determine thread count per block.
+
+    // Determine thread count per block
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     int threadPerBlock = tcoll.nWarps * comm->WarpSize;
 #else
@@ -105,12 +102,11 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     // Choose kernel for plan. Based on proto, algo=ring
     int funcIndex = ncclDevFuncId(ncclFuncAllGatherV, /*devRedOp,type=*/0, 0, NCCL_ALGO_RING, proto);
     if (!plan->kernelSpecialized) {
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      // RCCL doesn't expose the upstream ncclDevKernelForFunc[] lookup. The
+      // unroll-indexed ncclKerns table (file-local in enqueue.cc) is the
+      // canonical RCCL pattern (see enqueue.cc:1010-1011, :1413-1414); we go
+      // through a wrapper because the table is static.
       ncclPlanSetDefaultKernel(comm, plan);
-#else
-      plan->kernelFn = ncclDevKernelForFunc[funcIndex];
-      plan->kernelSpecialized = ncclDevKernelForFuncIsSpecialized[funcIndex];
-#endif
     }
 
     // Compute opCount for proxy work.

@@ -517,8 +517,8 @@ static void groupCleanup(struct ncclComm** groupCommHeadPtr,
           comm->planner.peers = tmp;
           if (comm->planner.peers != NULL)
             memset(comm->planner.peers, 0, comm->nRanks * sizeof(comm->planner.peers[0]));
-       //   comm->planner.bcast_info.minBcastPeer = INT_MAX;
-       //   comm->planner.bcast_info.maxBcastPeer = INT_MIN;
+          comm->planner.bcast_info.minBcastPeer = INT_MAX;
+          comm->planner.bcast_info.maxBcastPeer = INT_MIN;
 
           comm->planner.rmaTaskQueues = tmpRmaQueues;
           if (comm->planner.rmaTaskQueues != NULL) {

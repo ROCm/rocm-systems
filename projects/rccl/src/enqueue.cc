@@ -216,7 +216,6 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
     // account for all extension batches being fused together which is why
     // wipBatch.workBytes and wipBatch.nP2ps aren't reset to 0 for a new extension
     // batch further down.
-    newBatch |= NCCL_MAX_DEV_WORK_BATCH_BYTES < chan->wipBatch.workBytes + workSize;
     if (workType == ncclDevWorkTypeP2p) {
       newBatch |= !chan->wipBatch.batchP2P;
       newBatch |= (comm->nNodes > 2 && batchP2P) ? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) :
@@ -228,6 +227,12 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
         newBatch |= (p2pRound / NCCL_MAX_DEV_WORK_P2P_PER_BATCH) !=
                     (chan->wipBatch.p2pRounds[i] / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
       }
+    }
+    if (workType == ncclDevWorkTypeBcast) {
+      int maxitem = ncclMaxDevWorkBatchBytes(comm->cudaArch) / sizeof(ncclDevWorkBcast);
+      newBatch |= chan->wipBatch.nBcasts == maxitem;
+    } else {
+      newBatch |= NCCL_MAX_DEV_WORK_BATCH_BYTES < chan->wipBatch.workBytes + workSize;
     }
   }
   // Conditions causing us to create an extension batch (prev->nextExtends=1)
@@ -255,9 +260,11 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
       // a new batch
       chan->wipBatch.workBytes = 0;
       chan->wipBatch.nP2ps = 0;
+      chan->wipBatch.nBcasts = 0;
       // We don't count extension batches since this is used to derive a proxyOpCount,
       // and we wan't all ops which are fused together to have the same value.
       chan->nWorkBatchesP2p += (workType == ncclDevWorkTypeP2p ? 1 : 0);
+      chan->nWorkBatchesBcast += (workType == ncclDevWorkTypeBcast ? 1 : 0);
     }
     plan->nWorkBatches += 1;
   }
@@ -271,6 +278,9 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
     // We need to ensure that a single batch doesn't have multiple p2p's
     // of the same round since they would use the same connections.
     chan->wipBatch.p2pRounds[chan->wipBatch.nP2ps++] = p2pRound;
+  }
+  if (workType == ncclDevWorkTypeBcast) {
+    chan->wipBatch.nBcasts += 1;
   }
 }
 
