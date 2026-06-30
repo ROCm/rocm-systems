@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import fcntl
 import importlib
 import os
 import pkgutil
@@ -9,6 +10,8 @@ import shlex
 import shutil
 import time
 import traceback
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
@@ -59,6 +62,58 @@ def is_live_attach(
 def pc_sampling_unit(method: str) -> str:
     """Map a PC sampling method to its sampling unit."""
     return "time" if method == "host_trap" else "cycles"
+
+
+@contextmanager
+def file_lock(
+    lock_path: Path,
+    wait_message: str = "",
+    acquired_message: str = "",
+) -> Generator[None, None, None]:
+    """Hold an exclusive advisory lock on a shared, multi-user lock file."""
+    fd, mode = _open_shared_lock_fd(lock_path)
+    with os.fdopen(fd, mode, encoding="utf-8") as lock_handle:
+        try:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if wait_message:
+                print(wait_message, flush=True)
+            fcntl.flock(lock_handle, fcntl.LOCK_EX)  # blocking wait
+            if acquired_message:
+                print(acquired_message, flush=True)
+        yield
+
+
+def _open_shared_lock_fd(lock_path: Path) -> tuple[int, str]:
+    """Open a shared world-rw lock file, creating it if needed.
+
+    flock advisory locks do not require write access, so a read-only fd is
+    enough to keep a legacy file owned by another user lockable.
+    """
+    nofollow = getattr(os, "O_NOFOLLOW", 0)  # don't open through a symlink
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    create_flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | nofollow | cloexec
+    try:
+        fd = os.open(lock_path, create_flags, 0o666)
+        os.fchmod(fd, 0o666)  # fchmod defeats umask -> world-rw
+        return fd, "r+"
+    except FileExistsError:
+        pass  # already published; open the existing file below
+
+    try:
+        return os.open(lock_path, os.O_RDWR | nofollow | cloexec), "r+"
+    except PermissionError:
+        pass  # foreign-owned legacy file; fall back to read-only
+    except OSError as e:
+        raise RuntimeError(f"Cannot open lock file {lock_path}: {e}.") from e
+
+    try:
+        return os.open(lock_path, os.O_RDONLY | nofollow | cloexec), "r"
+    except OSError as e:
+        raise RuntimeError(
+            f"Cannot open lock file {lock_path}: {e}. A stale lock file owned "
+            "by another user may exist; remove it and retry."
+        ) from e
 
 
 def _classify_output_line(line: str) -> None:
