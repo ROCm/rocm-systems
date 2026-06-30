@@ -63,7 +63,7 @@ using counter_instance_id = std::uint64_t;
 struct counter_record
 {
     counter_instance_id id;
-    double              value{};
+    double              counter_value{};
     bool                operator==(const counter_record&) const = default;
 };
 struct user_data
@@ -228,6 +228,11 @@ public:
 };
 
 // Global singleton — GMock objects are non-copyable, so they live on the heap.
+//
+// SAFETY: Every static stub in mock_sdk dereferences g_mock_sdk without a null
+// check.  Always use this inside a backend_test fixture whose SetUp() sets
+// g_mock_sdk and TearDown() resets it.  Calling any backend<mock_sdk> function
+// outside that fixture will crash with a null pointer dereference.
 inline std::unique_ptr<gmock_sdk> g_mock_sdk;
 
 // ─── mock_sdk ─────────────────────────────────────────────────────────────────

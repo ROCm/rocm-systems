@@ -7,6 +7,7 @@
 
 #include <gmock/gmock.h>
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -125,8 +126,8 @@ struct mock_backend_factory
 
     static std::shared_ptr<backend_t> create_backend()
     {
-        if(s_mock) return s_mock;
-        return std::make_shared<backend_t>();
+        assert(s_mock != nullptr && "mock_backend_factory: call set_mock() before use");
+        return s_mock;
     }
 
     static void reset() { s_mock.reset(); }

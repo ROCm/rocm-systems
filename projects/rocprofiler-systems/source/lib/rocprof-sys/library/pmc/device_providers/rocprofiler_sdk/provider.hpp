@@ -36,6 +36,13 @@ public:
         configure_agents(agent_list, enabled);
     }
 
+    // &m_profile_configs is passed as void* user_data to the SDK callback.
+    // Moving this object after configure_agents() would relocate the map and
+    // dangle that pointer. Delete move operations to make this constraint
+    // a compile-time guarantee rather than a comment.
+    provider(provider&&)            = delete;
+    provider& operator=(provider&&) = delete;
+
     void start()
     {
         for(const auto& device : m_devices)
