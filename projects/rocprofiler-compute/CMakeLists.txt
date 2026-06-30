@@ -803,6 +803,13 @@ if(TARGET test-rocprofiler-compute-tool)
         set(_tool_test_cmd $<TARGET_FILE:test-rocprofiler-compute-tool>)
     endif()
     add_test(NAME test-rocprofiler-compute-tool COMMAND ${_tool_test_cmd})
+    sanitizer_runtime_env(_san_env OFF)
+    if(_san_env)
+        set_tests_properties(
+            test-rocprofiler-compute-tool
+            PROPERTIES ENVIRONMENT "${_san_env}"
+        )
+    endif()
 endif()
 
 if(TARGET test-pc-sampling-collector)
@@ -812,6 +819,13 @@ if(TARGET test-pc-sampling-collector)
         set(_pcs_test_cmd $<TARGET_FILE:test-pc-sampling-collector>)
     endif()
     add_test(NAME test-pc-sampling-collector COMMAND ${_pcs_test_cmd})
+    sanitizer_runtime_env(_san_env OFF)
+    if(_san_env)
+        set_tests_properties(
+            test-pc-sampling-collector
+            PROPERTIES ENVIRONMENT "${_san_env}"
+        )
+    endif()
 endif()
 
 # -----------------------------------
