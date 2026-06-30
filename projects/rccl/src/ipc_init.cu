@@ -56,11 +56,22 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   // DDA IPC requires cross-GPU IPC memory mapping (hipIpcOpenMemHandle).
-  // On non-P2P topologies (e.g. RDNA3 over PCIe) this fails with
-  // hipErrorInvalidDevicePointer and poisons the HIP device context.
-  if (!comm->isAllCudaP2p) {
-    INFO(NCCL_INIT, "ncclDdaIpcCommInit: skipping DDA IPC (no P2P between all GPUs)");
-    return ncclSuccess;
+  // comm->isAllCudaP2p is set via ncclTopoCheckP2p which on AMD/HIP returns true
+  // whenever ranks share a hostHash, regardless of actual P2P support (paths.cc).
+  // Use hipDeviceCanAccessPeer directly — the authoritative runtime check for IPC
+  // capability, and the same check used in init.cc for hasPeerAccess.
+  for (int i = 0; i < comm->nRanks; i++) {
+    for (int j = i + 1; j < comm->nRanks; j++) {
+      int canAccess = 0;
+      hipError_t err = hipDeviceCanAccessPeer(
+          &canAccess, comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
+      if (err != hipSuccess || !canAccess) {
+        INFO(NCCL_INIT,
+             "ncclDdaIpcCommInit: no P2P between GPU %d and GPU %d, skipping DDA IPC",
+             comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
+        return ncclSuccess;
+      }
+    }
   }
 
   size_t bytes = DDA_IPC_BUFFER_SIZE;
