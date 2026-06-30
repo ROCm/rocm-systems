@@ -2398,6 +2398,8 @@ class Device : public RuntimeObject {
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
   virtual device::UriLocator* createUriLocator() const = 0;
+  void reportDeviceMemoryLeaks();
+  static void reportAllDeviceMemoryLeaks();
 #endif
 #endif
 
