@@ -25,11 +25,11 @@
 // Named markers require the pass plugin. Numeric markers work standalone.
 //
 // Build (enabled + pass plugin for named markers):
-//   hipcc -DSQTT_ENABLED=1 -fpass-plugin=../../build/SQTTInstrumentPass.so \
+//   hipcc -DSQTT_ENABLED=1 -fpass-plugin=../../../build/lib/SQTTInstrumentPass.so \
 //         -I ../../include/ marker.hip -o marker
 
 #include <hip/hip_runtime.h>
-#include "sqtt_trace.hpp"
+#include "markers.hpp"
 
 __global__ void test_kernel(float *out, const float *in, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;

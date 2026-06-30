@@ -11,7 +11,7 @@ function entry/exit, barrier synchronization, and user-defined annotations.
 The system consists of:
 
 - **`SQTTInstrumentPass.so`** -- LLVM pass plugin loaded via `-fpass-plugin=`
-- **`sqtt_trace.hpp`** -- Device-side header for user markers
+- **`markers.hpp`** -- Device-side header for user markers
 - **`sqtt_flamegraph.py`** -- Post-processing tool: reads SQTT traces and
   `.sqtt_funcmap` sections to generate flamegraphs
 - **`sqtt_perfetto.py`** -- Post-processing tool: exports SQTT traces as
@@ -33,14 +33,14 @@ it gets symbols from the host compiler process.
 ```bash
 # Minimal (barriers + user markers only)
 SQTT_INSTRUMENT_BARRIERS=1 \
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 
 # Full (function entry/exit with threshold, barriers, scope filtering)
 SQTT_INSTRUMENT_FUNCTIONS=10 SQTT_INSTRUMENT_BARRIERS=1 \
 SQTT_SCOPE_CU=0x3 \
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 All configuration is read from environment variables at compile time and baked
@@ -386,9 +386,9 @@ early/late split needed since there is no inlining).
 
 ---
 
-## User Marker API (`sqtt_trace.hpp`)
+## User Marker API (`markers.hpp`)
 
-Include with `#include "sqtt_trace.hpp"` and compile with `-DSQTT_ENABLED=1`.
+Include with `#include "markers.hpp"` and compile with `-DSQTT_ENABLED=1`.
 When `SQTT_ENABLED` is 0 or undefined, all calls compile to nothing.
 
 ### Functions
@@ -504,7 +504,7 @@ hipcc --offload-arch=gfx942 ... -o my_app
 roc-obj-extract my_app -o my_app.co
 
 # Decode the funcmap
-python3 tools/sqtt_decode_funcmap.py my_app.co --demangle
+python3 scripts/sqtt_decode_funcmap.py my_app.co --demangle
 ```
 
 Output:
@@ -560,7 +560,7 @@ occupancy JSON, code objects) and generates interactive SVG flamegraphs:
 rocprofv3 --att -d trace_output -- ./my_app
 
 # Generate flamegraph (folded stacks to stdout, SVG to disk)
-python3 tools/sqtt_flamegraph.py trace_output/ --demangle --show
+python3 scripts/sqtt_flamegraph.py trace_output/ --demangle --show
 ```
 
 Each `ui_*` directory under the trace output is treated as an independent
@@ -583,10 +583,10 @@ Trace Event Format, viewable at <https://ui.perfetto.dev>:
 
 ```bash
 # One *.perfetto.json per ui_* (sibling-of-source by default)
-python3 tools/sqtt_perfetto.py trace_output/ --demangle
+python3 scripts/sqtt_perfetto.py trace_output/ --demangle
 
 # Collect outputs into one directory; convert cycles to ns
-python3 tools/sqtt_perfetto.py trace_output/ -o /tmp/perfetto_out \
+python3 scripts/sqtt_perfetto.py trace_output/ -o /tmp/perfetto_out \
     --clock-rate-ghz 2.1
 ```
 
@@ -626,8 +626,8 @@ in the funcmap, not from encoding bits.
 
 1. **Compile** with the pass plugin and desired env vars
 2. **Capture** an SQTT trace (via `rocprofv3 --att`)
-3. **Generate** flamegraph: `python3 tools/sqtt_flamegraph.py trace_dir/ --demangle`
-4. Or **export to Perfetto**: `python3 tools/sqtt_perfetto.py trace_dir/ --demangle`
+3. **Generate** flamegraph: `python3 scripts/sqtt_flamegraph.py trace_dir/ --demangle`
+4. Or **export to Perfetto**: `python3 scripts/sqtt_perfetto.py trace_dir/ --demangle`
 5. Or: **Extract** the code object, **read** `.sqtt_funcmap`, and **decode**
    trace tokens manually using the bit layout above
 

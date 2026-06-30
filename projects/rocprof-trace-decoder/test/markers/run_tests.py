@@ -25,7 +25,7 @@
 """
 Automated test suite for the SQTT instrumentation pass.
 
-Compiles test/kernels/auto.hip with various env var configurations and verifies:
+Compiles test/markers/kernels/auto.hip with various env var configurations and verifies:
 - IR patterns (readlane loops, ptrtoint, exec mask)
 - Assembly patterns (v_readlane_b32, s_ttracedata)
 - Funcmap entries in the .sqtt_funcmap ELF section
@@ -33,9 +33,9 @@ Compiles test/kernels/auto.hip with various env var configurations and verifies:
 - Regression: existing features still work after changes
 
 Usage:
-    python3 test/run_tests.py           # run from project root
-    python3 test/run_tests.py -v        # verbose (show compiler output on failure)
-    python3 test/run_tests.py -k lds    # run only tests matching "lds"
+    python3 test/markers/run_tests.py           # run from project root
+    python3 test/markers/run_tests.py -v        # verbose (show compiler output on failure)
+    python3 test/markers/run_tests.py -k lds    # run only tests matching "lds"
 """
 
 import argparse
@@ -48,18 +48,18 @@ import tempfile
 
 # Resolve project paths relative to this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 BUILD_DIR = os.environ.get("SQTT_BUILD_DIR", os.path.join(PROJECT_ROOT, "build"))
 PASS_PLUGIN = os.environ.get(
-    "SQTT_PASS_PLUGIN", os.path.join(BUILD_DIR, "SQTTInstrumentPass.so"))
-INCLUDE_DIR = os.path.join(PROJECT_ROOT, "include")
+    "SQTT_PASS_PLUGIN", os.path.join(BUILD_DIR, "lib", "SQTTInstrumentPass.so"))
+INCLUDE_DIR = os.path.join(PROJECT_ROOT, "include", "rocprof_trace_decoder", "cxx")
 TEST_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "auto.hip")
 ADDR_TRACE_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "addr_trace.hip")
 MARKER_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "marker.hip")
-TOOLS_DIR = os.path.join(PROJECT_ROOT, "tools")
+SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 
-# Add tools/ to path for find_llvm_tool
-sys.path.insert(0, TOOLS_DIR)
+# Add scripts/ to path for find_llvm_tool
+sys.path.insert(0, SCRIPTS_DIR)
 from sqtt_data import find_llvm_tool
 
 
@@ -659,9 +659,9 @@ def run_test(test: dict, hipcc: str, verbose: bool) -> TestResult:
                         result.fail(f"Missing stderr pattern: {pat}")
 
             elif mode == "tool_self_test":
-                # Run a tools/*.py self-test (no compilation, no rocprofv3).
+                # Run a scripts/*.py self-test (no compilation, no rocprofv3).
                 # Used to validate Python helpers in isolation.
-                tool = os.path.join(TOOLS_DIR, test["tool"])
+                tool = os.path.join(SCRIPTS_DIR, test["tool"])
                 r = subprocess.run(
                     [sys.executable, tool, "--self-test"],
                     capture_output=True, text=True, timeout=30)

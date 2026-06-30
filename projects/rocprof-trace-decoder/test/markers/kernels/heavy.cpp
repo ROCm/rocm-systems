@@ -34,7 +34,7 @@
 #define roctxProfilerPause(_x)
 #endif
 
-#include "sqtt_trace.hpp"
+#include "markers.hpp"
 
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \

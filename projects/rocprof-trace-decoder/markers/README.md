@@ -16,7 +16,7 @@ cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
 cmake --build build
 ```
 
-This produces `build/SQTTInstrumentPass.so`.
+This produces `build/lib/SQTTInstrumentPass.so`.
 
 Use `CMAKE_PREFIX_PATH` to select a specific ROCm installation:
 
@@ -32,7 +32,7 @@ cmake --build build-rocm713
 Add markers to your HIP code and compile with `-DSQTT_ENABLED=1`:
 
 ```cpp
-#include "sqtt_trace.hpp"
+#include "markers.hpp"
 
 __global__ void my_kernel(float *data, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -46,8 +46,8 @@ __global__ void my_kernel(float *data, int n) {
 ```
 
 ```bash
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 Without `-DSQTT_ENABLED=1` (or with `-DSQTT_ENABLED=0`), all marker calls
@@ -67,8 +67,8 @@ waves on matching CUs/SIMDs/WGs emit markers:
 # Only CU 0, SIMD 0, all workgroups
 SQTT_SCOPE_CU=0x1 SQTT_SCOPE_SIMD=0x1 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 By default the pass limits markers to CU 0-1 (`SQTT_SCOPE_CU=0x3`).
@@ -82,8 +82,8 @@ SQTT already generates wave start/end markers for them.
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=10 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 Use weighted cost instead of instruction count:
@@ -91,8 +91,8 @@ Use weighted cost instead of instruction count:
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=cost:50 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 ### Automatic barrier instrumentation (gfx12)
@@ -102,8 +102,8 @@ Insert point markers around `s_barrier_signal` and `s_barrier_wait`:
 ```bash
 SQTT_INSTRUMENT_BARRIERS=1 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 ### Automatic memory operation markers
@@ -114,8 +114,8 @@ Insert point markers around groups of global/buffer/flat memory operations
 ```bash
 SQTT_INSTRUMENT_MEMORY=2:5 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 Format: `N:M` where N = number of memory ops per marker, M = max instruction
@@ -134,8 +134,8 @@ cache line utilization analysis, stride detection, and coalescing analysis:
 ```bash
 SQTT_TRACE_ADDRESSES=memory \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 Trace LDS addresses only:
@@ -143,8 +143,8 @@ Trace LDS addresses only:
 ```bash
 SQTT_TRACE_ADDRESSES=lds \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 Trace both global and LDS:
@@ -152,8 +152,8 @@ Trace both global and LDS:
 ```bash
 SQTT_TRACE_ADDRESSES=memory,lds \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 `SQTT_TRACE_ADDRESSES` and `SQTT_INSTRUMENT_MEMORY` are mutually exclusive.
@@ -164,8 +164,8 @@ Analyze address traces after capture:
 
 ```bash
 rocprofv3 --att -d trace_output -- ./my_app
-python3 tools/sqtt_memory_trace.py trace_output/ -o addresses.json
-python3 tools/sqtt_memory_trace.py trace_output/ --summary
+python3 scripts/sqtt_memory_trace.py trace_output/ -o addresses.json
+python3 scripts/sqtt_memory_trace.py trace_output/ --summary
 ```
 
 The trace protocol emits a header marker, the EXEC mask, and then
@@ -189,8 +189,8 @@ SQTT_INSTRUMENT_MEMORY=2:5 \
 SQTT_SCOPE_CU=0x1 \
 SQTT_SCOPE_SIMD=0x1 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ my_kernel.hip -o my_kernel
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
 ```
 
 ## Marker API
@@ -213,7 +213,7 @@ sqtt_marker_point(uint32_t id);     // point event
 Use string-based markers for readable trace output with automatic ID management:
 
 ```cpp
-#include "sqtt_trace.hpp"
+#include "markers.hpp"
 
 __global__ void my_kernel(float *data, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -232,7 +232,7 @@ __global__ void my_kernel(float *data, int n) {
 }
 ```
 
-Named markers require the pass plugin (`-fpass-plugin=build/SQTTInstrumentPass.so`).
+Named markers require the pass plugin (`-fpass-plugin=build/lib/SQTTInstrumentPass.so`).
 The pass:
 
 1. Finds all `sqtt_marker_enter("...")`, `sqtt_marker_exit("...")`, and
@@ -289,17 +289,17 @@ directly via `getenv()`.
 
 ### Shader wave trace as seen with auto instrumentation and user markers together
 
-![Global view trace](docs/trace.png)
+![Global view trace](../docs/markers/trace.png)
 
 ### Coarse Flamegraph derived from the previous trace without instruction tracing
 
-![Coarse flamegraph](docs/globalflame.png)
+![Coarse flamegraph](../docs/markers/globalflame.png)
 
 ### Fine Flamegraph derived from the previous trace with instruction tracing
 
-![Fine flamegraph](docs/fineflame.png)
+![Fine flamegraph](../docs/markers/fineflame.png)
 
-### User markers (`test/kernels/heavy.cpp`)
+### User markers (`test/markers/kernels/heavy.cpp`)
 
 The kernel in `heavy.cpp` uses named markers to annotate producer/consumer
 threads and individual phases (memory loads, LDS stores, MFMA compute). Here is the
@@ -339,8 +339,8 @@ sqtt_marker_exit("Consumer Thread");
 Build with the pass plugin and capture a trace:
 
 ```bash
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ test/kernels/heavy.cpp -o heavy
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ test/markers/kernels/heavy.cpp -o heavy
 
 rocprofv3 --att -d trace -- ./heavy
 ```
@@ -381,10 +381,10 @@ Build with automatic function instrumentation and capture a trace:
 
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=10 \
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ test/kernels/heavy.hip -o heavy
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ test/markers/kernels/auto.hip -o auto
 
-rocprofv3 --att -d trace -- ./heavy
+rocprofv3 --att -d trace -- ./auto
 ```
 
 ## Decoding the function map
@@ -397,10 +397,10 @@ function names. Extract it from the code object:
 llvm-objdump --offloading my_kernel
 
 # Decode the function map (resolves ELF vaddrs)
-python3 tools/sqtt_decode_funcmap.py my_kernel.0.hipv4-amdgcn-amd-amdhsa--gfx942
+python3 scripts/sqtt_decode_funcmap.py my_kernel.0.hipv4-amdgcn-amd-amdhsa--gfx942
 
 # With demangled names
-python3 tools/sqtt_decode_funcmap.py my_kernel.0.hipv4-amdgcn-amd-amdhsa--gfx942 --demangle
+python3 scripts/sqtt_decode_funcmap.py my_kernel.0.hipv4-amdgcn-amd-amdhsa--gfx942 --demangle
 ```
 
 Example output:
@@ -508,14 +508,14 @@ Check that markers appear in the IR:
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=5 \
 hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ -S -emit-llvm my_kernel.hip -o - \
+      -fpass-plugin=build/lib/SQTTInstrumentPass.so \
+      -I include/rocprof_trace_decoder/cxx/ -S -emit-llvm my_kernel.hip -o - \
       | grep ttracedata
 ```
 
 Check that disabled builds have no markers:
 
 ```bash
-hipcc -I include/ -S -emit-llvm my_kernel.hip -o - | grep ttracedata
+hipcc -I include/rocprof_trace_decoder/cxx/ -S -emit-llvm my_kernel.hip -o - | grep ttracedata
 # (should produce no output)
 ```

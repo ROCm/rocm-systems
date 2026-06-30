@@ -1,103 +1,124 @@
-cmake_minimum_required(VERSION 3.20)
-project(SQTTInstrument LANGUAGES C CXX)
+cmake_minimum_required(VERSION 3.16.0)
 
-# Find ROCm LLVM (avoid system LLVM). Set CMAKE_PREFIX_PATH to choose a
-# specific ROCm install, for example:
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(
+        SQTTInstrument
+        VERSION 0.0.0
+        LANGUAGES C CXX)
+
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(TTD_PROJECT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+    include(GNUInstallDirs)
+    set(CMAKE_INSTALL_LIBDIR "lib")
+elseif(NOT DEFINED TTD_PROJECT_SOURCE_DIR)
+    set(TTD_PROJECT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
+endif()
+
+# Prefer ROCm LLVM so the plugin ABI matches the compiler process loading it.
+# CMAKE_PREFIX_PATH can be used to choose a specific ROCm install, for example:
 #   cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/rocm-7.13.0
 set(SQTT_ROCM_PREFIX_HINTS ${CMAKE_PREFIX_PATH} /opt/rocm)
 find_package(
-    LLVM REQUIRED
+    LLVM
     CONFIG
-    PATHS ${SQTT_ROCM_PREFIX_HINTS}
-    PATH_SUFFIXES lib/llvm/lib/cmake/llvm lib/cmake/llvm
+    QUIET
+    PATHS
+    ${SQTT_ROCM_PREFIX_HINTS}
+    PATH_SUFFIXES
+    lib/llvm/lib/cmake/llvm
+    lib/cmake/llvm
     NO_DEFAULT_PATH)
+
+if(NOT LLVM_FOUND)
+    find_package(LLVM REQUIRED CONFIG)
+    message(WARNING "ROCm LLVM was not found via CMAKE_PREFIX_PATH or /opt/rocm; using LLVM from ${LLVM_DIR}")
+endif()
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
-# Pass plugin shared library
 add_library(
     SQTTInstrumentPass MODULE
-    src/SQTTPass.cpp
-    src/SQTTMarkers.cpp
-    src/SQTTNamedMarkers.cpp
-    src/SQTTBarriers.cpp
-    src/SQTTMemory.cpp
-    src/SQTTAddressTrace.cpp
-    src/SQTTFunctions.cpp
-    src/SQTTFuncMap.cpp)
+    SQTTPass.cpp
+    SQTTMarkers.cpp
+    SQTTNamedMarkers.cpp
+    SQTTBarriers.cpp
+    SQTTMemory.cpp
+    SQTTAddressTrace.cpp
+    SQTTFunctions.cpp
+    SQTTFuncMap.cpp)
 
-target_include_directories(SQTTInstrumentPass PRIVATE ${LLVM_INCLUDE_DIRS} include src)
-
+target_include_directories(SQTTInstrumentPass PRIVATE ${LLVM_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}
+                                                      ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx)
 target_compile_definitions(SQTTInstrumentPass PRIVATE ${LLVM_DEFINITIONS})
-
 target_compile_features(SQTTInstrumentPass PRIVATE cxx_std_17)
 
-# Pass plugins must NOT link LLVM libraries -- they get symbols from the host process
+if(NOT MSVC)
+    target_compile_options(SQTTInstrumentPass PRIVATE -fno-rtti)
+endif()
+
+# Pass plugins must not link LLVM libraries: they get symbols from the host compiler process.
 set_target_properties(
-    SQTTInstrumentPass PROPERTIES NO_SONAME ON PREFIX "" # produce SQTTInstrumentPass.so, not libSQTTInstrumentPass.so
-)
+    SQTTInstrumentPass
+    PROPERTIES NO_SONAME ON
+               PREFIX ""
+               POSITION_INDEPENDENT_CODE ON
+               LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
-target_compile_options(SQTTInstrumentPass PRIVATE -fno-rtti -fPIC)
+install(
+    TARGETS SQTTInstrumentPass
+    EXPORT rocprof-trace-decoder-targets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT devel)
 
-# ----------------------------------------------------------------------------
-# `format` target: rewrite C/C++ sources via clang-format and CMake files via
-# cmake-format, using the .clang-format / .cmake-format.yaml at the repo root.
-# Build with:  cmake --build <build-dir> --target format
-# Missing formatters print a warning but don't fail the build.
-# ----------------------------------------------------------------------------
-file(
-    GLOB_RECURSE
-    SQTT_CXX_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/src/*.cpp"
-    "${CMAKE_SOURCE_DIR}/src/*.h"
-    "${CMAKE_SOURCE_DIR}/src/*.hpp"
-    "${CMAKE_SOURCE_DIR}/include/*.hpp"
-    "${CMAKE_SOURCE_DIR}/include/*.h")
+set(TTD_MARKER_SCRIPTS
+    ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_data.py ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_decode_funcmap.py
+    ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_flamegraph.py ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_memory_trace.py
+    ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_perfetto.py)
 
-set(SQTT_CMAKE_FILES "${CMAKE_SOURCE_DIR}/CMakeLists.txt")
+install(
+    PROGRAMS ${TTD_MARKER_SCRIPTS}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT runtime)
 
-# Pinned to clang-format-14 -- other versions produce different output and
-# would cause format churn across contributors. Override with
-# -DCLANG_FORMAT_EXECUTABLE=... only if you've verified your version matches.
-find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format-14)
-find_program(CMAKE_FORMAT_EXECUTABLE NAMES cmake-format)
+install(
+    DIRECTORY ${TTD_PROJECT_SOURCE_DIR}/docs/markers/
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/markers
+    COMPONENT devel)
 
-if(CLANG_FORMAT_EXECUTABLE)
-    set(_fmt_cxx_cmd
-        COMMAND
-        ${CMAKE_COMMAND}
-        -E
-        echo
-        "clang-format: ${CLANG_FORMAT_EXECUTABLE}"
-        COMMAND
-        ${CLANG_FORMAT_EXECUTABLE}
-        -i
-        --style=file
-        ${SQTT_CXX_SOURCES})
-else()
-    set(_fmt_cxx_cmd COMMAND ${CMAKE_COMMAND} -E echo "warning: clang-format not found, skipping C++ formatting")
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format-14)
+    find_program(CMAKE_FORMAT_EXECUTABLE NAMES cmake-format)
+
+    if(CLANG_FORMAT_EXECUTABLE)
+        set(_fmt_cxx_cmd
+            COMMAND
+            ${CLANG_FORMAT_EXECUTABLE}
+            -i
+            --style=file
+            ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/*.h
+            ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp)
+    else()
+        set(_fmt_cxx_cmd COMMAND ${CMAKE_COMMAND} -E echo "warning: clang-format not found, skipping C++ formatting")
+    endif()
+
+    if(CMAKE_FORMAT_EXECUTABLE)
+        set(_fmt_cmake_cmd COMMAND ${CMAKE_FORMAT_EXECUTABLE} -i ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
+    else()
+        set(_fmt_cmake_cmd COMMAND ${CMAKE_COMMAND} -E echo
+                           "warning: cmake-format not found, skipping CMake formatting")
+    endif()
+
+    add_custom_target(
+        format
+        ${_fmt_cxx_cmd} ${_fmt_cmake_cmd}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Formatting SQTT marker sources"
+        VERBATIM)
 endif()
-
-if(CMAKE_FORMAT_EXECUTABLE)
-    set(_fmt_cmake_cmd
-        COMMAND
-        ${CMAKE_COMMAND}
-        -E
-        echo
-        "cmake-format: ${CMAKE_FORMAT_EXECUTABLE}"
-        COMMAND
-        ${CMAKE_FORMAT_EXECUTABLE}
-        -i
-        ${SQTT_CMAKE_FILES})
-else()
-    set(_fmt_cmake_cmd COMMAND ${CMAKE_COMMAND} -E echo "warning: cmake-format not found, skipping CMake formatting")
-endif()
-
-add_custom_target(
-    format
-    ${_fmt_cxx_cmd} ${_fmt_cmake_cmd}
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Formatting sources"
-    VERBATIM)

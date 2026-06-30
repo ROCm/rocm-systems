@@ -59,8 +59,14 @@ option(BUILD_UNIT_TESTS "Enable Building Unit Tests for ROCProf Trace Decoder" O
 set(BUILD_PYTHON
     "AUTO"
     CACHE STRING "Install Python API: AUTO, ON, or OFF")
+
 set_property(CACHE BUILD_PYTHON PROPERTY STRINGS AUTO ON OFF)
+option(BUILD_MARKERS "Enable Building SQTT marker instrumentation plugin" OFF)
 option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
+
+if(BUILD_MARKERS)
+    add_subdirectory(markers)
+endif()
 
 add_subdirectory(source)
 
@@ -109,6 +115,9 @@ if(CLANG_FORMAT)
         ${CMAKE_SOURCE_DIR}/source/*.cpp
         ${CMAKE_SOURCE_DIR}/source/*.hpp
         ${CMAKE_SOURCE_DIR}/source/*.h
+        ${CMAKE_SOURCE_DIR}/markers/*.cpp
+        ${CMAKE_SOURCE_DIR}/markers/*.hpp
+        ${CMAKE_SOURCE_DIR}/markers/*.h
         ${CMAKE_SOURCE_DIR}/include/*.hpp
         ${CMAKE_SOURCE_DIR}/include/*.h
         ${CMAKE_SOURCE_DIR}/test/*.cpp
@@ -120,8 +129,10 @@ if(CLANG_FORMAT)
 endif()
 
 if(CMAKE_FORMAT)
-    set(ALL_CMAKE_FILES ${CMAKE_SOURCE_DIR}/CMakeLists.txt ${CMAKE_SOURCE_DIR}/source/CMakeLists.txt
-                        ${CMAKE_SOURCE_DIR}/test/CMakeLists.txt ${CMAKE_SOURCE_DIR}/test/unit/CMakeLists.txt)
+    set(ALL_CMAKE_FILES
+        ${CMAKE_SOURCE_DIR}/CMakeLists.txt ${CMAKE_SOURCE_DIR}/source/CMakeLists.txt
+        ${CMAKE_SOURCE_DIR}/markers/CMakeLists.txt ${CMAKE_SOURCE_DIR}/test/CMakeLists.txt
+        ${CMAKE_SOURCE_DIR}/test/unit/CMakeLists.txt)
     file(GLOB CMAKE_MODULES ${CMAKE_SOURCE_DIR}/cmake/*.cmake)
     list(APPEND ALL_CMAKE_FILES ${CMAKE_MODULES})
     list(APPEND FORMAT_COMMANDS COMMAND ${CMAKE_FORMAT} -i ${ALL_CMAKE_FILES})
