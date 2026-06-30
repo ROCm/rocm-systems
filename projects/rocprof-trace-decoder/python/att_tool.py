@@ -190,8 +190,7 @@ def _code_objects_from_paths(paths: list[Path]) -> list[CodeObject]:
     parsed_ids = {codeobj_id for _path, codeobj_id in parsed if codeobj_id is not None}
     if len(untagged) > 1:
         raise SystemExit(
-            "Cannot infer code object IDs for multiple unnamed inputs: "
-            + ", ".join(untagged)
+            "Cannot infer code object IDs for multiple unnamed inputs: " + ", ".join(untagged)
         )
     if untagged and 0 in parsed_ids:
         raise SystemExit(

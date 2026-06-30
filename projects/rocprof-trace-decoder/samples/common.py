@@ -61,7 +61,9 @@ def expand_input_paths(patterns: list[str]) -> SampleInputs:
     code_paths: list[Path] = []
     for pattern in patterns:
         expanded = str(Path(pattern).expanduser())
-        matches = sorted(glob.glob(expanded)) if any(ch in expanded for ch in "*?[]") else [expanded]
+        matches = (
+            sorted(glob.glob(expanded)) if any(ch in expanded for ch in "*?[]") else [expanded]
+        )
         if not matches:
             raise SystemExit(f"No files matched: {pattern}")
         for item in matches:
@@ -120,8 +122,7 @@ def _code_objects_from_paths(paths: list[Path]) -> list[CodeObject]:
     parsed_ids = {code_object_id for _path, code_object_id in parsed if code_object_id is not None}
     if len(untagged) > 1:
         raise SystemExit(
-            "Cannot infer code object ids for multiple unnamed inputs: "
-            + ", ".join(untagged)
+            "Cannot infer code object ids for multiple unnamed inputs: " + ", ".join(untagged)
         )
     if untagged and 0 in parsed_ids:
         raise SystemExit(

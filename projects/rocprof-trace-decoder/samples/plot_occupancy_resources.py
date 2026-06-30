@@ -68,12 +68,14 @@ def occupancy_resource_rows(traces) -> list[dict[str, int]]:
             active_sgprs -= old_sgprs
             active_vgprs -= old_vgprs
 
-        rows.append({
-            "time": int(time),
-            "active_waves": len(active_waves),
-            "active_sgprs": active_sgprs,
-            "active_vgprs": active_vgprs,
-        })
+        rows.append(
+            {
+                "time": int(time),
+                "active_waves": len(active_waves),
+                "active_sgprs": active_sgprs,
+                "active_vgprs": active_vgprs,
+            }
+        )
 
     return rows
 

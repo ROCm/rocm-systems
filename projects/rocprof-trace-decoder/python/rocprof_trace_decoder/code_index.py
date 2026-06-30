@@ -9,6 +9,17 @@ from pathlib import Path
 from .records import Pc, Wave
 
 CODE_HEADER = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle"
+CODE_ROW_INST = 0
+CODE_ROW_LINE = 2
+CODE_ROW_SOURCE = 3
+CODE_ROW_CODE_OBJECT = 4
+CODE_ROW_VADDR = 5
+CODE_ROW_HIT = 6
+CODE_ROW_LATENCY = 7
+CODE_ROW_STALL = 8
+CODE_ROW_IDLE = 9
+CODE_ROW_COUNTERS = (CODE_ROW_HIT, CODE_ROW_LATENCY, CODE_ROW_STALL, CODE_ROW_IDLE)
+CODE_ROW_WIDTH = CODE_ROW_IDLE + 1
 
 
 @dataclass
@@ -55,22 +66,22 @@ class CodeIndex:
         entries: list[CodeEntry] = []
 
         for row in document.get("code", []):
-            if len(row) < 10:
+            if len(row) < CODE_ROW_WIDTH:
                 continue
-            inst = str(row[0])
+            inst = str(row[CODE_ROW_INST])
             if _is_code_label(inst):
                 continue
-            pc = Pc(address=int(row[5]), code_object_id=int(row[4]))
+            pc = Pc(address=int(row[CODE_ROW_VADDR]), code_object_id=int(row[CODE_ROW_CODE_OBJECT]))
             entries.append(
                 CodeEntry(
                     pc=pc,
                     inst=inst,
-                    line_number=int(row[2]),
-                    source=str(row[3]),
-                    hitcount=int(row[6] or 0) if load_counts else 0,
-                    latency=int(row[7] or 0) if load_counts else 0,
-                    stall=int(row[8] or 0) if load_counts else 0,
-                    idle=int(row[9] or 0) if load_counts else 0,
+                    line_number=int(row[CODE_ROW_LINE]),
+                    source=str(row[CODE_ROW_SOURCE]),
+                    hitcount=int(row[CODE_ROW_HIT] or 0) if load_counts else 0,
+                    latency=int(row[CODE_ROW_LATENCY] or 0) if load_counts else 0,
+                    stall=int(row[CODE_ROW_STALL] or 0) if load_counts else 0,
+                    idle=int(row[CODE_ROW_IDLE] or 0) if load_counts else 0,
                 )
             )
 
@@ -279,8 +290,9 @@ def _is_code_label(inst: str) -> bool:
 
 def _clear_document_counts(document: dict) -> None:
     for row in document.get("code", []):
-        if len(row) >= 10:
-            row[6:10] = [0, 0, 0, 0]
+        if len(row) >= CODE_ROW_WIDTH:
+            for column in CODE_ROW_COUNTERS:
+                row[column] = 0
 
 
 def _write_stats_row(writer: object, entry: CodeEntry) -> None:

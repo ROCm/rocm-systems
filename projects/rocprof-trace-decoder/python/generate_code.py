@@ -38,8 +38,7 @@ def _code_objects_from_paths(paths: list[Path]) -> list[CodeObject]:
 
     if len(untagged) > 1:
         raise ValueError(
-            "Cannot infer code object IDs for multiple unnamed inputs: "
-            + ", ".join(untagged)
+            "Cannot infer code object IDs for multiple unnamed inputs: " + ", ".join(untagged)
         )
     if untagged and 0 in parsed_ids:
         raise ValueError(

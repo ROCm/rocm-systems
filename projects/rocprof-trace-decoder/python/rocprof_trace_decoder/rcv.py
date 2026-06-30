@@ -33,10 +33,7 @@ def normalize_output_formats(formats: str | Iterable[str]) -> frozenset[str]:
         raw_items = formats
 
     normalized = frozenset(
-        part.strip().lower()
-        for item in raw_items
-        for part in str(item).split(",")
-        if part.strip()
+        part.strip().lower() for item in raw_items for part in str(item).split(",") if part.strip()
     )
     if not normalized:
         raise ValueError("No output formats requested.")
@@ -159,8 +156,7 @@ class RcvOutputWriter:
     def _write_perf(self, se: int, events: list[PerfEvent]) -> None:
         data = {
             "data": [
-                [e.time, e.events0, e.events1, e.events2, e.events3, e.cu, e.bank]
-                for e in events
+                [e.time, e.events0, e.events1, e.events2, e.events3, e.cu, e.bank] for e in events
             ]
         }
         _write_json(self.output_dir / f"se{se}_perfcounter.json", data)
@@ -194,10 +190,7 @@ class RcvOutputWriter:
             "end_time": end,
             "records_schema": ["time", "value", "cu", "simd", "wave_id", "flags"],
             "records_count": len(records),
-            "records": [
-                [r.time, r.value, r.cu, r.simd, r.wave_id, r.flags]
-                for r in records
-            ],
+            "records": [[r.time, r.value, r.cu, r.simd, r.wave_id, r.flags] for r in records],
         }
         _write_json(self.output_dir / filename, data)
 

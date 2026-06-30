@@ -53,13 +53,15 @@ def wave_lifetime_rows(traces, artifacts) -> list[dict[str, int]]:
                 else:
                     non_valu_latency += inst.duration
 
-            rows.append({
-                "lifetime": max(wave.end_time - wave.begin_time, 0),
-                "waitcnt_latency": waitcnt_latency,
-                "non_valu_latency": non_valu_latency,
-                "valu_latency": valu_latency,
-                "idle_time": wave_idle_time(wave),
-            })
+            rows.append(
+                {
+                    "lifetime": max(wave.end_time - wave.begin_time, 0),
+                    "waitcnt_latency": waitcnt_latency,
+                    "non_valu_latency": non_valu_latency,
+                    "valu_latency": valu_latency,
+                    "idle_time": wave_idle_time(wave),
+                }
+            )
     return rows
 
 

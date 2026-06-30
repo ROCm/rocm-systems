@@ -111,6 +111,7 @@ def is_elf(path: str | Path) -> bool:
 # DWARF helpers
 # ---------------------------------------------------------------------------
 
+
 def _decode(b) -> str:
     if isinstance(b, bytes):
         return b.decode("utf-8", errors="replace")
@@ -155,7 +156,8 @@ def _get_high_pc(die, low_pc: int | None) -> int | None:
     if form == "DW_FORM_addr":
         return attr.value
     if form.startswith("DW_FORM_data") or form in (
-        "DW_FORM_udata", "DW_FORM_sdata",
+        "DW_FORM_udata",
+        "DW_FORM_sdata",
         "DW_FORM_implicit_const",
     ):
         return (low_pc or 0) + attr.value
@@ -256,7 +258,7 @@ class _Inlined:
                 added = True
                 break
         if self.is_inlined and self.contains_total(addr):
-            for (lo, hi) in self.ranges:
+            for lo, hi in self.ranges:
                 if lo <= addr < hi:
                     out.append(self.file_and_line)
                     return True
@@ -334,7 +336,9 @@ def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
             except expected_errors:
                 line_program = None
             except Exception:
-                LOGGER.debug("Unexpected error reading a DWARF line program from %s", elf_path, exc_info=True)
+                LOGGER.debug(
+                    "Unexpected error reading a DWARF line program from %s", elf_path, exc_info=True
+                )
                 line_program = None
             if line_program is None:
                 continue
@@ -355,7 +359,9 @@ def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
             except expected_errors:
                 continue
             except Exception:
-                LOGGER.debug("Unexpected error reading DWARF line entries from %s", elf_path, exc_info=True)
+                LOGGER.debug(
+                    "Unexpected error reading DWARF line entries from %s", elf_path, exc_info=True
+                )
                 continue
             states = [(e.state, e) for e in entries if e.state is not None]
             line_ranges: dict[int, tuple[int, str]] = {}
@@ -522,6 +528,7 @@ def extract_paths_from_comments(comments: list[str]) -> list[str]:
 # Driver
 # ---------------------------------------------------------------------------
 
+
 def _normalize_code_objects(code_objects: Iterable[CodeObject]) -> list[CodeObject]:
     out: list[CodeObject] = []
     seen_ids: dict[int, Path] = {}
@@ -562,32 +569,36 @@ def generate_code_artifacts(code_objects: Iterable[CodeObject]) -> CodeArtifacts
             kernel = kernels.get(vaddr)
             if kernel is not None:
                 kernel_name, kernel_demangled = kernel
-                rows.append([
-                    _code_label(kernel_name),
-                    0,
-                    line_no,
-                    kernel_demangled,
-                    codeobj_id,
-                    vaddr,
-                    0,
-                    0,
-                    0,
-                    0,
-                ])
+                rows.append(
+                    [
+                        _code_label(kernel_name),
+                        0,
+                        line_no,
+                        kernel_demangled,
+                        codeobj_id,
+                        vaddr,
+                        0,
+                        0,
+                        0,
+                        0,
+                    ]
+                )
                 line_no += 1
             for label in debug_labels.get(vaddr, []):
-                rows.append([
-                    _code_label(label),
-                    0,
-                    line_no,
-                    "",
-                    codeobj_id,
-                    vaddr,
-                    0,
-                    0,
-                    0,
-                    0,
-                ])
+                rows.append(
+                    [
+                        _code_label(label),
+                        0,
+                        line_no,
+                        "",
+                        codeobj_id,
+                        vaddr,
+                        0,
+                        0,
+                        0,
+                        0,
+                    ]
+                )
                 line_no += 1
 
             comment = lookup_range(range_map, vaddr)
@@ -596,12 +607,14 @@ def generate_code_artifacts(code_objects: Iterable[CodeObject]) -> CodeArtifacts
             line_no += 1
 
         for address, (name, demangled) in sorted(kernels.items()):
-            kernels_out.append({
-                "address": address,
-                "codeobj": codeobj_id,
-                "name": name,
-                "demangled": demangled,
-            })
+            kernels_out.append(
+                {
+                    "address": address,
+                    "codeobj": codeobj_id,
+                    "name": name,
+                    "demangled": demangled,
+                }
+            )
 
     code_doc = {
         "code": rows,

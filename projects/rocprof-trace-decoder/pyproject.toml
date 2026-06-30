@@ -21,3 +21,7 @@ include = ["rocprof_trace_decoder*"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.autopep8]
+max_line_length = 100
+ignore = "E402"
