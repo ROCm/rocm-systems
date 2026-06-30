@@ -37,7 +37,7 @@ public:
     {
         KERNARG_EXP_ID,
         OUTPUT_EXP_ID,
-        REFOUT_EXP_ID
+        REFOUT_EXP_ID,
     };
     // Memory descriptors IDs
     enum des_id_t
@@ -46,7 +46,7 @@ public:
         LOCAL_DES_ID,
         KERNARG_DES_ID,
         SYS_DES_ID,
-        REFOUT_DES_ID
+        REFOUT_DES_ID,
     };
 
     // Memory descriptors vector declaration
@@ -62,7 +62,7 @@ public:
     typedef mem_map_t::iterator             mem_it_t;
     typedef mem_map_t::const_iterator       mem_const_it_t;
 
-    virtual ~TestKernel() {}
+    virtual ~TestKernel() = default;
 
     // Initialize method
     virtual void Init() = 0;
@@ -71,10 +71,10 @@ public:
     mem_map_t& GetMemMap() { return mem_map_; }
 
     // Return NULL descriptor
-    static mem_descr_t NullDescriptor() { return {NULL_DES_ID, NULL, 0}; }
+    static mem_descr_t NullDescriptor() { return {NULL_DES_ID, nullptr, 0}; }
 
     // Check if decripter is local
-    bool IsLocal(const mem_descr_t& descr) const { return (descr.id == LOCAL_DES_ID); }
+    static bool IsLocal(const mem_descr_t& descr) { return (descr.id == LOCAL_DES_ID); }
 
     // Methods to get the kernel attributes
     const mem_descr_t& GetKernargDescr() { return *test_map_[KERNARG_EXP_ID]; }
@@ -130,7 +130,7 @@ protected:
             {
                 test_map_[REFOUT_EXP_ID] = &descr;
             }
-            if(descr.ptr == NULL) suc = false;
+            if(descr.ptr == nullptr) suc = false;
         }
         return suc;
     }
@@ -146,7 +146,7 @@ private:
     // Set memory descriptor
     bool SetMemDescr(const uint32_t& buf_id, const des_id_t& des_id, const uint32_t& size)
     {
-        const mem_descr_t des = {des_id, NULL, size};
+        const mem_descr_t des = {des_id, nullptr, size};
         auto              ret = mem_map_.insert(mem_map_t::value_type(buf_id, des));
         return ret.second;
     }

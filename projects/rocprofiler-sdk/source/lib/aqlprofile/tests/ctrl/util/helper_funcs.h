@@ -31,14 +31,14 @@
 #include <string>
 
 static inline void
-Error(std::string error_msg)
+Error(const std::string& error_msg)
 {
-    std::cerr << "Error: " << error_msg << std::endl;
+    std::cerr << "Error: " << error_msg << '\n';
 }
 
 template <typename T>
 void
-PrintArray(const std::string header, const T* data, const int width, const int height)
+PrintArray(const std::string& header, const T* data, const int width, const int height)
 {
     std::clog << header << " :\n";
     for(int i = 0; i < height; i++)
@@ -67,7 +67,7 @@ FillRandom(T*           array_ptr,
         return false;
     }
 
-    if(!seed) seed = (unsigned int) time(NULL);
+    if(!seed) seed = static_cast<unsigned int>(time(nullptr));
 
     srand(seed);
     double range = double(range_max - range_min) + 1.0;

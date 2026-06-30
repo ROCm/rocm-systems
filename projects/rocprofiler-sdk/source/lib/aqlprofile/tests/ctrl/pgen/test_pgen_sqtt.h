@@ -34,7 +34,7 @@
 typedef std::vector<hsa_ven_amd_aqlprofile_info_data_t> callback_data_t;
 
 hsa_status_t
-TestPGenSqttCallback(hsa_ven_amd_aqlprofile_info_type_t  info_type,
+TestPGenSqttCallback(hsa_ven_amd_aqlprofile_info_type_t   /*info_type*/,
                      hsa_ven_amd_aqlprofile_info_data_t* info_data,
                      void*                               callback_data)
 {
@@ -50,11 +50,11 @@ public:
     explicit TestPGenSqtt(TestAql* t)
     : TestPGen(t)
     {
-        std::clog << "Test: PGen SQTT" << std::endl;
+        std::clog << "Test: PGen SQTT" << '\n';
         profile_ = hsa_ven_amd_aqlprofile_profile_t{};
     }
 
-    bool Initialize(int arg_cnt, char** arg_list)
+    bool Initialize(int arg_cnt, char** arg_list) override
     {
         if(!TestPMgr::Initialize(arg_cnt, arg_list)) return false;
 
@@ -80,7 +80,7 @@ public:
         //                MODE_HOST_ACC|MODE_DEV_ACC|MODE_EXEC_DATA)
         profile_.command_buffer.ptr =
             GetRsrcFactory()->AllocateCmdMemory(GetAgentInfo(), command_buffer_size);
-        TEST_ASSERT(profile_.command_buffer.ptr != NULL);
+        TEST_ASSERT(profile_.command_buffer.ptr != nullptr);
         profile_.command_buffer.size = command_buffer_size;
         TEST_ASSERT((reinterpret_cast<uintptr_t>(profile_.command_buffer.ptr) & buffer_bitmask) ==
                     0);
@@ -99,7 +99,7 @@ public:
             GetRsrcFactory()->AllocateSysMemory(GetAgentInfo(), buffer_size_);
         profile_.output_buffer.size = buffer_size_;
 
-        TEST_ASSERT(profile_.output_buffer.ptr != NULL);
+        TEST_ASSERT(profile_.output_buffer.ptr != nullptr);
         TEST_ASSERT((reinterpret_cast<uintptr_t>(profile_.output_buffer.ptr) & buffer_bitmask) ==
                     0);
 
@@ -115,50 +115,50 @@ public:
         return (status == HSA_STATUS_SUCCESS);
     }
 
-    int  GetMode() { return RUN_MODE; }
-    bool BuildPackets() { return true; }
+    int  GetMode() override { return RUN_MODE; }
+    bool BuildPackets() override { return true; }
 
-    bool DumpData()
+    bool DumpData() override
     {
-        std::clog << "TestPGenSqtt::DumpData :" << std::endl;
+        std::clog << "TestPGenSqtt::DumpData :" << '\n';
 
         bool            bSomeSECollected = false;
         callback_data_t data;
         api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenSqttCallback, &data);
-        for(callback_data_t::iterator it = data.begin(); it != data.end(); ++it)
+        for(const auto& it : data)
         {
-            std::cout << "sample(" << std::dec << it->sample_id << ") size(" << std::dec
-                      << it->trace_data.size << ") ptr(" << std::hex << it->trace_data.ptr << ")"
-                      << std::dec << std::endl;
+            std::cout << "sample(" << std::dec << it.sample_id << ") size(" << std::dec
+                      << it.trace_data.size << ") ptr(" << std::hex << it.trace_data.ptr << ")"
+                      << std::dec << '\n';
 
-            if(it->trace_data.size == 0) continue;
+            if(it.trace_data.size == 0) continue;
             void* sys_buf =
-                GetRsrcFactory()->AllocateSysMemory(GetAgentInfo(), it->trace_data.size);
-            TEST_ASSERT(sys_buf != NULL);
-            if(sys_buf == NULL) return false;
+                GetRsrcFactory()->AllocateSysMemory(GetAgentInfo(), it.trace_data.size);
+            TEST_ASSERT(sys_buf != nullptr);
+            if(sys_buf == nullptr) return false;
 
-            hsa_status_t status = hsa_memory_copy(sys_buf, it->trace_data.ptr, it->trace_data.size);
+            hsa_status_t status = hsa_memory_copy(sys_buf, it.trace_data.ptr, it.trace_data.size);
             TEST_ASSERT(status == HSA_STATUS_SUCCESS);
             if(status != HSA_STATUS_SUCCESS) return false;
 
             {
-                std::ofstream out_file("sqtt_dump_" + std::to_string(it->sample_id) + ".txt");
+                std::ofstream out_file("sqtt_dump_" + std::to_string(it.sample_id) + ".txt");
                 if(out_file.is_open())
                 {
                     out_file << std::hex;
 
                     // Write the buffer in terms of shorts (16 bits)
-                    uint16_t* trace_data = (uint16_t*) sys_buf;
-                    for(unsigned i = 0; i < (it->trace_data.size / sizeof(uint16_t)); ++i)
+                    uint16_t* trace_data = static_cast<uint16_t*>(sys_buf);
+                    for(uint32_t i = 0; i < static_cast<uint32_t>(it.trace_data.size / sizeof(uint16_t)); ++i)
                         out_file << std::setw(4) << std::setfill('0') << trace_data[i] << "\n";
                     out_file << std::dec;
                 }
             }
             {
-                std::ofstream out_file("sqtt_dump_" + std::to_string(it->sample_id) + ".bin",
+                std::ofstream out_file("sqtt_dump_" + std::to_string(it.sample_id) + ".bin",
                                        std::ios::binary);
                 if(out_file.is_open())
-                    out_file.write(static_cast<const char*>(sys_buf), it->trace_data.size);
+                    out_file.write(static_cast<const char*>(sys_buf), it.trace_data.size);
             }
 
             GetRsrcFactory()->FreeMemory(sys_buf);

@@ -32,7 +32,7 @@
 typedef std::vector<hsa_ven_amd_aqlprofile_info_data_t> callback_data_t;
 
 hsa_status_t
-TestPGenPmcCallback(hsa_ven_amd_aqlprofile_info_type_t  info_type,
+TestPGenPmcCallback(hsa_ven_amd_aqlprofile_info_type_t   /*info_type*/,
                     hsa_ven_amd_aqlprofile_info_data_t* info_data,
                     void*                               callback_data)
 {
@@ -49,13 +49,13 @@ public:
     explicit TestPGenPmc(TestAql* t)
     : TestPGen(t)
     {
-        std::clog << "Test: PGen PMC" << std::endl;
+        std::clog << "Test: PGen PMC" << '\n';
         profile_ = hsa_ven_amd_aqlprofile_profile_t{};
     }
 
-    ~TestPGenPmc() { delete[] profile_.events; }
+    ~TestPGenPmc() override { delete[] profile_.events; }
 
-    bool Initialize(int arg_cnt, char** arg_list)
+    bool Initialize(int arg_cnt, char** arg_list) override
     {
         std::vector<hsa_ven_amd_aqlprofile_event_t> event_vec;
 
@@ -66,7 +66,7 @@ public:
             unsigned event_id    = 0;
             sscanf(arg_list[i], "%u:%u:%u", &block_id, &block_index, &event_id);
             const hsa_ven_amd_aqlprofile_event_t event = {
-                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block_id), block_index, event_id};
+                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block_id), block_index, event_id,};
             event_vec.push_back(event);
         }
 
@@ -84,27 +84,27 @@ public:
 
         // Preparing events vector
         std::vector<hsa_ven_amd_aqlprofile_event_t> event_vec_filtered;
-        for(auto it = event_vec.begin(); it != event_vec.end(); ++it)
+        for(const auto& it : event_vec)
         {
             bool         result = false;
             hsa_status_t status =
-                api_->hsa_ven_amd_aqlprofile_validate_event(agent, &(*it), &result);
+                api_->hsa_ven_amd_aqlprofile_validate_event(agent, &it, &result);
             if(status != HSA_STATUS_SUCCESS)
             {
                 const char* str = "";
                 api_->hsa_ven_amd_aqlprofile_error_string(&str);
-                std::cerr << "aqlprofile err: " << str << std::endl;
+                std::cerr << "aqlprofile err: " << str << '\n';
             }
             if(!result)
             {
-                std::cerr << "Bad event: block (" << it->block_name << "_" << it->block_index
-                          << ") id (" << it->counter_id << ")" << std::endl;
+                std::cerr << "Bad event: block (" << it.block_name << "_" << it.block_index
+                          << ") id (" << it.counter_id << ")" << '\n';
             }
             else
             {
-                event_vec_filtered.push_back(*it);
-                std::cerr << "Good event: block (" << it->block_name << "_" << it->block_index
-                          << ") id (" << it->counter_id << ")" << std::endl;
+                event_vec_filtered.push_back(it);
+                std::cerr << "Good event: block (" << it.block_name << "_" << it.block_index
+                          << ") id (" << it.counter_id << ")" << '\n';
             }
         }
         const size_t                    event_count = event_vec_filtered.size();
@@ -114,7 +114,7 @@ public:
             events[i] = event_vec_filtered.at(i);
         }
 
-        if(!event_count) return false;
+        if(event_count == 0u) return false;
 
         // Initialization the profile
         memset(&profile_, 0, sizeof(profile_));
@@ -128,12 +128,12 @@ public:
         // Profile buffers attributes
         command_buffer_alignment = buffer_alignment_;
         output_buffer_alignment  = buffer_alignment_;
-        status                   = api_->hsa_ven_amd_aqlprofile_start(&profile_, NULL);
+        status                   = api_->hsa_ven_amd_aqlprofile_start(&profile_, nullptr);
         if(status != HSA_STATUS_SUCCESS)
         {
             const char* str;
             api_->hsa_ven_amd_aqlprofile_error_string(&str);
-            std::cerr << "aqlprofile err: " << str << std::endl;
+            std::cerr << "aqlprofile err: " << str << '\n';
         }
         TEST_ASSERT(status == HSA_STATUS_SUCCESS);
         if(status != HSA_STATUS_SUCCESS) return false;
@@ -145,7 +145,7 @@ public:
         //          MODE_HOST_ACC|MODE_DEV_ACC|MODE_EXEC_DATA)
         profile_.command_buffer.ptr =
             GetRsrcFactory()->AllocateCmdMemory(GetAgentInfo(), command_buffer_size);
-        TEST_ASSERT(profile_.command_buffer.ptr != NULL);
+        TEST_ASSERT(profile_.command_buffer.ptr != nullptr);
         TEST_ASSERT((reinterpret_cast<uintptr_t>(profile_.command_buffer.ptr) &
                      (command_buffer_alignment - 1)) == 0);
 
@@ -154,7 +154,7 @@ public:
         //          MODE_HOST_ACC|MODE_DEV_ACC)
         profile_.output_buffer.ptr =
             GetRsrcFactory()->AllocateKernArgMemory(GetAgentInfo(), output_buffer_size);
-        TEST_ASSERT(profile_.output_buffer.ptr != NULL);
+        TEST_ASSERT(profile_.output_buffer.ptr != nullptr);
         // aqlprofile expects the caller to zero the memory
         memset(profile_.output_buffer.ptr, 0x0, output_buffer_size);
         TEST_ASSERT((reinterpret_cast<uintptr_t>(profile_.output_buffer.ptr) &
@@ -166,7 +166,7 @@ public:
         {
             const char* str;
             api_->hsa_ven_amd_aqlprofile_error_string(&str);
-            std::cerr << "aqlprofile err: " << str << std::endl;
+            std::cerr << "aqlprofile err: " << str << '\n';
         }
         TEST_ASSERT(status == HSA_STATUS_SUCCESS);
         if(status != HSA_STATUS_SUCCESS) return false;
@@ -180,20 +180,20 @@ public:
 
 private:
     //  bool BuildPackets() { return true; }
-    int GetMode() { return MODE; }
+    int GetMode() override { return MODE; }
 
-    bool DumpData()
+    bool DumpData() override
     {
-        std::clog << "TestPGenPmc::DumpData :" << std::endl;
+        std::clog << "TestPGenPmc::DumpData :" << '\n';
 
         callback_data_t data;
         api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenPmcCallback, &data);
-        for(callback_data_t::iterator it = data.begin(); it != data.end(); ++it)
+        for(const auto& it : data)
         {
-            std::cout << std::dec << "event(block(" << it->pmc_data.event.block_name << "_"
-                      << it->pmc_data.event.block_index << "), id(" << it->pmc_data.event.counter_id
-                      << ")), sample(" << it->sample_id << "), result(" << it->pmc_data.result
-                      << ")" << std::endl;
+            std::cout << std::dec << "event(block(" << it.pmc_data.event.block_name << "_"
+                      << it.pmc_data.event.block_index << "), id(" << it.pmc_data.event.counter_id
+                      << ")), sample(" << it.sample_id << "), result(" << it.pmc_data.result
+                      << ")" << '\n';
         }
 
         return true;

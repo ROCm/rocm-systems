@@ -23,6 +23,7 @@
 #ifndef TEST_PGEN_TEST_PGEN_SPM_H_
 #define TEST_PGEN_TEST_PGEN_SPM_H_
 
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -50,7 +51,7 @@ string_format(const std::string& format, Args... args)
 }
 
 hsa_status_t
-TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t  info_type,
+TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t   /*info_type*/,
                     hsa_ven_amd_aqlprofile_info_data_t* info_data,
                     void*                               callback_data)
 {
@@ -60,8 +61,8 @@ TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t  info_type,
                                info_data->trace_data.size);
     if(callback_data)
     {
-        auto* streams_ = (std::vector<std::ofstream>*) callback_data;
-        (*streams_)[info_data->sample_id].write((const char*) info_data->trace_data.ptr,
+        auto* streams_ = static_cast<std::vector<std::ofstream>*>(callback_data);
+        (*streams_)[info_data->sample_id].write(static_cast<const char*>(info_data->trace_data.ptr),
                                                 info_data->trace_data.size);
     }
     return status;
@@ -74,11 +75,11 @@ public:
     explicit TestPGenSpm(TestAql* t)
     : TestPGen(t)
     {
-        std::clog << "Test: PGen SPM" << std::endl;
+        std::clog << "Test: PGen SPM" << '\n';
         profile_ = hsa_ven_amd_aqlprofile_profile_t{};
     }
 
-    bool Initialize(int arg_cnt, char** arg_list)
+    bool Initialize(int arg_cnt, char** arg_list) override
     {
         std::vector<hsa_ven_amd_aqlprofile_event_t> event_vec;
 
@@ -89,7 +90,7 @@ public:
             unsigned event_id    = 0;
             sscanf(arg_list[i], "%u:%u:%u", &block_id, &block_index, &event_id);
             const hsa_ven_amd_aqlprofile_event_t event = {
-                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block_id), block_index, event_id};
+                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block_id), block_index, event_id,};
             event_vec.push_back(event);
         }
 
@@ -107,25 +108,25 @@ public:
 
         // Preparing events vector
         std::vector<hsa_ven_amd_aqlprofile_event_t> event_vec_filtered;
-        for(auto it = event_vec.begin(); it != event_vec.end(); ++it)
+        for(const auto& it : event_vec)
         {
             bool         result = false;
             hsa_status_t status =
-                api_->hsa_ven_amd_aqlprofile_validate_event(agent, &(*it), &result);
+                api_->hsa_ven_amd_aqlprofile_validate_event(agent, &it, &result);
             if(status != HSA_STATUS_SUCCESS)
             {
                 const char* str = "";
                 api_->hsa_ven_amd_aqlprofile_error_string(&str);
-                std::cerr << "aqlprofile err: " << str << std::endl;
+                std::cerr << "aqlprofile err: " << str << '\n';
             }
             if(!result)
             {
-                std::cerr << "Bad event: block (" << it->block_name << "_" << it->block_index
-                          << ") id (" << it->counter_id << ")" << std::endl;
+                std::cerr << "Bad event: block (" << it.block_name << "_" << it.block_index
+                          << ") id (" << it.counter_id << ")" << '\n';
             }
             else
             {
-                event_vec_filtered.push_back(*it);
+                event_vec_filtered.push_back(it);
             }
         }
         const size_t                    event_count = event_vec_filtered.size();
@@ -157,7 +158,7 @@ public:
             &profile_, HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE, &command_buffer_size);
         TEST_ASSERT(status == HSA_STATUS_SUCCESS);
 
-        num_xcc_                = GetAgentInfo()->xcc_num ? GetAgentInfo()->xcc_num : 1;
+        num_xcc_                = (GetAgentInfo()->xcc_num != 0u) ? GetAgentInfo()->xcc_num : 1;
         output_buffer_alignment = buffer_alignment_;
         output_buffer_size      = buffer_size_ * num_xcc_;
 
@@ -166,7 +167,7 @@ public:
         //                MODE_HOST_ACC|MODE_DEV_ACC|MODE_EXEC_DATA)
         profile_.command_buffer.ptr =
             GetRsrcFactory()->AllocateCmdMemory(GetAgentInfo(), command_buffer_size);
-        TEST_ASSERT(profile_.command_buffer.ptr != NULL);
+        TEST_ASSERT(profile_.command_buffer.ptr != nullptr);
         profile_.command_buffer.size = command_buffer_size;
         TEST_ASSERT((reinterpret_cast<uintptr_t>(profile_.command_buffer.ptr) &
                      (command_buffer_alignment - 1)) == 0);
@@ -176,7 +177,7 @@ public:
         //               MODE_DEV_ACC)
         profile_.output_buffer.ptr =
             GetRsrcFactory()->AllocateLocalMemory(GetAgentInfo(), output_buffer_size);
-        TEST_ASSERT(profile_.output_buffer.ptr != NULL);
+        TEST_ASSERT(profile_.output_buffer.ptr != nullptr);
         profile_.output_buffer.size = output_buffer_size;
         TEST_ASSERT((reinterpret_cast<uintptr_t>(profile_.output_buffer.ptr) &
                      (output_buffer_alignment - 1)) == 0);
@@ -202,22 +203,22 @@ public:
         return (status == HSA_STATUS_SUCCESS);
     }
 
-    int  GetMode() { return RUN_MODE; }
-    bool BuildPackets() { return true; }
+    int  GetMode() override { return RUN_MODE; }
+    bool BuildPackets() override { return true; }
 
-    bool DumpData()
+    bool DumpData() override
     {
-        std::clog << "TestPGenSpm::DumpData :" << std::endl;
+        std::clog << "TestPGenSpm::DumpData :" << '\n';
         return true;
     }
 
-    void ProcessOutput()
+    void ProcessOutput() const
     {
-        SpmBufferDesc* desc     = (SpmBufferDesc*) profile_.output_buffer.ptr;
+        SpmBufferDesc* desc     = static_cast<SpmBufferDesc*>(profile_.output_buffer.ptr);
         uint32_t       seg_size = (desc->global_num_line + desc->se_num_line * desc->num_se) * 32;
-        uint16_t*      buffer   = (uint16_t*) malloc(seg_size);
-        uint64_t*      counter  = (uint64_t*) malloc(profile_.event_count * sizeof(uint64_t));
-        uint64_t*      counter_total = (uint64_t*) calloc(profile_.event_count, sizeof(uint64_t));
+        uint16_t*      buffer   = static_cast<uint16_t*>(malloc(seg_size));
+        uint64_t*      counter  = static_cast<uint64_t*>(malloc(profile_.event_count * sizeof(uint64_t)));
+        uint64_t*      counter_total = static_cast<uint64_t*>(calloc(profile_.event_count, sizeof(uint64_t)));
         if(!buffer || !counter || !counter_total)
         {
             if(buffer) free(buffer);
@@ -234,7 +235,7 @@ public:
                                  desc->counter_map[i] & 0x8000 ? "GLOBAL" : "SE");
     }
 #endif
-        for(int i = 0; i < num_xcc_; i++)
+        for(uint32_t i = 0; i < num_xcc_; i++)
         {
             char name[64];
             sprintf(name, "spm_buffer_%d.bin", i);
@@ -246,16 +247,16 @@ public:
             uint64_t timestamp_last = 0;
             uint64_t timestamp_this;
             memset(counter, 0, profile_.event_count * sizeof(uint64_t));
-            while(!feof(stream))
+            while(feof(stream) == 0)
             {
                 size_t nr = fread(buffer, 1, seg_size, stream);
-                if(!nr) break;
+                if(nr == 0u) break;
                 if(nr != seg_size)
                 {
                     std::cerr << string_format("Incomplete segment %ld < %d\n", nr, seg_size);
                     break;
                 }
-                timestamp_this = *(uint64_t*) &buffer[0];
+                timestamp_this = *reinterpret_cast<uint64_t*>(&buffer[0]);
                 if(timestamp_this < timestamp_last)
                 {
                     std::cerr << string_format("Invalid timestamp %ld (last timestamp %ld\n",
@@ -268,10 +269,10 @@ public:
                 {
                     uint16_t index = desc->get_counter_map()[i] & 0x7FFF;
                     uint16_t index_j;
-                    bool     is_global = (desc->get_counter_map()[i] & 0x8000) ? true : false;
+                    bool     is_global = ((desc->get_counter_map()[i] & 0x8000) != 0) ? true : false;
                     if(is_global)
                     {
-                        if(buffer[index] && buffer[index] != 0xFFFF) counter[i] += buffer[index];
+                        if((buffer[index] != 0u) && buffer[index] != 0xFFFF) counter[i] += buffer[index];
                     }
                     else
                     {
@@ -280,7 +281,7 @@ public:
                         for(int j = 0; j < desc->num_se; j++)
                         {
                             index_j = index + se_base + se_step * j;
-                            if(buffer[index_j] && buffer[index_j] != 0xFFFF)
+                            if((buffer[index_j] != 0u) && buffer[index_j] != 0xFFFF)
                                 counter[i] += buffer[index_j];
                         }
                     }
@@ -288,9 +289,9 @@ public:
             }
             fclose(stream);
 
-            for(int i = 0; i < profile_.event_count; i++)
+            for(uint32_t i = 0; i < profile_.event_count; i++)
             {
-                auto it = &profile_.events[i];
+                const auto *it = &profile_.events[i];
                 std::cout << string_format("block %d-index %d counter %3d = 0x%lX\n",
                                            it->block_name,
                                            it->block_index,
@@ -303,9 +304,9 @@ public:
         if(num_xcc_ > 1)
         {
             std::cout << "SUM(XCC0:XCC" << num_xcc_ - 1 << "):\n";
-            for(int i = 0; i < profile_.event_count; i++)
+            for(uint32_t i = 0; i < profile_.event_count; i++)
             {
-                auto it = &profile_.events[i];
+                const auto *it = &profile_.events[i];
                 std::cout << string_format("block %d-index %d counter %3d = 0x%lX\n",
                                            it->block_name,
                                            it->block_index,
@@ -319,10 +320,10 @@ public:
         free(counter_total);
     }
 
-    bool Cleanup()
+    bool Cleanup() override
     {
-        api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenSpmCallback, NULL);
-        for(int i; i < num_xcc_; i++)
+        api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenSpmCallback, nullptr);
+        for(uint32_t i = 0; i < num_xcc_; i++)
         {
             if(streams_[i].is_open())
             {

@@ -80,7 +80,7 @@ simple_convolution::simple_convolution()
 void
 simple_convolution::Init()
 {
-    std::clog << "simple_convolution::init :" << std::endl;
+    std::clog << "simple_convolution::init :" << '\n';
 
     mem_descr_t kernarg_des = GetDescr(KERNARG_BUF_ID);
     mem_descr_t input_des   = GetDescr(INPUT_BUF_ID);
@@ -179,10 +179,10 @@ simple_convolution::ReferenceImplementation(uint32_t*       output,
                     uint32_t index    = j * width + i;
 
                     // to round to the nearest integer
-                    sum_fx += ((float) input[index] * mask[mask_idx]);
+                    sum_fx += (static_cast<float>(input[index]) * mask[mask_idx]);
                 }
             }
-            output[y * width + x] = uint32_t(sum_fx + 0.5f);
+            output[y * width + x] = static_cast<uint32_t>(sum_fx + 0.5f);
         }
     }
 

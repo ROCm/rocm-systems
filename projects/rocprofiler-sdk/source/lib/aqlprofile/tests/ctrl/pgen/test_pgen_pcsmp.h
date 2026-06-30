@@ -41,15 +41,15 @@ struct pcsmp_callback_data_t
 };
 
 hsa_status_t
-TestPGenPcsmpCallback(hsa_ven_amd_aqlprofile_info_type_t  info_type,
-                      hsa_ven_amd_aqlprofile_info_data_t* info_data,
+TestPGenPcsmpCallback(hsa_ven_amd_aqlprofile_info_type_t   /*info_type*/,
+                      hsa_ven_amd_aqlprofile_info_data_t*  /*info_data*/,
                       void*                               callback_data)
 {
     hsa_status_t           status     = HSA_STATUS_SUCCESS;
     pcsmp_callback_data_t* pcsmp_data = reinterpret_cast<pcsmp_callback_data_t*>(callback_data);
     std::cout << "id(" << std::dec << pcsmp_data->id << ") cycle(" << std::dec << pcsmp_data->cycle
               << ") pc(0x" << std::hex << pcsmp_data->pc << ") name(\"" << pcsmp_data->kernel_name
-              << "\")" << std::dec << std::endl
+              << "\")" << std::dec << '\n'
               << std::flush;
     return status;
 }
@@ -61,12 +61,12 @@ public:
     explicit TestPGenPcsmp(TestAql* t)
     : TestPGenSqtt(t)
     {
-        std::clog << "Test: PGen PC sampling" << std::endl;
+        std::clog << "Test: PGen PC sampling" << '\n';
     }
 
-    bool DumpData()
+    bool DumpData() override
     {
-        std::clog << "TestPGenPcsmp::DumpData :" << std::endl;
+        std::clog << "TestPGenPcsmp::DumpData :" << '\n';
 
         TEST_ASSERT(profile_.event_count == 0);
         profile_.event_count = UINT32_MAX;
@@ -76,8 +76,8 @@ public:
         // allocate host space
         void* sys_buf =
             GetRsrcFactory()->AllocateSysMemory(GetAgentInfo(), TestPGenSqtt::buffer_size_);
-        TEST_ASSERT(sys_buf != NULL);
-        if(sys_buf == NULL) return false;
+        TEST_ASSERT(sys_buf != nullptr);
+        if(sys_buf == nullptr) return false;
         data.data_buffer = sys_buf;
 
         api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenPcsmpCallback, &data);

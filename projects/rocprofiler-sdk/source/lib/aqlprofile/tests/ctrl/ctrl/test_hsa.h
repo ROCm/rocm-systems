@@ -54,41 +54,41 @@ public:
     }
 
     // Get methods for Agent Info, HAS queue, HSA Resourcse Manager
-    const AgentInfo* GetAgentInfo() { return agent_info_; }
-    hsa_queue_t*     GetQueue() { return hsa_queue_; }
-    HsaRsrcFactory*  GetRsrcFactory() { return hsa_rsrc_; }
+    const AgentInfo* GetAgentInfo() override { return agent_info_; }
+    hsa_queue_t*     GetQueue() override { return hsa_queue_; }
+    HsaRsrcFactory*  GetRsrcFactory() override { return hsa_rsrc_; }
 
     // Initialize application environment including setting
     // up of various configuration parameters based on
     // command line arguments
     // @return bool true on success and false on failure
-    bool Initialize(int argc, char** argv);
+    bool Initialize(int argc, char** argv) override;
 
     // Setup application parameters for exectuion
     // @return bool true on success and false on failure
-    bool Setup();
+    bool Setup() override;
 
     // Run the BinarySearch kernel
     // @return bool true on success and false on failure
-    bool Run();
+    bool Run() override;
 
     // Verify against reference implementation
     // @return bool true on success and false on failure
-    bool VerifyResults();
+    bool VerifyResults() override;
 
     // Print to console the time taken to execute kernel
-    void PrintTime();
+    void PrintTime() override;
 
     // Release resources e.g. memory allocations
     // @return bool true on success and false on failure
-    bool Cleanup();
+    bool Cleanup() override;
 
-    virtual bool RunSdma(size_t sdma_size);
+    bool RunSdma(size_t sdma_size) override;
     // test SDMA of @sdma_size bytes.
 
     // To get test name
     // @return test name
-    const char* Name() { return name_.c_str(); }
+    const char* Name() override { return name_.c_str(); }
 
 private:
     typedef TestKernel::mem_descr_t mem_descr_t;

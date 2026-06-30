@@ -45,18 +45,18 @@ PerfTimer::CreateTimer()
 #ifdef _WIN32
     QueryPerformanceFrequency((LARGE_INTEGER*) &newTimer->freq);
 #else
-    newTimer->freq = (long long) 1.0E3;
+    newTimer->freq = static_cast<long long>(1.0E3);
 #endif
 
     /* Push back the address of new Timer instance created */
     timers_.push_back(newTimer);
-    return (int) (timers_.size() - 1);
+    return static_cast<int>(timers_.size() - 1);
 }
 
 int
 PerfTimer::StartTimer(int index)
 {
-    if(index >= (int) timers_.size())
+    if(index >= static_cast<int>(timers_.size()))
     {
         Error("Cannot reset timer. Invalid handle.");
         return FAILURE;
@@ -75,8 +75,8 @@ PerfTimer::StartTimer(int index)
 // General Linux timing method
 #    ifndef _AMD
     struct timeval s;
-    gettimeofday(&s, 0);
-    timers_[index]->start = s.tv_sec * 1.0E3 + ((double) (s.tv_usec / 1.0E3));
+    gettimeofday(&s, nullptr);
+    timers_[index]->start = s.tv_sec * 1.0E3 + ((s.tv_usec / 1.0E3));
 #    else
     // AMD timing method
     unsigned int unused;
@@ -91,7 +91,7 @@ int
 PerfTimer::StopTimer(int index)
 {
     double n = 0;
-    if(index >= (int) timers_.size())
+    if(index >= static_cast<int>(timers_.size()))
     {
         Error("Cannot reset timer. Invalid handle.");
         return FAILURE;
@@ -109,8 +109,8 @@ PerfTimer::StopTimer(int index)
 // General Linux timing method
 #    ifndef _AMD
     struct timeval s;
-    gettimeofday(&s, 0);
-    n = s.tv_sec * 1.0E3 + (double) (s.tv_usec / 1.0E3);
+    gettimeofday(&s, nullptr);
+    n = s.tv_sec * 1.0E3 + (s.tv_usec / 1.0E3);
 #    else
     // AMD Linux timing
     unsigned int unused;
@@ -132,23 +132,23 @@ PerfTimer::StopTimer(int index)
 }
 
 void
-PerfTimer::Error(std::string str)
+PerfTimer::Error(const std::string& str)
 {
-    std::cout << str << std::endl;
+    std::cout << str << '\n';
 }
 
 double
 PerfTimer::ReadTimer(int index)
 {
-    if(index >= (int) timers_.size())
+    if(index >= static_cast<int>(timers_.size()))
     {
         Error("Cannot read timer. Invalid handle.");
         return FAILURE;
     }
 
-    double reading = double(timers_[index]->clocks);
+    double reading = timers_[index]->clocks;
 
-    reading = double(reading / timers_[index]->freq);
+    reading = (reading / timers_[index]->freq);
 
     return reading;
 }
@@ -172,7 +172,7 @@ PerfTimer::CoarseTimestampUs()
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-    return uint64_t(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
+    return static_cast<uint64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
 #endif
 }
 

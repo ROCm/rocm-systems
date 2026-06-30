@@ -45,7 +45,7 @@ TestPMgr::AddWaitPacket(packet_t* packet, hsa_signal_t signal)
 
     // Wait for Dispatch packet to complete
     hsa_signal_wait_acquire(
-        signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t) -1, HSA_WAIT_STATE_BLOCKED);
+        signal, HSA_SIGNAL_CONDITION_LT, 1, static_cast<uint64_t>(-1), HSA_WAIT_STATE_BLOCKED);
 
     hsa_signal_store_relaxed(signal, 1);
 
@@ -89,7 +89,7 @@ TestPMgr::Run()
     }
 
     Test()->Run();
-    if(getenv("AQLPROFILE_SDMA") != NULL) Test()->RunSdma(0x1000);
+    if(getenv("AQLPROFILE_SDMA") != nullptr) Test()->RunSdma(0x1000);
 
     if(mode == RUN_MODE)
     {
@@ -108,7 +108,7 @@ TestPMgr::Initialize(int argc, char** argv)
 {
     TestAql::Initialize(argc, argv);
 
-    hsa_status_t status = hsa_signal_create(1, 0, NULL, &packet_signal_);
+    hsa_status_t status = hsa_signal_create(1, 0, nullptr, &packet_signal_);
     TEST_ASSERT(status == HSA_STATUS_SUCCESS);
     api_ = ctrl_test::InTreeAqlProfileApi();
 
@@ -117,7 +117,7 @@ TestPMgr::Initialize(int argc, char** argv)
 
 TestPMgr::TestPMgr(TestAql* t)
 : TestAql(t)
-, api_(NULL)
+ 
 {
     memset(&pre_packet_, 0, sizeof(pre_packet_));
     memset(&post_packet_, 0, sizeof(post_packet_));

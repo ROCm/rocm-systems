@@ -34,7 +34,7 @@ enum Mode
 {
     SETUP_MODE,
     RUN_MODE,
-    UNKNOWN
+    UNKNOWN,
 };
 
 // Class implements profiling manager
@@ -43,9 +43,9 @@ class TestPMgr : public TestAql
 public:
     typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
     explicit TestPMgr(TestAql* t);
-    ~TestPMgr();
-    bool Setup();
-    bool Run();
+    ~TestPMgr() override;
+    bool Setup() override;
+    bool Run() override;
 
 protected:
     packet_t     pre_packet_;
@@ -53,18 +53,18 @@ protected:
     hsa_signal_t dummy_signal_;
     hsa_signal_t packet_signal_;
 
-    const hsa_ven_amd_aqlprofile_pfn_t* api_;
+    const hsa_ven_amd_aqlprofile_pfn_t* api_{nullptr};
 
     virtual int  GetMode() { return UNKNOWN; }
     virtual bool BuildPackets() { return false; }
     virtual bool DumpData() { return false; }
-    virtual bool Initialize(int argc, char** argv);
+    bool Initialize(int argc, char** argv) override;
 
 private:
     enum
     {
         SLOT_PM4_SIZE_DW   = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(uint32_t),
-        SLOT_PM4_SIZE_AQLP = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(packet_t)
+        SLOT_PM4_SIZE_AQLP = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(packet_t),
     };
     struct slot_pm4_t
     {

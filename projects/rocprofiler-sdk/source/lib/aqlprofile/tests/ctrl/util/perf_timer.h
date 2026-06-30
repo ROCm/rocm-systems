@@ -30,12 +30,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
 #    include <intrin.h>
 #    include <time.h>
 #    include <windows.h>
 #else
-#    if defined(__GNUC__)
+#    ifdef __GNUC__
 #        include <sys/time.h>
 #        include <x86intrin.h>
 #    endif  // __GNUC__
@@ -51,7 +51,7 @@ public:
     enum
     {
         SUCCESS = 0,
-        FAILURE = 1
+        FAILURE = 1,
     };
 
     PerfTimer();
@@ -80,10 +80,10 @@ private:
     double              freq_in_100mhz_;
 
     // AMD timing method
-    uint64_t CoarseTimestampUs();
+    static uint64_t CoarseTimestampUs();
     uint64_t MeasureTSCFreqHz();
 
-    void Error(std::string str);
+    static void Error(const std::string& str);
 };
 
 #endif  // TEST_UTIL_PERF_TIMER_H_

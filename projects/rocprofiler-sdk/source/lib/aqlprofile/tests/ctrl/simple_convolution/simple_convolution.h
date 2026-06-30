@@ -40,23 +40,23 @@ public:
         LOCAL_BUF_ID,
         MASK_BUF_ID,
         KERNARG_BUF_ID,
-        REFOUT_BUF_ID
+        REFOUT_BUF_ID,
     };
 
     // Constructor
     simple_convolution();
 
     // Initialize method
-    void Init();
+    void Init() override;
 
     // Return compute grid size
-    uint32_t GetGridSize() const { return width_ * height_; }
+    uint32_t GetGridSize() const override { return width_ * height_; }
 
     // Print output
-    void PrintOutput(const void* ptr) const;
+    void PrintOutput(const void* ptr) const override;
 
     // Return name
-    std::string Name() const { return std::string("simple_convolution"); }
+    std::string Name() const override { return std::string("simple_convolution"); }
 
 private:
     // Local kernel arguments declaration
@@ -78,7 +78,7 @@ private:
     // @param input_dimensions dimensions of the input matrix
     // @param mask_dimensions  dimensions of the mask matrix
     // @return bool true on success and false on failure
-    bool ReferenceImplementation(uint32_t*       output,
+    static bool ReferenceImplementation(uint32_t*       output,
                                  const uint32_t* input,
                                  const float*    mask,
                                  const uint32_t  width,

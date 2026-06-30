@@ -32,18 +32,18 @@
 class TestAql
 {
 public:
-    explicit TestAql(TestAql* t = 0)
+    explicit TestAql(TestAql* t = nullptr)
     : test_(t)
     {}
     virtual ~TestAql()
     {
-        if(test_) delete test_;
+        delete test_;
     }
 
     TestAql*                 Test() { return test_; }
-    virtual const AgentInfo* GetAgentInfo() { return (test_) ? test_->GetAgentInfo() : 0; }
-    virtual hsa_queue_t*     GetQueue() { return (test_) ? test_->GetQueue() : 0; }
-    virtual HsaRsrcFactory*  GetRsrcFactory() { return (test_) ? test_->GetRsrcFactory() : 0; }
+    virtual const AgentInfo* GetAgentInfo() { return (test_) ? test_->GetAgentInfo() : nullptr; }
+    virtual hsa_queue_t*     GetQueue() { return (test_) ? test_->GetQueue() : nullptr; }
+    virtual HsaRsrcFactory*  GetRsrcFactory() { return (test_) ? test_->GetRsrcFactory() : nullptr; }
 
     // Initialize application environment including setting
     // up of various configuration parameters based on
@@ -79,7 +79,7 @@ public:
 
     // To get test name
     // @return test name
-    virtual const char* Name() { return (test_) ? test_->Name() : NULL; }
+    virtual const char* Name() { return (test_) ? test_->Name() : nullptr; }
 
 private:
     TestAql* const test_;

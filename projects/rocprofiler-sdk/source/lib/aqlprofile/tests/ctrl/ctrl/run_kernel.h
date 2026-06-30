@@ -35,11 +35,11 @@ RunKernel(int argc, char* argv[], int count = 1)
     // Create test kernel object
     Kernel   test_kernel;
     TestAql* test_hsa = new TestHsa(&test_kernel);
-    TEST_ASSERT(test_hsa != NULL);
-    if(test_hsa == NULL) return false;
+    TEST_ASSERT(test_hsa != nullptr);
+    if(test_hsa == nullptr) return false;
     TestAql* test_aql = new Test(test_hsa);
-    TEST_ASSERT(test_aql != NULL);
-    if(test_aql == NULL)
+    TEST_ASSERT(test_aql != nullptr);
+    if(test_aql == nullptr)
     {
         delete test_hsa;
         return false;
@@ -49,7 +49,7 @@ RunKernel(int argc, char* argv[], int count = 1)
     ret_val = test_aql->Initialize(argc, argv);
     if(ret_val == false)
     {
-        std::cerr << "Error in the test initialization" << std::endl;
+        std::cerr << "Error in the test initialization" << '\n';
         // TEST_ASSERT(ret_val);
         delete test_aql;
         return false;
@@ -59,7 +59,7 @@ RunKernel(int argc, char* argv[], int count = 1)
     ret_val = test_aql->Setup();
     if(ret_val == false)
     {
-        std::cerr << "Error in creating hsa resources" << std::endl;
+        std::cerr << "Error in creating hsa resources" << '\n';
         delete test_aql;
         TEST_ASSERT(ret_val);
         return false;
@@ -72,7 +72,7 @@ RunKernel(int argc, char* argv[], int count = 1)
         ret_val = test_aql->Run();
         if(ret_val == false)
         {
-            std::cerr << "Error in running the test kernel" << std::endl;
+            std::cerr << "Error in running the test kernel" << '\n';
             test_aql->Cleanup();
             delete test_aql;
             TEST_ASSERT(ret_val);
@@ -83,11 +83,11 @@ RunKernel(int argc, char* argv[], int count = 1)
         ret_val = test_aql->VerifyResults();
         if(ret_val)
         {
-            std::clog << "Test : Passed" << std::endl;
+            std::clog << "Test : Passed" << '\n';
         }
         else
         {
-            std::clog << "Test : Failed" << std::endl;
+            std::clog << "Test : Failed" << '\n';
         }
     }
 

@@ -29,16 +29,16 @@
 #include "util/hsa_rsrc_factory.h"
 #include "util/test_assert.h"
 
-HsaRsrcFactory*  TestHsa::hsa_rsrc_   = NULL;
-const AgentInfo* TestHsa::agent_info_ = NULL;
-hsa_queue_t*     TestHsa::hsa_queue_  = NULL;
+HsaRsrcFactory*  TestHsa::hsa_rsrc_   = nullptr;
+const AgentInfo* TestHsa::agent_info_ = nullptr;
+hsa_queue_t*     TestHsa::hsa_queue_  = nullptr;
 uint32_t         TestHsa::agent_id_   = 0;
 
 HsaRsrcFactory*
 TestHsa::HsaInstantiate(const uint32_t agent_ind)
 {
     // Instantiate an instance of Hsa Resources Factory
-    if(hsa_rsrc_ == NULL)
+    if(hsa_rsrc_ == nullptr)
     {
         agent_id_ = agent_ind;
 
@@ -50,19 +50,19 @@ TestHsa::HsaInstantiate(const uint32_t agent_ind)
         // Create an instance of Gpu agent
         if(!hsa_rsrc_->GetGpuAgentInfo(agent_ind, &agent_info_))
         {
-            agent_info_ = NULL;
-            std::cerr << "> error: agent[" << agent_ind << "] is not found" << std::endl;
-            return NULL;
+            agent_info_ = nullptr;
+            std::cerr << "> error: agent[" << agent_ind << "] is not found" << '\n';
+            return nullptr;
         }
-        std::clog << "> Using agent[" << agent_ind << "] : " << agent_info_->name << std::endl;
+        std::clog << "> Using agent[" << agent_ind << "] : " << agent_info_->name << '\n';
 
         // Create an instance of Aql Queue
-        if(hsa_queue_ == NULL)
+        if(hsa_queue_ == nullptr)
         {
             uint32_t num_pkts = 1024;
             if(hsa_rsrc_->CreateQueue(agent_info_, num_pkts, &hsa_queue_) == false)
             {
-                hsa_queue_ = NULL;
+                hsa_queue_ = nullptr;
                 TEST_ASSERT(false);
             }
         }
@@ -73,24 +73,24 @@ TestHsa::HsaInstantiate(const uint32_t agent_ind)
 void
 TestHsa::HsaShutdown()
 {
-    if(hsa_queue_ != NULL)
+    if(hsa_queue_ != nullptr)
     {
         hsa_queue_destroy(hsa_queue_);
-        hsa_queue_ = NULL;
+        hsa_queue_ = nullptr;
     }
     if(hsa_rsrc_) hsa_rsrc_->Destroy();
 }
 
 bool
-TestHsa::Initialize(int arg_cnt, char** arg_list)
+TestHsa::Initialize(int  /*arg_cnt*/, char**  /*arg_list*/)
 {
-    std::clog << "TestHsa::Initialize :" << std::endl;
+    std::clog << "TestHsa::Initialize :" << '\n';
 
     // Instantiate a Timer object
     setup_timer_idx_    = hsa_timer_.CreateTimer();
     dispatch_timer_idx_ = hsa_timer_.CreateTimer();
 
-    if(HsaInstantiate(agent_id_) == NULL)
+    if(HsaInstantiate(agent_id_) == nullptr)
     {
         TEST_ASSERT(false);
         return false;
@@ -101,9 +101,9 @@ TestHsa::Initialize(int arg_cnt, char** arg_list)
 
     // Obtain the code object file name
     std::string agentName(agent_info_->name);
-    if(agentName.find(":") != std::string::npos)
+    if(agentName.find(':') != std::string::npos)
     {
-        agentName = agentName.substr(0, agentName.find(":"));
+        agentName = agentName.substr(0, agentName.find(':'));
     }
     brig_path_obj_.append(agentName + "_" + name_ + ".hsaco");
 
@@ -113,7 +113,7 @@ TestHsa::Initialize(int arg_cnt, char** arg_list)
 bool
 TestHsa::Setup()
 {
-    std::clog << "TestHsa::setup :" << std::endl;
+    std::clog << "TestHsa::setup :" << '\n';
 
     // Start the timer object
     hsa_timer_.StartTimer(setup_timer_idx_);
@@ -124,14 +124,14 @@ TestHsa::Setup()
         agent_info_, brig_path, symb_.c_str(), &hsa_exec_, &kernel_code_desc_);
     if(suc == false)
     {
-        std::cerr << "Error in loading and finalizing Kernel" << std::endl;
+        std::cerr << "Error in loading and finalizing Kernel" << '\n';
         return false;
     }
 
     mem_map_t& mem_map = test_->GetMemMap();
-    for(mem_it_t it = mem_map.begin(); it != mem_map.end(); ++it)
+    for(auto & it : mem_map)
     {
-        mem_descr_t& des = it->second;
+        mem_descr_t& des = it.second;
         switch(des.id)
         {
             case TestKernel::LOCAL_DES_ID:
@@ -152,7 +152,7 @@ TestHsa::Setup()
                 if(kernarg_missmatch)
                 {
                     std::cout << "kernarg_size = " << kernarg_size << ", size_info = " << size_info
-                              << std::flush << std::endl;
+                              << std::flush << '\n';
                     TEST_ASSERT(!kernarg_missmatch);
                     break;
                 }
@@ -166,11 +166,11 @@ TestHsa::Setup()
                 des.ptr = hsa_rsrc_->AllocateSysMemory(agent_info_, des.size);
                 if(des.ptr) memset(des.ptr, 0, des.size);
                 break;
-            case TestKernel::NULL_DES_ID: des.ptr = NULL; break;
+            case TestKernel::NULL_DES_ID: des.ptr = nullptr; break;
             default: break;
         }
-        TEST_ASSERT(des.ptr != NULL);
-        if(des.ptr == NULL) return false;
+        TEST_ASSERT(des.ptr != nullptr);
+        if(des.ptr == nullptr) return false;
     }
     test_->Init();
 
@@ -185,7 +185,7 @@ TestHsa::Setup()
 bool
 TestHsa::Run()
 {
-    std::clog << "TestHsa::run :" << std::endl;
+    std::clog << "TestHsa::run :" << '\n';
 
     const uint32_t work_group_size      = 64;
     const uint32_t work_grid_size       = test_->GetGridSize();
@@ -231,7 +231,7 @@ TestHsa::Run()
     hsa_signal_store_relaxed(hsa_signal_, 1);
     aql.completion_signal = hsa_signal_;
 
-    std::clog << "> Executing kernel: \"" << name_ << "\"" << std::endl;
+    std::clog << "> Executing kernel: \"" << name_ << "\"" << '\n';
 
     // Start the timer object
     hsa_timer_.StartTimer(dispatch_timer_idx_);
@@ -239,7 +239,7 @@ TestHsa::Run()
     // Submit AQL packet to the queue
     const uint64_t que_idx = hsa_rsrc_->Submit(hsa_queue_, &aql);
 
-    std::clog << "> Waiting on kernel dispatch signal, que_idx=" << que_idx << std::endl;
+    std::clog << "> Waiting on kernel dispatch signal, que_idx=" << que_idx << '\n';
 
     // Wait on the dispatch signal until the kernel is finished.
     // Update wait condition to HSA_WAIT_STATE_ACTIVE for Polling
@@ -249,7 +249,7 @@ TestHsa::Run()
         TEST_ASSERT(false);
     }
 
-    std::clog << "> DONE, que_idx=" << que_idx << std::endl;
+    std::clog << "> DONE, que_idx=" << que_idx << '\n';
 
     // Stop the timer object
     hsa_timer_.StopTimer(dispatch_timer_idx_);
@@ -263,7 +263,7 @@ bool
 TestHsa::VerifyResults()
 {
     bool           cmp    = false;
-    void*          output = NULL;
+    void*          output = nullptr;
     const uint32_t size   = test_->GetOutputSize();
     bool           suc    = false;
 
@@ -272,7 +272,7 @@ TestHsa::VerifyResults()
     {
         output = hsa_rsrc_->AllocateSysMemory(agent_info_, size);
         suc    = hsa_rsrc_->Memcpy(agent_info_, output, test_->GetOutputPtr(), size);
-        if(!suc) std::clog << "> VerifyResults: Memcpy failed" << std::endl << std::flush;
+        if(!suc) std::clog << "> VerifyResults: Memcpy failed" << '\n' << std::flush;
     }
     else
     {
@@ -280,7 +280,7 @@ TestHsa::VerifyResults()
         suc    = true;
     }
 
-    if((output != NULL) && suc)
+    if((output != nullptr) && suc)
     {
         // Print the test output
         test_->PrintOutput(output);
@@ -288,7 +288,7 @@ TestHsa::VerifyResults()
         cmp = (memcmp(output, test_->GetRefOut(), size) >= 0);
     }
 
-    if(test_->IsOutputLocal() && (output != NULL)) hsa_rsrc_->FreeMemory(output);
+    if(test_->IsOutputLocal() && (output != nullptr)) hsa_rsrc_->FreeMemory(output);
 
     return cmp;
 }
@@ -297,11 +297,11 @@ void
 TestHsa::PrintTime()
 {
     std::clog << "Time taken for Setup by " << this->name_ << " : " << this->setup_time_taken_
-              << std::endl;
+              << '\n';
     std::clog << "Time taken for Dispatch by " << this->name_ << " : " << this->dispatch_time_taken_
-              << std::endl;
+              << '\n';
     std::clog << "Time taken in Total by " << this->name_ << " : " << this->total_time_taken_
-              << std::endl;
+              << '\n';
 }
 
 bool
@@ -315,7 +315,7 @@ TestHsa::Cleanup()
 bool
 TestHsa::RunSdma(size_t sdma_size)
 {
-    std::cout << "Run SDMA test ..." << std::endl;
+    std::cout << "Run SDMA test ..." << '\n';
     const AgentInfo* cpu_agent{nullptr};
     hsa_rsrc_->GetCpuAgentInfo(0, &cpu_agent);
     const AgentInfo* gpu_agent{nullptr};
@@ -331,18 +331,18 @@ TestHsa::RunSdma(size_t sdma_size)
 
     for(size_t i = 0; i < sdma_size; ++i)
     {
-        ((char*) src_buf)[i]                  = i;
-        ((char*) dest_buf)[sdma_size - 1 - i] = i & 0xFF;
+        (static_cast<char*>(src_buf))[i]                  = i;
+        (static_cast<char*>(dest_buf))[sdma_size - 1 - i] = i & 0xFF;
     }
 
     for(size_t i = 0; i < 10; ++i)
-        std::cout << i << ": src_buf = " << (unsigned) (((char*) src_buf)[i] & 0xFF)
-                  << ", dest_buf = " << (unsigned) (((char*) dest_buf)[i] & 0xFF) << std::endl;
+        std::cout << i << ": src_buf = " << static_cast<unsigned>((static_cast<char*>(src_buf))[i] & 0xFF)
+                  << ", dest_buf = " << static_cast<unsigned>((static_cast<char*>(dest_buf))[i] & 0xFF) << '\n';
 
     hsa_status_t status;
 
     hsa_signal_t completion_signal;
-    status = hsa_signal_create(1, 0, NULL, &completion_signal);
+    status = hsa_signal_create(1, 0, nullptr, &completion_signal);
     CHECK_STATUS("hsa_signal_create", status);
 
     // SDMA src_buf -> gpu_buf
@@ -374,7 +374,7 @@ TestHsa::RunSdma(size_t sdma_size)
 
     // SDMA gpu_buf -> dest_buf
     hsa_signal_t completion_signal1;
-    status = hsa_signal_create(1, 0, NULL, &completion_signal1);
+    status = hsa_signal_create(1, 0, nullptr, &completion_signal1);
     CHECK_STATUS("hsa_signal_create", status);
 
     status = hsa_amd_memory_async_copy(dest_buf,
@@ -409,12 +409,12 @@ TestHsa::RunSdma(size_t sdma_size)
         assert(((char*) src_buf)[i] == ((char*) dest_buf)[i]);
     }
 
-    std::cout << std::endl;
+    std::cout << '\n';
 
     // print out some dma data.
     for(size_t i = 0; i < 10; ++i)
-        std::cout << i << ": src_buf = " << (int) ((char*) src_buf)[i]
-                  << ", dest_buf = " << (int) ((char*) dest_buf)[i] << std::endl;
+        std::cout << i << ": src_buf = " << static_cast<int>((static_cast<char*>(src_buf))[i])
+                  << ", dest_buf = " << static_cast<int>((static_cast<char*>(dest_buf))[i]) << '\n';
 
     return true;
 }
