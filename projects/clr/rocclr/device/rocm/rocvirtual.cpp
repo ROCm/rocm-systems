@@ -1394,6 +1394,24 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
                        (skippedDispatches_ >= skip_limit) || ring_for_non_profiler_signal;
   if (ring_doorbell) {
+    // Log launch descriptor and prefetch info before ringing doorbell
+    if (metadata_preloader_.HasDynDataPrefetch()) {
+      const uint32_t numRegions = metadata_preloader_.GetDynDataPrefetchNumRegions();
+      const uint8_t hints = metadata_preloader_.GetDynDataPrefetchHints();
+      ClPrint(amd::LOG_EXTRA_DEBUG, amd::LOG_AQL,
+        "Dispatch[%" PRIu64 "] with launch_descriptor: %u prefetch region(s), hints=0x%x",
+        index, numRegions, hints);
+
+      const amd::DynDataPrefetchRegion* regions =
+        metadata_preloader_.GetDynDataPrefetchRegions();
+      for (uint32_t i = 0; i < numRegions &&
+           i < amd::kDynDataPrefetchMaxRegions; i++) {
+        ClPrint(amd::LOG_EXTRA_DEBUG, amd::LOG_AQL,
+          " Region[%u]: addr=%p, burstSize=%zu, numBursts=%u, stride=%zu",
+          i, regions[i].baseAddress, regions[i].burstSize,
+          regions[i].numBursts, regions[i].stride);
+      }
+    }
     Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
     skippedDispatches_ = 0;
   } else {
