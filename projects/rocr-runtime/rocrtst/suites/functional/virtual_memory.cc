@@ -1320,8 +1320,8 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t cpuAgent, hsa_agent_t
       hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetGlobalMemoryPool, &global_pool));
 
   // Reserve two separate virtual address ranges
-  void* addr1 = nullptr;
-  void* addr2 = nullptr;
+  void* addr1 = nullptr; 
+  void* addr2 = nullptr; 
 
   ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addr1, alloc_size, 0, 0));
   ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addr2, alloc_size, 0, 0));

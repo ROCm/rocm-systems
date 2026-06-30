@@ -515,7 +515,7 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
     desc.buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
     desc.size = handle.size;
 
-    HsaHandleExportFlags export_flags = {};
+    HsaHandleExportFlags export_flags = {};  
     HsaMemoryExportResult res = {};
 
     if (HSAKMT_CALL(hsaKmtHandleExport(&desc, &res, &export_flags)) != HSAKMT_STATUS_SUCCESS) {

@@ -3910,7 +3910,7 @@ hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnl
     // From documentation, the handle can be released while there are still outstanding mappings. If
     // there are outstanding mappings, then we just decrement the ref count and exit. We will free
     // this handle when the last MappedHandle is deleted
-    // and use_count == 0 and ref_count == 0.
+    // and use_count == 0 and ref_count == 0. 
 
     if (memoryHandle->use_count > 0) return HSA_STATUS_SUCCESS;
 
