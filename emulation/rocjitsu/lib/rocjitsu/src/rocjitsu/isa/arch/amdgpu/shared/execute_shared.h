@@ -410,7 +410,7 @@ inline void execute_s_add_co_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   uint32_t s1 = inst.ssrc1.read_scalar(wf);
   uint32_t result = (s0 + s1);
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((((s0 ^ result) & (s1 ^ result)) & 0x80000000u));
+  wf.write_scc(signed_add_overflows(s0, s1));
 }
 
 template <typename Inst>
@@ -442,7 +442,7 @@ inline void execute_s_add_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint32_t s1 = inst.ssrc1.read_scalar(wf);
   uint32_t result = (s0 + s1);
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((((s0 ^ result) & (s1 ^ result)) & 0x80000000u));
+  wf.write_scc(signed_add_overflows(s0, s1));
 }
 
 template <typename Inst>
@@ -2481,7 +2481,7 @@ inline void execute_s_sub_co_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   uint32_t s1 = inst.ssrc1.read_scalar(wf);
   uint32_t result = (s0 - s1);
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((((s0 ^ s1) & (s0 ^ result)) & 0x80000000u));
+  wf.write_scc(signed_sub_overflows(s0, s1));
 }
 
 template <typename Inst>
@@ -2513,7 +2513,7 @@ inline void execute_s_sub_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint32_t s1 = inst.ssrc1.read_scalar(wf);
   uint32_t result = (s0 - s1);
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc((((s0 ^ s1) & (s0 ^ result)) & 0x80000000u));
+  wf.write_scc(signed_sub_overflows(s0, s1));
 }
 
 template <typename Inst>

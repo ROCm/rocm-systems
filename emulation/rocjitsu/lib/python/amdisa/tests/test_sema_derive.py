@@ -207,9 +207,8 @@ class TestDeriveScalarBinop:
         assert 'uint32_t result = (s0 + s1)' in cpp
         assert re.search(r'\bint32_t\b', cpp) is None
         assert re.search(r'\bint64_t\b', cpp) is None
-        # add overflow: (s0 ^ result) & (s1 ^ result) & sign-bit
-        assert '(s0 ^ result) & (s1 ^ result)' in cpp
-        assert '0x80000000u' in cpp
+        # SCC overflow is detected by the unsigned helper (simd_glue.h).
+        assert 'wf.write_scc(signed_add_overflows(s0, s1))' in cpp
 
         sem = derive_semantics('S_SUB_CO_I32', 'ENC_SOP2')
         assert sem.sets_scc == 'overflow'
@@ -218,9 +217,7 @@ class TestDeriveScalarBinop:
         assert 'uint32_t result = (s0 - s1)' in cpp
         assert re.search(r'\bint32_t\b', cpp) is None
         assert re.search(r'\bint64_t\b', cpp) is None
-        # sub overflow: (s0 ^ s1) & (s0 ^ result) & sign-bit
-        assert '(s0 ^ s1) & (s0 ^ result)' in cpp
-        assert '0x80000000u' in cpp
+        assert 'wf.write_scc(signed_sub_overflows(s0, s1))' in cpp
 
     @pytest.mark.parametrize(
         'name,operation,dtype,scc',

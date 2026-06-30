@@ -559,35 +559,14 @@ class _ScalarBinop(_ScalarDeriver):
                     ),
                 )
             elif sem.sets_scc == 'overflow':
-                # Signed overflow via the sign-bit identity:
-                # For add, overflow iff the operands share a sign that differs
-                # from the result's.
-                # For sub, overflow iff the operands differ in sign and src0's
-                # sign differs from the result's.
-                res_id = _id('result', result_ty)
-                if op == 'sub':
-                    x0 = SemaNode(SemaNodeKind.XOR, ty=result_ty, children=(src0, src1))
-                    x1 = SemaNode(
-                        SemaNodeKind.XOR, ty=result_ty, children=(src0, res_id)
-                    )
-                else:
-                    x0 = SemaNode(
-                        SemaNodeKind.XOR, ty=result_ty, children=(src0, res_id)
-                    )
-                    x1 = SemaNode(
-                        SemaNodeKind.XOR, ty=result_ty, children=(src1, res_id)
-                    )
-                sign_mask = _lit(
-                    '0x80000000u' if result_ty.size == 32 else '0x8000000000000000',
-                    result_ty,
-                )
+                # Signed-overflow SCC detected in unsigned via the sign-bit
+                # identity
+                fn = 'signed_sub_overflows' if op == 'sub' else 'signed_add_overflows'
                 scc_expr = SemaNode(
-                    SemaNodeKind.AND,
-                    ty=result_ty,
-                    children=(
-                        SemaNode(SemaNodeKind.AND, ty=result_ty, children=(x0, x1)),
-                        sign_mask,
-                    ),
+                    SemaNodeKind.CALL,
+                    ty=SemaType.U1,
+                    call_name=fn,
+                    children=(_id(fn), src0, src1),
                 )
             elif sem.sets_scc == 'compare':
                 cmp_kind = SemaNodeKind.GE if op == 'max' else SemaNodeKind.LT
