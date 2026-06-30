@@ -147,8 +147,11 @@ static void hash_hex(Hash128 h, char buf[33]) {
 // State
 // ---------------------------------------------------------------------------
 
-// Buffer must comfortably hold the largest single record (payload_length is a
-// uint16_t, so <= 65535 bytes). 256 KiB amortizes write() syscalls.
+// Buffer must comfortably hold the largest single record. payload_length is a
+// uint32_t (v4); in practice the largest record is a kernel-launch event whose
+// serialized args/name/by-value structs are well under this. 256 KiB amortizes
+// write() syscalls. buffer_append_locked() handles a record larger than kBufCap
+// by flushing and writing it directly, so this is a performance bound, not a cap.
 static constexpr size_t   kBufCap           = 256u * 1024u;
 // Flush+fsync every N events to bound crash data loss.
 static constexpr uint64_t kCheckpointEvents = 4096;
@@ -171,6 +174,12 @@ static uint8_t  g_buf[kBufCap];
 static size_t   g_buf_len            = 0;
 static uint64_t g_events_since_ckpt  = 0;
 static bool     g_trailer_written    = false;
+
+// Set when an event could not be serialized losslessly and had to be dropped
+// (e.g. an oversized kernel launch). A capture with this flag set is finalized
+// WITHOUT the clean-shutdown trailer and with manifest "complete": false, so the
+// reader treats it like a truncated archive rather than a faithful capture.
+static std::atomic<bool> g_capture_incomplete{false};
 
 // Crash-callback guard over g_buf / g_buf_len, raised by writer threads while
 // they mutate the buffer. If the crash interrupts a writer mid-lock,
@@ -233,9 +242,18 @@ static void flush_buffer_locked() {
 }
 
 // Append `len` bytes of one complete record to the buffer, flushing first if it
-// would not fit. Caller must hold g_file_mu.
+// would not fit. A single record larger than the buffer (possible now that
+// payload_length is a uint32_t — e.g. a kernel launch with very large by-value
+// args) is flushed-then-written directly so it never overruns g_buf. Caller must
+// hold g_file_mu.
 static void buffer_append_locked(const void* data, size_t len) {
   if (g_buf_len + len > kBufCap) flush_buffer_locked();
+  if (len > kBufCap) {
+    // Oversized record: buffer is now empty (flushed above); write it straight
+    // through rather than memcpy'ing past the end of g_buf.
+    if (g_events_fd >= 0) write_all_fd(g_events_fd, data, len);
+    return;
+  }
   memcpy(g_buf + g_buf_len, data, len);
   g_buf_len += len;
 }
@@ -292,7 +310,7 @@ static ScanResult scan_events_for_resume(FILE* f, std::int64_t file_size) {
 
     // Valid trailer only if full hrr_eof_record + magic (same rule as hrr_reader).
     if (h.event_type == HRR_EOF_MARKER &&
-        h.payload_length == static_cast<uint16_t>(sizeof(hrr_eof_record))) {
+        h.payload_length == static_cast<uint32_t>(sizeof(hrr_eof_record))) {
       uint64_t total_events = 0;
       uint32_t eof_magic    = 0;
       if (fread(&total_events, sizeof(total_events), 1, f) != 1 ||
@@ -697,15 +715,34 @@ void checkpoint() {
   g_events_since_ckpt = 0;
 }
 
+void mark_incomplete(const char* reason) {
+  // Record once; the loud, AMD_LOG_LEVEL-routed message is emitted by the caller
+  // (e.g. serialize_kernel_launch) which has the relevant context. Here we only
+  // need the durable flag and a single stderr breadcrumb so a bare run still
+  // surfaces it.
+  if (!g_capture_incomplete.exchange(true, std::memory_order_relaxed)) {
+    fprintf(stderr,
+            "[HRR capture] Archive marked INCOMPLETE: %s. The clean-shutdown "
+            "trailer will be omitted and manifest.complete=false so replay "
+            "cannot treat this capture as faithful.\n",
+            reason ? reason : "(unspecified)");
+  }
+}
+
+bool is_incomplete() { return g_capture_incomplete.load(std::memory_order_relaxed); }
+
 void flush(const char* /*output_dir*/) {
   // Always finalize the *effective* directory this process actually wrote to
   // (g_output_dir), which is always a pid-<pid> sub-archive. The caller passes
   // the base HIP_HRR_CAPTURE_OUTPUT path.
+  const bool incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
   std::string out_dir;
   {
     BufWriteGuard lk;
     out_dir = g_output_dir;
-    if (g_events_fd >= 0 && !g_trailer_written) {
+    // Skip the clean-shutdown trailer when the capture is known incomplete: its
+    // absence is exactly how the reader detects a non-faithful archive.
+    if (g_events_fd >= 0 && !g_trailer_written && !incomplete) {
       hrr_eof_record rec = hrr_make_eof_record(
           g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
       rec.hdr.timestamp_ns = amd::Os::timeNanos();
@@ -714,11 +751,15 @@ void flush(const char* /*output_dir*/) {
       flush_buffer_locked();
       HRR_FSYNC(g_events_fd);
       g_trailer_written = true;
+    } else if (g_events_fd >= 0 && incomplete) {
+      // Still flush buffered events so nothing is lost, just no trailer.
+      flush_buffer_locked();
+      HRR_FSYNC(g_events_fd);
     }
   }
 
   if (out_dir.empty()) return;
-  write_manifest_stdio(out_dir.c_str(), /*complete=*/true);
+  write_manifest_stdio(out_dir.c_str(), /*complete=*/!incomplete);
   update_root_manifest();
   remove((out_dir + "/writer_state.json").c_str());
 }
@@ -814,7 +855,7 @@ void emergency_finalize(bool clean_shutdown) {
 // Fills all header fields then copies the whole struct into the app buffer.
 // ---------------------------------------------------------------------------
 
-void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint16_t payload_len) {
+void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_len) {
   // Fill fields that don't require the lock (timestamp and thread_id are
   // cheap and per-thread; getting them outside the lock keeps contention low).
   hdr->event_type     = api_id;

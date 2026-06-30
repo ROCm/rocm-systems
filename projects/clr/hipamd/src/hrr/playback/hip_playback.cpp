@@ -1232,6 +1232,30 @@ hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* pl) {
     return replay_malloc(ctx, pl, /*managed=*/true);
 }
 
+// ---------------------------------------------------------------------------
+// Manual playback: hipExtMallocWithFlags
+// ---------------------------------------------------------------------------
+// A real device allocation (preserving the recorded flags) that must land in
+// alloc_map, otherwise any H2D/D2H copy or kernel-arg pointer derived from the
+// returned buffer would translate to nullptr. Mirrors replay_malloc for padding
+// and zero-init so its fidelity matches hipMalloc.
+hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipExtMallocWithFlags*>(pl);
+    size_t orig_sz = static_cast<size_t>(a->sizeBytes);
+    size_t pad_sz  = replay_padded_alloc_size(orig_sz);
+    void* live = nullptr;
+    hipError_t r = hipExtMallocWithFlags(&live, pad_sz, a->flags);
+    if (r == hipSuccess) {
+        if (hrr_replay_zero_init() && !ctx.in_graph_capture)
+            (void)hipMemset(live, 0, pad_sz);
+        ctx.record_alloc(a->ptr, live, pad_sz);
+        if (ctx.verbose && pad_sz > orig_sz)
+            fprintf(stderr, "[HRR] hipExtMallocWithFlags 0x%llx: orig=%zu padded=%zu\n",
+                    (unsigned long long)a->ptr, orig_sz, pad_sz);
+    }
+    return r;
+}
+
 
 // ---------------------------------------------------------------------------
 // Manual playback: hipMallocAsync / hipMallocFromPoolAsync
@@ -2020,9 +2044,19 @@ hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx,
 
     hipGraph_t graph = ctx.translate_graph(a->graph);
     if (!graph) {
-        fprintf(stderr, "[HRR] hipGraphInstantiate: graph 0x%llx not found in map\n",
+        // graph_map is populated ONLY by the stream-capture chain
+        // (hipStreamEndCapture). A miss means the graph was built through the
+        // explicit node API (hipGraphCreate + hipGraphAdd*Node), which HRR does
+        // not replay. Replaying an empty graph would silently skip every launch
+        // and corrupt downstream buffers, so fail loudly instead.
+        fprintf(stderr,
+                "[HRR] hipGraphInstantiate: graph 0x%llx not in graph_map. HRR only "
+                "replays stream-capture graphs (hipStreamBeginCapture/EndCapture); "
+                "explicit node-API graph construction (hipGraphCreate + "
+                "hipGraphAdd*Node) is NOT supported. Aborting replay rather than "
+                "running an empty graph.\n",
                 (unsigned long long)a->graph);
-        return hipSuccess;  // non-fatal — launches will be skipped
+        return hipErrorNotSupported;
     }
 
     hipGraphExec_t exec = nullptr;
@@ -2035,6 +2069,36 @@ hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx,
                     (unsigned long long)a->pGraphExec);
     } else {
         fprintf(stderr, "[HRR] hipGraphInstantiate (via WithFlags) failed: %d (%s)\n",
+                r, hipGetErrorString(r));
+    }
+    return r;
+}
+
+hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx,
+                                                 const uint8_t* payload) {
+    const auto* a =
+        reinterpret_cast<const hrr_args_hipGraphInstantiateWithFlags*>(payload);
+    if (a->ret != hipSuccess) return hipSuccess;  // original call failed — skip
+
+    hipGraph_t graph = ctx.translate_graph(a->graph);
+    if (!graph) {
+        // See playback_hipGraphInstantiate: a graph_map miss means explicit
+        // node-API construction, which HRR does not replay. Fail loudly.
+        fprintf(stderr,
+                "[HRR] hipGraphInstantiateWithFlags: graph 0x%llx not in graph_map. "
+                "HRR only replays stream-capture graphs; explicit node-API graph "
+                "construction is NOT supported. Aborting replay.\n",
+                (unsigned long long)a->graph);
+        return hipErrorNotSupported;
+    }
+
+    hipGraphExec_t exec = nullptr;
+    hipError_t r = hipGraphInstantiateWithFlags(&exec, graph,
+                                                static_cast<unsigned long long>(a->flags));
+    if (r == hipSuccess && exec) {
+        ctx.record_graph_exec(a->pGraphExec, exec);
+    } else {
+        fprintf(stderr, "[HRR] hipGraphInstantiateWithFlags failed: %d (%s)\n",
                 r, hipGetErrorString(r));
     }
     return r;
@@ -2311,6 +2375,115 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
     parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
     parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
     return hipMemcpy3DAsync(&parms, stream);
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipMemcpy2D / hipMemcpy2DAsync
+//
+// H2D: the recorded host `src` VA is meaningless at replay; substitute the
+//      captured blob (laid out with the recorded `spitch`) and copy into the
+//      translated device `dst`.
+// D2H: read the device `src` back with the recorded pitches and validate against
+//      the captured expected-output blob.
+// ---------------------------------------------------------------------------
+
+static size_t memcpy2d_host_bytes(uint64_t pitch, uint64_t width, uint64_t height) {
+    if (height == 0 || width == 0) return 0;
+    if (pitch < width) pitch = width;
+    return static_cast<size_t>(pitch * (height - 1) + width);
+}
+
+template <typename T>
+static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
+                                   hipStream_t stream, bool is_async) {
+    const auto kind   = static_cast<hipMemcpyKind>(a->kind);
+    const size_t dpitch = static_cast<size_t>(a->dpitch);
+    const size_t spitch = static_cast<size_t>(a->spitch);
+    const size_t width  = static_cast<size_t>(a->width);
+    const size_t height = static_cast<size_t>(a->height);
+
+    if (kind == hipMemcpyHostToDevice) {
+        void* dst = ctx.translate_ptr(a->dst);
+        size_t blob_sz = 0;
+        const void* blob = (a->blob_hash_lo || a->blob_hash_hi)
+                               ? ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz)
+                               : nullptr;
+        if (!blob) {
+            // No captured source data — nothing faithful to write. Skip rather
+            // than copy from a stale capture-time host VA.
+            fprintf(stderr, "[HRR] hipMemcpy2D%s H2D: no blob to substitute — skipped\n",
+                    is_async ? "Async" : "");
+            return hipSuccess;
+        }
+        if (is_async)
+            return hipMemcpy2DAsync(dst, dpitch, blob, spitch, width, height,
+                                    hipMemcpyHostToDevice, stream);
+        return hipMemcpy2D(dst, dpitch, blob, spitch, width, height,
+                           hipMemcpyHostToDevice);
+    }
+
+    if (kind == hipMemcpyDeviceToHost) {
+        void* src = ctx.translate_ptr(a->src);
+        if (!src) {
+            fprintf(stderr, "[HRR] hipMemcpy2D%s D2H validate FAIL: src 0x%llx not mapped\n",
+                    is_async ? "Async" : "", (unsigned long long)a->src);
+            ctx.d2h_attempted++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
+            return hipSuccess;
+        }
+        size_t n = memcpy2d_host_bytes(a->dpitch, a->width, a->height);
+        std::vector<uint8_t> actual(n ? n : 1);
+        hipError_t r;
+        if (is_async) {
+            r = hipMemcpy2DAsync(actual.data(), dpitch, src, spitch, width, height,
+                                 hipMemcpyDeviceToHost, stream);
+            if (r == hipSuccess) r = hipStreamSynchronize(stream);
+        } else {
+            r = hipMemcpy2D(actual.data(), dpitch, src, spitch, width, height,
+                            hipMemcpyDeviceToHost);
+        }
+        if (r != hipSuccess) {
+            fprintf(stderr, "[HRR] hipMemcpy2D%s D2H: device readback failed: %d (%s)\n",
+                    is_async ? "Async" : "", r, hipGetErrorString(r));
+            ctx.note_d2h_fail(hrr_dispatch_seq);
+            return r;
+        }
+        if (!ctx.validate_d2h || !(a->d2h_hash_lo || a->d2h_hash_hi))
+            return hipSuccess;
+        ctx.d2h_attempted++;
+        size_t blob_sz = 0;
+        const void* expected = ctx.load_blob(a->d2h_hash_lo, a->d2h_hash_hi, &blob_sz);
+        if (!expected) {
+            fprintf(stderr, "[HRR] hipMemcpy2D D2H validate FAIL: expected blob not found\n");
+            ctx.note_d2h_fail(hrr_dispatch_seq);
+            return hipSuccess;
+        }
+        size_t cmp_sz = std::min(n, blob_sz);
+        hrr_d2h_validate(ctx, "2D", hrr_dispatch_seq, actual.data(),
+                         static_cast<const uint8_t*>(expected), cmp_sz);
+        return hipSuccess;
+    }
+
+    // D2D / H2H: translate both ends (host ptrs translate to themselves-as-null
+    // and fall through to the recorded value, matching the generated behavior).
+    void* dst = ctx.translate_ptr(a->dst);
+    void* src = ctx.translate_ptr(a->src);
+    if (!dst) dst = reinterpret_cast<void*>(a->dst);
+    if (!src) src = reinterpret_cast<void*>(a->src);
+    if (is_async)
+        return hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
+    return hipMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
+}
+
+hipError_t playback_hipMemcpy2D(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpy2D*>(pl);
+    return replay_memcpy2d(ctx, a, nullptr, /*is_async=*/false);
+}
+
+hipError_t playback_hipMemcpy2DAsync(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpy2DAsync*>(pl);
+    hipStream_t stream = ctx.translate_stream(a->stream);
+    return replay_memcpy2d(ctx, a, stream, /*is_async=*/true);
 }
 
 hipError_t playback_hipMemcpy3D_spt(PlaybackContext& ctx, const uint8_t* pl) {

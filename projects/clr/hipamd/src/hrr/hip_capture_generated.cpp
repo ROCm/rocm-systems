@@ -3693,42 +3693,7 @@ static hipError_t capture_hipMemUnmap(void* ptr, size_t size) {
 }
 
 
-// Generated shim
-static hipError_t capture_hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind) {
-  hipError_t r = g_real_table.hipMemcpy2D_fn(dst, dpitch, src, spitch, width, height, kind);
-  if (r == hipSuccess) {
-    hrr_args_hipMemcpy2D a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dst = reinterpret_cast<uint64_t>(dst);
-    a.dpitch = static_cast<decltype(a.dpitch)>(dpitch);
-    a.src = reinterpret_cast<uint64_t>(src);
-    a.spitch = static_cast<decltype(a.spitch)>(spitch);
-    a.width = static_cast<decltype(a.width)>(width);
-    a.height = static_cast<decltype(a.height)>(height);
-    a.kind = static_cast<decltype(a.kind)>(kind);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY2D, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind, hipStream_t stream) {
-  hipError_t r = g_real_table.hipMemcpy2DAsync_fn(dst, dpitch, src, spitch, width, height, kind, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipMemcpy2DAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dst = reinterpret_cast<uint64_t>(dst);
-    a.dpitch = static_cast<decltype(a.dpitch)>(dpitch);
-    a.src = reinterpret_cast<uint64_t>(src);
-    a.spitch = static_cast<decltype(a.spitch)>(spitch);
-    a.width = static_cast<decltype(a.width)>(width);
-    a.height = static_cast<decltype(a.height)>(height);
-    a.kind = static_cast<decltype(a.kind)>(kind);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY2DASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipMemcpy2DFromArray(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset, size_t hOffset, size_t width, size_t height, hipMemcpyKind kind) {
@@ -7478,6 +7443,8 @@ extern hipError_t capture_hipMemPoolSetAccess(hipMemPool_t mem_pool, const hipMe
 extern hipError_t capture_hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value);
 extern hipError_t capture_hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc, size_t count);
 extern hipError_t capture_hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
+extern hipError_t capture_hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind);
+extern hipError_t capture_hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind, hipStream_t stream);
 extern hipError_t capture_hipMemcpy3D(const struct hipMemcpy3DParms* p);
 extern hipError_t capture_hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream);
 extern hipError_t capture_hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream);

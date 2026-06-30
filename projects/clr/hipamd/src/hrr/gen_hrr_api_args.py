@@ -119,6 +119,9 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipMemcpy3DAsync",
     "hipMemcpy3D_spt",
     "hipMemcpy3DAsync_spt",
+    # hipMemcpy2D family — H2D blob snapshot (pitched host src) + D2H expected blob
+    "hipMemcpy2D",
+    "hipMemcpy2DAsync",
     # Array creation — need handle map (manual capture for output handle)
     "hipArrayCreate",
     "hipArray3DCreate",
@@ -216,6 +219,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipStreamBeginCapture",
     "hipStreamEndCapture",
     "hipGraphInstantiate",
+    # hipGraphInstantiateWithFlags — same graph_map guard as hipGraphInstantiate;
+    # must fail loudly (not pass a null graph to the real API) when the graph was
+    # built via the unsupported explicit node API.
+    "hipGraphInstantiateWithFlags",
     "hipGraphLaunch",
     # DtoH driver-style copies — dst is a host pointer (not in alloc_map); need temp buffer
     "hipMemcpyDtoH",
@@ -225,6 +232,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipMemcpy3DAsync",
     "hipMemcpy3D_spt",
     "hipMemcpy3DAsync_spt",
+    # hipMemcpy2D family — H2D substitutes the captured blob (host src is a stale VA);
+    # D2H validates the device result against the captured expected blob.
+    "hipMemcpy2D",
+    "hipMemcpy2DAsync",
     # Array creation — handle must be recorded in ctx.array_map
     "hipArrayCreate",
     "hipArray3DCreate",
@@ -242,6 +253,58 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipMemRelease",
     "hipMemMap",
     "hipMemUnmap",
+    # Device allocation — must allocate a real buffer and record it in alloc_map
+    # (with padding + zero-init parity with hipMalloc).
+    "hipExtMallocWithFlags",
+}
+
+# ---------------------------------------------------------------------------
+# Explicit graph-construction APIs that HRR cannot replay. Unlike the generic
+# NOOP handlers (which emit a vague once-per-process message), these emit a
+# loud, attributable "explicit graph construction is not supported" warning
+# naming the specific API (finding H1) — so when replay later fails, the cause
+# is traceable.
+#
+# These are intentionally NON-FATAL (they return hipSuccess): a program may
+# legitimately create/clone/build graphs it never instantiates, or exercise
+# these APIs for coverage. The HARD fail-loud happens at the point that actually
+# matters — hipGraphInstantiate / hipGraphInstantiateWithFlags (manual handlers
+# in hip_playback.cpp) return hipErrorNotSupported (fatal) when asked to
+# instantiate a graph that is absent from graph_map, which can only be a
+# node-API-built graph. That prevents a node-API graph from silently replaying
+# as an empty graph with skipped launches, without aborting programs that merely
+# touch the construction APIs.
+#
+# Only true *construction* calls belong here. Harmless queries
+# (hipGraphGetNodes/Edges, hipStreamGetCaptureInfo_v2, ...) stay in
+# NOOP_PLAYBACK_APIS. The stream-capture chain never emits these APIs, so the
+# supported hipStreamBeginCapture/EndCapture path is unaffected.
+# ---------------------------------------------------------------------------
+ERROR_STUB_PLAYBACK_APIS: Set[str] = {
+    "hipGraphCreate",
+    "hipGraphClone",
+    "hipGraphAddChildGraphNode",
+    "hipGraphAddDependencies",
+    "hipGraphAddEmptyNode",
+    "hipGraphAddEventRecordNode",
+    "hipGraphAddEventWaitNode",
+    "hipGraphAddExternalSemaphoresSignalNode",
+    "hipGraphAddExternalSemaphoresWaitNode",
+    "hipGraphAddHostNode",
+    "hipGraphAddKernelNode",
+    "hipGraphAddMemAllocNode",
+    "hipGraphAddMemFreeNode",
+    "hipGraphAddMemcpyNode",
+    "hipGraphAddMemcpyNode1D",
+    "hipGraphAddMemcpyNodeFromSymbol",
+    "hipGraphAddMemcpyNodeToSymbol",
+    "hipGraphAddMemsetNode",
+    "hipGraphAddNode",
+    "hipGraphAddBatchMemOpNode",
+    "hipDrvGraphAddMemFreeNode",
+    "hipDrvGraphAddMemcpyNode",
+    "hipDrvGraphAddMemsetNode",
+    "hipGraphInstantiateWithParams",
 }
 
 # ---------------------------------------------------------------------------
@@ -274,24 +337,9 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemMapArrayAsync",
     "hipMipmappedArrayGetMemoryRequirements",
     # Category 4: hipGraphNode_t* array params — generator passes void** but API needs hipGraphNode_t*
-    "hipGraphAddChildGraphNode",
-    "hipGraphAddDependencies",
-    "hipGraphAddEmptyNode",
-    "hipGraphAddEventRecordNode",
-    "hipGraphAddEventWaitNode",
-    "hipGraphAddExternalSemaphoresSignalNode",
-    "hipGraphAddExternalSemaphoresWaitNode",
-    "hipGraphAddHostNode",
-    "hipGraphAddKernelNode",
-    "hipGraphAddMemAllocNode",
-    "hipGraphAddMemFreeNode",
-    "hipGraphAddMemcpyNode",
-    "hipGraphAddMemcpyNode1D",
-    "hipGraphAddMemcpyNodeFromSymbol",
-    "hipGraphAddMemcpyNodeToSymbol",
-    "hipGraphAddMemsetNode",
-    "hipGraphAddNode",
-    "hipGraphAddBatchMemOpNode",
+    # NOTE: the explicit node-construction Add*Node APIs were moved to
+    # ERROR_STUB_PLAYBACK_APIS (they now fail loudly, see H1). Only the harmless
+    # query/update calls remain NOOP here.
     "hipGraphExecUpdate",
     "hipGraphGetEdges",
     "hipGraphGetNodes",
@@ -304,9 +352,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipStreamGetCaptureInfo_v2",
     "hipStreamGetCaptureInfo_v2_spt",
     "hipStreamUpdateCaptureDependencies",
-    "hipDrvGraphAddMemFreeNode",
-    "hipDrvGraphAddMemcpyNode",
-    "hipDrvGraphAddMemsetNode",
     # Category 5: Other type mismatches (output handle params stored as void** by generator)
     "hipCtxCreate",
     "hipCtxGetCurrent",
@@ -418,9 +463,10 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # hipMallocPitch — already in MANUAL_PLAYBACK_APIS for the DrvMemcpy test; these are the _spt wrappers
     # hipLaunchCooperativeKernel — variable args (void**); handled via regular kernel launch fallback — noop
     "hipLaunchCooperativeKernel",
-    # hipOccupancyMaxActiveBlocksPerMultiprocessor / WithFlags — kernel fn ptr (stale) — noop
-    # Note: already in NOOP via func pointer category above; just confirming
-    "hipExtMallocWithFlags",
+    # NOTE: hipExtMallocWithFlags is intentionally NOT noop'd. It is a real device
+    # allocation (see _ALLOC_CREATE_APIS) and is handled by a manual playback handler
+    # (MANUAL_PLAYBACK_APIS) so the returned device pointer lands in alloc_map and any
+    # H2D/D2H/kernel-arg use of it translates correctly.
     "hipChooseDeviceR0000",
     "hipGetDevicePropertiesR0000",
     "hipGetErrorName",
@@ -558,9 +604,9 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGetMipmappedArrayLevel",
     "hipFreeMipmappedArray",
     # Category 15: Graph explicit APIs — stale hipGraph_t/hipGraphExec_t/hipGraphNode_t handles
-    "hipGraphCreate",
+    # NOTE: hipGraphCreate / hipGraphClone / hipGraphInstantiateWithParams moved to
+    # ERROR_STUB_PLAYBACK_APIS (explicit construction now fails loudly, see H1).
     "hipGraphDestroy",
-    "hipGraphClone",
     "hipGraphUpload",
     "hipGraphDebugDotPrint",
     "hipGraphNodeGetType",
@@ -588,7 +634,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGraphExecGetFlags",
     "hipGraphNodeSetParams",
     "hipGraphExecNodeSetParams",
-    "hipGraphInstantiateWithParams",
     "hipGraphChildGraphNodeGetGraph",
     "hipGraphEventRecordNodeGetEvent",
     "hipGraphEventRecordNodeSetEvent",
@@ -688,6 +733,17 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                              ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
                              ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
                              ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
+    # hipMemcpy2D family — H2D blob (pitched host src) + D2H expected-output blob.
+    # The copied region is height rows of `width` bytes spaced by spitch/dpitch;
+    # the blob is the contiguous host buffer (pitch * (height-1) + width bytes).
+    "hipMemcpy2D":      [("uint64_t", "blob_hash_lo", "H2D blob hash lo (0 if not H2D)"),
+                         ("uint64_t", "blob_hash_hi", "H2D blob hash hi"),
+                         ("uint64_t", "d2h_hash_lo",  "D2H expected-output blob hash lo (0 if not D2H)"),
+                         ("uint64_t", "d2h_hash_hi",  "D2H expected-output blob hash hi")],
+    "hipMemcpy2DAsync": [("uint64_t", "blob_hash_lo", "H2D blob hash lo (0 if not H2D)"),
+                         ("uint64_t", "blob_hash_hi", "H2D blob hash hi"),
+                         ("uint64_t", "d2h_hash_lo",  "D2H expected-output blob hash lo (0 if not D2H)"),
+                         ("uint64_t", "d2h_hash_hi",  "D2H expected-output blob hash hi")],
     # hipArrayCreate — HIP_ARRAY_DESCRIPTOR is 24 bytes; store inline.
     "hipArrayCreate":   [("uint8_t", "array_desc_bytes[24]", "HIP_ARRAY_DESCRIPTOR inline copy")],
     # hipArray3DCreate — HIP_ARRAY3D_DESCRIPTOR is 40 bytes; store inline.
@@ -1102,7 +1158,7 @@ _HEADER_PREAMBLE = """\
  *   - sequence_id    uint64_t  monotonically increasing per capture session
  *   - timestamp_ns   uint64_t  wall-clock at capture time
  *   - thread_id      uint64_t  OS thread that made the call (cached per thread)
- *   - payload_length uint16_t  total record size in bytes (incl. header)
+ *   - payload_length uint32_t  total record size in bytes (incl. header)
  *   - reserved       uint8_t[4]  padding to 32 bytes
  *
  * Payload bytes (after the 32-byte header):
@@ -1125,7 +1181,10 @@ _HEADER_PREAMBLE = """\
 
 /* ---- Archive format constants ---- */
 #define HRR_MAGIC   ((uint32_t)0x52524845u)  /* "HRRE" */
-#define HRR_VERSION ((uint16_t)3u)
+/* v4: payload_length widened from uint16_t to uint32_t so kernel-launch events
+ * larger than 65535 bytes (many args / long mangled names / large by-value
+ * structs) are no longer dropped. */
+#define HRR_VERSION ((uint16_t)4u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -1150,8 +1209,8 @@ typedef struct {
     uint64_t sequence_id;    /* monotonically increasing counter          */
     uint64_t timestamp_ns;   /* wall-clock at capture time (MONOTONIC)    */
     uint64_t thread_id;      /* OS thread ID (cached per thread)          */
-    uint16_t payload_length; /* total record size in bytes (incl. header) */
-    uint8_t  reserved[4];    /* padding to 32 bytes; zero on write        */
+    uint32_t payload_length; /* total record size in bytes (incl. header) */
+    uint8_t  reserved[2];    /* padding to 32 bytes; zero on write        */
 } hrr_event_header;
 
 #ifdef __cplusplus
@@ -1770,7 +1829,7 @@ _ALLOC_CREATE_APIS: Dict[str, Tuple[str, str]] = {
     'hipMallocAsync':        ('dev_ptr', 'size'),
     'hipMallocFromPoolAsync':('dev_ptr', 'size'),
     'hipMallocManaged':      ('dev_ptr', 'size'),
-    'hipExtMallocWithFlags': ('ptr', 'size'),
+    'hipExtMallocWithFlags': ('ptr', 'sizeBytes'),  # manual playback handler; field is sizeBytes
     'hipMallocPitch':        ('ptr', 'width'),  # approximate; width used as proxy
     'hipHostMalloc':         ('ptr', 'size'),
     'hipHostAlloc':          ('ptr', 'size'),
@@ -1910,6 +1969,29 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     sname = f"hrr_args_{entry.name}"
     fname = f"playback_{entry.name}"
     sig   = f"static hipError_t {fname}(PlaybackContext& ctx, const uint8_t* payload)"
+
+    # Error-stub playback APIs: explicit graph construction that HRR cannot
+    # replay. Emit a loud, attributable (per-API) warning, but return hipSuccess
+    # — these are non-fatal. The HARD failure is at hipGraphInstantiate /
+    # hipGraphInstantiateWithFlags, which abort (hipErrorNotSupported) only when
+    # actually asked to instantiate a non-replayable node-API graph (finding H1).
+    # This keeps replay alive for programs that merely create/clone/build graphs
+    # they never instantiate in an unsupported way. Message is once/process.
+    if entry.name in ERROR_STUB_PLAYBACK_APIS:
+        return (f"static hipError_t {fname}"
+                f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
+                f"  (void)ctx; (void)payload;\n"
+                f"  static bool warned = false;\n"
+                f"  if (!warned) {{\n"
+                f"    warned = true;\n"
+                f"    fprintf(stderr, \"[HRR] {entry.name}: explicit (node-API) graph \"\n"
+                f"            \"construction is NOT supported by HRR replay. Only \"\n"
+                f"            \"stream-capture graphs (hipStreamBeginCapture/EndCapture) \"\n"
+                f"            \"are replayable; instantiating a node-API-built graph will \"\n"
+                f"            \"fail loudly. This call is skipped.\\n\");\n"
+                f"  }}\n"
+                f"  return hipSuccess;\n"
+                f"}}\n")
 
     # No-op playback APIs: emit a one-time warning then return hipSuccess.
     # The static bool ensures the message fires once per process, not once per event,
@@ -2144,6 +2226,7 @@ def main() -> None:
         ("MANUAL_CAPTURE_APIS",  MANUAL_CAPTURE_APIS),
         ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
         ("NOOP_PLAYBACK_APIS",   NOOP_PLAYBACK_APIS),
+        ("ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
         ("EXTRA_FIELDS",         set(EXTRA_FIELDS.keys())),
     ]:
         bad = sorted(n for n in api_set if n not in parsed_names)

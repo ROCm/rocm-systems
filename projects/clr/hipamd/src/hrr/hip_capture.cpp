@@ -377,6 +377,11 @@ static void serialize_kernel_launch(
     }
   };
 
+  // Each arg's size is recorded as a uint16_t on the wire. A by-value struct
+  // argument >= 64 KiB cannot be represented and would otherwise wrap mod 65536,
+  // silently corrupting the event. Detect it and drop the launch loudly below.
+  bool arg_oversized = false;
+
   if (kbuf && ksz > 0) {
     const auto* buf_bytes = static_cast<const uint8_t*>(kbuf);
     if (dbg) {
@@ -394,6 +399,7 @@ static void serialize_kernel_launch(
     for (uint32_t i = 0; i < n_all; i++) {
       const auto& desc = sig.at(i);
       if (desc.info_.hidden_) continue;
+      if (desc.size_ > UINT16_MAX) { arg_oversized = true; break; }
       uint16_t sz = static_cast<uint16_t>(desc.size_);
       const uint8_t* bytes =
           (desc.offset_ + sz <= ksz) ? buf_bytes + desc.offset_ : nullptr;
@@ -404,6 +410,7 @@ static void serialize_kernel_launch(
     for (uint32_t i = 0; i < n_all; i++) {
       const auto& desc = sig.at(i);
       if (desc.info_.hidden_) { continue; }
+      if (desc.size_ > UINT16_MAX) { arg_oversized = true; break; }
       uint16_t sz = static_cast<uint16_t>(desc.size_);
       emit_arg(i, desc.type_ == T_POINTER,
                static_cast<const uint8_t*>(kernel_params[param_idx]), sz);
@@ -411,14 +418,26 @@ static void serialize_kernel_launch(
     }
   }
 
-  if (payload.size() > UINT16_MAX) {
-    LogPrintfWarning("[HRR capture] Kernel launch payload too large (%zu bytes) — dropping event for '%s'",
-                     payload.size(), kernel_name);
+  // payload_length is a uint32_t (wire v4), so the practical ceiling is ~4 GiB —
+  // a real launch never approaches it. A per-arg size that exceeds the uint16_t
+  // arg-size field (arg_oversized) is the genuine remaining limit. In either
+  // case the launch cannot be recorded faithfully: drop it LOUDLY and mark the
+  // whole archive incomplete so replay/validation can never silently treat a
+  // capture missing a GPU launch (and its downstream writes) as faithful.
+  if (arg_oversized || payload.size() > UINT32_MAX) {
+    LogPrintfError("[HRR capture] Kernel launch for '%s' cannot be serialized "
+                   "(payload=%zu bytes, oversized_by_value_arg=%s) — dropping the "
+                   "event and marking the capture INCOMPLETE. Replay of this "
+                   "archive will be unfaithful (this launch and its effects are "
+                   "absent).",
+                   kernel_name, payload.size(), arg_oversized ? "yes" : "no");
+    hrr_cap::writer::mark_incomplete(
+        "kernel launch payload exceeds wire-format limits");
     return;
   }
   hrr_cap::writer::write_event_raw(HRR_API_HIPMODULELAUNCHKERNEL,
                                    reinterpret_cast<hrr_event_header*>(payload.data()),
-                                   static_cast<uint16_t>(payload.size()));
+                                   static_cast<uint32_t>(payload.size()));
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel);
@@ -1172,6 +1191,98 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
   capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3DASYNC_SPT, p, stream, true);
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// hipMemcpy2D / hipMemcpy2DAsync — pitched H2D blob + D2H expected blob
+//
+// The 2D copy moves `height` rows of `width` bytes, source rows spaced by
+// `spitch` and destination rows by `dpitch`. The host side is a contiguous
+// buffer whose byte extent is pitch*(height-1)+width — the bytes that actually
+// belong to the copy. We snapshot exactly that so replay can substitute the
+// (capture-time, untranslatable) host VA, and validate D2H output.
+// ---------------------------------------------------------------------------
+
+static size_t memcpy2d_host_byte_count(size_t pitch, size_t width, size_t height) {
+  if (height == 0 || width == 0) return 0;
+  if (pitch < width) pitch = width;  // defensive: degenerate pitch
+  return pitch * (height - 1) + width;
+}
+
+// Shared blob logic for both 2D variants. Writes the H2D source blob or the D2H
+// expected-output blob into `a`, then emits the event.
+template <typename T>
+static void capture_memcpy2d_impl(
+    T& a, hrr_api_id_t api_id, const void* dst, size_t dpitch,
+    const void* src, size_t spitch, size_t width, size_t height,
+    hipMemcpyKind kind, hipStream_t stream, bool is_async) {
+  if (!hip_capture_enabled()) return;
+  if (kind == hipMemcpyHostToDevice && src) {
+    size_t n = memcpy2d_host_byte_count(spitch, width, height);
+    if (n > 0) {
+      auto h = hrr_cap::writer::write_blob(src, n);
+      a.blob_hash_lo = h.lo;
+      a.blob_hash_hi = h.hi;
+      hrr_trace_h2d(is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D", dst, n);
+    }
+  } else if (kind == hipMemcpyDeviceToHost && dst) {
+    size_t n = memcpy2d_host_byte_count(dpitch, width, height);
+    if (n > 0) {
+      if (is_async && stream) {
+        hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+        if (sync_r != hipSuccess) {
+          LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 2D blob skipped",
+                           sync_r);
+          hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
+          return;
+        }
+      }
+      auto h = hrr_cap::writer::write_blob(dst, n);
+      a.d2h_hash_lo = h.lo;
+      a.d2h_hash_hi = h.hi;
+    }
+  }
+  hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
+}
+
+hipError_t capture_hipMemcpy2D(void* dst, size_t dpitch, const void* src,
+                               size_t spitch, size_t width, size_t height,
+                               hipMemcpyKind kind) {
+  hipError_t r = g_real_table.hipMemcpy2D_fn(dst, dpitch, src, spitch, width, height, kind);
+  hrr_args_hipMemcpy2D a{};
+  a.ret    = static_cast<int32_t>(r);
+  a.dst    = reinterpret_cast<uint64_t>(dst);
+  a.dpitch = static_cast<uint64_t>(dpitch);
+  a.src    = reinterpret_cast<uint64_t>(src);
+  a.spitch = static_cast<uint64_t>(spitch);
+  a.width  = static_cast<uint64_t>(width);
+  a.height = static_cast<uint64_t>(height);
+  a.kind   = static_cast<int32_t>(kind);
+  if (r == hipSuccess)
+    capture_memcpy2d_impl(a, HRR_API_HIPMEMCPY2D, dst, dpitch, src, spitch,
+                          width, height, kind, nullptr, false);
+  return r;
+}
+
+hipError_t capture_hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
+                                    size_t spitch, size_t width, size_t height,
+                                    hipMemcpyKind kind, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpy2DAsync_fn(dst, dpitch, src, spitch,
+                                                  width, height, kind, stream);
+  hrr_args_hipMemcpy2DAsync a{};
+  a.ret    = static_cast<int32_t>(r);
+  a.dst    = reinterpret_cast<uint64_t>(dst);
+  a.dpitch = static_cast<uint64_t>(dpitch);
+  a.src    = reinterpret_cast<uint64_t>(src);
+  a.spitch = static_cast<uint64_t>(spitch);
+  a.width  = static_cast<uint64_t>(width);
+  a.height = static_cast<uint64_t>(height);
+  a.kind   = static_cast<int32_t>(kind);
+  a.stream = reinterpret_cast<uint64_t>(stream);
+  if (r == hipSuccess)
+    capture_memcpy2d_impl(a, HRR_API_HIPMEMCPY2DASYNC, dst, dpitch, src, spitch,
+                          width, height, kind, stream, true);
   return r;
 }
 

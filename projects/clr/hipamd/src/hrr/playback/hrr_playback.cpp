@@ -464,6 +464,18 @@ static bool needs_ordering(uint16_t etype) {
     case HRR_API_HIPHOSTFREE:
     case HRR_API_HIPMEMADDRESSFREE:
     case HRR_API_HIPMEMRELEASE:
+    // Host/pinned + VMM handle creation. These populate shared maps
+    // (alloc_map / host_reg_bufs / vmm_va_map / vmm_handle_map) that later
+    // consumers (e.g. hipMemMap, hipHostGetDevicePointer) translate against.
+    // They must be ordered so a cross-thread consumer can never run before the
+    // create populates the map (their destroy/free counterparts above are
+    // already ordered — this restores the symmetry).
+    case HRR_API_HIPHOSTREGISTER:
+    case HRR_API_HIPHOSTUNREGISTER:
+    case HRR_API_HIPHOSTGETDEVICEPOINTER:
+    case HRR_API_HIPHOSTMALLOC:
+    case HRR_API_HIPMEMADDRESSRESERVE:
+    case HRR_API_HIPMEMCREATE:
     // Stream create / destroy
     case HRR_API_HIPSTREAMCREATE:
     case HRR_API_HIPSTREAMCREATEWITHFLAGS:

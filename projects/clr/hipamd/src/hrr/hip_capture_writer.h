@@ -53,7 +53,18 @@ void close();
 // Fills all header fields (magic, version, event_type, sequence_id, timestamp_ns,
 // thread_id, payload_length) then does a single fwrite of the whole struct.
 // Thread-safe.
-void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint16_t payload_len);
+void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_len);
+
+// Mark the capture as incomplete. After this is called, flush() will NOT append
+// the clean-shutdown trailer and the manifest is written with "complete": false,
+// so the reader/replayer cannot mistake the archive for a faithful, whole
+// capture. Used when an event cannot be serialized losslessly (e.g. a kernel
+// launch whose payload exceeds the wire-format limits) and is therefore dropped.
+// Thread-safe; idempotent.
+void mark_incomplete(const char* reason);
+
+// Returns true if mark_incomplete() has been called.
+bool is_incomplete();
 
 // Write a buffer as a content-addressed blob. Returns hash.
 // Thread-safe. Skips write if blob already exists on disk.

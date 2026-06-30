@@ -262,7 +262,7 @@ bool load_archive(const std::string& path, Archive& archive) {
     }
 
     const uint16_t etype = ev.header().event_type;
-    const uint16_t total = ev.header().payload_length;
+    const uint32_t total = ev.header().payload_length;
 
     if (total < hdr_size) {
       fprintf(stderr,
@@ -272,7 +272,7 @@ bool load_archive(const std::string& path, Archive& archive) {
     }
     if (total > hdr_size) {
       ev.raw_payload.resize(total);
-      uint16_t pl_size = total - hdr_size;
+      uint32_t pl_size = total - hdr_size;
       if (fread(ev.raw_payload.data() + hdr_size, 1, pl_size, f) != pl_size) {
         fprintf(stderr,
                 "[HRR] Truncated event payload (expected %u bytes) at tail — recovered %zu events\n",
@@ -285,7 +285,7 @@ bool load_archive(const std::string& path, Archive& archive) {
     // event_type 0xFFFF alone is not enough — Unit_HRR_Format_UnknownEventType
     // uses 0xFFFF with header-sized payload as an opaque unknown record.
     if (etype == HRR_EOF_MARKER &&
-        total == static_cast<uint16_t>(sizeof(hrr_eof_record))) {
+        total == static_cast<uint32_t>(sizeof(hrr_eof_record))) {
       const auto* er = reinterpret_cast<const hrr_eof_record*>(ev.raw_payload.data());
       if (er->eof_magic == HRR_EOF_MAGIC) {
         complete = true;
@@ -298,7 +298,7 @@ bool load_archive(const std::string& path, Archive& archive) {
     // A malformed archive could supply a valid event_type with payload_length == 32
     // (header only), which would cause an OOB read in the typed cast.
     #define AS(T) reinterpret_cast<const T*>(ev.raw_payload.data())
-    #define SIZE_OK(T) (total >= static_cast<uint16_t>(sizeof(T)))
+    #define SIZE_OK(T) (total >= static_cast<uint32_t>(sizeof(T)))
 
     switch (ev.header().event_type) {
 
@@ -378,6 +378,31 @@ bool load_archive(const std::string& path, Archive& archive) {
         ev.stream_handle      = a->stream;
         ev.memcpy_ev.hash_lo  = a->blob_hash_lo;
         ev.memcpy_ev.hash_hi  = a->blob_hash_hi;
+        break;
+      }
+
+      case HRR_API_HIPMEMCPY2D: {
+        if (!SIZE_OK(hrr_args_hipMemcpy2D)) break;
+        const auto* a = AS(hrr_args_hipMemcpy2D);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->width * a->height;  // logical bytes (best-effort)
+        ev.memcpy_ev.kind     = a->kind;
+        // H2D blob if present, else D2H expected-output blob.
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo ? a->blob_hash_lo : a->d2h_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_lo ? a->blob_hash_hi : a->d2h_hash_hi;
+        break;
+      }
+      case HRR_API_HIPMEMCPY2DASYNC: {
+        if (!SIZE_OK(hrr_args_hipMemcpy2DAsync)) break;
+        const auto* a = AS(hrr_args_hipMemcpy2DAsync);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->width * a->height;  // logical bytes (best-effort)
+        ev.memcpy_ev.kind     = a->kind;
+        ev.stream_handle      = a->stream;
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo ? a->blob_hash_lo : a->d2h_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_lo ? a->blob_hash_hi : a->d2h_hash_hi;
         break;
       }
 

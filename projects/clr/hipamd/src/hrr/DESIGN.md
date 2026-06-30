@@ -292,8 +292,8 @@ HRR_VERSION = 3
               sequence_id    u64   monotonically increasing (atomic)
               timestamp_ns   u64   MONOTONIC wall clock
               thread_id      u64   OS thread ID (cached per-thread)
-              payload_length u16   total size INCLUDING this 32-byte header
-              reserved       u8[4] zero
+              payload_length u32   total size INCLUDING this 32-byte header (v4)
+              reserved       u8[2] zero
             payload bytes    (payload_length - 32 bytes)
               ret            i32   hipError_t return value
               params         per hrr_args_* struct fields
@@ -900,16 +900,18 @@ in `alloc_map`:
 | `hipMalloc3DArray` | no-op |
 | `hipMallocArray` | no-op |
 | `hipMallocMipmappedArray` | no-op |
-| `hipExtMallocWithFlags` | no-op (in `NOOP_PLAYBACK_APIS`) |
 
 These APIs allocate pinned host memory or array storage. At replay, no memory is
 actually allocated and no pointer is added to `alloc_map`.
 
-**`hipExtMallocWithFlags` is worse than the host-alloc cases.** It is also declared a
-device-allocation API, but the `NOOP_PLAYBACK_APIS` no-op wins, so it returns
-`hipSuccess` without allocating or recording anything. Because the returned buffer is
-the *device* destination (not host staging), even basic H2D/D2H into it breaks and any
-kernel argument derived from it translates to `nullptr`.
+**`hipExtMallocWithFlags` is now fully replayed (finding H4, fixed).** It is a device
+allocation, so it is no longer a no-op: it is a `MANUAL_PLAYBACK_APIS` handler that
+calls the real `hipExtMallocWithFlags` (preserving the recorded flags), applies the
+same padding and zero-init as `hipMalloc`, and records the buffer in `alloc_map`. H2D,
+D2H, and kernel-argument pointers derived from it now translate correctly. (Previously
+it was simultaneously a declared device allocation *and* in `NOOP_PLAYBACK_APIS`; the
+no-op won, so nothing was allocated or recorded and every derived pointer translated to
+`nullptr`.)
 
 **What still works:**
 
@@ -1050,58 +1052,76 @@ Other HIP features with similar complications include device-side enqueue, coope
 groups with CPU-side barriers, and persistent kernels with CPU-side steering. These are
 not currently handled.
 
-### Explicit Graph Construction — Not Supported
+### Explicit Graph Construction — Not Supported (fails loudly)
 
 Only the **stream-capture** graph chain is supported (`hipStreamBeginCapture` →
 `hipStreamEndCapture` → `hipGraphInstantiate` → `hipGraphLaunch`). Graphs built
-explicitly through the node API are not:
+explicitly through the node API are not — and replay no longer silently produces an
+empty graph with skipped launches (finding H1). The failure is split into two levels:
 
-- `hipGraphCreate` / `hipGraphClone` are no-ops, so `graph_map` is never populated and
-  a subsequent `hipGraphInstantiate` translates the graph handle to null.
-- `hipGraphAdd*Node` node-parameter struct pointers are stored as raw `uint64_t`
-  without dereferencing, so kernel/dims/kernarg/memcpy descriptors are lost, and
-  `pDependencies` records only its first element.
+- **Hard fail-loud at instantiate.** `hipGraphInstantiate` / `hipGraphInstantiateWithFlags`
+  (manual handlers) return `hipErrorNotSupported` — which the dispatcher treats as
+  fatal — when the graph handle is absent from `graph_map`. A miss can only happen for
+  a node-API-built graph, since the stream-capture chain always records its graph via
+  `hipStreamEndCapture`. This is the point that actually matters: a non-replayable
+  graph can never be launched as an empty graph.
+- **Attributable warning at construction (non-fatal).** `hipGraphCreate` /
+  `hipGraphClone` / every `hipGraphAdd*Node` / `hipGraphInstantiateWithParams` are
+  `ERROR_STUB_PLAYBACK_APIS`: they log a loud, per-API "explicit (node-API) graph
+  construction is NOT supported" message and return `hipSuccess`. They are deliberately
+  non-fatal so a program that merely *creates/clones* a graph (or exercises these APIs
+  for coverage) without instantiating it in an unsupported way still replays; if such a
+  graph is later instantiated, the instantiate gate above fires.
+- Node-parameter struct pointers are still stored as raw `uint64_t` without
+  dereferencing (full node-API replay remains future work).
 
-A node-API-constructed graph therefore replays as an empty graph with its launches
-silently skipped.
+The supported stream-capture path is unaffected: it never emits `hipGraphCreate` /
+`hipGraphAdd*Node` events, and its graph is in `graph_map` so instantiate succeeds.
 
 ### Wire-Format Size Limits
 
-The event wire format imposes hard size limits that fail **silently**:
+The event wire format (finding H5):
 
-- **Whole-launch drop above 65535 bytes.** `hrr_event_header::payload_length` is a
-  `uint16_t`. A kernel launch whose serialized payload (header + args + mangled name +
-  by-value structs) exceeds 65535 bytes logs a capture-time warning and is **not
-  written** — the launch and all its effects are absent from replay
-  (`hip_capture.cpp`).
-- **Per-argument size truncation at 64 KiB.** Each kernel arg's size is recorded as a
-  `uint16_t`; a by-value struct argument ≥ 64 KiB wraps mod 65536. A wrapped-small size
-  also slips past the total-payload guard, so a corrupt event is written.
+- **`payload_length` is now a `uint32_t` (wire v4).** `hrr_event_header::payload_length`
+  was widened from `uint16_t` to `uint32_t` (the 32-byte header size is preserved by
+  shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
+  (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
+  normally instead of being dropped at 65535 bytes. `HRR_VERSION` was bumped to 4; the
+  writer's single-record buffer path now writes any oversized record straight through.
+- **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
+  a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch
+  is **dropped with an error-level log** and the whole archive is marked **incomplete**
+  via `hrr_cap::writer::mark_incomplete()` — the clean-shutdown trailer is omitted and
+  `manifest.complete=false`, so replay/validation cannot mistake a capture missing a GPU
+  launch for a faithful one. (Previously the size wrapped mod 65536, slipping past the
+  total-payload guard and writing a corrupt event.)
 - **Pointer-translation size precondition.** Whole-arg pointer translation requires the
-  recorded `arg_size >= 8`; a smaller pointer descriptor (or one truncated by the wrap
-  above) is copied through untranslated, passing the stale capture-time VA to the
-  kernel.
+  recorded `arg_size >= 8`; a smaller pointer descriptor is copied through untranslated,
+  passing the stale capture-time VA to the kernel.
 
-### 2D/3D Memcpy and Memset — Not Blob-Captured
+### 2D/3D Memcpy and Memset — Blob Capture Status
 
-- `hipMemcpy2D` / `hipMemcpy2DAsync` do **not** capture an H2D/D2H blob (unlike the 1D
-  and 3D memcpy families). At replay an H2D 2D copy's host `src` is an untranslatable
-  capture-time VA with no blob to substitute, and D2H 2D copies are never validated —
-  affecting row-padded image/tensor buffers.
+- `hipMemcpy2D` / `hipMemcpy2DAsync` are now blob-captured (finding H3), matching the 1D
+  and 3D families. They are `MANUAL_CAPTURE_APIS` / `MANUAL_PLAYBACK_APIS`: H2D snapshots
+  the pitched host `src` region (`spitch*(height-1)+width` bytes) as a blob, and at
+  replay the captured blob is substituted for the untranslatable capture-time host VA
+  and copied into the translated device `dst` with the recorded `dpitch`. D2H snapshots
+  the host `dst` after the copy and validates the device result against it at replay.
+  Row-padded image/tensor buffers are now handled.
 - `hipMemset3D` / `hipMemset3DAsync` drop the destination pitched pointer/extent at
   capture (`pitchedDevPtr = 0`) and no-op at replay, so 3D-memset-initialized regions
   are invisible to replay.
 
-### Multi-Thread Replay Ordering — Missing Handle-Creating APIs
+### Multi-Thread Replay Ordering — Handle-Creating APIs
 
 `needs_ordering()` forces handle-lifecycle events into global capture order so a
-consumer never runs before its handle is created. Five handle-*creating* APIs are
-missing from that set — `hipHostRegister`, `hipHostGetDevicePointer`, `hipHostMalloc`,
-`hipMemAddressReserve`, `hipMemCreate` — even though their *destroy/free* counterparts
-**are** ordered (an accidental asymmetry). Under `--multi-thread`, a cross-thread
-consumer (e.g. `hipMemMap`) can dispatch before the create populates the translation
-map, then silently return `hipSuccess` and skip the mapping, faulting or reading
-garbage later.
+consumer never runs before its handle is created. The previously-missing
+handle-*creating* APIs — `hipHostRegister`, `hipHostGetDevicePointer`, `hipHostMalloc`,
+`hipMemAddressReserve`, `hipMemCreate` (plus `hipHostUnregister`) — are now ordered
+(finding H6), restoring symmetry with their already-ordered destroy/free counterparts.
+Under `--multi-thread`, a cross-thread consumer (e.g. `hipMemMap`) can no longer
+dispatch before the create populates the translation map and silently
+`return hipSuccess` while skipping the mapping.
 
 ### Validation-Fidelity Caveats
 
