@@ -52,6 +52,7 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -1007,20 +1008,30 @@ Queue::throttle_inflight(int64_t max_inflight) const
 {
     if(max_inflight <= 0 || _active_kernels.handle == 0u) return;
 
-    // Backpressure: block the producer thread while the number of outstanding
-    // async dispatches is at/above max_inflight. Without this, counter-collection
-    // serialization lets the host enqueue thousands of dispatches ahead of GPU
-    // completion, oversubscribing the HWS runlist and stalling the command
-    // processor. _active_kernels is decremented by async_complete() on kernel
-    // completion, which wakes this blocking wait (no busy spin). The timeout hint
-    // bounds the wait so we re-check periodically rather than blocking forever.
+    // Backpressure: block the producer thread while too many async dispatches are
+    // outstanding. Without this, counter-collection serialization lets the host
+    // enqueue thousands of dispatches ahead of GPU completion, oversubscribing the
+    // HWS runlist and stalling the command processor. _active_kernels is
+    // decremented by async_complete() on kernel completion, which wakes this
+    // blocking wait (no busy spin). The timeout hint bounds the wait so we re-check
+    // periodically rather than blocking forever.
+    //
+    // _active_kernels already counts the dispatch currently being enqueued
+    // (async_started() runs before this throttle on the serialized path), so the
+    // in-progress dispatch must not count against the cap. Treat max_inflight as an
+    // inclusive cap on already-outstanding dispatches by waiting until the signal
+    // drops below max_inflight + 1; otherwise a bound of 1 would wait for the
+    // signal to reach 0, which cannot happen before this dispatch is even
+    // submitted, deadlocking.
+    const int64_t cap =
+        (max_inflight < std::numeric_limits<int64_t>::max()) ? max_inflight + 1 : max_inflight;
     constexpr auto timeout_hint =
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-    while(_core_api.hsa_signal_load_scacquire_fn(_active_kernels) >= max_inflight)
+    while(_core_api.hsa_signal_load_scacquire_fn(_active_kernels) >= cap)
     {
         _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
                                              HSA_SIGNAL_CONDITION_LT,
-                                             max_inflight,
+                                             cap,
                                              timeout_hint.count(),
                                              HSA_WAIT_STATE_BLOCKED);
     }
