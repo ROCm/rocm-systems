@@ -500,16 +500,13 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
 
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
-  if (comm->nNodes < 8) return false;
   if (rcclParamHierarchicalAllGather() != 1) return false;
   if (!comm->hierarchicalCommsInitialized) return false;
 
-  size_t threshold = 0;
-  if (comm->nNodes >= 16) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
-  } else if (comm->nNodes >= 8) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
-  }
+  int interNodes = comm->hierarchicalInterComm->nRanks;
+  if (interNodes < 8) return false;
+
+  size_t threshold = (interNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
 
   return threshold > 0 && msgSize <= threshold;
 }

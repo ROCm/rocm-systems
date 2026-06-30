@@ -2575,26 +2575,31 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->initState = ncclSuccess;
 
   // Initialize hierarchical sub-communicators and temp buffer
-  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && rcclParamHierarchicalAllGather() == 1) {
-    if (comm->minLocalRanks != comm->maxLocalRanks) {
+  bool dpx = (comm->nNodes == 1 && comm->nRanks == 16);
+  if (!job->parent && !comm->isGrow && rcclParamHierarchicalAllGather() == 1 && (dpx || comm->nNodes >= 8)) {
+    bool uniform = dpx ? true : (comm->minLocalRanks == comm->maxLocalRanks);
+    if (!uniform) {
       INFO(NCCL_INIT, "Hierarchical AllGather: non-uniform GPU count per node, skipping hierarchical allgather");
     } else {
       // Hierarchical Shuffle kernel assumes compact rank ordering.
       // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
-      const int lr = comm->maxLocalRanks;
+      
       bool compactRanks = true;
-      for (int r = 0; r < comm->nRanks; r++) {
-        if (comm->rankToNode[r] != r / lr ||
-            comm->rankToLocalRank[r] != r % lr) {
-          compactRanks = false;
-          break;
+      if (!dpx) {
+        const int lr = comm->maxLocalRanks;
+        for (int r = 0; r < comm->nRanks; r++) {
+          if (comm->rankToNode[r] != r / lr ||
+              comm->rankToLocalRank[r] != r % lr) {
+            compactRanks = false;
+            break;
+          }
         }
-      }
+      } 
       if (!compactRanks) {
         INFO(NCCL_INIT, "Hierarchical AllGather: non-compact rank ordering, skipping hierarchical allgather");
       } else {
-        int node_id = comm->rankToNode[comm->rank];
-        int local_rank = comm->rankToLocalRank[comm->rank];
+        int node_id = dpx ? (comm->rank / 2) : comm->rankToNode[comm->rank];
+        int local_rank = dpx ? (comm->rank % 2) : comm->rankToLocalRank[comm->rank];
         NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
         // honor user input if user explicitly disables PAT
         const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
@@ -2602,11 +2607,12 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
         NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
         comm->forcePatEnable = false;
-        size_t tempBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+        int virNodes = dpx ? (comm->nRanks / 2) : comm->nNodes;
+        size_t tempBufSize = (virNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
         NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
         INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
-          comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+          dpx ? " [DPX]" : "", comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
       }
     }
   }
