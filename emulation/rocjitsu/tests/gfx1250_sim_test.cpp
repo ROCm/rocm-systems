@@ -2526,6 +2526,26 @@ TEST(Gfx1250ExecutionTest, TensorDmaAtomicBarrierArrivesAfterCopy) {
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
 }
 
+TEST(Gfx1250ExecutionTest, SBarrierWaitBlocksWavefront) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const std::array<uint32_t, 2> wait_words = {0xBF940000u, 0u};
+  std::unique_ptr<Instruction> wait_inst(decoder->decode(wait_words.data()));
+  ASSERT_NE(wait_inst, nullptr);
+  ASSERT_EQ(std::string_view(wait_inst->mnemonic()), "s_barrier_wait");
+
+  cu->execute_instruction(wait_inst.get(), *wf);
+
+  EXPECT_EQ(wf->state(), amdgpu::WfState::BARRIER);
+}
+
 TEST(Gfx1250ExecutionTest, ReleaseWaitCounterWakesWaitcntWhenTargetIsSatisfied) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();

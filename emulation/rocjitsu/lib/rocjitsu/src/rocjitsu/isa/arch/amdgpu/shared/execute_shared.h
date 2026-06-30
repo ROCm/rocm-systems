@@ -736,7 +736,9 @@ inline void execute_s_barrier_signal_isfirst_sop1([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_s_barrier_wait_sopp([[maybe_unused]] Inst &inst,
-                                        [[maybe_unused]] Wavefront &wf) {}
+                                        [[maybe_unused]] Wavefront &wf) {
+  wf.set_state(amdgpu::WfState::BARRIER);
+}
 
 template <typename Inst>
 inline void execute_s_bcnt0_i32_b32_sop1([[maybe_unused]] Inst &inst,
