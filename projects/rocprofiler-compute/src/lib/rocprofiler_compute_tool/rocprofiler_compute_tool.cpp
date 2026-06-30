@@ -32,8 +32,9 @@ static std::shared_ptr<CountersWriter>& g_counters_writer = *new std::shared_ptr
     std::make_shared<CsvCountersWriter>());
 static std::shared_ptr<rocprofiler_tool_configure_result_t>& g_cfg =
     *new std::shared_ptr<rocprofiler_tool_configure_result_t>();
-static std::atomic<bool> g_tool_shutting_down{false};
-static std::atomic<bool> g_hsa_intercept_done{false};
+static std::unique_ptr<tool_data_t>& g_tool_data = *new std::unique_ptr<tool_data_t>();
+static std::atomic<bool>             g_tool_shutting_down{false};
+static std::atomic<bool>             g_hsa_intercept_done{false};
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
@@ -53,6 +54,7 @@ void test_knobs::set_csv_writer(const std::shared_ptr<CountersWriter>& csv_write
 void test_knobs::reset_cfg()
 {
     g_cfg.reset();
+    g_tool_data.reset();
     g_tool_shutting_down.store(false, std::memory_order_release);
     g_hsa_intercept_done.store(false, std::memory_order_release);
 }
@@ -180,7 +182,7 @@ void tool_fini(void* user_data)
     auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(user_data);
     generate_output(tool_data_ptr->get());
 
-    delete tool_data_ptr;
+    tool_data_ptr->reset();
 }
 
 }  // namespace rocprofiler_compute_tool
@@ -282,13 +284,11 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
 
     std::clog << info.str() << std::endl;
 
-    // init tool data
-    auto tool_data = create_tool_data(id);
-
     // create configure data
     if (!g_cfg)
     {
-        auto* tool_data_ptr = new std::unique_ptr<tool_data_t>(std::move(tool_data));
+        g_tool_data         = create_tool_data(id);
+        auto* tool_data_ptr = &g_tool_data;
         g_cfg               = std::make_shared<rocprofiler_tool_configure_result_t>(
             rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                                 &tool_init,

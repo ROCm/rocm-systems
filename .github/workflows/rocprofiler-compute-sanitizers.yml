@@ -1,0 +1,224 @@
+name: rocprofiler-compute Sanitizers
+run-name: rocprofiler-compute-sanitizers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - rocprofiler-compute-develop
+    paths:
+      - ".github/workflows/rocprofiler-compute-sanitizers.yml"
+      - "projects/rocprofiler-compute/**"
+      - "!**/*.md"
+      - "!**/*.rtf"
+      - "!**/*.rst"
+      - "!**/.markdownlint-ci2.yaml"
+      - "!**/.readthedocs.yaml"
+      - "!**/.spellcheck.local.yaml"
+      - "!**/.wordlist.txt"
+      - "!projects/rocprofiler-compute/docs/**"
+      - "!projects/rocprofiler-compute/source/docs/**"
+      - "!projects/rocprofiler-compute/source/python/gui/**"
+      - "!projects/rocprofiler-compute/docker/**"
+      - "!projects/rocprofiler-compute/CMakePresets.json"
+  pull_request:
+    paths:
+      - ".github/workflows/rocprofiler-compute-sanitizers.yml"
+      - "projects/rocprofiler-compute/**"
+      - "!**/*.md"
+      - "!**/*.rtf"
+      - "!**/*.rst"
+      - "!**/.markdownlint-ci2.yaml"
+      - "!**/.readthedocs.yaml"
+      - "!**/.spellcheck.local.yaml"
+      - "!**/.wordlist.txt"
+      - "!projects/rocprofiler-compute/docs/**"
+      - "!projects/rocprofiler-compute/source/docs/**"
+      - "!projects/rocprofiler-compute/source/python/gui/**"
+      - "!projects/rocprofiler-compute/docker/**"
+      - "!projects/rocprofiler-compute/CMakePresets.json"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
+
+jobs:
+  sanitizer:
+    name: ${{ matrix.sanitizer.name }}
+    runs-on: linux-mi355-1gpu-ossci-rocm
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer:
+          - name: asan
+            enable_sanitizer: ASAN
+          - name: tsan
+            enable_sanitizer: TSAN
+          - name: ubsan
+            enable_sanitizer: UBSAN
+    env:
+      HIP_PLATFORM: "amd"
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+    container:
+      image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-multiarch
+      options: >-
+        --privileged
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --cap-add CAP_SYS_ADMIN
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
+
+      - name: Setup environment
+        id: setup_env
+        working-directory: projects/rocprofiler-compute
+        shell: bash
+        run: |
+          echo "code_name=noble" >> "${GITHUB_OUTPUT}"
+
+      - name: Install amdgpu and dependencies
+        shell: bash
+        run: |
+          ROCM_MAJOR="$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $1}')"
+          ROCM_MINOR="$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $2}')"
+          ROCM_VERSN="$(( (ROCM_MAJOR * 10000) + (ROCM_MINOR * 100) ))"
+          INSTALLER="amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb"
+          wget -N -P /tmp/ \
+            "https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/${INSTALLER}"
+          apt-get update
+          apt-get install -y "/tmp/${INSTALLER}"
+          apt-get update
+          apt-get install -y amd-smi-lib libdw-dev hip-dev pkg-config
+          echo "✅ amdgpu and ROCm dependencies Installed!"
+
+      - name: Install latest nightly ROCm
+        shell: bash
+        run: |
+          set -e
+          tarball="$(ls "${ROCM_PATH}"-*-multiarch.tar.gz | head -n1)"
+          tarball_rocm_version="$(echo "${tarball}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
+          mkdir -p "${ROCM_PATH}-${ROCM_VERSION}"
+          tar -xf "${tarball}" -C "${ROCM_PATH}-${ROCM_VERSION}"
+          ln -s "${ROCM_PATH}-${ROCM_VERSION}" "${ROCM_PATH}"
+          echo "ROCm ${tarball_rocm_version} installed to: ${ROCM_PATH}"
+          echo "✅ ROCm Installation Complete!"
+
+      - name: Output TheRock manifest
+        run: cat "${ROCM_PATH}/share/therock/therock_manifest.json"
+
+      - name: Locate clang sanitizer runtime
+        id: sanitizer_runtime
+        shell: bash
+        run: |
+          resource_dir="$("${ROCM_PATH}/llvm/bin/clang" -print-resource-dir)"
+          sanitizer_lib_dir="${resource_dir}/lib/linux"
+          if [ ! -d "${sanitizer_lib_dir}" ]; then
+            echo "❌ Missing clang sanitizer runtime: ${sanitizer_lib_dir}"
+            exit 1
+          fi
+          echo "sanitizer_lib_dir=${sanitizer_lib_dir}" >> "${GITHUB_OUTPUT}"
+          echo "Clang sanitizer runtime: ${sanitizer_lib_dir}"
+
+      - name: Install Python requirements
+        working-directory: projects/rocprofiler-compute
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            pip install \
+              -r requirements.txt \
+              --break-system-packages \
+              --ignore-installed \
+              --timeout 60 && break
+            echo "⚠️ pip install attempt ${attempt} failed, retrying..."
+            sleep 10
+          done
+          for attempt in 1 2 3; do
+            pip install \
+              -r requirements-test.txt \
+              --break-system-packages \
+              --ignore-installed \
+              --timeout 60 && break
+            echo "⚠️ pip install attempt ${attempt} failed, retrying..."
+            sleep 10
+          done
+          echo "✅ pip requirements installed!"
+
+      - name: Configure, build, and test
+        id: test
+        continue-on-error: true
+        working-directory: projects/rocprofiler-compute
+        shell: bash
+        run: |
+          set -e
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          git config --global --add safe.directory "${PWD}"
+
+          export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
+          export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${{ steps.sanitizer_runtime.outputs.sanitizer_lib_dir }}:${LD_LIBRARY_PATH:-}"
+
+          c_compiler="$(command -v amdclang)"
+          cxx_compiler="$(command -v amdclang++)"
+
+          python3 ./tools/run-ci.py \
+            --name "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-24.04-${{ matrix.sanitizer.name }}" \
+            --actor "${{ github.actor }}" \
+            --site linux-mi355-1gpu-ossci-rocm \
+            --mode Continuous \
+            --build-jobs 16 \
+            --repeat-until-pass 1 \
+            --repeat-after-timeout 1 \
+            -- \
+            "-DCMAKE_C_COMPILER=${c_compiler}" \
+            "-DCMAKE_CXX_COMPILER=${cxx_compiler}" \
+            "-DCMAKE_HIP_COMPILER=${cxx_compiler}" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_PREFIX_PATH=${ROCM_PATH}" \
+            -DENABLE_TESTS=ON \
+            -DINSTALL_TESTS=ON \
+            "-DENABLE_SANITIZER=${{ matrix.sanitizer.enable_sanitizer }}" \
+            -- \
+            -L sanitizer
+
+      - name: Output logs
+        if: steps.test.outcome == 'failure'
+        working-directory: projects/rocprofiler-compute
+        shell: bash
+        run: |
+          echo "❌ Run Failed: Outputting available log files..."
+          for log in build/Testing/Temporary/LastTest*.log \
+            build/Testing/Temporary/LastConfigure*.log; do
+            if [ -f "${log}" ]; then
+              echo "=== ${log} ==="
+              cat "${log}"
+            fi
+          done
+
+      - name: Check test results
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.test.outcome }}" = "failure" ]; then
+            echo "❌ Tests failed - see CDash for details: https://my.cdash.org/index.php?project=rocprofiler-compute"
+            exit 1
+          fi
+          echo "✅ All tests passed!"
