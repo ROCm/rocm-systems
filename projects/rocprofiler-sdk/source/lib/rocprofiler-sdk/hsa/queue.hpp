@@ -171,9 +171,10 @@ public:
         return _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
     }
 
-    // Blocks the calling (producer) thread while the number of outstanding async
-    // dispatches is at/above max_inflight, providing backpressure so the host
-    // cannot run far ahead of GPU completion. Uses a blocking HSA signal wait on
+    // Blocks the calling (producer) thread until the number of already-outstanding
+    // async dispatches drops below max_inflight, providing backpressure so the host
+    // cannot run far ahead of GPU completion. The dispatch currently being enqueued
+    // is not counted against the bound. Uses a blocking HSA signal wait on
     // _active_kernels (woken by async_complete()); no busy spin. A non-positive
     // max_inflight disables throttling.
     void throttle_inflight(int64_t max_inflight) const;
