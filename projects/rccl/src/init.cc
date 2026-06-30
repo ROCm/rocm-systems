@@ -78,6 +78,8 @@
 #include "dda_all_reduce_ipc.h"
 #include "ipc_init.h"
 #include  <cpuid.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/utsname.h>
 
 #ifndef STR2
