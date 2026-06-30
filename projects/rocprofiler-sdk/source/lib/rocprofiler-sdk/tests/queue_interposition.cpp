@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/common/environment.hpp"
 
 #include <gtest/gtest.h>
 
@@ -170,6 +171,33 @@ TEST(queue_interposition, load_write_index_returns_virtual_wptr)
     QueueState state{};
     state.virtual_wptr.store(99);
     EXPECT_EQ(load_write_index_impl(&state), 99u);
+}
+
+TEST(queue_interposition, async_signal_handler_thread_count_uses_gpu_queue_count)
+{
+    common::env_store env(
+        {{"GPU_MAX_HW_QUEUES", "7", 1}, {"ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", "", 1}});
+    ASSERT_TRUE(env.push());
+
+    EXPECT_EQ(get_async_signal_handler_thread_count(), 7u);
+}
+
+TEST(queue_interposition, async_signal_handler_thread_count_clamps_zero_gpu_queue_count)
+{
+    common::env_store env(
+        {{"GPU_MAX_HW_QUEUES", "0", 1}, {"ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", "", 1}});
+    ASSERT_TRUE(env.push());
+
+    EXPECT_EQ(get_async_signal_handler_thread_count(), 1u);
+}
+
+TEST(queue_interposition, async_signal_handler_thread_count_override_takes_precedence)
+{
+    common::env_store env(
+        {{"GPU_MAX_HW_QUEUES", "0", 1}, {"ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", "3", 1}});
+    ASSERT_TRUE(env.push());
+
+    EXPECT_EQ(get_async_signal_handler_thread_count(), 3u);
 }
 
 namespace

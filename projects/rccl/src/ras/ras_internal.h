@@ -69,7 +69,11 @@ struct rasCollRequest {
       int nSkipMissingRanksComms; // Number of elements in the array below.
       // Communicators for which we do *not* need the missingRanks data in the responses
       // (see struct rasCollCommsMissingRank later).
+#if defined(NCCL_OS_WINDOWS)
+      struct rasCommId skipMissingRanksComms[1]; // Variable length, sorted. [1] for MSVC.
+#else
       struct rasCommId skipMissingRanksComms[0]; // Variable length, sorted.
+#endif
     } comms;
   };
 };
@@ -82,7 +86,11 @@ struct rasCollResponse {
   int nLegTimeouts; // If >0, indicates incomplete data.
   int nPeers;
   int nData; // Size of data in bytes.
+#if defined(NCCL_OS_WINDOWS)
+  union ncclSocketAddress peers[1]; // Variable length. [1] for MSVC.
+#else
   union ncclSocketAddress peers[0]; // Variable length.
+#endif
   // The peers array is followed by:
   // alignas(int64_t) char data[0]; // Variable length, collective-dependent.
 };
@@ -91,7 +99,7 @@ struct rasCollResponse {
 // NCCL process.
 struct rasPeerInfo {
   union ncclSocketAddress addr;
-  pid_t pid;
+  ncclPid_t pid;
   uint64_t cudaDevs; // Bitmask.  This is for local devices so 64 bits is enough.
   uint64_t nvmlDevs; // Same, but not affected by CUDA_VISIBLE_DEVICES.
   uint64_t hostHash, pidHash; // Taken from ncclComm, but with the commHash subtracted to make it
@@ -187,7 +195,7 @@ static inline size_t rasMsgLength(rasMsgType type, rasCollectiveType collType = 
 #define POLL_FD_IGNORE -2
 
 // Our clock has nanosecond resolution.
-#define CLOCK_UNITS_PER_SEC 1000000000L
+#define CLOCK_UNITS_PER_SEC (1000000000LL)
 
 // Keep-alive messages are sent no sooner than a second after the last message was sent down a particular connection.
 #define RAS_KEEPALIVE_INTERVAL (1*CLOCK_UNITS_PER_SEC*ncclParamRasTimeoutFactor())
@@ -278,7 +286,12 @@ struct rasCollConns {
     union ncclSocketAddress source;
     union ncclSocketAddress dest;
     int64_t travelTimeMin;
-  } negativeMins[0]; // Variable length.
+  }
+#if defined(NCCL_OS_WINDOWS)
+  negativeMins[1]; // Variable length. [1] for MSVC.
+#else
+  negativeMins[0]; // Variable length.
+#endif
 };
 
 // Collective data in RAS_COLL_COMMS responses.
@@ -302,10 +315,20 @@ struct rasCollComms {
       } status;
       char cudaDev;
       char nvmlDev;
-    } ranks[0]; // Variable length. Sorted by commRank.  Optimized for 1 GPU/process.
+    }
+#if defined(NCCL_OS_WINDOWS)
+    ranks[1]; // Variable length. [1] for MSVC.
+#else
+    ranks[0]; // Variable length. Sorted by commRank.  Optimized for 1 GPU/process.
+#endif
     // The ranks array is followed by:
     // struct rasCollCommsMissingRank missingRanks[0]; // Variable length.  Sorted by commRank.
-  } comms[0]; // Variable length.  Sorted by commId.
+  }
+#if defined(NCCL_OS_WINDOWS)
+  comms[1]; // Variable length. [1] for MSVC.
+#else
+  comms[0]; // Variable length.  Sorted by commId.
+#endif
 };
 
 // Provides info about missing ranks.  An array of these structures can be part of struct rasCollComms above.

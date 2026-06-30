@@ -224,6 +224,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_gpu_agent.cpp
            core/runtime/amd_hsa_loader.cpp
            core/runtime/amd_aql_queue.cpp
+           core/runtime/amd_sdma_queue.cpp
            core/runtime/amd_loader_context.cpp
            core/runtime/hsa_ven_amd_loader.cpp
            core/runtime/amd_memory_region.cpp
@@ -231,6 +232,8 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_topology.cpp
            core/runtime/default_signal.cpp
            core/runtime/host_queue.cpp
+           core/runtime/hotswap.cpp
+           core/runtime/hotswap_gfx_query.cpp
            core/runtime/hsa.cpp
            core/runtime/hsa_api_trace.cpp
            core/runtime/hsa_ext_amd.cpp

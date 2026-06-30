@@ -1744,3 +1744,6 @@ graph:
   Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy:
+    <<: *level_2
+    tags: [node]

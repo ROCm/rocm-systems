@@ -211,6 +211,9 @@ performance:
   Performance_GraphTopology_Parallel: *level_2
   Performance_GraphTopology_Hexagon: *level_2
   Performance_GraphTopology_Mixed: *level_2
+  Performance_PyFR_Couette_IndividualGraphs: *level_2
+  Performance_PyFR_Couette_StepSimulation: *level_2
+  Performance_PyFR_Couette_SingleIteration: *level_2
   Performance_hipPerfMemcpy_test: *level_2
   Performance_hipPerfBufferCopyRectSpeed_test: *level_2
   Performance_hipPerfBufferCopySpeed_test: *level_2

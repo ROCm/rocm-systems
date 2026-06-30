@@ -172,11 +172,34 @@ class Stats {
     for (int i = 0; i < I; i++) incStat(i, otherStats.getStat(i));
   }
 
+  // Host-side accumulation: plain addition into an already-host-accessible
+  // Stats object (e.g. globalStats in hipHostMalloc memory).  Not atomic —
+  // must only be called from the host when no GPU kernels are concurrently
+  // writing to this object or to otherStats.
+  __host__ void hostAccumulateStats(const Stats<I> &otherStats) {
+    for (int i = 0; i < I; i++) stats[i] += otherStats.getStat(i);
+  }
+
   __host__ __device__ void resetStats() {
     memset(&stats, 0, sizeof(StatType) * I);
   }
 
-  __host__ __device__ StatType getStat(int index) const { return stats[index]; }
+  __host__ __device__ StatType getStat(int index) const {
+#ifdef __HIP_DEVICE_COMPILE__
+    return stats[index];
+#else
+    // On weak-memory-order hosts (e.g. ARM/AArch64) the compiler or CPU may
+    // reorder or cache a plain load of this array, whose elements are written
+    // by GPU wavefronts via atomicAdd into hipHostMalloc-mapped host memory.
+    // Use an atomic acquire load so the host always observes the most recent
+    // GPU write: on x86 (TSO) this compiles to a plain MOV; on ARM it emits
+    // LDAR (load-acquire), which prevents later loads from being speculated
+    // before this one and ensures the value is read from the coherent memory
+    // subsystem rather than a stale CPU register or store buffer.
+    return __atomic_load_n(const_cast<StatType *>(&stats[index]),
+                           __ATOMIC_ACQUIRE);
+#endif
+  }
 };
 
 template <int I>
@@ -190,7 +213,9 @@ class HostStats {
     incStat(index, wtime() - start);
   }
 
-  __host__ void incStat(int index, int value = 1) { stats[index] += value; }
+  __host__ void incStat(int index, int value = 1) {
+    stats[index].fetch_add(value, std::memory_order_relaxed);
+  }
 
   __host__ void accumulateStats(const HostStats<I> &otherStats) {
     for (int i = 0; i < I; i++) incStat(i, otherStats.getStat(i));
@@ -223,6 +248,7 @@ class NullStats {
   __host__ __device__ void endTimer(uint64_t start, int index) {}
   __host__ __device__ void incStat(int index, int value = 1) {}
   __host__ __device__ void accumulateStats(const NullStats<I> &otherStats) {}
+  __host__ void hostAccumulateStats(const NullStats<I> &otherStats) {}
   __host__ __device__ void resetStats() {}
   __host__ __device__ StatType getStat(int index) const { return 0; }
 };
@@ -234,7 +260,7 @@ typedef Stats<NUM_STATS> ROCStats;
 typedef HostStats<NUM_HOST_STATS> ROCHostStats;
 #else
 typedef NullStats<NUM_STATS> ROCStats;
-typedef NullStats<NUM_STATS> ROCHostStats;
+typedef NullStats<NUM_HOST_STATS> ROCHostStats;
 #endif
 
 }  // namespace rocshmem
