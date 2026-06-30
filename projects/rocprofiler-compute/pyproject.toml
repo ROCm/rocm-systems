@@ -1,6 +1,8 @@
 [project]
 name = "rocprof_compute"
-requires-python = ">=3.9"
+# Baseline floor for the project (profile mode). Analyze mode requires >=3.9,
+# enforced at runtime in src/rocprof-compute.
+requires-python = ">=3.8"
 
 [tool.ruff]
 line-length = 88
