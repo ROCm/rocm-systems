@@ -13,6 +13,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added symmetric-memory ReduceScatter kernel (`RailA2A_LsaLD`) on gfx942/gfx950.
 * Added bias (accumulation) AllReduce on gfx1250 (MI450).
 * Added optimized scale-up ReduceScatter, AllGather, and AllToAll kernels.
+* Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default on).
 * Added ROCProfiler-SDK coverage for `ncclCommGrow` and `ncclCommGetUniqueId`.
 * P2P batching auto-enabled for gfx950 in combination with non-AINIC NICs.
 * Display HIP/ROCm runtime versions in `NCCL_DEBUG` output.
@@ -63,6 +64,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Known issues
 * On gfx90a (MI210/MI250/MI250X) with ROCm 7.13 or later, per-launch scratch-memory reclaim in the runtime degrades RCCL performance. Set `HSA_NO_SCRATCH_RECLAIM=1` to restore performance.
 * Elastic-buffer support for GIN (multi-segment symmetric memory windows backed by a mix of device and CPU/`HOST_NUMA` memory, exposed through `NCCL_ELASTIC_BUFFER_REGISTER` and `NCCL_SYM_REUSE_SYSMEM_HANDLES`) was newly synced from upstream and compiles on ROCm, but is unverified on AMD hardware.
+* The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
 
 ## RCCL 2.28.3 for ROCm 7.13
 

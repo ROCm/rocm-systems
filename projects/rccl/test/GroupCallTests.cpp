@@ -346,8 +346,8 @@ namespace RcclUnitTesting
   }
 
   // Group of broadcasts each rooted at a different rank. With >=2 distinct roots
-  // and ALLGATHERV_ENABLE=1 (default) the task producer fuses them into a single
-  // ncclFuncAllGatherV ring kernel; with ALLGATHERV_ENABLE=0 they fall back to
+  // and NCCL_ALLGATHERV_ENABLE=1 (default) the task producer fuses them into a single
+  // ncclFuncAllGatherV ring kernel; with NCCL_ALLGATHERV_ENABLE=0 they fall back to
   // individual broadcasts. Results must validate either way. Sizes vary per root
   // to exercise AllGatherV's variable-length partitioning.
   TEST(GroupCall, MultiRootBroadcast)
