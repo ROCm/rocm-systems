@@ -34,7 +34,7 @@ When given a **diff and changed files**, review the code through a skeptic lens.
 - New C API functions: Must justify the full cascade cost (header → impl → wrapper → interface → CLI → docs)
 - New Python wrappers: Is the underlying C function actually needed by Python consumers?
 - Build system changes: Does this add complexity to an already complex packaging story (RPM/DEB + pip + system install)?
-- Internal "backward-compat" aliases: keeping a deprecated alias or old code path "for compatibility" when the symbol is internal with no external users is incomplete cleanup, not courtesy → ❌ BLOCKING.
+- Internal "backward-compat" aliases: keeping a deprecated alias or old code path "for compatibility" is incomplete cleanup, not courtesy, when the symbol is internal (`static` / file-scope / `_`-prefixed Python, or absent at the last `amdsmi_pkg_ver-*` tag) with no downstream callers. Flag it as blocking.
 
 ### Mode 2: Rebuttal Review (Round 2 — Thorough mode only)
 

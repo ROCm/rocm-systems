@@ -49,7 +49,7 @@ Signed-off-by: Full Name <email@amd.com>
 
 Rules:
 
-- Blank line after the subject; keep every body line under 80 columns.
+- Blank line after the subject; wrap body at 72 columns.
 - Each bullet starts with a verb (Add, Fix, Remove, Refactor, Implement).
 - Include the "why" only when it is not self-evident from the change.
 - **No JIRA ticket references in the commit body.** Reference the code/behavior,

@@ -23,15 +23,10 @@ Project structure and API cascade path are stored in repo memories.
 
 ## ABI Release Baseline
 
-A symbol's ABI is frozen only once it ships in a **released** package, not when it
-lands on `develop`. There are three independent version schemes — don't conflate
-them:
-
-| Scheme | Source | Meaning |
-|--------|--------|---------|
-| Lib version `MAJOR.MINOR.RELEASE` | `include/amd_smi/amdsmi.h` (`AMDSMI_LIB_VERSION_*`) | MAJOR = ABI-breaking header change; MINOR = API change, no header break; RELEASE = PM-set CSP point release |
-| Package tag `amdsmi_pkg_ver-*` | `git tag` | **The real ABI freeze points** — every shipped artifact |
-| ROCm / TheRock release | `CHANGELOG.md` top section / ROCm/TheRock releases | Downstream bundle version (different numbering) |
+A symbol's ABI is frozen only once it ships in a **released** package (the last
+`amdsmi_pkg_ver-*` tag), not when it lands on `develop`. CONTEXT.md's *released vs
+unreleased symbol* entry defines the three version schemes; the diff procedure is
+here.
 
 **The CI gap.** `tests/abi_check/abi_check.py` (driven by `abi-compliance-check.yml`)
 diffs `amdsmi.h` against the **base branch** (`origin/develop`) and applies a
@@ -44,8 +39,10 @@ ABI break.
 **absent at the last released package tag**. Diff against the tag, not `develop`:
 
 ```bash
-LAST=$(git tag --list 'amdsmi_pkg_ver-*' | grep -vE -- '-(cherrypicked|sohbodas)' \
-       | sed 's/.*-//' | sort -V | tail -1)
+# latest released package tag; the anchored regex keeps only bare X.Y.Z tags,
+# dropping any suffix (-cherrypicked, -rcN, personal tags)
+LAST=$(git tag --list 'amdsmi_pkg_ver-*' \
+       | grep -oP 'amdsmi_pkg_ver-\K[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
 # in-tag header path has NO projects/amdsmi/ prefix
 git show "amdsmi_pkg_ver-$LAST:include/amd_smi/amdsmi.h" | grep "<symbol>"
 # absent  => added this cycle  => ABI-safe to change/remove

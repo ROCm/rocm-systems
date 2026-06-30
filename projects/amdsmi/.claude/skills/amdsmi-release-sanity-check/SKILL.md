@@ -28,6 +28,11 @@ set is `git log <release-sha>..origin/develop -- .` from `projects/amdsmi`.
 Confirm `AMDSMI_LIB_VERSION_*` in `include/amd_smi/amdsmi.h` moved if behavior
 changed.
 
+This SHA scopes the *feature / changelog* audit. For an **ABI** question
+specifically (is a symbol rename or removal a real break?), the authoritative
+freeze point is the last `amdsmi_pkg_ver-*` package tag, not the TheRock SHA —
+see the architecture agent's *ABI Release Baseline*.
+
 ## 2. The Sanity Sweep
 
 | Check | Command / method | Red flag |
@@ -52,3 +57,9 @@ changed.
 | Trusting a conflict-free rebase | Resolve every export/doc name against the post-rebase interface |
 | Committing a regen from a stale image | Use the pinned image; reproduce the committed wrapper first |
 | "It imports for me" as proof | Installed package may differ from the tree — static-check the source |
+
+---
+
+*Validation status: grounded in an observed release miss (a cascade gap plus a
+rename break that passed a clean merge). A formal RED/GREEN pressure test per the
+`writing-skills` skill is still pending.*

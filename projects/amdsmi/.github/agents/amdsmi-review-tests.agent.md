@@ -52,15 +52,16 @@ Project structure and test directories are stored in repo memories.
 
 ## Test Substance
 
-Presence is not coverage. For any test claimed to cover new behavior, ask the **mutation question**: *what single change to the source would make this test fail?* If there is no clear answer, it is coverage padding — ⚠️ IMPORTANT, or ❌ BLOCKING when it is the only "test" for new behavior. AI-generated tells worth a closer read: phantom methods/attributes that do not exist in the source, and mock-only assertions that still pass against a no-op implementation.
+The Systems PR Bot only confirms a test *file* exists; this section is your check that the file actually exercises the new behavior. Presence is not coverage. For any test claimed to cover new behavior, ask the **mutation question**: *what single change to the source would make this test fail?* If there is no clear answer, it is coverage padding — ⚠️ IMPORTANT, or ❌ BLOCKING when it is the only "test" for new behavior. AI-generated tells worth a closer read: phantom methods/attributes that do not exist in the source, and mock-only assertions that still pass against a no-op implementation.
 
 ## Anti-Gaming (never weaken a test to green CI)
 
 Disabling, skipping, or weakening a test to make CI pass is never valid. When a PR changes product code **and** the same diff does any of the following without a stated justification, it is ❌ BLOCKING:
 
-- Adds an entry to `tests/amd_smi_test/amdsmitst.exclude` or widens `GTEST_EXCLUDE` via `tests/amd_smi_test/detect_asic_filter.sh`
+- Adds an entry to `tests/amd_smi_test/amdsmitst.exclude`, or changes the ASIC-detection / filter-routing in `tests/amd_smi_test/detect_asic_filter.sh` to send more runs into a wider `GTEST_EXCLUDE`
+- Renames a test source to `*.cc.disabled` (or any non-`.cc`/`.cpp` extension) so `aux_source_directory` silently drops it from the build (the repo already carries `ainic.cc.disabled`)
 - Adds a `DISABLED_` prefix to a GTest case
-- Adds `@unittest.skip` / `pytest.mark.skip` (or comments out a test body)
+- Adds `self.skipTest()` (the dominant idiom in this repo) / `raise unittest.SkipTest` / a `@unittest.skip`/`skipIf`/`skipUnless` decorator / `pytest.mark.skip`, or comments out a test body
 
 A genuine reason (test invalid on this ASIC, behavior intentionally removed) is fine when stated; a silent exclusion that happens to green a failing lane is not.
 

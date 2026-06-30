@@ -132,13 +132,12 @@ Disambiguation: bad pages ≡ retired pages (one set, status enum distinguishes 
 ### released vs unreleased symbol (ABI baseline)
 
 A symbol's ABI is **frozen** only once it ships in a released package tag
-(`git tag 'amdsmi_pkg_ver-*'`, e.g. the last shipped is the highest `sort -V`), **not**
-when it lands on `develop`. "Unreleased / this-cycle" = a symbol **absent** at the last
-`amdsmi_pkg_ver-*` tag (header path inside the tag is `include/amd_smi/amdsmi.h`, no
-`projects/amdsmi/` prefix) → renaming/removing it is **not** a real ABI break.
-The CI ABI check (`tests/abi_check/abi_check.py`) diffs against `origin/develop`, so it
-labels intra-cycle churn as `ABI BREAKAGE` even when nothing shipped. Three distinct
-version schemes coexist: lib `AMDSMI_LIB_VERSION_*` (amdsmi.h), the package tag (real
-freeze point), and the ROCm/TheRock bundle (CHANGELOG.md top section).
+(`amdsmi_pkg_ver-*`), **not** when it lands on `develop`. "Unreleased / this-cycle" =
+a symbol **absent** at the last `amdsmi_pkg_ver-*` tag → renaming or removing it is
+**not** a real ABI break, even though the CI ABI check (which diffs against `develop`)
+labels it one. Three distinct version schemes coexist: lib `AMDSMI_LIB_VERSION_*`
+(amdsmi.h), the package tag (real freeze point), and the ROCm/TheRock bundle
+(CHANGELOG.md top section).
 Disambiguation: "released" = present at last package tag (frozen ABI); base branch
 `develop` ≠ a release; lib version ≠ package tag ≠ ROCm/TheRock version.
+The diff procedure lives in the architecture agent's *ABI Release Baseline*.
