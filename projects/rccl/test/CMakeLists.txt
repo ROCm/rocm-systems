@@ -321,6 +321,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
+      transport/NetIbMPI/OpsFaultUnitTests.cpp
       transport/GinMPI/GinMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp

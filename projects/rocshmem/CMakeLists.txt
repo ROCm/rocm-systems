@@ -191,15 +191,62 @@ endif()
 set(DEFAULT_GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING
     "Target default GPUs if GPU_TARGETS is not defined.")
 
-if (COMMAND rocm_check_target_ids)
-  message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
-  rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
-else()
-  message(WARNING "Unable to check for supported GPU targets.")
-  set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
+# When the user supplies GPU_TARGETS:
+#   - Normalise comma/semicolon separators
+#   - Build a base→full map so feature suffixes (e.g. gfx950:sramecc+:xnack-)
+#     can be restored after validation
+#   - Produce a bare-arch list for rocm_check_target_ids and HIP compilation,
+#     which both reject feature-suffixed entries in --offload-arch
+if(GPU_TARGETS)
+  string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
+  set(_bare_targets "")
+  foreach(_t ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _base "${_t}")
+    set(_USER_FULL_${_base} "${_t}")
+    list(APPEND _bare_targets "${_base}")
+  endforeach()
+  list(REMOVE_DUPLICATES _bare_targets)
 endif()
 
-set(GPU_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU architectures to compile for")
+if(COMMAND rocm_check_target_ids)
+  if(GPU_TARGETS)
+    message(STATUS "Checking for ROCm support for GPU targets: " "${_bare_targets}")
+    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${_bare_targets})
+  else()
+    message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
+    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
+  endif()
+else()
+  message(WARNING "Unable to check for supported GPU targets.")
+  if(GPU_TARGETS)
+    set(SUPPORTED_GPUS ${_bare_targets})
+  else()
+    set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
+  endif()
+endif()
+
+# GPU_TARGETS_FULL: validated arch strings with feature suffixes restored.
+# Consumed by DeviceBitcode.cmake to embed correct amdhsa.target metadata in
+# HSACOs — HIP error 209 occurs if the suffix in the HSACO metadata does not
+# match the active feature configuration of the GPU.
+# Explicitly cleared when GPU_TARGETS is not set so a stale cached value from a
+# previous -DGPU_TARGETS=... configure run cannot persist into the defaults path.
+if(GPU_TARGETS)
+  set(_full_validated "")
+  foreach(_base ${SUPPORTED_GPUS})
+    if(DEFINED _USER_FULL_${_base})
+      list(APPEND _full_validated "${_USER_FULL_${_base}}")
+    else()
+      list(APPEND _full_validated "${_base}")
+    endif()
+  endforeach()
+  set(GPU_TARGETS_FULL "${_full_validated}" CACHE STRING
+    "Validated GPU arch strings with feature suffixes (consumed by DeviceBitcode.cmake)" FORCE)
+else()
+  unset(GPU_TARGETS_FULL CACHE)
+endif()
+
+set(GPU_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU architectures to compile for" FORCE)
 
 message(STATUS "Compiling for ${GPU_TARGETS}")
 

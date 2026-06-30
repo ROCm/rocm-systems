@@ -9,9 +9,10 @@
 name: TheRock Multi-Arch CI ASAN
 
 on:
-  push:
-    branches:
-      - develop
+  # TODO: Enable postsubmit ASAN once we have capacity
+  # push:
+  #   branches:
+  #     - develop
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
