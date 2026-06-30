@@ -240,7 +240,7 @@ public:
 
   /// @brief Imports a memory object from a shareable handle.
   ///
-  /// @note The handle must be destroyed with @ref DestroyImportedMemoryHandle.
+  /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
   ///
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory; @p handle->size is set to the
@@ -253,11 +253,6 @@ public:
   virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
                                           ShareType type, void* import_handle,
                                           void* mem = nullptr) = 0;
-
-  /// @brief Destroys the handle created during @ref ImportMemoryHandle.
-  ///
-  /// @param[in] handle handle of the object to release
-  virtual hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///

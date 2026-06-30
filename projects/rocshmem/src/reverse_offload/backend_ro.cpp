@@ -29,6 +29,7 @@
 #include <unistd.h>
 
 #include <cassert>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -298,6 +299,19 @@ void ROBackend::ctx_destroy(Context *ctx) {
   delete ro_net_host_ctx;
 }
 
+void ROBackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
+}
+
+void ROBackend::accumulate_default_host_ctx_stats() {
+  globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
+}
+
 void ROBackend::reset_backend_stats() {
   auto *bp{backend_proxy.get()};
 
@@ -311,6 +325,7 @@ void ROBackend::dump_backend_stats() {
   for (int i = 0; i < NUM_STATS; i++) {
     total += globalStats.getStat(i);
   }
+  if (!total) return;
 
   int device_id;
   CHECK_HIP(hipGetDevice(&device_id));
@@ -327,28 +342,40 @@ void ROBackend::dump_backend_stats() {
   auto *bp{backend_proxy.get()};
 
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
-    // Average latency as perceived from a thread
-    const ROStats &prof{bp->profiler[i]};
-    us_wait_slot += prof.getStat(WAITING_ON_SLOT) / gpu_frequency_mhz;
-    us_pack += prof.getStat(PACK_QUEUE) / gpu_frequency_mhz;
-    us_fence1 += prof.getStat(THREAD_FENCE_1) / gpu_frequency_mhz;
-    us_fence2 += prof.getStat(THREAD_FENCE_2) / gpu_frequency_mhz;
-    us_wait_host += prof.getStat(WAITING_ON_HOST) / gpu_frequency_mhz;
+    ROStats tmp;
+    CHECK_HIP(hipMemcpy(&tmp, bp->profiler + i, sizeof(ROStats), hipMemcpyDeviceToHost));
+    us_wait_slot += tmp.getStat(WAITING_ON_SLOT) / gpu_frequency_mhz;
+    us_pack      += tmp.getStat(PACK_QUEUE)      / gpu_frequency_mhz;
+    us_fence1    += tmp.getStat(THREAD_FENCE_1)  / gpu_frequency_mhz;
+    us_fence2    += tmp.getStat(THREAD_FENCE_2)  / gpu_frequency_mhz;
+    us_wait_host += tmp.getStat(WAITING_ON_HOST) / gpu_frequency_mhz;
   }
+  if (!us_wait_slot && !us_pack && !us_fence1 && !us_fence2 && !us_wait_host) return;
 
-  constexpr int FIELD_WIDTH{20};
-  constexpr int FLOAT_PRECISION{2};
+  char buf[1024];
+  int pos = 0;
+  auto append = [&](const char* fmt, ...) {
+    if (pos >= static_cast<int>(sizeof(buf)) - 1) return;
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(buf + pos, sizeof(buf) - pos, fmt, args);
+    va_end(args);
+    if (n > 0) pos += n;
+  };
 
-  printf("%*s%*s%*s%*s%*s\n", FIELD_WIDTH + 1, "Wait On Slot (us)",
-         FIELD_WIDTH + 1, "Pack Queue (us)", FIELD_WIDTH + 1, "Fence 1 (us)",
-         FIELD_WIDTH + 1, "Fence 2 (us)", FIELD_WIDTH + 1, "Wait Host (us)");
+  auto pstat = [&](const char* name, uint64_t cycles) {
+    double us = static_cast<double>(cycles) / total;
+    if (us != 0.0) append("  %-30s %.2f us\n", name, us);
+  };
 
-  printf("%*.*f %*.*f %*.*f %*.*f %*.*f\n\n", FIELD_WIDTH, FLOAT_PRECISION,
-         static_cast<double>(us_wait_slot) / total, FIELD_WIDTH,
-         FLOAT_PRECISION, static_cast<double>(us_pack) / total, FIELD_WIDTH,
-         FLOAT_PRECISION, static_cast<double>(us_fence1) / total, FIELD_WIDTH,
-         FLOAT_PRECISION, static_cast<double>(us_fence2) / total, FIELD_WIDTH,
-         FLOAT_PRECISION, static_cast<double>(us_wait_host) / total);
+  append("PROXY STATS\n");
+  pstat("Wait_On_Slot",  us_wait_slot);
+  pstat("Pack_Queue",    us_pack);
+  pstat("Fence_1",       us_fence1);
+  pstat("Fence_2",       us_fence2);
+  pstat("Wait_Host",     us_wait_host);
+
+  LOG_INFO("%s", buf);
 }
 
 void ROBackend::ro_net_free_runtime() {
