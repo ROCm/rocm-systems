@@ -22,7 +22,10 @@ struct ginRocshmemInitCtx {
 
 // Set RCCL-internal state into the plugin init context.
 // Called from gin.cc immediately after a rocshmem plugin's init() succeeds.
-void ncclGinRocshmemSetInitContext(void *initCtx, struct ncclComm *comm);
+static inline void ncclGinRocshmemSetInitContext(void *initCtx, struct ncclComm *comm) {
+  struct ginRocshmemInitCtx *ctx = (struct ginRocshmemInitCtx *)initCtx;
+  ctx->comm = comm;
+}
 
 // The built-in plugin instances
 extern ncclGin_t ncclGinRocshmemApiPlugin;
