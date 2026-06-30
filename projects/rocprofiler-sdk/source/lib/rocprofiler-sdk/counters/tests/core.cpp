@@ -192,6 +192,12 @@ null_record_callback(rocprofiler_dispatch_counting_service_data_t,
                      void*)
 {}
 
+uint64_t
+null_pass_count_callback(void*)
+{
+    return 1;
+}
+
 }  // namespace
 
 TEST(core, check_packet_generation)
@@ -665,22 +671,31 @@ TEST(core, kernel_replay_configure)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
 
-    EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(
-                  get_client_ctx(), nullptr, nullptr, null_record_callback, nullptr),
+    EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   null_record_callback,
+                                                                   nullptr,
+                                                                   null_pass_count_callback,
+                                                                   nullptr),
               ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
 
     ROCPROFILER_CALL(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
                                                                           null_dispatch_callback,
                                                                           (void*) 0x12345,
                                                                           null_record_callback,
-                                                                          (void*) 0x54321),
+                                                                          (void*) 0x54321,
+                                                                          null_pass_count_callback,
+                                                                          (void*) 0x67890),
                      "kernel replay configure failed");
 
     EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
                                                                    null_dispatch_callback,
                                                                    (void*) 0x12345,
                                                                    null_record_callback,
-                                                                   (void*) 0x54321),
+                                                                   (void*) 0x54321,
+                                                                   null_pass_count_callback,
+                                                                   (void*) 0x67890),
               ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID);
 
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
@@ -723,7 +738,9 @@ TEST(core, kernel_replay_rejects_after_callback_dispatch)
                                                                    null_dispatch_callback,
                                                                    (void*) 0x12345,
                                                                    null_record_callback,
-                                                                   (void*) 0x54321),
+                                                                   (void*) 0x54321,
+                                                                   null_pass_count_callback,
+                                                                   (void*) 0x67890),
               ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID);
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");

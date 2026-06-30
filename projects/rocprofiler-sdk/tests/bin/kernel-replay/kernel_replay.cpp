@@ -20,10 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// Standalone HIP application that launches the VecAdd and SAXPY kernels. Intended to be run under
-// the profiler as an integration test for kernel replay: the profiler re-executes each dispatch
-// and restores device memory between passes, so this application observes correct results exactly
-// as if it ran without profiling.
+// Standalone HIP application that launches three distinct kernels (VecAdd, SAXPY, VecScale).
+// Intended to be run under the profiler as an integration test for kernel replay: the profiler
+// re-executes each dispatch once per counter batch and restores device memory between passes, so
+// this application observes correct results exactly as if it ran without profiling.
 
 #include <hip/hip_runtime.h>
 
@@ -65,6 +65,15 @@ saxpy(float alpha, const float* __restrict__ x, float* __restrict__ y, int n)
     const int stride = blockDim.x * gridDim.x;
     for(int i = blockDim.x * blockIdx.x + threadIdx.x; i < n; i += stride)
         y[i] = alpha * x[i] + y[i];
+}
+
+// VecScale: in-place scalar multiply (a third distinct kernel).
+__global__ void
+vecScale(float* __restrict__ a, float s, int n)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for(int i = blockDim.x * blockIdx.x + threadIdx.x; i < n; i += stride)
+        a[i] = a[i] * s;
 }
 
 bool
@@ -173,6 +182,55 @@ run_saxpy(int n, int iters)
     printf("saxpy: n=%d iters=%d OK\n", n, iters);
     return EXIT_SUCCESS;
 }
+
+int
+run_vecscale(int n, int iters)
+{
+    const size_t bytes = static_cast<size_t>(n) * sizeof(float);
+    const float  scale = 0.5f;
+
+    std::vector<float> h_a(n), expected(n);
+    for(int i = 0; i < n; ++i)
+    {
+        h_a[i]      = static_cast<float>((i % 1000) + 1);
+        expected[i] = h_a[i];
+    }
+
+    float* d_a = nullptr;
+    HIP_CHECK(hipMalloc(&d_a, bytes));
+    HIP_CHECK(hipMemcpy(d_a, h_a.data(), bytes, hipMemcpyHostToDevice));
+
+    for(int iter = 0; iter < iters; ++iter)
+    {
+        vecScale<<<256, 256>>>(d_a, scale, n);
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Each (app-observed) launch scales a once.
+        for(int i = 0; i < n; ++i)
+            expected[i] = expected[i] * scale;
+
+        std::vector<float> h_result(n);
+        HIP_CHECK(hipMemcpy(h_result.data(), d_a, bytes, hipMemcpyDeviceToHost));
+        for(int i = 0; i < n && i < 1024; ++i)
+        {
+            if(!approx_equal(h_result[i], expected[i]))
+            {
+                fprintf(stderr,
+                        "vecScale mismatch iter %d elem %d: %f != %f\n",
+                        iter,
+                        i,
+                        h_result[i],
+                        expected[i]);
+                return EXIT_FAILURE;
+            }
+        }
+    }
+
+    HIP_CHECK(hipFree(d_a));
+    printf("vecScale: n=%d iters=%d OK\n", n, iters);
+    return EXIT_SUCCESS;
+}
 }  // namespace
 
 int
@@ -183,6 +241,7 @@ main(int argc, char** argv)
 
     if(run_vecadd(n, iters) != EXIT_SUCCESS) return EXIT_FAILURE;
     if(run_saxpy(n, iters) != EXIT_SUCCESS) return EXIT_FAILURE;
+    if(run_vecscale(n, iters) != EXIT_SUCCESS) return EXIT_FAILURE;
 
     printf("kernel-replay: all kernels completed\n");
     return EXIT_SUCCESS;
