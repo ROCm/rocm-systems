@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/common/container/pool.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
@@ -597,6 +598,15 @@ WriteInterceptor(const void* packets,
             bool inserted_before = false;
             if(_packet_data.is_serialized)
             {
+                // Bound the number of outstanding serialized dispatches before
+                // enqueueing another. This prevents the host from running thousands
+                // of kernels ahead of GPU completion (observed backlog >7000), which
+                // oversubscribes the HWS runlist and stalls the command processor.
+                // Tunable via ROCPROFILER_SERIALIZER_MAX_INFLIGHT (0 disables).
+                static const int64_t serializer_max_inflight =
+                    common::get_env("ROCPROFILER_SERIALIZER_MAX_INFLIGHT", int64_t{256});
+                queue.throttle_inflight(serializer_max_inflight);
+
                 inserted_before = true;
                 CHECK_NOTNULL(hsa::get_queue_controller())
                     ->serializer(&queue)
@@ -989,6 +999,30 @@ Queue::destroy_signal(pooled_signal_t* signal)
     {
         get_core_table()->hsa_signal_destroy_fn(signal->get().value);
         signal->get().value = null_hsa_signal;
+    }
+}
+
+void
+Queue::throttle_inflight(int64_t max_inflight) const
+{
+    if(max_inflight <= 0 || _active_kernels.handle == 0u) return;
+
+    // Backpressure: block the producer thread while the number of outstanding
+    // async dispatches is at/above max_inflight. Without this, counter-collection
+    // serialization lets the host enqueue thousands of dispatches ahead of GPU
+    // completion, oversubscribing the HWS runlist and stalling the command
+    // processor. _active_kernels is decremented by async_complete() on kernel
+    // completion, which wakes this blocking wait (no busy spin). The timeout hint
+    // bounds the wait so we re-check periodically rather than blocking forever.
+    constexpr auto timeout_hint =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
+    while(_core_api.hsa_signal_load_scacquire_fn(_active_kernels) >= max_inflight)
+    {
+        _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
+                                             HSA_SIGNAL_CONDITION_LT,
+                                             max_inflight,
+                                             timeout_hint.count(),
+                                             HSA_WAIT_STATE_BLOCKED);
     }
 }
 
