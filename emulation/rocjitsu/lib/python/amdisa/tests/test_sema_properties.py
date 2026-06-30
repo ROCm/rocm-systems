@@ -234,6 +234,144 @@ class TestDeriveReadsVcc:
         assert InstructionProperty.READS_VCC in props
 
 
+def _operand(name):
+    """A plain operand read (e.g. SRC[idx] / DST[idx])."""
+    return SemaNode(
+        SemaNodeKind.ARRAYDEREF,
+        ty=SemaType.U32,
+        children=(_id(name, SemaType.U32), _id('idx')),
+    )
+
+
+def _or(a, b):
+    return SemaNode(SemaNodeKind.OR, ty=SemaType.U32, children=(a, b))
+
+
+def _bitneg(inner):
+    return SemaNode(SemaNodeKind.BITNEG, ty=SemaType.U32, children=(inner,))
+
+
+class TestDeriveResultCopy:
+    def test_scalar_mov_shape(self):
+        # scalar_mov: DST = SRC
+        body = _assign(
+            _cast(_operand('DST'), SemaType.U32),
+            _cast(_operand('SRC'), SemaType.U32),
+        )
+        block = SemaBlock('S_MOV_B32', ExecModel.SCALAR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_COPY in props
+        assert InstructionProperty.RESULT_S_OR not in props
+
+    def test_scalar_mov_instoperand_shape(self):
+        # Derived ASTs (sema_derive) spell operands as INSTOPERAND.
+        operand = SemaNode(
+            SemaNodeKind.INSTOPERAND,
+            ty=SemaType.U32,
+            children=(_id('S'), _lit('0')),
+        )
+        dst = SemaNode(
+            SemaNodeKind.INSTOPERAND,
+            ty=SemaType.U32,
+            children=(_id('D'), _lit('0')),
+        )
+        body = _assign(_cast(dst, SemaType.U32), _cast(operand, SemaType.U32))
+        block = SemaBlock('S_MOV_B32', ExecModel.SCALAR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_COPY in props
+
+    def test_cmov_if_not_copy(self):
+        # scalar_cmov: conditional copy wrapped in IF -> not RESULT_S_COPY
+        body = SemaNode(
+            SemaNodeKind.IF,
+            children=(
+                _id('SCC', SemaType.U1),
+                _assign(
+                    _cast(_operand('DST'), SemaType.U32),
+                    _cast(_operand('SRC'), SemaType.U32),
+                ),
+            ),
+        )
+        block = SemaBlock('S_CMOV_B32', ExecModel.SCALAR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_COPY not in props
+
+    def test_computed_result_not_copy(self):
+        body = _assign(_cast(_operand('DST'), SemaType.U32), _lit('0'))
+        block = SemaBlock('S_MOVK', ExecModel.SCALAR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_COPY not in props
+
+    def test_vector_mov_not_flagged(self):
+        # Result-combinator props are scalar-only.
+        body = _assign(
+            _cast(_operand('DST'), SemaType.U32),
+            _cast(_operand('SRC'), SemaType.U32),
+        )
+        block = SemaBlock('V_MOV_B32', ExecModel.VECTOR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_COPY not in props
+
+
+class TestDeriveResultOr:
+    def test_scalar_binop_or_shape(self):
+        # s_or: result = SRC0 | SRC1; DST = result
+        body = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                _assign(_id('result'), _or(_operand('SRC0'), _operand('SRC1'))),
+                _assign(_cast(_operand('DST'), SemaType.U32), _id('result')),
+            ),
+        )
+        block = SemaBlock('S_OR_B32', ExecModel.SCALAR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_OR in props
+
+    def test_saveexec_or_shape(self):
+        # s_or_saveexec: EXEC = old_exec | src
+        body = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                _assign(
+                    _id('EXEC', SemaType.U64),
+                    _or(_id('old_exec', SemaType.U64), _id('src', SemaType.U64)),
+                ),
+            ),
+        )
+        block = SemaBlock('S_OR_SAVEEXEC_B64', ExecModel.SCALAR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_OR in props
+
+    def test_orn2_not_pure_or(self):
+        # s_orn2: result = SRC0 | ~SRC1 -> OR has a BITNEG child
+        body = _assign(
+            _id('result'),
+            _or(_operand('SRC0'), _bitneg(_operand('SRC1'))),
+        )
+        block = SemaBlock('S_ORN2_B32', ExecModel.SCALAR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_OR not in props
+
+    def test_nor_not_pure_or(self):
+        # s_nor: result = ~(SRC0 | SRC1) -> OR wrapped in BITNEG
+        body = _assign(
+            _id('result'),
+            _bitneg(_or(_operand('SRC0'), _operand('SRC1'))),
+        )
+        block = SemaBlock('S_NOR_B32', ExecModel.SCALAR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_OR not in props
+
+    def test_vector_or_not_flagged(self):
+        body = _assign(
+            _cast(_operand('DST'), SemaType.U32),
+            _or(_operand('SRC0'), _operand('SRC1')),
+        )
+        block = SemaBlock('V_OR_B32', ExecModel.VECTOR, body)
+        props = derive_properties(block)
+        assert InstructionProperty.RESULT_S_OR not in props
+
+
 @pytest.mark.skipif(not _HAS_SEMA_XML, reason="Semantics XML not available")
 class TestSemaXmlProperties:
     @pytest.fixture(scope='class')

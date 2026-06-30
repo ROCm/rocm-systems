@@ -39,6 +39,8 @@ class InstructionProperty(Flag):
     IS_BRANCH = auto()
     IS_MEMORY = auto()
     IS_ENDPGM = auto()
+    RESULT_S_COPY = auto()
+    RESULT_S_OR = auto()
 
 
 _CROSS_LANE_CALLS: frozenset[str] = frozenset(
@@ -148,6 +150,17 @@ def derive_properties(block: SemaBlock) -> InstructionProperty:
                 elif arr.id_name == 'EXEC':
                     props |= InstructionProperty.READS_EXEC
 
+    # Result-combinator properties describe how the destination/EXEC value is
+    # formed (a plain copy, or a pure OR of sources). They are scalar-only,
+    # matching the EXEC-state all-ones reasoning that consumes them, and are
+    # derived structurally from the AST since semantic_class/operation are not
+    # available here.
+    if block.pragma == ExecModel.SCALAR:
+        if _is_result_copy(block):
+            props |= InstructionProperty.RESULT_S_COPY
+        if _has_pure_or(block.body):
+            props |= InstructionProperty.RESULT_S_OR
+
     return props
 
 
@@ -155,6 +168,55 @@ def _unwrap_cast(node: SemaNode) -> SemaNode:
     while node.kind == SemaNodeKind.CAST and node.children:
         node = node.children[0]
     return node
+
+
+def _is_result_copy(block: SemaBlock) -> bool:
+    """True if the instruction's result is a plain copy of a single source.
+
+    Matches a mov-shaped body: a single unconditional ``ASSIGN`` whose
+    right-hand side, after stripping casts, is a plain operand read
+    (``ID`` or ``ARRAYDEREF``). Conditional copies (``scalar_cmov``, whose
+    body is an ``IF``) and computed results (RHS is a literal or operator)
+    do not qualify.
+    """
+    body = block.body
+    if body.kind != SemaNodeKind.ASSIGN or len(body.children) != 2:
+        return False
+    rhs = _unwrap_cast(body.children[1])
+    # Operand reads appear as INSTOPERAND in derived ASTs (sema_derive) and as
+    # ARRAYDEREF/ID in XML-parsed ASTs; accept either flow's spelling.
+    return rhs.kind in (
+        SemaNodeKind.ID,
+        SemaNodeKind.ARRAYDEREF,
+        SemaNodeKind.INSTOPERAND,
+    )
+
+
+def _has_pure_or(node: SemaNode) -> bool:
+    """True if the AST forms a value as a pure bitwise OR of its sources.
+
+    A qualifying ``OR`` node has two children, neither of which is a
+    ``BITNEG`` (after stripping casts), and is not itself the operand of a
+    ``BITNEG``. This accepts ``or`` / ``or_saveexec`` while rejecting the
+    negated variants (``orn1``/``orn2``/``or_notN`` carry a ``BITNEG`` child;
+    ``nor`` is a ``BITNEG`` wrapping an ``OR``).
+    """
+    negated_ors = set()
+    for n in node.walk():
+        if n.kind == SemaNodeKind.BITNEG and n.children:
+            inner = _unwrap_cast(n.children[0])
+            if inner.kind == SemaNodeKind.OR:
+                negated_ors.add(id(inner))
+    for n in node.walk():
+        if n.kind != SemaNodeKind.OR or id(n) in negated_ors:
+            continue
+        if len(n.children) != 2:
+            continue
+        c0 = _unwrap_cast(n.children[0])
+        c1 = _unwrap_cast(n.children[1])
+        if c0.kind != SemaNodeKind.BITNEG and c1.kind != SemaNodeKind.BITNEG:
+            return True
+    return False
 
 
 @dataclass
