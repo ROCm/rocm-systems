@@ -8,6 +8,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added opt-in idle gating for GPU metrics reads (`AMDSMI_SKIP_GPU_METRICS_ON_IDLE`)**.  
+  - On GPUs with runtime power management / GFXOFF (for example Navi/RDNA), reading `gpu_metrics` while the GPU is runtime-suspended forces a wake whose first firmware sample latches GFX activity and clock high for several seconds, producing false spikes on an otherwise idle GPU.
+  - Set `AMDSMI_SKIP_GPU_METRICS_ON_IDLE` (to `1`/`true`/`on`/`yes`) so `amdsmi_get_gpu_metrics_info` (and APIs that read metrics internally, such as `amdsmi_get_gpu_activity` and `amdsmi_get_clock_info`) return `AMDSMI_STATUS_BUSY` on a runtime-suspended device instead of reading `gpu_metrics` and waking it. Disabled by default, so existing behavior is unchanged.
+  - Not applicable to Instinct (MI2xx/MI3xx): those GPUs have no runtime PM, so their `power/runtime_status` is never `suspended` and the gate never fires; their metrics are unaffected.
+  - CLI effect: with the variable set, `amd-smi metric`/`amd-smi monitor` show `N/A` for metrics-derived fields on a runtime-suspended Navi GPU.
+
 - **Added NIC processor discovery and information API surface**.  
   - New C APIs: `amdsmi_get_nic_processor_handles()`, `amdsmi_get_nic_device_bdf()`, `amdsmi_get_nic_fw_info()`, `amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.
   - `amdsmi_get_nic_processor_handles()` enumerates NIC processors by socket; the BDF, firmware, and port/vendor statistics getters are reserved and currently return `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`.

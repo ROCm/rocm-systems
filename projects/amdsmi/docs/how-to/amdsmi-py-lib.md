@@ -65,6 +65,26 @@ You can set these in one of two ways:
    AMDSMI_GPU_METRICS_CACHE_MS=200 python tools/amdsmi_quick_start.py
    ```
 
+```{note}
+On GPUs with runtime power management / GFXOFF (for example Navi/RDNA), reading
+GPU metrics while the GPU is runtime-suspended forces a wake whose first firmware
+sample latches GFX activity and clock high for several seconds. Set
+``AMDSMI_SKIP_GPU_METRICS_ON_IDLE`` (to ``1``/``true``/``on``/``yes``) to opt in
+to idle gating, so `amdsmi_get_gpu_metrics_info` (and `amdsmi_get_gpu_activity`,
+which reads metrics internally) raise ``AmdSmiLibraryException`` with status
+``AMDSMI_STATUS_BUSY`` on a runtime-suspended device instead of waking it.
+
+| Variable | Description | Default |
+|---|---|---|
+| ``AMDSMI_SKIP_GPU_METRICS_ON_IDLE`` | Skip GPU metrics reads on a runtime-suspended GPU and raise ``AMDSMI_STATUS_BUSY`` instead of waking it | disabled |
+
+**Not applicable to Instinct (MI2xx/MI3xx):** those GPUs have no runtime PM, so
+the gate never fires and enabling the variable is a no-op there. With the
+variable set, `amd-smi metric` shows `N/A` for metrics-derived fields on a
+runtime-suspended Navi GPU; leave it unset (the default) for the previous
+behavior.
+```
+
 To get started, the `amdsmi` folder should be copied and placed next to
 the importing script. Import it as follows:
 

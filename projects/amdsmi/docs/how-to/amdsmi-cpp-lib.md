@@ -35,6 +35,33 @@ These can be set in the shell before running your application:
     export AMDSMI_GPU_METRICS_CACHE_MS=200
 ```
 
+```{note}
+On GPUs with runtime power management / GFXOFF (for example Navi/RDNA), reading
+the `gpu_metrics` sysfs node while the GPU is runtime-suspended forces a wake
+(D3→D0). The first firmware sample after that wake reports GFX activity and clock
+latched high for several seconds, so a tool that polls an idle GPU sees false
+spikes and keeps the GPU awake.
+
+Set ``AMDSMI_SKIP_GPU_METRICS_ON_IDLE`` (to ``1``/``true``/``on``/``yes``) to opt
+in to idle gating. When enabled, `amdsmi_get_gpu_metrics_info` (and APIs that read
+metrics internally, such as `amdsmi_get_gpu_activity` and `amdsmi_get_clock_info`)
+return ``AMDSMI_STATUS_BUSY`` on a runtime-suspended device instead of reading
+`gpu_metrics` and waking it.
+
+| Variable | Description | Default |
+|---|---|---|
+| ``AMDSMI_SKIP_GPU_METRICS_ON_IDLE`` | Skip `gpu_metrics` reads on a runtime-suspended GPU and return ``AMDSMI_STATUS_BUSY`` instead of waking it | disabled |
+
+**Not applicable to Instinct (MI2xx/MI3xx):** those GPUs have no runtime PM, so
+their `power/runtime_status` is never ``suspended`` and the gate never fires;
+enabling the variable is a no-op there and does not affect their metrics.
+
+**CLI effect:** with this variable set, `amd-smi metric` (and `amd-smi monitor`)
+show `N/A` for metrics-derived fields on a runtime-suspended Navi GPU, because the
+underlying read is intentionally skipped. Leave the variable unset (the default)
+for the previous behavior.
+```
+
 ```{seealso}
 Refer to the [C/C++ library API reference](../reference/amdsmi-cpp-api/index.md).
 ```
