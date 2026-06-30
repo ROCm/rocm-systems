@@ -1123,7 +1123,13 @@ Memory) is automatically detected based on the first available sensor.
 **Not Available**: The information cannot be retrieved by the `amd-smi` tool at this time. This could be due to one of the following reasons:
 
 - The hardware component does not report the specific metric.
-- The currently installed `amdgpu` driver version does not support querying this particular piece of information through `amd-smi-lib`.
+- The currently installed `amdgpu` driver version does not support querying
+  this particular piece of information through `amd-smi-lib`.
+- The installed AMD SMI version does not support the dynamic layout introduced
+  in gpu_metrics v1.9., which requires explicit support in the AMD SMI library.
+  Versions before ROCm 7.13 have no support for this format, causing fields
+  sourced by gpu_metrics show N/A on systems where the driver reports v1.9 or
+  later.
 
 (cli-ex-static)=
 ### Example output from amd-smi static
