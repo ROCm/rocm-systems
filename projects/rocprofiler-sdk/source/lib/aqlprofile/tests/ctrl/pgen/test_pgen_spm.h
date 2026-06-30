@@ -31,7 +31,7 @@
 
 #include "pgen/test_pgen.h"
 #include "util/test_assert.h"
-#include "spm_common.hpp"
+#include "lib/aqlprofile/core/spm_common.hpp"
 
 // C++11's solution for std::format()
 template <typename... Args>

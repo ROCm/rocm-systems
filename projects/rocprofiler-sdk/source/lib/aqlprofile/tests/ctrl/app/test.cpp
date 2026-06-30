@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "hsa/hsa_ext_amd.h"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include <hsa/hsa_ext_amd.h>
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include <stdlib.h>
 
 #include <string>
