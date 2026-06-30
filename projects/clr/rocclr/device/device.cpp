@@ -1388,7 +1388,7 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
 void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
 
 // ================================================================================================
-#if defined(__clang__)
+#if defined(__clang__) && defined(__linux__)
 #if __has_feature(address_sanitizer)
 
 extern "C" void __asan_report_nonself_leak(uint64_t alloc_pc, uint64_t alloc_size,
