@@ -1179,7 +1179,11 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       assert(thunkInfo.NMappedNodes <= agents_by_node_.size() &&
              "PointerInfo: Thunk returned more than all agents in NMappedNodes.");
       mappedNodes = (uint32_t*)alloca(thunkInfo.NMappedNodes * sizeof(uint32_t));
-      memcpy(mappedNodes, thunkInfo.MappedNodes, thunkInfo.NMappedNodes * sizeof(uint32_t));
+
+      assert(thunkInfo.MappedNodes || thunkInfo.NMappedNodes == 0);
+      if (thunkInfo.MappedNodes) {
+        memcpy(mappedNodes, thunkInfo.MappedNodes, thunkInfo.NMappedNodes * sizeof(uint32_t));
+      }
     }
     retInfo.type = (hsa_amd_pointer_type_t)thunkInfo.Type;
     retInfo.agentBaseAddress = reinterpret_cast<void*>(thunkInfo.GPUAddress);

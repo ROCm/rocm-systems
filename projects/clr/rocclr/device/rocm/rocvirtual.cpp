@@ -4779,6 +4779,45 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
+  // Serialize queue access like the other submit* paths.
+  std::scoped_lock lock(execution());
+
+  // Unwrap the CLR-visible handle; null guard for holder/queue.
+  const auto* holder =
+      static_cast<const hsa_amd_external_semaphore_t*>(cmd.sem_ptr());
+  if (holder == nullptr || gpu_queue_ == nullptr) {
+    cmd.setStatus(CL_INVALID_OPERATION);
+    return;
+  }
+
+  // A failed HSA call is logged but does not fail the command: some KMDs reject
+  // GPU-side waits even when signal works, and higher-level sync gates the data
+  // dependency. The barriers reproduce the needed cross-engine ordering.
+  if (cmd.semaphoreCmd() == amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE) {
+    // Leading barrier: drain prior work (incl. async SDMA via dep_signal[])
+    // before the signal so external observers see it last.
+    dispatchBarrierPacket(kBarrierPacketHeader);
+
+    hsa_status_t s =
+        hsa_amd_queue_signal_external_semaphore(gpu_queue_, *holder, cmd.fence());
+    if (s != HSA_STATUS_SUCCESS) {
+      LogError("Failed to signal external semaphore");
+    }
+  } else {
+    hsa_status_t s =
+        hsa_amd_queue_wait_external_semaphore(gpu_queue_, *holder, cmd.fence());
+    if (s != HSA_STATUS_SUCCESS) {
+      LogError("Failed to wait on external semaphore");
+    } else {
+      // Trailing acquire barrier (successful wait only): orders later
+      // cross-engine deps after the wait and makes producer writes visible.
+      dispatchBarrierPacket(kBarrierPacketAcquireHeader);
+    }
+  }
+}
+
+// ================================================================================================
 void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
