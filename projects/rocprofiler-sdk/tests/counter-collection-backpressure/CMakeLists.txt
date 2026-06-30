@@ -13,9 +13,9 @@ find_package(rocprofiler-sdk REQUIRED)
 # Execute test - drives a deep dispatch backlog (high iteration count with infrequent
 # synchronization) under counter collection. Counter collection serializes dispatches;
 # without producer backpressure the host runs thousands of kernels ahead of GPU
-# completion, oversubscribing the HWS runlist and wedging the command processor.
-# ROCPROFILER_SERIALIZER_MAX_INFLIGHT is set low to force the backpressure path; the tight
-# TIMEOUT fails the test if the hang regresses.
+# completion, oversubscribing the HWS runlist and wedging the command processor. The
+# serializer now bounds the staged-ahead depth automatically, so this deep backlog must
+# drain without hanging; the tight TIMEOUT fails the test if the hang regresses.
 rocprofiler_add_integration_execute_test(
     counter-collection-backpressure
     TARGET reproducible-dispatch-count
@@ -26,7 +26,6 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=counter-collection-backpressure-test.json"
         "ROCPROFILER_TOOL_CONTEXTS=COUNTER_COLLECTION" "ROCPROF_COUNTERS=SQ_WAVES_sum"
-        "ROCPROFILER_SERIALIZER_MAX_INFLIGHT=64"
     FIXTURES_SETUP counter-collection-backpressure
     UNSTABLE)
 

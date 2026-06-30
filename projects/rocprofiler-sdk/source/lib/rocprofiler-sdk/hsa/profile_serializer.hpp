@@ -86,6 +86,13 @@ public:
 
     void add_queue(hsa_queue_t** hsa_queues, const Queue& queue);
 
+    // Number of serialized dispatches handed to this queue that have not yet completed
+    // (dispatched - completed). This is the exact in-flight serialized depth and is used
+    // for host-side backpressure. Must be called with the serializer lock held (the
+    // dispatch path's shared lock is sufficient): it reads the stable per-queue counters,
+    // but the map structure is only safe to traverse under the lock.
+    uint64_t inflight(const Queue& queue) const;
+
 private:
     // Per-queue in-order serialized dispatch/completion ids. hsa_barrier uses them to tell when a
     // transition packet handed to a queue has executed (completed >= dispatched-at-enqueue).

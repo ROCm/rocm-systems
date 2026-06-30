@@ -230,6 +230,18 @@ profiler_serializer::kernel_dispatch(const Queue& queue) const
     return ret;
 }
 
+uint64_t
+profiler_serializer::inflight(const Queue& queue) const
+{
+    if(auto it = _serial.find(queue.get_id().handle); it != _serial.end())
+    {
+        const auto disp = it->second.dispatched.load(std::memory_order_relaxed);
+        const auto comp = it->second.completed.load(std::memory_order_relaxed);
+        return (disp > comp) ? (disp - comp) : 0;
+    }
+    return 0;
+}
+
 void
 profiler_serializer::destroy_queue(hsa_queue_t* id, const Queue& queue)
 {

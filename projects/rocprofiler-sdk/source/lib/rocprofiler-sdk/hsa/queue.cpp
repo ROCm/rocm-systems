@@ -22,7 +22,6 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/common/container/pool.hpp"
-#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
@@ -52,7 +51,6 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
-#include <limits>
 #include <memory>
 #include <utility>
 
@@ -599,14 +597,18 @@ WriteInterceptor(const void* packets,
             bool inserted_before = false;
             if(_packet_data.is_serialized)
             {
-                // Bound the number of outstanding serialized dispatches before
-                // enqueueing another. This prevents the host from running thousands
-                // of kernels ahead of GPU completion (observed backlog >7000), which
-                // oversubscribes the HWS runlist and stalls the command processor.
-                // Tunable via ROCPROFILER_SERIALIZER_MAX_INFLIGHT (0 disables).
-                static const int64_t serializer_max_inflight =
-                    common::get_env("ROCPROFILER_SERIALIZER_MAX_INFLIGHT", int64_t{256});
-                queue.throttle_inflight(serializer_max_inflight);
+                // Bound how many serialized dispatches may be staged ahead of the one
+                // kernel the serializer is executing. This prevents the host from running
+                // thousands of kernels ahead of GPU completion (observed backlog >7000),
+                // which oversubscribes the HWS runlist and stalls the command processor.
+                // Because the serializer runs one kernel at a time, the natural bound is a
+                // small lookahead: 1 keeps a single dispatch staged behind the running
+                // kernel, and 2 adds one cushion slot so the GPU is not starved by host
+                // wakeup latency between completions. Larger values buy nothing under
+                // serialization (only one kernel ever runs), so this is a fixed constant
+                // rather than a user-tunable knob.
+                constexpr int64_t serializer_dispatch_lookahead = 2;
+                queue.throttle_inflight(serializer_dispatch_lookahead);
 
                 inserted_before = true;
                 CHECK_NOTNULL(hsa::get_queue_controller())
@@ -1008,30 +1010,39 @@ Queue::throttle_inflight(int64_t max_inflight) const
 {
     if(max_inflight <= 0 || _active_kernels.handle == 0u) return;
 
-    // Backpressure: block the producer thread while too many async dispatches are
-    // outstanding. Without this, counter-collection serialization lets the host
-    // enqueue thousands of dispatches ahead of GPU completion, oversubscribing the
-    // HWS runlist and stalling the command processor. _active_kernels is
-    // decremented by async_complete() on kernel completion, which wakes this
-    // blocking wait (no busy spin). The timeout hint bounds the wait so we re-check
-    // periodically rather than blocking forever.
+    // Backpressure for serialized (counter-collection) dispatches. Without it the host
+    // enqueues thousands of dispatches ahead of GPU completion (observed backlog >7000),
+    // oversubscribing the HWS runlist and stalling the command processor.
     //
-    // _active_kernels already counts the dispatch currently being enqueued
-    // (async_started() runs before this throttle on the serialized path), so the
-    // in-progress dispatch must not count against the cap. Treat max_inflight as an
-    // inclusive cap on already-outstanding dispatches by waiting until the signal
-    // drops below max_inflight + 1; otherwise a bound of 1 would wait for the
-    // signal to reach 0, which cannot happen before this dispatch is even
-    // submitted, deadlocking.
-    const int64_t cap =
-        (max_inflight < std::numeric_limits<int64_t>::max()) ? max_inflight + 1 : max_inflight;
+    // The bound is expressed against the serializer's own in-flight depth
+    // (dispatched - completed) rather than an arbitrary count. Because the serializer
+    // executes one kernel at a time, this is the only quantity that matters: a small
+    // max_inflight is simply how many dispatches may be staged ahead of the one running
+    // kernel (1 = one staged behind the executing kernel). The dispatch currently being
+    // enqueued is not yet counted in the serializer depth (kernel_dispatch() increments
+    // it after this throttle returns), so no off-by-one adjustment is needed.
+    //
+    // The serializer counters are plain atomics with no blocking primitive, so we use the
+    // _active_kernels HSA signal purely as a wakeup: it is decremented by async_complete()
+    // on every completion, so blocking until it drops below its current value wakes us the
+    // moment a kernel finishes (no busy spin). The serializer depth is re-evaluated on each
+    // wake; the timeout hint bounds the wait as a safety net.
+    auto serialized_inflight = [this]() -> int64_t {
+        return static_cast<int64_t>(
+            CHECK_NOTNULL(hsa::get_queue_controller())
+                ->serializer(this)
+                .rlock([this](const auto& serializer) { return serializer.inflight(*this); }));
+    };
+
     constexpr auto timeout_hint =
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-    while(_core_api.hsa_signal_load_scacquire_fn(_active_kernels) >= cap)
+    while(serialized_inflight() > max_inflight)
     {
+        const auto active = _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
+        if(active <= 0) break;
         _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
                                              HSA_SIGNAL_CONDITION_LT,
-                                             cap,
+                                             active,
                                              timeout_hint.count(),
                                              HSA_WAIT_STATE_BLOCKED);
     }
