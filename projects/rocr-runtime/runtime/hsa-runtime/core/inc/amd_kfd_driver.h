@@ -113,7 +113,6 @@ public:
   hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
                                   core::ShareType type, void* import_handle,
                                   void* mem = nullptr) override;
-  hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                    size_t size, hsa_access_permission_t perms,uint32_t node_id) override;
   hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,

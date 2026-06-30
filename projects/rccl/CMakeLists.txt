@@ -90,6 +90,12 @@ option(ENABLE_CODE_COVERAGE                    "Enable code coverage"           
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+# Move .hip_fatbin to the end of librccl.so so that small-code-model host
+# relocations (PC32/PLT32/GOTPCRELX/32S) between .text and the read-only /
+# writable data clusters stay in range even when the bundled device fat
+# binary exceeds ~2 GiB.  Default ON; disable only to reproduce the prior
+# layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
+option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
