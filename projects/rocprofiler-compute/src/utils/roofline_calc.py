@@ -86,36 +86,35 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
         "I32",
         "I64",
     ],
+    # *For gfx115x series, BF16 is a supported matrix ops precision on this arch, but
+    # we are turning it off because:
+    # a) it has no VALU ops, therefore no PEAK VALU roofline, and
+    # b) we do not run a WMMA BF16 builtin to collect PEAK-BF16 roofline, since we do
+    # not receive the respective counters from the underlying stack tools.
     "gfx1150": [
         "FP16",
-        # "BF16", # Technically BF16 is a supported matrix precision on this arch,
-        # but we are turning it off because we lack the metrics counters
         "FP32",
         "FP64",
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported: F4, F6, F8
+    ],  # Unsupported: F4, F6, F8, BF16*
     "gfx1151": [
         "FP16",
-        # "BF16", # Technically BF16 is a supported matrix precision on this arch,
-        # but we are turning it off because we lack the metrics counters
         "FP32",
         "FP64",
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported: F4, F6, F8
+    ],  # Unsupported: F4, F6, F8, BF16*
     "gfx1152": [
         "FP16",
-        # "BF16", # Technically BF16 is a supported matrix precision on this arch,
-        # but we are turning it off because we lack the metrics counters
         "FP32",
         "FP64",
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported: F4, F6, F8
+    ],  # Unsupported: F4, F6, F8, BF16*
 }
 
 CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
