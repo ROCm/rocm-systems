@@ -572,6 +572,36 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+#### Interpreting hops and weight
+
+The following descriptions apply to AMD Instinct GPUs up to and including MI355X.
+
+**Hops (`-o, --hops`)** — The hops table reports an *abstracted topology step count*, not
+the number of physical xGMI links between devices. The possible values are:
+
+| Hops | Meaning |
+|------|---------|
+| 1 | The two GPUs are reachable over xGMI, regardless of the number of physical xGMI links on the route. |
+| 2 | The two GPUs communicate over PCIe within the same CPU NUMA node. |
+| 3 | The two GPUs communicate over PCIe across different CPU NUMA nodes. |
+| 4 | Fallback when the inter-CPU io_link weight cannot be read. |
+
+Two GPUs on the same xGMI fabric always report `1`, even when data physically crosses
+multiple xGMI links. To determine the literal number of physical xGMI links between two
+devices, read the value from the `amdgpu` driver:
+
+```bash
+cat /sys/class/drm/card*/device/xgmi_num_hops
+```
+
+**Weight (`-w, --weight`)** — The weight table reports a qualitative cost metric derived
+from the KFD io_link `weight` property (lower = closer/faster), analogous to the NUMA
+distances reported by `numactl`. Each physical xGMI hop contributes 15 to the weight
+(for example, a single-hop xGMI connection has weight 15). PCIe routes are summed across
+segments (GPU→CPU + CPU→CPU + CPU→GPU); each GPU-to-CPU segment is typically 20, while
+the CPU-to-CPU segment uses the actual io_link weight, or a fallback of 10 if that weight
+cannot be read.
+
 (cmd-set)=
 ### amd-smi set
 
@@ -608,7 +638,8 @@ Set Arguments:
   -P, --profile PROFILE_LEVEL                 Set power profile level (#) or choose one of available profiles:
                                                 CUSTOM_MASK, VIDEO_MASK, POWER_SAVING_MASK, COMPUTE_MASK, VR_MASK, THREE_D_FULL_SCR_MASK, BOOTUP_DEFAULT
   -d, --perf-determinism SCLKMAX              Enable performance determinism mode and set GFXCLK softmax limit (in MHz)
-  -C, --compute-partition TYPE/INDEX          Set one of the following the accelerator TYPE or profile INDEX:
+  -C, --compute-partition, --accelerator-partition TYPE/INDEX
+                                              Set one of the following the accelerator TYPE or profile INDEX:
                                                 N/A.
                                                 Use `sudo amd-smi partition --accelerator` to find acceptable values.
   -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
@@ -692,13 +723,16 @@ Reset options for specified devices.
 
 ```{warning}
 
-   * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
-     GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
+* On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
+  GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
 
-   * Any process with an open `/dev/kfd` handle will be terminated when a GPU reset occurs,
-     even if that process is not using the GPU being reset. GPU isolation techniques using the
-     environment variables `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` do not
-     prevent this.
+* Any process with an open `/dev/kfd` handle will be terminated when a GPU reset occurs,
+  even if that process is not using the GPU being reset. GPU isolation techniques using the
+  environment variables `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` do not
+  prevent this.
+
+See [GPU reset behavior on XGMI systems](/conceptual/gpu-reset-behavior.md) for
+more information.
 ```
 
 ```shell-session
@@ -941,6 +975,45 @@ Command Modifiers:
   --file FILE                 Saves output into a file on the provided path (stdout by default).
   --loglevel LEVEL            Set the logging level from the possible choices:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+### amd-smi fabric
+
+Displays fabric (UALoE/UALink over Ethernet) information of the devices.
+
+```{note}
+The `fabric` subcommand is registered only when the amdgpu driver is initialized.
+On systems without IFoE/UALoE fabric hardware the fabric queries report `N/A` /
+not supported.
+```
+
+```shell-session
+~$ amd-smi fabric --help
+usage: amd-smi fabric [-h] [-t] [-i] [-g GPU [GPU ...]] [--json | --csv]
+                      [--file FILE] [--loglevel LEVEL]
+
+If no GPU is specified, returns information for all GPUs on the system.
+If no fabric argument is provided, all fabric information will be displayed.
+
+Fabric arguments:
+  -h, --help               show this help message and exit
+  -t, --topology           Display fabric topology data (counters per category, instance, and item)
+  -i, --info               Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
+
+Command Modifiers:
+  --json                   Displays output in JSON format (human readable by default).
+  --csv                    Displays output in CSV format (human readable by default).
+  --file FILE              Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL         Set the logging level from the possible choices:
+                             DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
 ## Interpreting the output

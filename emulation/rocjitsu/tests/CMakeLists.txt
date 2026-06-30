@@ -60,6 +60,7 @@ add_executable(
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
+    cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
@@ -175,13 +176,13 @@ rj_configure_target(scaling_test TEST)
 #   rocjitsu --config <cfg> -- <test_binary> [args]
 # The CLI handles LD_PRELOAD and config discovery. No RESOURCE_LOCK needed.
 
-set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json")
-set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json")
+set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json")
+set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
 set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
-    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4.json"
+    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
 )
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
@@ -594,6 +595,7 @@ find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
 if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
+    set(RJ_HIP_SANITIZER_FLAGS ${RJ_SANITIZER_COMPILE_OPTIONS})
 
     # Helper: build a HIP test binary with hipcc + gtest.
     function(rj_add_hip_test TEST_NAME)
@@ -611,10 +613,11 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
                 ${HIPCC_EXECUTABLE} --offload-arch=${ARG_ARCH} -std=c++20
-                -isystem ${GTEST_INC} -I${CMAKE_CURRENT_SOURCE_DIR}
-                -L${GTEST_LIB_DIR} -lgtest -lpthread ${ARG_EXTRA_LIBS}
-                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} -o
-                ${HIP_TEST_BIN} ${HIP_TEST_SRC}
+                ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
+                -I${CMAKE_CURRENT_SOURCE_DIR} -L${GTEST_LIB_DIR} -lgtest
+                -lpthread ${ARG_EXTRA_LIBS} -Wl,-rpath,${GTEST_LIB_DIR}
+                -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} -o ${HIP_TEST_BIN}
+                ${HIP_TEST_SRC}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
             COMMENT "Building ${TEST_NAME} with hipcc (${ARG_ARCH})"
             VERBATIM
@@ -682,8 +685,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         daemon_test
         PRIVATE
             RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
-            RJ_DAEMON_CONFIG="${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
-            RJ_DAEMON_CONFIG_2GPU="${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd_2gpu.json"
+            RJ_DAEMON_CONFIG="${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+            RJ_DAEMON_CONFIG_2GPU="${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
             RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_kmd_shim>"
             RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
             RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
@@ -831,7 +834,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         OUTPUT ${CVT_NARROW_BIN}
         COMMAND
             ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20
-            -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
+            ${RJ_HIP_SANITIZER_FLAGS} -I${CMAKE_SOURCE_DIR}/lib/util/include -o
+            ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
         COMMENT "Building hip_cvt_narrow_test with hipcc (gfx950)"

@@ -239,6 +239,9 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     for (auto packet : gpuPackets_) {
       delete[] packet;
     }
+    for (auto packet : gpuMetadataPackets_) {
+      delete[] packet;
+    }
     amd::ScopedLock lock(nodeSetLock_);
     nodeSet_.erase(this);
   }
@@ -262,7 +265,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   //! Capture packets and accumulate them into a batch if provided
   hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
                                   std::vector<uint8_t*>* batchPackets = nullptr,
-                                  std::vector<const std::string*>* batchKernelNames = nullptr) {
+                                  std::vector<const std::string*>* batchKernelNames = nullptr,
+                                  std::vector<uint8_t*>* batchMetadataPackets = nullptr) {
     auto capture_stream = hip::getNullStream(g_devices[dev_id_]->devices()[0]->context(), false);
     hipError_t status = CreateCommand(capture_stream);
     if (status != hipSuccess) {
@@ -271,11 +275,14 @@ class GraphNode : public hipGraphNodeDOTAttribute {
 
     // Release last created packet memory before they are overwritten with new packets
     std::for_each(gpuPackets_.begin(), gpuPackets_.end(), [](auto p) { delete[] p; });
-    // Clear the pointer array
+    std::for_each(gpuMetadataPackets_.begin(), gpuMetadataPackets_.end(),
+                  [](auto p) { delete[] p; });
     gpuPackets_.clear();
+    gpuMetadataPackets_.clear();
 
     for (auto& command : commands_) {
-      command->setPktCapturingState(true, &gpuPackets_, kernArgMgr, &capturedKernelName_);
+      command->setPktCapturingState(true, &gpuPackets_, kernArgMgr, &capturedKernelName_,
+                                    &gpuMetadataPackets_);
       // Enqueue command to capture GPU Packet. The packet is not submitted to the device.
       // The packet is stored in gpuPacket_ and submitted during graph launch.
       command->submit(*(command->queue())->vdev());
@@ -284,9 +291,13 @@ class GraphNode : public hipGraphNodeDOTAttribute {
 
     // Accumulate packets directly into the batch (only if batch vectors are provided)
     if (batchPackets != nullptr && batchKernelNames != nullptr) {
-      for (auto& packet : gpuPackets_) {
-        batchPackets->push_back(packet);
+      for (size_t i = 0; i < gpuPackets_.size(); ++i) {
+        batchPackets->push_back(gpuPackets_[i]);
         batchKernelNames->push_back(capturedKernelName_);
+        if (batchMetadataPackets != nullptr) {
+          batchMetadataPackets->push_back(
+              i < gpuMetadataPackets_.size() ? gpuMetadataPackets_[i] : nullptr);
+        }
       }
     }
 
@@ -499,6 +510,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   unsigned int isEnabled_;
   bool signal_is_required_ = false;   //!< This node requires a signal on the command
   std::vector<uint8_t*> gpuPackets_;  //!< GPU Packet to enqueue during graph launch
+  std::vector<uint8_t*> gpuMetadataPackets_;  //!< Metadata prefetch packets (parallel to gpuPackets_)
   const std::string* capturedKernelName_ = nullptr;
   size_t alignedKernArgSize_ = 256;       //!< Aligned size required for kernel args
   size_t kernargSegmentByteSize_ = 512;   //!< Kernel arg segment byte size
@@ -1102,6 +1114,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void FindStreamsReqPerDevForSegments();
   //! Pre-compute segment-to-stream-index mapping and same-stream dep flags at instantiate
   void PrecomputeStreamAssignment();
+  //! Recompute each segment's needs_completion_signal flag from its current
+  //! stream assignment. Called after the initial assignment and again if
+  //! BuildSyncPlan's collapse pass reassigns segments to a single stream.
+  void ComputeCompletionSignalFlags();
+  //! Barrier-ROI heuristic: decide whether the segment graph should be collapsed
+  //! onto a single stream because the cross-stream barriers multi-stream would
+  //! cost outweigh the work that could actually overlap. Returns true to collapse.
+  bool ShouldCollapseToSingleStream() const;
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
@@ -1121,10 +1141,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   struct PacketBatch {
     // Size of one AQL packet
     static constexpr size_t kAqlPktSize = 64;
+    // Size of one metadata prefetch packet (256 bytes per AQL slot)
+    static constexpr size_t kMetadataPktSize = 256;
 
     // Main dispatch vectors - always ready for batch dispatch
     std::vector<uint8_t*> dispatchPackets;
     std::vector<const std::string*> dispatchKernelNames;
+    // Parallel metadata packets (one per dispatchPacket entry, nullptr for barriers)
+    std::vector<uint8_t*> dispatchMetadataPackets;
 
     // Cached filtered lists - built on-demand when nodes are disabled
     std::vector<uint8_t*> enabledPackets;
@@ -1133,11 +1157,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     // Pre-built flat packet buffer for fast bulk dispatch (all nodes enabled).
     std::vector<uint8_t> flatPacketData;
     std::vector<uint32_t> validPacketFullHeaders;
+    // Pre-built flat metadata buffer (kMetadataPktSize per AQL packet).
+    std::vector<uint8_t> flatMetadataData;
 
     // Filtered flat buffer - built alongside enabledPackets when some nodes are disabled.
     // Allows the fast flat-dispatch path even in the partially-disabled case.
     std::vector<uint8_t> filteredFlatPacketData;
     std::vector<uint32_t> filteredValidPacketFullHeaders;
+    std::vector<uint8_t> filteredFlatMetadataData;
     bool filteredCacheValid = false;
 
     // Node tracking
@@ -1202,6 +1229,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   };
 
   SyncPlan sync_plan_;
+
+  //! Set by BuildSyncPlan's collapse pass when the barrier-ROI heuristic folds
+  //! the graph onto a single stream. Read by Init() to size stream creation.
+  bool collapsed_to_single_stream_ = false;
 
   void BuildSyncPlan();
 };
@@ -1594,6 +1625,14 @@ class GraphKernelNode : public GraphNode {
   GraphKernelNode& operator=(const GraphKernelNode&) = delete;
 
   GraphNode* clone() const override { return new GraphKernelNode(*this); }
+
+  // Total threads this launch would dispatch (grid blocks * threads per block).
+  // Used as a static, instantiate-time work proxy by the single-stream gate.
+  size_t GetLaunchThreadCount() const {
+    const dim3& g = kernelParams_.gridDim;
+    const dim3& b = kernelParams_.blockDim;
+    return static_cast<size_t>(g.x) * g.y * g.z * static_cast<size_t>(b.x) * b.y * b.z;
+  }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     // Clear commands_ first, even if node is disabled

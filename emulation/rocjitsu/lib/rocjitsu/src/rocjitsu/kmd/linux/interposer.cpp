@@ -20,6 +20,18 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "linux/uapi/kfd_ioctl.h"
+// Vendored kernel DRM/amdgpu UAPI (MIT). Provides the real drm_version,
+// drm_amdgpu_info, drm_amdgpu_info_device, drm_amdgpu_info_vram_gtt, and
+// drm_amdgpu_memory_info structs so the interposer services the amdgpu DRM
+// ioctl ABI directly. These are kernel ABI, not libdrm library types, so this
+// keeps the interposer independent of libdrm.
+#include "amdgpu_drm.h"
+#include "drm.h"
+RJ_DIAGNOSTIC_POP
+
 #include "util/dynamic_loader.h"
 #include "util/log.h"
 
@@ -167,12 +179,15 @@ public:
   /// the next open("/dev/kfd") creates a fresh connection.
   void reset_after_fork() {
     rj_vm_ = nullptr;
-    remote_ = nullptr;
-    remote_kfd_fd_ = -1;
+    remote_.store(nullptr, std::memory_order_relaxed);
+    remote_kfd_fd_.store(-1, std::memory_order_relaxed);
+    remote_open_refs_.store(0, std::memory_order_relaxed);
     new (&init_mutex_) std::mutex();
     new (&fd_mutex_) std::mutex();
+    new (&remote_mutex_) std::mutex();
     sysfs_fds_.clear();
     drm_fds_.clear();
+    handle_to_drm_fd_.clear();
     kfd_dup_fds_.clear();
     in_construction = false;
   }
@@ -182,53 +197,79 @@ public:
     auto *d = driver();
     return d ? d->fd() : -1;
   }
-  bool initialized() const { return rj_vm_ != nullptr || remote_ != nullptr; }
+  bool initialized() const {
+    return rj_vm_ != nullptr || remote_.load(std::memory_order_acquire) != nullptr;
+  }
 
-  /// @brief Get the remote driver instance, or nullptr if not connected.
-  RemoteDriver *remote() { return remote_; }
+  std::unique_lock<std::mutex> lock_remote() { return std::unique_lock(remote_mutex_); }
 
-  /// @brief Get the synthetic KFD fd for the remote driver.
-  /// @retval >=0 Valid fd when connected to a daemon.
-  /// @retval -1 Not connected.
-  int remote_kfd_fd() const { return remote_kfd_fd_; }
+  RemoteDriver *remote() { return remote_.load(std::memory_order_acquire); }
 
-  /// @brief Look up the remote driver by its KFD fd.
-  /// @retval non-null If fd matches the remote KFD fd.
-  /// @retval nullptr If fd doesn't match or no remote driver exists.
+  int remote_kfd_fd() const { return remote_kfd_fd_.load(std::memory_order_acquire); }
+
   RemoteDriver *remote_lookup(int fd) {
-    return (fd >= 0 && fd == remote_kfd_fd_ && remote_) ? remote_ : nullptr;
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    return (fd >= 0 && fd == remote_kfd_fd_.load(std::memory_order_acquire) && active_remote)
+               ? active_remote
+               : nullptr;
   }
 
-  /// @brief Get the daemon's sysfs topology directory path.
-  /// @returns The topology path string, or empty if not connected.
   std::string remote_topology_path() {
-    return remote_ ? std::string(remote_->topology_path()) : std::string{};
+    std::lock_guard lock(remote_mutex_);
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    return active_remote ? std::string(active_remote->topology_path()) : std::string{};
   }
 
-  /// @brief Get the daemon's DRM sysfs directory path.
-  /// @returns The DRM path string, or empty if not connected.
   std::string remote_drm_path() {
-    return remote_ ? std::string(remote_->drm_path()) : std::string{};
+    std::lock_guard lock(remote_mutex_);
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    return active_remote ? std::string(active_remote->drm_path()) : std::string{};
   }
 
-  /// @brief Connect to the daemon and perform the RPC handshake.
-  /// @details Tries to connect to the daemon socket. If successful, creates
-  /// a RemoteDriver, performs the handshake, and caches the instance.
-  /// @retval non-null Connected remote driver.
-  /// @retval nullptr No daemon running or handshake failed.
+  /// @brief True when a daemon-mode (remote) KFD connection is open.
+  bool is_remote_mode() const { return remote_open_refs_.load(std::memory_order_acquire) > 0; }
+
+  /// @brief Add one open reference for a remote (daemon-mode) KFD fd.
+  /// @details Each live remote KFD fd (the primary plus every dup) holds one
+  /// reference; the RPC connection is torn down only when the last reference is
+  /// dropped. Mirrors SimulatedDriver's local open refcount for the daemon path.
+  void retain_remote_open() { remote_open_refs_.fetch_add(1, std::memory_order_acq_rel); }
+
+  /// @brief Drop one remote open reference, tearing down the connection on the
+  /// last release.
+  /// @details On the final release this sends RPC_CLOSE to the daemon (via
+  /// RemoteDriver::close()) so the daemon frees this client's process state,
+  /// rather than leaking it until socket disconnect at process exit.
+  void release_remote_open() {
+    int prev = remote_open_refs_.fetch_sub(1, std::memory_order_acq_rel);
+    assert(prev > 0 && "remote open refcount underflow");
+    if (prev == 1)
+      teardown_remote();
+  }
+
   RemoteDriver *get_or_create_remote() {
-    if (remote_ && remote_kfd_fd_ >= 0)
-      return remote_;
+    std::lock_guard lock(remote_mutex_);
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    if (active_remote && remote_kfd_fd_.load(std::memory_order_acquire) >= 0) {
+      // Re-open of an already-connected daemon: each open holds one reference,
+      // mirroring SimulatedDriver::open() retaining the local process.
+      retain_remote_open();
+      return active_remote;
+    }
     int sock = connect_to_daemon();
     if (sock < 0)
       return nullptr;
-    if (!remote_)
-      remote_ = new RemoteDriver(sock);
-    int fd = remote_->open();
+    if (!active_remote) {
+      active_remote = new RemoteDriver(sock);
+      remote_.store(active_remote, std::memory_order_release);
+    }
+    int fd = active_remote->open();
     if (fd < 0)
       return nullptr;
-    remote_kfd_fd_ = fd;
-    return remote_;
+    remote_kfd_fd_.store(fd, std::memory_order_release);
+    // The primary remote KFD fd holds the first open reference.
+    remote_open_refs_.store(1, std::memory_order_release);
+    return active_remote;
   }
 
   SimulatedDriver *lookup(int fd) {
@@ -246,7 +287,9 @@ public:
     return d ? d->redirect_sysfs_path(path) : std::string{};
   }
 
-  bool is_kfd_primary(int fd) { return fd == driver_fd() || fd == remote_kfd_fd_; }
+  bool is_kfd_primary(int fd) {
+    return fd == driver_fd() || fd == remote_kfd_fd_.load(std::memory_order_acquire);
+  }
 
   bool is_kfd_dup(int fd) {
     std::lock_guard lock(fd_mutex_);
@@ -258,19 +301,72 @@ public:
   void track_dup(int fd) {
     if (fd < 0 || is_kfd_primary(fd))
       return;
-    std::lock_guard lock(fd_mutex_);
-    kfd_dup_fds_.insert(fd);
+    bool newly_tracked = false;
+    {
+      std::lock_guard lock(fd_mutex_);
+      newly_tracked = kfd_dup_fds_.insert(fd).second;
+    }
+    if (!newly_tracked)
+      return;
+    // Each live KFD fd (primary + every dup) holds one open reference, so the
+    // process/connection is torn down only when the last fd closes. Retain on
+    // whichever backend is active (local SimulatedDriver or remote daemon RPC).
+    if (auto *d = driver())
+      d->retain_local_open();
+    else if (is_remote_mode())
+      retain_remote_open();
   }
 
   void untrack_dup(int fd) {
     if (fd < 0)
       return;
-    std::lock_guard lock(fd_mutex_);
-    kfd_dup_fds_.erase(fd);
+    bool was_tracked = false;
+    {
+      std::lock_guard lock(fd_mutex_);
+      was_tracked = kfd_dup_fds_.erase(fd) != 0;
+    }
+    if (!was_tracked)
+      return;
+    if (auto *d = driver())
+      d->close();
+    else if (is_remote_mode())
+      release_remote_open();
   }
 
   void clear_dups() {
-    std::lock_guard lock(fd_mutex_);
+    size_t released = 0;
+    {
+      std::lock_guard lock(fd_mutex_);
+      released = kfd_dup_fds_.size();
+      kfd_dup_fds_.clear();
+    }
+    // Drop the references the cleared dups were holding. Used when a fresh
+    // open() rebinds the local process; the just-opened reference is preserved
+    // because clear_dups runs before any new dups are tracked. Remote teardown
+    // releases its own references explicitly and never routes through here.
+    if (auto *d = driver())
+      for (size_t i = 0; i < released; ++i)
+        d->close();
+  }
+
+  /// @brief Tear down the remote (daemon) connection: send RPC_CLOSE, close the
+  /// synthetic primary fd, and drop daemon-redirect topology paths.
+  /// @details Invoked on the last remote open reference release. Any remaining
+  /// dup-tracked fds refer to the now-closed synthetic fd; clear the set so
+  /// their subsequent close()/ioctl calls fall through to the real syscall
+  /// instead of being misrouted to a dead RPC connection.
+  void teardown_remote() {
+    std::lock_guard lock(remote_mutex_);
+    RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
+    if (!active_remote)
+      return;
+    active_remote->close();
+    remote_.store(nullptr, std::memory_order_release);
+    delete active_remote;
+    int fd = remote_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
+    if (fd >= 0)
+      InterposerContext::real.close(fd);
+    std::lock_guard fd_lock(fd_mutex_);
     kfd_dup_fds_.clear();
   }
 
@@ -320,6 +416,16 @@ public:
   void track_drm_handle(void *handle, int fd) {
     std::lock_guard lock(fd_mutex_);
     handle_to_drm_fd_[handle] = fd;
+  }
+
+  int untrack_drm_handle(void *handle) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = handle_to_drm_fd_.find(handle);
+    if (it == handle_to_drm_fd_.end())
+      return -1;
+    int fd = it->second;
+    handle_to_drm_fd_.erase(it);
+    return fd;
   }
 
   SimulatedDriver *get_or_create() {
@@ -407,11 +513,24 @@ public:
 
 private:
   rj_vm_t *rj_vm_ = nullptr;
-  RemoteDriver *remote_ = nullptr;
-  int remote_kfd_fd_ = -1;
+  /// @brief Active daemon-mode remote driver, or nullptr in local mode.
+  /// @details Stored atomically so lock-free readers (`remote()`,
+  /// `remote_lookup()`, `initialized()`, the AMDKFD ioctl fallback, the mmap
+  /// path) never race the writer that swaps it under `remote_mutex_` in
+  /// `get_or_create_remote()`/`teardown_remote()`. The mutex still serializes the
+  /// compound new+open and delete+clear sequences; the atomic only makes the
+  /// bare pointer read/write data-race-free.
+  std::atomic<RemoteDriver *> remote_{nullptr};
+  std::atomic<int> remote_kfd_fd_{-1};
+  /// @brief Open-reference count for the remote (daemon-mode) KFD connection.
+  /// @details The primary remote fd and every dup of it each hold one
+  /// reference; the RPC connection is torn down only when the last reference is
+  /// released. Mirrors SimulatedDriver's local open refcount for daemon mode.
+  std::atomic<int> remote_open_refs_{0};
 
   std::mutex init_mutex_;
   std::mutex fd_mutex_;
+  std::mutex remote_mutex_;
   std::unordered_map<int, std::string> sysfs_fds_;
   std::unordered_map<int, uint32_t> drm_fds_;
   std::unordered_map<void *, int> handle_to_drm_fd_;
@@ -427,169 +546,7 @@ alignas(16) uint8_t InterposerContext::storage_[sizeof(InterposerContext)];
 InterposerContext &InterposerContext::ctx =
     *reinterpret_cast<InterposerContext *>(InterposerContext::storage_);
 
-static void *(*real_dlsym_fn)(void *, const char *) = nullptr;
-
-__attribute__((constructor(101))) static void resolve_real_dlsym() {
-  real_dlsym_fn =
-      reinterpret_cast<decltype(real_dlsym_fn)>(dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.34"));
-  if (!real_dlsym_fn)
-    real_dlsym_fn =
-        reinterpret_cast<decltype(real_dlsym_fn)>(dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5"));
-  if (!real_dlsym_fn) {
-    fprintf(stderr, "rocjitsu: failed to resolve real dlsym\n");
-    abort();
-  }
-}
-
 __attribute__((constructor)) static void init_interposer() { InterposerContext::init(); }
-
-constexpr int DRM_NODE_PRIMARY = 0;
-constexpr int DRM_NODE_RENDER = 2;
-constexpr int DRM_BUS_PCI = 0;
-constexpr unsigned kDrmCommandBase = 0x40;
-constexpr unsigned kDrmAmdgpuInfo = 0x05;
-constexpr unsigned kAmdgpuInfoDevInfo = 0x16;
-
-// Local ABI mirrors for the libdrm calls we interpose. The source of truth is
-// the Linux UAPI DRM headers for drm_version, drm_amdgpu_info, and
-// drm_amdgpu_info_device, plus libdrm's amdgpu.h for amdgpu_device_handle and
-// amdgpu_gpu_info. Keep this target independent of libdrm headers; the layout
-// test covers the drm_amdgpu_info_device prefix where that dependency already
-// existed.
-struct RjAmdgpuDevice;
-using RjAmdgpuDeviceHandle = RjAmdgpuDevice *;
-
-struct RjDrmVersion {
-  int version_major;
-  int version_minor;
-  int version_patchlevel;
-  size_t name_len;
-  char *name;
-  size_t date_len;
-  char *date;
-  size_t desc_len;
-  char *desc;
-};
-
-struct RjDrmAmdgpuInfo {
-  uint64_t return_pointer;
-  uint32_t return_size;
-  uint32_t query;
-  uint64_t pad;
-};
-
-struct RjAmdgpuGpuInfo {
-  uint32_t asic_id;
-  uint32_t chip_rev;
-  uint32_t chip_external_rev;
-  uint32_t family_id;
-  uint64_t ids_flags;
-  uint64_t max_engine_clk;
-  uint64_t max_memory_clk;
-  uint32_t num_shader_engines;
-  uint32_t num_shader_arrays_per_engine;
-  uint32_t avail_quad_shader_pipes;
-  uint32_t max_quad_shader_pipes;
-  uint32_t cache_entries_per_quad_pipe;
-  uint32_t num_hw_gfx_contexts;
-  uint32_t rb_pipes;
-  uint32_t enabled_rb_pipes_mask;
-  uint32_t gpu_counter_freq;
-  uint32_t backend_disable[4];
-  uint32_t mc_arb_ramcfg;
-  uint32_t gb_addr_cfg;
-  uint32_t gb_tile_mode[32];
-  uint32_t gb_macro_tile_mode[16];
-  uint32_t pa_sc_raster_cfg[4];
-  uint32_t pa_sc_raster_cfg1[4];
-  uint32_t cu_active_number;
-  uint32_t cu_ao_mask;
-  uint32_t cu_bitmap[4][4];
-  uint32_t vram_type;
-  uint32_t vram_bit_width;
-  uint32_t ce_ram_size;
-  uint32_t vce_harvest_config;
-  uint32_t pci_rev_id;
-};
-
-struct RjDrmAmdgpuInfoDevice {
-  uint32_t device_id;
-  uint32_t chip_rev;
-  uint32_t external_rev;
-  uint32_t pci_rev;
-  uint32_t family;
-  uint32_t num_shader_engines;
-  uint32_t num_shader_arrays_per_engine;
-  uint32_t gpu_counter_freq;
-  uint64_t max_engine_clock;
-  uint64_t max_memory_clock;
-  uint32_t cu_active_number;
-  uint32_t cu_ao_mask;
-  uint32_t cu_bitmap[4][4];
-  uint32_t enabled_rb_pipes_mask;
-  uint32_t num_rb_pipes;
-  uint32_t num_hw_gfx_contexts;
-  uint32_t pcie_gen;
-  uint64_t ids_flags;
-  uint64_t virtual_address_offset;
-  uint64_t virtual_address_max;
-  uint32_t virtual_address_alignment;
-  uint32_t pte_fragment_size;
-  uint32_t gart_page_size;
-  uint32_t ce_ram_size;
-  uint32_t vram_type;
-  uint32_t vram_bit_width;
-  uint32_t vce_harvest_config;
-  uint32_t gc_double_offchip_lds_buf;
-  uint64_t prim_buf_gpu_addr;
-  uint64_t pos_buf_gpu_addr;
-  uint64_t cntl_sb_buf_gpu_addr;
-  uint64_t param_buf_gpu_addr;
-  uint32_t prim_buf_size;
-  uint32_t pos_buf_size;
-  uint32_t cntl_sb_buf_size;
-  uint32_t param_buf_size;
-  uint32_t wave_front_size;
-  uint32_t num_shader_visible_vgprs;
-  uint32_t num_cu_per_sh;
-  uint32_t num_tcc_blocks;
-  uint32_t gs_vgt_table_depth;
-  uint32_t gs_prim_buffer_depth;
-  uint32_t max_gs_waves_per_vgt;
-  uint32_t pcie_num_lanes;
-  uint32_t cu_ao_bitmap[4][4];
-  uint64_t high_va_offset;
-  uint64_t high_va_max;
-  uint32_t pa_sc_tile_steering_override;
-  uint64_t tcc_disabled_mask;
-};
-
-struct drmPciBusInfo {
-  uint16_t domain;
-  uint8_t bus;
-  uint8_t dev;
-  uint8_t func;
-};
-
-struct drmPciDeviceInfo {
-  uint16_t vendor_id;
-  uint16_t device_id;
-  uint16_t subvendor_id;
-  uint16_t subdevice_id;
-  uint8_t revision_id;
-};
-
-struct drmDevice {
-  char **nodes;
-  int available_nodes;
-  int bustype;
-  union {
-    drmPciBusInfo *pci;
-  } businfo;
-  union {
-    drmPciDeviceInfo *pci;
-  } deviceinfo;
-};
 
 } // namespace
 
@@ -811,8 +768,14 @@ int openat64(int dirfd, const char *path, int flags, ...) {
 
 int close(int fd) {
   assert(InterposerContext::real.ready());
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
-    return remote->close();
+  if (InterposerContext::ctx.remote_lookup(fd)) {
+    // Closing the primary remote KFD fd drops one open reference; the synthetic
+    // fd and RPC connection are torn down only when the last reference is
+    // released (teardown_remote), mirroring local-mode primary close which also
+    // defers teardown to the last reference.
+    InterposerContext::ctx.release_remote_open();
+    return 0;
+  }
   InterposerContext::ctx.untrack_sysfs(fd);
   if (InterposerContext::ctx.untrack_drm(fd)) {
     InterposerContext::real.close(fd);
@@ -823,14 +786,15 @@ int close(int fd) {
     return static_cast<int>(InterposerContext::real.close(fd));
   }
   if (auto *drv = InterposerContext::ctx.lookup(fd)) {
-    int rc = drv->close();
-    InterposerContext::ctx.clear_dups();
-    return rc;
+    drv->close();
+    return 0;
   }
   if (InterposerContext::ctx.owns_fd(fd))
     return 0;
   return static_cast<int>(InterposerContext::real.close(fd));
 }
+
+__attribute__((destructor(101))) void rj_interposer_shutdown() {}
 
 int ioctl(int fd, unsigned long request, ...) {
   assert(InterposerContext::real.ready());
@@ -841,20 +805,30 @@ int ioctl(int fd, unsigned long request, ...) {
 
   constexpr unsigned kDrmIoctlType = 'd';
   constexpr unsigned kDrmIoctlNrVersion = 0x00;
-  constexpr unsigned kDrmIoctlNrAmdgpuInfo = kDrmCommandBase + kDrmAmdgpuInfo;
+  constexpr unsigned kDrmIoctlNrAmdgpuInfo = DRM_COMMAND_BASE + DRM_AMDGPU_INFO;
+  constexpr unsigned kDrmIoctlNrPrimeFdToHandle = 0x2e;
 
   if (InterposerContext::ctx.is_drm(fd)) {
     unsigned nr = _IOC_NR(request);
     unsigned type = _IOC_TYPE(request);
     if (type == kDrmIoctlType && nr == kDrmIoctlNrVersion && arg) {
-      auto *ver = static_cast<RjDrmVersion *>(arg);
+      auto *ver = static_cast<drm_version *>(arg);
       ver->version_major = 3;
       ver->version_minor = 57;
       ver->version_patchlevel = 0;
       static constexpr const char drv_name[] = "amdgpu";
-      if (ver->name && ver->name_len >= sizeof(drv_name) - 1)
-        std::memcpy(ver->name, drv_name, sizeof(drv_name));
-      ver->name_len = sizeof(drv_name) - 1;
+      constexpr size_t kNameStrLen = sizeof(drv_name) - 1;
+      // Mirror the kernel's drm_version contract: copy at most the caller's
+      // advertised buffer length, and only write the NUL terminator when the
+      // buffer has room for it. A caller that sized name to exactly the queried
+      // length must not get a terminator written one byte past the end.
+      if (ver->name && ver->name_len > 0) {
+        size_t copy = ver->name_len < kNameStrLen ? ver->name_len : kNameStrLen;
+        std::memcpy(ver->name, drv_name, copy);
+        if (ver->name_len > kNameStrLen)
+          ver->name[kNameStrLen] = '\0';
+      }
+      ver->name_len = kNameStrLen;
       if (ver->date && ver->date_len > 0)
         ver->date[0] = '\0';
       ver->date_len = 1;
@@ -863,45 +837,111 @@ int ioctl(int fd, unsigned long request, ...) {
       ver->desc_len = 1;
       return 0;
     }
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeFdToHandle && arg) {
+      struct drm_prime_handle {
+        uint32_t handle;
+        uint32_t flags;
+        int32_t fd;
+      };
+      auto *prime = static_cast<drm_prime_handle *>(arg);
+      if (prime->fd < 0) {
+        errno = EINVAL;
+        return -1;
+      }
+      prime->handle = static_cast<uint32_t>(prime->fd) + 1u;
+      return 0;
+    }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrAmdgpuInfo && arg) {
-      auto *info = static_cast<RjDrmAmdgpuInfo *>(arg);
-      if (info->query == kAmdgpuInfoDevInfo && !interposer_gpu_info()) {
+      // Service the AMDGPU_INFO queries that real libdrm_amdgpu issues during
+      // amdgpu_device_initialize / amdgpu_query_gpu_info_init. Answering these
+      // at the ioctl layer lets real libdrm run unmodified (no library shim).
+      // The init cascade (amdgpu_gpu_info.c) requires, in order:
+      //   ACCEL_WORKING (must be nonzero or init aborts), DEV_INFO,
+      //   READ_MMR_REG (gb_addr_cfg is mandatory for all families),
+      //   VRAM_GTT, MEMORY. Failures (-1) abort device init.
+      auto *info = static_cast<drm_amdgpu_info *>(arg);
+      auto *gpu = interposer_gpu_info();
+      if (!gpu) {
         errno = ENODEV;
         return -1;
       }
-      if (info->return_pointer && info->return_size > 0) {
-        auto *out = reinterpret_cast<void *>(info->return_pointer);
-        std::memset(out, 0, info->return_size);
-        if (info->query == kAmdgpuInfoDevInfo) {
-          if (info->return_size >= sizeof(RjDrmAmdgpuInfoDevice)) {
-            auto *dev = static_cast<RjDrmAmdgpuInfoDevice *>(out);
-            auto *gpu = interposer_gpu_info();
-            if (gpu) {
-              dev->device_id = gpu->device_id;
-              dev->chip_rev = gpu->revision_id;
-              dev->external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
-                  gpu->gfx_target_version, gpu->revision_id);
-              dev->pci_rev = gpu->pci_revision_id;
-              dev->family = gpu->family_id;
-              dev->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
-                  gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
-              dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
-              dev->gpu_counter_freq = 100000;
-              dev->max_engine_clock = gpu->max_engine_clk_fcompute;
-              dev->max_memory_clock = gpu->mem_clk_max;
-              dev->wave_front_size = gpu->wave_front_size;
-              dev->num_cu_per_sh = gpu->num_cu_per_sh;
-              dev->num_hw_gfx_contexts = rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(
-                  gpu->gfx_target_version);
-              dev->vram_type = gpu->vram_type;
-              dev->vram_bit_width = gpu->mem_width;
-              dev->cu_active_number =
-                  rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
-            }
-          }
-        }
+      auto *out = info->return_pointer ? reinterpret_cast<void *>(info->return_pointer) : nullptr;
+      if (!out || info->return_size == 0)
+        return 0;
+      std::memset(out, 0, info->return_size);
+
+      switch (info->query) {
+      case AMDGPU_INFO_ACCEL_WORKING: {
+        if (info->return_size >= sizeof(uint32_t))
+          *static_cast<uint32_t *>(out) = 1u;
+        return 0;
       }
-      return 0;
+      case AMDGPU_INFO_READ_MMR_REG: {
+        // rocjitsu does not model raster/tiling MMRs. libdrm only stores the
+        // returned words (never validates them), so zero-fill `count` u32s is
+        // sufficient for both the AI short path and the pre-AI cascade.
+        return 0; // buffer already zeroed
+      }
+      case AMDGPU_INFO_VRAM_GTT: {
+        if (info->return_size >= sizeof(drm_amdgpu_info_vram_gtt)) {
+          auto *vg = static_cast<drm_amdgpu_info_vram_gtt *>(out);
+          vg->vram_size = gpu->local_mem_size;
+          vg->vram_cpu_accessible_size = gpu->local_mem_size;
+          vg->gtt_size = gpu->local_mem_size;
+        }
+        return 0;
+      }
+      case AMDGPU_INFO_MEMORY: {
+        if (info->return_size >= sizeof(drm_amdgpu_memory_info)) {
+          auto *m = static_cast<drm_amdgpu_memory_info *>(out);
+          m->vram.total_heap_size = gpu->local_mem_size;
+          m->vram.usable_heap_size = gpu->local_mem_size;
+          m->vram.max_allocation = gpu->local_mem_size;
+          m->cpu_accessible_vram = m->vram;
+          m->gtt = m->vram;
+        }
+        return 0;
+      }
+      case AMDGPU_INFO_DEV_INFO: {
+        if (info->return_size >= sizeof(drm_amdgpu_info_device)) {
+          auto *dev = static_cast<drm_amdgpu_info_device *>(out);
+          dev->device_id = gpu->device_id;
+          dev->chip_rev = gpu->revision_id;
+          dev->external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
+              gpu->gfx_target_version, gpu->revision_id);
+          dev->pci_rev = gpu->pci_revision_id;
+          dev->family = gpu->family_id;
+          dev->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
+              gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
+          dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
+          dev->gpu_counter_freq = 100000;
+          dev->max_engine_clock = gpu->max_engine_clk_fcompute;
+          dev->max_memory_clock = gpu->mem_clk_max;
+          dev->wave_front_size = gpu->wave_front_size;
+          dev->num_cu_per_sh = gpu->num_cu_per_sh;
+          dev->num_hw_gfx_contexts =
+              rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(gpu->gfx_target_version);
+          dev->vram_type = gpu->vram_type;
+          dev->vram_bit_width = gpu->mem_width;
+          dev->cu_active_number =
+              rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
+          // VA aperture — libdrm's VA manager (amdgpu_vamgr_init) needs a sane
+          // range. Mirror the KFD GPUVM aperture used elsewhere.
+          dev->virtual_address_offset = 0x200000;       // 2 MiB
+          dev->virtual_address_max = 0x800000000000ULL; // 47-bit canonical
+          dev->virtual_address_alignment = 0x1000;      // 4 KiB
+          dev->pte_fragment_size = 0x200000;            // 2 MiB
+          dev->gart_page_size = 0x1000;                 // 4 KiB
+          dev->high_va_offset = 0xffff800000000000ULL;
+          dev->high_va_max = 0xffffffffffffffffULL;
+        }
+        return 0;
+      }
+      default:
+        // Unhandled query: succeed with zero-filled buffer. libdrm tolerates
+        // zeros for the optional queries (FW_VERSION, sensors, etc.).
+        return 0;
+      }
     }
     errno = EINVAL;
     return -1;
@@ -911,6 +951,15 @@ int ioctl(int fd, unsigned long request, ...) {
     return remote->ioctl(request, arg);
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
     if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
+      return remote->ioctl(request, arg);
+  }
+  // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd
+  // whose primary remote handle changed underneath it (e.g. a close/dup race in
+  // daemon mode). Forward only AMDKFD-typed ioctls, and only on fds we already
+  // track as KFD (primary or dup), so an arbitrary unrelated fd carrying a
+  // type-'K' ioctl is never misrouted to the remote KFD driver.
+  if (_IOC_TYPE(request) == AMDKFD_IOCTL_BASE && InterposerContext::ctx.is_kfd_tracked(fd)) {
+    if (auto *remote = InterposerContext::ctx.remote())
       return remote->ioctl(request, arg);
   }
 
@@ -937,32 +986,37 @@ int dup(int oldfd) {
 
 int dup2(int oldfd, int newfd) {
   assert(InterposerContext::real.ready());
+  // dup2(fd, fd) is a POSIX no-op that leaves the descriptor live; mutating
+  // tracking would drop a still-open ref. Forward without touching tracking.
+  if (oldfd == newfd)
+    return InterposerContext::real.dup2(oldfd, newfd);
+  int rc = InterposerContext::real.dup2(oldfd, newfd);
+  if (rc < 0)
+    return rc;
+  // newfd was atomically closed and replaced; reconcile its tracking only now.
   InterposerContext::ctx.untrack_sysfs(newfd);
   InterposerContext::ctx.untrack_drm(newfd);
-  InterposerContext::ctx.untrack_dup(newfd);
-  int rc = InterposerContext::real.dup2(oldfd, newfd);
-  if (rc >= 0) {
-    if (InterposerContext::ctx.is_kfd_tracked(oldfd))
-      InterposerContext::ctx.track_dup(rc);
-    else
-      InterposerContext::ctx.untrack_dup(rc);
-  }
+  if (InterposerContext::ctx.is_kfd_tracked(oldfd))
+    InterposerContext::ctx.track_dup(rc);
+  else
+    InterposerContext::ctx.untrack_dup(rc);
   return rc;
 }
 
 #ifdef SYS_dup3
 int dup3(int oldfd, int newfd, int flags) {
   assert(InterposerContext::real.ready());
+  // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
+  // descriptor; do not mutate tracking before the syscall confirms that.
+  int rc = InterposerContext::real.dup3(oldfd, newfd, flags);
+  if (rc < 0)
+    return rc;
   InterposerContext::ctx.untrack_sysfs(newfd);
   InterposerContext::ctx.untrack_drm(newfd);
-  InterposerContext::ctx.untrack_dup(newfd);
-  int rc = InterposerContext::real.dup3(oldfd, newfd, flags);
-  if (rc >= 0) {
-    if (InterposerContext::ctx.is_kfd_tracked(oldfd))
-      InterposerContext::ctx.track_dup(rc);
-    else
-      InterposerContext::ctx.untrack_dup(rc);
-  }
+  if (InterposerContext::ctx.is_kfd_tracked(oldfd))
+    InterposerContext::ctx.track_dup(rc);
+  else
+    InterposerContext::ctx.untrack_dup(rc);
   return rc;
 }
 #endif
@@ -1025,37 +1079,75 @@ FcntlArgKind fcntl_arg_kind(int cmd) {
 }
 } // namespace
 
-int fcntl(int fd, int cmd, ...) {
-  assert(InterposerContext::real.ready());
-  va_list ap;
-  va_start(ap, cmd);
+namespace {
+// Shared implementation for fcntl / fcntl64. The variadic third argument is
+// extracted by the public entry points (which can't forward a va_list) and
+// passed here already resolved. Both fcntl and fcntl64 share the same kernel
+// ABI, so InterposerContext::real.fcntl services both.
+int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   FcntlArgKind kind = fcntl_arg_kind(cmd);
   long rc = 0;
   switch (kind) {
-  case FcntlArgKind::Int: {
-    int arg = va_arg(ap, int);
-    rc = InterposerContext::real.fcntl(fd, cmd, arg);
+  case FcntlArgKind::Int:
+    rc = InterposerContext::real.fcntl(fd, cmd, int_arg);
     break;
-  }
-  case FcntlArgKind::Ptr: {
-    void *arg = va_arg(ap, void *);
-    rc = InterposerContext::real.fcntl(fd, cmd, arg);
+  case FcntlArgKind::Ptr:
+    rc = InterposerContext::real.fcntl(fd, cmd, ptr_arg);
     break;
-  }
   case FcntlArgKind::None:
   default:
     rc = InterposerContext::real.fcntl(fd, cmd, 0L);
     break;
   }
-  va_end(ap);
 
   if (rc >= 0 && (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC)) {
     if (InterposerContext::ctx.is_kfd_tracked(fd))
       InterposerContext::ctx.track_dup(static_cast<int>(rc));
     else
       InterposerContext::ctx.untrack_dup(static_cast<int>(rc));
+    // Propagate DRM render-node tracking across dup so ioctls on the duped fd
+    // are still recognized. libdrm's amdgpu_device_initialize duplicates the
+    // render fd (via fcntl64 F_DUPFD_CLOEXEC) and issues all AMDGPU_INFO ioctls
+    // on the copy.
+    if (InterposerContext::ctx.is_drm(fd))
+      InterposerContext::ctx.track_drm(static_cast<int>(rc),
+                                       InterposerContext::ctx.drm_render_minor(fd));
   }
   return static_cast<int>(rc);
+}
+} // namespace
+
+int fcntl(int fd, int cmd, ...) {
+  assert(InterposerContext::real.ready());
+  va_list ap;
+  va_start(ap, cmd);
+  FcntlArgKind kind = fcntl_arg_kind(cmd);
+  void *ptr_arg = nullptr;
+  int int_arg = 0;
+  if (kind == FcntlArgKind::Ptr)
+    ptr_arg = va_arg(ap, void *);
+  else if (kind == FcntlArgKind::Int)
+    int_arg = va_arg(ap, int);
+  va_end(ap);
+  return fcntl_impl(fd, cmd, ptr_arg, int_arg);
+}
+
+// libdrm_amdgpu imports fcntl64@GLIBC_2.28 (not fcntl), so it must be
+// interposed separately or libdrm's F_DUPFD_CLOEXEC on the render fd bypasses
+// our dup tracking and subsequent ioctls land on an untracked fd.
+int fcntl64(int fd, int cmd, ...) {
+  assert(InterposerContext::real.ready());
+  va_list ap;
+  va_start(ap, cmd);
+  FcntlArgKind kind = fcntl_arg_kind(cmd);
+  void *ptr_arg = nullptr;
+  int int_arg = 0;
+  if (kind == FcntlArgKind::Ptr)
+    ptr_arg = va_arg(ap, void *);
+  else if (kind == FcntlArgKind::Int)
+    int_arg = va_arg(ap, int);
+  va_end(ap);
+  return fcntl_impl(fd, cmd, ptr_arg, int_arg);
 }
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -1128,78 +1220,9 @@ int munmap(void *addr, size_t length) {
   return InterposerContext::real.munmap(addr, length);
 }
 
-// -- libdrm interposition --
+} // extern "C"
 
-int amdgpu_device_initialize(int /*fd*/, uint32_t *major_version, uint32_t *minor_version,
-                             RjAmdgpuDeviceHandle *device_handle) {
-  if (InterposerContext::ctx.driver_fd() < 0 && InterposerContext::ctx.remote_kfd_fd() < 0)
-    return -1;
-  *major_version = 3;
-  *minor_version = 57;
-  static int dummy_handle = 1;
-  *device_handle = reinterpret_cast<RjAmdgpuDeviceHandle>(&dummy_handle);
-  return 0;
-}
-
-int amdgpu_device_initialize2(int fd, bool /*deduplicate_device*/, uint32_t *major_version,
-                              uint32_t *minor_version, RjAmdgpuDeviceHandle *device_handle) {
-  return amdgpu_device_initialize(fd, major_version, minor_version, device_handle);
-}
-
-int amdgpu_device_deinitialize(RjAmdgpuDeviceHandle /*device_handle*/) { return 0; }
-
-int amdgpu_device_get_fd(RjAmdgpuDeviceHandle /*device_handle*/) {
-  int fd = InterposerContext::ctx.remote_kfd_fd();
-  return fd >= 0 ? fd : InterposerContext::ctx.driver_fd();
-}
-
-const char *amdgpu_get_marketing_name(RjAmdgpuDeviceHandle /*device_handle*/) {
-  auto *gpu = interposer_gpu_info();
-  if (!gpu)
-    return nullptr;
-
-  static thread_local std::string name;
-  if (!gpu->marketing_name.empty()) {
-    name = gpu->marketing_name;
-  } else {
-    name = rocjitsu::kmd::gfx_target_name(gpu->gfx_target_version);
-  }
-  return name.c_str();
-}
-
-int amdgpu_query_gpu_info(RjAmdgpuDeviceHandle /*device_handle*/, RjAmdgpuGpuInfo *info) {
-  if (!info)
-    return -EINVAL;
-
-  auto *gpu = interposer_gpu_info();
-  if (!gpu)
-    return -ENODEV;
-
-  std::memset(info, 0, sizeof(*info));
-  info->asic_id = gpu->device_id;
-  info->chip_rev = gpu->revision_id;
-  info->chip_external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
-      gpu->gfx_target_version, gpu->revision_id);
-  info->family_id = gpu->family_id;
-  info->max_engine_clk = gpu->max_engine_clk_fcompute;
-  info->max_memory_clk = gpu->mem_clk_max;
-  info->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
-      gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
-  info->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
-  info->avail_quad_shader_pipes =
-      rocjitsu::kmd::drm_quad_shader_pipe_count(gpu->num_shader_engines);
-  info->max_quad_shader_pipes = info->avail_quad_shader_pipes;
-  info->num_hw_gfx_contexts =
-      rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(gpu->gfx_target_version);
-  info->gpu_counter_freq = 100000;
-  info->gb_addr_cfg = rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
-  info->cu_active_number =
-      rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
-  info->vram_type = gpu->vram_type;
-  info->vram_bit_width = gpu->mem_width;
-  info->pci_rev_id = gpu->pci_revision_id;
-  return 0;
-}
+extern "C" {
 
 // -- fopen / freopen interposition (sysfs redirect) --
 
@@ -1356,7 +1379,17 @@ static std::string redirect_dev_dri(const char *path) {
   if (!path || !InterposerContext::real.ready() || InterposerContext::in_construction)
     return {};
   std::string_view sv(path);
-  if (sv != "/dev/dri" && sv != "/dev/dri/")
+  // Redirect both the /dev/dri directory and individual node files
+  // (/dev/dri/renderD<minor>, /dev/dri/card<n>) into our synthetic dev_dri
+  // tree. libdrm's drmGetMinorType probes node existence with access() on these
+  // exact paths to classify an fd as a render node; without per-node redirect
+  // the probe hits the real host (where extra GPUs don't exist) and fails,
+  // breaking amdgpu_device_initialize's amdgpu_get_auth on multi-GPU configs.
+  constexpr std::string_view kDevDri = "/dev/dri/";
+  bool is_dir = (sv == "/dev/dri" || sv == "/dev/dri/");
+  bool is_node = sv.starts_with(kDevDri) && (sv.substr(kDevDri.size()).starts_with("renderD") ||
+                                             sv.substr(kDevDri.size()).starts_with("card"));
+  if (!is_dir && !is_node)
     return {};
   std::string drm_base;
   auto *drv = InterposerContext::ctx.driver();
@@ -1366,7 +1399,9 @@ static std::string redirect_dev_dri(const char *path) {
     drm_base = InterposerContext::ctx.remote_drm_path();
   if (drm_base.empty())
     return {};
-  return drm_base + "/dev_dri";
+  if (is_dir)
+    return drm_base + "/dev_dri";
+  return drm_base + "/dev_dri/" + std::string(sv.substr(kDevDri.size()));
 }
 
 int stat(const char *path, struct stat *buf) {
@@ -1545,6 +1580,8 @@ int stat64(const char *path, struct stat64 *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_stat64(actual, buf);
 }
@@ -1557,6 +1594,8 @@ int lstat64(const char *path, struct stat64 *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_lstat64(actual, buf);
 }
@@ -1569,6 +1608,8 @@ int __xstat(int ver, const char *path, struct stat *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_xstat(ver, actual, buf);
 }
@@ -1581,6 +1622,8 @@ int __xstat64(int ver, const char *path, struct stat64 *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_xstat64(ver, actual, buf);
 }
@@ -1593,6 +1636,8 @@ int __lxstat(int ver, const char *path, struct stat *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_lxstat(ver, actual, buf);
 }
@@ -1605,159 +1650,10 @@ int __lxstat64(int ver, const char *path, struct stat64 *buf) {
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return real_lxstat64(ver, actual, buf);
-}
-
-// -- DRM device enumeration (direct PLT linkage consumers) --
-
-static std::unordered_set<void *> our_drm_allocs;
-static std::mutex drm_alloc_mutex;
-
-static drmDevice *alloc_drm_device(const Sysfs::GpuInfo &gpu, uint32_t card_idx) {
-  uint32_t render_minor = gpu.drm_render_minor;
-  char primary_path[64], render_path[64];
-  snprintf(primary_path, sizeof(primary_path), "/dev/dri/card%u", card_idx);
-  snprintf(render_path, sizeof(render_path), "/dev/dri/renderD%u", render_minor);
-
-  size_t primary_len = strlen(primary_path) + 1;
-  size_t render_len = strlen(render_path) + 1;
-  constexpr int kMaxNodeTypes = 3;
-
-  size_t alloc_size = sizeof(drmDevice) + kMaxNodeTypes * sizeof(char *) + primary_len +
-                      render_len + sizeof(drmPciBusInfo) + sizeof(drmPciDeviceInfo);
-  auto *mem = static_cast<uint8_t *>(calloc(1, alloc_size));
-  if (!mem)
-    return nullptr;
-
-  auto *dev = reinterpret_cast<drmDevice *>(mem);
-  auto *nodes = reinterpret_cast<char **>(mem + sizeof(drmDevice));
-  auto *str_buf = reinterpret_cast<char *>(nodes + kMaxNodeTypes);
-  auto *bus = reinterpret_cast<drmPciBusInfo *>(str_buf + primary_len + render_len);
-  auto *pci_dev = reinterpret_cast<drmPciDeviceInfo *>(bus + 1);
-
-  memcpy(str_buf, primary_path, primary_len);
-  memcpy(str_buf + primary_len, render_path, render_len);
-
-  nodes[DRM_NODE_PRIMARY] = str_buf;
-  nodes[DRM_NODE_RENDER] = str_buf + primary_len;
-  nodes[1] = nullptr;
-
-  uint32_t bus_num = (gpu.location_id >> 8) & 0xFF;
-  uint32_t dev_num = (gpu.location_id >> 3) & 0x1F;
-  uint32_t func_num = gpu.location_id & 0x7;
-
-  bus->domain = static_cast<uint16_t>(gpu.domain);
-  bus->bus = static_cast<uint8_t>(bus_num);
-  bus->dev = static_cast<uint8_t>(dev_num);
-  bus->func = static_cast<uint8_t>(func_num);
-
-  pci_dev->vendor_id = static_cast<uint16_t>(gpu.vendor_id);
-  pci_dev->device_id = static_cast<uint16_t>(gpu.device_id);
-  pci_dev->subvendor_id = static_cast<uint16_t>(gpu.vendor_id);
-  pci_dev->subdevice_id = static_cast<uint16_t>(gpu.device_id);
-  pci_dev->revision_id = static_cast<uint8_t>(gpu.pci_revision_id);
-
-  dev->nodes = nodes;
-  dev->available_nodes = (1 << DRM_NODE_PRIMARY) | (1 << DRM_NODE_RENDER);
-  dev->bustype = DRM_BUS_PCI;
-  dev->businfo.pci = bus;
-  dev->deviceinfo.pci = pci_dev;
-
-  {
-    std::lock_guard lock(drm_alloc_mutex);
-    our_drm_allocs.insert(mem);
-  }
-
-  return dev;
-}
-
-void drmFreeDevice(drmDevice **device) {
-  if (!device || !*device)
-    return;
-  bool ours;
-  {
-    std::lock_guard lock(drm_alloc_mutex);
-    ours = our_drm_allocs.erase(*device) != 0;
-  }
-  if (ours) {
-    free(*device);
-    *device = nullptr;
-    return;
-  }
-  using fn_t = void (*)(drmDevice **);
-  static fn_t real_fn = util::lookup_symbol<fn_t>(RTLD_NEXT, "drmFreeDevice");
-  if (real_fn)
-    real_fn(device);
-}
-
-void drmFreeDevices(drmDevice **devices, int count) {
-  for (int i = 0; i < count; ++i) {
-    if (devices[i])
-      drmFreeDevice(&devices[i]);
-  }
-}
-
-int drmGetDevice(int fd, drmDevice **device) {
-  if (!device)
-    return -EINVAL;
-  *device = nullptr;
-  if (!InterposerContext::real.ready() || !InterposerContext::ctx.is_drm(fd))
-    return -ENODEV;
-  auto *gpu = interposer_gpu_info();
-  if (!gpu)
-    return -ENODEV;
-  *device = alloc_drm_device(*gpu, 0);
-  return *device ? 0 : -ENOMEM;
-}
-
-int drmGetDevice2(int fd, uint32_t /*flags*/, drmDevice **device) {
-  return drmGetDevice(fd, device);
-}
-
-int drmGetDevices(drmDevice **devices, int max_devices) {
-  if (!devices || max_devices <= 0)
-    return 0;
-  auto *gpu = interposer_gpu_info();
-  if (!gpu)
-    return 0;
-  devices[0] = alloc_drm_device(*gpu, 0);
-  return devices[0] ? 1 : 0;
-}
-
-int drmGetDevices2(uint32_t /*flags*/, drmDevice **devices, int max_devices) {
-  return drmGetDevices(devices, max_devices);
-}
-
-// Intercept dlsym so that dlsym-based consumers (amdsmi) get our DRM
-// device query implementations instead of libdrm's.  Without this,
-// libdrm's internal drmGetDeviceFromDevId runs on our synthetic memfds
-// and produces a corrupted drmDevice that crashes in drmFreeDevice.
-// drmFreeDevice/drmFreeDevices are intentionally excluded: our own
-// drmFreeDevice fallback calls dlsym(RTLD_NEXT, "drmFreeDevice") and
-// including it here would cause infinite recursion.
-void *dlsym(void *handle, const char *symbol) {
-  auto symbol_addr = reinterpret_cast<uintptr_t>(symbol);
-  if (symbol_addr != 0 && InterposerContext::real.ready()) {
-    static const std::unordered_map<std::string_view, void *> overrides = {
-        {"drmGetDevice", reinterpret_cast<void *>(&drmGetDevice)},
-        {"drmGetDevice2", reinterpret_cast<void *>(&drmGetDevice2)},
-        {"drmGetDevices", reinterpret_cast<void *>(&drmGetDevices)},
-        {"drmGetDevices2", reinterpret_cast<void *>(&drmGetDevices2)},
-        {"amdgpu_get_marketing_name", reinterpret_cast<void *>(&amdgpu_get_marketing_name)},
-        {"amdgpu_query_gpu_info", reinterpret_cast<void *>(&amdgpu_query_gpu_info)},
-    };
-    auto it = overrides.find(symbol);
-    if (it != overrides.end())
-      return it->second;
-  }
-  if (real_dlsym_fn)
-    return real_dlsym_fn(handle, symbol);
-  // Called before resolve_real_dlsym constructor runs (e.g., during
-  // dynamic linker symbol resolution at library load time).  Resolve
-  // the real dlsym now and forward.
-  resolve_real_dlsym();
-  return real_dlsym_fn(handle, symbol);
 }
 
 pid_t fork() {
