@@ -55,6 +55,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
@@ -653,6 +654,55 @@ TEST(MfmaExecTest, ResolveAccAccVgpr) {
       /*vb=*/100, /*dst=*/200, /*src2_ev=*/770, const_acc, [&]() -> uint32_t { return 99u; });
   EXPECT_EQ(const_acc, amdgpu::ACC_FROM_VGPR);
   EXPECT_EQ(result, 100u + amdgpu::ACC_VGPR_OFFSET + 2u);
+}
+
+// ---------------------------------------------------------------------------
+// L2 cache tests
+// ---------------------------------------------------------------------------
+
+TEST(L2CacheTest, UcStoreInvalidatesResidentLineBeforeAtomicRmw) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x2000;
+  mem.write32(kAddr, 1);
+
+  uint32_t first_old = 0;
+  l2.atomic_rmw(kAddr, sizeof(uint32_t), [&](uint8_t *line, uint32_t offset) {
+    std::memcpy(&first_old, line + offset, sizeof(first_old));
+    std::memcpy(line + offset, &first_old, sizeof(first_old));
+  });
+  ASSERT_EQ(first_old, 1u);
+
+  const uint32_t unlocked = 0;
+  l2.write(kAddr, reinterpret_cast<const uint8_t *>(&unlocked), sizeof(unlocked),
+           amdgpu::Mtype::UC);
+
+  uint32_t second_old = 1;
+  l2.atomic_rmw(kAddr, sizeof(uint32_t), [&](uint8_t *line, uint32_t offset) {
+    std::memcpy(&second_old, line + offset, sizeof(second_old));
+    std::memcpy(line + offset, &second_old, sizeof(second_old));
+  });
+  EXPECT_EQ(second_old, 0u);
+}
+
+TEST(L2CacheTest, UcReadFlushesDirtyResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x2080;
+  mem.write32(kAddr, 7);
+
+  uint8_t line[amdgpu::L2Cache::LINE_SIZE] = {};
+  uint32_t dirty_value = 9;
+  std::memcpy(line, &dirty_value, sizeof(dirty_value));
+  l2.writeback_line(kAddr, line, amdgpu::Mtype::RW);
+
+  uint32_t read_value = 0;
+  l2.read(kAddr, reinterpret_cast<uint8_t *>(&read_value), sizeof(read_value), amdgpu::Mtype::UC);
+  EXPECT_EQ(read_value, 9u);
 }
 
 // ---------------------------------------------------------------------------
