@@ -149,14 +149,20 @@ template <typename T> bool ResolveComgrSymbol(os::LibHandle lib, const char* nam
 
 bool ResolveComgrApi(os::LibHandle lib, ComgrApi* api) {
   api->lib = lib;
-  return ResolveComgrSymbol(lib, "amd_comgr_create_data", &api->create_data) &&
+  const bool base_api_ready =
+      ResolveComgrSymbol(lib, "amd_comgr_create_data", &api->create_data) &&
       ResolveComgrSymbol(lib, "amd_comgr_release_data", &api->release_data) &&
       ResolveComgrSymbol(lib, "amd_comgr_set_data", &api->set_data) &&
       ResolveComgrSymbol(lib, "amd_comgr_get_data", &api->get_data) &&
       ResolveComgrSymbol(lib, "amd_comgr_get_data_isa_name", &api->get_data_isa_name) &&
-      ResolveComgrSymbol(lib, "amd_comgr_hotswap_rewrite", &api->hotswap_rewrite) &&
-      ResolveComgrSymbol(lib, "amd_comgr_hotswap_rewrite_with_options",
-                         &api->hotswap_rewrite_with_options);
+      ResolveComgrSymbol(lib, "amd_comgr_hotswap_rewrite", &api->hotswap_rewrite);
+  if (!base_api_ready) {
+    return false;
+  }
+
+  ResolveComgrSymbol(lib, "amd_comgr_hotswap_rewrite_with_options",
+                     &api->hotswap_rewrite_with_options);
+  return true;
 }
 
 std::string GetRuntimeLibraryDirectory() {
@@ -381,6 +387,11 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
   ComgrData output = {};
   int status = kComgrStatusSuccess;
   if (request_entry_trampolines) {
+    if (!api->hotswap_rewrite_with_options) {
+      api->release_data(input);
+      HOTSWAP_LOG("hotswap: COMGR entry-trampoline rewrite entry point unavailable\n");
+      return false;
+    }
     const ComgrHotswapRewriteOptions options{
         sizeof(ComgrHotswapRewriteOptions),
         kComgrHotswapRewriteFlagEntryTrampolines};
@@ -524,6 +535,11 @@ size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable) {
   std::scoped_lock lock(g_retained_rewritten_elf_buffers_mutex);
   const auto it = g_retained_rewritten_elf_buffers.find(executable.handle);
   return it == g_retained_rewritten_elf_buffers.end() ? 0 : it->second.size();
+}
+
+bool EntryTrampolineRewriteAvailableForTesting() {
+  ComgrApi* api = GetComgrApi();
+  return api && api->hotswap_rewrite_with_options;
 }
 #endif
 

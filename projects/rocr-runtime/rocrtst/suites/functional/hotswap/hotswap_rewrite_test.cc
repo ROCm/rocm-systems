@@ -201,6 +201,14 @@ void ResetRuntimeTestEnv() {
   rocr::hotswap::ResetAgentGfxRevisionCache();
 }
 
+bool NewComgrHotswapApiAvailable() {
+  if (rocr::hotswap::EntryTrampolineRewriteAvailableForTesting()) {
+    return true;
+  }
+  SUCCEED() << "requires COMGR with amd_comgr_hotswap_rewrite_with_options";
+  return false;
+}
+
 hsa_agent_t MakeTestAgent() {
   hsa_agent_t agent{};
   agent.handle = 1;
@@ -387,6 +395,7 @@ TEST(HotswapRewrite, RetargetNullSourceOrTarget) {
 
 TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
   ResetRuntimeTestEnv();
+  if (!NewComgrHotswapApiAvailable()) return;
   LoadRecorder load;
   hsa_loaded_code_object_t loaded{};
   const hsa_executable_t executable = MakeTestExecutable(0x501);
@@ -411,6 +420,7 @@ TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
 
 TEST(HotswapRewrite, RuntimeLoadNonA0UsesDefaultEntryTrampolines) {
   ResetRuntimeTestEnv();
+  if (!NewComgrHotswapApiAvailable()) return;
   g_fake_hsa_env.asic_revision = 1;
   LoadRecorder load;
   const hsa_executable_t executable = MakeTestExecutable(0x502);
@@ -452,6 +462,7 @@ TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesAreZero) {
 }
 
 TEST(HotswapRewrite, RuntimeLoadNonA0UsesEntryTrampolinesUnlessEnvIsZero) {
+  if (!NewComgrHotswapApiAvailable()) return;
   const char* const env_values[] = {"false", ""};
   uint64_t executable_handle = 0x504;
   for (const char* env_value : env_values) {
@@ -524,6 +535,7 @@ TEST(HotswapRewrite, RuntimeLoadRewriteFailureFallsBackToOriginal) {
 
 TEST(HotswapRewrite, RuntimeLoadRewrittenLoadFailureFallsBackToOriginal) {
   ResetRuntimeTestEnv();
+  if (!NewComgrHotswapApiAvailable()) return;
   LoadRecorder load;
   load.rewritten_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   const hsa_executable_t executable = MakeTestExecutable(0x508);
