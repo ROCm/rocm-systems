@@ -205,9 +205,8 @@ jobs:
     secrets: inherit
     with:
       cmake_options: >
-        -DTHEROCK_ENABLE_ALL=OFF
+        -DTHEROCK_ENABLE_ALL=ON
         -DTHEROCK_BUILD_TESTING=ON
-        -DTHEROCK_ENABLE_CORE=ON
       projects_to_test: "hip-tests, rocrtst"
       package_version: ${{ needs.setup.outputs.package_version }}
       amdgpu_families: "gfx125X-dcgpu"
