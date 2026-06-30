@@ -781,8 +781,16 @@ struct backend
                                                    counter_record* output_records,
                                                    size_t*         rec_count)
     {
+#if ROCPROFILER_VERSION >= 600
         return rocprofiler_sample_device_counting_service(ctx, user_data, flags,
                                                           output_records, rec_count);
+#else
+        // SDK < 0.6.0 (ROCm < 6.4) delivered records via the configured buffer callback;
+        // the output_records/rec_count out-params did not exist yet.
+        (void) output_records;
+        (void) rec_count;
+        return rocprofiler_sample_device_counting_service(ctx, user_data, flags);
+#endif
     }
 
     // ─── Tracing name tables ──────────────────────────────────────────────────────
