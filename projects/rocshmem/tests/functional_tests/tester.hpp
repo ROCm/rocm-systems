@@ -173,12 +173,24 @@
   X(HostIntAmoFCswap,          128)  \
   X(HostAmoAllPes,             129)  \
   X(HostAmoSelf,               130)  \
-  X(TileBroadcast,             131)  \
-  X(TileBroadcastWave,         132)  \
-  X(TileBroadcastWG,           133)  \
-  X(TileAllgather,             134)  \
-  X(TileAllgatherWave,         135)  \
-  X(TileAllgatherWG,           136)
+  X(HostAmoAdd,                131)  \
+  X(TileBroadcast,             132)  \
+  X(TileBroadcastWave,         133)  \
+  X(TileBroadcastWG,           134)  \
+  X(TileAllgather,             135)  \
+  X(TileAllgatherWave,         136)  \
+  X(TileAllgatherWG,           137)  \
+  X(HostWaitUntil,             138)  \
+  X(HostTest,                  139)  \
+  X(HostWaitUntilAll,          140)  \
+  X(HostWaitUntilAny,          141)  \
+  X(HostWaitUntilSome,         142)  \
+  X(HostWaitUntilAllVector,    143)  \
+  X(HostWaitUntilAnyVector,    144)  \
+  X(HostWaitUntilSomeVector,   145)  \
+  X(HostWaitUntilAllStatus,    146)  \
+  X(HostWaitUntilAnyStatus,    147)  \
+  X(HostWaitUntilSomeStatus,   148)
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)
