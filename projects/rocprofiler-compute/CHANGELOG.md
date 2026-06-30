@@ -40,6 +40,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
 
+* Fixed multi-user roofline benchmarking on shared systems: the per-GPU lock file under `/tmp/rocprof-compute-benchmark/` is now created world-readable/writable (0666) so any user can acquire it, regardless of which user created it first or the active umask. Stale unreadable lock files left by older versions in a sticky `/tmp` cannot be repaired automatically and must be removed manually by their owner or an administrator.
+
 ### Upcoming changes
 
 ### Known issues
