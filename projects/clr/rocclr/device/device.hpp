@@ -2395,7 +2395,7 @@ class Device : public RuntimeObject {
   //! Sets the group memory carveout percentage hint for the device
   void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
 
-#if defined(__clang__)
+#if defined(__clang__) && defined(__linux__)
 #if __has_feature(address_sanitizer)
   virtual device::UriLocator* createUriLocator() const = 0;
   void reportDeviceMemoryLeaks();
