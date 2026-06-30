@@ -62,7 +62,7 @@ jobs:
       # Only build gfx125X for MI455 pre-submit
       linux_amdgpu_families: "gfx125X"
       windows_amdgpu_families: ""
-      linux_test_labels: ${{ inputs.linux_test_labels || 'test_filter:comprehensive' }}
+      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       repository: ROCm/TheRock
       ref: main
       # Pass family_overrides to configure MI455 test runner and limited tests
