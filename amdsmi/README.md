@@ -54,7 +54,12 @@ sudo dpkg -i rocdxg-amd-smi-lib_<version>_amd64.deb
 
 ### 2. Set up the environment
 
-Installation registers `/etc/profile.d/rocdxg-amd-smi-lib.sh`, which loads `/opt/rocm-wsl/.env.sh` and sets `PYTHONPATH`, `PATH`, and `LD_LIBRARY_PATH`. Apply it in **one** of these ways:
+Installation loads `/opt/rocm-wsl/.env.sh` from:
+
+- `/etc/profile.d/rocdxg-amd-smi-lib.sh` for login shells
+- `/etc/bash.bashrc` for interactive non-login bash shells (for example `docker exec -it <container> bash`)
+
+This sets `PYTHONPATH`, `PATH`, and `LD_LIBRARY_PATH`. Apply it in **one** of these ways:
 
 - **Current shell:** `source /etc/profile.d/rocdxg-amd-smi-lib.sh`
 - **New shell:** open another login or interactive shell; the profile script loads automatically.

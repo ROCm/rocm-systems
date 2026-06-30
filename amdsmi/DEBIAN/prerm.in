@@ -111,6 +111,15 @@ rm_wsl_amdsmi_pth() {
   rm -f "$site_packages/zz-wsl-amdsmi.pth"
 }
 
+rm_bashrc_env() {
+  local bashrc_file="/etc/bash.bashrc"
+  if [ ! -f "$bashrc_file" ]; then
+    return
+  fi
+
+  sed -i '/^# >>> rocdxg-amd-smi-lib >>>$/,/^# <<< rocdxg-amd-smi-lib <<<$/d' "$bashrc_file"
+}
+
 
 case "$1" in
   ( remove | upgrade)
@@ -121,6 +130,8 @@ case "$1" in
     echo "python library removed"
     rm_wsl_amdsmi_pth
     echo "WSL AMD-SMI path registration removed"
+    rm_bashrc_env
+    echo "interactive shell environment registration removed"
     rm_leftovers
     echo "leftovers removed"
     rm_logFolder

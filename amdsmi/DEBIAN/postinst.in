@@ -215,9 +215,33 @@ install_wsl_amdsmi_pth() {
   fi
 }
 
+register_bashrc_env() {
+  local bashrc_file="/etc/bash.bashrc"
+  local begin_marker="# >>> rocdxg-amd-smi-lib >>>"
+  local end_marker="# <<< rocdxg-amd-smi-lib <<<"
+
+  if [ ! -f "$bashrc_file" ]; then
+    return
+  fi
+
+  if grep -Fq "$begin_marker" "$bashrc_file"; then
+    return
+  fi
+
+  cat << 'EOF' >> "$bashrc_file"
+
+# >>> rocdxg-amd-smi-lib >>>
+if [ -f "@CPACK_PACKAGING_INSTALL_PREFIX@/.env.sh" ]; then
+  . "@CPACK_PACKAGING_INSTALL_PREFIX@/.env.sh"
+fi
+# <<< rocdxg-amd-smi-lib <<<
+EOF
+}
+
 
 case "$1" in
   ( configure )
+    register_bashrc_env
     do_install_amdsmi_python_lib
     do_configureLogrotate || exit 0
   ;;
