@@ -81,7 +81,7 @@ void VNopVop1::execute_impl(amdgpu::Wavefront &wf) {
       src_operands_[1] = dpp_src1_.get();
     }
   }
-  (void)wf;
+  amdgpu::execute_v_nop_vop1(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -1661,17 +1661,7 @@ void VCvtOffF32I4Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() -> float {
-                      int32_t nibble = static_cast<int32_t>(src0.read_lane(wf, lane) & 0xfu);
-                      if (nibble & 0x8)
-                        nibble -= 16;
-                      return static_cast<float>(nibble) * 0.0625f;
-                    }()));
-  }
+  amdgpu::execute_v_cvt_off_f32_i4_vop1(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -3266,7 +3256,7 @@ void VPipeflushVop1::execute_impl(amdgpu::Wavefront &wf) {
       src_operands_[1] = dpp_src1_.get();
     }
   }
-  (void)wf;
+  amdgpu::execute_v_pipeflush_vop1(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -5373,14 +5363,7 @@ void VSinF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane,
-                    std::bit_cast<uint32_t>(amdgpu::transcendental::sin_f32(
-                        std::bit_cast<float>(src0.read_lane(wf, lane)))));
-  }
+  amdgpu::execute_v_sin_f32_vop1(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -5512,14 +5495,7 @@ void VCosF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane,
-                    std::bit_cast<uint32_t>(amdgpu::transcendental::cos_f32(
-                        std::bit_cast<float>(src0.read_lane(wf, lane)))));
-  }
+  amdgpu::execute_v_cos_f32_vop1(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {

@@ -3617,14 +3617,7 @@ void VLshlrevB64Vop2::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane64(wf, lane,
-                      (static_cast<uint64_t>(vsrc1.read_lane64(wf, lane))
-                       << (static_cast<uint64_t>(src0.read_lane(wf, lane)) & 63u)));
-  }
+  amdgpu::execute_v_lshlrev_b64_vop2(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
