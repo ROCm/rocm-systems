@@ -8600,7 +8600,7 @@ inline void execute_v_cvt_f32_bf8_vop1([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(
+                         std::bit_cast<uint32_t>(util::bf8_e5m2_fnuz_to_f32(
                              static_cast<uint8_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
@@ -8614,7 +8614,7 @@ inline void execute_v_cvt_f32_bf8_vop3([[maybe_unused]] Inst &inst,
       continue;
     inst.vdst.write_lane(
         wf, lane,
-        std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>(
+        std::bit_cast<uint32_t>(util::bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>(
             ((inst.src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst.inst_) & 0x1u) << 1) |
                                                  ((amdgpu::vop3_opsel(inst.inst_) & 0x2u) >> 1)) *
                                                 8u)) &
@@ -8692,7 +8692,7 @@ inline void execute_v_cvt_f32_fp8_vop1([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(
+                         std::bit_cast<uint32_t>(util::fp8_e4m3_fnuz_to_f32(
                              static_cast<uint8_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
@@ -8713,7 +8713,7 @@ inline void execute_v_cvt_f32_fp8_vop3([[maybe_unused]] Inst &inst,
                                               ((amdgpu::vop3_opsel(inst.inst_) & 0x2u) >> 1)) *
                                              8u)) &
                                            0xFFu)))
-                                    : util::fp8_e4m3_to_f32(static_cast<uint8_t>(
+                                    : util::fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>(
                                           ((inst.src0.read_lane(wf, lane) >>
                                             ((((amdgpu::vop3_opsel(inst.inst_) & 0x1u) << 1) |
                                               ((amdgpu::vop3_opsel(inst.inst_) & 0x2u) >> 1)) *
