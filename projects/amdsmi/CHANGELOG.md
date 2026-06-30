@@ -74,6 +74,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Restructured AMD SMI C++ tests into unit and functional suites**.  
+  - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
+  - GTest suite names were updated: `amdsmitstReadOnly` is now `GpuFunctionalReadOnly`, `amdsmitstReadWrite` is now `GpuFunctionalReadWrite`, and unit tests now use the `<Component>Unit` suite pattern, such as `GpuUnit` for GPU unit tests including dynamic metric tests formerly under `AmdSmiDynamicMetricTest`.
+  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
+  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and filter examples.
+
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
   - Human-readable output is unchanged, since it uppercases all keys.
