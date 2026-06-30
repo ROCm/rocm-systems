@@ -20,6 +20,10 @@ from utils.logger import (
 
 NS_TO_MS = 1.0 / 1_000_000.0
 
+# Canonical column-name preference order for Pct of Peak lookups
+VALUE_COL_PREFERENCE: tuple[str, ...] = ("Avg", "Value")
+PEAK_COL_PREFERENCE: tuple[str, ...] = ("Peak", "Peak (Empirical)")
+
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
     """Return the divisor and suffix for a bandwidth value in Bytes/s."""

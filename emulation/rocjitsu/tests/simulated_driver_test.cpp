@@ -18,7 +18,7 @@
 
 namespace {
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
 
 struct TestVM {
   rocjitsu::config::LoadedConfig loaded;

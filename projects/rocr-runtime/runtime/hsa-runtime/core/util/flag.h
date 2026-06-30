@@ -320,9 +320,6 @@ class Flag {
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
 
-    var = os::GetEnvVar("HSA_ENABLE_SDMA_FASTPATH_DEBUG");
-    enable_sdma_fastpath_debug_ = (var == "1") ? true : false;
-
     var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
     enable_core_dump_progress_ = (var == "1");
 
@@ -335,12 +332,12 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_LIGHTWEIGHT_COREDUMP");
     lightweight_core_dump_enable_ = (var == "1");
 
-    // This limits the maximum number of hardware queues that can be created per 
+    // This limits the maximum number of hardware queues that can be created per
     // priority level for counted queues on every GPU agent. By default, the limit is set to 4.
     var = os::GetEnvVar("GPU_MAX_HW_QUEUES");
     cp_queues_limit_ = var.empty() ? DEFAULT_GPU_HW_QUEUES_MAX : atoi(var.c_str());
 
-    // This allows configuring the size of counted queues created through 
+    // This allows configuring the size of counted queues created through
     // hsa_amd_counted_queue_acquire API. If not set, default queue size is set to 16384.
     var = os::GetEnvVar("HSA_COUNTED_QUEUE_SIZE");
     counted_queue_size_ = var.empty() ? DEFAULT_COUNTED_QUEUE_SIZE : atoi(var.c_str());
@@ -348,6 +345,11 @@ class Flag {
     // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto (size threshold)
     var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
     sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
+    // HSA_SDMA_FORCE_MULTICAST: 1=force gfx1250 broadcast onto the multicast
+    // packet regardless of copy size (debug only; the multicast engine drops
+    // destinations above 256 KB, so large copies will produce wrong data).
+    sdma_force_multicast_ = (os::GetEnvVar("HSA_SDMA_FORCE_MULTICAST") == "1");
 
   }
 
@@ -485,13 +487,13 @@ class Flag {
 
   bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
 
-  bool enable_sdma_fastpath_debug() const { return enable_sdma_fastpath_debug_; }
-
   bool enable_dtif() const { return enable_dtif_; }
 
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
+
+  bool sdma_force_multicast() const { return sdma_force_multicast_; }
 
   [[nodiscard]]
   bool core_dump_disable() const { return core_dump_disable_; }
@@ -505,9 +507,9 @@ class Flag {
                                          return core_dump_pattern_; }
 
   [[nodiscard]]
-  bool lightweight_core_dump_enable() const { 
-    return lightweight_core_dump_enable_; 
-  } 
+  bool lightweight_core_dump_enable() const {
+    return lightweight_core_dump_enable_;
+  }
 
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
@@ -574,6 +576,8 @@ class Flag {
   bool enable_dxg_detection_;
   SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
 
+  bool sdma_force_multicast_ = false;
+
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;
   SDMA_OVERRIDE enable_sdma_gang_;
@@ -616,8 +620,6 @@ class Flag {
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
-
-  bool enable_sdma_fastpath_debug_;
 
   void parse_masks(std::string& args, uint32_t maxGpu, uint32_t maxCU);
 

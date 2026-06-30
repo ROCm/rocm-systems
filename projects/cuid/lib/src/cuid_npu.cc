@@ -297,9 +297,12 @@ CuidNpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
 }
 
 amdcuid_status_t CuidNpu::get_primary_cuid(amdcuid_primary_id &id) const {
+  bool temp = false;
   if (geteuid() != 0) {
-    return AMDCUID_STATUS_PERMISSION_DENIED;
+    temp = true;
   }
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
+  uint64_t fingerprint = 0;
 
   // Attempt to read the CUID from the file first
   std::string cuid_file_path = CuidUtilities::priv_cuid_file();
@@ -307,8 +310,7 @@ amdcuid_status_t CuidNpu::get_primary_cuid(amdcuid_primary_id &id) const {
   primary_file.load();
 
   CuidFileEntry entry;
-  amdcuid_status_t status =
-      primary_file.find_by_device_node(m_info.accel_node, entry);
+  status = primary_file.find_by_device_node(m_info.accel_node, entry);
   if (status == AMDCUID_STATUS_SUCCESS) {
     id.UUIDv8_representation = entry.primary_cuid;
     CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
@@ -316,11 +318,18 @@ amdcuid_status_t CuidNpu::get_primary_cuid(amdcuid_primary_id &id) const {
   }
 
   // Primary CUID not found in file, so generate it
-  uint64_t fingerprint = 0;
   status = get_hardware_fingerprint(fingerprint);
   if (status != AMDCUID_STATUS_SUCCESS) {
-    std::memset(&id, 0, sizeof(id));
-    return status;
+    std::string bdf;
+    status = this->get_bdf(bdf);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      return status;
+    }
+    status = CuidUtilities::make_fallback_fingerprint(bdf, fingerprint);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      return status;
+    }
+    temp = true;
   }
 
   status = CuidUtilities::generate_primary_cuid(
@@ -328,7 +337,7 @@ amdcuid_status_t CuidNpu::get_primary_cuid(amdcuid_primary_id &id) const {
       0, // unit_id: NPUs are not partitioned
       m_info.header.fields.npu.revision_id, m_info.header.fields.npu.device_id,
       m_info.header.fields.npu.vendor_id,
-      static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NPU), &id);
+      static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NPU), &id, temp);
   if (status != AMDCUID_STATUS_SUCCESS) {
     std::memset(&id, 0, sizeof(id));
     return status;

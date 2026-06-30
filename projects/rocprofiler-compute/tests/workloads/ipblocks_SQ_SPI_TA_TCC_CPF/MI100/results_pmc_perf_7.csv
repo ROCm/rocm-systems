@@ -1,0 +1,19 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,1,0,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868654977333,1125868655001493,0,TA_TA_BUSY_sum,2142360.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,1,0,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868654977333,1125868655001493,0,TA_TOTAL_WAVEFRONTS_sum,32768.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,1,0,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868654977333,1125868655001493,0,TCC_MISS_sum,262482.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,1,0,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868654977333,1125868655001493,0,TCC_NC_REQ_sum,48.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,1,0,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868654977333,1125868655001493,0,TCC_NORMAL_EVICT_sum,131075.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,1,0,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868654977333,1125868655001493,0,TCC_NORMAL_WRITEBACK_sum,86366.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,2,1,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655685810,1125868655705170,0,TA_TA_BUSY_sum,1911780.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,2,1,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655685810,1125868655705170,0,TA_TOTAL_WAVEFRONTS_sum,32768.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,2,1,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655685810,1125868655705170,0,TCC_MISS_sum,262148.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,2,1,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655685810,1125868655705170,0,TCC_NC_REQ_sum,48.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,2,1,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655685810,1125868655705170,0,TCC_NORMAL_EVICT_sum,131076.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,2,1,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655685810,1125868655705170,0,TCC_NORMAL_WRITEBACK_sum,86744.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,3,2,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655962610,1125868655981810,0,TA_TA_BUSY_sum,1983230.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,3,2,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655962610,1125868655981810,0,TA_TOTAL_WAVEFRONTS_sum,32768.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,3,2,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655962610,1125868655981810,0,TCC_MISS_sum,262148.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,3,2,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655962610,1125868655981810,0,TCC_NC_REQ_sum,48.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,3,2,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655962610,1125868655981810,0,TCC_NORMAL_EVICT_sum,131077.0
+2,0000431b-61eb-71eb-8d93-5ec0cd7ca963,3,2,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125868655962610,1125868655981810,0,TCC_NORMAL_WRITEBACK_sum,86366.0

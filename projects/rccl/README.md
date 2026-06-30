@@ -13,6 +13,15 @@ RCCL (pronounced "Rickle") is a stand-alone library of standard collective commu
 
 The collective operations are implemented using ring and tree algorithms and have been optimized for throughput and latency. For best performance, small operations can be either batched into larger operations or aggregated through the API.
 
+Additionally, RCCL supports zero-CU (zero-CTA) collectives for selected operations,
+including all-gather, all-to-all, gather, and scatter. These collectives use SDMA/Copy
+Engine (CE) hardware to offload data movement, enabling communication without consuming
+GPU compute units. This path is opt-in: initialize the communicator with
+NCCL_CTA_POLICY_ZERO and register symmetric buffers via ncclCommWindowRegister
+with NCCL_WIN_COLL_SYMMETRIC (single-node only; requires ROCm 7.12+). On MI350,
+CE collectives can outperform CU-based collectives for large message sizes and improve
+overlap when computation and communication run concurrently.
+
 ## Requirements
 
 1. ROCm supported GPUs
@@ -58,7 +67,6 @@ RCCL build & installation helper script
     -l|--local_gpu_only        Only compile for local GPU architecture
        --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
        --no_clean              Don't delete files if they already exist
-       --npkit-enable          Compile with npkit enabled
        --openmp-test-enable    Enable OpenMP in rccl unit tests
     -p|--package_build         Build RCCL package
        --prefix                Specify custom directory to install RCCL to (default: `/opt/rocm`)
