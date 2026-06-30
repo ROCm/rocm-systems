@@ -118,7 +118,7 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   uint16_t      cq_mask  = dvcq.q.mask;
 
   /* QueuePair is either QueuePairIONIC or QueuePairMux
-   * both have a constructor that accepts rvalue reference QueuePairMLX5&&,
+   * both have a constructor that accepts rvalue reference QueuePairIONIC&&,
    * so just use that instead of trying to figure out which one we're using */
   new (gpu_qp) QueuePair{QueuePairIONIC{qpn, base_heap, heap_size, lkey, rkey, pd,
                                         ionic_device_sq{sq_buf, sq_dbreg, sq_dbval, sq_mask},

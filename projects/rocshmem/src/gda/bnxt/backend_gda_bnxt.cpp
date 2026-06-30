@@ -94,7 +94,7 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   }
 
   /* QueuePair is either QueuePairBNXT or QueuePairMux
-   * both have a constructor that accepts rvalue reference QueuePairMLX5&&,
+   * both have a constructor that accepts rvalue reference QueuePairBNXT&&,
    * so just use that instead of trying to figure out which one we're using */
   new (gpu_qp) QueuePair{QueuePairBNXT{qpn, base_heap, heap_size, lkey, rkey, pd, dbr,
                                        bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz,
