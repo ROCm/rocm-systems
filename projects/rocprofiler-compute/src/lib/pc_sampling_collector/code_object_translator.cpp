@@ -128,8 +128,7 @@ std::set<std::filesystem::path> code_object_translator_impl_t::get_source_paths(
     return source_paths;
 }
 
-std::vector<std::filesystem::path> code_object_translator_impl_t::source_paths_from_comment(
-    std::string_view comment) const
+std::vector<std::filesystem::path> code_object_translator_impl_t::source_paths_from_comment(std::string_view comment)
 {
     std::vector<std::filesystem::path> source_paths;
     size_t                             frame_start = 0;

@@ -52,7 +52,6 @@ public:
     virtual std::vector<symbol_t>      get_symbols(size_t object_id) const                  = 0;
     virtual instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const = 0;
     virtual std::set<std::filesystem::path> get_source_paths() const                        = 0;
-    virtual std::vector<std::filesystem::path> source_paths_from_comment(std::string_view comment) const = 0;
 };
 
 class code_object_translator_impl_t : public code_object_translator_t
@@ -71,9 +70,10 @@ public:
     std::vector<symbol_t>      get_symbols(size_t object_id) const override;
     instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const override;
     std::set<std::filesystem::path> get_source_paths() const override;
-    std::vector<std::filesystem::path> source_paths_from_comment(std::string_view comment) const override;
 
 private:
+    static std::vector<std::filesystem::path> source_paths_from_comment(std::string_view comment);
+
     std::unique_ptr<rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate> m_translator;
     std::vector<size_t>                                                              m_obj_ids;
     std::map<size_t, uint64_t> m_obj_id_to_load_addr;
