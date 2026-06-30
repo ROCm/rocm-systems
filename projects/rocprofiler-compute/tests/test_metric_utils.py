@@ -344,15 +344,12 @@ class TestEvaluationPipeline:
             }
         )
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
-        with (
-            patch(
-                "utils.metrics.evaluation_pipeline.get_build_in_vars",
-                return_value={},
-            ),
-            patch(
-                "utils.metrics.evaluation_pipeline.debug_row_tracker"
-            ) as mock_debug_row_tracker,
-        ):
+        with patch(
+            "utils.metrics.evaluation_pipeline.get_build_in_vars",
+            return_value={},
+        ), patch(
+            "utils.metrics.evaluation_pipeline.debug_row_tracker"
+        ) as mock_debug_row_tracker:
             eval_metric(
                 dfs,
                 dfs_type,
@@ -462,17 +459,13 @@ class TestEvaluationPipeline:
         })
 
         clear_noise_clamp_warnings()
-        with (
-            patch(
-                "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
-            ),
-            patch(
-                "utils.metrics.evaluation_pipeline.console_warning"
-            ) as mock_console_warning,
-            patch(
-                "utils.metrics.evaluation_pipeline.print_noise_clamp_summary"
-            ) as mock_print_summary,
-        ):
+        with patch(
+            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
+        ), patch(
+            "utils.metrics.evaluation_pipeline.console_warning"
+        ) as mock_console_warning, patch(
+            "utils.metrics.evaluation_pipeline.print_noise_clamp_summary"
+        ) as mock_print_summary:
             eval_metric(
                 dfs,
                 dfs_type,
@@ -774,10 +767,8 @@ class TestMetricEvaluator:
     def test_eval_expression_returns_na_when_eval_raises_attribute_error(self):
         """eval_expression returns 'N/A' for a generic AttributeError."""
         metric_evaluator = MetricEvaluator({}, {}, {})
-        with (
-            patch("builtins.eval") as mock_eval,
-            patch("builtins.compile"),
-            patch("sys.exit"),
+        with patch("builtins.eval") as mock_eval, patch("builtins.compile"), patch(
+            "sys.exit"
         ):
             mock_eval.side_effect = AttributeError("Some AttributeError")
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
@@ -909,10 +900,11 @@ class TestMetricEvaluator:
         for columns, equation in cases:
             evaluator = self._make_evaluator(columns)
             eval_str = self._to_eval_str(equation)
-            with (
-                patch("utils.metrics.metric_evaluator.console_warning") as mock_warning,
-                patch("utils.metrics.metric_evaluator.console_debug") as mock_debug,
-            ):
+            with patch(
+                "utils.metrics.metric_evaluator.console_warning"
+            ) as mock_warning, patch(
+                "utils.metrics.metric_evaluator.console_debug"
+            ) as mock_debug:
                 result = evaluator.eval_expression(eval_str)
 
             assert result == "N/A", (

@@ -209,9 +209,8 @@ def test_load_yaml_generic_exception():
     ids=["missing_binary", "nonzero_exit"],
 )
 def test_run_fails_fast(mock_kwargs):
-    with (
-        patch.object(specs.subprocess, "run", **mock_kwargs),
-        pytest.raises(SystemExit),
+    with patch.object(specs.subprocess, "run", **mock_kwargs), pytest.raises(
+        SystemExit
     ):
         specs._run_command(["rocminfo"])
 
@@ -571,11 +570,9 @@ def test_rdna35_finalize_soc_fields(
         "gpu_cache_info": {},
         "vram_bit_width": vram_bit_width,
     }
-    with (
-        patch.object(specs, "set_cache_sizes", return_value={}),
-        patch.object(specs.mi_gpu_specs, "get_num_dies", return_value=1),
-        patch.object(specs, "totall2_banks", return_value="32"),
-    ):
+    with patch.object(specs, "set_cache_sizes", return_value={}), patch.object(
+        specs.mi_gpu_specs, "get_num_dies", return_value=1
+    ), patch.object(specs, "totall2_banks", return_value="32"):
         spec.finalize_soc_fields(gpu_info)
 
     assert spec.num_gl1c == expected_gl1c
@@ -593,10 +590,9 @@ def test_reconstruct_specs_from_sysinfo_round_trip():
         "num_gl1c": "8",
         "num_memory_channels": "8",
     }
-    with (
-        patch.object(specs, "get_version", return_value={"version": "3.0.0"}),
-        patch.object(specs.mi_gpu_specs, "get_gpu_series", return_value="RDNA3.5"),
-    ):
+    with patch.object(
+        specs, "get_version", return_value={"version": "3.0.0"}
+    ), patch.object(specs.mi_gpu_specs, "get_gpu_series", return_value="RDNA3.5"):
         spec = generate_machine_specs(None, sysinfo)
 
     assert isinstance(spec, MachineSpecsRDNA35)
