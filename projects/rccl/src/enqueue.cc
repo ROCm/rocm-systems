@@ -3516,19 +3516,20 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
-      if (!ceAvailable && comm->nNodes == 1 && rcclParamForceCe() && ncclCeImplemented(info->coll, info->op, info->datatype)) {
-        size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-        if (winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes) {
-          INFO(NCCL_INIT, "Using DDA scratch for CE collective");
+      bool CeScartchAvailable = ncclCeScartchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
+      if (CeScartchAvailable && winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && rcclParamForceCe() && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes) {
+        INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
                                      comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
-        } 
       }
-        if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable) {
+      else if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable) {
+        INFO(NCCL_TUNING, "Using CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr, opDev));
       }
       // Append kernel-based collective 
       else {
+        INFO(NCCL_TUNING, "Using kernel-based collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
         // currently legacy sendrecv needs src and dst buffers to be registered
         // we cannot allow UB if alltoall/scatter/gather fallback to legacy sendrecv
         // when src or dst buffers are not registered
