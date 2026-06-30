@@ -434,9 +434,6 @@ set(SRC_FILES
   transport/shm.cc
   gin/gin_host.cc
   gin/gin_host_proxy.cc
-  gin/gin_plugin_rocshmem_api.cc
-  gin/gin_plugin_rocshmem_gda.cc
-  gin/gin_rocshmem_gda_factory.cc
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
   include/latency_profiler/CollTraceFunc.h
@@ -453,6 +450,14 @@ list(TRANSFORM SRC_FILES PREPEND "src/")
 
 # Conditional source files based on build options
 #==================================================================================================
+if(ENABLE_ROCSHMEM_GIN)
+  list(APPEND SRC_FILES
+    src/gin/gin_plugin_rocshmem_api.cc
+    src/gin/gin_plugin_rocshmem_gda.cc
+    src/gin/gin_rocshmem_gda_factory.cc
+  )
+endif()
+
 if(USE_AMDSMI)
   set(SMI_SOURCES
     src/include/amdsmi_wrap.h
