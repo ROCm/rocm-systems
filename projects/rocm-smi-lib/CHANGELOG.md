@@ -4,6 +4,14 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+## rocm_smi_lib for ROCm 7.14.0
+
+### Changed
+
+- **Added `ROCM_SMI_DISABLE` environment variable to disable the library at runtime (ROCM-966)**.
+  - When `ROCM_SMI_DISABLE` is set to a truthy value (`1`/`true`/`yes`/`on`, case-insensitive), `rsmi_init()` logs a deprecation notice and returns `RSMI_STATUS_NOT_SUPPORTED` without initializing.
+  - Intended to help identify components that still depend on the deprecated rocm-smi library at runtime. Unset (default) leaves behavior unchanged.
+
 ## rocm_smi_lib for ROCm 7.2.0
 
 ### Added
