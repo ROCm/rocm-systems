@@ -23,9 +23,6 @@ find_program(
     HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
     ENV ROCM_PATH
     /opt/rocm
-    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
-    ENV ROCM_PATH
-    /opt/rocm
     PATH_SUFFIXES bin llvm/bin lib/llvm/bin
 )
 mark_as_advanced(amdclang_EXECUTABLE)
@@ -40,9 +37,9 @@ if(amdclang_EXECUTABLE)
     if(NOT _llvm_host_triple_result EQUAL 0)
         set(LLVM_HOST_TRIPLE "")
         rocprofiler_systems_message(
-            FATAL
-            "Failed to query LLVM host triple from ${amdclang_EXECUTABLE}; "
-            "libomptarget discovery for LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON may not work."
+            FATAL_ERROR
+            "'${amdclang_EXECUTABLE} --print-target-triple' failed (exit code ${_llvm_host_triple_rc})"
+            "This toolchain may be broken."
         )
     endif()
 else()

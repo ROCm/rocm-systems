@@ -82,9 +82,9 @@ execute_process(
 if(NOT _llvm_host_triple_rc EQUAL 0)
     set(LLVM_HOST_TRIPLE "")
     rocprofiler_systems_message(
-        FATAL
-        "Failed to query LLVM host triple from ${amdclang_EXECUTABLE}; "
-        "libomptarget discovery for LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON may not work."
+        FATAL_ERROR
+        "'${OMP_TARGET_COMPILER} --print-target-triple' failed (exit code ${_llvm_host_triple_rc})"
+        "This toolchain may be broken."
     )
 endif()
 

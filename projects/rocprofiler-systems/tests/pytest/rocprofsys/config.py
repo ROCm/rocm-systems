@@ -89,12 +89,32 @@ class RocprofsysConfig:
                 self.rocm_path / "llvm" / "lib",
                 self.rocm_path / "lib" / "llvm" / "lib",
             ]
-            # Determine host triple
-            clang_path = self.rocm_path / "lib" / "llvm" / "bin" / "amdclang"
-            if clang_path.exists():
-                host_triple = subprocess.check_output(
-                    [str(clang_path), "--print-target-triple"], text=True
-                ).strip()
+            # Determine the per-target runtime subdir used when
+            # LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON
+            clang_candidates = [
+                self.rocm_path / "bin" / "amdclang",
+                self.rocm_path / "llvm" / "bin" / "amdclang",
+                self.rocm_path / "lib" / "llvm" / "bin" / "amdclang",
+            ]
+            clang_path = next((c for c in clang_candidates if c.exists()), None)
+            if clang_path is None:
+                which_clang = shutil.which("amdclang")
+                if which_clang:
+                    clang_path = Path(which_clang)
+            if clang_path is not None:
+                try:
+                    host_triple = subprocess.run(
+                        [str(clang_path), "--print-target-triple"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=True,
+                    ).stdout.strip()
+                except (subprocess.SubprocessError, OSError) as exc:
+                    raise RuntimeError(
+                        f"'{clang_path} --print-target-triple' failed; "
+                        "this suggests a broken toolchain."
+                    ) from exc
                 if host_triple:
                     candidates.append(
                         self.rocm_path / "lib" / "llvm" / "lib" / host_triple
