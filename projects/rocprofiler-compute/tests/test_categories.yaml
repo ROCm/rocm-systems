@@ -106,6 +106,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test_profile_torch_trace
+      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     exclude:
@@ -173,6 +174,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test_profile_torch_trace
+      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     exclude:
@@ -240,6 +242,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test_profile_torch_trace
+      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     exclude:

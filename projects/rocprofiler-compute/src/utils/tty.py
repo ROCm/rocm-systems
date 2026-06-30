@@ -299,18 +299,23 @@ def is_roofline_shown(
     return True
 
 
-def list_torch_operators(
+def list_ml_operators(
     workload_path: str,
     call_trees: dict[str, CallTreeNode],
+    framework_label: str = "PyTorch",
 ) -> None:
-    """Display PyTorch operators as a unified call tree grouped by source location."""
+    """Display operators as a unified call tree grouped by source location.
+
+    ``framework_label`` sets the heading text (for example "PyTorch" or
+    "Triton").
+    """
     if not call_trees:
-        print(f"\nPyTorch Operators in: {workload_path}")
+        print(f"\n{framework_label} Operators in: {workload_path}")
         print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"PyTorch Operator Call Tree: {workload_path}")
+    print(f"{framework_label} Operator Call Tree: {workload_path}")
     print("Grouped by source location, sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)

@@ -878,8 +878,8 @@ workload (counter data, traces) untouched:
 
 .. _torch-operator-mapping:
 
-Torch operator mapping
-========================
+Torch trace
+===========
 
 ROCm Compute Profiler offers Torch operator mapping functionality to analyze the performance metrics at the PyTorch operator level. This feature maps the performance counters to specific PyTorch operators, enabling detailed performance analysis of
 the PyTorch workloads at the operator granularity.
@@ -920,7 +920,7 @@ option when profiling a PyTorch workload:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental profile --name mnist_torch --torch-trace -- python train.py
+   $ rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -1042,12 +1042,14 @@ The ``pmc_perf.csv`` file contains the standard performance counter data (same a
 * Correlating operator-level timing with kernel-level hardware metrics
 * Tracing the execution flow from high-level PyTorch API to low-level GPU kernels
 
+.. _torch-trace-limitations:
+
 Limitations
 -----------
 
 The Torch trace feature currently has the following limitations:
 
-* Torch trace is experimental. Use ``rocprof-compute --experimental profile ... --torch-trace`` and ``rocprof-compute --experimental analyze ...`` with ``--list-torch-operators`` or ``--torch-operator`` as needed.
+* Torch trace is experimental. Use ``rocprof-compute profile ... --experimental --torch-trace`` and ``rocprof-compute analyze ... --experimental`` with ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
 
@@ -1112,13 +1114,84 @@ Torch operator mapping can be combined with other profiling options. Use
 .. code-block:: shell-session
 
    # Combine with block filtering for targeted counter collection
-   $ rocprof-compute --experimental profile --name mnist --torch-trace -b 11 12 -- python train.py
+   $ rocprof-compute profile -b 11 12 --experimental --torch-trace --name mnist -- python train.py
 
    # Combine with iteration multiplexing
-   $ rocprof-compute --experimental profile --name mnist --torch-trace --iteration-multiplexing kernel -- python train.py
+   $ rocprof-compute profile --experimental --torch-trace --name mnist --iteration-multiplexing kernel -- python train.py
 
    # Combine with kernel filtering (filters by GPU kernel name)
-   $ rocprof-compute --experimental profile --name mnist --torch-trace -k elementwise -- python train.py
+   $ rocprof-compute profile --experimental --torch-trace --name mnist -k elementwise -- python train.py
+
+.. _triton-trace:
+
+Triton trace
+============
+
+In addition to PyTorch, ROCm Compute Profiler can map performance counters to
+Triton kernels (including Triton kernels launched by ``torch.compile`` /
+Inductor). This is enabled with the ``--triton-trace`` option and shares the
+same ``ml_api_trace`` output, ``Backend`` attribution, and analysis flow as Torch
+trace.
+
+.. warning::
+
+   Triton trace is currently an experimental feature. You must pass
+   ``--experimental`` to both **profile** and **analyze** commands when using the
+   Triton trace related options (``--triton-trace`` for profile;
+   ``--list-triton-operators`` and ``--triton-operator`` for analyze).
+
+Requirements
+------------
+
+Triton trace has the same requirements and limitations as Torch trace (see
+:ref:`torch-trace-limitations`), with a valid Triton installation required in
+place of PyTorch.
+
+Usage
+-----
+
+To enable Triton kernel mapping, use ``--experimental`` with the
+``--triton-trace`` option:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --triton-trace --name triton_gemm -- python gemm.py
+
+``--triton-trace`` can be combined with ``--torch-trace`` to instrument both
+frameworks in a single run:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
+
+Each captured marker records its originating framework in the ``Backend`` column
+of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
+independently. To enable all supported backends at once, use
+:ref:`--ml-api-trace <ml-api-trace>`.
+
+To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
+``--triton-operator`` options in analyze mode (see :doc:`../analyze/cli`).
+
+.. _ml-api-trace:
+
+ML API trace
+============
+
+``--ml-api-trace`` enables marker tracing for all supported ML framework backends in a
+single option.
+
+.. warning::
+
+   ML API trace is currently an experimental feature. You must pass
+   ``--experimental`` when using it.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --ml-api-trace --name model -- python train.py
+
+The output is identical to enabling each framework's trace flag individually.
+Captured kernels are attributed in the ``Backend`` column and analyzed with the
+corresponding per-framework operator options (see :doc:`../analyze/cli`).
 
 .. _iteration-multiplexing:
 

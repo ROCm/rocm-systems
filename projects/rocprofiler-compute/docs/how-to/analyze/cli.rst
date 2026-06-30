@@ -681,7 +681,7 @@ Analysis database example
    WARNING Created file: test.db
 
 
-PyTorch Operator Analysis
+PyTorch operator analysis
 =========================
 
 .. warning::
@@ -691,18 +691,18 @@ PyTorch Operator Analysis
 
    These options require ``--experimental``. After profiling with
    ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
-   use ``rocprof-compute --experimental analyze ...`` with
+   use ``rocprof-compute analyze ... --experimental`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
 
-Listing All Operators
+List all operators
 ---------------------
 
 Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental analyze --path ./workload --list-torch-operators
+   $ rocprof-compute analyze --experimental --list-torch-operators --path ./workload
 
    ================================================================================
    PyTorch Operator Call Tree: ./workload
@@ -759,6 +759,8 @@ milliseconds and microseconds per cell; missing values render as ``N/A``.
 When no operator has any recorded dispatches, the table is replaced by the
 line ``Operator summary: (no operators with recorded dispatches)``.
 
+.. _operator-filtering:
+
 Filtering by Operator
 ---------------------
 
@@ -775,17 +777,84 @@ operators. Operator hierarchies are ``/``-separated (e.g.
 .. code-block:: shell-session
 
    # Wildcard match
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "*relu"
+   $ rocprof-compute analyze --experimental --torch-operator "*relu" --path ./workload
 
    # Exact match
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator torch.nn.functional.relu
+   $ rocprof-compute analyze --experimental --torch-operator torch.nn.functional.relu --path ./workload
 
    # Match all operators (no arguments)
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator
+   $ rocprof-compute analyze --experimental --torch-operator --path ./workload
 
 **Filter multiple operators** (space or comma separated):
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental analyze --path ./workload \
-       --torch-operator "*relu,*conv*,*linear"
+   $ rocprof-compute analyze --experimental \
+       --torch-operator "*relu,*conv*,*linear" --path ./workload
+
+
+Triton operator analysis
+========================
+
+.. warning::
+
+   Triton operator analysis is currently available only in CLI mode and
+   requires ``--experimental``. After profiling with
+   ``--experimental --triton-trace`` (see :ref:`triton-trace`), use
+   ``rocprof-compute analyze ... --experimental`` with
+   ``--list-triton-operators`` or ``--triton-operator`` as needed.
+
+Triton kernels can be analyzed similar to PyTorch operators. You can use the
+``--list-triton-operators`` and ``--triton-operator`` options. Both options read the
+same ``ml_api_trace/consolidated.csv`` and select rows where the ``Backend`` column is
+``triton``. As a result, Triton kernels are reported independently even if PyTorch
+operators appear in the same run.
+
+List all captured Triton kernels
+---------------------------------
+
+Display all Triton kernels captured during profiling:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --experimental --list-triton-operators --path ./workload
+
+   ================================================================================
+   Triton Operator Call Tree: ./workload
+   Grouped by source location, sorted by total GPU kernel duration.
+   ================================================================================
+
+   torch_compile_triton.py:26 (dispatches: 39, total: 4.22 ms, dispatch_mean: 0.11 ms, dispatch_min: 0.05 ms, dispatch_max: 0.81 ms)
+   └─ torch.compile.fused (calls: 1)
+      └─ triton.CompiledKernel.triton_poi_fused_add_mul_relu_0 (calls: 3)
+         └─ triton_poi_fused_add_mul_relu_0 (id 0) (dispatches: 39, total: 4.22 ms)
+
+   Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
+   ╒══════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
+   │ Operator                                                                 │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
+   ╞══════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
+   │ torch.compile.fused                                                      │       1 │           39 │ 4.22 ms │    100.00 │     4.22 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
+   ├──────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ torch.compile.fused/triton.CompiledKernel.triton_poi_fused_add_mul_relu_ │       3 │           39 │ 4.22 ms │    100.00 │     1.41 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
+   │ 0                                                                        │         │              │         │           │             │         │         │         │
+   ╘══════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
+
+Filter the Triton kernels
+-------------------------
+
+``--triton-operator`` uses the same shell-style glob matching as
+``--torch-operator``; see :ref:`operator-filtering` for the full pattern syntax.
+
+.. code-block:: shell-session
+
+   # Wildcard match
+   $ rocprof-compute analyze --experimental --triton-operator "*matmul*" --path ./workload
+
+   # Filter multiple kernels (space or comma separated)
+   $ rocprof-compute analyze --experimental \
+       --triton-operator "*matmul*,*softmax*" --path ./workload
+
+.. note::
+
+   ``--torch-operator`` and ``--triton-operator`` are mutually exclusive; use
+   one operator filter per analysis run.

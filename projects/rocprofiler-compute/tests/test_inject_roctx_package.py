@@ -5,12 +5,42 @@
 ``core.install_global_wraps``, ``registry.install_many``, ``TritonBackend``,
 and ``core._push_scope`` / ``_pop_scope``."""
 
+import functools
 import importlib
 import sys
 import types
 
 import common  # noqa: F401
 import pytest
+
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
+
+
+def record_call(calls, names):
+    """Append a snapshot of ``names`` to ``calls`` (an ``install_many`` spy)."""
+    calls.append(list(names))
+
+
+def find_spec_without_name(absent_name, real_find_spec, name, *args, **kwargs):
+    """Behave like ``find_spec`` but report ``absent_name`` as missing."""
+    if name == absent_name:
+        return None
+    return real_find_spec(name, *args, **kwargs)
+
+
+def raise_import_skipped(*args, **kwargs):
+    """Raise to assert that an import path is never reached."""
+    raise AssertionError("roctx import should be skipped")
+
+
+def make_backend(name, install_fn=None):
+    backend = types.SimpleNamespace()
+    backend.name = name
+    backend.install = install_fn or (lambda: None)
+    return backend
+
 
 # ---------------------------------------------------------------------------
 # install_global_wraps
@@ -23,11 +53,9 @@ def captured_install(monkeypatch):
     from utils.inject_roctx import registry as registry_pkg
 
     calls: list[list[str]] = []
-
-    def _record(names):
-        calls.append(list(names))
-
-    monkeypatch.setattr(registry_pkg, "install_many", _record)
+    monkeypatch.setattr(
+        registry_pkg, "install_many", functools.partial(record_call, calls)
+    )
     return calls
 
 
@@ -60,20 +88,6 @@ def test_install_global_wraps_iterable_input(captured_install):
     assert captured_install == [["torch", "triton"]]
 
 
-def test_install_global_wraps_api_alias_expands(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
-    install_global_wraps("api")
-    assert captured_install == [["torch", "triton"]]
-
-
-def test_install_global_wraps_api_alongside_explicit_name(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
-    install_global_wraps("api,torch")
-    assert captured_install == [["torch", "triton", "torch"]]
-
-
 # ---------------------------------------------------------------------------
 # registry.install_many
 # ---------------------------------------------------------------------------
@@ -88,17 +102,10 @@ def fresh_registry(monkeypatch):
     return registry_pkg
 
 
-def _make_backend(name, install_fn=None):
-    backend = types.SimpleNamespace()
-    backend.name = name
-    backend.install = install_fn or (lambda: None)
-    return backend
-
-
 def test_install_many_invokes_registered_backends(fresh_registry):
     calls: list[str] = []
-    fresh_registry.register(_make_backend("alpha", lambda: calls.append("alpha")))
-    fresh_registry.register(_make_backend("beta", lambda: calls.append("beta")))
+    fresh_registry.register(make_backend("alpha", lambda: calls.append("alpha")))
+    fresh_registry.register(make_backend("beta", lambda: calls.append("beta")))
 
     fresh_registry.install_many(["alpha", "beta"])
     assert calls == ["alpha", "beta"]
@@ -106,7 +113,7 @@ def test_install_many_invokes_registered_backends(fresh_registry):
 
 def test_install_many_dedupes_duplicate_names(fresh_registry):
     calls: list[str] = []
-    fresh_registry.register(_make_backend("alpha", lambda: calls.append("alpha")))
+    fresh_registry.register(make_backend("alpha", lambda: calls.append("alpha")))
 
     fresh_registry.install_many(["alpha", "alpha", "alpha"])
     assert calls == ["alpha"]
@@ -118,9 +125,9 @@ def test_install_many_continues_after_backend_failure(fresh_registry, monkeypatc
 
     other_calls: list[str] = []
     fresh_registry.register(
-        _make_backend("bad", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        make_backend("bad", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     )
-    fresh_registry.register(_make_backend("good", lambda: other_calls.append("good")))
+    fresh_registry.register(make_backend("good", lambda: other_calls.append("good")))
 
     fresh_registry.install_many(["bad", "good"])
     assert other_calls == ["good"]
@@ -160,13 +167,11 @@ def test_triton_backend_skips_when_triton_missing(monkeypatch):
     from utils.inject_roctx._backends import triton as triton_backend
 
     real_find_spec = importlib.util.find_spec
-
-    def _no_triton(name, *args, **kwargs):
-        if name == "triton":
-            return None
-        return real_find_spec(name, *args, **kwargs)
-
-    monkeypatch.setattr(importlib.util, "find_spec", _no_triton)
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        functools.partial(find_spec_without_name, "triton", real_find_spec),
+    )
 
     warnings: list[tuple] = []
     monkeypatch.setattr(
@@ -179,39 +184,34 @@ def test_triton_backend_skips_when_triton_missing(monkeypatch):
     )
 
 
-def test_triton_backend_wraps_compiled_kernel_call(monkeypatch):
+def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
+    """CompiledKernel.run() is wrapped in preference to __call__."""
     from utils.inject_roctx._backends import triton as triton_backend
 
     pushes: list[tuple] = []
-    pops: list[None] = []
     monkeypatch.setattr(
         triton_backend,
         "_push_scope",
-        lambda marker, ctx, backend="": pushes.append((marker, ctx, backend)),
+        lambda marker, ctx, backend="": pushes.append((marker, backend)),
     )
-    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: pops.append(None))
+    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
+    monkeypatch.setattr(triton_backend._STATE, "jit_function", None)
 
-    class FakeKernel:
-        name = "my_kernel"
+    class FakeCompiledKernel:
+        name = "rk"
 
-        def __call__(self, *a, **kw):
-            return ("ran", a, kw)
+        def run(self, *a, **kw):
+            return "ran"
 
-    backend = triton_backend.TritonBackend()
-    backend._compiled_kernel = FakeKernel
-    backend.patch_launcher()
+    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", FakeCompiledKernel)
+    triton_backend.patch_triton_launcher()
 
-    out = FakeKernel()(1, x=2)
-    assert out == ("ran", (1,), {"x": 2})
-    assert len(pushes) == 1
-    marker, ctx, backend = pushes[0]
-    assert marker == "triton.CompiledKernel.my_kernel"
-    assert ctx.startswith("#1@")
-    assert backend == "triton"
-    assert pops == [None]
+    assert FakeCompiledKernel().run() == "ran"
+    assert pushes == [("triton.CompiledKernel.rk", "triton")]
 
 
-def test_triton_backend_kernel_name_fallbacks(monkeypatch):
+def test_triton_backend_wraps_jitfunction_run(monkeypatch):
+    """JITFunction.run is wrapped for eager launches."""
     from utils.inject_roctx._backends import triton as triton_backend
 
     pushes: list[str] = []
@@ -221,46 +221,167 @@ def test_triton_backend_kernel_name_fallbacks(monkeypatch):
         lambda marker, ctx, backend="": pushes.append(marker),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
+    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", None)
 
-    class KernelWithDictMeta:
-        metadata = {"name": "from_meta"}
+    class FakeJIT:
+        def __init__(self):
+            self.fn = types.SimpleNamespace(__name__="add_kernel")
 
-        def __call__(self):
-            pass
+        def run(self, *a, **kw):
+            return "launched"
 
-    class KernelNoName:
-        def __call__(self):
-            pass
+    monkeypatch.setattr(triton_backend._STATE, "jit_function", FakeJIT)
+    triton_backend.patch_triton_launcher()
 
-    for cls, expected in (
-        (KernelWithDictMeta, "triton.CompiledKernel.from_meta"),
-        (KernelNoName, "triton.CompiledKernel.<triton_kernel>"),
-    ):
-        backend = triton_backend.TritonBackend()
-        backend._compiled_kernel = cls
-        backend.patch_launcher()
-        cls()()
-        assert pushes[-1] == expected
+    assert FakeJIT().run() == "launched"
+    assert pushes == ["triton.JITFunction.add_kernel"]
+
+
+def test_triton_backend_reentrancy_dedups_nested_launch(monkeypatch):
+    """Nested JITFunction.run and CompiledKernel.run emit one marker."""
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    pushes: list[str] = []
+    monkeypatch.setattr(
+        triton_backend,
+        "_push_scope",
+        lambda marker, ctx, backend="": pushes.append(marker),
+    )
+    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
+    # Reset the per-thread guard.
+    if hasattr(triton_backend._thread_local, "in_launch"):
+        del triton_backend._thread_local.in_launch
+
+    class FakeCompiledKernel:
+        name = "inner"
+
+        def run(self, *a, **kw):
+            return "inner_ran"
+
+    class FakeJIT:
+        name = "outer"
+
+        def __init__(self, compiled):
+            self._compiled = compiled
+
+        def run(self, *a, **kw):
+            return self._compiled.run()
+
+    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", FakeCompiledKernel)
+    monkeypatch.setattr(triton_backend._STATE, "jit_function", FakeJIT)
+    triton_backend.patch_triton_launcher()
+
+    compiled = FakeCompiledKernel()
+    out = FakeJIT(compiled).run()
+
+    assert out == "inner_ran"
+    assert pushes == ["triton.JITFunction.outer"]
 
 
 def test_triton_backend_patch_is_idempotent(monkeypatch):
+    """Patching twice does not re-wrap the launch entry point."""
     from utils.inject_roctx._backends import triton as triton_backend
 
-    monkeypatch.setattr(triton_backend, "_push_scope", lambda *a, **k: None)
+    pushes: list[str] = []
+    monkeypatch.setattr(
+        triton_backend,
+        "_push_scope",
+        lambda marker, ctx, backend="": pushes.append(marker),
+    )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
+    # Reset the per-thread guard.
+    if hasattr(triton_backend._thread_local, "in_launch"):
+        del triton_backend._thread_local.in_launch
 
-    class FakeKernel:
+    class FakeJIT:
         name = "k"
 
-        def __call__(self):
-            pass
+        def run(self, *a, **kw):
+            return "ran"
 
-    backend = triton_backend.TritonBackend()
-    backend._compiled_kernel = FakeKernel
-    backend.patch_launcher()
-    first = FakeKernel.__call__
-    backend.patch_launcher()
-    assert FakeKernel.__call__ is first
+    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", None)
+    monkeypatch.setattr(triton_backend._STATE, "jit_function", FakeJIT)
+
+    triton_backend.patch_triton_launcher()
+    wrapped_once = FakeJIT.__dict__["run"]
+    triton_backend.patch_triton_launcher()
+
+    assert FakeJIT.__dict__["run"] is wrapped_once, (
+        "second patch re-wrapped the launcher"
+    )
+    assert FakeJIT().run() == "ran"
+    assert pushes == ["triton.JITFunction.k"], "exactly one marker per launch"
+
+
+def test_triton_backend_registers_framework_root(monkeypatch):
+    """install() registers triton's package directory as a framework root."""
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    monkeypatch.setattr(triton_backend, "_resolve_triton", lambda: True)
+    monkeypatch.setattr(triton_backend, "patch_triton_launcher", lambda: None)
+
+    fake_triton = types.ModuleType("triton")
+    fake_triton.__file__ = "/opt/fake/triton/__init__.py"
+    monkeypatch.setitem(sys.modules, "triton", fake_triton)
+
+    roots: list[str] = []
+    monkeypatch.setattr(
+        triton_backend.core, "add_framework_root", lambda p: roots.append(p)
+    )
+
+    triton_backend.TritonBackend().install()
+    assert roots == ["/opt/fake/triton"]
+
+
+def test_triton_backend_skips_when_python_tier_unavailable(monkeypatch):
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    monkeypatch.setattr(triton_backend, "_resolve_triton", lambda: True)
+    monkeypatch.setattr(triton_backend.core, "ensure_python_tier", lambda: False)
+
+    patched: list[bool] = []
+    monkeypatch.setattr(
+        triton_backend, "patch_triton_launcher", lambda: patched.append(True)
+    )
+    warnings: list[tuple] = []
+    monkeypatch.setattr(
+        triton_backend, "console_warning", lambda *a: warnings.append(a)
+    )
+
+    triton_backend.TritonBackend().install()
+    assert patched == []
+    assert any("ROCTX bindings not found" in str(a[1]) for a in warnings if len(a) > 1)
+
+
+def test_ensure_python_tier_short_circuits_when_already_configured(monkeypatch):
+    from utils.inject_roctx import core
+
+    saved_push, saved_pop = core._STATE.range_push, core._STATE.range_pop
+    try:
+        core.set_python_tier_io(lambda _s: None, lambda: None)
+
+        monkeypatch.setattr(core.importlib, "import_module", raise_import_skipped)
+        assert core.ensure_python_tier() is True
+    finally:
+        core._STATE.range_push, core._STATE.range_pop = saved_push, saved_pop
+
+
+def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    named = types.SimpleNamespace(name="direct")
+    assert triton_backend._extract_kernel_name(named) == "direct"
+
+    meta = types.SimpleNamespace(metadata={"name": "meta_name"})
+    assert triton_backend._extract_kernel_name(meta) == "meta_name"
+
+    via_fn = types.SimpleNamespace(fn=types.SimpleNamespace(__name__="fn_name"))
+    assert triton_backend._extract_kernel_name(via_fn) == "fn_name"
+
+    assert (
+        triton_backend._extract_kernel_name(types.SimpleNamespace())
+        == "<triton_kernel>"
+    )
 
 
 # ---------------------------------------------------------------------------

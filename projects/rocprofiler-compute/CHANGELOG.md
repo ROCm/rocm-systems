@@ -14,6 +14,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Improved GPU Benchmarking and Roofline profiling/analysis support for gfx1150/gfx1151/gfx1152 architectures.
   * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations.
 
+* Added experimental Triton support to ML API tracing. Profile with `--experimental --triton-trace` to emit a ROCTX marker per Triton/Inductor kernel launch attributed to the user call site, and analyze with `--experimental --list-triton-operators` or `--experimental --triton-operator <pattern>` to list or filter Triton operators independently of Torch.
+
 ### Changed
 
 * `--pc-sampling-sorting-type` now defaults to `count` (was `offset`), so the PC sampling table shows the most-sampled instructions first.

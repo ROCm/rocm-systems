@@ -17,8 +17,6 @@ from importlib.machinery import PathFinder
 from pathlib import Path
 from typing import Callable, Union
 
-from .constants import API_ALIAS, KNOWN_BACKENDS
-
 
 def _missing_range_push(_label: str) -> None:
     raise RuntimeError(
@@ -144,13 +142,21 @@ def resolve_user_caller_location() -> str:
 # "|<backend>" suffix attributes the scope to its backend.
 
 
+def encode_marker_name(name: str) -> str:
+    """Percent-encode a marker segment so an embedded '/' is not read as the
+    frame separator.
+    """
+    return name.replace("%", "%25").replace("/", "%2F")
+
+
 def compose_marker(marker: str, context: str, backend: str = "") -> str:
     """Return the wire-format string for a scope nested under the current
-    marker and context stacks.
+    marker and context stacks. Marker segments are percent-encoded.
     """
     marker_stack = get_marker_stack()
     context_stack = get_context_stack()
-    full = "/".join([*marker_stack, marker]) + ":" + "/".join([*context_stack, context])
+    op_path = "/".join(encode_marker_name(name) for name in [*marker_stack, marker])
+    full = op_path + ":" + "/".join([*context_stack, context])
     if backend:
         full = f"{full}|{backend}"
     return full
@@ -186,7 +192,7 @@ def _pop_scope() -> None:
 def install_global_wraps(backends: Union[str, Iterable[str]] = "") -> None:
     """Install ROCTX instrumentation for each backend in backends.
 
-    "api" expands to every known backend. Empty input is a no-op.
+    Empty input is a no-op.
     """
     from .registry import install_many
 
@@ -195,13 +201,6 @@ def install_global_wraps(backends: Union[str, Iterable[str]] = "") -> None:
     else:
         names = [str(n).strip() for n in backends if str(n).strip()]
 
-    expanded: list[str] = []
-    for n in names:
-        if n == API_ALIAS:
-            expanded.extend(KNOWN_BACKENDS)
-        else:
-            expanded.append(n)
-
-    if not expanded:
+    if not names:
         return
-    install_many(expanded)
+    install_many(names)
