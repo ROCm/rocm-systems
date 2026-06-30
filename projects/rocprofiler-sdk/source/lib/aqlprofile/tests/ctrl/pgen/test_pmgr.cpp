@@ -24,6 +24,7 @@
 
 #include <atomic>
 
+#include "ctrl/hsa_init.h"
 #include "util/test_assert.h"
 
 bool
@@ -109,7 +110,7 @@ TestPMgr::Initialize(int argc, char** argv)
 
     hsa_status_t status = hsa_signal_create(1, 0, NULL, &packet_signal_);
     TEST_ASSERT(status == HSA_STATUS_SUCCESS);
-    api_ = HsaRsrcFactory::Instance().AqlProfileApi();
+    api_ = ctrl_test::InTreeAqlProfileApi();
 
     return true;
 }

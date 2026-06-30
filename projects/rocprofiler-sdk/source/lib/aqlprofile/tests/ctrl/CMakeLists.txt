@@ -44,7 +44,7 @@ add_custom_target(aqlprofile-ctrl-test-hsaco DEPENDS ${HSACO_TARGET_LIST})
 # hsa_rsrc_factory.cpp under util/ is a symlink to the migrated factory that is already
 # compiled into rocprofiler-sdk-aqlprofile, so it is NOT listed here.
 set(AQLPROFILE_CTRL_TEST_SOURCES
-    app/test.cpp ctrl/test_hsa.cpp pgen/test_pmgr.cpp
+    app/test.cpp ctrl/test_hsa.cpp ctrl/hsa_init.cpp pgen/test_pmgr.cpp
     simple_convolution/simple_convolution.cpp util/perf_timer.cpp)
 
 add_executable(aqlprofile-ctrl-test)
@@ -86,13 +86,14 @@ set(_CTRL_LD_LIBRARY_PATH
 
 # Register one CTest entry per exercised mode (matches run.sh).
 function(add_ctrl_mode_test NAME MODE_ENV)
-    add_test(NAME aqlprofile-ctrl-${NAME} COMMAND $<TARGET_FILE:aqlprofile-ctrl-test>)
+    add_test(NAME tests.integration.aqlprofile.ctrl.${NAME}
+             COMMAND $<TARGET_FILE:aqlprofile-ctrl-test>)
     set(_env "LD_LIBRARY_PATH=${_CTRL_LD_LIBRARY_PATH}")
     if(NOT MODE_ENV STREQUAL "")
         list(APPEND _env "${MODE_ENV}")
     endif()
     set_tests_properties(
-        aqlprofile-ctrl-${NAME}
+        tests.integration.aqlprofile.ctrl.${NAME}
         PROPERTIES ENVIRONMENT
                    "${_env}"
                    WORKING_DIRECTORY

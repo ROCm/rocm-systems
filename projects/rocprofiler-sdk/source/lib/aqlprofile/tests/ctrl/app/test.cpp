@@ -27,6 +27,7 @@
 #include <string>
 #include <thread>
 
+#include "ctrl/hsa_init.h"
 #include "ctrl/run_kernel.h"
 #include "pgen/test_pgen_pcsmp.h"
 #include "pgen/test_pgen_pmc.h"
@@ -103,6 +104,7 @@ main(int argc, char* argv[])
         std::cerr.rdbuf(NULL);
     }
 
+    ctrl_test::InitHsaTables();
     TestHsa::HsaInstantiate();
     const hsa_ven_amd_aqlprofile_event_t* events_arr;
 
