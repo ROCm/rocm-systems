@@ -21,7 +21,7 @@ unset(_RJ_ROCM_PATH_EXPLICIT)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(rj_default_compiler)
 
-project(rocm_jit_suite VERSION 0.1.0)
+project(rocm_jit_suite VERSION 0.2.0)
 
 include(rj_version)
 
@@ -55,6 +55,13 @@ endif()
 # HSA/KFD headers (local copies from rocr-runtime).
 set(HSA_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
+)
+
+# DRM/amdgpu UAPI headers (vendored kernel ABI, MIT-licensed). Lets the
+# interposer service the amdgpu DRM ioctl surface using the real kernel structs
+# instead of hand-mirrored copies, without depending on libdrm library types.
+set(DRM_INCLUDE_DIR
+    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux/uapi/drm"
 )
 
 include(rj_log)
