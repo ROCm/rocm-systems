@@ -381,6 +381,9 @@ public:
       plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
+  virtual void notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
+                                       uint8_t byte_mask = 0xF) const = 0;
+
   /// @brief Read a vector register lane from the physical VGPR file.
   /// @param reg_idx Physical register index.
   /// @param lane Lane index within the wavefront.
@@ -626,10 +629,14 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx]) {
-      this->plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, uint64_t{1} << lane);
-    }
+    notify_vgpr_read_by_reg(reg_idx, uint64_t{1} << lane);
     return vgpr_file_[reg_idx][lane];
+  }
+
+  void notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
+                               uint8_t byte_mask = 0xF) const override {
+    if (auto *wf = vgpr_to_wave_[reg_idx])
+      this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
   }
 
   void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {

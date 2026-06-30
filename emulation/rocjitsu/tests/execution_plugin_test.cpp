@@ -8,8 +8,11 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/soc.h"
+#include "util/simd.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -22,6 +25,8 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cstdint>
 #include <format>
 #include <map>
@@ -33,6 +38,7 @@ namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
+using namespace rocjitsu::plugins::race_detector;
 
 // SOPP encoding: bits[31:23]=0x17F, bits[22:16]=op, bits[15:0]=simm16.
 constexpr uint32_t sopp(uint32_t op, uint16_t simm16 = 0) {
@@ -70,6 +76,9 @@ struct HookEvent {
   uint32_t wf_id = 0;
   uint32_t physical_vgpr_count = 0;
   uint32_t sgpr_count = 0;
+  uint32_t physical_reg = 0;
+  uint64_t lane_mask = 0;
+  uint8_t byte_mask = 0;
   uint64_t pc = 0;
   std::string mnemonic;
 };
@@ -167,13 +176,17 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
+                             uint8_t byte_mask) override {
     HookEvent e{HookEvent::READ_VGPR};
     if (wf) {
       e.dispatch_id = wf->dispatch_id();
       e.wg_id = wf->wg_id();
       e.wf_id = wf->wf_id();
     }
+    e.physical_reg = physical_reg;
+    e.lane_mask = lane_mask;
+    e.byte_mask = byte_mask;
     events.push_back(e);
   }
 
@@ -195,6 +208,43 @@ public:
     }
     events.push_back(e);
   }
+};
+
+class MfmaRacePlugin : public ExecutionPlugin {
+public:
+  MfmaRacePlugin() : ExecutionPlugin("mfma_race_probe") {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id, uint32_t physical_vgpr_count,
+                                   uint32_t sgpr_count,
+                                   std::span<amdgpu::Wavefront *> wavefronts) override {
+    detector_ = std::make_unique<RaceDetector>(
+        static_cast<int>(wavefronts.size()), static_cast<int>(physical_vgpr_count),
+        static_cast<int>(sgpr_count), Dim3d(static_cast<int>(wg_id)),
+        [this](RaceViolation v) { violations.push_back(v); });
+    wf_ = wavefronts.front();
+    state_ = &detector_->getWaveRaceState(0);
+  }
+
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
+                             uint8_t byte_mask) override {
+    if (wf != wf_ || !state_)
+      return;
+    uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
+    state_->checkVgprReadLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
+  }
+
+  void registerOutstandingLoad(uint32_t logical_reg, uint64_t exec_mask, uint8_t byte_mask = 0xF) {
+    ASSERT_NE(state_, nullptr);
+    state_->registerEvent(/*pc=*/0x1000, MemoryEventType::GLOBAL_TO_VGPR, {logical_reg}, exec_mask,
+                          byte_mask);
+  }
+
+  std::vector<RaceViolation> violations;
+
+private:
+  std::unique_ptr<RaceDetector> detector_;
+  amdgpu::Wavefront *wf_ = nullptr;
+  WaveRaceState *state_ = nullptr;
 };
 
 const char *kindName(HookEvent::Kind k) {
@@ -465,6 +515,119 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
+}
+
+TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
+
+  amdgpu::observe_mfma_input_reads(*cu, vb + S0, /*dim=*/16, /*K=*/32, /*B=*/1,
+                                   /*data_bits=*/16, wf->wf_size());
+  amdgpu::observe_mfma_input_reads(*cu, vb + S1, /*dim=*/16, /*K=*/32, /*B=*/1,
+                                   /*data_bits=*/16, wf->wf_size());
+  amdgpu::observe_mfma_acc32_reads(*cu, vb + ACC, /*M=*/16, /*N=*/16, /*B=*/1, wf->wf_size());
+
+  uint32_t read_hooks = 0;
+  bool saw_multi_lane = false;
+  for (const HookEvent &e : plugin->events) {
+    if (e.kind != HookEvent::READ_VGPR)
+      continue;
+    ++read_hooks;
+    saw_multi_lane |= std::popcount(e.lane_mask) > 1;
+    EXPECT_NE(e.lane_mask, 0u);
+    EXPECT_NE(e.byte_mask, 0u);
+  }
+  EXPECT_GT(read_hooks, 0u);
+  EXPECT_LT(read_hooks, 32u);
+  EXPECT_TRUE(saw_multi_lane);
+}
+
+TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>();
+  auto plugin = std::make_unique<MfmaRacePlugin>();
+  auto *race_plugin = plugin.get();
+  f.plugin_group_->add(std::move(plugin));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/256, /*sgpr_count=*/104,
+                                               waves);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t S0 = 0;
+
+  race_plugin->registerOutstandingLoad(S0, /*exec_mask=*/1u);
+  amdgpu::observe_mfma_input_reads(*cu, vb + S0, /*dim=*/16, /*K=*/32, /*B=*/1,
+                                   /*data_bits=*/16, wf->wf_size());
+
+  ASSERT_FALSE(race_plugin->violations.empty());
+  const auto &violation = race_plugin->violations.front();
+  EXPECT_EQ(violation.space, RaceViolation::Space::VGPR);
+  EXPECT_EQ(violation.index, static_cast<int>(S0));
+  EXPECT_EQ(violation.lane, 0);
+}
+
+TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "stdx SIMD is unavailable";
+  } else {
+    if (util::native<float>::size() != 16)
+      GTEST_SKIP() << "MFMA fast path requires 16-lane native<float>";
+
+    struct ForceScalarGuard {
+      bool old = util::force_scalar();
+      ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
+    } force_scalar_guard;
+    util::set_force_scalar_for_testing(false);
+
+    PluginFixture f(/*num_wf_slots=*/1);
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>();
+    auto plugin = std::make_unique<MfmaRacePlugin>();
+    auto *race_plugin = plugin.get();
+    f.plugin_group_->add(std::move(plugin));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 64u);
+    std::array<amdgpu::Wavefront *, 1> waves{wf};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                                 /*physical_vgpr_count=*/256, /*sgpr_count=*/104,
+                                                 waves);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+    for (uint32_t reg = 0; reg < 64; ++reg)
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0x3c003c00u);
+
+    race_plugin->registerOutstandingLoad(S0, /*exec_mask=*/1u);
+    amdgpu::exec_f32_mfma_f16_spec<16, 16, 32>(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
+                                               amdgpu::ACC_FROM_VGPR, /*cbsz=*/0, /*abid=*/0,
+                                               /*blgp=*/0);
+
+    ASSERT_FALSE(race_plugin->violations.empty());
+    const auto &violation = race_plugin->violations.front();
+    EXPECT_EQ(violation.space, RaceViolation::Space::VGPR);
+    EXPECT_EQ(violation.index, static_cast<int>(S0));
+    EXPECT_EQ(violation.lane, 0);
+  }
 }
 
 // -- Ordering tests ----------------------------------------------------------
