@@ -57,23 +57,6 @@ namespace {
 
 constexpr uint64_t kQSize = 1024;  // power of two, like a real AQL ring
 
-// RetryPending: completion-aware "is a retry barrier still outstanding" decision.
-
-TEST(RetryPending, NotOutstandingIsNeverPending) {
-  // The hang bug: read index lags (retry_index > read) for an already-completed barrier;
-  // gating on retry_outstanding must report NOT pending so a replacement gets inserted.
-  EXPECT_FALSE(RetryPending(/*retry_outstanding=*/false, /*retry_index=*/100, /*read=*/10));
-}
-
-TEST(RetryPending, OutstandingAndAheadOfReadIsPending) {
-  EXPECT_TRUE(RetryPending(/*retry_outstanding=*/true, /*retry_index=*/100, /*read=*/10));
-}
-
-TEST(RetryPending, OutstandingButReadCaughtUpIsNotPending) {
-  EXPECT_FALSE(RetryPending(/*retry_outstanding=*/true, /*retry_index=*/100, /*read=*/100));
-  EXPECT_FALSE(RetryPending(/*retry_outstanding=*/true, /*retry_index=*/100, /*read=*/200));
-}
-
 // PlanSubmit: slot accounting. Two invariants prevent the crash: submitted_count never
 // exceeds the available non-marker packets, nor free_slots (never overcommits the ring).
 

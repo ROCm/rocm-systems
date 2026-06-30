@@ -51,12 +51,6 @@ namespace rocr {
 namespace core {
 namespace intercept_queue_logic {
 
-// Whether a retry barrier is still outstanding. The read index alone can lag and report a
-// completed barrier as pending, so gate on retry_outstanding to avoid stranding overflow.
-inline bool RetryPending(bool retry_outstanding, uint64_t retry_index, uint64_t read_index) {
-  return retry_outstanding && retry_index > read_index;
-}
-
 struct SubmitPlan {
   // Number of (non-marker) packets to copy to the wrapped queue this iteration.
   uint64_t submitted_count;

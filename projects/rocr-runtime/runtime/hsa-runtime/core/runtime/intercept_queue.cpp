@@ -82,38 +82,15 @@ static const uint16_t kBarrierHeader = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKE
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
-bool InterceptQueue::IsPendingRetryPoint(uint64_t wrapped_current_read_index) const {
-  // This function is intended to determine if the last retry barrier packet
-  // has definitely not been processed in order to avoid putting multiple retry
-  // packets on the wrapped queue.
-  //
-  // The AQL protocol allows the packet processor to advance the read index any
-  // time after the producer advances the write index. It does not specify the
-  // latest that the read index must be advanced. This makes it impossible to
-  // use the read index to determine if a packet has definitely not been
-  // processed.
-  //
-  // This code assumes that the read index will be advanced no later than the
-  // start of processing the next packet. So at worst, if the read index equals
-  // the retry index the packet may have already been processed, and its
-  // completion signal updated (perhaps that was the cause of entering
-  // InterceptQueue::StoreRelaxed that is now invoking this function). But if
-  // the read index is less than the retry index, then the packet has not yet
-  // been processed, This implies that the minimum queue size is 3 (enforced in
-  // hsa_amd_queue_intercept_create): a non-retry packet, a retry packet that
-  // is being processed, and space for a new retry packet.
-  //
-  // FIXME: The above assumption can be removed by using a distinct interrupt
-  // signal for the retry packet completion signal, and tracking when that
-  // signal is updated and invokes its async handler. Currently the wrapped
-  // queue doorbell signal is also being used as the retry completion signal.
-  // If that is done then the minimum queue size needs to be changed from 3 to
-  // 2 (enforced in hsa_amd_queue_intercept_create).
-  //
-  // Gate on retry_outstanding_ too: the read index can lag and report an already-completed
-  // barrier as pending, stranding overflow_ (the hang). See RetryPending (unit tested).
-  return intercept_queue_logic::RetryPending(retry_outstanding_.load(std::memory_order_acquire),
-                                             retry_index_, wrapped_current_read_index);
+bool InterceptQueue::IsPendingRetryPoint() const {
+  // Whether a retry barrier has been inserted but its completion has not yet been observed,
+  // used to avoid putting multiple retry packets on the wrapped queue. The retry barrier
+  // completes against a dedicated signal (retry_doorbell_) whose async handler clears
+  // retry_outstanding_, so that flag is the authoritative source. The wrapped queue read
+  // index is intentionally NOT consulted: it can advance past the retry packet before the
+  // completion handler runs, which would let a second retry be inserted while the first is
+  // still outstanding and let the delayed first handler then clear the newer retry's state.
+  return retry_outstanding_.load(std::memory_order_acquire);
 }
 
 InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
@@ -124,11 +101,10 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
       retry_index_(0),
       quit_(false),
       active_(true) {
-  // Initial retry_index_ value must ensure that
-  // InterceptQueue::IsPendingRetryPoint will return false before the first
-  // retry barrier packet is inserted.
-  assert(!IsPendingRetryPoint(next_packet_) &&
-         "Packet intercept error: initial retry index is incompatible with IsPendingRetryPoint.\n");
+  // retry_outstanding_ defaults to false, so IsPendingRetryPoint() is false before the
+  // first retry barrier is inserted.
+  assert(!IsPendingRetryPoint() &&
+         "Packet intercept error: initial retry state is incompatible with IsPendingRetryPoint.\n");
   buffer_ = SharedArray<AqlPacket, 4096>(wrapped->amd_queue_.hsa_queue.size);
   amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
 
@@ -266,7 +242,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
   while (true) {
     uint64_t write = wrapped->LoadWriteIndexRelaxed();
     uint64_t read = wrapped->LoadReadIndexRelaxed();
-    bool pending_retry_point = IsPendingRetryPoint(read);
+    bool pending_retry_point = IsPendingRetryPoint();
 
     // Pure slot-accounting decision (overflow/underflow hardening, unit tested). The
     // non-atomic write/read snapshot (transient read > write) is handled inside PlanSubmit.
@@ -283,6 +259,13 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
              "Packet intercept error: wrapped queue has been updated by another thread.\n");
       ++write;
 
+      // Mark the retry outstanding BEFORE publishing the packet and ringing the doorbell.
+      // The GPU may complete the barrier immediately; HandleRetryDoorbell() must then observe
+      // retry_outstanding_ == true so it clears it (otherwise the flag is left stuck true and
+      // overflow_ is stranded). retry_index_ is retained for diagnostics only.
+      retry_index_ = barrier;
+      retry_outstanding_.store(true, std::memory_order_release);
+
       // Barrier wakes async queue processing; completion signal is the dedicated
       // retry_doorbell_ so HandleRetryDoorbell() tracks it unambiguously.
       ring[barrier & mask].packet.body = {};
@@ -291,15 +274,10 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
         // Ensure the packet body is written as header may get reordered when writing over PCIE
         _mm_sfence();
       }
+      // Release-publish the header, then ring the doorbell.
       atomic::Store(&ring[barrier & mask].barrier_and.header, kBarrierHeader,
                     std::memory_order_release);
-      // Update the wrapped queue's doorbell so it knows there is a new packet in the queue.
       HSA::hsa_signal_store_screlease(wrapped->amd_queue_.hsa_queue.doorbell_signal, barrier);
-
-      // Record the retry point and mark it outstanding (cleared on its
-      // retry_doorbell_ wake in HandleRetryDoorbell()).
-      retry_index_ = barrier;
-      retry_outstanding_.store(true, std::memory_order_release);
     }
 
     // Attempt to reserve useable queue space if some packets need to be
