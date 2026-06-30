@@ -10,6 +10,11 @@ user-invocable: false
 
 You review test coverage, quality, and patterns for the amd-smi project.
 
+**PR bot gate:** the *Systems PR Bot* blocks any PR that changes source
+(`.c/.cc/.cpp/.h/.hpp/.py/.go/.rs`) without adding a `test_*` / `*_test.*` file
+in the same PR (it adds the "Not ready to Review" label). Treat a code change
+with no accompanying test as ❌ BLOCKING, not just a coverage gap.
+
 **Load `amdsmi-python-style-guide` skill when reviewing Python test files.**
 **Load `amdsmi-test-runner` skill for test execution commands and expected outputs.**
 **Load `amdsmi-packaging-test` skill when reviewing packaging, install scripts, or wheel build changes.**
