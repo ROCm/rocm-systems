@@ -4031,6 +4031,28 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
   }
 
   *pgpu_metrics = amdsmi_gpu_metrics_t{};
+
+  // Opt-in (AMDSMI_SKIP_GPU_METRICS_ON_IDLE): on runtime-PM/GFXOFF GPUs (Navi),
+  // reading gpu_metrics while runtime-suspended forces a D3->D0 resume whose
+  // first FW sample latches gfx activity/clock high for several seconds. Skip
+  // the read and report BUSY instead of waking the device. Instinct has no
+  // runtime PM, so runtime_status is never "suspended" and this never fires.
+  if (skip_gpu_metrics_on_idle_enabled()) {
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    if (get_gpu_device_from_handle(processor_handle, &gpu_device) == AMDSMI_STATUS_SUCCESS) {
+      const std::string runtime_status_path =
+          "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/power/runtime_status";
+      if (is_gpu_runtime_suspended(runtime_status_path)) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | AMDSMI_SKIP_GPU_METRICS_ON_IDLE active and "
+           << runtime_status_path
+           << " = suspended; skipping gpu_metrics read, returning AMDSMI_STATUS_BUSY";
+        LOG_DEBUG(ss);
+        return AMDSMI_STATUS_BUSY;
+      }
+    }
+  }
+
   rsmi_gpu_metrics_t rsmi_metrics{};
   auto status = rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle, 0, &rsmi_metrics);
   if (status != AMDSMI_STATUS_SUCCESS) {

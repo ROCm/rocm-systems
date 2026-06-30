@@ -1129,6 +1129,27 @@ int read_env_ms(const char* name, int def) {
   return def;
 }
 
+bool skip_gpu_metrics_on_idle_enabled() {
+  const char* val = std::getenv("AMDSMI_SKIP_GPU_METRICS_ON_IDLE");
+  if (val == nullptr) {
+    return false;
+  }
+  std::string s(val);
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return (s == "1" || s == "true" || s == "on" || s == "yes");
+}
+
+bool is_gpu_runtime_suspended(const std::string& runtime_status_path) {
+  std::ifstream file(runtime_status_path, std::ifstream::in);
+  if (!file.is_open()) {
+    return false;
+  }
+  std::string line;
+  std::getline(file, line);
+  return line == "suspended";
+}
+
 uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
   uint64_t serial_number = 0;
   amdsmi_board_info_t board_info = {};

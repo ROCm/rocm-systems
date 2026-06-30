@@ -4970,6 +4970,14 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
  *  For non-APU devices, @p pgpu_metrics->apu_metrics will be nullptr.
  *
+ *  **Idle/runtime-suspend gating (opt-in):**
+ *  If the ``AMDSMI_SKIP_GPU_METRICS_ON_IDLE`` environment variable is enabled
+ *  (``1``/``true``/``on``/``yes``) and the device is runtime-suspended (its
+ *  ``power/runtime_status`` reads ``suspended``), this function returns
+ *  ::AMDSMI_STATUS_BUSY without reading @c gpu_metrics, so the GPU is not woken
+ *  from a low-power (e.g. GFXOFF) state. Applies to GPUs with runtime PM (e.g.
+ *  Navi); Instinct GPUs have no runtime PM and are unaffected. Disabled by default.
+ *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_handle,
@@ -7636,6 +7644,11 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
  *
  *  @param[out] info Reference to the gpu engine usage structure. Must be allocated by user.
  *
+ *  @note This reads @c gpu_metrics internally, so the
+ *  ``AMDSMI_SKIP_GPU_METRICS_ON_IDLE`` opt-in described on
+ *  ::amdsmi_get_gpu_metrics_info applies here too: on a runtime-suspended GPU it
+ *  returns ::AMDSMI_STATUS_BUSY instead of waking the device.
+ *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle,
@@ -7693,6 +7706,11 @@ amdsmi_status_t amdsmi_is_gpu_power_management_enabled(amdsmi_processor_handle p
  *
  *  @param[out] info Reference to the gpu clock structure.
  *              Must be allocated by user.
+ *
+ *  @note This reads @c gpu_metrics internally, so the
+ *  ``AMDSMI_SKIP_GPU_METRICS_ON_IDLE`` opt-in described on
+ *  ::amdsmi_get_gpu_metrics_info applies here too: on a runtime-suspended GPU it
+ *  returns ::AMDSMI_STATUS_BUSY instead of waking the device.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

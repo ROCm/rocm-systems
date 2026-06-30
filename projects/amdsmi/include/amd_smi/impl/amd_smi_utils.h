@@ -171,6 +171,31 @@ amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle processor_han
  */
 int read_env_ms(const char* name, int def);
 
+/**
+ *  @brief Whether gpu_metrics idle gating is enabled via environment variable.
+ *
+ *  @details Reads the ``AMDSMI_SKIP_GPU_METRICS_ON_IDLE`` environment variable.
+ *  Enabled when set to ``1``, ``true``, ``on`` or ``yes`` (case-insensitive).
+ *
+ *  @retval true if the feature is enabled, false otherwise (including when unset)
+ */
+bool skip_gpu_metrics_on_idle_enabled();
+
+/**
+ *  @brief Whether a GPU is runtime-suspended, read from a non-waking PM node.
+ *
+ *  @details Reads the ``power/runtime_status`` sysfs node at @p runtime_status_path
+ *  (a PM-core attribute that does not touch the device) and reports whether the
+ *  GPU is runtime-suspended. GPUs without runtime PM (e.g. Instinct) never report
+ *  ``suspended``, so this returns false for them.
+ *
+ *  @param[in] runtime_status_path full path to the ``power/runtime_status`` node
+ *
+ *  @retval true if the file's first line equals ``suspended``; false on any
+ *          other value or if the file cannot be opened
+ */
+bool is_gpu_runtime_suspended(const std::string& runtime_status_path);
+
 template <typename>
 constexpr bool is_dependent_false_v = false;
 
