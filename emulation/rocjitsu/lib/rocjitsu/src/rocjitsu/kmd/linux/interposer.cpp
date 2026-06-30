@@ -141,6 +141,13 @@ std::optional<std::string> child_config_path() {
   return std::string(cfg_buf);
 }
 
+void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
+  if (rc == -1)
+    return MAP_FAILED;
+  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
+}
+
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
   signal(SIGSEGV, SIG_DFL);
   raise(SIGSEGV);
@@ -1176,6 +1183,9 @@ RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
 
 RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, int fd,
                                 off_t offset) {
+  if (!InterposerContext::real().ready() || !InterposerContext::real().mmap)
+    return raw_mmap_syscall(addr, length, prot, flags, fd, offset);
+
   assert(InterposerContext::real().ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->mmap(addr, length, prot, flags, offset);
