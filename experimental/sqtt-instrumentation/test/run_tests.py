@@ -49,8 +49,9 @@ import tempfile
 # Resolve project paths relative to this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
-PASS_PLUGIN = os.path.join(BUILD_DIR, "SQTTInstrumentPass.so")
+BUILD_DIR = os.environ.get("SQTT_BUILD_DIR", os.path.join(PROJECT_ROOT, "build"))
+PASS_PLUGIN = os.environ.get(
+    "SQTT_PASS_PLUGIN", os.path.join(BUILD_DIR, "SQTTInstrumentPass.so"))
 INCLUDE_DIR = os.path.join(PROJECT_ROOT, "include")
 TEST_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "auto.hip")
 ADDR_TRACE_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "addr_trace.hip")
@@ -64,11 +65,19 @@ from sqtt_data import find_llvm_tool
 
 def find_hipcc():
     """Find hipcc compiler."""
-    return shutil.which("hipcc")
+    if os.environ.get("HIPCC"):
+        return os.environ["HIPCC"]
+    found = shutil.which("hipcc")
+    if found:
+        return found
+    rocm_hipcc = "/opt/rocm/bin/hipcc"
+    return rocm_hipcc if os.path.isfile(rocm_hipcc) else None
 
 
 def build_pass():
     """Build the pass plugin if needed."""
+    if os.environ.get("SQTT_PASS_PLUGIN"):
+        return os.path.isfile(PASS_PLUGIN), f"missing SQTT_PASS_PLUGIN={PASS_PLUGIN}"
     r = subprocess.run(
         ["cmake", "--build", BUILD_DIR],
         capture_output=True, text=True, cwd=PROJECT_ROOT, timeout=120)
@@ -431,7 +440,7 @@ TESTS = [
         "flags": ["--offload-arch=gfx1200"],
         "expect_ir": [],
         "reject_ir": [],
-        "expect_funcmap": ["F:"],
+        "expect_funcmap": ["M:shader_clock_bits=12;shader_clock_shift=4", "F:"],
         "reject_funcmap": [],
     },
     {
@@ -482,15 +491,16 @@ TESTS = [
         "reject_funcmap": [],
     },
     {
-        "name": "gfx12_asm_imm",
-        "desc": "gfx12 uses s_ttracedata_imm for compact IDs",
+        "name": "gfx12_asm_shader_clock",
+        "desc": "gfx12 packs shader clock bits into full s_ttracedata markers",
         "env": {"SQTT_INSTRUMENT_FUNCTIONS": "10"},
         "mode": "asm",
         "flags": ["--offload-arch=gfx1200"],
         "expect_ir": [
-            r"s_ttracedata_imm\b",
+            r"s_getreg_b32\b",
+            r"s_ttracedata\b",
         ],
-        "reject_ir": [],
+        "reject_ir": [r"s_ttracedata_imm\b"],
         "expect_funcmap": [],
         "reject_funcmap": [],
     },
@@ -520,9 +530,10 @@ TESTS = [
         "expect_ir": [],
         "reject_ir": [],
         "expect_funcmap": [
-            "load_phase", "compute_phase", "inner_step", "checkpoint",
+            "load_phase", "compute_phase", "inner_step", "checkpoint", "payload_value",
         ],
         "reject_funcmap": [],
+        "custom_funcmap_check": "data_marker_payload",
     },
     {
         "name": "user_markers_ir",
@@ -788,6 +799,35 @@ def check_custom_funcmap(result: TestResult, funcmap: str, check: str):
         if missing_payloads:
             result.fail(
                 f"Addr trace IDs missing nonzero extra_payload_count: {missing_payloads}")
+    elif check == "data_marker_payload":
+        payload_id = None
+        payload_counts = {}
+        for line in funcmap.splitlines():
+            line = line.strip().rstrip("\x00")
+            if line.startswith("P:") and line.endswith(":payload_value"):
+                parts = line.split(":", 2)
+                if len(parts) == 3:
+                    payload_id = int(parts[1])
+            elif line.startswith("R:"):
+                parts = line.split(":", 2)
+                if len(parts) != 3:
+                    continue
+                try:
+                    mid = int(parts[1])
+                except ValueError:
+                    continue
+                for item in parts[2].split(";"):
+                    key, sep, value = item.partition("=")
+                    if sep and key == "extra_payload_count":
+                        try:
+                            payload_counts[mid] = int(value)
+                        except ValueError:
+                            pass
+        if payload_id is None:
+            result.fail("Missing P: entry for payload_value")
+        elif payload_counts.get(payload_id) != 1:
+            result.fail(
+                f"payload_value marker missing extra_payload_count=1 (id {payload_id})")
 
 
 def main():

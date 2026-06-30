@@ -53,7 +53,8 @@ PreservedAnalyses SQTTInstrumentPass::runEarly(Module& M)
     LLVMContext& Ctx = M.getContext();
 
     // Force-inline all callers of the named marker sentinels.
-    for (const char* Name : {"__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point"})
+    for (const char* Name :
+         {"__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point", "__sqtt_named_marker_data"})
     {
         Function* S = M.getFunction(Name);
         if (!S) continue;
@@ -91,7 +92,8 @@ PreservedAnalyses SQTTInstrumentPass::runEarly(Module& M)
     }
 
     // Clean up sentinel declarations
-    for (const char* Name : {"__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point"})
+    for (const char* Name :
+         {"__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point", "__sqtt_named_marker_data"})
     {
         Function* S = M.getFunction(Name);
         if (!S) continue;
@@ -175,17 +177,20 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
         if (Config.hasAddressTracing()) Changed |= instrumentAddressTraces(F, Gen);
 
         if (!hadEarlyPass && Config.FunctionThreshold > 0 && !IsKernel) Changed |= instrumentFunctionDirect(F, Gen);
+
+        Changed |= applyShaderClockPacking(F, Gen);
     }
 
     // Clean up sentinel declarations
-    for (const char* Name : {"__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point"})
+    for (const char* Name :
+         {"__sqtt_named_marker_enter", "__sqtt_named_marker_exit", "__sqtt_named_marker_point", "__sqtt_named_marker_data"})
     {
         if (Function* S = M.getFunction(Name))
             if (S->use_empty()) S->eraseFromParent();
     }
 
     if (!FuncMap.empty() || !KernelNames.empty() || !UserMarkers.empty() || Config.InstrumentBarriers ||
-        Config.InstrumentMemory || !AddrTraceEntries.empty())
+        Config.InstrumentMemory || !AddrTraceEntries.empty() || ShaderClockBitsUsed > 0)
     {
         emitFuncMap(M);
         Changed = true;

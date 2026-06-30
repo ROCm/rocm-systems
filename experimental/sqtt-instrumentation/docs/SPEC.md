@@ -83,8 +83,8 @@ Where `flags` is the OR of applicable bits: `EXIT_PREV=1`, `ENTER=2`.
 
 ### Instruction selection
 
-- If `encoded <= 0xFF` **and** the target is gfx10+: emit `s_ttracedata_imm`
-  (8-bit immediate, no m0 setup, ~1 cycle faster)
+- If `encoded <= 0xFF`, the target supports it, and shader-clock packing is
+  inactive: emit `s_ttracedata_imm` (8-bit immediate, no m0 setup, ~1 cycle faster)
 - Otherwise: emit `s_ttracedata` (32-bit value loaded into m0)
 
 With the 2-bit encoding, IDs 1-63 fit in `s_ttracedata_imm` (previously
@@ -92,6 +92,26 @@ limited to IDs 1-15 with 4-bit flags).
 
 SQTT hardware only captures the low 8 bits from `s_ttracedata_imm`, so the
 8-bit limit is a hardware constraint, not an ISA one.
+
+### GFX12 Shader Clock Packing
+
+On gfx12+, marker headers include a truncated shader clock from
+`s_getreg_b32 hwreg(HW_REG_SHADER_CYCLES_LO, shift, bits)`. The default window
+is source bits 4-15 (`SQTT_SHADER_CLOCK_SHIFT=4`, `SQTT_SHADER_CLOCK_BITS=12`),
+stored in marker bits 31-20, leaving 18 marker ID bits plus the two low flags:
+
+```python
+clock_bits = 12
+exit_prev  = val & 1
+enter      = (val >> 1) & 1
+id         = (val >> 2) & ((1 << (30 - clock_bits)) - 1)
+clock      = val >> (32 - clock_bits)
+```
+
+The clock field is the shader clock sampled with `s_getreg`, not the realtime
+clock associated with `s_sendmsg`. The funcmap records the active layout with
+`M:shader_clock_bits=N;shader_clock_shift=S`. When `SQTT_SHADER_CLOCK_BITS=0`,
+gfx12 uses the legacy marker layout and may use `s_ttracedata_imm`.
 
 ### Semantic rules
 
@@ -120,7 +140,7 @@ transitions.
 ```python
 exit_prev = (val >> 0) & 1
 enter     = (val >> 1) & 1
-id        = val >> 2
+id        = val >> 2  # or masked to 30 - shader_clock_bits when M: is present
 ```
 
 The marker type (function, user scope, point event) is resolved from the
@@ -159,6 +179,8 @@ W:N                     — wave size (32 or 64), present when address tracing i
 R:id:extra_payload_count=N
                         — optional record metadata; number of following
                           s_ttracedata records consumed by this marker header
+M:shader_clock_bits=N;shader_clock_shift=S
+                        — marker headers reserve high bits for gfx12 shader clock
 ```
 
 `source_loc`, when present, follows rocprofiler-sdk's inline-chain format:
@@ -176,6 +198,8 @@ The decoder uses the funcmap type to determine behavior:
 - `R:` entries attach optional metadata to a marker ID. Missing `R:` rows
   imply `extra_payload_count=0`, which is the behavior for function markers,
   user markers, barriers, and normal memory point markers.
+- `M:` entries communicate non-legacy marker encoding metadata. Missing `M:`
+  rows imply the original `id = value >> 2` decoder behavior.
 - User markers (`U:`) and the deduplicated point markers for barriers /
   vmem are intentionally source-loc-less: their IDs are shared across all
   call sites so any single source loc would be misleading.
@@ -230,6 +254,8 @@ All variables are read at **compile time** by the pass plugin.
 | `SQTT_INSTRUMENT_FUNCTIONS`| `0`     | Function entry/exit threshold (0=disabled)     |
 | `SQTT_INSTRUMENT_MEMORY`   | off     | Memory op markers. Format: `N:M` (N=ops per marker, M=max gap) |
 | `SQTT_MEM_BARRIER`         | `fence` | Reordering boundary around markers (`none`/`asm`/`fence` or `0`/`1`/`2`) |
+| `SQTT_SHADER_CLOCK_BITS`   | auto    | Gfx12 shader clock bits in marker headers (`12` on gfx12, `0` elsewhere; `0` disables) |
+| `SQTT_SHADER_CLOCK_SHIFT`  | `4`     | Source bit offset in `HW_REG_SHADER_CYCLES_LO` for shader clock packing |
 
 ### Marker reorder boundary (`SQTT_MEM_BARRIER`)
 
@@ -398,6 +424,10 @@ __device__ void sqtt_marker_point(const char *name);
 // Numeric point marker
 // Emits s_ttracedata with (data << 2) (no flags).
 __device__ void sqtt_marker_point(uint32_t data);
+
+// Named point marker followed by one raw 32-bit payload record.
+// The funcmap stores P:id:name plus R:id:extra_payload_count=1.
+__device__ void sqtt_marker_data(const char *name, uint32_t data);
 ```
 
 All numeric markers wrap the s_ttracedata with `sched_barrier(0)` on each
@@ -410,25 +440,29 @@ User markers have enter/exit semantics for scoped regions.
 `sqtt_marker_exit()` pops the top scope. Matching enter/exit pairs
 produce nested frames in flamegraphs.
 
-Point markers (`sqtt_marker_point()`) record an event without pushing or
-popping the call stack. **They are dropped by the flamegraph tool** -- a
-point event has no meaningful cycle attribution (start/end are the same
-instant), so attributing synthetic weight to it would distort the time
-visualization. Inspect point events via `sqtt_decode_funcmap.py` and the
-raw shaderdata records.
+Point markers (`sqtt_marker_point()` and `sqtt_marker_data()`) record an event
+without pushing or popping the call stack. **They are dropped by the flamegraph
+tool** -- a point event has no meaningful cycle attribution (start/end are the
+same instant), so attributing synthetic weight to it would distort the time
+visualization. Inspect point events via `sqtt_decode_funcmap.py` and the raw
+shaderdata records. `sqtt_marker_data()` emits the point marker header followed
+by one raw payload record; decoders skip that payload as part of the header
+using the marker's `R:id:extra_payload_count=1` metadata.
 
 ### Named marker processing
 
-1. User writes `sqtt_marker_enter("my_label")` and `sqtt_marker_exit("my_label")`
+1. User writes `sqtt_marker_enter("my_label")`, `sqtt_marker_exit("my_label")`,
+   `sqtt_marker_point("my_label")`, or `sqtt_marker_data("my_label", value)`
 2. The compiler emits calls to `__sqtt_named_marker_enter(const char*)` and
-   `__sqtt_named_marker_exit(const char*)` respectively
+   the matching named marker sentinel respectively
 3. The Early pass force-inlines the wrappers, resolves the string literal,
    assigns a unique ID (starting at 1, with deduplication across all marker
    types), and replaces each call with a bare `s_ttracedata` intrinsic
 4. Adjacent exit+enter sentinel calls in the same basic block are fused into
    a single `s_ttracedata` with `exit_prev=true`, halving marker overhead
 5. The ID-to-name mapping is stored in `.sqtt_funcmap` as `U:id:name`
-   (scope markers) or `P:id:name` (point markers)
+   (scope markers) or `P:id:name` (point markers). Data markers additionally
+   emit `R:id:extra_payload_count=1`.
 
 If you forget to load the pass plugin, you get a linker error
 ("undefined reference to `__sqtt_named_marker_enter`") -- no silent
@@ -454,6 +488,7 @@ P:ID:addr_trace_load@kernel.hip:59 -> hip_runtime.h:264
                                                -- address trace op with inline chain source location
 R:ID:extra_payload_count=130                   -- following payload records for that header
 W:64                                           -- wave size (present when address tracing is enabled)
+M:shader_clock_bits=12;shader_clock_shift=4    -- gfx12 marker header clock packing
 ```
 
 The section is added to `llvm.used` to prevent linker stripping.

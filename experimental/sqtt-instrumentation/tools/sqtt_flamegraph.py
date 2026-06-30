@@ -87,6 +87,7 @@ from sqtt_data import (
     load_shaderdata,
     build_kernel_to_co,
     merge_folded,
+    merge_funcmaps,
     preprocess_records,
 )
 
@@ -120,15 +121,8 @@ def build_stacks(
 
     Returns a dict mapping "frame1;frame2;...;frameN" -> (total_cycles, exec_count).
     """
-    # Merged funcmap for fallback resolution
-    merged = FuncMap()
-    for fm in per_co.values():
-        merged.markers.update(fm.markers)
-        merged.source_locs.update(fm.source_locs)
-        merged.kernels.extend(fm.kernels)
-        merged.kernel_source_locs.update(fm.kernel_source_locs)
-        if fm.wave_size:
-            merged.wave_size = fm.wave_size
+    # Merged funcmap for fallback resolution.
+    merged = merge_funcmaps(per_co.values())
 
     # Build sorted launch times per (cu, simd, wave_slot) from occupancy.
     slot_launches: dict[tuple, list[int]] = defaultdict(list)
@@ -203,7 +197,7 @@ def build_stacks(
         spans = wave_spans.get(base_wk, [])
 
         for rec in recs:
-            marker_id, enter, exit_prev = decode_marker(rec.value)
+            marker_id, enter, exit_prev = decode_marker(rec.value, cur_funcmap)
 
             if marker_id == 0 and not exit_prev:
                 continue
@@ -557,15 +551,8 @@ def main():
         print("Warning: no instrumented functions found in code objects. "
               "Was the pass plugin loaded during compilation?", file=sys.stderr)
 
-    # Build merged funcmap for preprocessing
-    merged = FuncMap()
-    for fm in per_co.values():
-        merged.markers.update(fm.markers)
-        merged.source_locs.update(fm.source_locs)
-        merged.kernels.extend(fm.kernels)
-        merged.kernel_source_locs.update(fm.kernel_source_locs)
-        if fm.wave_size:
-            merged.wave_size = fm.wave_size
+    # Build merged funcmap for preprocessing.
+    merged = merge_funcmaps(per_co.values())
 
     # Process each trace directory independently
     all_folded: list[dict[str, tuple[int, int]]] = []

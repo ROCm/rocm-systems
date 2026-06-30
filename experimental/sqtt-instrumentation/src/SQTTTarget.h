@@ -39,6 +39,7 @@ enum class GfxGen
 {
     GFX9,
     RDNA,
+    GFX12,
     Unknown
 };
 
@@ -49,14 +50,15 @@ inline GfxGen getGfxGen(const llvm::Function& F)
     llvm::StringRef CPU = A.getValueAsString();
 
     if (CPU.starts_with("gfx9")) return GfxGen::GFX9;
-    if (CPU.starts_with("gfx10") || CPU.starts_with("gfx11") || CPU.starts_with("gfx12")) return GfxGen::RDNA;
+    if (CPU.starts_with("gfx12")) return GfxGen::GFX12;
+    if (CPU.starts_with("gfx10") || CPU.starts_with("gfx11")) return GfxGen::RDNA;
     return GfxGen::Unknown;
 }
 
 // Does this GfxGen support s_ttracedata_imm?
 inline bool supportsImmTrace(GfxGen gen)
 {
-    return gen == GfxGen::RDNA; // gfx10+ = all RDNA
+    return gen == GfxGen::RDNA || gen == GfxGen::GFX12; // gfx10+
 }
 
 // Wave size for this architecture
@@ -73,8 +75,20 @@ inline HwRegEncodings getHwRegEncodings(GfxGen gen)
     {
         case GfxGen::GFX9: return {GFX9_HWREG_WAVE, GFX9_HWREG_SIMD, GFX9_HWREG_CU, GFX9_HWREG_WG};
         case GfxGen::RDNA: return {RDNA_HWREG_WAVE, RDNA_HWREG_SIMD, RDNA_HWREG_CU, RDNA_HWREG_WG};
+        case GfxGen::GFX12: return {RDNA_HWREG_WAVE, RDNA_HWREG_SIMD, RDNA_HWREG_CU, RDNA_HWREG_WG};
         default: return {RDNA_HWREG_WAVE, RDNA_HWREG_SIMD, RDNA_HWREG_CU, RDNA_HWREG_WG};
     }
+}
+
+inline unsigned getShaderClockBits(const SQTTConfig& config, GfxGen gen)
+{
+    if (config.ShaderClockBits != SQTTConfig::AutoShaderClockBits) return config.ShaderClockBits;
+    return gen == GfxGen::GFX12 ? 12 : 0;
+}
+
+inline bool usesShaderClockPacking(const SQTTConfig& config, GfxGen gen)
+{
+    return gen == GfxGen::GFX12 && getShaderClockBits(config, gen) != 0;
 }
 
 // ============================================================================

@@ -134,6 +134,7 @@ def demangle(name: str) -> str:
 # entry_type: "kernel", "func", "user", "point"
 # source_loc may be empty
 Entry = tuple[int | None, str, str, str, int]
+MarkerEncoding = tuple[int, int]  # shader_clock_bits, shader_clock_shift
 
 
 def _split_source_loc(s: str) -> tuple[str, str]:
@@ -144,10 +145,12 @@ def _split_source_loc(s: str) -> tuple[str, str]:
     return name, loc
 
 
-def parse_funcmap(output: str) -> list[Entry]:
+def parse_funcmap(output: str) -> tuple[list[Entry], MarkerEncoding]:
     """Parse funcmap content into entries."""
     entries: list[tuple[int | None, str, str, str]] = []
     extra_payload_counts: dict[int, int] = {}
+    shader_clock_bits = 0
+    shader_clock_shift = 0
 
     for line in output.splitlines():
         line = line.strip()
@@ -172,7 +175,20 @@ def parse_funcmap(output: str) -> list[Entry]:
         if not rest:
             continue
 
-        if prefix == "K":
+        if prefix == "M":
+            for item in rest.split(";"):
+                key, sep, value = item.partition("=")
+                if not sep:
+                    continue
+                try:
+                    parsed = int(value)
+                except ValueError:
+                    continue
+                if key.strip() == "shader_clock_bits":
+                    shader_clock_bits = parsed
+                elif key.strip() == "shader_clock_shift":
+                    shader_clock_shift = parsed
+        elif prefix == "K":
             name, loc = _split_source_loc(rest)
             entries.append((None, name, "kernel", loc))
         elif prefix == "R":
@@ -203,10 +219,13 @@ def parse_funcmap(output: str) -> list[Entry]:
             name, loc = _split_source_loc(name)
             entries.append((mid, name, type_map[prefix], loc))
 
-    return [
-        (mid, name, etype, loc, extra_payload_counts.get(mid, 0) if mid is not None else 0)
-        for mid, name, etype, loc in entries
-    ]
+    return (
+        [
+            (mid, name, etype, loc, extra_payload_counts.get(mid, 0) if mid is not None else 0)
+            for mid, name, etype, loc in entries
+        ],
+        (shader_clock_bits, shader_clock_shift),
+    )
 
 
 def main():
@@ -223,8 +242,15 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    entries = parse_funcmap(output)
+    entries, marker_encoding = parse_funcmap(output)
+    if marker_encoding[0]:
+        print(
+            "marker_encoding: "
+            f"shader_clock_bits={marker_encoding[0]} "
+            f"shader_clock_shift={marker_encoding[1]}")
     if not entries:
+        if marker_encoding[0]:
+            return
         print("No function map entries found.", file=sys.stderr)
         sys.exit(1)
 

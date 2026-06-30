@@ -88,7 +88,7 @@
 // ---------------------------------------------------------------------------
 // ID encoding conventions
 // ---------------------------------------------------------------------------
-// Both s_ttracedata and s_ttracedata_imm share the same 2-bit flag layout:
+// Legacy markers share the same 2-bit flag layout:
 //
 //   Bit  0:      exit previous scope (pop top)
 //   Bit  1:      enter scope (push)
@@ -100,10 +100,13 @@
 //   is_enter  = (val >> 1) & 1
 //   id        = val >> 2
 //
-// On gfx10+ targets, IDs 1-63 use s_ttracedata_imm (8-bit immediate, faster).
-// Larger IDs fall back to s_ttracedata (32-bit m0).
+// On gfx10+ targets, IDs 1-63 may use s_ttracedata_imm (8-bit immediate,
+// faster). Larger IDs fall back to s_ttracedata (32-bit m0). When the pass
+// enables gfx12 shader-clock packing, marker headers are rewritten to full
+// s_ttracedata and the funcmap records the non-legacy layout with M: metadata.
 //
-// Value 0x0 is a no-op.  Exit markers are always s_ttracedata_imm 1.
+// Value 0x0 is a no-op. Exit markers encode as value 1 before any pass-side
+// target-specific rewrite.
 //
 // The marker type (function, user, barrier, memory) is determined by
 // looking up the ID in the .sqtt_funcmap section, not from encoding bits.
@@ -128,6 +131,7 @@ static __device__ __forceinline__ void sqtt_marker_exit(uint32_t) {}
 static __device__ __forceinline__ void sqtt_marker_exit(const char*) {}
 static __device__ __forceinline__ void sqtt_marker_point(uint32_t) {}
 static __device__ __forceinline__ void sqtt_marker_point(const char*) {}
+static __device__ __forceinline__ void sqtt_marker_data(const char*, uint32_t) {}
 
 #    else // SQTT_ENABLED
 
@@ -141,6 +145,7 @@ static __device__ __forceinline__ void sqtt_marker_point(const char*) {}
 extern "C" __device__ void __sqtt_named_marker_enter(const char*);
 extern "C" __device__ void __sqtt_named_marker_exit(const char*);
 extern "C" __device__ void __sqtt_named_marker_point(const char*);
+extern "C" __device__ void __sqtt_named_marker_data(const char*, uint32_t);
 
 // --- Named (string) variants ---
 
@@ -149,6 +154,11 @@ static __device__ __forceinline__ void sqtt_marker_enter(const char* name) { __s
 static __device__ __forceinline__ void sqtt_marker_exit(const char* name) { __sqtt_named_marker_exit(name); }
 
 static __device__ __forceinline__ void sqtt_marker_point(const char* name) { __sqtt_named_marker_point(name); }
+
+static __device__ __forceinline__ void sqtt_marker_data(const char* name, uint32_t data)
+{
+    __sqtt_named_marker_data(name, data);
+}
 
 // --- Numeric variants ---
 //

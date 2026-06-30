@@ -45,6 +45,8 @@ SmallVector<SQTTInstrumentPass::MarkerCall, 8> SQTTInstrumentPass::collectSentin
                 Calls.push_back({CI, MarkerType::Exit});
             else if (Name == "__sqtt_named_marker_point")
                 Calls.push_back({CI, MarkerType::Point});
+            else if (Name == "__sqtt_named_marker_data")
+                Calls.push_back({CI, MarkerType::Data});
         }
     }
     return Calls;
@@ -65,15 +67,17 @@ uint32_t SQTTInstrumentPass::resolveMarkerString(CallInst* CI, MarkerType type)
     std::string Name = CDA->getAsString().str();
     if (!Name.empty() && Name.back() == '\0') Name.pop_back();
 
-    bool isPoint = (type == MarkerType::Point);
+    bool isPoint = (type == MarkerType::Point || type == MarkerType::Data);
+    uint32_t extraPayloadCount = (type == MarkerType::Data) ? 1 : 0;
+    std::string key = std::string(isPoint ? "P:" : "U:") + std::to_string(extraPayloadCount) + ":" + Name;
     uint32_t id;
-    auto it = UserMarkerMap.find(Name);
+    auto it = UserMarkerMap.find(key);
     if (it != UserMarkerMap.end()) { id = it->second; }
     else
     {
         id = NextEventID++;
-        UserMarkerMap[Name] = id;
-        UserMarkers.push_back({id, Name, isPoint});
+        UserMarkerMap[key] = id;
+        UserMarkers.push_back({id, Name, isPoint, extraPayloadCount});
     }
     bool enter = (type == MarkerType::Enter);
     return encodeMarker(id, enter, false); // enter or point
@@ -139,14 +143,27 @@ bool SQTTInstrumentPass::processMarkerCalls(Function& F, GfxGen gen, bool useBar
         if (!encoded)
         {
             if (useBareTrace) continue; // not resolvable yet, leave for late pass
-            errs() << "SQTT: warning: sqtt_marker_enter/exit/point() "
+            errs() << "SQTT: warning: sqtt_marker_enter/exit/point/data() "
                       "argument is not a string literal, skipping\n";
             CI->eraseFromParent();
             continue;
         }
 
         IRBuilder<> B(CI);
-        if (useBareTrace)
+        if (Type == MarkerType::Data)
+        {
+            if (useBareTrace)
+            {
+                emitBareTrace(B, encoded, M, gen);
+                Value* payload = CI->getArgOperand(1);
+                if (payload->getType() != llvm::Type::getInt32Ty(CI->getContext()))
+                    payload = B.CreateZExtOrTrunc(payload, llvm::Type::getInt32Ty(CI->getContext()));
+                emitRawTracePayload(B, payload, M);
+            }
+            else
+                insertTraceMarkerWithPayload(B, encoded, CI->getArgOperand(1), F, gen);
+        }
+        else if (useBareTrace)
             emitBareTrace(B, encoded, M, gen);
         else
             insertTraceMarker(B, encoded, F, gen);

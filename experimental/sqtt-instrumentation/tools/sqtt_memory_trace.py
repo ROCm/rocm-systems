@@ -51,12 +51,12 @@ import sys
 from typing import Optional
 
 from sqtt_data import (
-    FuncMap,
     AddressTrace,
     discover_base_dir,
     load_funcmaps,
     load_occupancy,
     load_shaderdata,
+    merge_funcmaps,
     preprocess_records,
 )
 
@@ -220,15 +220,8 @@ def main():
     # Load funcmaps
     per_co = load_funcmaps(code_objects, do_demangle=args.demangle)
 
-    # Build merged funcmap for preprocessing
-    merged = FuncMap()
-    for fm in per_co.values():
-        merged.markers.update(fm.markers)
-        merged.source_locs.update(fm.source_locs)
-        merged.kernels.extend(fm.kernels)
-        merged.kernel_source_locs.update(fm.kernel_source_locs)
-        if fm.wave_size:
-            merged.wave_size = fm.wave_size
+    # Build merged funcmap for preprocessing.
+    merged = merge_funcmaps(per_co.values())
 
     # Collect address traces from all directories
     all_traces: list[AddressTrace] = []

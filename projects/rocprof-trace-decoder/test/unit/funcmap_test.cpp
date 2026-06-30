@@ -102,6 +102,21 @@ TEST(DecodeMarkerValue, EnterAfterExitTransition)
     EXPECT_TRUE(m.exit_prev);
 }
 
+TEST(DecodeMarkerValue, ShaderClockEncoding)
+{
+    MarkerEncoding enc{12, 4};
+    uint32_t raw = (0xABCu << 20) | (42u << 2) | 0b10u;
+    auto m = decode_marker_value(raw, enc);
+    EXPECT_EQ(m.id, 42u);
+    EXPECT_EQ(m.shader_clock, 0xABCu);
+    EXPECT_TRUE(m.is_enter);
+    EXPECT_FALSE(m.exit_prev);
+
+    Funcmap fm;
+    fm.marker_encoding = enc;
+    EXPECT_EQ(decode_marker_value(raw, fm).id, 42u);
+}
+
 // ─── parse_funcmap_section ──────────────────────────────────────────────────
 
 TEST(ParseFuncmap, EachRowKind)
@@ -140,6 +155,20 @@ TEST(ParseFuncmap, EachRowKind)
     EXPECT_EQ(p->kind, FuncmapEntryKind::Point);
     EXPECT_EQ(p->name, "vmem_load");
     EXPECT_EQ(p->source_loc, "a.cpp:7");
+}
+
+TEST(ParseFuncmap, ParsesExtraPayloadAndMarkerEncoding)
+{
+    std::string blob = "M:shader_clock_bits=12;shader_clock_shift=4\n"
+                       "P:7:payload_point\n"
+                       "R:7:extra_payload_count=1\n";
+
+    Funcmap m = parse_funcmap_section(blob, /*silent=*/true);
+    auto p = m.find(7);
+    ASSERT_TRUE(p);
+    EXPECT_EQ(p->extra_payload_count, 1u);
+    EXPECT_EQ(m.marker_encoding.shader_clock_bits, 12u);
+    EXPECT_EQ(m.marker_encoding.shader_clock_shift, 4u);
 }
 
 TEST(ParseFuncmap, ToleratesBlankLinesCRLFAndTrailingNUL)

@@ -79,7 +79,8 @@ void SQTTInstrumentPass::storeUserMarkerMetadata(Module& M, LLVMContext& Ctx)
             Ctx,
             {ConstantAsMetadata::get(ConstantInt::get(I32, entry.ID)),
              MDString::get(Ctx, entry.Name),
-             ConstantAsMetadata::get(ConstantInt::get(I32, entry.IsPoint ? 1 : 0))}
+             ConstantAsMetadata::get(ConstantInt::get(I32, entry.IsPoint ? 1 : 0)),
+             ConstantAsMetadata::get(ConstantInt::get(I32, entry.ExtraPayloadCount))}
         ));
     }
 }
@@ -99,8 +100,15 @@ void SQTTInstrumentPass::recoverUserMarkerMetadata(Module& M)
         uint32_t id = IdC->getZExtValue();
         std::string name = NameS->getString().str();
         bool isPoint = PointC->getZExtValue() != 0;
-        UserMarkers.push_back({id, name, isPoint});
-        UserMarkerMap[name] = id;
+        uint32_t extraPayloadCount = 0;
+        if (Op->getNumOperands() >= 4)
+        {
+            if (auto* ExtraC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(3)))
+                extraPayloadCount = ExtraC->getZExtValue();
+        }
+        UserMarkers.push_back({id, name, isPoint, extraPayloadCount});
+        std::string key = std::string(isPoint ? "P:" : "U:") + std::to_string(extraPayloadCount) + ":" + name;
+        UserMarkerMap[key] = id;
         if (id >= NextEventID) NextEventID = id + 1;
     }
     NMD->eraseFromParent();
@@ -224,6 +232,7 @@ uint32_t SQTTInstrumentPass::compactFuncIDs(Module& M)
                 if (!Callee) continue;
                 auto IID = Callee->getIntrinsicID();
                 if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
+                if (isRawPayloadTrace(CI)) continue;
                 auto* Arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
                 if (!Arg) continue;
                 uint32_t val = Arg->getZExtValue();
@@ -309,6 +318,7 @@ void SQTTInstrumentPass::rewriteMarkerIDs(Function& F, const std::map<uint32_t, 
 
             auto IID = Callee->getIntrinsicID();
             if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
+            if (isRawPayloadTrace(CI)) continue;
 
             auto* Arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
             if (!Arg) continue;
@@ -376,6 +386,7 @@ void SQTTInstrumentPass::removeFuncMarkersFromModule(Module& M, uint32_t id)
 
                 auto IID = Callee->getIntrinsicID();
                 if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
+                if (isRawPayloadTrace(CI)) continue;
 
                 auto* Arg = dyn_cast<ConstantInt>(CI->getArgOperand(0));
                 if (!Arg) continue;

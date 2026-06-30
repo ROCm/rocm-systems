@@ -43,7 +43,7 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from glob import glob
-from typing import Optional
+from typing import Iterable, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +126,8 @@ class FuncMap:
     wave_size: int = 0  # from W: entry (32 or 64), 0 if unknown
     # from R:id:extra_payload_count=N entries; absent means zero
     extra_payload_counts: dict[int, int] = field(default_factory=dict)
+    shader_clock_bits: int = 0
+    shader_clock_shift: int = 0
 
     def resolve(self, marker_id: int) -> tuple[str, str]:
         """Returns (name, type). Type determines scope vs point behavior."""
@@ -136,6 +138,23 @@ class FuncMap:
     def extra_payload_count(self, marker_id: int) -> int:
         """Returns extra records after this marker header; default is zero."""
         return self.extra_payload_counts.get(marker_id, 0)
+
+
+def merge_funcmaps(funcmaps: Iterable[FuncMap]) -> FuncMap:
+    """Merge funcmaps while preserving all metadata used for marker decoding."""
+    merged = FuncMap()
+    for fm in funcmaps:
+        merged.markers.update(fm.markers)
+        merged.source_locs.update(fm.source_locs)
+        merged.kernels.extend(fm.kernels)
+        merged.kernel_source_locs.update(fm.kernel_source_locs)
+        merged.extra_payload_counts.update(fm.extra_payload_counts)
+        if fm.wave_size:
+            merged.wave_size = fm.wave_size
+        if fm.shader_clock_bits:
+            merged.shader_clock_bits = fm.shader_clock_bits
+            merged.shader_clock_shift = fm.shader_clock_shift
+    return merged
 
 
 def _split_source_loc(s: str) -> tuple[str, str]:
@@ -162,6 +181,8 @@ def parse_funcmap(raw: str) -> FuncMap:
         W:N                     -- wave size
         R:id:extra_payload_count=N
                                 -- number of payload records after the header
+        M:shader_clock_bits=N;shader_clock_shift=S
+                                -- marker ID shares the word with shader clock bits
 
     Source locations (when present) follow rocprofiler-sdk's inline chain
     format: "<inner_file>:<line> -> <outer_file>:<line>".
@@ -181,6 +202,19 @@ def parse_funcmap(raw: str) -> FuncMap:
                 fm.wave_size = int(rest)
             except ValueError:
                 pass
+        elif prefix == "M":
+            for item in rest.split(";"):
+                key, sep, value = item.partition("=")
+                if not sep:
+                    continue
+                try:
+                    parsed = int(value)
+                except ValueError:
+                    continue
+                if key.strip() == "shader_clock_bits":
+                    fm.shader_clock_bits = parsed
+                elif key.strip() == "shader_clock_shift":
+                    fm.shader_clock_shift = parsed
         elif prefix == "K":
             name, loc = _split_source_loc(rest)
             fm.kernels.append(name)
@@ -283,11 +317,16 @@ class ShaderRecord:
     flags: int
 
 
-def decode_marker(value: int) -> tuple[int, bool, bool]:
+def decode_marker(value: int, funcmap: FuncMap | None = None) -> tuple[int, bool, bool]:
     """Decode marker value -> (id, enter, exit_prev)."""
     exit_prev = bool(value & 0x1)
     enter = bool(value & 0x2)
-    marker_id = value >> 2
+    clock_bits = funcmap.shader_clock_bits if funcmap else 0
+    if clock_bits:
+        id_bits = max(0, 30 - clock_bits)
+        marker_id = (value >> 2) & ((1 << id_bits) - 1 if id_bits else 0)
+    else:
+        marker_id = value >> 2
     return marker_id, enter, exit_prev
 
 
@@ -701,24 +740,35 @@ def preprocess_records(
     for rec in records:
         key = (rec.cu, rec.simd, rec.wave_id)
         per_wave[key].append(rec)
-        # Check if this record is an address trace header
-        marker_id, enter, exit_prev = decode_marker(rec.value)
-        name, mtype = funcmap.resolve(marker_id)
-        if _match_addr_trace(name) is not None:
-            wave_has_addr_trace.add(key)
+
+    for key, wave_records in per_wave.items():
+        i = 0
+        while i < len(wave_records):
+            marker_id, _enter, _exit_prev = decode_marker(wave_records[i].value, funcmap)
+            name, _mtype = funcmap.resolve(marker_id)
+            if _match_addr_trace(name) is not None:
+                wave_has_addr_trace.add(key)
+                break
+            i += 1 + funcmap.extra_payload_count(marker_id)
 
     # Process each wave's records
     for key, wave_records in per_wave.items():
         if key not in wave_has_addr_trace:
-            # No address traces in this wave -- all records are markers
-            markers.extend(wave_records)
+            # No address traces in this wave. Still honor generic payload
+            # metadata so raw payload records are not decoded as headers.
+            i = 0
+            while i < len(wave_records):
+                rec = wave_records[i]
+                marker_id, _enter, _exit_prev = decode_marker(rec.value, funcmap)
+                markers.append(rec)
+                i += 1 + funcmap.extra_payload_count(marker_id)
             continue
 
         # Parse this wave's contiguous record stream
         i = 0
         while i < len(wave_records):
             rec = wave_records[i]
-            marker_id, enter, exit_prev = decode_marker(rec.value)
+            marker_id, enter, exit_prev = decode_marker(rec.value, funcmap)
             name, mtype = funcmap.resolve(marker_id)
 
             if _match_addr_trace(name) is not None:
@@ -729,7 +779,7 @@ def preprocess_records(
                     addr_traces.append(trace)
             else:
                 markers.append(rec)
-                i += 1
+                i += 1 + funcmap.extra_payload_count(marker_id)
 
     # Re-sort markers by time since we processed per-wave
     markers.sort(key=lambda r: r.time)

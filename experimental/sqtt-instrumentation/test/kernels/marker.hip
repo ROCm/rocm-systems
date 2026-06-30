@@ -52,8 +52,10 @@ __global__ void test_kernel(float *out, const float *in, int n) {
 
     // Point marker (no scope change)
     sqtt_marker_point("checkpoint");
+    sqtt_marker_data("payload_value", static_cast<uint32_t>(idx));
 
     // Numeric enter/exit markers (work without pass plugin)
+    sqtt_marker_point(static_cast<uint32_t>(blockIdx.x));
     sqtt_marker_enter(10u);
     out[idx] = val;
     sqtt_marker_exit(10u);

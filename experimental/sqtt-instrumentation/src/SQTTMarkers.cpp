@@ -27,8 +27,12 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/AtomicOrdering.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
+
+static constexpr const char* RawPayloadMetadataName = "sqtt.raw_payload";
+static constexpr uint32_t GFX12_SHADER_CYCLES_LO = 29;
 
 // True for instructions that already act as a *scheduling* boundary at the
 // IR/MIR level — i.e. the optimizer/scheduler will not move s_ttracedata
@@ -86,6 +90,13 @@ static void emitMemBarrier(IRBuilder<>& B, MemBarrierMode mode)
 
 void SQTTInstrumentPass::insertTraceMarker(IRBuilder<>& B, uint32_t markerID, Function& F, GfxGen gen)
 {
+    insertTraceMarkerWithPayload(B, markerID, nullptr, F, gen);
+}
+
+void SQTTInstrumentPass::insertTraceMarkerWithPayload(
+    IRBuilder<>& B, uint32_t markerID, Value* payload, Function& F, GfxGen gen
+)
+{
     Module* M = F.getParent();
     LLVMContext& Ctx = M->getContext();
     Type* I32 = Type::getInt32Ty(Ctx);
@@ -122,6 +133,12 @@ void SQTTInstrumentPass::insertTraceMarker(IRBuilder<>& B, uint32_t markerID, Fu
         {
             Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
             Builder.CreateCall(TTD, {ConstantInt::get(I32, markerID)});
+        }
+
+        if (payload)
+        {
+            if (payload->getType() != I32) payload = Builder.CreateZExtOrTrunc(payload, I32);
+            emitRawTracePayload(Builder, payload, M);
         }
 
         emitMemBarrier(Builder, Config.MemBarrier);
@@ -379,23 +396,117 @@ bool SQTTInstrumentPass::addBarriersToExistingMarkers(Function& F)
     return true;
 }
 
-void SQTTInstrumentPass::emitBareTrace(IRBuilder<>& B, uint32_t encoded, Module* M, GfxGen gen)
+CallInst* SQTTInstrumentPass::emitBareTrace(IRBuilder<>& B, uint32_t encoded, Module* M, GfxGen gen)
 {
     LLVMContext& Ctx = M->getContext();
     if (canUseImm(encoded) && supportsImmTrace(gen))
     {
         Function* TTDImm = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata_imm);
-        B.CreateCall(TTDImm, {ConstantInt::get(Type::getInt16Ty(Ctx), encoded)});
+        return B.CreateCall(TTDImm, {ConstantInt::get(Type::getInt16Ty(Ctx), encoded)});
     }
     else
     {
         Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-        B.CreateCall(TTD, {ConstantInt::get(Type::getInt32Ty(Ctx), encoded)});
+        return B.CreateCall(TTD, {ConstantInt::get(Type::getInt32Ty(Ctx), encoded)});
     }
 }
 
-void SQTTInstrumentPass::emitBareTraceValue(IRBuilder<>& B, Value* val, Module* M, GfxGen gen)
+CallInst* SQTTInstrumentPass::emitBareTraceValue(IRBuilder<>& B, Value* val, Module* M, GfxGen gen)
+{
+    (void) gen;
+    Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
+    CallInst* CI = B.CreateCall(TTD, {val});
+    markRawPayloadTrace(CI);
+    return CI;
+}
+
+CallInst* SQTTInstrumentPass::emitRawTracePayload(IRBuilder<>& B, Value* val, Module* M)
 {
     Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
-    B.CreateCall(TTD, {val});
+    CallInst* CI = B.CreateCall(TTD, {val});
+    markRawPayloadTrace(CI);
+    return CI;
+}
+
+void SQTTInstrumentPass::markRawPayloadTrace(CallInst* CI)
+{
+    if (!CI) return;
+    CI->setMetadata(RawPayloadMetadataName, MDNode::get(CI->getContext(), {}));
+}
+
+bool SQTTInstrumentPass::isRawPayloadTrace(CallInst* CI)
+{
+    return CI && CI->getMetadata(RawPayloadMetadataName) != nullptr;
+}
+
+bool SQTTInstrumentPass::applyShaderClockPacking(Function& F, GfxGen gen)
+{
+    unsigned clockBits = getShaderClockBits(Config, gen);
+    if (!usesShaderClockPacking(Config, gen)) return false;
+
+    if (clockBits > 29)
+        report_fatal_error("SQTT_SHADER_CLOCK_BITS must leave at least one marker ID bit");
+    if (Config.ShaderClockShift >= 32 || Config.ShaderClockShift + clockBits > 32)
+        report_fatal_error("SQTT shader clock window must fit in shader_cycles_lo bits [31:0]");
+
+    const unsigned idBits = 30 - clockBits;
+    const uint32_t maxID = (uint32_t(1) << idBits) - 1u;
+    const unsigned markerAndFlagBits = idBits + 2;
+    const uint32_t markerAndFlagMask =
+        markerAndFlagBits >= 32 ? 0xFFFFFFFFu : ((uint32_t(1) << markerAndFlagBits) - 1u);
+
+    SmallVector<std::pair<CallInst*, Value*>, 16> Rewrites;
+    for (auto& BB : F)
+    {
+        for (auto& I : BB)
+        {
+            auto* CI = dyn_cast<CallInst>(&I);
+            if (!CI || isRawPayloadTrace(CI)) continue;
+            Function* Callee = CI->getCalledFunction();
+            if (!Callee) continue;
+            auto IID = Callee->getIntrinsicID();
+            if (IID != Intrinsic::amdgcn_s_ttracedata && IID != Intrinsic::amdgcn_s_ttracedata_imm) continue;
+
+            Value* encodedValue = CI->getArgOperand(0);
+            if (auto* Arg = dyn_cast<ConstantInt>(encodedValue))
+            {
+                uint32_t encoded = Arg->getZExtValue();
+                uint32_t markerID = encoded >> 2;
+                if (markerID > maxID)
+                {
+                    report_fatal_error(
+                        Twine("SQTT marker ID ") + Twine(markerID) + " does not fit with SQTT_SHADER_CLOCK_BITS=" +
+                        Twine(clockBits)
+                    );
+                }
+            }
+            Rewrites.push_back({CI, encodedValue});
+        }
+    }
+    if (Rewrites.empty()) return false;
+
+    Module* M = F.getParent();
+    LLVMContext& Ctx = M->getContext();
+    Type* I32 = Type::getInt32Ty(Ctx);
+    Function* SGetReg = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_getreg);
+    Function* TTD = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_s_ttracedata);
+    uint32_t hwreg = GETREG_IMMED(clockBits - 1, Config.ShaderClockShift, GFX12_SHADER_CYCLES_LO);
+    uint32_t clockDestShift = 32 - clockBits;
+
+    for (auto& [CI, encoded] : Rewrites)
+    {
+        IRBuilder<> B(CI);
+        Value* markerAndFlags = encoded;
+        if (markerAndFlags->getType() != I32) markerAndFlags = B.CreateZExtOrTrunc(markerAndFlags, I32);
+        markerAndFlags = B.CreateAnd(markerAndFlags, ConstantInt::get(I32, markerAndFlagMask));
+        Value* clock = B.CreateCall(SGetReg, {ConstantInt::get(I32, hwreg)});
+        Value* shiftedClock = B.CreateShl(clock, ConstantInt::get(I32, clockDestShift));
+        Value* packed = B.CreateOr(shiftedClock, markerAndFlags);
+        B.CreateCall(TTD, {packed});
+        CI->eraseFromParent();
+    }
+
+    ShaderClockBitsUsed = clockBits;
+    ShaderClockShiftUsed = Config.ShaderClockShift;
+    return true;
 }

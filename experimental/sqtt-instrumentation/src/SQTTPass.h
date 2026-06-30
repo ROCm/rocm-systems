@@ -97,9 +97,12 @@ private:
         uint32_t ID;
         std::string Name;
         bool IsPoint;
+        uint32_t ExtraPayloadCount;
     };
     std::vector<UserMarkerEntry> UserMarkers;
     llvm::Value* CurScopeCheck = nullptr; // cached per-function scope check result
+    uint32_t ShaderClockBitsUsed = 0;
+    uint32_t ShaderClockShiftUsed = 0;
 
     // Dynamically allocated IDs for system events
     uint32_t BarrierSignalID = 0;
@@ -130,6 +133,9 @@ private:
     // Marker insertion
     // -----------------------------------------------------------------
     void insertTraceMarker(llvm::IRBuilder<>& B, uint32_t markerID, llvm::Function& F, GfxGen gen);
+    void insertTraceMarkerWithPayload(
+        llvm::IRBuilder<>& B, uint32_t markerID, llvm::Value* payload, llvm::Function& F, GfxGen gen
+    );
 
     // -----------------------------------------------------------------
     // Scope check
@@ -156,7 +162,8 @@ private:
     {
         Enter,
         Exit,
-        Point
+        Point,
+        Data
     };
     struct MarkerCall
     {
@@ -167,8 +174,11 @@ private:
     llvm::SmallVector<MarkerCall, 8> collectSentinelCalls(llvm::Function& F);
     uint32_t resolveMarkerString(llvm::CallInst* CI, MarkerType type);
 
-    void emitBareTrace(llvm::IRBuilder<>& B, uint32_t encoded, llvm::Module* M, GfxGen gen);
-    void emitBareTraceValue(llvm::IRBuilder<>& B, llvm::Value* val, llvm::Module* M, GfxGen gen);
+    llvm::CallInst* emitBareTrace(llvm::IRBuilder<>& B, uint32_t encoded, llvm::Module* M, GfxGen gen);
+    llvm::CallInst* emitBareTraceValue(llvm::IRBuilder<>& B, llvm::Value* val, llvm::Module* M, GfxGen gen);
+    llvm::CallInst* emitRawTracePayload(llvm::IRBuilder<>& B, llvm::Value* val, llvm::Module* M);
+    static void markRawPayloadTrace(llvm::CallInst* CI);
+    static bool isRawPayloadTrace(llvm::CallInst* CI);
 
     bool resolveNamedMarkersEarly(llvm::Function& F, GfxGen gen);
     bool processNamedMarkers(llvm::Function& F, GfxGen gen);
@@ -263,6 +273,7 @@ private:
     bool filterInstrumentedFunctions(llvm::Module& M);
     uint32_t compactFuncIDs(llvm::Module& M);
     void rewriteMarkerIDs(llvm::Function& F, const std::map<uint32_t, uint32_t>& IDMap, GfxGen gen);
+    bool applyShaderClockPacking(llvm::Function& F, GfxGen gen);
     void removeFuncMarkersFromModule(llvm::Module& M, uint32_t id);
     void removeAdjacentBarriers(llvm::CallInst* CI);
 

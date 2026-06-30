@@ -40,6 +40,7 @@ __global__ void my_kernel(float *data, int n) {
 
     sqtt_marker_enter("work");
     data[idx] = do_work(data[idx]);
+    sqtt_marker_data("work_value", static_cast<uint32_t>(idx));
     sqtt_marker_exit("work");
 }
 ```
@@ -51,6 +52,11 @@ hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
 
 Without `-DSQTT_ENABLED=1` (or with `-DSQTT_ENABLED=0`), all marker calls
 compile to nothing. You can leave them in production code permanently.
+
+`sqtt_marker_data(name, value)` emits a named point marker followed by one raw
+32-bit payload record. The funcmap annotates that marker with
+`R:ID:extra_payload_count=1` so decoders treat the next shaderdata record as
+payload, not as a separate marker header.
 
 ### User markers with scope filtering
 
@@ -276,6 +282,8 @@ directly via `getenv()`.
 | `SQTT_INSTRUMENT_MEMORY` | `N:M` | off | Instrument memory ops. N = ops per marker, M = max gap. `2:5` = 1 marker per 2 ops, sequence breaks at gap > 5. Covers global, buffer, flat (not LDS/scratch). |
 | `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or both | off | Trace per-lane virtual addresses. Mutually exclusive with `SQTT_INSTRUMENT_MEMORY`. `memory` = global/buffer/flat, `lds` = LDS (AS=3). Expensive. |
 | `SQTT_MEM_BARRIER` | `none` / `asm` / `fence` (or `0` / `1` / `2`) | `fence` | Reordering boundary planted around every marker. `fence` (default) emits `fence syncscope("workgroup") acq_rel` tagged with AMDGPU local/LDS synchronization metadata, anchoring markers against optimizer and scheduler movement without marker-generated global cache invalidation. `asm` plants an empty `~{memory}` inline asm (IR/MIR-only constraint, no machine code). `none` disables both. Default favors marker accuracy; opt down for tight kernels. |
+| `SQTT_SHADER_CLOCK_BITS` | unsigned integer | auto (`12` on gfx12, `0` elsewhere) | Number of gfx12 marker header high bits reserved for shader clock. `0` disables clock packing. |
+| `SQTT_SHADER_CLOCK_SHIFT` | unsigned integer | `4` | Source bit offset in `HW_REG_SHADER_CYCLES_LO` for the packed shader clock field. |
 
 ## Examples
 
@@ -398,15 +406,15 @@ python3 tools/sqtt_decode_funcmap.py my_kernel.0.hipv4-amdgcn-amd-amdhsa--gfx942
 Example output:
 
 ```
-  Type        ID               Vaddr  Name
-  ----       ---               -----  ----
-kernel         -  0x0000000000001900  my_kernel(float*, int)
-  user         1                   -  load_phase
-  user         2                   -  compute_phase
-  func         3  0x0000000000001000  do_work(float)
- point         4                   -  barrier_signal
- point         5                   -  barrier_wait
- point         6                   -  barrier
+  Type        ID     Extra               Vaddr  Name
+  ----       ---     -----               -----  ----
+kernel         -         0  0x0000000000001900  my_kernel(float*, int)
+  user         1         0                   -  load_phase
+  user         2         0                   -  compute_phase
+  func         3         0  0x0000000000001000  do_work(float)
+ point         4         0                   -  barrier_signal
+ point         5         0                   -  barrier_wait
+ point         6         0                   -  barrier
 ```
 
 With address tracing, the funcmap also contains per-op entries with source
@@ -414,8 +422,8 @@ locations and a wave size entry:
 
 ```
   wave_size: 64
- point         1                   -  addr_trace_load@my_kernel.hip:10
- point         2                   -  addr_trace_store@my_kernel.hip:12
+ point         1       130                   -  addr_trace_load@my_kernel.hip:10
+ point         2       130                   -  addr_trace_store@my_kernel.hip:12
 ```
 
 ### Weighted cost model
@@ -433,8 +441,9 @@ When using `SQTT_INSTRUMENT_FUNCTIONS=cost:N`, instructions are weighted:
 ## ID encoding
 
 Marker values are packed into 2 flag bits so that small IDs can use the faster
-`s_ttracedata_imm` instruction (8-bit immediate, gfx10+). Larger IDs fall back
-to `s_ttracedata` (32-bit m0, all targets).
+`s_ttracedata_imm` instruction (8-bit immediate, gfx10+) when shader-clock
+packing is inactive. Larger IDs fall back to `s_ttracedata` (32-bit m0, all
+targets).
 
 ```
 Both instructions share the same bit layout:
@@ -451,8 +460,15 @@ Decoding (works for both):
 ```
 
 The pass plugin automatically selects `s_ttracedata_imm` when the encoded value
-fits in 8 bits and the target is gfx10+. IDs 1-63 use the fast path on RDNA.
-Exit markers are always `s_ttracedata_imm 1` (no m0 setup needed).
+fits in 8 bits, the target supports it, and shader-clock packing is inactive.
+IDs 1-63 use the fast path on RDNA. Exit markers use the same selection rule.
+
+On gfx12+, the default is to pack 12 shader-clock bits from
+`s_getreg_b32 hwreg(HW_REG_SHADER_CYCLES_LO, 4, 12)` into marker bits 31-20,
+leaving 18 marker ID bits plus the two low flags. Configure this with
+`SQTT_SHADER_CLOCK_BITS` and `SQTT_SHADER_CLOCK_SHIFT`; set
+`SQTT_SHADER_CLOCK_BITS=0` to use the legacy layout on gfx12. The funcmap emits
+`M:shader_clock_bits=N;shader_clock_shift=S` whenever clock packing is active.
 
 The marker type (function, user, barrier, memory) is determined by looking up
 the ID in the `.sqtt_funcmap` section, not from encoding bits.

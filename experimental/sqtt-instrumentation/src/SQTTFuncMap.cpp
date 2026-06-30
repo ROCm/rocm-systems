@@ -29,6 +29,14 @@ using namespace llvm;
 void SQTTInstrumentPass::emitFuncMap(Module& M)
 {
     std::string mapData;
+    if (ShaderClockBitsUsed > 0)
+    {
+        mapData += "M:shader_clock_bits=";
+        mapData += std::to_string(ShaderClockBitsUsed);
+        mapData += ";shader_clock_shift=";
+        mapData += std::to_string(ShaderClockShiftUsed);
+        mapData += '\n';
+    }
     // Instrumented device functions: "F:ID:name" (+ "@source_loc" if known)
     for (auto& entry : FuncMap)
     {
@@ -63,6 +71,14 @@ void SQTTInstrumentPass::emitFuncMap(Module& M)
         mapData += ':';
         mapData += entry.Name;
         mapData += '\n';
+        if (entry.ExtraPayloadCount > 0)
+        {
+            mapData += "R:";
+            mapData += std::to_string(entry.ID);
+            mapData += ":extra_payload_count=";
+            mapData += std::to_string(entry.ExtraPayloadCount);
+            mapData += '\n';
+        }
     }
     // Point markers (barriers, memory ops): "P:ID:name"
     if (Config.InstrumentBarriers)

@@ -68,6 +68,7 @@ from sqtt_data import (
     load_funcmaps,
     load_occupancy,
     load_shaderdata,
+    merge_funcmaps,
     preprocess_records,
 )
 
@@ -207,7 +208,7 @@ def emit_wave_events(
         return cycles * ts_scale
 
     for rec in wave_records:
-        marker_id, enter, exit_prev = decode_marker(rec.value)
+        marker_id, enter, exit_prev = decode_marker(rec.value, cur_funcmap)
         if marker_id == 0 and not exit_prev:
             continue   # noop / reserved value
 
@@ -548,14 +549,7 @@ def main() -> int:
     per_co = (load_funcmaps(code_objects, do_demangle=True)
               if args.demangle else per_co_raw)
 
-    merged_fm = FuncMap()
-    for fm in per_co.values():
-        merged_fm.markers.update(fm.markers)
-        merged_fm.source_locs.update(fm.source_locs)
-        merged_fm.kernels.extend(fm.kernels)
-        merged_fm.kernel_source_locs.update(fm.kernel_source_locs)
-        if fm.wave_size:
-            merged_fm.wave_size = fm.wave_size
+    merged_fm = merge_funcmaps(per_co.values())
 
     written: list[tuple[str, int, int]] = []
     skipped: list[str] = []
