@@ -170,9 +170,13 @@ def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
 
 
 def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
-    """Returns true if any HIP or ROCR files were modified."""
+    """Returns true if any HIP or ROCR files were modified (excluding docs).
+
+    Also returns true if TheRock CI workflow files are modified.
+    """
     if modified_paths is None:
         return False
+
     hip_rocr_prefixes = [
         "projects/hip/",
         "projects/hip-tests/",
@@ -181,8 +185,30 @@ def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
         "projects/rocr-runtime/",
         "projects/rocr-debug-agent/",
     ]
+
+    # Patterns to ignore (docs, etc.)
+    ignore_patterns = [
+        "*.md",
+        "*/docs/*",
+        "*/.gitignore",
+        "*/README*",
+        "*/CONTRIBUTING*",
+        "*/LICENSE*",
+    ]
+
+    def is_ignored(path: str) -> bool:
+        return any(fnmatch.fnmatch(path, pattern) for pattern in ignore_patterns)
+
+    def is_hip_rocr_code(path: str) -> bool:
+        return any(path.startswith(prefix) for prefix in hip_rocr_prefixes)
+
+    # Check for CI workflow changes
+    if check_for_workflow_file_related_to_ci(modified_paths):
+        return True
+
+    # Check for HIP/ROCR code changes (excluding ignored files)
     return any(
-        any(path.startswith(prefix) for prefix in hip_rocr_prefixes)
+        is_hip_rocr_code(path) and not is_ignored(path)
         for path in modified_paths
     )
 
