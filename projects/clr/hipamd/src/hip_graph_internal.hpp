@@ -279,6 +279,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     std::for_each(gpuPackets_.begin(), gpuPackets_.end(), [](auto p) { delete[] p; });
     std::for_each(gpuMetadataPackets_.begin(), gpuMetadataPackets_.end(),
                   [](auto p) { delete[] p; });
+    // Clear the pointer array
     gpuPackets_.clear();
     gpuMetadataPackets_.clear();
 
@@ -317,6 +318,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   ) {
     assert(stream_id_ != -1 && "Stream ID wasn't initialized");
     stream_ = streams[stream_id_];
+    // Reset the launch ID after the stream assignment
     launch_id_ = -1;
   }
   /// Create amd::command for the graph node
@@ -743,22 +745,23 @@ class Graph {
     std::vector<GraphExecutionPaths> child_graph_paths;  //!< Child graph execution paths
   };
 
-  //! DFS-based stream assignment for a single node and its subtree
+  //! Schedules one node on a virtual stream.
+  //! It will also process the nodes in edges, using DFS
   void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
-                       int stream_id  //!< A virtual stream for scheduling
+                       int stream_id  //!< Current active virtual stream to use for scheduling
   );
 
-  //! Schedule all nodes in the graph (classic or segment path)
+  //! Schedules all nodes in the graph into different streams
   hipError_t ScheduleNodes();
 
   //! Runs one node on the assigned stream
-  bool RunOneNode(Node node);
+  bool RunOneNode(Node node);  //!< Node for the execution on GPU
 
   //! Runs all nodes from the execution graph on the assigned streams
   bool RunNodes(
-      int32_t base_stream = 0,
-      const std::vector<hip::Stream*>* streams = nullptr,
-      const amd::Command::EventWaitList* parent_waitlist = nullptr
+      int32_t base_stream = 0,                             //!< The base stream to run the graph on
+      const std::vector<hip::Stream*>* streams = nullptr,  //!< Streams to run the graph
+      const amd::Command::EventWaitList* parent_waitlist = nullptr  //!< Parent Graph waitlist
   );
 
   //! Schedules nodes into batches for optimized execution
@@ -921,6 +924,8 @@ class Graph {
  protected:
   int max_streams_ = 0;  //!< Maximum number of streams used in the graph launch
   //!< Maps stream ID to the set of device IDs that use that stream.
+  //!< Used to track which devices are accessed by each parallel stream
+  //!< during multi-device graph execution scheduling.
   std::unordered_map<int, std::set<int>> streams_dev_ids_;
   int captureDeviceId_ = -1;
     //! Topological order of the graph doesn't include nodes embedded as part of the child graph
@@ -968,7 +973,9 @@ class Graph {
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
   std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
   std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream
-  std::vector<Node> wait_order_; //!< Temporary storage for waiting nodes
+  //!< Used as a temporary storage for the waiting nodes
+  //!< to reduce the stack pressure in recursion
+  std::vector<Node> wait_order_;
   std::vector<hip::Stream*> streams_;  //!< The list of streams, used in the execution
   int32_t current_id_ = 0;             //!< The current node ID in the graph execution sequence
   hip::Device* device_;                //!< HIP device object
@@ -1017,8 +1024,10 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
     graphExecSet_.erase(this);
   }
 
+  //! Check executable graphs validity
   static bool isGraphExecValid(GraphExecBase* pGraphExec);
-  // Completion callback shared by both paths: releases the launch reference.
+  // Completion callback for a graph launch: re-arms and returns the launch's
+  // pooled signals, then drops the launch's reference on the GraphExecBase.
   static void OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data);
 
   Node GetClonedNode(Node node) {

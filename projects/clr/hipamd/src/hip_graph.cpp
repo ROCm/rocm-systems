@@ -3218,6 +3218,7 @@ hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
   }
   clonedNode->SetEnabled(isEnabled);
 
+  // Update packet batches when node is enabled/disabled
   hipError_t status = graphExec->UpdatePacketBatchesForNodeEnableDisable(clonedNode, isEnabled != 0);
   HIP_RETURN(status);
 }
