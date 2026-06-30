@@ -43,8 +43,8 @@ bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_
 {
     if (source_path.empty())
     {
-        std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping empty file: "
-                  << source_path << '\n';
+        std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping empty file: " << source_path
+                  << '\n';
         return false;
     }
 
@@ -52,16 +52,16 @@ bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_
     absolute_source_path = m_filesystem->absolute(source_path, error);
     if (error)
     {
-        std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping file: "
-                  << source_path << ": " << error.message() << '\n';
+        std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping file: " << source_path
+                  << ": " << error.message() << '\n';
         return false;
     }
 
     const auto source_status = m_filesystem->status(absolute_source_path, error);
     if (error)
     {
-        std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping file: "
-                  << absolute_source_path << ": " << error.message() << '\n';
+        std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping file: " << absolute_source_path
+                  << ": " << error.message() << '\n';
         return false;
     }
 
@@ -82,8 +82,7 @@ bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_
     return true;
 }
 
-bool source_snapshotter_impl_t::create_destination_parent_directory(
-    const std::filesystem::path& destination_path)
+bool source_snapshotter_impl_t::create_destination_parent_directory(const std::filesystem::path& destination_path)
 {
     if (!destination_path.has_parent_path())
         return true;
@@ -93,8 +92,7 @@ bool source_snapshotter_impl_t::create_destination_parent_directory(
     if (error)
     {
         std::clog << "[rocprofiler-compute] [source_snapshotter] Failed to create destination "
-                  << "directory "
-                  << destination_path.parent_path() << ": " << error.message() << '\n';
+                  << "directory " << destination_path.parent_path() << ": " << error.message() << '\n';
         return false;
     }
 
@@ -108,12 +106,14 @@ void source_snapshotter_impl_t::copy_source(const std::filesystem::path& source_
         return;
 
     std::error_code error;
-    m_filesystem->copy_file(
-        source_path, destination_path, std::filesystem::copy_options::overwrite_existing, error);
+    m_filesystem->copy_file(source_path,
+                            destination_path,
+                            std::filesystem::copy_options::overwrite_existing,
+                            error);
     if (error)
     {
-        std::clog << "[rocprofiler-compute] [source_snapshotter] Failed to copy "
-                  << source_path << " to " << destination_path << ": " << error.message() << '\n';
+        std::clog << "[rocprofiler-compute] [source_snapshotter] Failed to copy " << source_path
+                  << " to " << destination_path << ": " << error.message() << '\n';
         return;
     }
 }

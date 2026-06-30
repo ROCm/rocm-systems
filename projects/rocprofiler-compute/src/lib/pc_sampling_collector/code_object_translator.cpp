@@ -19,9 +19,10 @@ bool is_source_line_token(std::string_view token)
     if (token == "?")
         return true;
 
-    return !token.empty() && std::all_of(token.cbegin(), token.cend(), [](char ch) {
-               return std::isdigit(static_cast<unsigned char>(ch)) != 0;
-           });
+    return !token.empty() &&
+           std::all_of(token.cbegin(),
+                       token.cend(),
+                       [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; });
 }
 
 std::string_view path_from_source_frame(std::string_view frame)
@@ -138,8 +139,8 @@ std::vector<std::filesystem::path> code_object_translator_impl_t::source_paths_f
         const auto separator_position = comment.find(source_frame_separator, frame_start);
         const auto frame_end = separator_position == std::string_view::npos ? comment.size()
                                                                             : separator_position;
-        const auto frame = comment.substr(frame_start, frame_end - frame_start);
-        const auto path  = path_from_source_frame(frame);
+        const auto frame     = comment.substr(frame_start, frame_end - frame_start);
+        const auto path      = path_from_source_frame(frame);
         if (!path.empty())
         {
             source_paths.emplace_back(std::string{path});

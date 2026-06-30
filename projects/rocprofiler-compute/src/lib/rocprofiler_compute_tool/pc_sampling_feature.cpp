@@ -29,8 +29,8 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode mode, std::filesyste
 {
 }
 
-pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
-                                             std::filesystem::path        output_path,
+pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode                mode,
+                                             std::filesystem::path         output_path,
                                              code_object_translator_t::ptr translator,
                                              pc_sampling_collector_t::ptr  collector,
                                              source_snapshotter_t::ptr     snapshotter)
@@ -60,7 +60,6 @@ void pc_sampling_feature_t::finalize()
     if (!writer.empty())
     {
         writer.flush(m_output_path);
-        m_snapshotter->snapshot(m_translator->get_source_paths(),
-                                m_output_path.parent_path() / "sources");
+        m_snapshotter->snapshot(m_translator->get_source_paths(), m_output_path.parent_path() / "sources");
     }
 }

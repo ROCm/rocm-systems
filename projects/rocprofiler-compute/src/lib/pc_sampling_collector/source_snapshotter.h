@@ -15,7 +15,7 @@ class source_snapshotter_t
 public:
     using ptr = std::shared_ptr<source_snapshotter_t>;
 
-    virtual ~source_snapshotter_t() = default;
+    virtual ~source_snapshotter_t()                                                = default;
     virtual void snapshot(const std::set<std::filesystem::path>& source_paths,
                           const std::filesystem::path&           destination_root) = 0;
 };
@@ -30,9 +30,8 @@ public:
                   const std::filesystem::path&           destination_root) override;
 
 private:
-    static std::filesystem::path get_destination_path(
-        const std::filesystem::path& source_path,
-        const std::filesystem::path& destination_root);
+    static std::filesystem::path get_destination_path(const std::filesystem::path& source_path,
+                                                      const std::filesystem::path& destination_root);
 
     bool is_copyable(const std::filesystem::path& source_path,
                      std::filesystem::path&       absolute_source_path);
