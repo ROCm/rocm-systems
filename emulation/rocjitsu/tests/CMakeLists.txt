@@ -876,7 +876,19 @@ endif()
 # --- HIP tests (requires amdclang++ + CLI launcher) ---
 
 rj_find_amdcxx(AMDCXX)
-if(AMDCXX AND HSA_RUNTIME64)
+set(RJ_ENABLE_HIP_TESTS ON)
+if(NOT AMDCXX)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (amdclang++ not found)")
+elseif(NOT HSA_RUNTIME64)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (libhsa-runtime64 not found)")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND RJ_SANITIZER_LINK_OPTIONS)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (GNU host compiler with sanitizers)")
+endif()
+
+if(RJ_ENABLE_HIP_TESTS)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
     set(RJ_HIP_SANITIZER_FLAGS)
@@ -1207,16 +1219,11 @@ if(AMDCXX AND HSA_RUNTIME64)
     add_subdirectory(race-detector)
 
     message(STATUS "HIP tests enabled (found ${AMDCXX})")
-else()
-    message(
-        STATUS
-        "HIP tests disabled (amdclang++ or libhsa-runtime64 not found)"
-    )
 endif()
 
 # --- Narrow conversion HIP CTS tests ---
 # Uses the same HIP compiler path as the other HIP tests.
-if(AMDCXX AND HSA_RUNTIME64)
+if(RJ_ENABLE_HIP_TESTS)
     set(CVT_NARROW_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_cvt_narrow_test)
     add_custom_command(
         OUTPUT ${CVT_NARROW_BIN}
