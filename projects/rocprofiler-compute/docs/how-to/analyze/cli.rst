@@ -759,6 +759,8 @@ milliseconds and microseconds per cell; missing values render as ``N/A``.
 When no operator has any recorded dispatches, the table is replaced by the
 line ``Operator summary: (no operators with recorded dispatches)``.
 
+.. _operator-filtering:
+
 Filtering by Operator
 ---------------------
 
@@ -840,9 +842,8 @@ Display all Triton kernels captured during profiling:
 Filter the Triton kernels
 -------------------------
 
-Filter Triton kernels with shell-style glob patterns (``fnmatch``); the syntax
-matches ``--torch-operator`` (``*``, ``?``, ``[seq]``; match all with no
-arguments, ``all``, ``*``, or ``**``):
+``--triton-operator`` uses the same shell-style glob matching as
+``--torch-operator``; see :ref:`operator-filtering` for the full pattern syntax.
 
 .. code-block:: shell-session
 

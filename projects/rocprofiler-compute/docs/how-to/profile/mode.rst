@@ -1042,6 +1042,8 @@ The ``pmc_perf.csv`` file contains the standard performance counter data (same a
 * Correlating operator-level timing with kernel-level hardware metrics
 * Tracing the execution flow from high-level PyTorch API to low-level GPU kernels
 
+.. _torch-trace-limitations:
+
 Limitations
 -----------
 
@@ -1141,11 +1143,9 @@ trace.
 Requirements
 ------------
 
-The minimum requirements to use the Triton trace feature are:
-
-* Valid Triton installation in the profiling environment.
-* The workload must be run as a Python script or a Python command.
-* The workload's Python version must match roctx's Python version.
+Triton trace has the same requirements and limitations as Torch trace (see
+:ref:`torch-trace-limitations`), with a valid Triton installation required in
+place of PyTorch.
 
 Usage
 -----
@@ -1177,7 +1177,7 @@ To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
 ML API trace
 ============
 
-``--ml-api-trace`` enables marker tracing for all supported framework backends in a
+``--ml-api-trace`` enables marker tracing for all supported ML framework backends in a
 single option.
 
 .. warning::
