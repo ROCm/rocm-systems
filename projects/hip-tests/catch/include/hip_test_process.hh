@@ -163,7 +163,7 @@ class SpawnProc {
       if (hFile != INVALID_HANDLE_VALUE) {
         si.dwFlags |= STARTF_USESTDHANDLES;
         si.hStdOutput = hFile;
-        si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+        si.hStdError = hFile;  // Redirect stderr to the same file as stdout
         si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
         inheritHandles = TRUE;
       }
