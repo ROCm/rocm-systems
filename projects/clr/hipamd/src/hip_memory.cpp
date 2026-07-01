@@ -3383,6 +3383,10 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
   command->enqueue();
   if (!isAsync) {
     hip_stream->finish();
+    if (command->status() == CL_INVALID_OPERATION) {
+      command->release();
+      return hipErrorIllegalState;
+    }
   }
   command->release();
   return hip_error;
