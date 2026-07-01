@@ -48,8 +48,8 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_EmptyString_Windows_UsesPAL) {
   hip::SpawnProc proc("hipEnvGpuEnablePal_CheckRuntime", true);
 
   // Empty string should default to PAL on Windows
-  int result = proc.run("");
-
+  proc.setEnv("GPU_ENABLE_PAL", "");
+  int result = proc.run();
   INFO("GPU_ENABLE_PAL=\"\" on Windows, result: " << result);
   REQUIRE(result == 0); // 0 = PAL path
 }
@@ -145,8 +145,8 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_EmptyString_Linux_UsesROCr) {
   hip::SpawnProc proc("hipEnvGpuEnablePal_CheckRuntime", true);
 
   // Empty string should default to ROCr on Linux
-  int result = proc.run("");
-
+  proc.setEnv("GPU_ENABLE_PAL", "");
+  int result = proc.run();
   INFO("GPU_ENABLE_PAL=\"\" on Linux, result: " << result);
   REQUIRE(result == 1); // 1 = ROCr path
 }
@@ -239,8 +239,10 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_EmptyVsZero_AreDifferent) {
   hip::SpawnProc proc_empty("hipEnvGpuEnablePal_CheckRuntime", true);
   hip::SpawnProc proc_zero("hipEnvGpuEnablePal_CheckRuntime", true);
 
-  int result_empty = proc_empty.run("");
-  int result_zero = proc_zero.run("0");
+  proc_empty.setEnv("GPU_ENABLE_PAL", "");
+  proc_zero.setEnv("GPU_ENABLE_PAL", "0");
+  int result_empty = proc_empty.run();
+  int result_zero = proc_zero.run();
 
   INFO("Empty string result: " << result_empty);
   INFO("Explicit '0' result: " << result_zero);
