@@ -6,6 +6,7 @@
 """Local sanity checks for rocprofiler-systems GitHub workflows."""
 
 import argparse
+import json
 import os
 import shutil
 import stat
@@ -29,13 +30,19 @@ PROJECT_ROOT = REPO_ROOT / "projects" / "rocprofiler-systems"
 WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 
 BUILD_WORKFLOW = WORKFLOW_DIR / "rocprofiler-systems-build.yml"
+BUILD_GROUP_WORKFLOW = WORKFLOW_DIR / "rocprofiler-systems-build-group.yml"
+COVERAGE_WORKFLOW = WORKFLOW_DIR / "rocprofiler-systems-code-coverage.yml"
 CONTINUOUS_WORKFLOW = WORKFLOW_DIR / "rocprofiler-systems-continuous-integration.yml"
 SANITIZER_WORKFLOW = WORKFLOW_DIR / "rocprofiler-systems-ubuntu-noble-sanitizers.yml"
 RUN_CI = PROJECT_ROOT / "scripts" / "run-ci.py"
 SUMMARY_SCRIPT = PROJECT_ROOT / "scripts" / "summarize-junit-results.py"
+MATRIX_HELPER = PROJECT_ROOT / "scripts" / "generate-ci-build-matrix.py"
+MATRIX_FILE = PROJECT_ROOT / ".github" / "ci-build-matrix.json"
 
 TARGET_WORKFLOWS = [
     BUILD_WORKFLOW,
+    BUILD_GROUP_WORKFLOW,
+    COVERAGE_WORKFLOW,
     CONTINUOUS_WORKFLOW,
     SANITIZER_WORKFLOW,
 ]
@@ -179,20 +186,73 @@ def check_actionlint(paths: Sequence[Path], strict_actionlint: str) -> None:
     ok("actionlint passed for rocprofiler-systems workflows")
 
 
-def check_junit_publication(build_workflow: Mapping[str, Any]) -> None:
-    workflow_jobs = jobs(build_workflow, BUILD_WORKFLOW)
-    require("build" in workflow_jobs, "build workflow is missing job 'build'")
+def check_junit_publication(
+    build_workflow: Mapping[str, Any], build_group_workflow: Mapping[str, Any]
+) -> None:
+    orchestrator_jobs = jobs(build_workflow, BUILD_WORKFLOW)
+    workflow_jobs = jobs(build_group_workflow, BUILD_GROUP_WORKFLOW)
+    expected_top_level = (
+        "matrix-setup",
+        "ubuntu-2204",
+        "ubuntu-2404",
+        "debian",
+        "rhel",
+        "code-coverage",
+        "sanitizers",
+        "publish-test-results",
+    )
+    for job_name in expected_top_level:
+        require(
+            job_name in orchestrator_jobs,
+            f"build workflow is missing top-level job '{job_name}'",
+        )
+
+    for job_name in ("ubuntu-2204", "ubuntu-2404", "debian", "rhel"):
+        job = as_mapping(orchestrator_jobs[job_name], job_name)
+        require(
+            job.get("needs") == "matrix-setup",
+            f"top-level job '{job_name}' must need matrix-setup",
+        )
+        require(
+            job.get("uses") == "./.github/workflows/rocprofiler-systems-build-group.yml",
+            f"top-level job '{job_name}' must call the build-group workflow",
+        )
+
+    require(
+        as_mapping(orchestrator_jobs["sanitizers"], "sanitizers job").get("uses")
+        == "./.github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml",
+        "top-level sanitizers job must call the sanitizer reusable workflow",
+    )
+    require(
+        as_mapping(orchestrator_jobs["code-coverage"], "code-coverage job").get("uses")
+        == "./.github/workflows/rocprofiler-systems-code-coverage.yml",
+        "top-level code-coverage job must call the coverage reusable workflow",
+    )
+    require(
+        "prepare-matrix" not in workflow_jobs,
+        "build-group workflow must not contain an internal matrix setup job",
+    )
+    require(
+        "primary-build" in workflow_jobs,
+        "build group workflow is missing job 'primary-build'",
+    )
     require(
         "system-deps" in workflow_jobs,
-        "build workflow is missing job 'system-deps'",
-    )
-    require(
-        "publish-test-results" in workflow_jobs,
-        "build workflow is missing aggregate job 'publish-test-results'",
+        "build group workflow is missing job 'system-deps'",
     )
 
-    for job_name in ("build", "system-deps"):
-        steps = job_steps(as_mapping(workflow_jobs[job_name], job_name), job_name)
+    for job_name in ("primary-build", "system-deps"):
+        job = as_mapping(workflow_jobs[job_name], job_name)
+        matrix = str(
+            as_mapping(job.get("strategy"), f"job '{job_name}' strategy").get(
+                "matrix", ""
+            )
+        )
+        require(
+            "inputs." in matrix,
+            f"job '{job_name}' matrix must come from workflow_call inputs",
+        )
+        steps = job_steps(job, job_name)
         publishers = [
             step
             for step in steps
@@ -207,41 +267,54 @@ def check_junit_publication(build_workflow: Mapping[str, Any]) -> None:
         junit_uploads = [
             step
             for step in uploads
-            if "junit-" in str(with_mapping(step, "upload artifact step").get("name"))
+            if str(with_mapping(step, "upload artifact step").get("name", "")).startswith(
+                "junit-build-"
+            )
             and "test-results.xml"
             in str(with_mapping(step, "upload artifact step").get("path"))
         ]
         require(
             junit_uploads,
-            f"job '{job_name}' must upload test-results.xml as a JUnit artifact",
+            f"job '{job_name}' must upload test-results.xml as a build JUnit artifact",
         )
 
     aggregate = as_mapping(
-        workflow_jobs["publish-test-results"], "publish-test-results job"
+        orchestrator_jobs["publish-test-results"], "publish-test-results job"
     )
     needs = aggregate.get("needs")
     require(
-        isinstance(needs, list) and set(needs) == {"build", "system-deps"},
-        "publish-test-results must need exactly build and system-deps",
+        isinstance(needs, list)
+        and set(needs)
+        == {
+            "ubuntu-2204",
+            "ubuntu-2404",
+            "debian",
+            "rhel",
+            "code-coverage",
+            "sanitizers",
+        },
+        "publish-test-results must need build groups, coverage, and sanitizers",
     )
     steps = job_steps(aggregate, "publish-test-results")
 
     download_steps = [
         step for step in steps if step_uses(step, "actions/download-artifact@")
     ]
-    require(download_steps, "publish-test-results must download JUnit artifacts")
-    download_with = with_mapping(download_steps[0], "download artifact step")
+    download_patterns = {
+        str(with_mapping(step, "download artifact step").get("pattern"))
+        for step in download_steps
+    }
     require(
-        download_with.get("pattern") == "junit-*",
-        "download-artifact pattern must be junit-*",
+        "junit-build-*" in download_patterns,
+        "summary job must download only build JUnit artifacts with junit-build-*",
     )
     require(
-        download_with.get("path") == "junit-results",
-        "download-artifact path must be junit-results",
+        "junit-sanitizer-*" in download_patterns,
+        "summary job must download sanitizer JUnit artifacts separately",
     )
     require(
-        download_with.get("merge-multiple") is False,
-        "download-artifact must keep merge-multiple: false",
+        "sanitizer-summary-*" in download_patterns,
+        "summary job must download sanitizer status artifacts",
     )
 
     publish_steps = [
@@ -254,27 +327,36 @@ def check_junit_publication(build_workflow: Mapping[str, Any]) -> None:
         "publish-test-results must use the custom Markdown summary, not EnricoMi",
     )
 
-    summary_step = step_with_name(steps, "Generate test result summary")
+    build_summary_step = step_with_name(steps, "Generate test result summary")
     require(
-        summary_step is not None,
+        build_summary_step is not None,
         "publish-test-results must generate a custom test result summary",
     )
-    summary_run = str(summary_step.get("run", ""))
+    build_summary_run = str(build_summary_step.get("run", ""))
     require(
-        "summarize-junit-results.py" in summary_run and "--mode build" in summary_run,
+        "summarize-junit-results.py" in build_summary_run
+        and "--mode build" in build_summary_run,
         "build summary must be generated by summarize-junit-results.py --mode build",
     )
     require(
-        "--commit-sha" in summary_run and "github.sha" in summary_run,
+        "--commit-sha" in build_summary_run and "github.sha" in build_summary_run,
         "build summary must include the commit SHA represented by the results",
     )
     require(
-        "--commit-url" in summary_run and "github.server_url" in summary_run,
+        "--commit-url" in build_summary_run and "github.server_url" in build_summary_run,
         "build summary must link the commit represented by the results",
     )
+
+    sanitizer_summary_step = step_with_name(steps, "Generate sanitizer result summary")
     require(
-        "cat junit-summary.md" in summary_run and "GITHUB_STEP_SUMMARY" in summary_run,
-        "build summary must be written to GITHUB_STEP_SUMMARY",
+        sanitizer_summary_step is not None,
+        "publish-test-results must generate a sanitizer summary",
+    )
+    sanitizer_summary_run = str(sanitizer_summary_step.get("run", ""))
+    require(
+        "summarize-junit-results.py" in sanitizer_summary_run
+        and "--mode sanitizer" in sanitizer_summary_run,
+        "sanitizer summary must be generated by summarize-junit-results.py --mode sanitizer",
     )
 
     comment_steps = [step for step in steps if step_uses(step, "actions/github-script@")]
@@ -287,24 +369,25 @@ def check_junit_publication(build_workflow: Mapping[str, Any]) -> None:
     )
     require(
         "rocprofiler-systems-ci-summary" in comment_script,
-        "build comment updater must use the stable summary marker",
+        "comment updater must use the stable summary marker",
     )
     require(
         "rocprofiler-systems-build-summary:start" in comment_script
         and "rocprofiler-systems-build-summary:end" in comment_script,
-        "build comment updater must replace the build summary section",
+        "comment updater must replace the build summary section",
     )
     require(
-        "rocprofiler-systems-sanitizer-summary:start" in comment_script,
-        "build comment updater must preserve/create the sanitizer summary section",
+        "rocprofiler-systems-sanitizer-summary:start" in comment_script
+        and "rocprofiler-systems-sanitizer-summary:end" in comment_script,
+        "comment updater must replace the sanitizer summary section",
     )
-    ok("JUnit publication uses the custom aggregate Markdown summary")
+    ok("JUnit publication uses one top-level aggregate Markdown summary")
 
 
-def check_ccache_keys(build_workflow: Mapping[str, Any]) -> None:
-    workflow_jobs = jobs(build_workflow, BUILD_WORKFLOW)
+def check_ccache_keys(build_group_workflow: Mapping[str, Any]) -> None:
+    workflow_jobs = jobs(build_group_workflow, BUILD_GROUP_WORKFLOW)
     expected_tokens = {
-        "build": [
+        "primary-build": [
             "matrix.ccache_key_distro",
             "matrix.image",
             "github.job",
@@ -341,6 +424,34 @@ def check_ccache_keys(build_workflow: Mapping[str, Any]) -> None:
     ok("ccache keys include image and expected matrix dimensions")
 
 
+def check_build_matrix_file() -> None:
+    data = json.loads(MATRIX_FILE.read_text(encoding="utf-8"))
+    primary = as_list(data.get("primary"), "primary build matrix")
+    system_deps = as_list(data.get("system_deps"), "system-deps build matrix")
+
+    expected_counts = {
+        "ubuntu-22.04": (5, 2),
+        "ubuntu-24.04": (5, 2),
+        "debian": (4, 0),
+        "rhel": (12, 4),
+    }
+    for group, (primary_count, system_deps_count) in expected_counts.items():
+        actual_primary = [entry for entry in primary if entry.get("group") == group]
+        actual_system_deps = [
+            entry for entry in system_deps if entry.get("group") == group
+        ]
+        require(
+            len(actual_primary) == primary_count,
+            f"group '{group}' must have {primary_count} primary matrix entries",
+        )
+        require(
+            len(actual_system_deps) == system_deps_count,
+            f"group '{group}' must have {system_deps_count} system-deps entries",
+        )
+
+    ok("build matrix data preserves expected group entry counts")
+
+
 def check_continuous_tarball_install(workflow_text: str) -> None:
     require(
         "TARBALL_ROCM_VERSION=$(basename" in workflow_text,
@@ -368,6 +479,25 @@ def check_continuous_tarball_install(workflow_text: str) -> None:
     ok("continuous CI ROCm tarball install exports the tarball version")
 
 
+def check_coverage_workflow(
+    coverage_workflow: Mapping[str, Any], workflow_text: str
+) -> None:
+    require(
+        "workflow_call" in as_mapping(coverage_workflow.get("on"), "coverage on"),
+        "coverage workflow must be reusable through workflow_call",
+    )
+    require(
+        "push:" not in workflow_text and "pull_request:" not in workflow_text,
+        "coverage workflow must not run independently from the orchestrator",
+    )
+    workflow_jobs = jobs(coverage_workflow, COVERAGE_WORKFLOW)
+    require(
+        "rocprofiler-systems-code-coverage" in workflow_jobs,
+        "coverage workflow must keep the code coverage job",
+    )
+    ok("coverage workflow is reusable through the top-level orchestrator")
+
+
 def check_sanitizer_workflow(
     sanitizer_workflow: Mapping[str, Any], workflow_text: str
 ) -> None:
@@ -378,6 +508,14 @@ def check_sanitizer_workflow(
     require(
         sanitizer_workflow.get("name") is not None,
         "sanitizer workflow must have a top-level name",
+    )
+    require(
+        "workflow_call" in as_mapping(sanitizer_workflow.get("on"), "sanitizer on"),
+        "sanitizer workflow must be reusable through workflow_call",
+    )
+    require(
+        "push:" not in workflow_text and "pull_request:" not in workflow_text,
+        "sanitizer workflow must not run independently from the orchestrator",
     )
     require(
         "python3 ./scripts/run-ci.py --stage generate" in workflow_text,
@@ -398,8 +536,8 @@ def check_sanitizer_workflow(
         "sanitizer workflow is missing the matrix sanitizer job",
     )
     require(
-        "publish-sanitizer-test-results" in workflow_jobs,
-        "sanitizer workflow is missing aggregate sanitizer summary job",
+        "publish-sanitizer-test-results" not in workflow_jobs,
+        "sanitizer summary must be published by the top-level summary job",
     )
 
     matrix_job = as_mapping(
@@ -428,46 +566,7 @@ def check_sanitizer_workflow(
         step_with_name(matrix_steps, "Upload sanitizer summary status") is not None,
         "sanitizer matrix job must upload status artifacts",
     )
-
-    aggregate = as_mapping(
-        workflow_jobs["publish-sanitizer-test-results"],
-        "publish-sanitizer-test-results job",
-    )
-    require(
-        aggregate.get("needs") == ["ubuntu-noble-sanitizers"],
-        "sanitizer summary job must need ubuntu-noble-sanitizers",
-    )
-    aggregate_steps = job_steps(aggregate, "publish-sanitizer-test-results")
-    summary_step = step_with_name(aggregate_steps, "Generate sanitizer result summary")
-    require(
-        summary_step is not None,
-        "sanitizer summary job must generate a custom sanitizer summary",
-    )
-    summary_run = str(summary_step.get("run", ""))
-    require(
-        "summarize-junit-results.py" in summary_run and "--mode sanitizer" in summary_run,
-        "sanitizer summary must be generated by summarize-junit-results.py --mode sanitizer",
-    )
-    comment_steps = [
-        step for step in aggregate_steps if step_uses(step, "actions/github-script@")
-    ]
-    require(
-        len(comment_steps) == 1,
-        "sanitizer summary job must have exactly one github-script comment updater",
-    )
-    comment_script = str(
-        with_mapping(comment_steps[0], "sanitizer github-script step").get("script", "")
-    )
-    require(
-        "rocprofiler-systems-ci-summary" in comment_script,
-        "sanitizer comment updater must use the stable summary marker",
-    )
-    require(
-        "rocprofiler-systems-sanitizer-summary:start" in comment_script
-        and "rocprofiler-systems-sanitizer-summary:end" in comment_script,
-        "sanitizer comment updater must replace the sanitizer summary section",
-    )
-    ok("sanitizer workflow keeps expected run-ci and custom summary contracts")
+    ok("sanitizer workflow is reusable and reports through artifacts")
 
 
 def write_fake_tool(bin_dir: Path, name: str, log_path: Path) -> None:
@@ -599,15 +698,21 @@ def check_run_ci_split_stage_contract(verbose: bool) -> None:
 
 
 def run_checks(args: argparse.Namespace) -> None:
-    for path in TARGET_WORKFLOWS + [RUN_CI, SUMMARY_SCRIPT]:
+    for path in TARGET_WORKFLOWS + [RUN_CI, SUMMARY_SCRIPT, MATRIX_HELPER, MATRIX_FILE]:
         require(path.exists(), f"required file is missing: {path.relative_to(REPO_ROOT)}")
 
     parsed_workflows = {path: load_workflow(path) for path in TARGET_WORKFLOWS}
 
     check_actionlint(TARGET_WORKFLOWS, args.strict_actionlint)
-    check_junit_publication(parsed_workflows[BUILD_WORKFLOW])
-    check_ccache_keys(parsed_workflows[BUILD_WORKFLOW])
+    check_junit_publication(
+        parsed_workflows[BUILD_WORKFLOW], parsed_workflows[BUILD_GROUP_WORKFLOW]
+    )
+    check_ccache_keys(parsed_workflows[BUILD_GROUP_WORKFLOW])
+    check_build_matrix_file()
     check_continuous_tarball_install(read_text(CONTINUOUS_WORKFLOW))
+    check_coverage_workflow(
+        parsed_workflows[COVERAGE_WORKFLOW], read_text(COVERAGE_WORKFLOW)
+    )
     check_sanitizer_workflow(
         parsed_workflows[SANITIZER_WORKFLOW], read_text(SANITIZER_WORKFLOW)
     )

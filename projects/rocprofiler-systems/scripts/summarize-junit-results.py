@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
 BUILD_GROUP_LABELS = {
+    "ubuntu-22.04": "Ubuntu 22.04",
+    "ubuntu-24.04": "Ubuntu 24.04",
+    "debian": "Debian",
+    "rhel": "RHEL",
     "build": "Build matrix",
     "system-deps": "System deps",
 }
@@ -157,6 +161,11 @@ def artifact_name(path: Path) -> str:
 
 
 def build_group_from_artifact(artifact: str) -> str:
+    for group in ("ubuntu-22.04", "ubuntu-24.04", "debian", "rhel"):
+        if artifact.startswith(f"junit-build-{group}-"):
+            return group
+        if artifact.startswith(f"junit-{group}-"):
+            return group
     if artifact.startswith("junit-system-deps-"):
         return "system-deps"
     if artifact.startswith("junit-build-"):
@@ -313,7 +322,14 @@ def render_build_summary(
     results: Sequence[JUnitResult], commit_sha: str = "", commit_url: str = ""
 ) -> str:
     summaries = summarize_by_group(results)
-    ordered_keys = ["build", "system-deps"]
+    ordered_keys = [
+        "ubuntu-22.04",
+        "ubuntu-24.04",
+        "debian",
+        "rhel",
+        "build",
+        "system-deps",
+    ]
     ordered_summaries = [summaries[key] for key in ordered_keys if key in summaries] + [
         summary for key, summary in sorted(summaries.items()) if key not in ordered_keys
     ]
