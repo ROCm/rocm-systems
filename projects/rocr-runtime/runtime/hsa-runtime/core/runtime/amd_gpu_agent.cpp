@@ -1069,6 +1069,8 @@ void GpuAgent::ReleaseResources() {
 
     if (trap_code_buf_ != NULL)
       system_deallocator()(trap_code_buf_);
+
+    driver().ReleaseResources(*this);
   }
 }
 

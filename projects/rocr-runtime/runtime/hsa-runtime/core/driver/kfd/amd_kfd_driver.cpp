@@ -111,6 +111,9 @@ __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
 KfdDriver::KfdDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
+KfdDriver::KfdDriver(core::DriverType type, std::string devnode_name)
+    : core::Driver(type, std::move(devnode_name)) {}
+
 hsa_status_t KfdDriver::Init() {
   HSAKMT_STATUS ret =
       HSAKMT_CALL(hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
@@ -153,6 +156,10 @@ hsa_status_t KfdDriver::ShutDown() {
 }
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
+  // When the DRM/UKI path is enabled, DrmDriver handles GPU agents instead.
+  if (core::Runtime::runtime_singleton_->flag().enable_drm())
+    return HSA_STATUS_ERROR;
+
   auto tmp_driver = std::unique_ptr<core::Driver>(new KfdDriver("/dev/kfd"));
 
   if (tmp_driver->Open() == HSA_STATUS_SUCCESS) {

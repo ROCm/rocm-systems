@@ -64,6 +64,9 @@
 #include "core/inc/amd_filter_device.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
+#include "core/inc/amd_drm_driver.h"
+#include "core/inc/amd_kfd_driver.h"
+#include "core/inc/amd_xdna_driver.h"
 #include "core/inc/runtime.h"
 #include "core/util/utils.h"
 #ifdef HSAKMT_VIRTIO_ENABLED
@@ -83,16 +86,11 @@ namespace AMD {
 namespace {
 
 const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
-#if _WIN32
-                 1
-#elif __linux__
-                 static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
-#endif
-                 >
+                      static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)>
     discover_driver_funcs = {
         KfdDriver::DiscoverDriver
 #ifdef __linux__
-        , XdnaDriver::DiscoverDriver
+        , DrmDriver::DiscoverDriver, XdnaDriver::DiscoverDriver
 #ifdef HSAKMT_VIRTIO_ENABLED
         , KfdVirtioDriver::DiscoverDriver
 #endif

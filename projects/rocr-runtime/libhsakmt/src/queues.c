@@ -690,6 +690,15 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
  */
 static uint32_t priority_map[] = {0, 3, 5, 7, 9, 11, 15};
 
+HSAuint32 HSAKMTAPI hsaKmtMapPriorityToHw(HSA_QUEUE_PRIORITY priority)
+{
+       if (priority < HSA_QUEUE_PRIORITY_MINIMUM ||
+           priority > HSA_QUEUE_PRIORITY_MAXIMUM)
+               return 7; // default to normal priority
+
+       return priority_map[priority + 3];
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
 							HsaKFDContext *ctx,
 							HSAuint32 NodeId,

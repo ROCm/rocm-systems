@@ -57,6 +57,8 @@
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/default_signal.h"
 
+#include "core/inc/amd_drm_driver.h"
+
 namespace rocr {
 namespace AMD {
 
@@ -134,6 +136,9 @@ BlitSdma<useGCR, scopeFields>::BlitSdma()
       gang_leader_(false),
       is_ganged_(false),
       min_submission_size_(0),
+      queue_shared_(NULL),
+      drm_queue_id_(0),
+      drm_doorbell_offset_(0),
       needs_kmt_doorbell_(false),
       sdma_wait_idle_(false),
       is_dxg_(false),
@@ -228,20 +233,69 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   std::memset(queue_start_addr_, 0, kQueueSize);
 
   bytes_written_.resize(kQueueSize);
+  bool drm_sdma_created = false;
 
-  // Access kernel driver to initialize the queue control block
-  // This call binds user mode queue object to underlying compute
-  // device. ROCr creates queues that are of two kinds: PCIe optimized
-  // and xGMI optimized. Which queue to create is indicated via input
-  // boolean flag
-  const HSA_QUEUE_TYPE kQueueType_ = rec_eng >= 0 ? HSA_QUEUE_SDMA_BY_ENG_ID :
-                                     (use_xgmi ? HSA_QUEUE_SDMA_XGMI : HSA_QUEUE_SDMA);
-  if (agent_->driver().CreateQueue(agent_->node_id(), kQueueType_, 100, HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM,
-                                   rec_eng, queue_start_addr_, kQueueSize, 0, nullptr,
-                                   queue_resource_) != HSA_STATUS_SUCCESS) {
-    LogPrint(HSA_AMD_LOG_FLAG_INFO, "Failed to create queue, size=%d, type=%d,"
-       " priority=%d, engine_id=%d", kQueueSize, kQueueType_, HSA_QUEUE_PRIORITY_MAXIMUM, rec_eng);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
+    // Attempt SDMA queue creation via DRM; fall back to KFD if unsupported.
+    drm_amdgpu_info_uq_metadata info;
+    do {
+      if (static_cast<DrmDriver&>(agent_->driver()).GetUserQueueMetadata(*agent_, DrmDriver::SDMA_QUEUE, &info) != 0)
+        break;
+
+      uint32_t csa_offset = AlignUp(sizeof(queue_shared_t), info.sdma.csa_alignment);
+      uint32_t total_size = csa_offset + info.sdma.csa_size;
+
+      queue_shared_ = static_cast<queue_shared_t *>(core::Runtime::runtime_singleton_->system_allocator()(
+                                                   total_size, MemoryRegion::GetPageSize(),
+                                                   MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged,
+                                                   agent_->node_id()));
+      if (!queue_shared_) break;
+
+      memset(queue_shared_, 0, total_size);
+
+      DrmDriver::CreateQueueInParams queueIn(*agent_, DrmDriver::SDMA_QUEUE,
+                                             queue_start_addr_, kQueueSize,
+                                             (uint64_t) &(queue_shared_->rptr),
+                                             (uint64_t) &(queue_shared_->wptr),
+                                             ((uint64_t) queue_shared_) + csa_offset);
+      DrmDriver::CreateQueueOutParams queueOut;
+
+      if (static_cast<DrmDriver&>(agent_->driver()).CreateQueue(&queueIn, &queueOut) != HSA_STATUS_SUCCESS)
+        break;
+
+      drm_doorbell_offset_ = queueOut.doorbell_offset;
+      drm_queue_id_ = queueOut.queue_id;
+      queue_resource_.Queue_DoorBell = (HSAuint32 *) queueOut.doorbell_ptr;
+      queue_resource_.Queue_write_ptr = (HSAuint32 *) &(queue_shared_->wptr);
+      queue_resource_.Queue_read_ptr = (HSAuint32 *) &(queue_shared_->rptr);
+      drm_sdma_created = true;
+    } while (false);
+
+    if (!drm_sdma_created) {
+      if (queue_shared_) {
+        core::Runtime::runtime_singleton_->system_deallocator()(queue_shared_);
+        queue_shared_ = nullptr;
+      }
+      // In DRM mode, KFD SDMA queues cannot access DRM-allocated VRAM safely.
+      // Return error; callers will skip DRM SDMA and fall back to CPU blit.
+      debug_print("DRM SDMA queue creation failed, not falling back to KFD\n");
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+  }
+
+  if (!drm_sdma_created) {
+    // Access kernel driver to initialize the queue control block
+    // This call binds user mode queue object to underlying compute
+    // device. ROCr creates queues that are of two kinds: PCIe optimized
+    // and xGMI optimized. Which queue to create is indicated via input
+    // boolean flag
+    const HSA_QUEUE_TYPE kQueueType_ = rec_eng >= 0 ? HSA_QUEUE_SDMA_BY_ENG_ID :
+      (use_xgmi ? HSA_QUEUE_SDMA_XGMI : HSA_QUEUE_SDMA);
+    if (agent_->driver().CreateQueue(agent_->node_id(), kQueueType_, 100, HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM,
+                                     rec_eng, queue_start_addr_, kQueueSize, 0, nullptr,
+                                     queue_resource_) != HSA_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
   }
 
   // Cache MMIO pointers to avoid repeated struct access + reinterpret_cast in hot paths.
@@ -282,13 +336,31 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
 template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFields>::Destroy() {
   // Release all allocated resources and reset them to zero.
 
-  if (queue_resource_.QueueId != 0) {
-    // Release queue resources from the kernel
-    auto err = agent_->driver().DestroyQueue(queue_resource_.QueueId);
-    assert(err == HSA_STATUS_SUCCESS);
-    (void)err;
-    memset(&queue_resource_, 0, sizeof(queue_resource_));
-  }
+ if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
+   if (drm_queue_id_ != 0) {
+     DrmDriver::DestroyQueueInParams queueIn(*agent_, drm_queue_id_, drm_doorbell_offset_);
+     auto err = static_cast<DrmDriver&>(agent_->driver()).DestroyQueue(&queueIn);
+     assert(err == HSA_STATUS_SUCCESS && "DestroyQueue failed.");
+
+     drm_doorbell_offset_ = 0;
+     drm_queue_id_ = 0;
+   }
+
+   if (queue_shared_) {
+     agent_->system_deallocator()(queue_shared_);
+     queue_shared_ = NULL;
+   }
+
+ } else {
+   if (queue_resource_.QueueId != 0) {
+     // Release queue resources from the kernel
+     auto err = HSAKMT_CALL(hsaKmtDestroyQueue(queue_resource_.QueueId));
+     assert(err == HSAKMT_STATUS_SUCCESS);
+    }
+
+}
+
+  memset(&queue_resource_, 0, sizeof(queue_resource_));
 
   if (queue_start_addr_ != NULL) {
     // Release queue buffer.
