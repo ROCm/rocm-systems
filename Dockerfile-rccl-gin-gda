@@ -157,6 +157,9 @@ ARG USE_LOCAL_SRC=0
 # DEBUG_BUILD=1: build all components with debug symbols (-g, Debug).
 ARG DEBUG_BUILD=0
 
+## All projects share a mono-repo layout under ${SRC}/projects/ so that
+## cmake auto-detect (CMAKE_SOURCE_DIR/../..) finds sibling projects.
+
 ## building rocSHMEM
 ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage2
 ARG ROCSHMEM_CACHE_BUST=1
@@ -167,15 +170,15 @@ RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
       find /tmp/local/projects/rocshmem -name CMakeCache.txt -delete && \
       find /tmp/local/projects/rocshmem -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
       find /tmp/local/projects/rocshmem -name build -type d -exec rm -rf {} + 2>/dev/null; \
-      mkdir -p ${WORKDIR}/rocshmem/src/projects && \
-      cp -r /tmp/local/projects/rocshmem ${WORKDIR}/rocshmem/src/projects/rocshmem; \
+      mkdir -p ${SRC}/projects && \
+      cp -r /tmp/local/projects/rocshmem ${SRC}/projects/rocshmem; \
     else \
-      git clone --no-checkout --filter=blob:none ${ROCM_REPO} ${WORKDIR}/rocshmem/src && \
-      cd ${WORKDIR}/rocshmem/src && \
+      git clone --no-checkout --filter=blob:none ${ROCM_REPO} ${SRC} && \
+      cd ${SRC} && \
       git sparse-checkout set --cone projects/rocshmem && \
       git checkout ${ROCSHMEM_BRANCH}; \
     fi
-RUN cd rocshmem/src/projects/rocshmem \
+RUN cd ${SRC}/projects/rocshmem \
  && mkdir -p build && cd build \
  && ../scripts/build_configs/all_backends \
       -DBUILD_DEBUG_TRACE_DEVICE=ON -DBUILD_DEBUG_DEVICE=ON -DBUILD_DEBUG_TRACE_HOST=ON \
@@ -187,7 +190,6 @@ RUN cd rocshmem/src/projects/rocshmem \
       $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug")
 
 ## building RCCL
-#ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
 ARG RCCL_BRANCH=users/abouteiller/gin-stage2
 ARG RCCL_CACHE_BUST=1
 COPY projects/rccl/      /tmp/local/projects/rccl/
@@ -200,40 +202,38 @@ RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
       find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name CMakeCache.txt -delete && \
       find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
       find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name build -type d -exec rm -rf {} + 2>/dev/null; \
-      mkdir -p ${WORKDIR}/rccl/src/projects && \
-      cp -r /tmp/local/projects/rccl       ${WORKDIR}/rccl/src/projects/rccl && \
-      cp -r /tmp/local/projects/rccl-tests ${WORKDIR}/rccl/src/projects/rccl-tests; \
+      cp -r /tmp/local/projects/rccl       ${SRC}/projects/rccl && \
+      cp -r /tmp/local/projects/rccl-tests ${SRC}/projects/rccl-tests; \
     else \
-      git clone --no-checkout --filter=blob:none "${ROCM_REPO}" ${WORKDIR}/rccl/src/ && \
-      cd ${WORKDIR}/rccl/src && \
-      git sparse-checkout set --cone projects/rccl && \
-      git checkout ${RCCL_BRANCH}; \
+      cd ${SRC} && \
+      git sparse-checkout add projects/rccl projects/rccl-tests && \
+      git checkout ${RCCL_BRANCH} -- projects/rccl projects/rccl-tests; \
     fi
 
-RUN cd rccl/src/projects/rccl \
+RUN cd ${SRC}/projects/rccl \
  && sed -i \
        's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks\/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
        src/rccl_wrap.cc
-RUN cd rccl/src/projects/rccl \
+RUN cd ${SRC}/projects/rccl \
  && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} --no-device-linker --no_clean \
-      --cmake-options "-DENABLE_ROCSHMEM_GIN=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} -DROCSHMEM_SOURCE_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem -DROCSHMEM_BUILD_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem/build/include/rocshmem" \
+      --cmake-options "-DENABLE_ROCSHMEM_GIN=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}" \
       $([ "${DEBUG_BUILD}" = "1" ] && echo "--debug")
 
 # Workaround: hipify renames core.h->core_tmp.h but gin headers still include ../core.h
 RUN RCCL_BUILD_DIR=$([ "${DEBUG_BUILD}" = "1" ] && echo "debug" || echo "release") \
- && ln -sf core_tmp.h ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_device/core.h \
- && ln -sf ../hipify/src/include/nccl_tuner.h ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_tuner.h \
- && cp -r ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/* ${RCCL_INSTALL_PREFIX}/include/
+ && ln -sf core_tmp.h ${SRC}/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_device/core.h \
+ && ln -sf ../hipify/src/include/nccl_tuner.h ${SRC}/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_tuner.h \
+ && cp -r ${SRC}/projects/rccl/build/${RCCL_BUILD_DIR}/include/* ${RCCL_INSTALL_PREFIX}/include/
 
 ## building RCCL-Tests
-RUN if [ "${USE_LOCAL_SRC}" != "1" ]; then \
-      cd rccl/src && \
-      git sparse-checkout add --cone projects/rccl-tests && \
-      git checkout ${RCCL_BRANCH}; \
-    fi
 RUN mkdir rccl-tests \
     && cd rccl-tests \
-    && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} -DROCSHMEM_SOURCE_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem -DROCSHMEM_BUILD_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem/build/include/rocshmem -DRCCL_SOURCE_DIR=${WORKDIR}/rccl/src/projects/rccl -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
+    && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") \
+       -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON \
+       -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} \
+       -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" \
+       -DGPU_TARGETS=${GPU_TARGETS} \
+       ${SRC}/projects/rccl-tests \
     && make -j16
 
 ## set environment variables

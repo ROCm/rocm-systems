@@ -217,7 +217,14 @@ if (ENABLE_ROCSHMEM)
     endif()
     # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM is set
     include_directories(${ROCSHMEM_INSTALL_DIR}/include)
-    # GIN QP device headers depend on rocshmem internals (queue_pair.hpp etc.)
+    # Auto-detect RCCL_SOURCE_DIR from mono-repo layout if not provided
+    if (NOT RCCL_SOURCE_DIR)
+        get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
+        if(EXISTS "${_mono_root}/projects/rccl/CMakeLists.txt")
+            set(RCCL_SOURCE_DIR "${_mono_root}/projects/rccl")
+            message(STATUS "rccl-tests: found rccl source at ${RCCL_SOURCE_DIR}")
+        endif()
+    endif()
     # Auto-detect ROCSHMEM_SOURCE_DIR from mono-repo layout if not provided
     if (NOT ROCSHMEM_SOURCE_DIR)
         get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
