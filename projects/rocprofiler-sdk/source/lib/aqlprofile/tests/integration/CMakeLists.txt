@@ -1,31 +1,13 @@
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-project(Aqlprofile_v2_tests LANGUAGES C CXX HIP)
-set(CMAKE_CXX_STANDARD 17)
-
-if(NOT DEFINED AQLPROFILE_TARGET)
-    find_library(
-        AQLPROFILE_TARGET REQUIRED
-        NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
-        HINTS /opt/rocm ${CMAKE_INSTALL_PREFIX}
-        PATHS /opt/rocm
-        PATH_SUFFIXES lib)
-    enable_testing()
-    include(CTest)
-endif()
-
-find_package(hsa-runtime64 REQUIRED CONFIG HINTS /opt/rocm/ PATHS /opt/rocm/)
-
-get_property(
-    HSA_RUNTIME_INCLUDE_DIRECTORIES
-    TARGET hsa-runtime64::hsa-runtime64
-    PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-find_file(
-    HSA_H hsa.h
-    PATHS ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
-    PATH_SUFFIXES hsa
-    NO_DEFAULT_PATH REQUIRED)
-get_filename_component(HSA_RUNTIME_INC_PATH ${HSA_H} DIRECTORY)
-include_directories(${HSA_RUNTIME_INC_PATH})
+#
+# aqlprofile v2 integration test (testv2), migrated from
+# projects/aqlprofile/test/integration.
+#
+# Builds a HIP application that exercises the in-tree aqlprofile v2 API
+# (aqlprofile_pmc_*) plus an LD_PRELOAD'd HSA-tool shared library (intercept)
+# that enables profiling on created queues. Both link the in-tree aqlprofile
+# statically so the migrated implementation is what gets tested.
+#
+rocprofiler_deactivate_clang_tidy()
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -35,39 +17,76 @@ if(NOT CMAKE_HIP_COMPILER)
         PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
         PATH_SUFFIXES bin llvm/bin NO_CACHE)
     mark_as_advanced(amdclangpp_EXECUTABLE)
-
     if(amdclangpp_EXECUTABLE)
         set(CMAKE_HIP_COMPILER "${amdclangpp_EXECUTABLE}")
     endif()
 endif()
 
+enable_language(HIP)
+
+foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
+    if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
+        set(CMAKE_HIP_FLAGS_${_TYPE} "${CMAKE_CXX_FLAGS_${_TYPE}}")
+    endif()
+endforeach()
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+set(CMAKE_HIP_EXTENSIONS OFF)
+
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 
-set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O1")
+set(_v2_common_libs
+    -Wl,--start-group
+    rocprofiler-sdk::rocprofiler-sdk-aqlprofile
+    rocprofiler-sdk::rocprofiler-sdk-static-library
+    rocprofiler-sdk::rocprofiler-sdk-common-library
+    -Wl,--end-group
+    rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+    rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+    rocprofiler-sdk::rocprofiler-sdk-drm)
 
-add_library(intercept SHARED)
-target_include_directories(
-    intercept PRIVATE ${HSA_RUNTIME_INC_PATH} ${CMAKE_CURRENT_SOURCE_DIR}
-                      ${CMAKE_SOURCE_DIR}/src/core/include/)
-target_sources(intercept PRIVATE intercept.cpp)
-target_link_libraries(intercept PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_TARGET})
-target_link_options(
-    intercept PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap
-    -Wl,--no-undefined)
-target_compile_definitions(intercept PUBLIC AMD_INTERNAL_BUILD)
-add_executable(testv2)
-target_sources(testv2 PRIVATE main.cpp workload.cpp counter.cpp agent.cpp)
-target_include_directories(
-    testv2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/core/include/
-                   ${HSA_RUNTIME_INC_PATH} /opt/rocm/include)
-target_link_libraries(testv2 PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_TARGET})
-target_compile_definitions(testv2 PUBLIC AMD_INTERNAL_BUILD)
+# HSA-tool shared library: loaded via LD_PRELOAD, hooks hsa_queue_create to enable
+# aqlprofile profiling on the queue (uses the in-tree v1 get_info).
+add_library(aqlprofile-v2-intercept SHARED)
+target_sources(aqlprofile-v2-intercept PRIVATE intercept.cpp)
+target_include_directories(aqlprofile-v2-intercept PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(aqlprofile-v2-intercept PRIVATE AMD_INTERNAL_BUILD)
+target_compile_options(aqlprofile-v2-intercept PRIVATE -Wno-shadow -Wno-unused-parameter)
+target_link_libraries(aqlprofile-v2-intercept PRIVATE ${_v2_common_libs})
+target_link_options(aqlprofile-v2-intercept PRIVATE
+                    -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap)
+set_target_properties(
+    aqlprofile-v2-intercept PROPERTIES OUTPUT_NAME intercept LIBRARY_OUTPUT_DIRECTORY
+                                                             ${CMAKE_CURRENT_BINARY_DIR})
 
-# Add a PRELOAD environment with libintercept
-add_test(NAME testv2 COMMAND testv2)
+# HIP application exercising the in-tree aqlprofile v2 API.
+add_executable(aqlprofile-v2-test)
+target_sources(aqlprofile-v2-test PRIVATE main.cpp workload.cpp counter.cpp agent.cpp)
+target_include_directories(aqlprofile-v2-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(aqlprofile-v2-test PRIVATE AMD_INTERNAL_BUILD)
+target_compile_options(aqlprofile-v2-test PRIVATE -Wno-shadow -Wno-unused-parameter
+                                                  -Wno-unused-variable)
+set_target_properties(
+    aqlprofile-v2-test PROPERTIES OUTPUT_NAME testv2 RUNTIME_OUTPUT_DIRECTORY
+                                                     ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(aqlprofile-v2-test PRIVATE ${_v2_common_libs}
+                                                 rocprofiler-sdk::rocprofiler-sdk-hip)
+
+set(_v2_ld_library_path
+    "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    )
+
+add_test(NAME tests.integration.aqlprofile.v2 COMMAND $<TARGET_FILE:aqlprofile-v2-test>)
 set_tests_properties(
-    testv2
-    PROPERTIES ENVIRONMENT "${LD_PRELOAD}:${CMAKE_CURRENT_BINARY_DIR}/libintercept.so"
-               TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+    tests.integration.aqlprofile.v2
+    PROPERTIES
+        ENVIRONMENT
+        "LD_PRELOAD=$<TARGET_FILE:aqlprofile-v2-intercept>;LD_LIBRARY_PATH=${_v2_ld_library_path}"
+        WORKING_DIRECTORY
+        ${CMAKE_CURRENT_BINARY_DIR}
+        LABELS
+        "integration-tests;aqlprofile"
+        TIMEOUT
+        30
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
