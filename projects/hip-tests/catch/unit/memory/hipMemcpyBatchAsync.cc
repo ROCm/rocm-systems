@@ -395,6 +395,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Functional) {
   StreamGuard stream_guard(Streams::created);
 
   SECTION("Regular attributes") {
+#if HT_AMD
     std::array<hipMemcpyAttributes, 6> host_attrs{
         hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault},
         hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE},
@@ -403,6 +404,13 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Functional) {
         hipMemcpyAttributes{hipMemcpySrcAccessOrderAny, {}, {}, hipMemcpyFlagDefault},
         hipMemcpyAttributes{hipMemcpySrcAccessOrderAny, {}, {}, hipMemcpyFlagExtPreferCE},
     };
+#else
+    std::array<hipMemcpyAttributes, 3> host_attrs{
+        hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault},
+        hipMemcpyAttributes{hipMemcpySrcAccessOrderDuringApiCall, {}, {}, hipMemcpyFlagDefault},
+        hipMemcpyAttributes{hipMemcpySrcAccessOrderAny, {}, {}, hipMemcpyFlagDefault},
+    };
+#endif
     BatchConfig host_config{host_attrs.size() * kCopiesPerAttr, kSmallCopySize};
     std::vector<LinearAllocGuard<int>> host_src =
         AllocateBatchBuffers(LinearAllocs::hipHostMalloc, host_config);
@@ -426,6 +434,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Functional) {
     VerifyDeviceBuffers(dst_ptrs, kSmallCopySize);
   }
 
+#if HT_AMD
   SECTION("Swap attribute") {
     BatchConfig d2d_config{kCopiesPerAttr, kSmallCopySize};
     std::vector<LinearAllocGuard<int>> d2d_src =
@@ -454,6 +463,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Functional) {
       VerifyDeviceBuffers(d2d_dst_ptrs, kSmallCopySize, kSwapSrcValue);
     }
   }
+#endif
 }
 
 /**
@@ -474,7 +484,11 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional) {
   const PointerPattern pointer_pattern =
       GENERATE(PointerPattern::kBasePointers, PointerPattern::kOffsetPointers,
                PointerPattern::kUnalignedPointers, PointerPattern::kBroadcastSource);
+#if HT_AMD
   const hipMemcpyFlags flag = GENERATE(hipMemcpyFlagDefault, hipMemcpyFlagExtPreferCE);
+#else
+  const hipMemcpyFlags flag = hipMemcpyFlagDefault;
+#endif
   const size_t offset_bytes = pointer_pattern == PointerPattern::kOffsetPointers      ? sizeof(int)
                               : pointer_pattern == PointerPattern::kUnalignedPointers ? 1
                                                                                       : 0;
@@ -844,7 +858,11 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Stream) {
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
   const std::vector<std::pair<int, int>> peer_pairs = GetPeerAccessibleDevicePairs();
   const int stream_device = peer_pairs.front().first;
+#if HT_AMD
   const hipMemcpyFlags flag = GENERATE(hipMemcpyFlagDefault, hipMemcpyFlagExtPreferCE);
+#else
+  const hipMemcpyFlags flag = hipMemcpyFlagDefault;
+#endif
 
   constexpr size_t copy_size = kSmallCopySize;
   constexpr size_t batch_count = 2;
