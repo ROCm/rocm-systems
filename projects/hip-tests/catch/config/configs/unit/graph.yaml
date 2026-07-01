@@ -170,6 +170,9 @@ graph:
   Unit_hipGraphAddHostNode_BasicFunc:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphAddHostNode_CallbackSeesUpstreamDtoH:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphAddMemcpyNodeFromSymbol_Negative:
     <<: *level_2
     tags: [node]

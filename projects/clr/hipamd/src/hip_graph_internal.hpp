@@ -2901,8 +2901,13 @@ class GraphHostNode : public GraphNode {
     amd::Command::EventWaitList waitList;
     commands_.reserve(1);
     amd::Command* command = new amd::Marker(*stream, !kMarkerDisableFlush, waitList);
-    // This is just to invoke a callback, so no need to flush caches.
-    command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+    // The host callback runs on the CPU and may read memory produced by an
+    // upstream GPU node (e.g. a DtoH copy feeding this node). Use a system-scope
+    // fence so the barrier preceding the callback flushes/invalidates the L2 and
+    // the producer's writes are visible to the CPU. A NOP-scope barrier only
+    // orders GPU work and leaves the data invisible to the host on GPUs where
+    // the producer's agent-scope release is not host-visible.
+    command->setCommandEntryScope(amd::Device::kCacheStateSystem);
     commands_.emplace_back(command);
     return hipSuccess;
   }
