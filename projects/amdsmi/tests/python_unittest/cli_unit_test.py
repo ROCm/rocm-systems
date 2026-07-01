@@ -196,8 +196,16 @@ class TestAmdSmiCli(unittest.TestCase):
         options = []
         for index, line in enumerate(lines):
             if found:
-                if not line:
+                # The hybrid help formatter separates entries with blank lines,
+                # stacks help beneath long options, and uppercases headings.
+                # Skip blank lines and stacked help/continuation lines; stop at
+                # the next section header (the first non-indented line).
+                if not line.strip():
+                    continue
+                if not line[:1].isspace():
                     break
+                if line.strip()[0] != "-":
+                    continue
                 items = line.split()
                 for item_index, item in enumerate(items):
                     items[item_index] = item.strip()
@@ -250,7 +258,7 @@ class TestAmdSmiCli(unittest.TestCase):
                             pass
                         else:
                             print(f"ERROR: bad sub arg {items[item_index]}")
-                    elif len(items) > item_index:
+                    elif len(items) > item_index + 1:
                         if items[item_index + 1][0:1] == self.openBracket:
                             items[item_index + 1] = items[item_index + 1][1:]
                         sub_arg = items[item_index + 1]
@@ -335,7 +343,7 @@ class TestAmdSmiCli(unittest.TestCase):
                             pass
                         else:
                             options.append(items[item_index])
-            if match_str in line:
+            if match_str.lower() in line.lower():
                 found = True
         if not options:
             return ["pass"]
@@ -746,6 +754,50 @@ class TestAmdSmiCli(unittest.TestCase):
             msg = f"\n{self.tab}".join(errors)
             self.fail(f"Fail:\n{self.tab}{msg}")
         return
+
+    def test_help_formatter(self):
+        """Guard the hybrid help formatter output contract.
+
+        Verifies the hybrid formatter contract: uppercased section headings, a
+        blank line between entries, no literal tab characters, and that
+        nargs="+" options advertise their real grammar (display_metavar) in the
+        usage line instead of argparse's "X [X ...]".
+        """
+        self.common.print_func_name("")
+
+        (rc, std_out, std_err) = self.util.RunCmdSync("amd-smi static --help")
+        self.assertEqual(rc, 0, f"'amd-smi static --help' failed: {std_err}")
+
+        # Section headings are uppercased
+        self.assertIn("STATIC ARGUMENTS:", std_out)
+        self.assertIn("DEVICE ARGUMENTS:", std_out)
+
+        # Tabs in source help strings are expanded, never rendered literally
+        self.assertNotIn("\t", std_out, "help output contains literal tab characters")
+
+        # The hybrid layout separates entries with a blank line
+        lines = std_out.split("\n")
+        self.assertTrue(
+            any(
+                lines[i].startswith("  -") and not lines[i + 1].strip()
+                for i in range(len(lines) - 1)
+            ),
+            "expected a blank line after an option entry (hybrid layout)",
+        )
+
+        # nargs="+" options show their real grammar, not "X [X ...]", in usage.
+        # CPU options only appear when HSMP is initialized, so guard on presence.
+        (rc, metric_out, std_err) = self.util.RunCmdSync("amd-smi metric --help")
+        self.assertEqual(rc, 0, f"'amd-smi metric --help' failed: {std_err}")
+        if "--cpu-svi3-vr-controller-temp" in metric_out:
+            self.assertIn("TYPE [RAIL_INDEX]", metric_out)
+            self.assertNotIn("TYPE [TYPE ...]", metric_out)
+
+        (rc, set_out, std_err) = self.util.RunCmdSync("amd-smi set --help")
+        self.assertEqual(rc, 0, f"'amd-smi set --help' failed: {std_err}")
+        if "--cpu-pwr-eff-mode" in set_out:
+            self.assertIn("MODE [UTIL PPT_LIMIT]", set_out)
+            self.assertNotIn("MODE [MODE ...]", set_out)
 
     def test_help(self):
         self.common.print_func_name("")

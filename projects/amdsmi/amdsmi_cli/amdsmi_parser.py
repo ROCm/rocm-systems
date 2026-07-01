@@ -61,6 +61,22 @@ class AMDSMIParserHelpFormatter(argparse.HelpFormatter):
         super().start_section(heading.upper() if heading else heading)
 
 
+def _set_display_metavar(action, metavar):
+    """Give an argparse action a literal usage/help metavar.
+
+    argparse renders ``nargs="+"`` as ``X [X ...]``; attaching ``display_metavar``
+    lets an option advertise its real grammar (e.g. ``TYPE [RAIL_INDEX]``) in both
+    the usage line and the options list. Consumed by
+    ``_AMDSMIHybridHelpFormatter._format_args``.
+    """
+    action.display_metavar = metavar
+
+
+# NOTE: The layout below overrides several non-public argparse methods
+# (_format_action, _format_args, _fill_text) and reads argparse-internal state
+# (_current_indent, _width, _expand_help, _iter_indented_subactions). These are
+# stable across CPython 3.9-3.13; re-verify against argparse if the minimum
+# supported Python version is bumped.
 class _AMDSMIHybridHelpFormatter:
     """Shared help layout for amd-smi subcommand screens.
 
@@ -71,17 +87,28 @@ class _AMDSMIHybridHelpFormatter:
 
     INLINE_HELP_COLUMN = 26
     STACKED_HELP_INDENT = 4
+    MIN_WRAP_WIDTH = 11
 
     def start_section(self, heading):
         super().start_section(heading.upper() if heading else heading)
 
+    def _format_args(self, action, default_metavar):
+        # Honor a literal display_metavar (see _set_display_metavar) so the real
+        # grammar shows in BOTH the usage line and the options list.
+        display_metavar = getattr(action, "display_metavar", None)
+        if display_metavar is not None:
+            return display_metavar
+        return super()._format_args(action, default_metavar)
+
     def _fill_text(self, text, width, indent):
-        # RawText preserves author newlines; also strip trailing whitespace that
-        # line-continuations bake into multi-line description/help source strings.
-        return "\n".join((indent + line).rstrip() for line in text.splitlines())
+        # RawText preserves author newlines; also expand tabs baked into help
+        # source strings and strip trailing whitespace from line continuations.
+        return "\n".join((indent + line).rstrip() for line in text.expandtabs(4).splitlines())
 
     def _format_action(self, action):
-        help_text = self._expand_help(action) if (action.help and action.help.strip()) else ""
+        help_text = (
+            self._expand_help(action).expandtabs(4) if (action.help and action.help.strip()) else ""
+        )
         invocation = self._format_action_invocation(action)
         indent = " " * self._current_indent
         body = " " * (self._current_indent + self.STACKED_HELP_INDENT)
@@ -90,14 +117,16 @@ class _AMDSMIHybridHelpFormatter:
         if help_text and "\n" not in help_text:
             if len(indent) + len(invocation) < self.INLINE_HELP_COLUMN:
                 wrapped = textwrap.wrap(
-                    help_text, max(self._width - self.INLINE_HELP_COLUMN, 11)
+                    help_text, max(self._width - self.INLINE_HELP_COLUMN, self.MIN_WRAP_WIDTH)
                 ) or [""]
                 pad = self.INLINE_HELP_COLUMN - len(indent) - len(invocation)
                 cont = " " * self.INLINE_HELP_COLUMN
                 parts.append(f"{indent}{invocation}{' ' * pad}{wrapped[0]}\n")
                 parts.extend(f"{cont}{line}\n" for line in wrapped[1:])
             else:
-                wrapped = textwrap.wrap(help_text, max(self._width - len(body), 11)) or [""]
+                wrapped = textwrap.wrap(
+                    help_text, max(self._width - len(body), self.MIN_WRAP_WIDTH)
+                ) or [""]
                 parts.append(f"{indent}{invocation}\n")
                 parts.extend(f"{body}{line}\n" for line in wrapped)
         else:
@@ -119,13 +148,11 @@ class AMDSMISubparserHelpFormatter(_AMDSMIHybridHelpFormatter, argparse.RawTextH
         self._action_max_length = 20
 
     def _format_action_invocation(self, action):
+        # Render "-s, --long METAVAR" once; argparse's base repeats the metavar
+        # per option string. Metavar comes from _format_args, which honors
+        # display_metavar for nargs="+" options.
         if not action.option_strings or action.nargs == 0:
             return super()._format_action_invocation(action)
-        # nargs="+" otherwise renders as "X [X ...]"; let an action opt into a
-        # literal metavar string that shows the real argument grammar.
-        display_metavar = getattr(action, "display_metavar", None)
-        if display_metavar is not None:
-            return ", ".join(action.option_strings) + " " + display_metavar
         default = self._get_default_metavar_for_optional(action)
         args_string = self._format_args(action, default)
         return ", ".join(action.option_strings) + " " + args_string
@@ -2198,7 +2225,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metavar="TYPE",
                 help=cpu_svi3_vr_controller_temp_help,
             )
-            svi3_vr_temp_action.display_metavar = "TYPE [RAIL_INDEX]"
+            _set_display_metavar(svi3_vr_temp_action, "TYPE [RAIL_INDEX]")
             cpu_group.add_argument(
                 "--cpu-enabled-commands",
                 action="store_true",
@@ -2776,7 +2803,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar="MODE",
                     help=set_cpu_pwr_eff_mode_help,
                 )
-                pwr_eff_mode_action.display_metavar = "MODE [UTIL PPT_LIMIT]"
+                _set_display_metavar(pwr_eff_mode_action, "MODE [UTIL PPT_LIMIT]")
                 cpu_group.add_argument(
                     "--cpu-gmi3-link-width",
                     action="append",

@@ -210,22 +210,22 @@ STATIC ARGUMENTS:
 
   -r, --ras
       Displays RAS features information;
-      	Sudo may be required for some features
+          Sudo may be required for some features
 
   -C, --clock [CLOCK ...]
       Show one or more valid clock frequency levels. Available options:
-      	SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
+          SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
 
   -p, --partition
       Partition information:
-      	No longer available in default output.
-      	Argument is required to display.
-      	Ex. `amd-smi static -p` or use
-      	`amd-smi partition -c -m`/`sudo amd-smi partition -a`
+          No longer available in default output.
+          Argument is required to display.
+          Ex. `amd-smi static -p` or use
+          `amd-smi partition -c -m`/`sudo amd-smi partition -a`
 
   -m, --mem-carveout
       Display VRAM carveout memory options and current setting.
-      	Only supported on some APUs.
+          Only supported on some APUs.
 
   -l, --limit             All limit metric values (i.e. power and thermal limits)
 
@@ -414,7 +414,7 @@ usage: amd-smi metric [-h] [-m] [-u] [-p] [-c] [-t] [-P] [-e] [-k] [-V] [-b] [-G
                       [--cpu-dimm-thermal-sensor DIMM_ADDR] [--cpu-xgmi-pstate-range]
                       [--cpu-railisofreq-policy] [--cpu-dfcstate-ctrl] [--cpu-pc6-enable]
                       [--cpu-cc6-enable] [--cpu-dimm-sb-reg DIMM_ADDR LID OFFSET SPACE]
-                      [--cpu-tdelta] [--cpu-svi3-vr-controller-temp TYPE [TYPE ...]]
+                      [--cpu-tdelta] [--cpu-svi3-vr-controller-temp TYPE [RAIL_INDEX]]
                       [--cpu-enabled-commands] [--cpu-sdps-limit] [--core-boost-limit]
                       [--core-curr-active-freq-core-limit] [--core-energy]
                       [--core-ccd-power] [--core-floor-limit] [--core-eff-floor-limit]
@@ -865,7 +865,7 @@ usage: amd-smi set [-h]
                    INDEX | -G GB] [--cpu-pwr-limit PWR_LIMIT]
                    [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM]
-                   [--cpu-pwr-eff-mode MODE [MODE ...]]
+                   [--cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT]]
                    [--cpu-gmi3-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-pcie-link-rate LINK_RATE]
                    [--cpu-df-pstate-range MIN_PSTATE MAX_PSTATE] [--cpu-enable-apb]
@@ -892,45 +892,45 @@ SET ARGUMENTS:
 
   -l, --perf-level LEVEL
       Set one of the following performance levels:
-      	AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
+          AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
 
   -P, --profile PROFILE_LEVEL
       Set power profile level (#) or choose one of available profiles:
-      	CUSTOM, VIDEO, POWER_SAVING, COMPUTE, VR, 3D_FULL_SCREEN, BOOTUP_DEFAULT
+          CUSTOM, VIDEO, POWER_SAVING, COMPUTE, VR, 3D_FULL_SCREEN, BOOTUP_DEFAULT
 
   -d, --perf-determinism SCLKMAX
       Enable performance determinism mode and set GFXCLK softmax limit (in MHz)
 
   -C, --compute-partition, --accelerator-partition TYPE/INDEX
       Set one of the following accelerator TYPE or profile INDEX:
-      	N, /, A.
-      	Use `sudo amd-smi partition --accelerator` to find acceptable values.
+          N, /, A.
+          Use `sudo amd-smi partition --accelerator` to find acceptable values.
 
   -M, --memory-partition PARTITION
       Set one of the following the memory partition modes:
-      	NPS1, NPS2, NPS4, NPS8
+          NPS1, NPS2, NPS4, NPS8
 
   -a, --compute-partition-mem-alloc-mode MODE
       Set compute partition memory allocation mode (CAPPING or ALL). Requires sudo.
 
   -o, --power-cap WATTS [[PWR_TYPE] ...]
       Set either PPT0 or PPT1 power capacity limit:
-      	Ex: `amd-smi set -o 1300 ppt0`
-      	PPT0 min cap: 0 W, PPT0 max cap: 550 W
-      	PPT1 min cap: N/A, PPT1 max cap: N/A
+          Ex: `amd-smi set -o 1300 ppt0`
+          PPT0 min cap: 0 W, PPT0 max cap: 550 W
+          PPT1 min cap: N/A, PPT1 max cap: N/A
 
   -p, --soc-pstate POLICY_ID
       Set the GPU soc pstate policy using policy id, an integer. Valid id's include:
-      	N/A
+          N/A
 
   -x, --xgmi-plpd POLICY_ID
       Set the GPU XGMI per-link power down policy using policy id, an integer. Valid id's include:
-      	N/A
+          N/A
 
   -c, --clk-level CLK_TYPE [PERF_LEVELS ...]
       Set one or more sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency levels.
-      	Use `amd-smi static --clock` to find acceptable levels.
-      	Use `amd-smi static --bus` to find acceptable pcie levels.
+          Use `amd-smi static --clock` to find acceptable levels.
+          Use `amd-smi static --bus` to find acceptable pcie levels.
 
   -S, --ptl-status STATUS
       Enable or disable the PTL on a GPU processor:
@@ -938,11 +938,11 @@ SET ARGUMENTS:
 
   -F, --ptl-format FRMT1,FRMT2
       Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
-      	Set to one of the following PTL formats: I8, F16, BF16, F32, F64, F8, VECTOR
+          Set to one of the following PTL formats: I8, F16, BF16, F32, F64, F8, VECTOR
 
   -L, --clk-limit CLK_TYPE LIM_TYPE VALUE
       Sets the sclk (aka gfxclk), mclk, or fclk minimum and maximum frequencies.
-      	ex: amd-smi set -L (sclk | mclk | fclk) (min | max) value
+          ex: amd-smi set -L (sclk | mclk | fclk) (min | max) value
 
   -R, --process-isolation STATUS
       Enable or disable the GPU process isolation on a per partition basis:
@@ -950,12 +950,12 @@ SET ARGUMENTS:
 
   -m, --mem-carveout INDEX
       Set VRAM carveout size by option index.
-      	Use `amd-smi static --mem-carveout` to see available options.
-      	Only supported on some APUs; a reboot is required after setting.
+          Use `amd-smi static --mem-carveout` to see available options.
+          Only supported on some APUs; a reboot is required after setting.
 
   -G, --gtt GB
       Set GTT (shared GPU memory) size in GB.
-      	This is a system-wide setting, not per-GPU.
+          This is a system-wide setting, not per-GPU.
 
 CPU ARGUMENTS:
   --cpu-pwr-limit PWR_LIMIT

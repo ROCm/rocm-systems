@@ -90,6 +90,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Renamed "AINIC version" to "ionic version" in `amd-smi version` output**.  
   - The label now correctly reflects that it shows the ionic kernel driver version.
 
+- **Modernized `amd-smi` CLI help output and standardized CPU option metavars**.  
+  - Subcommand `--help` screens use a consistent layout (short options inline, options with arguments or multi-line help stacked beneath, uppercased section headings) so long CPU options no longer push help text off-screen.
+  - Standardized CPU/core metavars shown in help and error messages: `BW_TYPE`/`LINK_ID` (was `IO_BW`/`XGMI_BW`/`LINKID_NAME`), `OFFSET`/`SPACE` (was `REG_OFFSET`/`REG_SPACE`), and `MIN_WIDTH`/`MAX_WIDTH` (was `MIN_LW`/`MAX_LW`).
+  - `--help` now shows the real argument grammar for `--cpu-svi3-vr-controller-temp` (`TYPE [RAIL_INDEX]`) and `--cpu-pwr-eff-mode` (`MODE [UTIL PPT_LIMIT]`) instead of argparse's repeated-metavar default.
+  - Flag names and CLI behavior are unchanged.
+
 ### Removed
 
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
