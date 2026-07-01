@@ -29,5 +29,5 @@ jobs:
         uses: benc-uk/workflow-dispatch@e2e5e9a103e331dad343f381a29e654aea3cf8fc # v1.2.4
         with:
           workflow: therock-multi-arch-ci.yml
-          ref: develop
+          ref: users/geomin12/ci-nightly-disable
           inputs: '{ "linux_amdgpu_families": "gfx94X,gfx950,gfx125X", "windows_amdgpu_families": "gfx1151", "linux_test_labels": "test_filter:comprehensive", "windows_test_labels": "test_filter:comprehensive" }'
