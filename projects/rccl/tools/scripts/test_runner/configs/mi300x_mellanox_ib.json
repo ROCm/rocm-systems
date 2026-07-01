@@ -1142,7 +1142,7 @@
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 60,
-      "description": "Pure-unit coverage of the ops-overload fault mechanism: a fake ibv_context drives the inner ncclIbOpsFault* guards and shim error paths directly. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware).",
+      "_comment": "Pure-unit coverage of the ops-overload fault mechanism: a fake ibv_context drives the inner ncclIbOpsFault* guards and shim error paths directly. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware).",
       "tests": [
         {
           "name": "FaultInj_OpsUnit_All",
