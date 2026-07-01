@@ -2575,6 +2575,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->initState = ncclSuccess;
 
   // Initialize hierarchical sub-communicators and temp buffer
+  // NOTE: extra scope so `dpx` (declared with an initializer) is not live at the
+  // function's `fail:` label; otherwise the earlier NCCLCHECKGOTO jumps would be
+  // ill-formed (goto bypasses variable initialization).
+  {
   bool dpx = (comm->nNodes == 1 && comm->nRanks == 16);
   if (!job->parent && !comm->isGrow && rcclParamHierarchicalAllGather() == 1 && (dpx || comm->nNodes >= 8)) {
     bool uniform = dpx ? true : (comm->minLocalRanks == comm->maxLocalRanks);
@@ -2611,10 +2615,11 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         size_t tempBufSize = (virNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
         NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
-        INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
+        INFO(NCCL_INIT, "Hierarchical AllGather:%s intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
           dpx ? " [DPX]" : "", comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
       }
     }
+  }
   }
 
   timers[TIMER_INIT_TOTAL] = clockNano() - timers[TIMER_INIT_TOTAL];
