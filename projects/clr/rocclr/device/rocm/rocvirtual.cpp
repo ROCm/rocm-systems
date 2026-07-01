@@ -29,6 +29,7 @@
 #include <vector>
 #include <atomic>
 #include <cinttypes>
+#include <mutex>
 
 #if defined(__AVX__)
 #if defined(__MINGW64__)
@@ -2316,6 +2317,35 @@ void VirtualGPU::ReleaseHwQueue() {
 }
 
 // ================================================================================================
+// hsa_amd_profiling_async_copy_enable() is a process-global toggle shared by
+// every agent/queue, so it cannot be scoped per-stream. Multiple VirtualGPUs
+// (one per stream, potentially on different host threads) may want SDMA
+// profiling enabled for their in-flight command at the same time. Guard the
+// global with a process-wide refcount under a lock: enable on the 0->1
+// transition, disable on the 1->0 transition, so it stays on exactly while at
+// least one profiled command is outstanding and is never toggled off from
+// under a concurrent profiled command on another stream.
+namespace {
+std::mutex g_sdmaProfilingLock;
+uint32_t g_sdmaProfilingRefCount = 0;
+
+void acquireSdmaProfiling() {
+  std::lock_guard<std::mutex> lock(g_sdmaProfilingLock);
+  if (g_sdmaProfilingRefCount++ == 0) {
+    Hsa::profiling_async_copy_enable(true);
+  }
+}
+
+void releaseSdmaProfiling() {
+  std::lock_guard<std::mutex> lock(g_sdmaProfilingLock);
+  assert(g_sdmaProfilingRefCount > 0 && "unbalanced SDMA profiling release");
+  if (--g_sdmaProfilingRefCount == 0) {
+    Hsa::profiling_async_copy_enable(false);
+  }
+}
+}  // namespace
+
+// ================================================================================================
 /* profilingBegin, when profiling is enabled, creates a timestamp to save in
  * virtualgpu's timestamp_, saves the pointer timestamp_ to the command's data
  * and then calls start() to get the current host timestamp.
@@ -2349,10 +2379,14 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
     timestamp_ = new Timestamp(this, command);
     command.data().emplace_back(timestamp_);
     timestamp_->start();
-    // Enable SDMA profiling on the first access if profiling is set
-    // Its not per command basis
-    if (sdmaProfiling && !Barriers().GetSDMAProfiling()) {
-      Barriers().SetSDMAProfiling(true);
+    // Enable SDMA profiling for this command only; disabled in profilingEnd().
+    // The underlying HSA async-copy profiling flag is process-global, so use a
+    // refcounted, locked acquire instead of a per-stream bool (which races
+    // across concurrent streams and could disable profiling out from under
+    // another stream's in-flight profiled copy).
+    if (sdmaProfiling) {
+      acquireSdmaProfiling();
+      sdma_profiling_for_cmd_ = true;
     }
   }
 
@@ -2403,6 +2437,11 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
       }
       timestamp_ = nullptr;
     }
+  }
+
+  if (sdma_profiling_for_cmd_) {
+    releaseSdmaProfiling();
+    sdma_profiling_for_cmd_ = false;
   }
 
   // Certain commands like map/unmap memory may not need hw_events as its not a
