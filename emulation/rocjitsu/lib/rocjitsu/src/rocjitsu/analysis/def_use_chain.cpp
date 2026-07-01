@@ -24,7 +24,9 @@ constexpr int MaxLaneWidth = 32;
 // operand narrower than that (e.g. a 16-bit dst) writes only part of its
 // lowest lane and leaves the remaining bits intact, so the instruction
 // read-modify-writes that register rather than fully redefining it.
-[[nodiscard]] bool is_partial_def(int size_bits) { return size_bits > 0 && size_bits < MaxLaneWidth; }
+[[nodiscard]] bool is_partial_def(int size_bits) {
+  return size_bits > 0 && size_bits < MaxLaneWidth;
+}
 
 void add_def(InstDefUse &du, RegisterRef ref, int size_bits) {
   du.defs.expand(ref);
