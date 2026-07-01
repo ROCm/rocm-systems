@@ -531,6 +531,9 @@ contract:
   Contract_Library_LoadData_TruncatedBundle_IsRejected:
     <<: *level_0
     tags: [library]
+  Contract_Library_LoadData_HostileEntryIdSize_IsRejected:
+    <<: *level_0
+    tags: [library]
   Contract_Library_LoadData_CopiesImageForLaterAccess:
     <<: *level_0
     tags: [library]

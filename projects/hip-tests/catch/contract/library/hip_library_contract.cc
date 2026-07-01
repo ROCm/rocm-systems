@@ -166,6 +166,46 @@ HIP_TEST_CASE(Contract_Library_LoadData_TruncatedBundle_IsRejected) {
   REQUIRE(library == nullptr);
 }
 
+HIP_TEST_CASE(Contract_Library_LoadData_HostileEntryIdSize_IsRejected) {
+  // A well-formed-looking uncompressed bundle header with a single descriptor
+  // whose bundleEntryIdSize is larger than any real target-triple string must
+  // be rejected. The descriptor walk advances its cursor by the untrusted
+  // bundleEntryIdSize, so a hostile value would step past the buffer even when
+  // the code-object count itself is sane. This exercises the per-record entry-id
+  // ceiling in the runtime rather than the code-object count ceiling. The
+  // contract requires a non-success status and no crash.
+  //
+  // Layout mirrors symbols::ClangOffloadBundleUncompressedHeader followed by one
+  // symbols::ClangOffloadBundleInfo: magic, uint64 numOfCodeObjects, then the
+  // descriptor's uint64 offset, uint64 size, uint64 bundleEntryIdSize. We stop
+  // after the descriptor fields and deliberately omit the giant entry-id payload
+  // that bundleEntryIdSize claims, so the buffer stays small.
+  const size_t magic_len = std::strlen(kUncompressedBundleMagic);
+  std::vector<char> data(kUncompressedBundleMagic, kUncompressedBundleMagic + magic_len);
+
+  auto append_u64 = [&data](uint64_t value) {
+    for (size_t i = 0; i < sizeof(value); ++i) {
+      data.push_back(static_cast<char>((value >> (8 * i)) & 0xFF));
+    }
+  };
+
+  // numOfCodeObjects = 1: a sane count, so rejection must come from the entry-id
+  // size check and not the count check.
+  append_u64(1);
+  // Descriptor: valid-looking offset/size, but a hostile bundleEntryIdSize just
+  // over the 4096-byte ceiling the runtime enforces.
+  append_u64(/*offset=*/0);
+  append_u64(/*size=*/0);
+  append_u64(/*bundleEntryIdSize=*/4097);
+  // No entry-id payload follows: the buffer ends here.
+
+  hipLibrary_t library = nullptr;
+  const hipError_t status =
+      hipLibraryLoadData(&library, data.data(), nullptr, nullptr, 0, nullptr, nullptr, 0);
+  REQUIRE(status != hipSuccess);
+  REQUIRE(library == nullptr);
+}
+
 HIP_TEST_CASE(Contract_Library_LoadData_CopiesImageForLaterAccess) {
   // hipLibraryLoadData must take ownership of (copy) the code image so that the
   // caller's buffer can be freed once the call returns, mirroring CUDA's
