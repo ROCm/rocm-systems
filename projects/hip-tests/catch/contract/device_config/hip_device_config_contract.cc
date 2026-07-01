@@ -98,11 +98,11 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetLimit_ReportsStackAndHeapAndRejectsInvali
     (void)value;
   }
 
-  // hipLimitRange is the trailing sentinel of hipLimit_t (one past the last
-  // real limit), so querying it exercises an out-of-range limit that must not
-  // succeed. Backends may report the specific hipErrorUnsupportedLimit or
-  // another non-success error; the contract only requires that the query does
-  // not silently succeed.
+  // hipLimitRange is the terminating range marker of hipLimit_t (one past
+  // hipExtLimitScratchCurrent), not a real queryable limit, so querying it
+  // exercises an out-of-range limit that must not succeed. Backends may report
+  // the specific hipErrorUnsupportedLimit or another non-success error; the
+  // contract only requires that the query does not silently succeed.
   size_t invalid_value = 0;
   const hipError_t invalid_status =
       hipDeviceGetLimit(&invalid_value, static_cast<hipLimit_t>(hipLimitRange));
