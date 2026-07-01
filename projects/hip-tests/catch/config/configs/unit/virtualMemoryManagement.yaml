@@ -112,6 +112,9 @@ virtualMemoryManagement:
   Unit_hipMemCreate_HostNuma_HostAndDeviceAccess:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_HostNuma_NumaTypedAccess:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemCreate_HostNuma_Negative:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]

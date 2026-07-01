@@ -391,6 +391,102 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_HostAndDeviceAccess) {
 /**
  * Test Description
  * ------------------------
+ *    - Path-coverage for granting host access via a NUMA-typed access descriptor
+ * (hipMemLocationTypeHostNuma / hipMemLocationTypeHostNumaCurrent) instead of the
+ * generic hipMemLocationTypeHost. Grants host access with the NUMA-typed
+ * descriptor, then verifies a CPU read/write round-trip through the GPU.
+ *
+ *    - NOTE: this only exercises the code path; it does NOT assert NUMA-specific
+ * behavior. In hipMemSetAccess the location names the *accessor*, not placement.
+ * ROCr grants CPU access node-agnostically: EnableAccess only checks
+ * device_type == kAmdCpuDevice and mmaps via the memory's owner agent, discarding
+ * which CPU/NUMA agent was passed. So HostNuma / HostNumaCurrent / Host access
+ * descriptors are behaviorally identical; this test guards that they are all
+ * accepted and functional, not that they differ.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemCreateHostNuma.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_NumaTypedAccess) {
+  constexpr int N = DATA_SIZE;
+  const size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+
+  if (numa_available() < 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  }
+  const int numNodes = numa_max_node() + 1;
+
+  // Vary the host-access descriptor's location type/id (the accessor), keeping the
+  // allocation itself on NUMA node 0.
+  hipMemLocationType accessType = hipMemLocationTypeHostNuma;
+  int accessId = 0;
+  SECTION("access via hipMemLocationTypeHostNuma node 0") {
+    accessType = hipMemLocationTypeHostNuma;
+    accessId = 0;
+  }
+  SECTION("access via hipMemLocationTypeHostNuma last node") {
+    accessType = hipMemLocationTypeHostNuma;
+    accessId = numNodes - 1;
+  }
+  SECTION("access via hipMemLocationTypeHostNumaCurrent") {
+    accessType = hipMemLocationTypeHostNumaCurrent;
+    accessId = 0;
+  }
+
+  hipMemAllocationProp prop = makeHostNumaProp(hipMemLocationTypeHostNuma, 0);
+  size_t granularity = 0;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  const size_t size_mem = ((buffer_size + granularity - 1) / granularity) * granularity;
+
+  hipMemGenericAllocationHandle_t handle;
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+
+  void* ptrA = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+
+  // Grant host access via the NUMA-typed descriptor under test.
+  hipMemAccessDesc hostDesc = {};
+  hostDesc.location.type = accessType;
+  hostDesc.location.id = accessId;
+  hostDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &hostDesc, 1));
+
+  // Grant device access so the GPU can operate on it.
+  hipMemAccessDesc devDesc = {};
+  devDesc.location.type = hipMemLocationTypeDevice;
+  devDesc.location.id = device;
+  devDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &devDesc, 1));
+
+  int* hostPtr = reinterpret_cast<int*>(ptrA);
+  for (int idx = 0; idx < N; ++idx) {
+    hostPtr[idx] = idx;
+  }
+  hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
+                     reinterpret_cast<int*>(ptrA));
+  HIP_CHECK(hipDeviceSynchronize());
+  for (int idx = 0; idx < N; ++idx) {
+    REQUIRE(hostPtr[idx] == idx * idx);
+  }
+
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
  *    - Negative tests for host-NUMA hipMemCreate: invalid NUMA node ids and
  * invalid flags.
  * ------------------------

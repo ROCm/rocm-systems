@@ -494,7 +494,7 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
     amd::Device* accessDev = nullptr;
     if (accessLocationType == hipMemLocationTypeDevice) {
       if (desc[desc_idx].location.id < 0 || desc[desc_idx].location.id >= g_devices.size()) {
-        HIP_RETURN(hipErrorInvalidValue)
+        HIP_RETURN(hipErrorInvalidValue);
       }
       accessDev = g_devices[desc[desc_idx].location.id]->devices()[0];
     } else {
