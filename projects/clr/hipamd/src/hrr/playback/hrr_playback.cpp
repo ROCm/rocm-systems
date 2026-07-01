@@ -48,6 +48,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -850,8 +851,20 @@ static int repair_archive(const hrr::Archive& archive) {
     return 1;
   }
 
-  if (rename(tmp_path.c_str(), events_path.c_str()) != 0) {
-    fprintf(stderr, "[HRR] repair: cannot replace %s\n", events_path.c_str());
+  // Atomically replace the original events.bin. POSIX rename() overwrites an
+  // existing destination, but Windows rename()/MoveFile without
+  // MOVEFILE_REPLACE_EXISTING fails when the target already exists. Use
+  // std::filesystem::rename (which maps to a replacing move on Windows) and, if
+  // that still fails, fall back to removing the destination first.
+  std::error_code ec;
+  fs::rename(tmp_path, events_path, ec);
+  if (ec) {
+    fs::remove(events_path, ec);
+    fs::rename(tmp_path, events_path, ec);
+  }
+  if (ec) {
+    fprintf(stderr, "[HRR] repair: cannot replace %s: %s\n",
+            events_path.c_str(), ec.message().c_str());
     remove(tmp_path.c_str());
     return 1;
   }
