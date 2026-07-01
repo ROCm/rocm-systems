@@ -28,6 +28,7 @@ set(TEST_SOURCE_FILES
     fastpath.cpp
     main.cpp
     mountinfo.cpp
+    runtime.cpp
     stats.cpp
     stream.cpp
 )
