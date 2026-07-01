@@ -40,9 +40,9 @@
 class IWorkload
 {
 public:
-    IWorkload() = default;
-    virtual ~IWorkload()= default;
-    virtual void run() = 0;
+    IWorkload()          = default;
+    virtual ~IWorkload() = default;
+    virtual void run()   = 0;
 };
 
 class Collection
