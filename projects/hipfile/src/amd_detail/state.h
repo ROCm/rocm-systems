@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include "backend.h"
 #include "batch/batch.h"
 #include "buffer.h"
 #include "file.h"
@@ -18,7 +17,6 @@
 #include <memory>
 #include <shared_mutex>
 #include <stdexcept>
-#include <vector>
 
 namespace hipFile {
 
@@ -189,14 +187,6 @@ public:
     void ensureInitialized();
 
     //
-    // Backends
-    //
-
-    /// @brief Get the backends that can service IO requests
-    /// @return A collection of backends that can service IO requests
-    virtual std::vector<std::shared_ptr<Backend>> getBackends() const;
-
-    //
     // Misc
     //
 
@@ -226,9 +216,6 @@ private:
 
     // Manages the driver's Stream objects
     std::unique_ptr<StreamMap> stream_map;
-
-    // Backends available to service IO requests
-    mutable std::vector<std::shared_ptr<Backend>> backends;
 
     /// Mutex to protect the state
     mutable std::shared_mutex state_mutex;

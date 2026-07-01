@@ -3,12 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "backend/fallback.h"
-#include "backend/fastpath.h"
 #include "batch/batch.h"
 #include "buffer.h"
 #include "configuration.h"
-#include "context.h"
 #include "file.h"
 #include "state.h"
 #include "stream.h"
@@ -20,10 +17,6 @@
 #include <utility>
 
 using namespace std;
-
-namespace hipFile {
-struct Backend;
-}
 
 namespace hipFile {
 
@@ -269,21 +262,5 @@ DriverState::ensureInitialized()
     if (ref_count == 0) {
         ref_count++;
     }
-}
-
-std::vector<std::shared_ptr<Backend>>
-DriverState::getBackends() const
-{
-    static bool once = [&]() {
-        std::shared_ptr<Fallback> fallback_backend = std::make_shared<Fallback>();
-        std::shared_ptr<Fastpath> fastpath_backend = std::make_shared<Fastpath>();
-        fastpath_backend->register_fallback_backend(fallback_backend);
-        backends.push_back(fallback_backend);
-        backends.push_back(fastpath_backend);
-        return true;
-    }();
-    (void)once;
-
-    return backends;
 }
 }

@@ -34,7 +34,6 @@ public:
     MOCK_METHOD(void, incrRefCount, (), (override));
     MOCK_METHOD(void, decrRefCount, (), (override));
     MOCK_METHOD(int64_t, getRefCount, (), (override, const));
-    MOCK_METHOD(std::vector<std::shared_ptr<Backend>>, getBackends, (), (const, override));
 };
 
 }
