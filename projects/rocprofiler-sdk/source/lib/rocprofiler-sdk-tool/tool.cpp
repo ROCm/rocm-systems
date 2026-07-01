@@ -2981,15 +2981,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             // Prototype: drive counters through the in-process kernel-replay service. Mutually
             // exclusive with the dispatch counting service. Pass count comes from
             // ROCPROFILER_KERNEL_REPLAY_PASSES (read by the SDK queue replay loop).
-            ROCPROFILER_CALL(
-                rocprofiler_configure_kernel_replay_counting_service(counter_collection_ctx,
-                                                                     callbacks.counter_dispatch,
-                                                                     nullptr,
-                                                                     callbacks.counter_record,
-                                                                     nullptr,
-                                                                     counter_replay_pass_count_callback,
-                                                                     nullptr),
-                "Could not setup kernel-replay counting service");
+            ROCPROFILER_CALL(rocprofiler_configure_kernel_replay_counting_service(
+                                 counter_collection_ctx,
+                                 callbacks.counter_dispatch,
+                                 nullptr,
+                                 callbacks.counter_record,
+                                 nullptr,
+                                 counter_replay_pass_count_callback,
+                                 nullptr),
+                             "Could not setup kernel-replay counting service");
         }
         else
         {

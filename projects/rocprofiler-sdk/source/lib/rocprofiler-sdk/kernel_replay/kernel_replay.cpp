@@ -59,7 +59,7 @@ rocprofiler_configure_kernel_replay_counting_service(
                                                                  record_callback_args);
     if(st != ROCPROFILER_STATUS_SUCCESS) return st;
 
-    ctx->kernel_replay                     = std::make_unique<rocprofiler::context::kernel_replay_service>();
+    ctx->kernel_replay = std::make_unique<rocprofiler::context::kernel_replay_service>();
     ctx->kernel_replay->pass_count_cb      = pass_count_callback;
     ctx->kernel_replay->pass_count_cb_args = pass_count_callback_args;
     ctx->kernel_replay->enabled.wlock([](bool& v) { v = true; });

@@ -23,11 +23,12 @@ set(rocprofv3-validate-env
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
 
-# Collect counters via in-process kernel replay. The number of --pmc groups drives the number of
-# replay passes (one batch per pass), with device memory restored between passes. Each group shares
-# SQ_WAVES and SQ_INSTS_VALU (the sanity counters that must be constant across a kernel's passes)
-# plus one unique counter (so the batches are genuinely distinct). The kernel-replay app verifies
-# its own results, so a broken restore fails this generate step.
+# Collect counters via in-process kernel replay. The number of --pmc groups drives the
+# number of replay passes (one batch per pass), with device memory restored between
+# passes. Each group shares SQ_WAVES and SQ_INSTS_VALU (the sanity counters that must be
+# constant across a kernel's passes) plus one unique counter (so the batches are genuinely
+# distinct). The kernel-replay app verifies its own results, so a broken restore fails
+# this generate step.
 set(REPLAY_PASSES 5)
 
 add_test(
@@ -53,8 +54,9 @@ set_tests_properties(
                FIXTURES_SETUP
                rocprofv3-test-kernel-replay-data)
 
-# Validate replay structure: each dispatch replayed REPLAY_PASSES times, the shared sanity counters
-# (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, and the kernels are present.
+# Validate replay structure: each dispatch replayed REPLAY_PASSES times, the shared sanity
+# counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, and the
+# kernels are present.
 add_test(
     NAME rocprofv3-test-kernel-replay-validate
     COMMAND

@@ -98,7 +98,8 @@ struct replay_pass_state
 };
 
 // Number of replay passes for the active kernel-replay context (the tool supplies it via the
-// service's pass-count callback). Returns 1 when no replay context is active, which disables replay.
+// service's pass-count callback). Returns 1 when no replay context is active, which disables
+// replay.
 uint64_t
 kernel_replay_pass_count()
 {
