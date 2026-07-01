@@ -294,7 +294,7 @@ protected:
     // TODO: instrument multiple instructions
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
     ASSERT_NE(decoder, nullptr);
-    auto blocks = BasicBlock::build(*co, *decoder);
+    auto blocks = BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA2);
 
     ASSERT_FALSE(co->text_sections().empty());
     const auto *text = co->text_sections().front();
