@@ -107,7 +107,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 			pthread_mutex_unlock(&hsakmt_mutex);
 			return HSAKMT_STATUS_ERROR;
 		}
-		if (!hsakmt_use_model)
+		/* In DRM mode the events page is a DRM BO whose handle is not a
+		 * valid KFD offset; leave event_page_offset=0 so KFD owns the page. */
+		if (!hsakmt_use_model && !hsakmt_enable_drm)
 			hsakmt_fmm_get_handle(ctx, events_page, (uint64_t *)&args.event_page_offset, NULL);
 		// Note: In model mode, FFM handles event management entirely - no event page needed
 	}
