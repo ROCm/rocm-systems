@@ -793,6 +793,18 @@ memory:
   Unit_hipMemsetD8Async_KernelBuffer:
     <<: *level_2
     tags: [memset]
+  Unit_hipMemsetD16_UnalignedPatternFill:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetD32_UnalignedPatternFill:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetD16Async_UnalignedPatternFill:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetD32Async_UnalignedPatternFill:
+    <<: *level_2
+    tags: [memset]
   Unit_hipMemcpy2DArrayToArray_Negative:
     <<: *level_2
     tags: [transfer, image]

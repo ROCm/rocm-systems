@@ -41,16 +41,6 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 
 static int ncclCuMemSupported = 0;
 
-// cuMem VMM API availability by HIP/driver version.
-#define NCCL_CUMEM_NATIVE_MIN_VERSION   71260540
-#define NCCL_CUMEM_BACKPORT_MIN_VERSION 70051831
-#define NCCL_CUMEM_BACKPORT_MAX_VERSION 70060000
-
-#define NCCL_CUMEM_VERSION_SUPPORTED(version)                  \
-  ((version) >= NCCL_CUMEM_NATIVE_MIN_VERSION ||               \
-   ((version) >= NCCL_CUMEM_BACKPORT_MIN_VERSION &&            \
-    (version) < NCCL_CUMEM_BACKPORT_MAX_VERSION))
-
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
 
 static int ncclGetKernelVersionCode() {
@@ -116,7 +106,10 @@ static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1)
     return ncclCumemHostEnable;
-#if HIP_VERSION < 71260540
+  // NOTE: the cuMem *host* allocation path is NOT part of the ROCm 7.0.2.x
+  // backport (it relies on hipDeviceAttributeHostNumaId, which is absent there),
+  // so it has its own native-only gate rather than NCCL_CUMEM_VERSION_SUPPORTED().
+#if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
@@ -124,7 +117,7 @@ int ncclCuMemHostEnable() {
   int cudaDriverVersion;
   int paramValue = -1;
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 71260540) {
+  if (!NCCL_CUMEM_HOST_VERSION_SUPPORTED(cudaDriverVersion)) {
     ncclCumemHostEnable = 0;
   }
   else {
@@ -132,7 +125,7 @@ int ncclCuMemHostEnable() {
     if (paramValue != -1)
       ncclCumemHostEnable = paramValue;
     else
-      ncclCumemHostEnable = (cudaDriverVersion >= 71260540) ? 1 : 0;
+      ncclCumemHostEnable = NCCL_CUMEM_HOST_VERSION_SUPPORTED(cudaDriverVersion) ? 1 : 0;
     if (ncclCumemHostEnable) {
       // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
       // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
