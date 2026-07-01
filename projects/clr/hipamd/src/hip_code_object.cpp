@@ -515,76 +515,77 @@ const char* StatCO::GetFuncName(const void* hostFunction) {
 }
 
 hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId) {
-  std::shared_lock<std::shared_mutex> lock(sclock_);
+  {
+    std::shared_lock<std::shared_mutex> lock(sclock_);
 
+    auto it = functions_.find(hostFunction);
+    if (it == functions_.end()) {
+      return hipErrorInvalidSymbol;
+    }
+
+    FatBinaryInfo** module = it->second->ModuleInfo();
+    if (module == nullptr) {
+      return hipErrorInvalidDeviceFunction;
+    }
+    if (*module != nullptr) {
+      return it->second->GetStatFunc(hfunc, deviceId);
+    }
+  }
+
+  // Lazy load: upgrade to exclusive lock.
+  std::unique_lock<std::shared_mutex> wlock(sclock_);
+  // Re-find after acquiring exclusive lock (concurrent removal may have occurred).
   auto it = functions_.find(hostFunction);
   if (it == functions_.end()) {
     return hipErrorInvalidSymbol;
   }
-
   FatBinaryInfo** module = it->second->ModuleInfo();
   if (module == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
-
   if (*module == nullptr) {
-    // Lazy load: upgrade to exclusive lock.
-    lock.unlock();
-    std::unique_lock<std::shared_mutex> wlock(sclock_);
-    // Re-find after acquiring exclusive lock (concurrent removal may have occurred).
-    it = functions_.find(hostFunction);
-    if (it == functions_.end()) {
-      return hipErrorInvalidSymbol;
+    hipError_t err = DigestFatBinary(module_to_hostModule_[module], *module);
+    if (err != hipSuccess) {
+      return err;
     }
-    module = it->second->ModuleInfo();
-    if (module == nullptr) {
-      return hipErrorInvalidDeviceFunction;
-    }
-    if (*module == nullptr) {
-      hipError_t err = DigestFatBinary(module_to_hostModule_[module], *module);
-      if (err != hipSuccess) {
-        return err;
-      }
-    }
-    return it->second->GetStatFunc(hfunc, deviceId);
   }
-
   return it->second->GetStatFunc(hfunc, deviceId);
 }
 
 hipError_t StatCO::GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction,
                                int deviceId) {
-  std::shared_lock<std::shared_mutex> lock(sclock_);
+  {
+    std::shared_lock<std::shared_mutex> lock(sclock_);
 
+    auto it = functions_.find(hostFunction);
+    if (it == functions_.end()) {
+      return hipErrorInvalidSymbol;
+    }
+
+    FatBinaryInfo** module = it->second->ModuleInfo();
+    if (module == nullptr) {
+      return hipErrorInvalidDeviceFunction;
+    }
+
+    if (*module != nullptr) {
+      return it->second->GetStatFuncAttr(func_attr, deviceId);
+    }
+  }
+
+  // Lazy load: upgrade to exclusive lock.
+  std::unique_lock<std::shared_mutex> wlock(sclock_);
+  // Re-find after acquiring exclusive lock (concurrent removal may have occurred).
   auto it = functions_.find(hostFunction);
   if (it == functions_.end()) {
     return hipErrorInvalidSymbol;
   }
-
   FatBinaryInfo** module = it->second->ModuleInfo();
   if (module == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
-
   if (*module == nullptr) {
-    // Lazy load: upgrade to exclusive lock.
-    lock.unlock();
-    std::unique_lock<std::shared_mutex> wlock(sclock_);
-    // Re-find after acquiring exclusive lock (concurrent removal may have occurred).
-    it = functions_.find(hostFunction);
-    if (it == functions_.end()) {
-      return hipErrorInvalidSymbol;
-    }
-    module = it->second->ModuleInfo();
-    if (module == nullptr) {
-      return hipErrorInvalidDeviceFunction;
-    }
-    if (*module == nullptr) {
-      std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
-    }
-    return it->second->GetStatFuncAttr(func_attr, deviceId);
+    std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
   }
-
   return it->second->GetStatFuncAttr(func_attr, deviceId);
 }
 
@@ -603,58 +604,50 @@ hipError_t StatCO::RegisterGlobalVar(const void* hostVar, Var* var) {
 
 hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
                                 size_t* size_ptr) {
-  std::shared_lock<std::shared_mutex> lock(sclock_);
+  {
+    std::shared_lock<std::shared_mutex> lock(sclock_);
 
+    auto it = vars_.find(hostVar);
+    if (it == vars_.end()) {
+      return hipErrorInvalidSymbol;
+    }
+
+    FatBinaryInfo** module = it->second->ModuleInfo();
+    if (module == nullptr) {
+      return hipErrorInvalidSymbol;
+    }
+
+    if (*module != nullptr) {
+      amd::Memory* mem = nullptr;
+      IHIP_RETURN_ONFAIL(it->second->GetStatDeviceVar(&mem, deviceId));
+
+      // Handle size-0 globals: return null device pointer and size 0.
+      *dev_ptr = (mem == nullptr) ? 0 : memDevPtr(mem);
+      *size_ptr = (mem == nullptr) ? 0 : mem->getSize();
+      return hipSuccess;
+    }
+  }
+
+  // Lazy load: upgrade to exclusive lock.
+  std::unique_lock<std::shared_mutex> wlock(sclock_);
+  // Re-find after acquiring exclusive lock (concurrent removal may have occurred).
   auto it = vars_.find(hostVar);
   if (it == vars_.end()) {
     return hipErrorInvalidSymbol;
   }
-
   FatBinaryInfo** module = it->second->ModuleInfo();
   if (module == nullptr) {
     return hipErrorInvalidSymbol;
   }
-
   if (*module == nullptr) {
-    // Lazy load: upgrade to exclusive lock.
-    lock.unlock();
-    std::unique_lock<std::shared_mutex> wlock(sclock_);
-    // Re-find after acquiring exclusive lock (concurrent removal may have occurred).
-    it = vars_.find(hostVar);
-    if (it == vars_.end()) {
-      return hipErrorInvalidSymbol;
-    }
-    module = it->second->ModuleInfo();
-    if (module == nullptr) {
-      return hipErrorInvalidSymbol;
-    }
-    if (*module == nullptr) {
-      std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
-    }
-    amd::Memory* mem = nullptr;
-    IHIP_RETURN_ONFAIL(it->second->GetStatDeviceVar(&mem, deviceId));
-    if (mem == nullptr) {
-      // Handle size-0 globals: return null device pointer and size 0.
-      *dev_ptr = 0;
-      *size_ptr = 0;
-      return hipSuccess;
-    }
-    *dev_ptr = memDevPtr(mem);
-    *size_ptr = mem->getSize();
-    return hipSuccess;
+    std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
   }
-
   amd::Memory* mem = nullptr;
   IHIP_RETURN_ONFAIL(it->second->GetStatDeviceVar(&mem, deviceId));
 
-  if (mem == nullptr) {
-    // Handle size-0 globals: return null device pointer and size 0.
-    *dev_ptr = 0;
-    *size_ptr = 0;
-    return hipSuccess;
-  }
-  *dev_ptr = memDevPtr(mem);
-  *size_ptr = mem->getSize();
+  // Handle size-0 globals: return null device pointer and size 0.
+  *dev_ptr = (mem == nullptr) ? 0 : memDevPtr(mem);
+  *size_ptr = (mem == nullptr) ? 0 : mem->getSize();
   return hipSuccess;
 }
 
