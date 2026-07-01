@@ -237,6 +237,28 @@ resolve_attach_tid(pid_t pid)
     return -1;
 }
 
+void
+validate_target_tool_path(pid_t pid, const std::string& tool_lib_path)
+{
+    auto tool_path = std::filesystem::path{tool_lib_path};
+    if(tool_path.empty()) return;
+
+    if(!tool_path.is_absolute()) return;
+
+    auto target_path = std::filesystem::path{fmt::format("/proc/{}/root", pid)};
+    target_path += tool_path;
+    std::error_code ec;
+    if(!std::filesystem::exists(target_path, ec))
+    {
+        ROCP_WARNING << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_lib_path
+                     << "' is absolute but is not visible at " << target_path.string()
+                     << " from the target process mount namespace. Attachment requires "
+                        "ROCPROF_ATTACH_TOOL_LIBRARY to name a library path that target-side "
+                        "dlopen can resolve.";
+        return;
+    }
+}
+
 rocattach_status_t
 setup(int pid)
 {
@@ -306,6 +328,7 @@ setup(int pid)
                                                                 "librocprofiler-sdk-tool.so");
     const char* tool_lib_path     = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
+    validate_target_tool_path(pid, tool_lib_path_env);
 
     size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;
     std::vector<uint8_t> tool_lib_buffer(tool_lib_path, tool_lib_path + tool_lib_path_len);
