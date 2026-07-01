@@ -13,7 +13,7 @@
 #include <gmock/gmock.h>
 
 /*
- * A place to create mocks for the DriverState singleton.
+ * A place to create mocks for IDriverState.
  */
 
 namespace hipFile {
