@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 190
+- Contract tests: 197
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 157
-- Approximate declared API-name coverage: 31.7%
+- Declared HIP runtime APIs directly exercised by contract tests: 164
+- Approximate declared API-name coverage: 33.1%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -39,6 +39,8 @@ The percentages below are approximate API-name coverage against declarations par
 | `graph_node_types` | 5 |
 | `graph_child` | 3 |
 | `graph_host` | 3 |
+| `graph_mem_nodes` | 4 |
+| `graph_node_find` | 3 |
 | `host_memory` | 5 |
 | `pitched_memory` | 4 |
 | `array_memory` | 4 |
@@ -62,7 +64,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Error handling | 3 | 3 | 100.0% |
 | Event | 6 | 8 | 75.0% |
 | Occupancy | 3 | 7 | 42.9% |
-| Graph / capture | 32 | 96 | 33.3% |
+| Graph / capture | 39 | 96 | 40.6% |
 | Stream | 5 | 23 | 21.7% |
 | Runtime / device | 28 | 45 | 62.2% |
 | Kernel launch / function attrs | 2 | 13 | 15.4% |
@@ -266,6 +268,13 @@ hipGraphGetEdges
 hipGraphNodeGetDependencies
 hipGraphNodeGetDependentNodes
 hipGraphClone
+hipGraphNodeFindInClone
+hipGraphAddMemAllocNode
+hipGraphMemAllocNodeGetParams
+hipGraphAddMemFreeNode
+hipGraphMemFreeNodeGetParams
+hipDeviceGetGraphMemAttribute
+hipDeviceGraphMemTrim
 hipStreamBeginCapture
 hipStreamEndCapture
 hipStreamIsCapturing
@@ -305,7 +314,7 @@ hipIpcOpenEventHandle
 2. Texture and surface APIs beyond current basics: texture/surface object create/destroy with resource and texture descriptor round-trips and channel-descriptor queries are now covered; texture reference APIs, mipmapped arrays, and bound/linear texture variants remain.
 3. Module, library, and code-loading APIs: HIPRTC-backed module load-from-data, unload, function and global lookup, and module kernel launch (with `hipFuncGetAttribute`) are now covered; the HIPRTC-backed library-loading family is now covered too (library load-from-data, unload, kernel lookup, kernel count, kernel enumeration, global lookup, and the `hipKernel*` accessors for function/library/name). Module load from file/fat-binary, `hipModuleLoadDataEx`, tex-ref and function-count queries, cooperative module launches, and module occupancy helpers remain.
 4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; context create/destroy, push/pop/set-current, shared-memory config setter, and context peer access remain.
-5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, and host nodes with param round-trips are now covered; graph update, node find in clone, memory alloc/free nodes, node attributes, debug dot export, and user objects remain.
+5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, and memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers are now covered; graph update, node attributes, debug dot export, and user objects remain.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch and CU-mask stream variants, logging controls, and link-type queries remain.
 
