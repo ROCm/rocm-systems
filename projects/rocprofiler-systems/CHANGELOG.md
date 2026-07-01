@@ -76,6 +76,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   v1.17.0 (bundled fmt v12).
 - Supported environment variables for rank detection: removed MPI_RANK and
   MPI_LOCALRANKID, added PMI_RANK and SLURM_PROCID.
+- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
 
 ### Resolved issues
 
@@ -164,6 +165,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Fixed an issue where the `--rocm-domains` CLI option for `rocprof-sys-run` was not recognized.
+- Fixed invalid strongly typed configuration values for `ROCPROFSYS_MODE`,
+  `ROCPROFSYS_PERFETTO_BACKEND`, `ROCPROFSYS_TRACE`,
+  `ROCPROFSYS_TRACE_DURATION`, and `ROCPROFSYS_SAMPLING_FREQ` being silently
+  accepted or failing later during runtime instead of reporting clear
+  configuration diagnostics.
 
 ## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
 

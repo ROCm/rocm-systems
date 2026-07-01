@@ -41,6 +41,7 @@ jobs:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+      THEROCK_REQUIRE_HIP_YAML_ENTRIES: 1
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -50,7 +51,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: f1e3fc2311fde45bf3e17b0e3349200be9caa4b4 # 2026-06-23
+          ref: 177bc45e201c996e1a780e3348fd49ca2c439b8e # 2026-06-25 commit
 
       - name: Install python deps
         run: |

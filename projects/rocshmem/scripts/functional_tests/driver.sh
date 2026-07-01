@@ -145,12 +145,24 @@ declare -A TEST_NUMBERS=(
   ["host_int_amo_fcswap"]="128"
   ["host_amo_all_pes"]="129"
   ["host_amo_self"]="130"
-  ["tile_broadcast"]="131"
-  ["tile_broadcast_wave"]="132"
-  ["tile_broadcast_wg"]="133"
-  ["tile_allgather"]="134"
-  ["tile_allgather_wave"]="135"
-  ["tile_allgather_wg"]="136"
+  ["host_amo_add"]="131"
+  ["tile_broadcast"]="132"
+  ["tile_broadcast_wave"]="133"
+  ["tile_broadcast_wg"]="134"
+  ["tile_allgather"]="135"
+  ["tile_allgather_wave"]="136"
+  ["tile_allgather_wg"]="137"
+  ["host_wait_until"]="138"
+  ["host_test"]="139"
+  ["host_wait_until_all"]="140"
+  ["host_wait_until_any"]="141"
+  ["host_wait_until_some"]="142"
+  ["host_wait_until_all_vector"]="143"
+  ["host_wait_until_any_vector"]="144"
+  ["host_wait_until_some_vector"]="145"
+  ["host_wait_until_all_status"]="146"
+  ["host_wait_until_any_status"]="147"
+  ["host_wait_until_some_status"]="148"
 )
 
 # Detect which runtime to use
@@ -660,6 +672,8 @@ TestColl() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "syncall"          2       1            1
+  ExecTest  "syncall"          3       1            1
+  ExecTest  "syncall"          5       1            1
 
   ExecTest  "wavesyncall"      2       1            1
 
@@ -669,6 +683,8 @@ TestColl() {
   ExecTest  "teamsync"         2       16           64
   ExecTest  "teamsync"         2       32           256
   ExecTest  "teamsync"         2       39           1024
+  ExecTest  "teamsync"         3       16           64
+  ExecTest  "teamsync"         5       16           64
 
   ExecTest  "teamwavesync"     2       1            1
   ExecTest  "teamwavesync"     2       16           64
@@ -681,6 +697,8 @@ TestColl() {
   ExecTest  "teamwgsync"       2       39           1024
 
   ExecTest  "barrierall"       2       1            1
+  ExecTest  "barrierall"       3       1            1
+  ExecTest  "barrierall"       5       1            1
 
   ExecTest  "wavebarrierall"   2       1            1
 
@@ -690,6 +708,8 @@ TestColl() {
   ExecTest  "teambarrier"      2       16           64
   ExecTest  "teambarrier"      2       32           256
   ExecTest  "teambarrier"      2       39           1024
+  ExecTest  "teambarrier"      3       16           64
+  ExecTest  "teambarrier"      5       16           64
 
   ExecTest  "teamwavebarrier"  2       1            1
   ExecTest  "teamwavebarrier"  2       16           64
@@ -702,11 +722,20 @@ TestColl() {
   ExecTest  "teamwgbarrier"    2       39           1024
 
   ExecTest  "alltoall"         2       1            64        512
+  ExecTest  "alltoall"         3       1            64        512
+  ExecTest  "alltoall"         5       1            64        512
 
   ExecTest  "teambroadcast"    2       1            64        32768
+  ExecTest  "teambroadcast"    3       1            64        32768
+  ExecTest  "teambroadcast"    5       1            64        32768
 
   ExecTest  "fcollect"         2       1            64        32768
+  ExecTest  "fcollect"         3       1            64        32768
+  ExecTest  "fcollect"         5       1            64        32768
 
+  # NOTE: teamreduction at rank counts > 2 currently fails a data validation
+  # check in the ring all-reduce path; this is a pre-existing bug unrelated to
+  # work/sync pool alignment, so it is only run at 2 ranks here.
   ExecTest  "teamreduction"    2       1            64        32768
 }
 
@@ -763,6 +792,18 @@ TestHostRma() { #AIROCSHMEM-419
   # Int (32-bit) AMOs: rocshmem_int_atomic_fetch_add/cas (exercises 32-bit kernel path)
   ExecTest  "host_int_amo_fadd"   2        1      1
   ExecTest  "host_int_amo_fcswap" 2        1      1
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 ExecTest "host_amo_add" 2 1 1
+  ExecTest  "host_wait_until"            2        1      1
+  ExecTest  "host_test"                  2        1      1
+  ExecTest  "host_wait_until_all"        2        1      1
+  ExecTest  "host_wait_until_any"        2        1      1
+  ExecTest  "host_wait_until_some"       2        1      1
+  ExecTest  "host_wait_until_all_vector" 2        1      1
+  ExecTest  "host_wait_until_any_vector" 2        1      1
+  ExecTest  "host_wait_until_some_vector" 2       1      1
+  ExecTest  "host_wait_until_all_status" 2        1      1
+  ExecTest  "host_wait_until_any_status" 2        1      1
+  ExecTest  "host_wait_until_some_status" 2       1      1
   # Concurrency tests — configurable PE count (IPC_HOST_NPES, default 4)
   ExecTest  "host_amo_all_pes"    $npes    1      1
   ExecTest  "host_amo_self"       $npes    1      1

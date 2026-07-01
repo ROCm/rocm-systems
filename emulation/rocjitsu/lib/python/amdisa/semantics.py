@@ -296,6 +296,12 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'branch', branch_condition='always')
     if name.startswith('S_ENDPGM'):
         return InstructionSemantics(name, 'endpgm')
+    if name == 'S_TRAP':
+        # S_TRAP enters the trap handler instead of continuing with the next
+        # instruction. The simulator currently treats the instruction body as a
+        # stub, but DBT/CFG construction still needs the semantic class so the
+        # generated instruction metadata can mark it as a program terminator.
+        return InstructionSemantics(name, 'trap')
     if name == 'S_WAITCNT':
         return InstructionSemantics(name, 'waitcnt')
     if name == 'S_SET_VGPR_MSB':
