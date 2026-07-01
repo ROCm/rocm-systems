@@ -39,16 +39,19 @@
 
 // Helper macro to detect RDNA3 (gfx11xx) architectures
 // These architectures default to Real16 mode and require .set fake16 for legacy F16 instructions
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || \
-    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__) || \
-    defined(__gfx1200__) || defined(__gfx1201__)
-#define GFX11_RDNA3_ARCH 1
+#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) ||                        \
+    defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) ||                        \
+    defined(__gfx1152__) || defined(__gfx1153__) || defined(__gfx1200__) || defined(__gfx1201__)
+#    define GFX11_RDNA3_ARCH 1
 #endif
 
-#define DATA_SIZE          (64*4)
+#define DATA_SIZE (64 * 4)
 
-#define HIP_API_CALL(CALL) do { if ((CALL) != hipSuccess) abort(); } while(0)
-
+#define HIP_API_CALL(CALL)                                                                         \
+    do                                                                                             \
+    {                                                                                              \
+        if((CALL) != hipSuccess) abort();                                                          \
+    } while(0)
 
 //#define ATTEMPT_GMI
 #define DOT2_ARCH
@@ -93,7 +96,7 @@ public:
     {
         col = std::make_unique<Collection>(agent, counters);
     }
-    virtual ~HIPWorkload() {};
+    virtual ~HIPWorkload(){};
     virtual std::string_view name() = 0;
 
     std::map<std::string, int64_t> collect(Queue& queue)
@@ -105,60 +108,64 @@ public:
     void printcounters(Queue& queue)
     {
         std::cout << "Name: " << name() << std::endl;
-        for (auto& [name, v] : collect(queue)) std::cout << " - " << name << ": " << v << std::endl;
+        for(auto& [name, v] : collect(queue))
+            std::cout << " - " << name << ": " << v << std::endl;
     }
 
     std::unique_ptr<Collection> col{nullptr};
-    hipMemory src{DATA_SIZE};
-    hipMemory dst{DATA_SIZE};
-    Stream stream{};
+    hipMemory                   src{DATA_SIZE};
+    hipMemory                   dst{DATA_SIZE};
+    Stream                      stream{};
 };
 
-
-__global__ void copy_kernel(float* a, const float* b)
+__global__ void
+copy_kernel(float* a, const float* b)
 {
-    int idx = threadIdx.x + blockIdx.x*blockDim.x;
-    if (idx < DATA_SIZE)
-        a[idx] = b[idx];
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if(idx < DATA_SIZE) a[idx] = b[idx];
 }
 
-__global__ void atomic_kernel(float* a, const float* b)
+__global__ void
+atomic_kernel(float* a, const float* b)
 {
-    int idx = threadIdx.x + blockIdx.x*blockDim.x;
-    if (idx < DATA_SIZE)
-        atomicAdd(a+threadIdx.x, b[idx]);
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if(idx < DATA_SIZE) atomicAdd(a + threadIdx.x, b[idx]);
 }
 
-__global__ void iops_kernel_trans()
+__global__ void
+iops_kernel_trans()
 {
     // 2 F32 Trans OPS
     asm volatile("v_cos_f32 v3, v3; v_cos_f32 v4, v4");
 }
 
-__global__ void iops_kernel1()
+__global__ void
+iops_kernel1()
 {
-    asm volatile("v_fma_f32 v3, v1, v2, v3"); // 2 F32 OPs
+    asm volatile("v_fma_f32 v3, v1, v2, v3");  // 2 F32 OPs
 
-    asm volatile("v_add_f64 v[0:1], v[2:3], v[4:5]"); // 1 F64 OP
-    asm volatile("v_fma_f64 v[0:1], v[2:3], v[4:5], v[6:7]"); // 2 F64 OP
-    asm volatile("v_fma_f64 v[0:1], v[2:3], v[4:5], v[6:7]"); // 2 F64 OP
+    asm volatile("v_add_f64 v[0:1], v[2:3], v[4:5]");          // 1 F64 OP
+    asm volatile("v_fma_f64 v[0:1], v[2:3], v[4:5], v[6:7]");  // 2 F64 OP
+    asm volatile("v_fma_f64 v[0:1], v[2:3], v[4:5], v[6:7]");  // 2 F64 OP
 }
 
-__global__ void iops_kernel2()
+__global__ void
+iops_kernel2()
 {
     // Fallback - removed dot2_f32_f16 instruction
-    asm volatile("v_add_f32 v4, v5, v6"); // 1 F32 OP
-    asm volatile("v_fma_f64 v[0:1], v[0:1], v[2:3], v[4:5]"); // 2 F64 OPs
-
+    asm volatile("v_add_f32 v4, v5, v6");                      // 1 F32 OP
+    asm volatile("v_fma_f64 v[0:1], v[0:1], v[2:3], v[4:5]");  // 2 F64 OPs
 }
 
 class CopyWorkload : public HIPWorkload
 {
 public:
-    CopyWorkload(AgentInfo& agent, const std::vector<std::string>& counters): HIPWorkload(agent, counters) {}
+    CopyWorkload(AgentInfo& agent, const std::vector<std::string>& counters)
+    : HIPWorkload(agent, counters)
+    {}
     virtual void run() override
     {
-        copy_kernel<<<DATA_SIZE/64,64,0,stream.stream>>>(dst.ptr, src.ptr);
+        copy_kernel<<<DATA_SIZE / 64, 64, 0, stream.stream>>>(dst.ptr, src.ptr);
         stream.synchronize();
     }
     virtual std::string_view name() override { return "CopyWorkload"; };
@@ -167,10 +174,12 @@ public:
 class AtomicWorkload : public HIPWorkload
 {
 public:
-    AtomicWorkload(AgentInfo& agent, const std::vector<std::string>& counters): HIPWorkload(agent, counters) {}
+    AtomicWorkload(AgentInfo& agent, const std::vector<std::string>& counters)
+    : HIPWorkload(agent, counters)
+    {}
     virtual void run() override
     {
-        atomic_kernel<<<DATA_SIZE/64,64,0,stream.stream>>>(dst.ptr, src.ptr);
+        atomic_kernel<<<DATA_SIZE / 64, 64, 0, stream.stream>>>(dst.ptr, src.ptr);
         stream.synchronize();
     }
     virtual std::string_view name() override { return "AtomicWorkload"; };
@@ -179,10 +188,12 @@ public:
 class IOPSWorkload1 : public HIPWorkload
 {
 public:
-    IOPSWorkload1(AgentInfo& agent, const std::vector<std::string>& counters): HIPWorkload(agent, counters) {}
+    IOPSWorkload1(AgentInfo& agent, const std::vector<std::string>& counters)
+    : HIPWorkload(agent, counters)
+    {}
     virtual void run() override
     {
-        iops_kernel1<<<DATA_SIZE/64,64,0,stream.stream>>>();
+        iops_kernel1<<<DATA_SIZE / 64, 64, 0, stream.stream>>>();
         stream.synchronize();
     }
     virtual std::string_view name() override { return "IOPSWorkload1"; };
@@ -191,10 +202,12 @@ public:
 class IOPSWorkload2 : public HIPWorkload
 {
 public:
-    IOPSWorkload2(AgentInfo& agent, const std::vector<std::string>& counters): HIPWorkload(agent, counters) {}
+    IOPSWorkload2(AgentInfo& agent, const std::vector<std::string>& counters)
+    : HIPWorkload(agent, counters)
+    {}
     virtual void run() override
     {
-        iops_kernel2<<<DATA_SIZE/64,64,0,stream.stream>>>();
+        iops_kernel2<<<DATA_SIZE / 64, 64, 0, stream.stream>>>();
         stream.synchronize();
     }
     virtual std::string_view name() override { return "IOPSWorkload2"; };
@@ -203,10 +216,12 @@ public:
 class IOPSWorkload3 : public HIPWorkload
 {
 public:
-    IOPSWorkload3(AgentInfo& agent, const std::vector<std::string>& counters): HIPWorkload(agent, counters) {}
+    IOPSWorkload3(AgentInfo& agent, const std::vector<std::string>& counters)
+    : HIPWorkload(agent, counters)
+    {}
     virtual void run() override
     {
-        iops_kernel_trans<<<DATA_SIZE/64,64,0,stream.stream>>>();
+        iops_kernel_trans<<<DATA_SIZE / 64, 64, 0, stream.stream>>>();
         stream.synchronize();
     }
     virtual std::string_view name() override { return "Trans IOPSWorkload"; };
@@ -215,25 +230,28 @@ public:
 class GMIWorkload : public HIPWorkload
 {
 public:
-    GMIWorkload(AgentInfo& agent, const std::vector<std::string>& counters): HIPWorkload(agent, counters) {}
+    GMIWorkload(AgentInfo& agent, const std::vector<std::string>& counters)
+    : HIPWorkload(agent, counters)
+    {}
     virtual void run() override
     {
-        auto policies = std::vector<unsigned>{hipHostMallocDefault, hipHostMallocCoherent, hipHostMallocNonCoherent};
-        for (auto& policy : policies)
+        auto policies = std::vector<unsigned>{
+            hipHostMallocDefault, hipHostMallocCoherent, hipHostMallocNonCoherent};
+        for(auto& policy : policies)
         {
             float* srchost;
             float* dsthost;
             HIP_API_CALL(hipHostMalloc(&srchost, DATA_SIZE * sizeof(float), policy));
             HIP_API_CALL(hipHostMalloc(&dsthost, DATA_SIZE * sizeof(float), policy));
 
-            for (size_t i=0; i<DATA_SIZE; i++)
+            for(size_t i = 0; i < DATA_SIZE; i++)
                 srchost[i] = float(i);
 
-            copy_kernel<<<DATA_SIZE/64,64,0,stream.stream>>>(dsthost, srchost);
+            copy_kernel<<<DATA_SIZE / 64, 64, 0, stream.stream>>>(dsthost, srchost);
             stream.synchronize();
-            atomic_kernel<<<DATA_SIZE/64,64,0,stream.stream>>>(srchost, dsthost);
+            atomic_kernel<<<DATA_SIZE / 64, 64, 0, stream.stream>>>(srchost, dsthost);
             stream.synchronize();
-            copy_kernel<<<DATA_SIZE/64,64,0,stream.stream>>>(dst.ptr, src.ptr);
+            copy_kernel<<<DATA_SIZE / 64, 64, 0, stream.stream>>>(dst.ptr, src.ptr);
             stream.synchronize();
 
             HIP_API_CALL(hipHostFree(srchost));
@@ -243,11 +261,12 @@ public:
     virtual std::string_view name() override { return "GMIWorkload"; };
 };
 
-auto tcp1_counters(std::string_view gfxip)
+auto
+tcp1_counters(std::string_view gfxip)
 {
     std::vector<std::string> counters = {"GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU"};
 
-    if (gfxip.find("gfx95") == 0)
+    if(gfxip.find("gfx95") == 0)
     {
         counters.push_back("TCP_CACHE_ACCESS");
         counters.push_back("TCP_CACHE_MISS");
@@ -258,7 +277,7 @@ auto tcp1_counters(std::string_view gfxip)
         counters.push_back("TCC_EA0_WRREQ_WRITE_DRAM_32B");
         counters.push_back("TCC_EA0_WRREQ_ATOMIC_DRAM");
     }
-    else if (gfxip.find("gfx94") == 0)
+    else if(gfxip.find("gfx94") == 0)
     {
         counters.push_back("TCP_READ");
         counters.push_back("TCP_WRITE");
@@ -270,18 +289,19 @@ auto tcp1_counters(std::string_view gfxip)
     return counters;
 }
 
-auto tcp2_counters(std::string_view gfxip)
+auto
+tcp2_counters(std::string_view gfxip)
 {
     std::vector<std::string> counters = {"GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU"};
 
-    if (gfxip.find("gfx95") == 0)
+    if(gfxip.find("gfx95") == 0)
     {
         counters.push_back("TCP_CACHE_MISS_TG0");
         counters.push_back("TCP_CACHE_MISS_TG1");
         counters.push_back("TCP_CACHE_MISS_TG2");
         counters.push_back("TCP_CACHE_MISS_TG3");
     }
-    else if (gfxip.find("gfx94") == 0)
+    else if(gfxip.find("gfx94") == 0)
     {
         counters.push_back("TCP_READ");
         counters.push_back("TCP_WRITE");
@@ -293,18 +313,19 @@ auto tcp2_counters(std::string_view gfxip)
     return counters;
 }
 
-auto atomic_counters(std::string_view gfxip)
+auto
+atomic_counters(std::string_view gfxip)
 {
     std::vector<std::string> counters = {"GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU"};
 
-    if (gfxip.find("gfx95") == 0)
+    if(gfxip.find("gfx95") == 0)
     {
         counters.push_back("TCC_EA0_WRREQ_ATOMIC_DRAM");
         counters.push_back("TCC_EA0_WRREQ_ATOMIC_DRAM_32B");
         counters.push_back("TCC_EA0_WRREQ_DRAM");
         counters.push_back("TCC_EA0_WRREQ_WRITE_DRAM");
     }
-    else if (gfxip.find("gfx94") == 0)
+    else if(gfxip.find("gfx94") == 0)
     {
         counters.push_back("TCP_READ");
         counters.push_back("TCP_WRITE");
@@ -316,11 +337,12 @@ auto atomic_counters(std::string_view gfxip)
     return counters;
 }
 
-auto iops_counters(std::string_view gfxip)
+auto
+iops_counters(std::string_view gfxip)
 {
     std::vector<std::string> counters = {"GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU"};
 
-    if (gfxip.find("gfx95") == 0)
+    if(gfxip.find("gfx95") == 0)
     {
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP32");
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP64");
@@ -330,18 +352,19 @@ auto iops_counters(std::string_view gfxip)
     return counters;
 }
 
-auto gmi_counters(std::string_view gfxip)
+auto
+gmi_counters(std::string_view gfxip)
 {
     std::vector<std::string> counters = {"GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU"};
 
-    if (gfxip.find("gfx95") == 0)
+    if(gfxip.find("gfx95") == 0)
     {
         counters.push_back("TCC_EA0_RDREQ");
         counters.push_back("TCC_EA0_RDREQ_GMI_32B");
         counters.push_back("TCC_EA0_WRREQ_GMI_32B");
         counters.push_back("TCC_EA0_ATOMIC_GMI_32B");
     }
-    else if (gfxip.find("gfx94") == 0)
+    else if(gfxip.find("gfx94") == 0)
     {
         counters.push_back("TCC_EA0_WRREQ_CREDIT_STALL");
         counters.push_back("TCC_EA0_WRREQ_IO_CREDIT_STALL");
@@ -351,18 +374,19 @@ auto gmi_counters(std::string_view gfxip)
     return counters;
 }
 
-auto io_counters(std::string_view gfxip)
+auto
+io_counters(std::string_view gfxip)
 {
     std::vector<std::string> counters = {"GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU"};
 
-    if (gfxip.find("gfx95") == 0)
+    if(gfxip.find("gfx95") == 0)
     {
         counters.push_back("TCC_EA0_RDREQ");
         counters.push_back("TCC_EA0_RDREQ_IO_32B");
         counters.push_back("TCC_EA0_WRREQ_IO_32B");
         counters.push_back("TCC_EA0_ATOMIC_IO_32B");
     }
-    else if (gfxip.find("gfx94") == 0)
+    else if(gfxip.find("gfx94") == 0)
     {
         counters.push_back("TCC_EA0_RDREQ");
         counters.push_back("TCC_EA0_RDREQ_IO_CREDIT_STALL");
@@ -372,12 +396,15 @@ auto io_counters(std::string_view gfxip)
     return counters;
 }
 
-void printcounters(const std::map<std::string, int64_t>& map)
+void
+printcounters(const std::map<std::string, int64_t>& map)
 {
-    for (auto& [name, v] : map) std::cout << " - " << name << ": " << v << std::endl;
+    for(auto& [name, v] : map)
+        std::cout << " - " << name << ": " << v << std::endl;
 }
 
-int main()
+int
+main()
 {
     CHECK_HSA(hsa_init());
     AgentInfo::iterate_agents();
@@ -385,13 +412,13 @@ int main()
     auto agent = AgentInfo::gpu_agents.at(0);
 
     {
-        Queue queue(agent);
-        CopyWorkload tcp1(*agent, tcp1_counters(agent->gfxip));
-        CopyWorkload tcp2(*agent, tcp2_counters(agent->gfxip));
+        Queue          queue(agent);
+        CopyWorkload   tcp1(*agent, tcp1_counters(agent->gfxip));
+        CopyWorkload   tcp2(*agent, tcp2_counters(agent->gfxip));
         AtomicWorkload atomic(*agent, atomic_counters(agent->gfxip));
-        IOPSWorkload1 iops1(*agent, iops_counters(agent->gfxip));
-        IOPSWorkload2 iops2(*agent, iops_counters(agent->gfxip));
-        IOPSWorkload3 iops3(*agent, iops_counters(agent->gfxip));
+        IOPSWorkload1  iops1(*agent, iops_counters(agent->gfxip));
+        IOPSWorkload2  iops2(*agent, iops_counters(agent->gfxip));
+        IOPSWorkload3  iops3(*agent, iops_counters(agent->gfxip));
 
         // warmup
         tcp1.run();

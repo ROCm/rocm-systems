@@ -42,6 +42,7 @@
 class AQLPacket
 {
     using desc_t = aqlprofile_buffer_desc_flags_t;
+
 public:
     AQLPacket(AgentInfo& _agent, const std::vector<std::string>& counters);
     ~AQLPacket() { aqlprofile_pmc_delete_packets(this->handle); };
@@ -55,17 +56,17 @@ public:
     std::map<std::string, int64_t> get()
     {
         std::map<std::string, int64_t> ret;
-        for (auto& [event, counter] : counter_names)
+        for(auto& [event, counter] : counter_names)
             ret.emplace(counter, results.at(event));
         return ret;
     }
 
     std::map<aqlprofile_pmc_event_t, std::string> counter_names;
-    std::map<aqlprofile_pmc_event_t, int64_t> results;
-    std::map<aqlprofile_pmc_event_t, int64_t> prev_results;
+    std::map<aqlprofile_pmc_event_t, int64_t>     results;
+    std::map<aqlprofile_pmc_event_t, int64_t>     prev_results;
 
-    aqlprofile_handle_t handle{0};
-    hsa_agent_t hsa_agent;
+    aqlprofile_handle_t          handle{0};
+    hsa_agent_t                  hsa_agent;
     aqlprofile_pmc_aql_packets_t packets;
 
     bool delta = false;
