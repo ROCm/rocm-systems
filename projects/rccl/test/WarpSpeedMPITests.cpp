@@ -254,6 +254,9 @@ TEST_F(WarpSpeedMPITest, HighRankCommInitAndAllGather)
     void* d_recv = nullptr;
     HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&d_send, sendCount * sizeof(float)));
     HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&d_recv, recvCount * sizeof(float)));
+    // Free on any exit path (including early ASSERT/FAIL returns) to avoid leaks.
+    SCOPE_EXIT(if(d_send) { (void)hipFree(d_send); });
+    SCOPE_EXIT(if(d_recv) { (void)hipFree(d_recv); });
 
     // Each rank fills its send buffer with its own rank value.
     HIP_TEST_CHECK_GTEST_FAIL(initializeBufferWithPattern<float>(
@@ -270,9 +273,6 @@ TEST_F(WarpSpeedMPITest, HighRankCommInitAndAllGather)
         d_recv, recvCount,
         [sendCount](size_t idx) { return static_cast<float>(idx / sendCount); });
     EXPECT_TRUE(ok) << "AllGather result mismatch across " << nranks << " ranks";
-
-    HIP_TEST_CHECK_GTEST_FAIL(hipFree(d_send));
-    HIP_TEST_CHECK_GTEST_FAIL(hipFree(d_recv));
 
     TEST_INFO("HighRankCommInitAndAllGather passed on %d ranks (single node)", nranks);
 }
