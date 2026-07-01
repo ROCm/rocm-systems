@@ -13,6 +13,10 @@ on:
   # push:
   #   branches:
   #     - develop
+  push:
+    branches:
+      - develop
+      - users/dlytovch/test-therock-fixes
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
