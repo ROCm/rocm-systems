@@ -106,7 +106,7 @@ struct spm_dispatch_counter_collection_service
 /// the HSA queue path should run the multi-pass replay loop for this context.
 struct kernel_replay_service
 {
-    common::Synchronized<bool>                enabled{false};
+    common::Synchronized<bool> enabled{false};
     // Returns how many replay passes (counter batches) to run for a dispatch. Supplied by the tool.
     rocprofiler_kernel_replay_pass_count_cb_t pass_count_cb      = nullptr;
     void*                                     pass_count_cb_args = nullptr;

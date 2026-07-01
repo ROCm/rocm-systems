@@ -169,11 +169,15 @@ def _records_by_dispatch(sdk):
         entry = table.setdefault(
             did,
             {
-                "kernel": kernel_id_to_name.get(int(_dispatch_info(rec)["kernel_id"]), ""),
+                "kernel": kernel_id_to_name.get(
+                    int(_dispatch_info(rec)["kernel_id"]), ""
+                ),
                 "passes": {},
             },
         )
-        entry["passes"][_pass_index(rec)] = _aggregated_named_counters(rec, counter_id_to_name)
+        entry["passes"][_pass_index(rec)] = _aggregated_named_counters(
+            rec, counter_id_to_name
+        )
     assert table, "no counter records found"
     return table
 
@@ -228,9 +232,9 @@ def test_counters_differ_between_kernels(json_data, common_counters):
         sig = tuple(round(first_pass.get(c, float("nan")), 3) for c in common_counters)
         signatures[entry["kernel"]] = sig
     values = list(signatures.values())
-    assert len(set(values)) == len(values), (
-        f"kernels are not distinguishable by common counters {common_counters}: {signatures}"
-    )
+    assert len(set(values)) == len(
+        values
+    ), f"kernels are not distinguishable by common counters {common_counters}: {signatures}"
 
 
 def test_replayed_kernels_present(json_data):
