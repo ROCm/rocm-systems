@@ -350,6 +350,12 @@ add_executable(
     data_types_test.cpp
     drm_info_layout_test.cpp
 )
+if(HAS_DEVICE_KERNELS)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE dbt/multikernel_indirect_branch_test.cpp
+    )
+endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(
         rocjitsu_tests
