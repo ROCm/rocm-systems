@@ -536,6 +536,7 @@ BlitKernel::BlitKernel(core::Queue* queue)
       kernarg_async_(NULL),
       kernarg_async_mask_(0),
       kernarg_async_counter_(0),
+      kernarg_signals_(NULL),
       bytes_queued_(0),
       last_queued_(0),
       pending_search_index_(0),
@@ -563,6 +564,9 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
                                   16, core::MemoryRegion::AllocateNoFlags));
 
   kernarg_async_mask_ = queue_->public_handle()->size - 1;
+
+  kernarg_signals_ = new hsa_signal_t[queue_->public_handle()->size]();
+  memset(kernarg_signals_, 0, queue_->public_handle()->size * sizeof(hsa_signal_t));
 
   // Obtain the number of compute units in the underlying agent.
   num_cus_ = gpuAgent->properties().NumFComputeCores / 4;
@@ -599,6 +603,9 @@ hsa_status_t BlitKernel::Destroy() {
   if (kernarg_async_ != NULL) {
     gpuAgent->system_deallocator()(kernarg_async_);
   }
+
+  delete[] kernarg_signals_;
+  kernarg_signals_ = NULL;
 
   if (completion_signal_.handle != 0) {
     core::Signal* signal = core::Signal::Convert(completion_signal_);
@@ -711,7 +718,8 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
   }
 
   // Insert dispatch packet for copy kernel.
-  KernelArgs* args = ObtainAsyncKernelCopyArg();
+  uint32_t kernarg_index;
+  KernelArgs* args = ObtainAsyncKernelCopyArg(kernarg_index);
   KernelCode* kernel_code = nullptr;
   int num_workitems = 0;
 
@@ -779,6 +787,7 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
   hsa_signal_t signal = {(core::Signal::Convert(&out_signal)).handle};
   PopulateQueue(write_index, uintptr_t(kernel_code->code_buf_), args,
                 num_workitems, signal);
+  kernarg_signals_[kernarg_index] = signal;
 
   // Submit barrier(s) and dispatch packets.
   ReleaseWriteIndex(write_index_temp, total_num_packet);
@@ -806,7 +815,8 @@ hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value,
       num_workitems * sizeof(uint32_t) * kFillUnroll() * kFillVecWidth();
   uint64_t phase1_size = (fill_size / phase1_block) * phase1_block;
 
-  KernelArgs* args = ObtainAsyncKernelCopyArg();
+  uint32_t kernarg_index;
+  KernelArgs* args = ObtainAsyncKernelCopyArg(kernarg_index);
   args->fill.phase1_dst_start = dst_start;
   args->fill.phase2_dst_start = dst_start + phase1_size;
   args->fill.phase2_dst_end = dst_start + fill_size;
@@ -825,6 +835,7 @@ hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value,
 
   PopulateQueue(write_index, uintptr_t(kernels_[KernelType::Fill].code_buf_),
                 args, num_workitems, completion_signal_);
+  kernarg_signals_[kernarg_index] = completion_signal_;
 
   ReleaseWriteIndex(write_index, 1);
 
@@ -929,10 +940,20 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
     completion_signal.handle, queue_->LoadReadIndexRelaxed(), index);
 }
 
-BlitKernel::KernelArgs* BlitKernel::ObtainAsyncKernelCopyArg() {
+BlitKernel::KernelArgs* BlitKernel::ObtainAsyncKernelCopyArg(uint32_t& out_index) {
   const uint32_t index =
       atomic::Add(&kernarg_async_counter_, 1U, std::memory_order_acquire) & kernarg_async_mask_;
 
+  // Wait for the kernel that previously used this kernarg slot to complete.
+  // AcquireWriteIndex only guarantees the CP consumed the packet (read_index
+  // advanced), not that the kernel finished reading its arguments.
+  if (kernarg_signals_[index].handle != 0) {
+    HSA::hsa_signal_wait_scacquire(kernarg_signals_[index],
+                                   HSA_SIGNAL_CONDITION_LT, 1,
+                                   uint64_t(-1), HSA_WAIT_STATE_ACTIVE);
+  }
+
+  out_index = index;
   KernelArgs* arg = &kernarg_async_[index];
   assert(IsMultipleOf(arg, 16));
   return arg;

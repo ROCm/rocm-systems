@@ -170,7 +170,7 @@ class BlitKernel : public core::Blit {
   void PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
                      uint32_t grid_size_x, hsa_signal_t completion_signal);
 
-  KernelArgs* ObtainAsyncKernelCopyArg();
+  KernelArgs* ObtainAsyncKernelCopyArg(uint32_t& out_index);
 
   void RecordBlitHistory(uint64_t size, uint64_t index);
 
@@ -198,6 +198,10 @@ class BlitKernel : public core::Blit {
   KernelArgs* kernarg_async_;
   uint32_t kernarg_async_mask_;
   volatile uint32_t kernarg_async_counter_;
+
+  /// Per-slot completion signal tracking to prevent kernarg reuse while
+  /// a previously dispatched kernel is still reading from that slot.
+  hsa_signal_t* kernarg_signals_;
 
   /// Completion signal for every kernel dispatched.
   hsa_signal_t completion_signal_;
