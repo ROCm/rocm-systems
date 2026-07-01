@@ -837,7 +837,22 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
-  if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+  // Check if GPU_ENABLE_PAL env var was set to empty string
+  // Empty string should be treated as "not set" to preserve default behavior
+  const char* gpu_enable_pal_env = getenv("GPU_ENABLE_PAL");
+  bool gpu_enable_pal_is_empty_string = (gpu_enable_pal_env != nullptr && gpu_enable_pal_env[0] == '\0');
+
+  // Handle empty string case: set platform-specific defaults
+  // Bug fix: atoi("") returns 0, but empty string should mean "use platform default"
+  if (gpu_enable_pal_is_empty_string) {
+    if (IS_WINDOWS) {
+      // Windows default: PAL path
+      GPU_ENABLE_PAL = 1;
+    } else {
+      // Linux default: ROCr path
+      GPU_ENABLE_PAL = 0;
+    }
+  } else if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
     // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
     // Without this, roc::Device::init() returns true & disables PAL path in below code
     GPU_ENABLE_PAL = 1;
