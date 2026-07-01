@@ -10,6 +10,7 @@
 // and clang-offload-bundler at build time). No GPU is required; this only
 // loads and parses the object.
 
+#include "../test_paths.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/patch/probe_callable.h"
@@ -30,10 +31,10 @@
 namespace rocjitsu {
 namespace {
 
-std::string probe_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".hsaco"; }
+using test::kernel_hsaco_path;
 
 TEST(ProbeFixture, NopProbeResolvesAndReturns) {
-  Executable exec(probe_path("rj_nop_probe_gfx90a"));
+  Executable exec(kernel_hsaco_path("rj_nop_probe_gfx90a"));
   ASSERT_TRUE(exec.is_valid()) << "failed to load rj_nop_probe_gfx90a.hsaco";
   ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX90A), 0u);
   const AmdGpuCodeObject *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
@@ -73,7 +74,7 @@ TEST(ProbeFixture, NopProbeResolvesAndReturns) {
 }
 
 TEST(ProbeFixture, NopProbeBuildsCallable) {
-  Executable exec(probe_path("rj_nop_probe_gfx90a"));
+  Executable exec(kernel_hsaco_path("rj_nop_probe_gfx90a"));
   ASSERT_TRUE(exec.is_valid()) << "failed to load rj_nop_probe_gfx90a.hsaco";
   const AmdGpuCodeObject *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
   ASSERT_NE(co, nullptr);
@@ -92,7 +93,7 @@ TEST(ProbeFixture, NopProbeBuildsCallable) {
 }
 
 TEST(ProbeFixture, NopProbeClobberSummaryIsEmpty) {
-  Executable exec(probe_path("rj_nop_probe_gfx90a"));
+  Executable exec(kernel_hsaco_path("rj_nop_probe_gfx90a"));
   ASSERT_TRUE(exec.is_valid()) << "failed to load rj_nop_probe_gfx90a.hsaco";
   const AmdGpuCodeObject *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
   ASSERT_NE(co, nullptr);
