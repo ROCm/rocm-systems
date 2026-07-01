@@ -1,21 +1,19 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Regression guard (GTest): the bundled SQLite must stay sealed.
+// Catch regressions where bundled sqlite3_* symbols leak out of libprofiler-hub.so.
 //
-// profiler-hub bundles its own static SQLite compiled with hidden visibility
-// (-fvisibility=hidden) and links libprofiler-hub.so with --exclude-libs, so no
-// sqlite3_* symbol is exported from the shared library and therefore cannot
-// collide with (or be interposed by) other sqlite3 versions present on TheRock.
-//
-// This test inspects the BUILT shared library with `nm` and fails if any
-// defined, exported sqlite3_* dynamic symbol reappears. It asserts a property
-// of the build artifact, not runtime behavior; the absolute path of the library
-// is injected by CMake via PROFILER_HUB_SHARED_LIB.
+// SQLite is compiled with -fvisibility=hidden and the shared library uses
+// --exclude-libs on ELF so we do not step on another sqlite3 in the same process
+// (TheRock has one). We parse nm/dumpbin output on the built artifact, not at
+// runtime. PROFILER_HUB_SHARED_LIB comes from CMake. Skip if the host has no
+// suitable tool.
 
 #include <gtest/gtest.h>
 
-#include <sys/wait.h>
+#if !defined(_WIN32)
+#    include <sys/wait.h>
+#endif
 
 #include <array>
 #include <cstdio>
@@ -28,31 +26,36 @@
 namespace
 {
 
-// Absolute path to the built libprofiler-hub.so, injected by CMake.
+// Set by CMake (absolute path to libprofiler-hub.so).
 constexpr const char* k_shared_library = PROFILER_HUB_SHARED_LIB;
 
-// Closes a popen() stream; used as a unique_ptr deleter. A dedicated functor
-// (rather than decltype(&pclose)) avoids -Wignored-attributes on libc symbols.
+#if defined(_WIN32)
+#    define PHUB_POPEN  _popen
+#    define PHUB_PCLOSE _pclose
+#else
+#    define PHUB_POPEN  popen
+#    define PHUB_PCLOSE pclose
+#endif
+
 struct file_op
 {
     void operator()(FILE* pipe) const noexcept
     {
         if(pipe != nullptr)
         {
-            pclose(pipe);
+            PHUB_PCLOSE(pipe);
         }
     }
 };
 
-// Run a shell command and capture its stdout. Returns false if the command
-// could not be launched OR exited with a non-zero status, so a failed `nm`
-// (e.g. an unreadable library path) is reported as a hard error rather than
-// silently producing empty output and masking a leak.
+// Run command, collect stdout. Returns the child exit status via `status`
+// (-1 if the shell could not run it). False only when the pipe could not open.
 bool
-run_capture(const std::string& command, std::string& output)
+run_capture(const std::string& command, std::string& output, int& status)
 {
     output.clear();
-    std::unique_ptr<FILE, file_op> pipe(popen(command.c_str(), "r"));
+    status = -1;
+    std::unique_ptr<FILE, file_op> pipe(PHUB_POPEN(command.c_str(), "r"));
     if(!pipe)
     {
         return false;
@@ -65,50 +68,100 @@ run_capture(const std::string& command, std::string& output)
         output += buffer.data();
     }
 
-    // Reclaim the handle from the RAII guard (which still covers the read above
-    // if it threw) so we can close it ourselves and inspect the exit status.
-    const int status = pclose(pipe.release());
-    return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    status = PHUB_PCLOSE(pipe.release());
+    return true;
 }
 
-// Locate an `nm`-like tool; empty string if none is available.
-std::string
-find_nm()
+// Convenience overload: success means the command ran and exited zero.
+bool
+run_capture(const std::string& command, std::string& output)
 {
+    int status = -1;
+    if(!run_capture(command, output, status))
+    {
+        return false;
+    }
+#if defined(_WIN32)
+    // _pclose gives the child exit code directly (-1 on error).
+    return status == 0;
+#else
+    return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#endif
+}
+
+struct symbol_holder
+{
+    std::string command;
+    std::regex  pattern;
+};
+
+// A probe only needs to prove the tool exists and runs. Some tools (notably
+// dumpbin /?) print their banner to stdout but exit non-zero, so presence is
+// decided by captured output, not by the exit status.
+bool
+tool_available(const std::string& probe)
+{
+    std::string out;
+    int         status = -1;
+    return run_capture(probe, out, status) && !out.empty();
+}
+
+// First nm/llvm-nm/dumpbin that works on this platform, or false.
+bool
+pick_tool(const std::string& library, symbol_holder& out)
+{
+    const std::string quoted = "\"" + library + "\"";
+
+#if defined(_WIN32)
+    // dumpbin export table: ordinal, hint, RVA, name.
+    if(tool_available("dumpbin /? 2>NUL"))
+    {
+        out = {
+            "dumpbin /nologo /exports " + quoted + " 2>NUL",
+            std::regex{
+                R"(^\s*[0-9]+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(sqlite3_[A-Za-z0-9_]+))" }
+        };
+        return true;
+    }
+    if(tool_available("llvm-nm --version 2>NUL"))
+    {
+        out = { "llvm-nm --defined-only " + quoted + " 2>NUL",
+                std::regex{ R"(\b[A-Za-z] (sqlite3_[A-Za-z0-9_]+)$)" } };
+        return true;
+    }
+#else
     for(const char* candidate : { "nm", "llvm-nm" })
     {
-        std::string out;
-        if(run_capture(std::string{ candidate } + " --version 2>/dev/null", out) &&
-           !out.empty())
+        if(tool_available(std::string{ candidate } + " --version 2>/dev/null"))
         {
-            return candidate;
+            out = {
+                std::string{ candidate } + " -D --defined-only " + quoted +
+                    " 2>/dev/null",
+                std::regex{
+                    R"(^[0-9a-fA-F]+ [A-Za-z] (sqlite3_[A-Za-z0-9_]+(?:@{1,2}[A-Za-z0-9_.-]+)?)$)" }
+            };
+            return true;
         }
     }
-    return {};
+#endif
+
+    return false;
 }
 
 TEST(sqlite3_symbol_seal, shared_library_exports_no_sqlite3_symbols)
 {
-    const std::string nm = find_nm();
-    if(nm.empty())
+    symbol_holder lister;
+    if(!pick_tool(k_shared_library, lister))
     {
-        GTEST_SKIP() << "no 'nm'/'llvm-nm' available to inspect exported symbols";
+        GTEST_SKIP() << "need nm, llvm-nm, or dumpbin to inspect " << k_shared_library;
     }
 
-    // -D: dynamic (exported) symbols, --defined-only: only symbols defined here.
-    std::string nm_output;
-    ASSERT_TRUE(run_capture(
-        nm + " -D --defined-only \"" + k_shared_library + "\" 2>/dev/null", nm_output))
-        << "failed to run " << nm << " on " << k_shared_library;
-
-    // Match real sqlite3_* exports (not C++ names that just contain "sqlite3_"),
-    // including versioned ones like "sqlite3_open@@SQLITE_3.45.3".
-    const std::regex exported_sqlite{
-        R"(^[0-9a-fA-F]+ [A-Za-z] (sqlite3_[A-Za-z0-9_]+(?:@{1,2}[A-Za-z0-9_.-]+)?)$)"
-    };
+    std::string output;
+    ASSERT_TRUE(run_capture(lister.command, output))
+        << "failed to inspect exported symbols of " << k_shared_library;
 
     std::vector<std::string> leaked;
-    std::istringstream       stream(nm_output);
+    std::istringstream       stream(output);
     std::string              line;
     while(std::getline(stream, line))
     {
@@ -118,7 +171,7 @@ TEST(sqlite3_symbol_seal, shared_library_exports_no_sqlite3_symbols)
         }
 
         std::smatch match;
-        if(std::regex_match(line, match, exported_sqlite))
+        if(std::regex_search(line, match, lister.pattern))
         {
             leaked.push_back(match[1].str());
         }
@@ -131,12 +184,9 @@ TEST(sqlite3_symbol_seal, shared_library_exports_no_sqlite3_symbols)
     }
 
     EXPECT_TRUE(leaked.empty())
-        << "'" << k_shared_library << "' exports " << leaked.size()
-        << " bundled sqlite3_* symbol(s):" << detail
-        << "\nThese must remain local (hidden) so they cannot collide with other "
-           "sqlite3 versions on TheRock. Check the -fvisibility=hidden compile "
-           "option on profiler-hub-sqlite3-static and the --exclude-libs link "
-           "option on the profiler-hub shared library.";
+        << k_shared_library << " exports bundled sqlite3 symbol(s):" << detail
+        << " (expected none, heck -fvisibility=hidden on profiler-hub-sqlite3-static "
+           "and --exclude-libs on the profiler-hub shared link)";
 }
 
 }  // namespace
