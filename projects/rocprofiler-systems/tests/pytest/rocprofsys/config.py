@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+from functools import cached_property
 import getpass
 import os
 from pathlib import Path
@@ -76,7 +77,8 @@ class RocprofsysConfig:
             self._capabilities = SystemCapabilities.from_config(self)
         return self._capabilities
 
-    def get_llvm_lib_paths(self) -> list[Path]:
+    @cached_property
+    def llvm_lib_paths(self) -> list[Path]:
         """Get list of found ROCm LLVM lib paths.
 
         Returns:
@@ -143,7 +145,7 @@ class RocprofsysConfig:
             paths.append(existing)
 
         # Add ROCm LLVM lib as fallback
-        for llvm_path in self.get_llvm_lib_paths():
+        for llvm_path in self.llvm_lib_paths:
             paths.append(str(llvm_path))
 
         return ":".join(paths)
