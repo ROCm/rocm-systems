@@ -27,6 +27,9 @@
 name: TheRock Multi-Arch CI
 
 on:
+  push:
+    branches:
+      - users/geomin12/ci-nightly-disable
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -67,7 +70,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/fix-test-label
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
@@ -105,7 +108,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/fix-test-label
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -127,7 +130,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/fix-test-label
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
