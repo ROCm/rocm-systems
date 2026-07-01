@@ -82,6 +82,17 @@ foreach(gtest_target GTest::gtest GTest::gmock)
         set_property(TARGET ${gtest_target} APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES Threads::Threads)
     endif()
+
+    # Mark GoogleTest's headers as system includes so consumers pull them in
+    # via -isystem. clang-tidy suppresses diagnostics from system headers by
+    # default, which keeps GoogleTest's macros and templates from polluting our
+    # test builds with warnings we can't fix. The SYSTEM keyword passed to
+    # FetchContent_Declare only takes effect on CMake >= 3.25, and a system
+    # find_package(GTest) is not guaranteed to mark them either, so set the
+    # property here directly to cover every path.
+    set_target_properties(${gtest_target} PROPERTIES
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+            "$<TARGET_PROPERTY:${gtest_target},INTERFACE_INCLUDE_DIRECTORIES>")
 endforeach()
 
 include(GoogleTest)

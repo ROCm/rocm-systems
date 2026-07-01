@@ -32,6 +32,241 @@ set(RJ_OBJECT_LIBS
     rocjitsu_config
 )
 
+if(RJ_INSTALL_TESTS)
+    set(RJ_INSTALL_TEST_DIR "${CMAKE_INSTALL_DATADIR}/rocjitsu/tests")
+    set(RJ_INSTALL_TEST_BIN_DIR "${RJ_INSTALL_TEST_DIR}/bin")
+    set(RJ_INSTALL_CTEST_FILE
+        "${CMAKE_CURRENT_BINARY_DIR}/install/CTestTestfile.cmake"
+    )
+    set(RJ_INSTALL_GTEST_GENERATOR
+        "${PROJECT_SOURCE_DIR}/cmake/rj_generate_installed_gtest_ctest.cmake"
+    )
+    if(IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
+        set(_rj_installed_bindir "${CMAKE_INSTALL_BINDIR}")
+    else()
+        set(_rj_installed_bindir "../../../${CMAKE_INSTALL_BINDIR}")
+    endif()
+    if(IS_ABSOLUTE "${CMAKE_INSTALL_DATADIR}")
+        set(_rj_installed_datadir "${CMAKE_INSTALL_DATADIR}")
+    else()
+        set(_rj_installed_datadir "../..")
+    endif()
+    if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+        set(_rj_installed_libdir "${CMAKE_INSTALL_LIBDIR}")
+    else()
+        set(_rj_installed_libdir "../../../${CMAKE_INSTALL_LIBDIR}")
+    endif()
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/install")
+    file(WRITE "${RJ_INSTALL_CTEST_FILE}" "# Installed rocjitsu CTest tests\n")
+    file(
+        APPEND "${RJ_INSTALL_CTEST_FILE}"
+        "set(RJ_INSTALLED_BINDIR \"${_rj_installed_bindir}\")\n"
+        "set(RJ_INSTALLED_CONFIG_DIR \"${_rj_installed_datadir}/rocjitsu/configs\")\n\n"
+        "set(RJ_INSTALLED_KERNEL_DIR \"kernels\")\n\n"
+        "set(RJ_INSTALLED_LIBDIR \"${_rj_installed_libdir}\")\n\n"
+        "include(\"rocjitsu_tests.cmake\")\n\n"
+    )
+
+    # Install a compiled test/tool target into the installed CTest bin directory.
+    # The installed CTest file references these binaries with paths relative to
+    # ${RJ_INSTALL_TEST_DIR}, e.g. bin/rocjitsu_tests.
+    function(rj_install_test_target target)
+        install(
+            TARGETS ${target}
+            RUNTIME DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+        )
+    endfunction()
+
+    # Install a non-CMake executable produced by a custom command, such as a HIP
+    # test binary compiled directly with hipcc.
+    function(rj_install_test_program path)
+        install(PROGRAMS ${path} DESTINATION ${RJ_INSTALL_TEST_BIN_DIR})
+    endfunction()
+
+    # Append one installed CTest entry to ${RJ_INSTALL_CTEST_FILE}. This mirrors
+    # the subset of add_test()/set_tests_properties() used by rj_add_test, but
+    # writes plain CMake code because the file is consumed later by
+    # `ctest --test-dir <installed tests dir>`.
+    function(rj_install_ctest name)
+        set(oneValueArgs TIMEOUT SKIP_REGULAR_EXPRESSION)
+        set(multiValueArgs COMMAND ENVIRONMENT LABELS)
+        cmake_parse_arguments(
+            ARG
+            ""
+            "${oneValueArgs}"
+            "${multiValueArgs}"
+            ${ARGN}
+        )
+        if(NOT ARG_COMMAND)
+            message(FATAL_ERROR "rj_install_ctest(${name}) requires COMMAND")
+        endif()
+
+        set(_content "add_test(\"${name}\"")
+        foreach(_arg IN LISTS ARG_COMMAND)
+            string(APPEND _content " \"${_arg}\"")
+        endforeach()
+        string(APPEND _content ")\n")
+
+        set(_props)
+        if(ARG_TIMEOUT)
+            string(APPEND _props " \"TIMEOUT\" \"${ARG_TIMEOUT}\"")
+        endif()
+        if(ARG_SKIP_REGULAR_EXPRESSION)
+            string(
+                APPEND _props
+                " \"SKIP_REGULAR_EXPRESSION\" [=[${ARG_SKIP_REGULAR_EXPRESSION}]=]"
+            )
+        endif()
+        if(ARG_LABELS)
+            list(JOIN ARG_LABELS ";" _labels)
+            string(APPEND _props " \"LABELS\" \"${_labels}\"")
+        endif()
+        if(ARG_ENVIRONMENT)
+            list(JOIN ARG_ENVIRONMENT ";" _env)
+            string(APPEND _props " \"ENVIRONMENT\" \"${_env}\"")
+        endif()
+        if(_props)
+            string(
+                APPEND _content
+                "set_tests_properties(\"${name}\" PROPERTIES"
+            )
+            string(APPEND _content "${_props})\n")
+        endif()
+
+        file(APPEND "${RJ_INSTALL_CTEST_FILE}" "${_content}\n")
+    endfunction()
+
+    # Generate and install fine-grained CTest entries for every concrete
+    # GoogleTest case in a target. The target executable must already exist, so
+    # this is a build-time custom command that runs --gtest_list_tests and writes
+    # an installed CTest fragment like rocjitsu_tests.cmake.
+    function(rj_install_gtest_cases target)
+        set(_fragment "${CMAKE_CURRENT_BINARY_DIR}/install/${target}.cmake")
+        add_custom_command(
+            OUTPUT "${_fragment}"
+            COMMAND
+                ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:${target}>"
+                "-DINSTALLED_EXECUTABLE=bin/${target}"
+                "-DOUTPUT_FILE=${_fragment}" -P "${RJ_INSTALL_GTEST_GENERATOR}"
+            DEPENDS ${target} "${RJ_INSTALL_GTEST_GENERATOR}"
+            COMMENT "Generating installed CTest entries for ${target}"
+            VERBATIM
+        )
+        add_custom_target(${target}_installed_ctest ALL DEPENDS "${_fragment}")
+        install(FILES "${_fragment}" DESTINATION ${RJ_INSTALL_TEST_DIR})
+    endfunction()
+
+    install(FILES "${RJ_INSTALL_CTEST_FILE}" DESTINATION ${RJ_INSTALL_TEST_DIR})
+endif()
+
+include(GoogleTest)
+
+set(_rj_installed_test_bin_dir "${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/bin")
+function(_rj_path_from_installed_test_bin out install_dir file_name)
+    if(IS_ABSOLUTE "${install_dir}")
+        set(_path "${install_dir}/${file_name}")
+    elseif(IS_ABSOLUTE "${_rj_installed_test_bin_dir}")
+        set(_path "${CMAKE_INSTALL_PREFIX}/${install_dir}/${file_name}")
+    else()
+        file(
+            RELATIVE_PATH
+            _rel_dir
+            "/${_rj_installed_test_bin_dir}"
+            "/${install_dir}"
+        )
+        set(_path "${_rel_dir}/${file_name}")
+    endif()
+    set(${out} "${_path}" PARENT_SCOPE)
+endfunction()
+
+# Register a test for both the build tree and, when RJ_INSTALL_TESTS is ON, the
+# installed CTest tree. COMMAND is the normal build-tree command passed to
+# add_test(). INSTALL_COMMAND is optional and should use paths relative to the
+# installed test directory, e.g. bin/my_test or ${RJ_INSTALLED_BINDIR}/rocjitsu.
+# Shared properties TIMEOUT, SKIP_REGULAR_EXPRESSION, and LABELS are applied to
+# both registrations. ENVIRONMENT applies only to the build-tree test;
+# INSTALL_ENVIRONMENT adds to the default installed test environment, which
+# points installed tests at packaged configs, kernels, binaries, and runtimes.
+function(rj_add_test)
+    set(oneValueArgs NAME WORKING_DIRECTORY TIMEOUT SKIP_REGULAR_EXPRESSION)
+    set(multiValueArgs
+        COMMAND
+        ENVIRONMENT
+        INSTALL_COMMAND
+        INSTALL_ENVIRONMENT
+        LABELS
+    )
+    cmake_parse_arguments(ARG "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    if(NOT ARG_NAME)
+        message(FATAL_ERROR "rj_add_test requires NAME")
+    endif()
+    if(NOT ARG_COMMAND)
+        message(FATAL_ERROR "rj_add_test(${ARG_NAME}) requires COMMAND")
+    endif()
+
+    add_test(NAME "${ARG_NAME}" COMMAND ${ARG_COMMAND})
+
+    if(ARG_WORKING_DIRECTORY)
+        set_tests_properties(
+            "${ARG_NAME}"
+            PROPERTIES WORKING_DIRECTORY "${ARG_WORKING_DIRECTORY}"
+        )
+    endif()
+    if(ARG_TIMEOUT)
+        set_tests_properties("${ARG_NAME}" PROPERTIES TIMEOUT "${ARG_TIMEOUT}")
+    endif()
+    if(ARG_SKIP_REGULAR_EXPRESSION)
+        set_tests_properties(
+            "${ARG_NAME}"
+            PROPERTIES SKIP_REGULAR_EXPRESSION "${ARG_SKIP_REGULAR_EXPRESSION}"
+        )
+    endif()
+    if(ARG_LABELS)
+        list(JOIN ARG_LABELS ";" _labels)
+        set_tests_properties("${ARG_NAME}" PROPERTIES LABELS "${_labels}")
+    endif()
+    if(ARG_ENVIRONMENT)
+        list(JOIN ARG_ENVIRONMENT ";" _env)
+        set_tests_properties("${ARG_NAME}" PROPERTIES ENVIRONMENT "${_env}")
+    endif()
+
+    if(RJ_INSTALL_TESTS AND ARG_INSTALL_COMMAND)
+        set(_install_args COMMAND ${ARG_INSTALL_COMMAND})
+        if(ARG_TIMEOUT)
+            list(APPEND _install_args TIMEOUT "${ARG_TIMEOUT}")
+        endif()
+        if(ARG_SKIP_REGULAR_EXPRESSION)
+            list(
+                APPEND _install_args
+                SKIP_REGULAR_EXPRESSION
+                "${ARG_SKIP_REGULAR_EXPRESSION}"
+            )
+        endif()
+        if(ARG_LABELS)
+            list(APPEND _install_args LABELS ${ARG_LABELS})
+        endif()
+        set(_install_env
+            "ROCJITSU_CONFIG_DIR=\${RJ_INSTALLED_CONFIG_DIR}"
+            "ROCJITSU_KERNEL_DIR=\${RJ_INSTALLED_KERNEL_DIR}"
+        )
+        list(APPEND _install_env ${ARG_INSTALL_ENVIRONMENT})
+        list(APPEND _install_args ENVIRONMENT ${_install_env})
+        rj_install_ctest("${ARG_NAME}" ${_install_args})
+    endif()
+endfunction()
+
+# Register a GoogleTest target with fine-grained tests in both the build tree
+# and installed CTest tree. Build-tree discovery delegates to
+# gtest_discover_tests(); installed discovery delegates to rj_install_gtest_cases
+# so parameterized TEST_P cases are expanded from the built executable.
+function(rj_add_gtest_tests target)
+    gtest_discover_tests(${target} ${ARGN})
+    if(RJ_INSTALL_TESTS)
+        rj_install_test_target(${target})
+        rj_install_gtest_cases(${target})
+    endif()
+endfunction()
+
 # --- Unit / integration test suite ---
 
 add_executable(
@@ -134,12 +369,10 @@ target_link_libraries(
         GTest::gtest_main
 )
 rj_configure_target(rocjitsu_tests TEST)
-
-include(GoogleTest)
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*').
-gtest_discover_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
+rj_add_gtest_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
 
 add_executable(
     rj_dbt_translate_smoke_test
@@ -154,10 +387,17 @@ target_include_directories(
 target_link_libraries(rj_dbt_translate_smoke_test PRIVATE GTest::gtest)
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
 add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
-add_test(
+if(RJ_INSTALL_TESTS)
+    rj_install_test_target(rj_dbt_translate_smoke_test)
+    rj_install_test_target(rj_dbt_translate)
+endif()
+rj_add_test(
     NAME "RjDbtTranslate.Smoke"
     COMMAND rj_dbt_translate_smoke_test $<TARGET_FILE:rj_dbt_translate>
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    INSTALL_COMMAND
+        "bin/rj_dbt_translate_smoke_test"
+        "bin/rj_dbt_translate"
 )
 
 # --- Scaling test (standalone executable) ---
@@ -176,7 +416,16 @@ rj_configure_target(scaling_test TEST)
 # The CLI handles LD_PRELOAD and config discovery. No RESOURCE_LOCK needed.
 
 set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json")
+set(RJ_CDNA4_KMD_2GPU_CONFIG
+    "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
+)
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
+get_filename_component(RJ_CDNA4_KMD_CONFIG_NAME "${RJ_CDNA4_KMD_CONFIG}" NAME)
+get_filename_component(
+    RJ_CDNA4_KMD_2GPU_CONFIG_NAME
+    "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+    NAME
+)
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
 set(RJ_KMD_PRELOAD_ENV
@@ -186,6 +435,17 @@ set(RJ_KMD_PRELOAD_ENV
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
+
+_rj_path_from_installed_test_bin(
+    _rj_installed_rocjitsu_bin
+    "${CMAKE_INSTALL_BINDIR}"
+    "rocjitsu"
+)
+_rj_path_from_installed_test_bin(
+    _rj_installed_cdna4_kmd_config
+    "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+    "${RJ_CDNA4_KMD_CONFIG_NAME}"
+)
 
 find_program(
     ROCMINFO_EXECUTABLE
@@ -202,49 +462,47 @@ if(ROCMINFO_EXECUTABLE)
             ROCMINFO_PATH="${ROCMINFO_EXECUTABLE}"
             ROCJITSU_BIN="$<TARGET_FILE:rocjitsu_bin>"
             RJ_CONFIG_PATH="${RJ_CDNA4_KMD_CONFIG}"
+            RJ_INSTALLED_ROCJITSU_BIN="${_rj_installed_rocjitsu_bin}"
+            RJ_INSTALLED_CONFIG_PATH="${_rj_installed_cdna4_kmd_config}"
     )
     target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
     add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_kmd_shim)
 
-    add_test(
-        NAME "RocminfoTest.ExitsSuccessfully"
-        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ExitsSuccessfully
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    if(RJ_INSTALL_TESTS)
+        rj_install_test_target(rocminfo_test)
+    endif()
+    set(_rocminfo_install_environment_arg)
+    if(ROCM_PATH AND EXISTS "${ROCM_PATH}/bin/rocminfo")
+        list(
+            APPEND _rocminfo_install_environment_arg
+            INSTALL_ENVIRONMENT
+            "ROCMINFO_PATH=${ROCM_PATH}/bin/rocminfo"
+        )
+    endif()
+    foreach(
+        _rocminfo_test
+        IN
+        ITEMS
+            ExitsSuccessfully
+            InterposerActive
+            HsaSystemAttributes
+            DetectsGpuAgent
+            ReportsGfx950
+            ReportsWavefrontSize
     )
-    add_test(
-        NAME "RocminfoTest.InterposerActive"
-        COMMAND rocminfo_test --gtest_filter=RocminfoTest.InterposerActive
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "RocminfoTest.HsaSystemAttributes"
-        COMMAND rocminfo_test --gtest_filter=RocminfoTest.HsaSystemAttributes
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "RocminfoTest.DetectsGpuAgent"
-        COMMAND rocminfo_test --gtest_filter=RocminfoTest.DetectsGpuAgent
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "RocminfoTest.ReportsGfx950"
-        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsGfx950
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "RocminfoTest.ReportsWavefrontSize"
-        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsWavefrontSize
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    set_tests_properties(
-        "RocminfoTest.ExitsSuccessfully"
-        "RocminfoTest.InterposerActive"
-        "RocminfoTest.HsaSystemAttributes"
-        "RocminfoTest.DetectsGpuAgent"
-        "RocminfoTest.ReportsGfx950"
-        "RocminfoTest.ReportsWavefrontSize"
-        PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
-    )
+        rj_add_test(
+            NAME "RocminfoTest.${_rocminfo_test}"
+            COMMAND
+                rocminfo_test
+                "--gtest_filter=RocminfoTest.${_rocminfo_test}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            ENVIRONMENT ${RJ_KMD_PRELOAD_ENV}
+            INSTALL_COMMAND
+                "bin/rocminfo_test"
+                "--gtest_filter=RocminfoTest.${_rocminfo_test}"
+            ${_rocminfo_install_environment_arg}
+        )
+    endforeach()
     message(STATUS "rocminfo test enabled (found ${ROCMINFO_EXECUTABLE})")
 else()
     message(STATUS "rocminfo test disabled (rocminfo not found)")
@@ -266,25 +524,30 @@ if(HSA_RUNTIME64)
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
     add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_kmd_shim)
-    add_test(
-        NAME "HsaTest.InitSucceeded"
-        COMMAND
-            ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} --
-            $<TARGET_FILE:hsa_init_test> --gtest_filter=HsaTest.InitSucceeded
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "HsaTest.GpuAgentFound"
-        COMMAND
-            ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} --
-            $<TARGET_FILE:hsa_init_test> --gtest_filter=HsaTest.GpuAgentFound
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    set_tests_properties(
-        "HsaTest.InitSucceeded"
-        "HsaTest.GpuAgentFound"
-        PROPERTIES SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-    )
+    if(RJ_INSTALL_TESTS)
+        rj_install_test_target(hsa_init_test)
+    endif()
+    foreach(_hsa_test IN ITEMS InitSucceeded GpuAgentFound)
+        rj_add_test(
+            NAME "HsaTest.${_hsa_test}"
+            COMMAND
+                ${RJ_CLI}
+                --config
+                ${RJ_CDNA4_KMD_CONFIG}
+                --
+                $<TARGET_FILE:hsa_init_test>
+                "--gtest_filter=HsaTest.${_hsa_test}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+            INSTALL_COMMAND
+                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                "--config"
+                "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+                "--"
+                "bin/hsa_init_test"
+                "--gtest_filter=HsaTest.${_hsa_test}"
+        )
+    endforeach()
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
     # --- HSA translate test: CDNA4→RDNA4 on-device verification ---
@@ -358,6 +621,9 @@ if(HSA_RUNTIME64)
         )
         add_dependencies(hsa_translate_test device_kernels)
         rj_configure_target(hsa_translate_test TEST)
+        if(RJ_INSTALL_TESTS)
+            rj_install_test_target(hsa_translate_test)
+        endif()
 
         add_executable(hsa_hooks_test dbt/hsa_hooks_test.cpp)
         target_include_directories(
@@ -386,37 +652,51 @@ if(HSA_RUNTIME64)
         )
         add_dependencies(hsa_hooks_test device_kernels rocjitsu_hooks)
         rj_configure_target(hsa_hooks_test TEST)
+        if(RJ_INSTALL_TESTS)
+            rj_install_test_target(hsa_hooks_test)
+        endif()
 
         if(HAS_RDNA4_GPU)
-            add_test(
+            rj_add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                INSTALL_COMMAND
+                    "bin/hsa_translate_test"
+                    "--gtest_filter=*VectorAdd*"
             )
         endif()
 
         if(HAS_GFX1201_GPU)
-            add_test(
+            rj_add_test(
                 NAME "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
                 COMMAND
                     hsa_hooks_test
                     --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            set_tests_properties(
-                "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
-                PROPERTIES
-                    TIMEOUT 60
-                    ENVIRONMENT
-                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_hooks>;RJ_DBT_TARGET_ISA=gfx1201;RJ_DBT_LOG=1"
+                TIMEOUT 60
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_hooks>"
+                    "RJ_DBT_TARGET_ISA=gfx1201"
+                    "RJ_DBT_LOG=1"
+                INSTALL_COMMAND
+                    "bin/hsa_hooks_test"
+                    "--gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+                INSTALL_ENVIRONMENT
+                    "HSA_TOOLS_LIB=\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_hooks${CMAKE_SHARED_LIBRARY_SUFFIX}"
+                    "RJ_DBT_TARGET_ISA=gfx1201"
+                    "RJ_DBT_LOG=1"
             )
         endif()
 
         if(HAS_RDNA4_GPU)
-            add_test(
+            rj_add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
                 COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                INSTALL_COMMAND
+                    "bin/hsa_translate_test"
+                    "--gtest_filter=*Mfma16x16*"
             )
             message(STATUS "HSA translate test enabled (RDNA4 GPU detected)")
         else()
@@ -458,6 +738,9 @@ if(HSA_RUNTIME64)
         )
         add_dependencies(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} device_kernels)
         rj_configure_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} TEST)
+        if(RJ_INSTALL_TESTS)
+            rj_install_test_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE})
+        endif()
 
         set(RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS
             DynamicCopyLoopTranslates
@@ -467,16 +750,16 @@ if(HSA_RUNTIME64)
             TritonFlashAttentionBufferAsyncTranslates
         )
         foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS)
-            add_test(
+            rj_add_test(
                 NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
                 COMMAND
                     ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
                     --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            set_tests_properties(
-                "Cdna4ToCdna3DispatchTest.${_test_name}"
-                PROPERTIES TIMEOUT 120
+                TIMEOUT 120
+                INSTALL_COMMAND
+                    "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
+                    "--gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}"
             )
         endforeach()
 
@@ -490,16 +773,16 @@ if(HSA_RUNTIME64)
                 TritonFlashAttentionBufferAsyncDispatchAndRun
             )
             foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS)
-                add_test(
+                rj_add_test(
                     NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
                     COMMAND
                         ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
                         --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                )
-                set_tests_properties(
-                    "Cdna4ToCdna3DispatchTest.${_test_name}"
-                    PROPERTIES TIMEOUT 120
+                    TIMEOUT 120
+                    INSTALL_COMMAND
+                        "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
+                        "--gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}"
                 )
             endforeach()
             message(
@@ -543,6 +826,9 @@ if(HSA_RUNTIME64)
         )
         add_dependencies(hsa_dbi_smoke_test device_kernels)
         rj_configure_target(hsa_dbi_smoke_test TEST)
+        if(RJ_INSTALL_TESTS)
+            rj_install_test_target(hsa_dbi_smoke_test)
+        endif()
 
         # Local helper: register one TEST_F case from hsa_dbi_smoke_test as a
         # CTest entry. <group> is the part of the fixture name after
@@ -552,17 +838,15 @@ if(HSA_RUNTIME64)
             set(oneValueArgs TIMEOUT)
             cmake_parse_arguments(RJ_DBI "" "${oneValueArgs}" "" ${ARGN})
             set(name "HsaDbiSmoke${group}.${case}")
-            add_test(
+            rj_add_test(
                 NAME "${name}"
                 COMMAND hsa_dbi_smoke_test --gtest_filter=${name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                INSTALL_COMMAND
+                    "bin/hsa_dbi_smoke_test"
+                    "--gtest_filter=${name}"
+                ${ARGN}
             )
-            if(RJ_DBI_TIMEOUT)
-                set_tests_properties(
-                    "${name}"
-                    PROPERTIES TIMEOUT ${RJ_DBI_TIMEOUT}
-                )
-            endif()
         endfunction()
 
         # Static-only test: no GPU needed, runs anywhere the binary is built.
@@ -594,7 +878,21 @@ find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
 if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
-    set(RJ_HIP_SANITIZER_FLAGS ${RJ_SANITIZER_COMPILE_OPTIONS})
+    set(RJ_HIP_SANITIZER_FLAGS)
+    foreach(_rj_sanitizer_flag IN LISTS RJ_SANITIZER_COMPILE_OPTIONS)
+        list(APPEND RJ_HIP_SANITIZER_FLAGS -Xarch_host ${_rj_sanitizer_flag})
+    endforeach()
+    set(RJ_HIP_SANITIZER_LINK_FLAGS)
+    foreach(_rj_sanitizer_flag IN LISTS RJ_SANITIZER_LINK_OPTIONS)
+        list(
+            APPEND RJ_HIP_SANITIZER_LINK_FLAGS
+            -Xarch_host
+            ${_rj_sanitizer_flag}
+        )
+    endforeach()
+    if(RJ_HIP_SANITIZER_FLAGS OR RJ_HIP_SANITIZER_LINK_FLAGS)
+        list(APPEND RJ_HIP_SANITIZER_FLAGS -Xarch_device -fno-sanitize=all)
+    endif()
 
     # Helper: build a HIP test binary with hipcc + gtest.
     function(rj_add_hip_test TEST_NAME)
@@ -608,21 +906,29 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             set(HIP_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}.cpp)
         endif()
         set(HIP_TEST_BIN ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
+        set(HIP_EXTRA_LIBS)
+        if(ARG_EXTRA_LIBS)
+            set(HIP_EXTRA_LIBS -x none ${ARG_EXTRA_LIBS})
+        endif()
         add_custom_command(
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
-                ${HIPCC_EXECUTABLE} --offload-arch=${ARG_ARCH} -std=c++20
+                ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
+                --rocm-path=${ROCM_PATH} -std=c++20 -O2
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
-                -I${CMAKE_CURRENT_SOURCE_DIR} -L${GTEST_LIB_DIR} -lgtest
-                -lpthread ${ARG_EXTRA_LIBS} -Wl,-rpath,${GTEST_LIB_DIR}
-                -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} -o ${HIP_TEST_BIN}
-                ${HIP_TEST_SRC}
+                -I${CMAKE_CURRENT_SOURCE_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
+                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
+                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+                ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
             COMMENT "Building ${TEST_NAME} with hipcc (${ARG_ARCH})"
             VERBATIM
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
         add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_kmd_shim)
+        if(RJ_INSTALL_TESTS)
+            rj_install_test_program(${HIP_TEST_BIN})
+        endif()
     endfunction()
 
     # Helper: register a HIP test case run through the CLI launcher.
@@ -640,23 +946,65 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         if(NOT ARG_NAME)
             set(ARG_NAME ${TEST_CASE})
         endif()
-        add_test(
-            NAME ${ARG_NAME}
+        get_filename_component(_install_config_name "${ARG_CONFIG}" NAME)
+        set(_install_env)
+        foreach(_env_entry IN LISTS ARG_ENVIRONMENT)
+            if(_env_entry MATCHES "^(ROCJITSU_RUNTIME_DIR|RJ_SINK_DIR)=(.*)$")
+                set(_env_name "${CMAKE_MATCH_1}")
+                set(_env_value "${CMAKE_MATCH_2}")
+                if(IS_ABSOLUTE "${_env_value}")
+                    file(
+                        RELATIVE_PATH
+                        _env_relpath
+                        "${CMAKE_CURRENT_BINARY_DIR}"
+                        "${_env_value}"
+                    )
+                    if(_env_relpath MATCHES "^\\.\\.")
+                        get_filename_component(
+                            _env_relpath
+                            "${_env_value}"
+                            NAME
+                        )
+                    endif()
+                    list(
+                        APPEND _install_env
+                        "${_env_name}=runtime/${_env_relpath}"
+                    )
+                else()
+                    list(APPEND _install_env "${_env_entry}")
+                endif()
+            else()
+                list(APPEND _install_env "${_env_entry}")
+            endif()
+        endforeach()
+        set(_test_args
+            NAME
+            ${ARG_NAME}
             COMMAND
-                ${RJ_CLI} --config ${ARG_CONFIG} --
-                ${CMAKE_CURRENT_BINARY_DIR}/${TEST_BIN}
-                --gtest_filter=${TEST_CASE}
+            ${RJ_CLI}
+            --config
+            ${ARG_CONFIG}
+            --
+            ${CMAKE_CURRENT_BINARY_DIR}/${TEST_BIN}
+            --gtest_filter=${TEST_CASE}
+            INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${_install_config_name}"
+            "--"
+            "bin/${TEST_BIN}"
+            "--gtest_filter=${TEST_CASE}"
         )
+        if(RJ_INSTALL_TESTS AND _install_env)
+            list(APPEND _test_args INSTALL_ENVIRONMENT ${_install_env})
+        endif()
         if(ARG_ENVIRONMENT)
-            list(JOIN ARG_ENVIRONMENT ";" _ENV_STR)
-            set_tests_properties(
-                ${ARG_NAME}
-                PROPERTIES ENVIRONMENT "${_ENV_STR}"
-            )
+            list(APPEND _test_args ENVIRONMENT ${ARG_ENVIRONMENT})
         endif()
         if(ARG_TIMEOUT)
-            set_tests_properties(${ARG_NAME} PROPERTIES TIMEOUT ${ARG_TIMEOUT})
+            list(APPEND _test_args TIMEOUT ${ARG_TIMEOUT})
         endif()
+        rj_add_test(${_test_args})
     endfunction()
 
     rj_add_hip_test(hip_memcpy_test)
@@ -679,17 +1027,40 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     # --- Daemon RPC tests (gtest-driven) ---
     # A gtest fixture manages the daemon lifecycle: fork+exec the daemon in
     # SetUp, run the HIP test binary as a subprocess, tear down in TearDown.
+    _rj_path_from_installed_test_bin(
+        _rj_installed_daemon_config
+        "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+        "${RJ_CDNA4_KMD_CONFIG_NAME}"
+    )
+    _rj_path_from_installed_test_bin(
+        _rj_installed_daemon_config_2gpu
+        "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+        "${RJ_CDNA4_KMD_2GPU_CONFIG_NAME}"
+    )
+    _rj_path_from_installed_test_bin(
+        _rj_installed_preload_lib
+        "${CMAKE_INSTALL_LIBDIR}"
+        "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_kmd${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    )
+
     add_executable(daemon_test daemon_test.cpp)
     target_compile_definitions(
         daemon_test
         PRIVATE
             RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
-            RJ_DAEMON_CONFIG="${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
-            RJ_DAEMON_CONFIG_2GPU="${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
+            RJ_DAEMON_CONFIG="${RJ_CDNA4_KMD_CONFIG}"
+            RJ_DAEMON_CONFIG_2GPU="${RJ_CDNA4_KMD_2GPU_CONFIG}"
             RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_kmd_shim>"
             RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
             RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
             RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
+            RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
+            RJ_INSTALLED_DAEMON_CONFIG="${_rj_installed_daemon_config}"
+            RJ_INSTALLED_DAEMON_CONFIG_2GPU="${_rj_installed_daemon_config_2gpu}"
+            RJ_INSTALLED_PRELOAD_LIB="${_rj_installed_preload_lib}"
+            RJ_INSTALLED_HIP_VECTOR_ADD_BIN="hip_vector_add_test"
+            RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
+            RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
     )
     target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
     add_dependencies(
@@ -701,7 +1072,9 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     if(RCCL_LIB)
         add_dependencies(daemon_test hip_rccl_test_target)
     endif()
-
+    if(RJ_INSTALL_TESTS)
+        rj_install_test_target(daemon_test)
+    endif()
     set(RJ_DAEMON_TESTS
         DaemonTest.HipVectorAdd
         DaemonTest.HipMemcpyRoundTripFloat
@@ -710,8 +1083,15 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         DaemonTest.TwoIndependentClients
     )
     foreach(TC IN LISTS RJ_DAEMON_TESTS)
-        add_test(NAME ${TC} COMMAND daemon_test --gtest_filter=${TC})
-        set_tests_properties(${TC} PROPERTIES TIMEOUT 120 LABELS "daemon")
+        rj_add_test(
+            NAME ${TC}
+            COMMAND daemon_test --gtest_filter=${TC}
+            TIMEOUT 120
+            LABELS daemon
+            INSTALL_COMMAND
+                "bin/daemon_test"
+                "--gtest_filter=${TC}"
+        )
     endforeach()
 
     if(RCCL_LIB)
@@ -723,10 +1103,14 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             RcclDaemonTest.SendRecv
         )
         foreach(TC IN LISTS RJ_RCCL_TESTS)
-            add_test(NAME ${TC} COMMAND daemon_test --gtest_filter=${TC})
-            set_tests_properties(
-                ${TC}
-                PROPERTIES TIMEOUT 180 LABELS "daemon;rccl"
+            rj_add_test(
+                NAME ${TC}
+                COMMAND daemon_test --gtest_filter=${TC}
+                TIMEOUT 180
+                LABELS daemon rccl
+                INSTALL_COMMAND
+                    "bin/daemon_test"
+                    "--gtest_filter=${TC}"
             )
         endforeach()
     endif()
@@ -755,12 +1139,16 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
                 BetaZero
                 Large_2048x2048
         )
-            rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
+            if(TC STREQUAL "Large_2048x2048")
+                rj_add_hip_test_case(
+                    hip_gemm_test
+                    "RocblasGemmTest.${TC}"
+                    TIMEOUT 300
+                )
+            else()
+                rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
+            endif()
         endforeach()
-        set_tests_properties(
-            RocblasGemmTest.Large_2048x2048
-            PROPERTIES TIMEOUT 300
-        )
         foreach(I RANGE 0 4)
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
         endforeach()
@@ -836,16 +1224,26 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             ${RJ_HIP_SANITIZER_FLAGS} -I${CMAKE_SOURCE_DIR}/lib/util/include -o
             ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
+            ${RJ_HIP_SANITIZER_LINK_FLAGS}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
         COMMENT "Building hip_cvt_narrow_test with hipcc (gfx950)"
         VERBATIM
     )
     add_custom_target(hip_cvt_narrow_test_target ALL DEPENDS ${CVT_NARROW_BIN})
     add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_kmd_shim)
+    if(RJ_INSTALL_TESTS)
+        rj_install_test_program(${CVT_NARROW_BIN})
+    endif()
 
-    add_test(
+    rj_add_test(
         NAME "CvtNarrow.AllTests"
         COMMAND ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} -- ${CVT_NARROW_BIN}
+        TIMEOUT 300
+        INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+            "--"
+            "bin/hip_cvt_narrow_test"
     )
-    set_tests_properties("CvtNarrow.AllTests" PROPERTIES TIMEOUT 300)
 endif()

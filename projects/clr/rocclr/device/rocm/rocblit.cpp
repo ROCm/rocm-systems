@@ -2003,8 +2003,25 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
   bool result = false;
   bool rejected = false;
 
+  // hsa_amd_memory_async_copy_rect requires dword-aligned row/slice pitches.
+  // When they are not aligned, DmaBlitManager::copyBufferRect falls back to one
+  // hsa_amd_memory_async_copy per row. For tall, narrow host<->device rects
+  // (e.g. hipMemcpy2D with width=1 and a very large height) this issues one
+  // single-byte SDMA submission per row - up to millions of descriptors - which
+  // is orders of magnitude slower than the shader rect kernel below
+  // (BlitCopyBufferRect handles 1-byte alignment in a single dispatch). Skip the
+  // SDMA rect path in that pathological case and let the shader kernel handle it.
+  constexpr size_t kSdmaRectRowSerializeLimit = 256;
+  const bool dwordAlignedRect =
+      ((srcRectIn.rowPitch_ % 4) == 0) && ((srcRectIn.slicePitch_ % 4) == 0) &&
+      ((dstRectIn.rowPitch_ % 4) == 0) && ((dstRectIn.slicePitch_ % 4) == 0);
+  const bool hostDeviceRect =
+      srcMemory.isHostMemDirectAccess() != dstMemory.isHostMemDirectAccess();
+  const bool sdmaRectWouldSerialize =
+      !dwordAlignedRect && hostDeviceRect && ((sizeIn[1] * sizeIn[2]) > kSdmaRectRowSerializeLimit);
+
   // Fall into the ROC path for rejected transfers
-  if (dev().info().pcie_atomics_ &&
+  if (dev().info().pcie_atomics_ && !sdmaRectWouldSerialize &&
       (setup_.disableCopyBufferRect_ || srcMemory.isHostMemDirectAccess() ||
        dstMemory.isHostMemDirectAccess())) {
     result = DmaBlitManager::copyBufferRect(srcMemory, dstMemory, srcRectIn, dstRectIn, sizeIn,
