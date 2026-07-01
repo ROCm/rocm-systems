@@ -357,10 +357,10 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt ${_catch
 set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
 
-if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/DartConfiguration.tcl)
+if(EXISTS "${CMAKE_BINARY_DIR}/DartConfiguration.tcl")
   configure_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/DartConfiguration.tcl
-    ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/DartConfiguration.tcl
+    "${CMAKE_BINARY_DIR}/DartConfiguration.tcl"
+    "${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/DartConfiguration.tcl"
     COPYONLY)
 endif()
 
