@@ -54,20 +54,20 @@ AvcVideoParser::~AvcVideoParser() {
 }
 
 rocDecStatus AvcVideoParser::Initialize(RocdecParserParams *p_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_params));
     rocDecStatus ret = RocVideoParser::Initialize(p_params);
     FunctionExitLog(g_rocdec_logger);
     return ret;
 }
 
 rocDecStatus AvcVideoParser::UnInitialize() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_data));
     if (p_data->payload && p_data->payload_size) {
         DebugLog(g_rocdec_logger, ROCDEC_STR("Parsing picture ") + ROCDEC_TOSTR(pic_count_) + ROCDEC_STR(" with payload size ") + ROCDEC_TOSTR(p_data->payload_size) + ROCDEC_STR(" bytes ..."));
         curr_pts_ = p_data->pts;
@@ -150,7 +150,7 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 }
 
 ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t pic_data_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(pic_data_size));
     ParserResult ret = PARSER_OK;
     ParserResult ret2;
 
@@ -324,7 +324,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 }
 
 ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_sps));
     video_format_params_.codec = rocDecVideoCodec_AVC;
     video_format_params_.frame_rate.numerator = frame_rate_.numerator;
     video_format_params_.frame_rate.denominator = frame_rate_.denominator;
@@ -471,7 +471,7 @@ static const int diag_scan_8x8[64] = {
 };
 
 ParserResult AvcVideoParser::SendPicForDecode() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     int i, j;
     AvcSeqParameterSet *p_sps = &sps_list_[active_sps_id_];
     AvcPicParameterSet *p_pps = &pps_list_[active_pps_id_];
@@ -815,7 +815,7 @@ const int Default_8x8_Inter[64] = {
 };
 
 ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(size));
     size_t offset = 0;  // current bit offset
     AvcSeqParameterSet *p_sps = nullptr;
 
@@ -990,8 +990,17 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
     CHECK_ALLOWED_RANGE("max_num_ref_frames", p_sps->max_num_ref_frames, 0, AVC_MAX_DPB_FRAMES - 1);
     p_sps->gaps_in_frame_num_value_allowed_flag = Parser::GetBit(p_stream, offset);
     p_sps->pic_width_in_mbs_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    uint64_t pic_width_in_mbs = static_cast<uint64_t>(p_sps->pic_width_in_mbs_minus1) + 1;
+    // Maximum picture width in MBs is 1056 for AVC Level 6.2 (Annex A.3 Sqrt(MaxFS * 8))
+    CHECK_ALLOWED_MAX("PicWidthInMbs", pic_width_in_mbs, 1056);
     p_sps->pic_height_in_map_units_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
     p_sps->frame_mbs_only_flag = Parser::GetBit(p_stream, offset);
+    uint64_t frame_height_in_mbs = static_cast<uint64_t>(2 - p_sps->frame_mbs_only_flag) * (static_cast<uint64_t>(p_sps->pic_height_in_map_units_minus1) + 1);
+    // Maximum picture height in MBs is 1056 for AVC Level 6.2 (Annex A.3 Sqrt(MaxFS * 8))
+    CHECK_ALLOWED_MAX("PicHeightInMbs", frame_height_in_mbs, 1056);
+    // Maximum picture size in MBs is 139264 for AVC Level 6.2 (Annex A.3 MaxFS)
+    CHECK_ALLOWED_MAX("PicWidthInMbs * PicHeightInMbs", pic_width_in_mbs * frame_height_in_mbs, 139264);
+
     if (!p_sps->frame_mbs_only_flag) {
         p_sps->mb_adaptive_frame_field_flag = Parser::GetBit(p_stream, offset);
     }
@@ -1031,10 +1040,10 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
         uint32_t frame_height_in_samples_l = (2 - p_sps->frame_mbs_only_flag) * (p_sps->pic_height_in_map_units_minus1 + 1) * AVC_MACRO_BLOCK_SIZE;
         p_sps->frame_crop_left_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
         p_sps->frame_crop_right_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_MAX("frame_crop_left_offset + frame_crop_right_offset", p_sps->frame_crop_left_offset + p_sps->frame_crop_right_offset + 1, pic_width_in_samples_l / crop_unit_x);
+        CHECK_ALLOWED_MAX("frame_crop_left_offset + frame_crop_right_offset", static_cast<uint64_t>(p_sps->frame_crop_left_offset) + p_sps->frame_crop_right_offset + 1, pic_width_in_samples_l / crop_unit_x);
         p_sps->frame_crop_top_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
         p_sps->frame_crop_bottom_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_MAX("frame_crop_top_offset + frame_crop_bottom_offset", p_sps->frame_crop_top_offset + p_sps->frame_crop_bottom_offset + 1, frame_height_in_samples_l / crop_unit_y);
+        CHECK_ALLOWED_MAX("frame_crop_top_offset + frame_crop_bottom_offset", static_cast<uint64_t>(p_sps->frame_crop_top_offset) + p_sps->frame_crop_bottom_offset + 1, frame_height_in_samples_l / crop_unit_y);
     }
 
     p_sps->vui_parameters_present_flag = Parser::GetBit(p_stream, offset);
@@ -1053,7 +1062,7 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
 }
 
 ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_byte) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(stream_size_in_byte));
     AvcSeqParameterSet *p_sps = nullptr;
     AvcPicParameterSet *p_pps = nullptr;
     size_t offset = 0; // current bit offset
@@ -1237,7 +1246,7 @@ ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_b
 }
 
 ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_size_in_byte, AvcSliceHeader *p_slice_header) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(stream_size_in_byte) + ", " + RocDecFmtPtr(p_slice_header));
     int i;
     size_t offset = 0;  // current bit offset
     AvcSeqParameterSet *p_sps = nullptr;

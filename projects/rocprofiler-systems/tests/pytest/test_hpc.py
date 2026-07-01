@@ -147,7 +147,6 @@ class TestJacobi(RocprofsysTest):
     def test_roctx(self, mode, hpc_openmp_environment):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
 
         result = self.run_test(
@@ -159,13 +158,20 @@ class TestJacobi(RocprofsysTest):
         )
         self.assert_regex(result)
 
+        # Going through dyninst (binary_rewrite or runtime_instrument) makes the host
+        # functions visible, changing the depth of the ROCTx markers as
+        # _QMjacobi_modPinit_jacobi is captured.
+        # sys_run does not go through dyninst, and hence needs a different depth check
+        expected_depths = (
+            [2, 2] if mode in ["binary_rewrite", "runtime_instrument"] else [1, 1]
+        )
         self.assert_perfetto(
             result,
             subtest_name="Perfetto ROCtx marker validation",
             categories=["rocm_marker_api"],
             labels=["init", "run"],
             counts=[1, 1],
-            depths=[1, 1],
+            depths=expected_depths,
         )
 
     @pytest.mark.hip
@@ -230,7 +236,6 @@ class TestMatrixExponential(RocprofsysTest):
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
         env["ROCPROFSYS_USE_OMPT"] = "ON"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
 
         result = self.run_test(
             mode, target="matrix-exponential-streams-sync-hip", env=env

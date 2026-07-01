@@ -46,14 +46,19 @@ __device__ inline float unsafeAtomicAdd(float* addr, float value) {
     __has_builtin(__builtin_amdgcn_is_private) &&                                                  \
     __has_builtin(__builtin_amdgcn_ds_atomic_fadd_f32) &&                                          \
     __has_builtin(__builtin_amdgcn_global_atomic_fadd_f32)
-  if (__builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)addr))
-    return __builtin_amdgcn_ds_atomic_fadd_f32(addr, value);
-  else if (__builtin_amdgcn_is_private((const __attribute__((address_space(0))) void*)addr)) {
+  if (__builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)addr)) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_atomic_fadd_f32))
+      return __builtin_amdgcn_ds_atomic_fadd_f32(addr, value);
+    return 0.0f;
+  } else if (__builtin_amdgcn_is_private((const __attribute__((address_space(0))) void*)addr)) {
     float temp = *addr;
     *addr = temp + value;
     return temp;
-  } else
-    return __builtin_amdgcn_global_atomic_fadd_f32(addr, value);
+  } else {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_atomic_fadd_f32))
+      return __builtin_amdgcn_global_atomic_fadd_f32(addr, value);
+    return 0.0f;
+  }
 #elif __has_builtin(__hip_atomic_fetch_add)
   __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     return __hip_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -165,7 +170,9 @@ __device__ inline float unsafeAtomicMin(float* addr, float val) {
  */
 __device__ inline double unsafeAtomicAdd(double* addr, double value) {
 #if defined(__gfx90a__) && __has_builtin(__builtin_amdgcn_flat_atomic_fadd_f64)
-  return __builtin_amdgcn_flat_atomic_fadd_f64(addr, value);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_f64))
+    return __builtin_amdgcn_flat_atomic_fadd_f64(addr, value);
+  return 0.0;
 #elif __has_builtin(__hip_atomic_fetch_add)
   __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     return __hip_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -204,7 +211,9 @@ __device__ inline double unsafeAtomicAdd(double* addr, double value) {
 __device__ inline double unsafeAtomicMax(double* addr, double val) {
 #if (defined(__gfx90a__) || defined(__gfx94plus_clr__)) &&                                         \
     __has_builtin(__builtin_amdgcn_flat_atomic_fmax_f64)
-  return __builtin_amdgcn_flat_atomic_fmax_f64(addr, val);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fmax_f64))
+    return __builtin_amdgcn_flat_atomic_fmax_f64(addr, val);
+  return 0.0;
 #else
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
   __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
@@ -258,7 +267,9 @@ __device__ inline double unsafeAtomicMax(double* addr, double val) {
 __device__ inline double unsafeAtomicMin(double* addr, double val) {
 #if (defined(__gfx90a__) || defined(__gfx94plus_clr__)) &&                                         \
     __has_builtin(__builtin_amdgcn_flat_atomic_fmin_f64)
-  return __builtin_amdgcn_flat_atomic_fmin_f64(addr, val);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fmin_f64))
+    return __builtin_amdgcn_flat_atomic_fmin_f64(addr, val);
+  return 0.0;
 #else
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
   __HIP_ATOMICS_IGNORE_DENORMAL_MODE {

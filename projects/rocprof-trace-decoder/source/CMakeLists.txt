@@ -45,10 +45,13 @@ if(NOT DEFINED TTD_ALL_VERSIONS AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 include(CMakePackageConfigHelpers)
+find_package(Threads REQUIRED)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+if(NOT MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
+    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+endif()
 
 # Collect source files
 file(
@@ -198,12 +201,8 @@ endif()
 if(TTD_DISASM_COMPILE_DEFS)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ${TTD_DISASM_COMPILE_DEFS})
 endif()
+target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
 set_target_properties(rocprof-trace-decoder-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-option(SQTT_LOGGING "Enable SQTT logging" OFF)
-if(SQTT_LOGGING)
-    target_compile_definitions(rocprof-trace-decoder-objects PRIVATE SQTT_LOGGING)
-endif()
 
 option(ARCH_MODEL "Enable ARCH_MODEL stitcher path" OFF)
 if(ARCH_MODEL)
@@ -231,7 +230,7 @@ if(TTD_DISASM_COMPILE_DEFS)
 endif()
 target_link_libraries(
     rocprof-trace-decoder
-    PRIVATE pthread
+    PRIVATE Threads::Threads
     PUBLIC ${TTD_DISASM_LINK_LIBS})
 set_target_properties(
     rocprof-trace-decoder
@@ -257,9 +256,13 @@ if(TTD_DISASM_COMPILE_DEFS)
 endif()
 target_link_libraries(
     rocprof-trace-decoder-static
-    PRIVATE pthread
+    PRIVATE Threads::Threads
     PUBLIC ${TTD_DISASM_LINK_LIBS})
-set_target_properties(rocprof-trace-decoder-static PROPERTIES OUTPUT_NAME rocprof-trace-decoder
+set(_td_static_output_name rocprof-trace-decoder)
+if(WIN32)
+    set(_td_static_output_name rocprof-trace-decoder-static)
+endif()
+set_target_properties(rocprof-trace-decoder-static PROPERTIES OUTPUT_NAME ${_td_static_output_name}
                                                               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
 # --- Sanitized shared library (test-only, not installed) ---
@@ -269,13 +272,14 @@ if(DEFINED BUILD_TESTS AND BUILD_TESTS)
         rocprof-trace-decoder-sanitized
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
         PUBLIC $<BUILD_INTERFACE:${TTD_PROJECT_SOURCE_DIR}/include>)
-    target_link_libraries(rocprof-trace-decoder-sanitized PRIVATE pthread ${TTD_DISASM_LINK_LIBS})
+    target_link_libraries(rocprof-trace-decoder-sanitized PRIVATE Threads::Threads ${TTD_DISASM_LINK_LIBS})
     if(TTD_DISASM_INCLUDE_DIRS)
         target_include_directories(rocprof-trace-decoder-sanitized PRIVATE ${TTD_DISASM_INCLUDE_DIRS})
     endif()
     if(TTD_DISASM_COMPILE_DEFS)
         target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ${TTD_DISASM_COMPILE_DEFS})
     endif()
+    target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
     target_compile_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined -g -O1)
     target_link_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined)
     if(ARCH_MODEL)
@@ -288,6 +292,7 @@ endif()
 install(
     TARGETS rocprof-trace-decoder
     EXPORT rocprof-trace-decoder-targets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT devel)
 

@@ -356,6 +356,7 @@ struct testColl alltoAllTest = {
   AlltoAllInitData,
   AlltoAllGetBw,
   AlltoAllRunColl,
+  NULL,
   NULL
 };
 

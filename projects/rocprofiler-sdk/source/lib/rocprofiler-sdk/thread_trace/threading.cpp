@@ -87,15 +87,17 @@ copy_data_sync(void*         dst,
                size_t        size,
                hsa_signal_t* dependency)
 {
-    ROCP_FATAL_IF(dependency == nullptr) << "Dependency must not be null";
     ROCP_TRACE << fmt::format("Executing async copy from {} to {}", src, dst);
 
     thread_local auto signal = scoped_signal_t{};
 
     auto copy_fn = CHECK_NOTNULL(hsa::get_amd_ext_table())->hsa_amd_memory_async_copy_fn;
 
+    // Workaround for ROCM-25606
+    if(dependency) signal_wait(*dependency);
+
     signal_reset(signal.sig);
-    auto status = copy_fn(dst, dst_agent, src, src_agent, size, 1, dependency, signal.sig);
+    auto status = copy_fn(dst, dst_agent, src, src_agent, size, 0, nullptr, signal.sig);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to copy: " << status;
     signal_wait(signal.sig);
 }

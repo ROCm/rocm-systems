@@ -13,6 +13,9 @@ Key invariants:
 - (p_offset % PAGE_SIZE) == (p_vaddr % PAGE_SIZE) for all PT_LOAD segments
 - PT_PHDR (if present) must point to the program header table location
 - The program header table must be covered by a PT_LOAD segment
+
+See normalize_phdr_vaddr() for the additional p_vaddr == p_offset constraint
+that old kernels (e.g. EL8 4.18) require on the relocated PHDR segment.
 """
 
 from dataclasses import dataclass
@@ -24,6 +27,7 @@ from .types import (
     PAGE_SIZE,
     PT_LOAD,
     PT_PHDR,
+    PT_INTERP,
     PF_R,
     round_up_to_page,
     page_align_offset,
@@ -313,3 +317,101 @@ def create_load_segment(
         p_memsz=size,
         p_align=PAGE_SIZE,
     )
+
+
+def normalize_phdr_vaddr(surgery: ElfSurgery) -> bool:
+    """Pin the relocated PHDR PT_LOAD to p_vaddr == p_offset.
+
+    When the program header table has been relocated to a trailing PT_LOAD, its
+    p_vaddr is only page-congruent with its file offset. Old kernels (e.g. EL8
+    4.18) compute AT_PHDR = load_bias + e_phoff without translating e_phoff
+    through the covering segment, so direct exec maps an unmapped address and
+    SIGSEGVs in ld.so before main. Making p_vaddr == p_offset fixes that and
+    stays valid on newer kernels.
+
+    Run as the final step, after all size-changing transforms. When the table
+    already sits above every other segment's address range (the common case for
+    real binaries) this is a pure metadata edit; otherwise the table is moved to
+    a fresh end-of-file offset at/above the address ceiling, which grows the file
+    (only happens for fully zero-paged binaries whose file shrank below it).
+
+    Only applied to executables (those with a PT_INTERP). Shared libraries are
+    always mapped by ld.so, which handles a relocated PHDR correctly, so they are
+    left untouched to avoid needless file growth.
+
+    Returns True if the binary was modified.
+    """
+    ehdr = surgery.ehdr
+    e_phoff = ehdr.e_phoff
+
+    if not any(ph.p_type == PT_INTERP for _, ph in surgery.iter_program_headers()):
+        return False
+
+    cover_idx = None
+    cover = None
+    pt_phdr_idx = None
+    ceiling = 0  # max p_vaddr+p_memsz over OTHER PT_LOAD segments
+    for idx, ph in surgery.iter_program_headers():
+        if ph.p_type == PT_PHDR:
+            pt_phdr_idx = idx
+        if ph.p_type == PT_LOAD and ph.p_offset <= e_phoff < ph.p_offset + ph.p_filesz:
+            cover_idx, cover = idx, ph
+    for idx, ph in surgery.iter_program_headers():
+        if ph.p_type == PT_LOAD and idx != cover_idx:
+            ceiling = max(ceiling, ph.p_vaddr + ph.p_memsz)
+
+    # Only act on a *relocated* PHDR table: a dedicated PT_LOAD that begins
+    # exactly at e_phoff. This excludes the non-relocated case where the PHDR
+    # still lives in the first PT_LOAD (e.g. ET_EXEC, where that segment has
+    # p_vaddr != p_offset and must not be rewritten). Also skip if already
+    # normalized (p_vaddr == p_offset).
+    if cover is None or cover.p_offset != e_phoff or cover.p_vaddr == cover.p_offset:
+        return False
+
+    page_ceiling = round_up_to_page(ceiling)
+    pt_phdr = surgery._phdrs[pt_phdr_idx] if pt_phdr_idx is not None else None
+
+    def _pin(idx: int, source: ProgramHeader, vaddr: int, offset: int) -> None:
+        surgery.update_program_header(
+            idx,
+            ProgramHeader(
+                p_type=source.p_type,
+                p_flags=source.p_flags,
+                p_offset=offset,
+                p_vaddr=vaddr,
+                p_paddr=vaddr,
+                p_filesz=source.p_filesz,
+                p_memsz=source.p_memsz,
+                p_align=source.p_align,
+            ),
+        )
+
+    if e_phoff >= page_ceiling:
+        # Table already clears every other segment's address range: just pin
+        # vaddr to the existing offset. No file growth.
+        _pin(cover_idx, cover, cover.p_offset, cover.p_offset)
+        if pt_phdr is not None:
+            _pin(pt_phdr_idx, pt_phdr, pt_phdr.p_offset, pt_phdr.p_offset)
+        return True
+
+    # Table offset is below the address ceiling; pinning vaddr there would
+    # overlap another segment. Copy the table to a fresh end-of-file offset
+    # at/above the ceiling so vaddr == offset holds without overlap.
+    # Copy the covering segment's full p_filesz (table entries plus any spare
+    # slots), not just e_phnum*e_phentsize, so the file actually contains every
+    # byte the relocated PT_LOAD claims (otherwise it could map past EOF).
+    table = bytes(surgery.data[e_phoff : e_phoff + cover.p_filesz])
+    new_off = round_up_to_page(max(len(surgery.data), page_ceiling))
+    pad = new_off - len(surgery.data)
+    if pad > 0:
+        surgery.append_bytes(b"\x00" * pad, "padding for PHDR vaddr normalization")
+    surgery.append_bytes(table, "relocated PHDR table (vaddr==offset)")
+
+    surgery._ehdr.e_phoff = new_off
+    surgery.update_elf_header()
+
+    _pin(cover_idx, cover, new_off, new_off)
+    if pt_phdr is not None:
+        _pin(pt_phdr_idx, pt_phdr, new_off, new_off)
+    surgery._phdrs = surgery._parse_program_headers()
+    return True

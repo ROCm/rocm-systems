@@ -14,7 +14,7 @@
     "NCCL_DEBUG": "WARN"
   },
   "build_configuration": {
-    "install_flags": ["-t", "-l", "--disable-colltrace", "--no_clean"],
+    "install_flags": ["-t", "-l", "--no_clean"],
     "cmake_options": "",
     "env_variables": {
       "HIPCC_COMPILE_FLAGS_APPEND": "-O3"

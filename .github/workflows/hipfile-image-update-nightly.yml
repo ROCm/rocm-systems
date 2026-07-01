@@ -1,0 +1,130 @@
+name: update_nightly_CI_image
+run-name: Refresh the latest nightly hipFile CI image
+
+env:
+  AIS_DOCKER_REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
+
+on:
+  schedule:
+    # ~10:00 UTC daily. The ROCm nightly publish runs ~02:00 UTC, leaving ~8h of
+    # buffer. This job is purely an optimization: if it is late/failed/builds
+    # against an incomplete nightly, per-PR runs fall back to building the nightly
+    # image on demand.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+  # Refresh on merge of a Dockerfile/resolver change so the published nightly
+  # image + floating cache track develop. Without this, the per-PR registry
+  # skip could serve an image built from an out-of-date Dockerfile.
+  pull_request_target:
+    types:
+      - closed
+    branches:
+      - develop
+    paths:
+      - projects/hipfile/util/docker/**
+      - projects/hipfile/util/resolve-rocm-nightly.sh
+      - .github/workflows/hipfile-image-update-nightly.yml
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Resolve runs on the runner (not the docker:28.5 container) because the
+  # resolver needs curl/bash, which the Alpine-based docker image lacks.
+  resolve_nightly:
+    # pull_request_target/closed fires for un-merged PRs too; only act on merges.
+    # (The downstream build job needs this one, so skipping here skips both.)
+    if: ${{ github.event_name != 'pull_request_target' || github.event.pull_request.merged == true }}
+    runs-on: [ubuntu-24.04]
+    outputs:
+      nightly_build: ${{ steps.nightly.outputs.nightly_build }}
+      nightly_rocm_version: ${{ steps.nightly.outputs.nightly_rocm_version }}
+    steps:
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - name: Resolve ROCm nightly metadata
+        id: nightly
+        working-directory: projects/hipfile
+        run: ./util/resolve-rocm-nightly.sh | tee -a "${GITHUB_OUTPUT}"
+
+  update_nightly_AIS_CI_image:
+    needs: resolve_nightly
+    env:
+      AIS_CI_IMAGE_NAME: ais_ci_ubuntu
+      AIS_INPUT_PLATFORM: ubuntu
+      AIS_NIGHTLY_BUILD: ${{ needs.resolve_nightly.outputs.nightly_build }}
+      AIS_NIGHTLY_ROCM_VERSION: ${{ needs.resolve_nightly.outputs.nightly_rocm_version }}
+    runs-on: [ubuntu-24.04]
+    container: docker:28.5
+    steps:
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+
+      - name: Authenticating to GitHub Container Registry.
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set target nightly AIS CI image
+        id: ci-image
+        # The image tag carries the resolved build id for reproducibility; the
+        # cache refs stay floating (no build id) so each day's build reuses the
+        # previous day's layers.
+        run: |
+          AIS_CI_IMAGE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm-nightly-${AIS_NIGHTLY_BUILD}"
+          echo "AIS_CI_IMAGE=$(printf '%s' "${AIS_CI_IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+          AIS_CI_IMAGE_NVIDIA="${AIS_CI_IMAGE}-nvidia"
+          echo "AIS_CI_IMAGE_NVIDIA=$(printf '%s' "${AIS_CI_IMAGE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+          AIS_CI_CACHE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm-nightly-cache"
+          echo "AIS_CI_CACHE=$(printf '%s' "${AIS_CI_CACHE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+          AIS_CI_CACHE_NVIDIA="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm-nightly-nvidia-cache"
+          echo "AIS_CI_CACHE_NVIDIA=$(printf '%s' "${AIS_CI_CACHE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Docker Builder
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          name: ais-builder
+          driver: docker-container
+          cache-binary: false # True uses the GHA Cache Backend
+
+      - name: Build & Push latest nightly base image for AIS CI
+        run: |
+          docker buildx build \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
+            --target base \
+            --build-arg ROCM_VERSION=${AIS_NIGHTLY_ROCM_VERSION} \
+            --build-arg ROCM_NIGHTLY_BUILD=${AIS_NIGHTLY_BUILD} \
+            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE }}" \
+            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE }}" \
+            --push \
+            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
+            "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
+
+      - name: Build & Push latest nightly NVIDIA image for AIS CI
+        run: |
+          docker buildx build \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
+            --target nvidia \
+            --build-arg ROCM_VERSION=${AIS_NIGHTLY_ROCM_VERSION} \
+            --build-arg ROCM_NIGHTLY_BUILD=${AIS_NIGHTLY_BUILD} \
+            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE_NVIDIA }}" \
+            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE }}" \
+            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE_NVIDIA }}" \
+            --push \
+            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
+            "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"

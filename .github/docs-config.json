@@ -79,6 +79,11 @@
       "folder": "rocshmem",
       "rtd_slug": "advanced-micro-devices-rocshmem",
       "rtd_alias": "rocSHMEM"
+    },
+    {
+      "folder": "hipfile",
+      "rtd_slug": "advanced-micro-devices-hipfile",
+      "rtd_alias": "hipFile"
     }
   ]
 }

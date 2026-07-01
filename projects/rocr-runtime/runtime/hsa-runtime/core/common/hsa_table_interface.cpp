@@ -1194,6 +1194,13 @@ hsa_status_t HSA_API hsa_amd_queue_set_priority(hsa_queue_t* queue,
 }
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_queue_create(hsa_agent_t agent,
+                                          hsa_amd_queue_create_desc_t* descs,
+                                          uint32_t num_descs) {
+  return amdExtTable->hsa_amd_queue_create_fn(agent, descs, num_descs);
+}
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_register_deallocation_callback(void* ptr,
                                                     hsa_amd_deallocation_callback_t callback,
                                                     void* user_data) {
@@ -1328,6 +1335,17 @@ hsa_status_t HSA_API hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_
   return amdExtTable->hsa_amd_vmem_retain_alloc_handle_fn(handle, addr);
 }
 
+hsa_status_t HSA_API hsa_amd_vmem_export_fabric_handle(hsa_fabric_handle_t *fabric_handle,
+                                                       hsa_amd_vmem_alloc_handle_t handle,
+                                                       uint64_t flags) {
+  return amdExtTable->hsa_amd_vmem_export_fabric_handle_fn(fabric_handle, handle, flags);
+}
+
+hsa_status_t HSA_API hsa_amd_vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t* handle) {
+  return amdExtTable->hsa_amd_vmem_import_fabric_handle_fn(fabric_handle, handle);
+}
+
 hsa_status_t HSA_API hsa_amd_vmem_get_alloc_properties_from_handle(
     hsa_amd_vmem_alloc_handle_t alloc_handle, hsa_amd_memory_pool_t* pool,
     hsa_amd_memory_type_t* type) {
@@ -1395,6 +1413,22 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem) {
   return amdExtTable->hsa_amd_external_semaphore_handle_close_fn(sem);
+}
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value) {
+  return amdExtTable->hsa_amd_queue_signal_external_semaphore_fn(queue, sem, value);
+}
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_queue_wait_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value) {
+  return amdExtTable->hsa_amd_queue_wait_external_semaphore_fn(queue, sem, value);
 }
 
 // Tools only table interfaces.
