@@ -55,6 +55,9 @@ event:
     # (amd_wsl) Below tests fail in stress test on 24/07/23
     disabled: [amd_windows, amd_wsl]
     tags: [ipc]
+  Unit_hipEventIpc_DestroyNonBlocking:
+    <<: *level_2
+    tags: [ipc, lifecycle]
   Unit_hipEventDestroy_Unfinished:
     <<: *level_2
     # SWDEV-411303 fails in WSL. Profiling not support in WSL
@@ -135,3 +138,15 @@ event:
   Unit_hipEventIpc_shm_cleanup:
     <<: *level_2
     tags: [ipc]
+  Unit_hipEventCoalescing_CrossStreamWait:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipEventCoalescing_AsyncOpsBreakCoalescing:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipEventCoalescing_InterleavedEvents:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipEventCoalescing_EventQuery:
+    <<: *level_2
+    tags: [synchronization]

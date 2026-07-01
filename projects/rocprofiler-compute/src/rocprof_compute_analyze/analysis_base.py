@@ -30,6 +30,7 @@ from utils.utils_analysis import (
     merge_counters_spatial_multiplex,
 )
 from utils.utils_common import (
+    PC_SAMPLING_BLOCK_IDS,
     canonical_config_arch,
     get_uuid,
     is_only_pc_sampling,
@@ -89,10 +90,56 @@ class OmniAnalyze_Base:
     def get_profiling_config(self) -> dict[str, Any]:
         return self._profiling_config
 
+    def pc_sampling_collected(self) -> bool:
+        """True when PC sampling is among the collected blocks."""
+        config = getattr(self, "_profiling_config", {})
+        return any(
+            block in PC_SAMPLING_BLOCK_IDS for block in config.get("filter_blocks", [])
+        )
+
     def pc_sampling_only(self) -> bool:
-        """True when profiling collected only PC sampling (block 21)."""
+        """True when every collected block is PC sampling."""
         config = getattr(self, "_profiling_config", {})
         return is_only_pc_sampling(config.get("filter_blocks", []))
+
+    def load_pc_sampling_tool_data(
+        self, workload_path: str
+    ) -> Optional[dict[str, Any]]:
+        """Return parsed PC sampling tool data, or None when not collected."""
+        if not self.pc_sampling_collected():
+            return None
+        return file_io.load_pc_sampling_results(str(workload_path))
+
+    def build_pc_sampling_only_workload(
+        self,
+        workload: schema.Workload,
+        dir_path: str,
+        args: argparse.Namespace,
+        tool_data: Optional[dict[str, Any]],
+        filter_nodes: Optional[list[str]] = None,
+    ) -> None:
+        """Build dispatch scaffolding and tables for a run without counters."""
+        workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(tool_data)
+        workload.raw_pmc = workload.raw_pmc.rename(
+            columns={"Dispatch_Id": "Dispatch_ID"}
+        )
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+            df_in=workload.raw_pmc,
+            raw_data_dir=str(dir_path),
+            filter_gpu_ids=workload.filter_gpu_ids,
+            filter_dispatch_ids=workload.filter_dispatch_ids,
+            filter_nodes=(
+                filter_nodes if filter_nodes is not None else workload.filter_nodes
+            ),
+            time_unit=args.time_unit,
+            kernel_verbose=args.kernel_verbose,
+        )
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+        parser.load_non_mertrics_table(
+            workload, dir_path, args, pc_sampling_tool_data=tool_data
+        )
+        parser.nullify_unevaluated_metric_values(workload)
 
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs

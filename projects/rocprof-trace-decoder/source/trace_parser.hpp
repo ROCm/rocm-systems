@@ -82,7 +82,8 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         uint64_t me,
         uint64_t pipe,
         uint64_t is_ext,
-        uint64_t wg
+        uint64_t wg,
+        uint64_t cluster = 0
     )
     {
         this->pc = pc;
@@ -96,6 +97,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->pipe_id = pipe & 0xF;
         this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
+        this->cluster_id = cluster & 0x1F;
         this->_rsvd = 0;
     }
     occupancy_info_t(
@@ -108,7 +110,8 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         uint64_t me,
         uint64_t pipe,
         uint64_t is_ext,
-        uint64_t wg
+        uint64_t wg,
+        uint64_t cluster = 0
     )
     {
         this->pc = pc;
@@ -122,6 +125,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->pipe_id = pipe & 0xF;
         this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
+        this->cluster_id = cluster & 0x1F;
         this->_rsvd = 0;
     }
 };
@@ -165,7 +169,8 @@ struct WaveDataInternal : public rocprofiler_thread_trace_decoder_wave_t
         bool exbarw,
         uint8_t me = 0,
         uint8_t pipe = 0,
-        uint8_t wg = 0
+        uint8_t wg = 0,
+        uint8_t cluster = 0
     )
     {
         this->cu = (uint8_t) cu;
@@ -175,6 +180,7 @@ struct WaveDataInternal : public rocprofiler_thread_trace_decoder_wave_t
 
         this->dispatcher = (uint8_t) (((me & 0x7) << 4) | (pipe & 0xF));
         this->workgroup_id = wg;
+        this->cluster_id = cluster;
         this->reserved = 0;
         this->size = sizeof(rocprofiler_thread_trace_decoder_wave_t);
 
@@ -339,6 +345,7 @@ public:
 
     bool bIsROCMFormat = false;
     int userdata_state{};
+    int tt_version{0};
 
     CowPtr<std::vector<address_range_t>> active_codeobjs{};
     CachedTable table{};
@@ -521,7 +528,7 @@ public:
 
     static constexpr uint64_t BITMASK = (uint64_t{1} << 48) - 1;
 
-    rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int me, int pipe, int tt_version = 0)
+    rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int me, int pipe)
     {
         rocprofiler_thread_trace_decoder_dispatch_t event{};
         event.size = sizeof(rocprofiler_thread_trace_decoder_dispatch_t);
@@ -537,14 +544,15 @@ public:
         event.thread_dim_x = num_thread_x;
         event.thread_dim_y = num_thread_y;
         event.thread_dim_z = num_thread_z;
+        event.dispatch_pkt_addr = dispatch_pkt_addr.at(me & 0x1).at(pipe);
         event.lds_size = ((rsrc2 >> 15) & 0x1FF) * 512;
 
         event.sgprs = 128;
         event.vgprs = (rsrc1 & 0x3F) * 8 + 8;
         event.user_sgprs = (rsrc2 >> 1) & 0x1F;
 
-        if (tt_version == 0) event.sgprs = ((rsrc1 >> 7) & 0x7) * 16 + 16;
-
+        if (tt_version <= 1) event.sgprs = ((rsrc1 >> 7) & 0x7) * 16 + 16;
+        if (tt_version == 1) event.lds_size = event.lds_size * 10 / 4;
         if (tt_version >= 5)
         {
             event.vgprs *= 2;

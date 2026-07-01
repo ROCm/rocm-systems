@@ -33,6 +33,7 @@
 #include "lib/common/logging.hpp"
 
 #include "lib/common/filesystem.hpp"
+#include "lib/rocprofiler-sdk/code_object/hip/code_object.hpp"
 
 #ifndef CODEOBJ_BINARY_DIR
 static_assert(false && "Please define CODEOBJ_BINARY_DIR to codeobj tests binary, "
@@ -565,4 +566,26 @@ TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
 
     EXPECT_EQ(mismatches, 0u) << mismatches << " of " << addrs.size()
                               << " addresses disagreed with llvm-symbolizer";
+}
+
+TEST(codeobj_library, memory_loaded_code_object_symbol_map)
+{
+    // HIPK/kpack reaches ROCprofiler-SDK as an HSA-loaded code object. The SDK
+    // parses those executable bytes, not the .kpack archive or HIPK metadata.
+    std::string path = codeobjhelper::get_data_file_path("syncthreads_kernel.bin");
+    ASSERT_FALSE(path.empty()) << "syncthreads_kernel.bin not found";
+
+    std::ifstream file(path, std::ios::binary);
+    using iterator_t = std::istreambuf_iterator<char>;
+    std::vector<char> objdata{iterator_t(file), iterator_t{}};
+    ASSERT_FALSE(objdata.empty());
+
+    auto symbol_map =
+        rocprofiler::code_object::hip::get_kernel_symbol_device_name_map_from_executable(
+            objdata.data(), objdata.size());
+
+    ASSERT_FALSE(symbol_map.empty());
+    auto symbol = symbol_map.find("_Z18syncthreads_kernelPi.kd");
+    ASSERT_NE(symbol, symbol_map.end());
+    EXPECT_EQ(symbol->second, "_Z18syncthreads_kernelPi");
 }

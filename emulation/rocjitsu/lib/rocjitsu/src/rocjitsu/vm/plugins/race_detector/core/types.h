@@ -69,8 +69,7 @@ struct RaceViolation {
   Dim3d workgroupId;
 };
 
-/// Pending memory event data written by instruction executors. Dispatched to
-/// WaveRaceState by Workgroup::run after tryExecute returns.
+/// Pending memory event data dispatched to WaveRaceState by the plugin adapter.
 struct PendingMemoryEvent {
   uint64_t pc;
   MemoryEventType type;
