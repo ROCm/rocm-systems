@@ -111,6 +111,10 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_SDMA");
     enable_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
+    // Enable DRM interface only when HSA_ENABLE_DRM_DEBUG=1 is explicitly set.
+    var = os::GetEnvVar("HSA_ENABLE_DRM_DEBUG");
+    enable_drm_ = (var == "1") ? true : false;
+
     var = os::GetEnvVar("HSA_ENABLE_PEER_SDMA");
     enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
@@ -404,6 +408,8 @@ class Flag {
 
   SDMA_OVERRIDE enable_sdma_recommended_eng() const { return enable_sdma_recommended_eng_; }
 
+  bool enable_drm() const { return enable_drm_; }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -583,6 +589,8 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_gang_;
   SDMA_OVERRIDE enable_sdma_copy_size_override_;
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
+
+  bool enable_drm_;
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;
