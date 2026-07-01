@@ -66,7 +66,7 @@ checkNull(std::initializer_list<void *> ptrs)
 // count if the driver is already initialized. Used by hipFile to ensure its
 // behaviour is consistent on AMD and NVIDIA
 static inline void
-ensureDriverInit(DriverState &state)
+ensureDriverInit(IDriverState &state)
 {
     state.ensureInitialized();
 }
@@ -174,7 +174,7 @@ catch (...) {
 
 ssize_t
 hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
-          hoff_t buffer_offset, DriverState &state, const vector<shared_ptr<Backend>> &backends)
+          hoff_t buffer_offset, IDriverState &state, const vector<shared_ptr<Backend>> &backends)
 try {
     auto [file, buffer] = state.getFileAndBuffer(fh, buffer_base);
     int                      score{-1};
@@ -367,7 +367,7 @@ catch (...) {
 }
 
 hipFileError_t
-hipFileBatchSetUp(hipFileBatchHandle_t *batch_idp, unsigned max_nr, DriverState &state)
+hipFileBatchSetUp(hipFileBatchHandle_t *batch_idp, unsigned max_nr, IDriverState &state)
 try {
     if (batch_idp == nullptr) {
         return {hipFileInvalidValue, hipSuccess};
@@ -396,7 +396,7 @@ catch (...) {
 
 hipFileError_t
 hipFileBatchSubmit(hipFileBatchHandle_t batch_idp, unsigned nr, hipFileIOParams_t *iocbp, unsigned flags,
-                   DriverState &state)
+                   IDriverState &state)
 try {
     (void)flags; // Unused at this time.
 
@@ -470,7 +470,7 @@ catch (...) {
 hipFileError_t
 hipFileIOAsync(IoType io_type, hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
                hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t hipStream,
-               DriverState &state)
+               IDriverState &state)
 try {
     if (state.getRefCount() == 0) {
         ensureDriverInit(state);

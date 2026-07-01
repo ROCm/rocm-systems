@@ -20,7 +20,8 @@ class MBatchContext : public IBatchContext {
 public:
     MOCK_METHOD(unsigned, get_capacity, (), (const, noexcept, override));
     MOCK_METHOD(void, submit_operations,
-                (const hipFileIOParams_t *params, const unsigned num_params, DriverState &state), (override));
+                (const hipFileIOParams_t *params, const unsigned num_params, IDriverState &state),
+                (override));
 };
 
 }

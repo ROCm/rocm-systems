@@ -105,7 +105,7 @@ BatchContext::get_capacity() const noexcept
 }
 
 void
-BatchContext::submit_operations(const hipFileIOParams_t *params, unsigned num_params, DriverState &state)
+BatchContext::submit_operations(const hipFileIOParams_t *params, unsigned num_params, IDriverState &state)
 {
     std::unique_lock<std::shared_mutex> _ulock{context_mutex};
 

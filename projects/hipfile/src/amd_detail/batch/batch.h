@@ -20,7 +20,7 @@ namespace hipFile {
 class IFile;
 }
 namespace hipFile {
-class DriverState;
+class IDriverState;
 }
 
 namespace hipFile {
@@ -57,10 +57,10 @@ class IBatchContext {
 public:
     static constexpr unsigned MAX_SIZE = 128;
 
-    virtual ~IBatchContext()                               = default;
-    virtual unsigned get_capacity() const noexcept         = 0;
+    virtual ~IBatchContext()                                = default;
+    virtual unsigned get_capacity() const noexcept          = 0;
     virtual void     submit_operations(const hipFileIOParams_t *params, unsigned num_params,
-                                       DriverState &state) = 0;
+                                       IDriverState &state) = 0;
 };
 
 class BatchContext : public IBatchContext {
@@ -81,7 +81,7 @@ public:
     ///       will be submitted.
     ///
     void submit_operations(const hipFileIOParams_t *params, const unsigned num_params,
-                           DriverState &state) override;
+                           IDriverState &state) override;
 
 private:
     const unsigned capacity;

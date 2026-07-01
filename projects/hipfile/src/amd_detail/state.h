@@ -196,7 +196,7 @@ public:
 // * When the driver transitions to a reference count of zero, the
 //   BufferMap and FileMap will be cleared
 //
-class DriverState : public IDriverState {
+class DriverState final : public IDriverState {
 public:
     //
     // Batch interface
