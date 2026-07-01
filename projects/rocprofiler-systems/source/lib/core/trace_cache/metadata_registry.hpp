@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -22,6 +23,7 @@
 #include <string.h>
 #include <string>
 #include <sys/types.h>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -157,6 +159,19 @@ struct kernel_symbol_less
     }
 };
 
+/**
+ * @brief Maps a sample value index to its pmc_info and track names.
+ *
+ * Stored in metadata_registry per device. Processors use these to
+ * emit pmc_events and samples from batched gpu_perf_counter_sample values.
+ */
+struct gpu_perf_counter_name_entry
+{
+    std::uint64_t counter_id;     ///< SDK counter instance ID (counter_id_t)
+    std::string   pmc_info_name;  ///< Qualified counter name, e.g. "SQ_WAVES[WGP=0,SA=0]"
+    std::string   track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
+};
+
 }  // namespace info
 
 struct metadata_registry
@@ -207,6 +222,12 @@ struct metadata_registry
     rocprofiler::sdk::buffer_name_info_t<const char*>   get_buffer_name_info() const;
     rocprofiler::sdk::callback_name_info_t<const char*> get_callback_tracing_info() const;
 
+    void set_gpu_perf_counter_counter_names(
+        std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries);
+
+    std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
+    find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
+
 private:
     common::synchronized<info::process> m_process{};
     common::synchronized<
@@ -231,6 +252,13 @@ private:
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
+
+    // SDK PMC counter name ordering: device_id -> ordered name entries
+    std::map<std::uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
+        m_gpu_perf_counter_counter_names{};
+    // O(1) lookup index: device_id -> counter_id -> index into the vector above
+    std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
+        m_gpu_perf_counter_index{};
 
     using callback_rename_map_t =
         std::map<rocprofiler_tracing_operation_t, std::string_view>;

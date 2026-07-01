@@ -153,6 +153,7 @@ function(ROCPROFILER_SYSTEMS_STRIP_TARGET)
                     ${CMAKE_STRIP} -w --keep-symbol="rocprofsys_init"
                     --keep-symbol="rocprofsys_finalize"
                     --keep-symbol="rocprofsys_push_trace"
+                    --keep-symbol="rocprofsys_push_trace_with_args"
                     --keep-symbol="rocprofsys_pop_trace"
                     --keep-symbol="rocprofsys_push_region"
                     --keep-symbol="rocprofsys_pop_region"

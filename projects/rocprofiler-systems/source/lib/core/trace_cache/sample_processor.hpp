@@ -8,6 +8,7 @@
 
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/gpu/sample.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
 
 #include <rocprofiler-sdk/version.h>
@@ -59,6 +60,11 @@ struct processor_t
 
     void handle(const cpu_pmc_sample& sample) { static_cast<T*>(this)->handle(sample); }
 
+    void handle(const gpu_perf_counter_sample& sample)
+    {
+        static_cast<T*>(this)->handle(sample);
+    }
+
     void handle(const backtrace_region_sample& sample)
     {
         static_cast<T*>(this)->handle(sample);
@@ -88,9 +94,11 @@ struct processor_view_t
     using gpu_pmc_sample_fn_t   = void (*)(void*, const gpu_pmc_sample&) noexcept;
     using ainic_pmc_sample_fn_t = void (*)(void*, const ainic_pmc_sample&) noexcept;
     using cpu_pmc_sample_fn_t   = void (*)(void*, const cpu_pmc_sample&) noexcept;
-    using backtrace_region_fn_t = void (*)(void*,
+    using gpu_perf_counter_sample_fn_t =
+        void (*)(void*, const gpu_perf_counter_sample&) noexcept;
+    using backtrace_region_fn_t       = void (*)(void*,
                                            const backtrace_region_sample&) noexcept;
-    using kfd_sample_fn_t       = void (*)(void*, const kfd_sample&) noexcept;
+    using kfd_sample_fn_t             = void (*)(void*, const kfd_sample&) noexcept;
     using prepare_for_processing_fn_t = void (*)(void*) noexcept;
     using finalize_processing_fn_t    = void (*)(void*) noexcept;
 
@@ -102,26 +110,25 @@ struct processor_view_t
 #if(ROCPROFILER_VERSION >= 600)
         memory_allocate_fn_t handle_memory_allocate;
 #endif
-        region_fn_t                 handle_region;
-        in_time_sample_fn_t         handle_in_time_sample;
-        pmc_event_fn_t              handle_pmc_event;
-        gpu_pmc_sample_fn_t         handle_gpu_pmc_sample;
-        ainic_pmc_sample_fn_t       handle_ainic_pmc_sample;
-        cpu_pmc_sample_fn_t         handle_cpu_pmc_sample;
-        backtrace_region_fn_t       handle_backtrace_region;
-        kfd_sample_fn_t             handle_kfd_sample;
-        prepare_for_processing_fn_t prepare_for_processing;
-        finalize_processing_fn_t    finalize_processing;
+        region_fn_t                  handle_region;
+        in_time_sample_fn_t          handle_in_time_sample;
+        pmc_event_fn_t               handle_pmc_event;
+        gpu_pmc_sample_fn_t          handle_gpu_pmc_sample;
+        ainic_pmc_sample_fn_t        handle_ainic_pmc_sample;
+        cpu_pmc_sample_fn_t          handle_cpu_pmc_sample;
+        gpu_perf_counter_sample_fn_t handle_gpu_perf_counter_sample;
+        backtrace_region_fn_t        handle_backtrace_region;
+        kfd_sample_fn_t              handle_kfd_sample;
+        prepare_for_processing_fn_t  prepare_for_processing;
+        finalize_processing_fn_t     finalize_processing;
     };
 
     template <typename T>
+        requires std::is_base_of_v<processor_t<T>, T>
     explicit processor_view_t(T& t) noexcept
     : m_object{ std::addressof(t) }
     , m_vtable{ std::addressof(get_vtable_for_type<T>()) }
-    {
-        static_assert(std::is_base_of<processor_t<T>, T>::value,
-                      "Type must be derived from processor_t<T>");
-    }
+    {}
 
     processor_view_t(const processor_view_t&) noexcept            = default;
     processor_view_t(processor_view_t&&) noexcept                 = default;
@@ -172,6 +179,11 @@ struct processor_view_t
     ROCPROFSYS_INLINE void handle(const ainic_pmc_sample& sample) const noexcept
     {
         m_vtable->handle_ainic_pmc_sample(m_object, sample);
+    }
+
+    ROCPROFSYS_INLINE void handle(const gpu_perf_counter_sample& sample) const noexcept
+    {
+        m_vtable->handle_gpu_perf_counter_sample(m_object, sample);
     }
 
     ROCPROFSYS_INLINE void handle(const cpu_pmc_sample& sample) const noexcept
@@ -234,6 +246,9 @@ private:
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const cpu_pmc_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const gpu_perf_counter_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const backtrace_region_sample& sample) noexcept {
@@ -322,6 +337,9 @@ struct sample_processor_t
                 break;
             case type_identifier_t::cpu_pmc_sample:
                 handle_sample(static_cast<const cpu_pmc_sample&>(sample));
+                break;
+            case type_identifier_t::gpu_perf_counter_sample:
+                handle_sample(static_cast<const gpu_perf_counter_sample&>(sample));
                 break;
             case type_identifier_t::backtrace_region_sample:
                 handle_sample(static_cast<const backtrace_region_sample&>(sample));

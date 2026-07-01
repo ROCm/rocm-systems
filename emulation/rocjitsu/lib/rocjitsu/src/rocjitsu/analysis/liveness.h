@@ -30,6 +30,17 @@ class Instruction;
 /// @brief The basic blocks reachable from one kernel entry.
 using KernelBlockScope = std::span<BasicBlock *const>;
 
+/// @brief Extra edge in a kernel-scoped analysis graph.
+///
+/// @details BasicBlock::successors() stores context-free local CFG edges only.
+/// DBT can provide scoped call and return edges here when translating one
+/// kernel body, so liveness sees the callee and the correct call-site return
+/// continuation without making those edges globally visible to other kernels.
+struct ScopedCfgEdge {
+  BasicBlock *from = nullptr;
+  BasicBlock *to = nullptr;
+};
+
 /// @brief Block-level dataflow state for one kernel scope.
 ///
 /// @details `gen` is the upward-exposed use set: registers read in the block
@@ -42,6 +53,17 @@ struct BlockLiveness {
   RegisterSet live_out;
   RegisterSet gen;
   RegisterSet kill;
+};
+
+/// @brief Optional controls for liveness construction.
+struct LivenessAnalysisOptions {
+  /// @brief Lowest VGPR index that find_free_run() may return.
+  ///
+  /// @details This is a debug-oriented allocation floor, not a dataflow fact.
+  /// The computed live-before sets remain the normal kernel liveness result,
+  /// while scratch allocation can be forced above a descriptor-declared VGPR
+  /// range to test whether semantic lowerings clobber guest registers.
+  uint16_t min_free_vgpr = 0;
 };
 
 /// @brief Reverse-post-order traversal of one kernel's implicit CFG.
@@ -62,7 +84,8 @@ public:
   /// entry being translated, not every block decoded from the containing code
   /// object.
   /// @param blocks Blocks in one kernel CFG scope.
-  LivenessAnalysis(KernelBlockScope blocks);
+  LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options = {},
+                   std::span<const ScopedCfgEdge> extra_edges = {});
 
   /// @brief Block liveness by block object.
   [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
@@ -94,8 +117,9 @@ public:
                                                        uint16_t search_start = 0) const;
 
 private:
-  void analyze(KernelBlockScope blocks);
+  void analyze(KernelBlockScope blocks, std::span<const ScopedCfgEdge> extra_edges);
 
+  uint16_t min_free_vgpr_ = 0;
   std::vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;

@@ -15,21 +15,11 @@ from .. import benchmark_base
 # Bench_gfx9 Class (ABSTRACT)
 # =============================================================================
 class Bench_gfx9(benchmark_base.Bench_base):
-    def __init__(self, device_ids: list) -> None:
-        super().__init__(device_ids)
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        super().__init__(device_id, cache_sizes)
 
         self.WAVEFRONT_SIZE = 64
         self.MATRIX_OPS_TYPE = "MFMA"
-
-        # Unused, keeping for reference
-        # self.lds_sizes = {
-        #     "gfx908": 64 * 1024,
-        #     "gfx90a": 64 * 1024,
-        #     "gfx940": 64 * 1024,
-        #     "gfx941": 64 * 1024,
-        #     "gfx942": 64 * 1024,
-        #     "gfx950": 64 * 1024,
-        # }
 
         self.matrix_kernel_selector = {
             "F4": "mfma_f8f6f4<FP4_E2M1>",
@@ -90,6 +80,10 @@ class Bench_gfx9(benchmark_base.Bench_base):
         }
 
     # -----------------------------------------------------------------------------
+    # Helper Methods and Classes
+    # -----------------------------------------------------------------------------
+
+    # -----------------------------------------------------------------------------
     # Benchmarking kernel source
     # -----------------------------------------------------------------------------
     def set_kernel_source(self) -> None:
@@ -98,11 +92,24 @@ class Bench_gfx9(benchmark_base.Bench_base):
 
         # Cache bandwidth and FLOPs benchmarking
         # ----------------------------------------
-        # Completed in the Bench_base class set_kernel_source()
+        # All other cache and FLOPs definitions are completed in the Bench_base
+        # class set_kernel_source()
+
+        # HBM Bandwidth benchmark
+        self.hbm_bw_src = """
+        template<typename T>
+        __global__ void HBM_bw(T *dst, const T *src)
+        {
+            const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
+            const unsigned int tid = threadIdx.x;
+            dst[gid] = src[gid];
+        }
+        """
 
         # Matrix operations
         # ----------------------------------------
         # Kernels need arch-specific definitions or are unsupported by the hardware
+
         self.matrix_f16_src = """"""
         self.matrix_bf16_src = """"""
         self.matrix_i8_src = """"""

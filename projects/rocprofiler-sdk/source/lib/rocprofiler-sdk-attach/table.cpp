@@ -29,7 +29,7 @@ namespace rocprofiler
 {
 namespace attach
 {
-ROCP_SDK_ENFORCE_ABI_VERSIONING(::RocAttachDispatchTable, ROCPROFILER_ATTACH_DISPATCH_TABLE_LEGNTH);
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::RocAttachDispatchTable, ROCPROFILER_ATTACH_DISPATCH_TABLE_LENGTH);
 
 RocAttachDispatchTable*
 get_dispatch_table()
@@ -50,8 +50,10 @@ dispatch_table_init()
     table->rocprofiler_attach_set_write_interceptor = &rocprofiler_attach_set_write_interceptor;
     table->rocprofiler_attach_iterate_all_code_objects =
         &rocprofiler_attach_iterate_all_code_objects;
-    table->rocprofiler_attach_notify_new_queue       = nullptr;
-    table->rocprofiler_attach_notify_new_code_object = nullptr;
+    table->rocprofiler_attach_add_code_object_cb    = &rocprofiler_attach_add_code_object_cb;
+    table->rocprofiler_attach_remove_code_object_cb = &rocprofiler_attach_remove_code_object_cb;
+    table->rocprofiler_attach_add_queue_cb          = &rocprofiler_attach_add_queue_cb;
+    table->rocprofiler_attach_remove_queue_cb       = &rocprofiler_attach_remove_queue_cb;
 }
 }  // namespace attach
 }  // namespace rocprofiler

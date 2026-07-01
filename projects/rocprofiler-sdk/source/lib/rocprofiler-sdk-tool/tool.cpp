@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -68,12 +68,14 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
 #include <rocprofiler-sdk/experimental/registration.h>
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/marker/api_id.h>
+#include <rocprofiler-sdk/ompt/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
@@ -86,6 +88,7 @@
 #include <unistd.h>
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
@@ -98,6 +101,7 @@
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <string>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
@@ -205,10 +209,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t rocdecode_api_trace     = {};
     rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
     rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
+    rocprofiler_buffer_id_t ompt_trace              = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 13>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 14>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -220,7 +225,8 @@ struct buffer_ids
                                                        pc_sampling_host_trap,
                                                        rocdecode_api_trace,
                                                        rocjpeg_api_trace,
-                                                       pc_sampling_stochastic};
+                                                       pc_sampling_stochastic,
+                                                       ompt_trace};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1292,6 +1298,13 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 tool::write_ring_buffer(*record, domain_type::RCCL);
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_OMPT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_ompt_record_t*>(header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::OMPT);
+            }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT)
             {
                 auto* record = static_cast<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t*>(
@@ -1503,6 +1516,10 @@ get_config_perf_counters()
     for(const auto& att_counter : tool::config().att_param_perfcounters)
     {
         tool_pmc_counters.emplace(att_counter.counter_name);
+    }
+    for(const auto& spm_counter : rocprofiler::tool::get_config().spm_counters)
+    {
+        tool_pmc_counters.emplace(spm_counter);
     }
     return tool_pmc_counters;
 }
@@ -1807,6 +1824,162 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     }
 }
 
+bool
+if_spm_config_match(rocprofiler_agent_id_t           agent_id,
+                    uint64_t                         spm_sample_interval,
+                    rocprofiler_spm_parameter_type_t spm_sample_unit)
+{
+    auto spm_config = CHECK_NOTNULL(tool_metadata)->get_spm_config_info(agent_id);
+    if(!spm_config.empty())
+    {
+        for(auto config : spm_config)
+        {
+            if(config.type == spm_sample_unit &&
+               config.interval.min_interval <= spm_sample_interval &&
+               config.interval.max_interval >= spm_sample_interval)
+                return true;
+        }
+    }
+    return false;
+}
+
+std::optional<rocprofiler_counter_config_id_t>
+get_spm_config(rocprofiler_agent_id_t agent_id)
+{
+    static const auto gpu_agents_counter_info = get_agent_counter_info();
+    using agent_configs_t =
+        std::unordered_map<rocprofiler_agent_id_t, rocprofiler_counter_config_id_t>;
+    static auto agent_configs = common::Synchronized<agent_configs_t, true>{};
+
+    return agent_configs.wlock(
+        [&](auto& _configs) -> std::optional<rocprofiler_counter_config_id_t> {
+            auto itr = _configs.find(agent_id);
+            if(itr != _configs.end()) return itr->second;
+
+            if(!if_spm_config_match(agent_id,
+                                    tool::get_config().spm_sample_interval,
+                                    tool::get_config().spm_sample_interval_unit_value))
+                ROCP_FATAL << "Invalid input parameter\n";
+
+            std::vector<rocprofiler_spm_parameters_t*> input_params{};
+            auto                                       param = rocprofiler_spm_parameters_t{};
+            switch(tool::get_config().spm_sample_interval_unit_value)
+            {
+                case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES:
+                    param = common::init_public_api_struct(
+                        rocprofiler_spm_parameters_t{},
+                        ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+                        tool::get_config().spm_sample_interval);
+                    break;
+                case ROCPROFILER_SPM_PARAMETER_TYPE_NONE:
+                case ROCPROFILER_SPM_PARAMETER_TYPE_LAST:
+                default: break;
+            }
+            input_params.push_back(&param);
+            auto expected_counters = std::vector<rocprofiler_counter_id_t>{};
+
+            for(const auto& citr : gpu_agents_counter_info.at(agent_id))
+            {
+                for(const auto& desired_counter : rocprofiler::tool::get_config().spm_counters)
+                {
+                    if(citr.spm_support &&
+                       std::string_view{desired_counter} == std::string_view{citr.name})
+                        expected_counters.emplace_back(citr.id);
+                }
+            }
+
+            auto config = rocprofiler_counter_config_id_t{};
+            ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(agent_id,
+                                                                   expected_counters.data(),
+                                                                   expected_counters.size(),
+                                                                   input_params.data(),
+                                                                   input_params.size(),
+                                                                   &config),
+                             "SPM could not be configured");
+
+            _configs.emplace(agent_id, config);
+            return config;
+        });
+}
+
+void
+spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                      rocprofiler_counter_config_id_t*                        config,
+                      rocprofiler_user_data_t*                                user_data,
+                      void* /*callback_data_args*/)
+{
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+
+    if(!is_targeted_kernel(dispatch_data->dispatch_info.kernel_id, kernel_iteration))
+    {
+        return;
+    }
+    else if(auto profile = get_spm_config(dispatch_data->dispatch_info.agent_id))
+    {
+        *config          = *profile;
+        user_data->value = common::get_tid();
+    }
+}
+
+void
+spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                  const rocprofiler_spm_counter_record_t**                records,
+                  size_t                                                  record_count,
+                  rocprofiler_spm_record_flag_t                           flags,
+                  rocprofiler_user_data_t                                 user_data,
+                  void* /* record_callback_args*/)
+{
+    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END) != 0)
+    {
+        auto dispatch_data_copy = *dispatch_data;
+        get_stream_id(&dispatch_data_copy);
+        return;
+    }
+
+    if(record_count == 0) return;
+
+    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DATA) != 0)
+    {
+        auto counter_record      = tool::tool_spm_counter_record_t{};
+        counter_record.thread_id = user_data.value;
+
+        if(dispatch_data->correlation_id.external.ptr != nullptr)
+        {
+            auto* ecid = static_cast<kernel_rename_and_stream_data*>(
+                dispatch_data->correlation_id.external.ptr);
+            counter_record.stream_id                    = ecid->stream_id;
+            auto dispatch_copy                          = *dispatch_data;
+            dispatch_copy.correlation_id.external.value = ecid->region_id;
+            counter_record.dispatch_data                = dispatch_copy;
+        }
+        else
+        {
+            counter_record.dispatch_data = *dispatch_data;
+        }
+
+        auto serialized_records = std::vector<tool::tool_spm_counter_value_t>{};
+        for(size_t count = 0; count < record_count; count++)
+        {
+            auto _counter_id = rocprofiler_counter_id_t{};
+            ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count]->id, &_counter_id),
+                             "query record counter id");
+            serialized_records.emplace_back(tool::tool_spm_counter_value_t{
+                _counter_id, records[count]->value, records[count]->timestamp, records[count]->id});
+        }
+
+        if(!serialized_records.empty())
+        {
+            counter_record.write(serialized_records);
+            tool::write_ring_buffer(counter_record, domain_type::SPM_COUNTER_COLLECTION);
+        }
+    }
+
+    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOSS) != 0)
+    {
+        ROCP_WARNING << fmt::format("SPM data loss in dispatch ID {}",
+                                    dispatch_data->dispatch_info.dispatch_id);
+    }
+}
 rocprofiler_client_finalize_t client_finalizer  = nullptr;
 rocprofiler_client_id_t*      client_identifier = nullptr;
 
@@ -2113,6 +2286,137 @@ reset_output_thread(std::optional<std::thread>& thread_ptr)
     }
 }
 
+namespace
+{
+constexpr auto attach_session_file_perms =
+    fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read;
+
+fs::path
+attach_session_file_path(pid_t target_pid)
+{
+    return fmt::format("/tmp/rocprofv3_attach_{}.session", target_pid);
+}
+
+// Reject symlinks and non-regular files before fstream open
+bool
+is_attach_session_path_safe(const fs::path& path)
+{
+    std::error_code ec;
+    if(!fs::exists(path, ec)) return true;
+    if(ec)
+    {
+        ROCP_WARNING << "Failed to stat attach session file " << path << " :: " << ec.message();
+        return false;
+    }
+    if(fs::is_symlink(path, ec))
+    {
+        ROCP_WARNING << "Refusing attach session path (symlink): " << path;
+        return false;
+    }
+    if(!fs::is_regular_file(path, ec))
+    {
+        ROCP_WARNING << "Refusing attach session path (not a regular file): " << path;
+        return false;
+    }
+    return true;
+}
+
+void
+set_attach_session_file_permissions(const fs::path& path)
+{
+    std::error_code ec;
+    fs::permissions(path, attach_session_file_perms, fs::perm_options::replace, ec);
+    if(ec)
+    {
+        ROCP_WARNING << "Failed to set attach session file permissions on " << path
+                     << " :: " << ec.message();
+    }
+}
+
+bool
+read_attach_session(const fs::path& path, uint64_t& session_out)
+{
+    constexpr auto reattach_overwrite_warning =
+        "If this is a re-attach, output may overwrite a previous session";
+
+    if(!is_attach_session_path_safe(path))
+    {
+        ROCP_WARNING << reattach_overwrite_warning;
+        return false;
+    }
+    if(!fs::exists(path)) return false;
+
+    std::ifstream ifs{path};
+    if(!ifs)
+    {
+        ROCP_WARNING << "Failed to open attach session file for read: " << path << ". "
+                     << reattach_overwrite_warning;
+        return false;
+    }
+
+    uint64_t session = 0;
+    if(!(ifs >> session))
+    {
+        ROCP_WARNING << "Failed to parse attach session file: " << path << ". "
+                     << reattach_overwrite_warning;
+        return false;
+    }
+
+    session_out = session;
+    return true;
+}
+
+bool
+write_attach_session(const fs::path& path, uint64_t session)
+{
+    if(!is_attach_session_path_safe(path)) return false;
+
+    std::ofstream ofs{path, std::ios::trunc};
+    if(!ofs)
+    {
+        ROCP_WARNING << "Failed to open attach session file for write (reattaches may "
+                        "overwrite previous rocprof output): "
+                     << path;
+        return false;
+    }
+
+    ofs << session;
+    if(!ofs.good())
+    {
+        ROCP_WARNING << "Failed to write attach session file (reattaches may "
+                        "overwrite previous rocprof output): "
+                     << path;
+        return false;
+    }
+
+    set_attach_session_file_permissions(path);
+    return true;
+}
+}  // namespace
+
+// Checks for a file in /tmp to see if this is a re-attach to a process that was already profiled,
+// and if so suffixes the output file name with the session number so that previous output files are
+// not overwritten.
+void
+assign_attach_output_session_suffix()
+{
+    const auto instrumented_pid = getpid();
+    const auto session_path     = attach_session_file_path(instrumented_pid);
+
+    auto session = uint64_t{0};
+    if(read_attach_session(session_path, session)) ++session;
+
+    if(!write_attach_session(session_path, session)) return;
+
+    if(session > 0)
+    {
+        auto& cfg       = tool::get_config();
+        cfg.output_file = fmt::format("{}_{}", cfg.output_file, session);
+        ROCP_INFO << "Reattach #" << session << " for PID " << instrumented_pid
+                  << ". Base file name is " << cfg.output_file;
+    }
+}
+
 int
 tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             rocprofiler_context_id_t* context_ids,
@@ -2143,11 +2447,14 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
            "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
            "<output_file> -d <output_directory> ...]` to attach to a new process.";
 
-    pid_t target_pid = getppid();  // The target process we're attaching to
-    pid_t tool_pid   = getpid();   // The rocprofv3 tool process
-    ROCP_INFO << "Attach mode: Setting process_id to target PID " << target_pid
-              << " (tool PID: " << tool_pid << ")";
-    tool_metadata->set_process_id(target_pid, 0);  // Set target as main process
+    assign_attach_output_session_suffix();
+
+    pid_t instrumented_pid = getpid();   // The process being profiled
+    pid_t parent_pid       = getppid();  // Its parent process
+    ROCP_INFO << "Attach mode: Setting process_id to instrumented PID " << instrumented_pid
+              << " (parent PID: " << parent_pid << ")";
+    // NOLINTNEXTLINE(readability-suspicious-call-argument): parent_pid is correctly the _ppid arg
+    tool_metadata->set_process_id(instrumented_pid, parent_pid);
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
@@ -2263,6 +2570,79 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         std::vector<rocprofiler_tracing_operation_t> operations = {};
     };
 
+    // Resolve the --ompt-trace category list (forwarded via ROCPROF_OMPT_TRACE_OPERATIONS)
+    // into the explicit operation IDs that rocprofiler_configure_buffer_tracing_service
+    // expects. Contract:
+    //   (a) an empty input string returns an empty vector, i.e. the "all operations" case;
+    //   (b) the SDK interprets num_operations == 0 as "enable every operation in the
+    //       domain", so an empty vector means trace all OMPT ops (no filtering);
+    //   (c) any unknown category token is fatal (ROCP_FATAL aborts the run) rather than
+    //       silently skipped, so a typo can never be misread as the "all operations" case.
+    auto resolve_ompt_ops = [](const std::string& csv) {
+        using ompt_ops_t                 = std::vector<rocprofiler_tracing_operation_t>;
+        static const auto category_table = std::unordered_map<std::string_view, ompt_ops_t>{
+            {"thread", {ROCPROFILER_OMPT_ID_thread_begin, ROCPROFILER_OMPT_ID_thread_end}},
+            {"parallel",
+             {ROCPROFILER_OMPT_ID_parallel_begin,
+              ROCPROFILER_OMPT_ID_parallel_end,
+              ROCPROFILER_OMPT_ID_implicit_task,
+              ROCPROFILER_OMPT_ID_work,
+              ROCPROFILER_OMPT_ID_dispatch,
+              ROCPROFILER_OMPT_ID_reduction,
+              ROCPROFILER_OMPT_ID_masked}},
+            {"task",
+             {ROCPROFILER_OMPT_ID_task_create,
+              ROCPROFILER_OMPT_ID_task_schedule,
+              ROCPROFILER_OMPT_ID_dependences,
+              ROCPROFILER_OMPT_ID_task_dependence}},
+            {"sync",
+             {ROCPROFILER_OMPT_ID_sync_region,
+              ROCPROFILER_OMPT_ID_sync_region_wait,
+              ROCPROFILER_OMPT_ID_flush,
+              ROCPROFILER_OMPT_ID_cancel}},
+            {"mutex",
+             {ROCPROFILER_OMPT_ID_lock_init,
+              ROCPROFILER_OMPT_ID_lock_destroy,
+              ROCPROFILER_OMPT_ID_mutex_acquire,
+              ROCPROFILER_OMPT_ID_mutex_acquired,
+              ROCPROFILER_OMPT_ID_mutex_released,
+              ROCPROFILER_OMPT_ID_nest_lock}},
+            {"target",
+             {ROCPROFILER_OMPT_ID_target_emi,
+              ROCPROFILER_OMPT_ID_target_data_op_emi,
+              ROCPROFILER_OMPT_ID_target_submit_emi}},
+            {"device",
+             {ROCPROFILER_OMPT_ID_device_initialize,
+              ROCPROFILER_OMPT_ID_device_finalize,
+              ROCPROFILER_OMPT_ID_device_load}},
+            {"error", {ROCPROFILER_OMPT_ID_error}},
+        };
+
+        auto ops = ompt_ops_t{};
+        if(csv.empty()) return ops;
+
+        for(const auto& tok : rocprofiler::sdk::parse::tokenize(csv, ", "))
+        {
+            auto it = category_table.find(tok);
+            if(it == category_table.end())
+            {
+                ROCP_FATAL << "unknown OMPT category '" << tok
+                           << "' in ROCPROF_OMPT_TRACE_OPERATIONS; valid categories: thread, "
+                              "parallel, task, sync, mutex, target, device, error";
+            }
+            ops.insert(ops.end(), it->second.begin(), it->second.end());
+        }
+        std::sort(ops.begin(), ops.end());
+        ops.erase(std::unique(ops.begin(), ops.end()), ops.end());
+        return ops;
+    };
+    // Only parse the operation filter when OMPT tracing is actually enabled —
+    // otherwise a stray ROCPROF_OMPT_TRACE_OPERATIONS in the environment would
+    // emit spurious "unknown OMPT category" warnings for an unused feature.
+    auto ompt_ops = tool::get_config().ompt_trace
+                        ? resolve_ompt_ops(tool::get_config().ompt_trace_operations)
+                        : std::vector<rocprofiler_tracing_operation_t>{};
+
     for(auto&& itr : {buffer_service_config{tool::get_config().kernel_trace,
                                             ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                             get_buffers().kernel_trace},
@@ -2323,7 +2703,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                             get_buffers().kfd_trace},
                       buffer_service_config{tool::get_config().kfd_queue_trace,
                                             ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
-                                            get_buffers().kfd_trace}})
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().ompt_trace,
+                                            ROCPROFILER_BUFFER_TRACING_OMPT,
+                                            get_buffers().ompt_trace,
+                                            ompt_ops}})
 
     {
         if(itr.option)
@@ -2414,6 +2798,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                               dummy_callback_tracing_callback},
                       callback_service_config{tool::get_config().rocjpeg_api_trace,
                                               ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().ompt_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_OMPT,
                                               dummy_callback_tracing_callback}})
     {
         if(itr.option)
@@ -2560,6 +2947,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             ROCP_ERROR << "Invalid GPU Device Index: " << entry;
     }
 
+    const auto defer_counter_start{tool::get_config().selected_regions};
+
     if(tool::get_config().counter_collection)
     {
         create_pause_resume_ctx(counter_collection_ctx, "agent counter collection");
@@ -2571,7 +2960,18 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                      nullptr),
             "Could not setup counting service");
 
-        start_context(counter_collection_ctx, "counter collection");
+        if(!defer_counter_start) start_context(counter_collection_ctx, "counter collection");
+    }
+
+    if(tool::get_config().spm_counter_collection)
+    {
+        create_pause_resume_ctx(counter_collection_ctx, "SPM counter collection");
+        ROCPROFILER_CALL(
+            rocprofiler_spm_configure_callback_dispatch_service(
+                counter_collection_ctx, spm_dispatch_callback, nullptr, spm_data_callback, nullptr),
+            "Could not setup SPM counting service");
+
+        if(!defer_counter_start) start_context(counter_collection_ctx, "SPM counter collection");
     }
 
     auto rename_ctx            = rocprofiler_context_id_t{0};
@@ -2658,6 +3058,21 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                  nullptr),
                              "Could not configure external correlation id request service");
         }
+
+        if(tool::get_config().spm_counter_collection && !tool::get_config().counter_collection)
+        {
+            auto spm_external_corr_id_request_kinds =
+                std::array<rocprofiler_external_correlation_id_request_kind_t, 1>{
+                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH};
+
+            ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
+                                 counter_collection_ctx,
+                                 spm_external_corr_id_request_kinds.data(),
+                                 spm_external_corr_id_request_kinds.size(),
+                                 set_kernel_rename_and_stream_correlation_id,
+                                 nullptr),
+                             "Could not configure external correlation id request service for SPM");
+        }
     }
 
     if(tool::get_config().pc_sampling_host_trap)
@@ -2695,6 +3110,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_exclude);
     if(include && (!exclude || tool::get_config().kernel_filter_exclude.empty()))
         add_kernel_target(0, tool::get_config().kernel_filter_range);
+
+    ROCP_ERROR_IF(tool::get_config().selected_regions &&
+                  !tool::get_config().collection_periods.empty())
+        << "selected-regions and collection-period options are mutually exclusive";
 
     if(tool::get_config().benchmark_mode == tool::config::benchmark::disabled_contexts_overhead)
     {
@@ -2908,21 +3327,28 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     output_data_v.num_output += 1;
     output_data_v.num_bytes += _num_bytes;
 
-    if(tool::get_config().stats || tool::get_config().summary_output)
+    // OMPT is rocpd-only: direct CSV/stats (and JSON/Perfetto/OTF2) emission is not
+    // produced for OMPT. OMPT records are written to rocpd and exported to other
+    // formats via `rocpd convert`. The record count above is still tallied so that
+    // rocpd output is produced even when OMPT is the only active trace domain.
+    if constexpr(DomainT != domain_type::OMPT)
     {
-        output_v.stats =
-            tool::generate_stats(tool::get_config(), *tool_metadata, output_v.get_generator());
-    }
+        if(tool::get_config().stats || tool::get_config().summary_output)
+        {
+            output_v.stats =
+                tool::generate_stats(tool::get_config(), *tool_metadata, output_v.get_generator());
+        }
 
-    if(output_v.stats)
-    {
-        contributions_v.emplace_back(output_v.buffer_type_v, output_v.stats);
-    }
+        if(output_v.stats)
+        {
+            contributions_v.emplace_back(output_v.buffer_type_v, output_v.stats);
+        }
 
-    if(tool::get_config().csv_output && _num_bytes >= tool::get_config().minimum_output_bytes)
-    {
-        tool::generate_csv(
-            tool::get_config(), *tool_metadata, output_v.get_generator(), output_v.stats);
+        if(tool::get_config().csv_output && _num_bytes >= tool::get_config().minimum_output_bytes)
+        {
+            tool::generate_csv(
+                tool::get_config(), *tool_metadata, output_v.get_generator(), output_v.stats);
+        }
     }
 }
 
@@ -2945,9 +3371,12 @@ generate_output(cleanup_mode _cleanup_mode)
     auto marker_output = tool::marker_buffered_output_t{tool::get_config().marker_api_trace};
     auto counters_output =
         tool::counter_collection_buffered_output_t{tool::get_config().counter_collection};
+    auto spm_counters_output =
+        tool::spm_counter_collection_buffered_output_t{tool::get_config().spm_counter_collection};
     auto scratch_memory_output =
         tool::scratch_memory_buffered_output_t{tool::get_config().scratch_memory_trace};
     auto rccl_output = tool::rccl_buffered_output_t{tool::get_config().rccl_api_trace};
+    auto ompt_output = tool::ompt_buffered_output_t{tool::get_config().ompt_trace};
     auto memory_allocation_output =
         tool::memory_allocation_buffered_output_t{tool::get_config().memory_allocation_trace};
     auto kfd_output = tool::kfd_buffered_output_t{
@@ -2995,12 +3424,14 @@ generate_output(cleanup_mode _cleanup_mode)
     generate_output(kfd_output, outdata, contributions, cleanups);
     generate_output(marker_output, outdata, contributions, cleanups);
     generate_output(rccl_output, outdata, contributions, cleanups);
+    generate_output(ompt_output, outdata, contributions, cleanups);
     generate_output(counters_output, outdata, contributions, cleanups);
     generate_output(scratch_memory_output, outdata, contributions, cleanups);
     generate_output(rocdecode_output, outdata, contributions, cleanups);
     generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups);
     generate_output(rocjpeg_output, outdata, contributions, cleanups);
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
+    generate_output(spm_counters_output, outdata, contributions, cleanups);
 
     if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
     {
@@ -3047,7 +3478,8 @@ generate_output(cleanup_mode _cleanup_mode)
                          rocdecode_output.get_generator(),
                          rocjpeg_output.get_generator(),
                          pc_sampling_host_trap_output.get_generator(),
-                         pc_sampling_stochastic_output.get_generator());
+                         pc_sampling_stochastic_output.get_generator(),
+                         spm_counters_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -3088,7 +3520,9 @@ generate_output(cleanup_mode _cleanup_mode)
                           kfd_output.get_generator(),
                           rccl_output.get_generator(),
                           rocdecode_output.get_generator(),
-                          counters_output.get_generator());
+                          counters_output.get_generator(),
+                          spm_counters_output.get_generator(),
+                          ompt_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
@@ -3170,7 +3604,7 @@ tool_detach(void* /*tool_data*/)
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
 
     // Flush all buffers, stop context to ensure in-flight GPU operations complete,
-    // then flush again to capture any final events (same pattern as tool_fini)
+    // then flush again to capture any final events (same pattern as tool_fini).
     flush();
     rocprofiler_stop_context(get_client_ctx());
     flush();

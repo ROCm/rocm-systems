@@ -2135,12 +2135,9 @@ ncclResult_t parseChordalRing(struct ncclTopoSystem* system, struct ncclTopoGrap
     int sum = ngpus*(ngpus-1)/2 - node->gpu.dev;
     int count = 0;
     for (int n = 0; n<ngpus; n++) {
-      struct ncclTopoLink* link;
-      for (link = node->links; link->remNode; link++) {
-        if (link->remNode->gpu.dev == n) break;
-      }
-      if (!link->remNode) continue;
-      if (link->type != LINK_NVL) continue;
+      // Direct XGMI neighbor: post NCCL-2.30 a direct GPU->GPU path is GPU-DEV-DEV-GPU (count<=3).
+      struct ncclTopoLinkList* path = node->paths[GPU] + n;
+      if (path->type != PATH_NVL || path->count > 3) continue;
       sum -= system->nodes[GPU].nodes[n].gpu.dev;
       count ++;
     }
@@ -2278,7 +2275,9 @@ static ncclResult_t parseRomeSystem(struct ncclTopoSystem* system, struct rcclRo
     for (n = 0; n < romeTopo->nGpus; n++) {
       romeTopo->connMatrix[i*romeTopo->nGpus+n] = 0;
       struct ncclTopoLinkList *path = node->paths[GPU] + gpu_scores[n].g;
-      if (path->type != LINK_NVL) continue;
+      // Only count direct XGMI links: since NCCL 2.30, GPU->GPU routes via DEV nodes, so direct is
+      // count==3 and indirect count==4. Counting indirect breaks Rome matching on sparse topos.
+      if (path->type != PATH_NVL || path->count > 3) continue;
       romeTopo->connMatrix[i*romeTopo->nGpus+n] = path->bw/ncclTopoXGMISpeed(node->gpu.gcn);
       count ++;
     }
@@ -2322,7 +2321,9 @@ static ncclResult_t parseRomeSystem(struct ncclTopoSystem* system, struct rcclRo
     int n = net_scores[i].n;
     for (int j = 0; j < romeTopo->nGpus; j++) {
       int g = gpu_scores[j].g;
-      romeTopo->gdrLevel[i*romeTopo->nGpus+j] = system->nodes[GPU].nodes[g].paths[NET][n].type;
+      struct ncclTopoNode* gpuNode = &system->nodes[GPU].nodes[g];
+      // paths[NET] is null when the GPU has no topology path to any NET node (e.g. remote NICs in MNNVL)
+      romeTopo->gdrLevel[i*romeTopo->nGpus+j] = (gpuNode->paths[NET] != NULL) ? gpuNode->paths[NET][n].type : PATH_DIS;
     }
   }
 

@@ -60,14 +60,16 @@ namespace gfx11
 class gfx11_cntx_prim
 {
 public:
-    static const uint32_t     GFXIP_LEVEL         = 11;
-    static const uint32_t     NUMBER_OF_BLOCKS    = LastCounterBlockId + 1;
-    static constexpr Register GRBM_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
+    static const uint32_t     GFXIP_LEVEL          = 11;
+    static const uint32_t     NUMBER_OF_BLOCKS     = LastCounterBlockId + 1;
+    static constexpr Register GRBM_GFX_INDEX_ADDR  = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
+    static constexpr Register GRBMA_GFX_INDEX_ADDR = REG_32B_NULL;
     static constexpr Register COMPUTE_PERFCOUNT_ENABLE_ADDR =
         REG_32B_ADDR(GC, 0, regCOMPUTE_PERFCOUNT_ENABLE);
     static constexpr Register RLC_PERFMON_CLK_CNTL_ADDR =
         REG_32B_ADDR(GC, 0, regRLC_PERFMON_CNTL);  // REG_32B_ADDR(GC, 0, regRLC_PERFMON_CLK_CNTL);
-    static constexpr Register CP_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 0, regCP_PERFMON_CNTL);
+    static constexpr Register CP_PERFMON_CNTL_ADDR  = REG_32B_ADDR(GC, 0, regCP_PERFMON_CNTL);
+    static constexpr Register AID_PERFMON_CNTL_ADDR = REG_32B_NULL;
 
     static constexpr Register COMPUTE_THREAD_TRACE_ENABLE_ADDR =
         REG_32B_ADDR(GC, 0, regCOMPUTE_THREAD_TRACE_ENABLE);
@@ -339,6 +341,14 @@ public:
         return sq_cntr_sel;
     }
 
+    // SQG Counter Select Register value
+    static uint32_t sqg_select_value(const counter_des_t& counter_des)
+    {
+        uint32_t sqg_cntr_sel =
+            SET_REG_FIELD_BITS(SQG_PERFCOUNTER0_SELECT, PERF_SEL, counter_des.id);
+        return sqg_cntr_sel;
+    }
+
     static uint32_t sq_spm_select_value(const counter_des_t& counter_des)
     {
         uint32_t sq_cntr_sel =
@@ -384,6 +394,13 @@ public:
         else if(block_id == SqCsCounterBlockId)
         {
             sq_cntr_ctrl = SET_REG_FIELD_BITS(SQ_PERFCOUNTER_CTRL, CS_EN, 0x1);
+        }
+        else if(block_id == SqgCounterBlockId)
+        {
+            sq_cntr_ctrl = SET_REG_FIELD_BITS(SQG_PERFCOUNTER_CTRL, GS_EN, 0x1) |
+                           SET_REG_FIELD_BITS(SQG_PERFCOUNTER_CTRL, PS_EN, 0x1) |
+                           SET_REG_FIELD_BITS(SQG_PERFCOUNTER_CTRL, HS_EN, 0x1) |
+                           SET_REG_FIELD_BITS(SQG_PERFCOUNTER_CTRL, CS_EN, 0x1);
         }
 
         return sq_cntr_ctrl;
@@ -450,6 +467,8 @@ public:
         select_value(SPI_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TA_PERFCOUNTER0_SELECT =
         select_value(TA_PERFCOUNTER0_SELECT);
+    static auto constexpr select_value_TD_PERFCOUNTER0_SELECT =
+        select_value(TD_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TCP_PERFCOUNTER0_SELECT =
         select_value(TCP_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_SX_PERFCOUNTER0_SELECT =
@@ -629,7 +648,7 @@ public:
 
     // Indicate the different TT messages/tokens that should be enabled/logged
     // Indicate the different TT tokens that specify register operations to be logged
-    static uint32_t sqtt_token_mask_on_value()
+    static uint32_t sqtt_token_mask_on_value(bool)
     {
 #if SQTT_PRIM_ENABLED
         uint32_t sq_thread_trace_token_mask =

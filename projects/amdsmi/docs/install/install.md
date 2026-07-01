@@ -7,119 +7,170 @@ myst:
 
 # Install the AMD SMI library and CLI tool
 
-This section describes how to install the AMD SMI library, Python interface,
-and command line tool either as part of the
-{doc}`ROCm software stack <rocm:what-is-rocm>` -- or manually.
+This page describes the system requirements for AMD SMI and explains how to
+install the AMD SMI library, Python interface, and `amd-smi` CLI on Linux.
+
+## Supported platforms
+
+AMD SMI supports:
+
+- {ref}`AMD GPUs <rocm:release-supported-hw>` on Linux bare metal systems
+- AMD GPUs in Linux virtual machine guests
+- AMD EPYC™ CPUs through the [esmi_ib_library](https://github.com/amd/esmi_ib_library)
+
+For AMD SMI on Linux SR-IOV hosts, refer to
+the [AMD SMI for Virtualization documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/index.html).
+
+AMD SMI library runs on AMD ROCm supported platforms. Refer to
+{ref}`AMD hardware support <rocm:release-supported-hw>` for more information.
 
 (install_reqs)=
 ## Requirements
 
-The following are required to install and use the AMD SMI library through its language interfaces and CLI.
+Before installing AMD SMI, make sure your system meets the following
+requirements.
 
-* The `amdgpu` driver must be loaded for AMD SMI initialization to work. See
-  [Install the amdgpu driver](#install_amdgpu_driver).
+(install_amdgpu_driver)=
+### Driver requirements
 
-* Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
+To run AMD SMI, the following components need to be installed on your system:
 
-  ```bash
-  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64
-  ```
+- The `amdgpu-dkms` driver
+  - For current amdgpu driver installation instructions, see the [AMD GPU
+    Driver (amdgpu)
+    documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html).
+- The `amd_hsmp` or `hsmp_acpi` driver
+  - See [amd_hsmp](https://github.com/amd/amd_hsmp) for more information.
 
-### Supported platforms
+Also confirm that your Linux kernel version matches the system requirements
+described in {ref}`Operating system support <rocm:release-supported-os>`.
 
-The AMD SMI library supports Linux bare metal and Linux virtual machine guests
-for AMD GPUs, and supports AMD EPYC™ CPUs via the
-[esmi_ib_library](https://github.com/amd/esmi_ib_library).
-To use AMD SMI for virtualization on Linux SR-IOV hosts, refer to
-the [AMD SMI for Virtualization documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/index.html).
+### Interface prerequisites
 
-AMD SMI library can run on AMD ROCm supported platforms. Refer to
-{doc}`System requirements (Linux) <rocm-install-on-linux:reference/system-requirements>`
-for more information.
-<!--https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html-->
+The following prerequisites apply to the AMD SMI library interfaces:
 
-To run the AMD SMI library, the `amdgpu` driver and the `amd_hsmp` or `hsmp_acpi` driver need to be installed.
-
-### Python interface and CLI tool prerequisites
-
-* Python version 3.6.8 or greater (64-bit)
+- Python interface and `amd-smi` CLI:
+  - Python 3.6.8 or later
+  - 64-bit Python
+- Go interface:
+  - Go 1.20 or later
 
 ::::{note}
-During the driver installation process on Azure Linux 3, you might encounter the `ModuleNotFoundError: No module named 'more_itertools'` warning. This warning is a result of the reintroduction of `python3-wheel` and `python3-setuptools` dependencies in the CMake of AMD SMI, which requires `more_itertools` to build these Python libraries. This issue will be fixed in a future ROCm release. As a workaround, use the following command before installation:
+During the driver installation process on Azure Linux 3, you might encounter
+the `ModuleNotFoundError: No module named 'more_itertools'` warning. This
+warning is a result of the reintroduction of `python3-wheel` and
+`python3-setuptools` dependencies in the CMake of AMD SMI, which requires
+`more_itertools` to build these Python libraries. This issue will be fixed in a
+future ROCm release. As a workaround, use the following command before
+installation:
 
-```
+```bash
 sudo python3 -m pip install more_itertools
 ```
 ::::
 
-### Go interface prerequisites
+(install_rocm)=
+## Install the ROCm Core SDK
 
-* Go version 1.20 or greater
+AMD SMI is included with most installations of the ROCm Core SDK on Linux.
 
-(install_amdgpu_driver)=
-## Install the amdgpu driver
-
-```{note}
-As of ROCm 7.0.0, the `amdgpu` driver is distributed separately from the ROCm
-software stack. See
-{doc}`rocm-install-on-linux:reference/user-kernel-space-compat-matrix` for
-driver to ROCm user space compatibility information.
-```
-
-Confirm that your Linux kernel version matches the system requirements described in
-{ref}`rocm-install-on-linux:supported_distributions`.
-
-For up-to-date installation instructions, see the [AMD GPU Driver (amdgpu)
-documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html).
-
-(install_amdgpu_rocm)=
-## Install AMD SMI with ROCm
-
-AMD SMI is included as a core package in the ROCm software stack as part of the
-`rocm-developer-tools` meta package. See [ROCm runtime
-packages](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/package-manager-integration.html#id3)
-for more information.
-
-```{note}
-The `amdgpu-install` script is no longer the recommended way to install ROCm.
-Install using your supported Linux distribution's package manager instead.
-```
-
-For up-to-date installation instructions via package manager, see {doc}`ROCm
-installation for Linux <rocm-install-on-linux:install/prerequisites>`.
-
-After installing the `amdgpu` driver and ROCm, verify your AMD SMI installation:
-
-```shell
-amd-smi
-```
+For instructions, see {doc}`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
 
 (install_without_rocm)=
-## Install AMD SMI without ROCm
+## Install AMD SMI standalone on Linux
 
-The following are example steps to install the AMD SMI libraries and CLI tool on
-Ubuntu 22.04.
+Alternatively, if you want to install AMD SMI without additional ROCm libraries
+and tools, install the `amdrocm-amdsmi` package. This includes AMD SMI and
+ROCm system dependencies.
 
-1. Install the library.
+1. Complete the {doc}`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
 
-   ```shell
-   sudo apt install amd-smi-lib
+2. Install the AMD SMI package that matches your desired ROCm version. Package
+   names use the following format:
+
+   ```
+   amdrocm-amdsmi<rocm_version>
    ```
 
-2. Add the installation directory to your PATH. If installed with ROCm, ignore
-   this step.
+   `<rocm_version>` represents the ROCm Core SDK version to install. Omit this
+   suffix to install the latest available version.
 
-   ```shell
-   export PATH="${PATH:+${PATH}:}~/opt/rocm/bin"
+   For example, to install the latest ROCm AMD SMI release for supported GPU
+   architectures:
+
+   :::::{tab-set}
+   ::::{tab-item} Debian-based distros
+   ```bash
+   sudo apt install amdrocm-amdsmi
+   ```
+   ::::
+   ::::{tab-item} RHEL-based distros
+   ```bash
+   sudo dnf install amdrocm-amdsmi
+   ```
+   ::::
+   ::::{tab-item} SLES
+   ```bash
+   sudo zypper install amdrocm-amdsmi
+   ```
+   ::::
+   :::::
+
+3. Prepend the `amd-smi` binary to your PATH, it is not on PATH by default.
+   Replace `<major>` and `<minor>` with the appropriate ROCm version.
+
+   ```bash
+   export PATH="/opt/rocm/core-<major>.<minor>/bin${PATH:+:${PATH}}"
    ```
 
-3. Verify your installation.
+   To persist this across shells, append the line to your `~/.bashrc` (or
+   equivalent shell config).
 
-   ```shell
-   amd-smi --help
+4. Verify your installation.
+
+   ```bash
+   amd-smi version
    ```
 
-## Optionally enable CLI autocompletion
+(install_nightly)=
+## Install a nightly build
+
+Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
+[TheRock](https://github.com/ROCm/TheRock) to a unified pip index.
+
+1. Create and activate a Python virtual environment (recommended):
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+2. Install ROCm with the device extra matching your GPU. For example, for
+   gfx942 (MI300X / MI325X):
+
+   ```bash
+   pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+       "rocm[libraries,device-gfx942]"
+   ```
+
+   For the full list of `device-*` extras and other release options, see
+   [TheRock RELEASES.md](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#supported-python-device--install-extras).
+
+3. Verify your installation:
+
+   ```bash
+   amd-smi version
+   ```
+
+## Optional and advanced installation
+
+Use these optional procedures for CLI autocompletion and advanced setups, such
+as systems with multiple ROCm instances.
+
+### Enable CLI autocompletion
 
 The `amd-smi` CLI application supports autocompletion. If `argcomplete` is not
 installed and enabled already, do so using the following commands.
@@ -131,14 +182,13 @@ activate-global-python-argcomplete --user
 ```
 
 (install-manual-py-lib)=
-## Install the Python library for multiple ROCm instances
+### Install the Python library for multiple ROCm instances
 
-If {doc}`multiple ROCm versions are installed
-<rocm-install-on-linux:install/install-methods/multi-version-install-index>` and you
-are not using `pyenv`, uninstall previous versions of AMD SMI before installing
-the desired version from your ROCm instance.
+If multiple ROCm versions are installed and you are not using `pyenv`,
+uninstall previous versions of AMD SMI before installing the desired version
+from your ROCm instance.
 
-### Manually install the Python library
+#### Manually install the Python library
 
 Multiple ROCm installations may cause `amd-smi` failures.
 Installing multiple versions of ROCm on the same system can result in the `amd-smi` CLI not functioning correctly.
@@ -150,11 +200,12 @@ Installing multiple versions of ROCm on the same system can result in the `amd-s
    python3 -m pip uninstall amdsmi
    ```
 
-2. Install the AMD SMI Python library from your target ROCm instance.
+2. Install the AMD SMI Python library from your target ROCm instance. Replace
+   `<major>` and `<minor>` with the appropriate ROCm version.
 
    ```shell
    # Install from target ROCm instance
-   cd /opt/rocm/share/amd_smi
+   cd /opt/rocm/core-<major>.<minor>/share/amd_smi
    python3 -m pip install --user .
    ```
 

@@ -54,8 +54,7 @@ class TestComputeXorMask:
         assert end == 48
 
     def test_identity_returns_none(self):
-        assert compute_xor_mask(
-            MFMA_F32_16X16X16_F16, MFMA_F32_16X16X16_F16) is None
+        assert compute_xor_mask(MFMA_F32_16X16X16_F16, MFMA_F32_16X16X16_F16) is None
 
     def test_symmetric(self):
         fwd = compute_xor_mask(MFMA_F32_16X16X16_F16, WMMA_F32_16X16X16_F16)

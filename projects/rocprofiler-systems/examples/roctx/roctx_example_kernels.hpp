@@ -8,11 +8,35 @@
 #include <cstdlib>
 #include <functional>
 #include <mutex>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 #include <hip/hip_runtime.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
+
+// Open a named region using either roctxRangeStartA (start_stop) or
+// roctxRangePushA (push_pop). Returns the range ID for start_stop; 0 for push_pop.
+inline roctx_range_id_t
+range_start(const char* name, bool use_push_pop)
+{
+    if(use_push_pop)
+    {
+        roctxRangePushA(name);
+        return 0;
+    }
+    return roctxRangeStartA(name);
+}
+
+// Close the region opened by range_start().
+inline void
+range_stop(roctx_range_id_t id, bool use_push_pop)
+{
+    if(use_push_pop)
+        roctxRangePop();
+    else
+        roctxRangeStop(id);
+}
 
 static std::mutex print_lock{};
 

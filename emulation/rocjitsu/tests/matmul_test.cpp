@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "test_paths.h"
 
+#include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -36,11 +39,9 @@ RJ_DIAGNOSTIC_POP
 namespace {
 
 using namespace rocjitsu;
+using test::kernel_path;
 
-const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
 
 constexpr uint32_t TOTAL_XCDS = 8;
 constexpr uint32_t CUS_PER_XCD = 32; // 4 SEs × 8 CUs
@@ -112,7 +113,7 @@ struct KernelExecFixture {
   uint64_t kernel_object = 0;
 
   void setup(const char *kernel_name, uint32_t num_threads = 1) {
-    auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
+    auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
     soc = loaded.soc();
     gpu_mem = loaded.memory();
     loaded.engine_config.num_threads = num_threads;
@@ -383,9 +384,9 @@ TEST(MatmulStressTest, MfmaAllCUs_MultiThreaded) {
 
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
+  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
-  auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
+  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
@@ -434,9 +435,9 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
 // Multi-threaded topology-only: 1 thread per XCD, dispatch s_endpgm to all CUs.
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
+  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
-  auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
+  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;

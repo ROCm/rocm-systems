@@ -1,0 +1,42 @@
+{
+    "required_tables": [
+        {
+            "name": "regions",
+            "required_columns": [
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "All recursive frames were recorded (RECURSION_DEPTH=100 -> 101 frames)",
+                    "error_message": "Expected 101 'recurse' rows: the initial recurse(100) call plus 100 recursive descents. Fewer rows indicate the per-thread region cache is collapsing same-name nested calls.",
+                    "expected_result": 101,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'recurse'"
+                }
+            ]
+        },
+        {
+            "name": "region_args",
+            "required_columns": [
+                "name",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Each recurse frame has a source_object trace-arg",
+                    "error_message": "Expected one source_object arg per recurse frame (101 total).",
+                    "expected_result": 101,
+                    "query": "SELECT COUNT(*) FROM region_args WHERE name = 'source_object'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "All source_object args on recurse regions reference the minimal-recursion binary",
+                    "error_message": "Expected every recurse region's source_object to equal 'minimal-recursion'.",
+                    "expected_result": 101,
+                    "query": "SELECT COUNT(*) FROM region_args A INNER JOIN regions R ON R.id = A.id AND R.guid = A.guid WHERE R.name = 'recurse' AND A.name = 'source_object' AND A.value = 'minimal-recursion'"
+                }
+            ]
+        }
+    ]
+}

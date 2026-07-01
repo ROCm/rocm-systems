@@ -145,7 +145,8 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
 
-  if (gfxipMajor == 9 && gfxipMinor >= 4) {
+  if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
+      (gfxipMajor == 12 && gfxipMinor >= 5)) {
     sdma_swap_supported_ = true;
   }
 
@@ -184,10 +185,13 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if (gfxipMajor == 12 && gfxipMinor >= 5) {
     ext_dispatch_packet_ = true;
     groupMemCarveout_ = true;
-    groupMemPref_.totalSharedBanks = 7;
-    groupMemPref_.preferLDSBanks = 5;
-    groupMemPref_.preferCacheLDSBanks = 2;
-    groupMemPref_.preferEqualLDSBanks = 3;
+  }
+
+  // SDMA indirect copy uses the gfx1250 wait/signal-indirect SDMA
+  // packet that dereferences a pointer-to-pointer slot before issuing the
+  // copy.
+  if (gfxipMajor == 12 && gfxipMinor == 5) {
+    sdma_indirect_supported_ = true;
   }
 
   // Override current device settings

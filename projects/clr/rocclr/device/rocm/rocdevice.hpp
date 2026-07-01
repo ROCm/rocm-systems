@@ -27,8 +27,9 @@
 
 #include <atomic>
 #include <iostream>
-#include <vector>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 /*! \addtogroup HSA
  *  @{
@@ -237,6 +238,16 @@ class NullDevice : public amd::Device {
     return true;
   }
 
+  cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override {
+    ShouldNotReachHere();
+    return CL_INVALID_OPERATION;
+  }
+
+  cl_int virtualUnmap(void* va, size_t size) override {
+    ShouldNotReachHere();
+    return CL_INVALID_OPERATION;
+  }
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override {
     ShouldNotReachHere();
@@ -351,6 +362,11 @@ class Device : public NullDevice {
   static hsa_status_t iterateCpuMemoryPoolCallback(hsa_amd_memory_pool_t region, void* data);
   static hsa_status_t loaderQueryHostAddress(const void* device, const void** host);
 
+  //! Returns the AMD HSA loader extension function table.
+  static const hsa_ven_amd_loader_1_03_pfn_t& loaderExtensionTable() {
+    return amd_loader_ext_table;
+  }
+
   static bool loadHsaModules();
 
   hsa_agent_t getBackendDevice() const { return bkendDevice_; }
@@ -464,16 +480,22 @@ class Device : public NullDevice {
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override;
   virtual bool virtualFree(void* addr) override;
 
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
+  virtual cl_int virtualUnmap(void* va, size_t size) override;
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override;
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
 
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle) override;
+  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
+                                        amd::Memory::HandleType handle_type) override;
 
-  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) const;
+  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr,
+                                amd::Memory::HandleType handle_type) const;
 
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) override;
+  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle,
+                                                amd::Memory::HandleType handle_type) override;
 
   virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
                             cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override;
@@ -485,11 +507,17 @@ class Device : public NullDevice {
   virtual void RetainGlobalSignal(void* signal) const override;
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
   virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
+  virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket() const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
+
+  virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type) override;
+  virtual void DestroyExtSemaphore(void* extSemaphore) override;
 
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
@@ -624,7 +652,14 @@ class Device : public NullDevice {
   bool IsPm4Emulation() const { return pm4_emulation_; }
 
   //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
-  void WaitForHsaAsyncHandlersIdle();
+  void WaitForHsaAsyncHandlersIdle() override;
+
+  //! Destroy all queues whose destroy was deferred from the async-events thread.
+  //! Must only be called on an app thread (e.g. acquireQueue, ~Device).
+  void DrainDeferredQueueDestroys();
+
+  //! Current number of queues pending deferred destroy.
+  size_t DeferredQueueCount();
 
  private:
   bool create();
@@ -634,12 +669,17 @@ class Device : public NullDevice {
 
   static constexpr int kDefaultNumaNode = -1;
 
+  //! Queues with destroy deferred from an async-handler-driven ~VirtualGPU, drained on app threads.
+  static constexpr size_t kDeferredQueueDrainThreshold = 8;
+  std::vector<hsa_queue_t*> deferredQueueDestroy_;
+  std::mutex deferredQueueDestroyLock_;
+
   bool SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
                            bool first_alloc = false, bool use_cpu = false,
                            int numa_id = kDefaultNumaNode) const;
   static constexpr hsa_signal_value_t InitSignalValue = 1;
 
-  static hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table;
+  static hsa_ven_amd_loader_1_03_pfn_t amd_loader_ext_table;
 
   std::recursive_mutex* mapCacheOps_;    //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure
@@ -710,18 +750,8 @@ class Device : public NullDevice {
   };
 
   struct QueueCompare {
-    const Device* device_;
-
-    QueueCompare(const Device* dev = nullptr) : device_(dev) {}
-
     // Customized queue compare operator to make sure the queues are sorted in the creation order
-    bool operator()(hsa_queue_t* lhs, hsa_queue_t* rhs) const {
-      if (device_ != nullptr && device_->settings().dynamic_queues_ > 0) {
-        return (lhs->id < rhs->id) ? true : false;
-      } else {
-        return (lhs < rhs) ? true : false;
-      }
-    }
+    bool operator()(hsa_queue_t* lhs, hsa_queue_t* rhs) const { return lhs->id < rhs->id; }
   };
   //! a vector for keeping Pool of HSA queues with low, normal and high priorities for recycling
   std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queuePool_;

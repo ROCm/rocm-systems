@@ -5,7 +5,9 @@
 // and matmul_mfma across 1..8 threads (one per XCD). Outputs CSV to stdout.
 
 #include "aql_queue.h"
+#include "test_paths.h"
 
+#include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -34,11 +36,8 @@ RJ_DIAGNOSTIC_POP
 
 using namespace rocjitsu;
 
-static const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
-static const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-static std::string kernel_path(const char *name) {
-  return std::string(KERNEL_DIR) + "/" + name + ".o";
-}
+static const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+using test::kernel_path;
 
 static constexpr uint32_t TOTAL_XCDS = 8;
 static constexpr uint32_t CUS_PER_XCD = 32;
@@ -70,7 +69,7 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   if (!co)
     return -1;
-  auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
+  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = num_threads;

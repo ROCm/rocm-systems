@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/counters/sample_consumer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
@@ -46,11 +47,15 @@ get_buffer_mut()
     return *CHECK_NOTNULL(mut);
 }
 
+namespace
+{
 /**
- * Callback called by HSA interceptor when the kernel has completed processing.
+ * Synchronous body of the completion callback. Invoked on the dedicated
+ * consumer thread (or, as a fallback, on the producer thread when the
+ * ring-buffer is full / the consumer is not running).
  */
 void
-process_callback_data(completed_cb_params_t&& params)
+process_completed_cb(completed_cb_params_t&& params)
 {
     auto&       info          = params.info;
     auto&       session       = *params.session;
@@ -152,6 +157,39 @@ process_callback_data(completed_cb_params_t&& params)
                                   info->record_callback_args);
         }
     }
+}
+
+using callback_consumer_t = consumer_thread_t<completed_cb_params_t>;
+
+callback_consumer_t&
+callback_thread_get()
+{
+    static auto*& _v = common::static_object<callback_consumer_t>::construct(&process_completed_cb);
+    return *CHECK_NOTNULL(_v);
+}
+}  // namespace
+
+void
+callback_thread_start()
+{
+    callback_thread_get().start();
+}
+
+void
+callback_thread_stop()
+{
+    callback_thread_get().exit();
+}
+
+/**
+ * Callback called by HSA interceptor when the kernel has completed processing.
+ * Hands the work off to the dedicated consumer thread so that the HSA async
+ * signal handler returns quickly.
+ */
+void
+process_callback_data(completed_cb_params_t&& params)
+{
+    callback_thread_get().add(std::move(params));
 }
 }  // namespace counters
 }  // namespace rocprofiler

@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef PROFILER_V4_H_
 #define PROFILER_V4_H_
@@ -36,7 +37,7 @@ typedef struct {
     } p2p;
 
     struct {
-      pid_t pid;                // pid of the originating process
+      ncclPid_t pid;            // pid of the originating process
       uint8_t channelId;        // channel id for this proxy operation
       int peer;                 // remote rank for send/recv
       int nSteps;               // number of steps for this proxy operation

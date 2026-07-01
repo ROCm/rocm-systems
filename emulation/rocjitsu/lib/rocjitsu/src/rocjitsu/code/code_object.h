@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_CODE_CODE_OBJECT_H_
 #define ROCJITSU_CODE_CODE_OBJECT_H_
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -65,6 +66,10 @@ public:
   /// @brief Virtual address of the section (from ELF sh_addr).
   /// @returns Section virtual address, or 0 if not set.
   virtual uint64_t vaddr() const { return 0; }
+
+  /// @brief Raw ELF section flags.
+  /// @returns Section flags from sh_flags, or 0 when not backed by ELF metadata.
+  virtual uint64_t flags() const { return 0; }
 
   /// @brief Raw section data.
   /// @returns Pointer to the section contents, or nullptr if empty.

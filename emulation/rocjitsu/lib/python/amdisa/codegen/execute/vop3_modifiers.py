@@ -11,8 +11,9 @@ parameters rather than accessing transient instance state.
 from __future__ import annotations
 
 
-def vop3_src_mod(varname: str, src_idx: int, has_abs: bool,
-                 indent: str = '    ') -> list[str]:
+def vop3_src_mod(
+    varname: str, src_idx: int, has_abs: bool, indent: str = '    '
+) -> list[str]:
     """Generate VOP3 input modifier lines (abs then neg) for a floating-point src.
 
     Works for both float and double temporaries. The generated C++ uses
@@ -27,9 +28,9 @@ def vop3_src_mod(varname: str, src_idx: int, has_abs: bool,
     lines = []
     if has_abs:
         lines.append(
-            f'{indent}if (inst_.abs & (1u << {src_idx})) {varname} = std::fabs({varname});')
-    lines.append(
-        f'{indent}if (inst_.neg & (1u << {src_idx})) {varname} = -{varname};')
+            f'{indent}if (inst_.abs & (1u << {src_idx})) {varname} = std::fabs({varname});'
+        )
+    lines.append(f'{indent}if (inst_.neg & (1u << {src_idx})) {varname} = -{varname};')
     return lines
 
 

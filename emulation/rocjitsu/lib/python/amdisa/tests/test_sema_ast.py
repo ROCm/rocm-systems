@@ -92,26 +92,74 @@ class TestSemaNodeKind:
         assert len(SemaNodeKind) == 72
 
     def test_all_xml_op_types_mapped(self):
-        op_map = {
-            k.value: k for k in SemaNodeKind
-            if not k.value.startswith('_')
-        }
+        op_map = {k.value: k for k in SemaNodeKind if not k.value.startswith('_')}
         xml_ops = [
-            '+', '-', '*', '/', '%', '**', '+=', '-=',
-            '==', '!=', '<', '>', '<=', '>=', '<>',
-            '&', '|', '^', '<<', '>>', '.bitneg', '.bitcat',
-            '&&', '||', '.boolneg',
-            '.fma', '.sqrt', '.sin', '.cos', '.log2', '.ldexp',
-            '.floor', '.trunc', '.fract', '.pow',
-            '.abs', '.uminus', '.uplus', '.sign', '.signext', '.signext_from_bit',
+            '+',
+            '-',
+            '*',
+            '/',
+            '%',
+            '**',
+            '+=',
+            '-=',
+            '==',
+            '!=',
+            '<',
+            '>',
+            '<=',
+            '>=',
+            '<>',
+            '&',
+            '|',
+            '^',
+            '<<',
+            '>>',
+            '.bitneg',
+            '.bitcat',
+            '&&',
+            '||',
+            '.boolneg',
+            '.fma',
+            '.sqrt',
+            '.sin',
+            '.cos',
+            '.log2',
+            '.ldexp',
+            '.floor',
+            '.trunc',
+            '.fract',
+            '.pow',
+            '.abs',
+            '.uminus',
+            '.uplus',
+            '.sign',
+            '.signext',
+            '.signext_from_bit',
             '.cast',
-            '.instoperand', '.arrayderef', '.arrayslice', '.arrayslicesize',
-            '.fieldderef', '.cons_array',
-            '.call', '.lambda',
-            ':seq', ':if', ':for', ':while', ':break', ':return',
-            ':declare', ':comment', ':eval', ':pragma',
-            '=', '?:',
-            '.sum', '.within', '.exponent', '.mantissa',
+            '.instoperand',
+            '.arrayderef',
+            '.arrayslice',
+            '.arrayslicesize',
+            '.fieldderef',
+            '.cons_array',
+            '.call',
+            '.lambda',
+            ':seq',
+            ':if',
+            ':for',
+            ':while',
+            ':break',
+            ':return',
+            ':declare',
+            ':comment',
+            ':eval',
+            ':pragma',
+            '=',
+            '?:',
+            '.sum',
+            '.within',
+            '.exponent',
+            '.mantissa',
         ]
         for op in xml_ops:
             assert op in op_map, f"XML op type {op!r} not in SemaNodeKind"
@@ -139,10 +187,7 @@ class TestSemaNodeKind:
         assert SemaNodeKind.DEFAULT.value == ':default'
 
     def test_op_type_map_excludes_synthetics(self):
-        op_map = {
-            k.value: k for k in SemaNodeKind
-            if not k.value.startswith('_')
-        }
+        op_map = {k.value: k for k in SemaNodeKind if not k.value.startswith('_')}
         assert '_lit' not in op_map
         assert '_id' not in op_map
         assert '+' in op_map
@@ -199,14 +244,19 @@ class TestSemaNode:
 
     def test_cast_target(self):
         inner = SemaNode(SemaNodeKind.LIT, lit_value='0', ty=SemaType.U32)
-        cast = SemaNode(SemaNodeKind.CAST, ty=SemaType.U64,
-                        cast_target=SemaType.U64, children=(inner,))
+        cast = SemaNode(
+            SemaNodeKind.CAST,
+            ty=SemaType.U64,
+            cast_target=SemaType.U64,
+            children=(inner,),
+        )
         assert cast.cast_target == SemaType.U64
 
     def test_call_name(self):
         callee = SemaNode(SemaNodeKind.ID, id_name='CalcBufferAddr')
-        call = SemaNode(SemaNodeKind.CALL, call_name='CalcBufferAddr',
-                        children=(callee,))
+        call = SemaNode(
+            SemaNodeKind.CALL, call_name='CalcBufferAddr', children=(callee,)
+        )
         assert call.call_name == 'CalcBufferAddr'
 
     def test_unknown_op(self):
@@ -228,9 +278,9 @@ class TestExecModel:
 
 class TestSemaBlock:
     def _make_non_empty_block(self):
-        body = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.LIT, lit_value='0'),
-        ))
+        body = SemaNode(
+            SemaNodeKind.SEQ, children=(SemaNode(SemaNodeKind.LIT, lit_value='0'),)
+        )
         return SemaBlock('S_NOP', ExecModel.SCALAR, body)
 
     def _make_empty_block(self):
@@ -257,15 +307,29 @@ class TestSemaBlock:
 
 class TestValidateTypes:
     def test_valid_tree_passes(self):
-        tree = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='tmp'),
-                SemaNode(SemaNodeKind.ADD, ty=SemaType.U32, children=(
-                    SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32),
-                    SemaNode(SemaNodeKind.LIT, lit_value='2', ty=SemaType.U32),
-                )),
-            )),
-        ))
+        tree = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='tmp'),
+                        SemaNode(
+                            SemaNodeKind.ADD,
+                            ty=SemaType.U32,
+                            children=(
+                                SemaNode(
+                                    SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32
+                                ),
+                                SemaNode(
+                                    SemaNodeKind.LIT, lit_value='2', ty=SemaType.U32
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
         validate_types(tree)
 
     def test_statement_with_type_fails(self):
@@ -273,11 +337,20 @@ class TestValidateTypes:
         with pytest.raises(AssertionError, match="Statement node"):
             validate_types(tree)
 
-    @pytest.mark.parametrize('kind', [
-        SemaNodeKind.ASSIGN, SemaNodeKind.IF, SemaNodeKind.FOR,
-        SemaNodeKind.WHILE, SemaNodeKind.BREAK, SemaNodeKind.CONTINUE,
-        SemaNodeKind.RETURN, SemaNodeKind.ADD_ASSIGN, SemaNodeKind.SUB_ASSIGN,
-    ])
+    @pytest.mark.parametrize(
+        'kind',
+        [
+            SemaNodeKind.ASSIGN,
+            SemaNodeKind.IF,
+            SemaNodeKind.FOR,
+            SemaNodeKind.WHILE,
+            SemaNodeKind.BREAK,
+            SemaNodeKind.CONTINUE,
+            SemaNodeKind.RETURN,
+            SemaNodeKind.ADD_ASSIGN,
+            SemaNodeKind.SUB_ASSIGN,
+        ],
+    )
     def test_each_statement_kind_rejects_type(self, kind):
         n = SemaNode(kind, ty=SemaType.U32, children=())
         with pytest.raises(AssertionError):
@@ -286,54 +359,64 @@ class TestValidateTypes:
 
 class TestValidateWellFormed:
     def test_valid_add(self):
-        tree = SemaNode(SemaNodeKind.ADD, ty=SemaType.U32, children=(
-            SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32),
-            SemaNode(SemaNodeKind.LIT, lit_value='2', ty=SemaType.U32),
-        ))
+        tree = SemaNode(
+            SemaNodeKind.ADD,
+            ty=SemaType.U32,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32),
+                SemaNode(SemaNodeKind.LIT, lit_value='2', ty=SemaType.U32),
+            ),
+        )
         validate_well_formed(tree)
 
     def test_add_wrong_children_fails(self):
-        tree = SemaNode(SemaNodeKind.ADD, children=(
-            SemaNode(SemaNodeKind.LIT, lit_value='1'),
-        ))
+        tree = SemaNode(
+            SemaNodeKind.ADD, children=(SemaNode(SemaNodeKind.LIT, lit_value='1'),)
+        )
         with pytest.raises(AssertionError, match="must have 2 children"):
             validate_well_formed(tree)
 
     def test_valid_if_two_children(self):
-        tree = SemaNode(SemaNodeKind.IF, children=(
-            SemaNode(SemaNodeKind.LIT, lit_value='1'),
-            SemaNode(SemaNodeKind.SEQ, children=()),
-        ))
+        tree = SemaNode(
+            SemaNodeKind.IF,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='1'),
+                SemaNode(SemaNodeKind.SEQ, children=()),
+            ),
+        )
         validate_well_formed(tree)
 
     def test_valid_if_three_children(self):
-        tree = SemaNode(SemaNodeKind.IF, children=(
-            SemaNode(SemaNodeKind.LIT, lit_value='1'),
-            SemaNode(SemaNodeKind.SEQ, children=()),
-            SemaNode(SemaNodeKind.SEQ, children=()),
-        ))
+        tree = SemaNode(
+            SemaNodeKind.IF,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='1'),
+                SemaNode(SemaNodeKind.SEQ, children=()),
+                SemaNode(SemaNodeKind.SEQ, children=()),
+            ),
+        )
         validate_well_formed(tree)
 
     def test_if_one_child_fails(self):
-        tree = SemaNode(SemaNodeKind.IF, children=(
-            SemaNode(SemaNodeKind.LIT, lit_value='1'),
-        ))
+        tree = SemaNode(
+            SemaNodeKind.IF, children=(SemaNode(SemaNodeKind.LIT, lit_value='1'),)
+        )
         with pytest.raises(AssertionError, match="IF must have >= 2"):
             validate_well_formed(tree)
 
     def test_if_many_children_ok(self):
-        children = tuple(
-            SemaNode(SemaNodeKind.LIT, lit_value=str(i))
-            for i in range(9)
-        )
+        children = tuple(SemaNode(SemaNodeKind.LIT, lit_value=str(i)) for i in range(9))
         tree = SemaNode(SemaNodeKind.IF, children=children)
         validate_well_formed(tree)
 
     def test_for_wrong_children_fails(self):
-        tree = SemaNode(SemaNodeKind.FOR, children=(
-            SemaNode(SemaNodeKind.LIT, lit_value='0'),
-            SemaNode(SemaNodeKind.LIT, lit_value='1'),
-        ))
+        tree = SemaNode(
+            SemaNodeKind.FOR,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='0'),
+                SemaNode(SemaNodeKind.LIT, lit_value='1'),
+            ),
+        )
         with pytest.raises(AssertionError, match="FOR must have 4"):
             validate_well_formed(tree)
 
@@ -346,10 +429,13 @@ class TestValidateWellFormed:
         validate_well_formed(tree)
 
     def test_signext_from_bit_two_children_ok(self):
-        tree = SemaNode(SemaNodeKind.SIGNEXT_FROM_BIT, children=(
-            SemaNode(SemaNodeKind.LIT, lit_value='0', ty=SemaType.U32),
-            SemaNode(SemaNodeKind.LIT, lit_value='7', ty=SemaType.U32),
-        ))
+        tree = SemaNode(
+            SemaNodeKind.SIGNEXT_FROM_BIT,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='0', ty=SemaType.U32),
+                SemaNode(SemaNodeKind.LIT, lit_value='7', ty=SemaType.U32),
+            ),
+        )
         validate_well_formed(tree)
 
     def test_lit_without_value_fails(self):
@@ -376,41 +462,71 @@ class TestValidateWellFormed:
         validate_well_formed(tree)
 
     def test_valid_return(self):
-        tree = SemaNode(SemaNodeKind.RETURN, children=(
-            SemaNode(SemaNodeKind.LIT, lit_value='0'),
-        ))
+        tree = SemaNode(
+            SemaNodeKind.RETURN, children=(SemaNode(SemaNodeKind.LIT, lit_value='0'),)
+        )
         validate_well_formed(tree)
 
     def test_valid_complex_tree(self):
         """Validate a tree resembling S_ADD_CO_U32."""
-        s0 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-            SemaNode(SemaNodeKind.ID, id_name='S'),
-            SemaNode(SemaNodeKind.LIT, lit_value='0'),
-        ))
-        s1 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-            SemaNode(SemaNodeKind.ID, id_name='S'),
-            SemaNode(SemaNodeKind.LIT, lit_value='1'),
-        ))
-        add = SemaNode(SemaNodeKind.ADD, ty=SemaType.U64, children=(
-            SemaNode(SemaNodeKind.CAST, cast_target=SemaType.U64, children=(s0,)),
-            SemaNode(SemaNodeKind.CAST, cast_target=SemaType.U64, children=(s1,)),
-        ))
-        assign_tmp = SemaNode(SemaNodeKind.ASSIGN, children=(
-            SemaNode(SemaNodeKind.ID, id_name='tmp'),
-            add,
-        ))
-        assign_scc = SemaNode(SemaNodeKind.ASSIGN, children=(
-            SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
-            SemaNode(SemaNodeKind.TERNARY, ty=SemaType.U1, children=(
-                SemaNode(SemaNodeKind.GE, children=(
-                    SemaNode(SemaNodeKind.ID, id_name='tmp', ty=SemaType.U64),
-                    SemaNode(SemaNodeKind.LIT, lit_value='4294967296',
-                             ty=SemaType.U64),
-                )),
-                SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U1),
-                SemaNode(SemaNodeKind.LIT, lit_value='0', ty=SemaType.U1),
-            )),
-        ))
+        s0 = SemaNode(
+            SemaNodeKind.INSTOPERAND,
+            ty=SemaType.B32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='S'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0'),
+            ),
+        )
+        s1 = SemaNode(
+            SemaNodeKind.INSTOPERAND,
+            ty=SemaType.B32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='S'),
+                SemaNode(SemaNodeKind.LIT, lit_value='1'),
+            ),
+        )
+        add = SemaNode(
+            SemaNodeKind.ADD,
+            ty=SemaType.U64,
+            children=(
+                SemaNode(SemaNodeKind.CAST, cast_target=SemaType.U64, children=(s0,)),
+                SemaNode(SemaNodeKind.CAST, cast_target=SemaType.U64, children=(s1,)),
+            ),
+        )
+        assign_tmp = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='tmp'),
+                add,
+            ),
+        )
+        assign_scc = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
+                SemaNode(
+                    SemaNodeKind.TERNARY,
+                    ty=SemaType.U1,
+                    children=(
+                        SemaNode(
+                            SemaNodeKind.GE,
+                            children=(
+                                SemaNode(
+                                    SemaNodeKind.ID, id_name='tmp', ty=SemaType.U64
+                                ),
+                                SemaNode(
+                                    SemaNodeKind.LIT,
+                                    lit_value='4294967296',
+                                    ty=SemaType.U64,
+                                ),
+                            ),
+                        ),
+                        SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U1),
+                        SemaNode(SemaNodeKind.LIT, lit_value='0', ty=SemaType.U1),
+                    ),
+                ),
+            ),
+        )
         tree = SemaNode(SemaNodeKind.SEQ, children=(assign_tmp, assign_scc))
         validate_well_formed(tree)
         validate_types(tree)

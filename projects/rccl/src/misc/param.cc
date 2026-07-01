@@ -1,10 +1,12 @@
 /*************************************************************************
- * Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "param.h"
+#include "param/param_tmp.h"
 #include "debug.h"
 #include "env.h"
 
@@ -13,47 +15,43 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <pthread.h>
+#include <string>
 #include <mutex>
-#include <pwd.h>
+#include <unordered_set>
+#include "os.h"
 
 const char* userHomeDir() {
-  struct passwd *pwUser = getpwuid(getuid());
-  return pwUser == NULL ? NULL : pwUser->pw_dir;
+  return getenv("HOME");
 }
 
 void setEnvFile(const char* fileName) {
   FILE * file = fopen(fileName, "r");
   if (file == NULL) return;
 
-  char *line = NULL;
+  char line[4096];
   char envVar[1024];
   char envValue[1024];
-  size_t n = 0;
-  ssize_t read;
-  while ((read = getline(&line, &n, file)) != -1) {
+  while (fgets(line, (int)sizeof(line), file) != NULL) {
+    size_t len = strlen(line);
+    if (len > 0 && line[len-1] == '\n') line[--len] = '\0';
+    if (len > 0 && line[len-1] == '\r') line[--len] = '\0';
     if (line[0] == '#') continue;
-    if (line[read-1] == '\n') line[read-1] = '\0';
-    int s=0; // Env Var Size
+    int s = 0;
     while (line[s] != '\0' && line[s] != '=') s++;
     if (line[s] == '\0') continue;
     strncpy(envVar, line, std::min(1023,s));
     envVar[std::min(1023,s)] = '\0';
     s++;
     strncpy(envValue, line+s, 1023);
-    envValue[1023]='\0';
-    setenv(envVar, envValue, 0);
-    //printf("%s : %s->%s\n", fileName, envVar, envValue);
+    envValue[1023] = '\0';
+    ncclOsSetEnv(envVar, envValue);
   }
-  if (line) free(line);
   fclose(file);
 }
 
 static void initEnvFunc() {
   char confFilePath[1024];
-  const char* userFile = getenv("NCCL_CONF_FILE");
+  const char* userFile = std::getenv("NCCL_CONF_FILE");
   if (userFile && strlen(userFile) > 0) {
     snprintf(confFilePath, sizeof(confFilePath), "%s", userFile);
     setEnvFile(confFilePath);
@@ -73,24 +71,36 @@ void initEnv() {
   std::call_once(once, initEnvFunc);
 }
 
-void ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache) {
+static void ncclGetCachePolicy(char const* env, int8_t* noCache) {
+  *noCache = ncclParamIsCacheDisabled(env) ? /*noCache*/ 1 : /*cache*/ 0;
+}
+
+int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache, int8_t* noCache) {
   static std::mutex mutex;
   std::lock_guard<std::mutex> lock(mutex);
-  if (__atomic_load_n(cache, __ATOMIC_RELAXED) == uninitialized) {
-    const char* str = ncclGetEnv(env);
-    int64_t value = deftVal;
-    if (str && strlen(str) > 0) {
-      errno = 0;
-      value = strtoll(str, nullptr, 0);
-      if (errno) {
-        value = deftVal;
-        INFO(NCCL_ALL,"Invalid value %s for %s, using default %lld.", str, env, (long long)deftVal);
-      } else {
-        INFO(NCCL_ENV,"%s set by environment to %lld.", env, (long long)value);
-      }
+
+  // noCache is only load/stored within the mutex, no need for atomic
+  if (*noCache == /*uninitialized*/ -1) ncclGetCachePolicy(env, noCache);
+
+  if (COMPILER_ATOMIC_LOAD(cache, std::memory_order_relaxed) != uninitialized) return COMPILER_ATOMIC_LOAD(cache, std::memory_order_relaxed);
+
+  // Read the environment variable
+  const char* str = ncclGetEnv(env);
+  int64_t value = deftVal;
+
+  if (str && strlen(str) > 0) {
+    errno = 0;
+    value = strtoll(str, nullptr, 0);
+    if (errno) {
+      value = deftVal;
+      INFO(NCCL_ALL, "Invalid value %s for %s, using default %lld.", str, env, (long long)deftVal);
+    } else {
+      INFO(NCCL_ENV, "%s set by environment to %lld.", env, (long long)value);
     }
-    __atomic_store_n(cache, value, __ATOMIC_RELAXED);
   }
+
+  if (*noCache == /*cache*/ 0) COMPILER_ATOMIC_STORE(cache, value, std::memory_order_relaxed);
+  return value;
 }
 
 const char* ncclGetEnv(const char* name) {

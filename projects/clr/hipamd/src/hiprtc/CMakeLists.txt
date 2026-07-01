@@ -37,7 +37,11 @@ if(WIN32)
   else()
     set(HIP_MAJOR_VERSION "0${HIP_LIB_VERSION_MAJOR}")
   endif()
-  set(HIP_MINOR_VERSION "0${HIP_LIB_VERSION_MINOR}")
+  if(${HIP_LIB_VERSION_MINOR} VERSION_GREATER 9)
+    set(HIP_MINOR_VERSION "${HIP_LIB_VERSION_MINOR}")
+  else()
+    set(HIP_MINOR_VERSION "0${HIP_LIB_VERSION_MINOR}")
+  endif()
 endif()
 
 if(BUILD_SHARED_LIBS)
@@ -161,6 +165,7 @@ ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_warp_sync_functions.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/hip_cooperative_groups_helper.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_cooperative_groups.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_cooperative_groups_reduce.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_cooperative_groups_scan.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_unsafe_atomics.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_atomic.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/math_fwd.h

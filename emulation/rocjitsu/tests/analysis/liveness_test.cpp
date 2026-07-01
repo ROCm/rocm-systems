@@ -5,6 +5,7 @@
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -112,14 +113,15 @@ enum class TestOpcode : uint32_t {
   DefVgpr0 = 5,
   UseVgpr0 = 6,
   UseSgpr4 = 7,
-  ReadWriteSgpr4 = 8,
-  PredicatedDefSgpr4 = 9,
-  ImplicitUseSgpr6Pair = 10,
-  DefSgpr4 = 11,
-  CBranchBackToUseSgpr4 = 12,
-  CBranchToElseAfterTwo = 13,
-  IndirectCall = 14,
-  IndirectBranch = 15,
+  UseSgpr7 = 8,
+  ReadWriteSgpr4 = 9,
+  PredicatedDefSgpr4 = 10,
+  ImplicitUseSgpr6Pair = 11,
+  DefSgpr4 = 12,
+  CBranchBackToUseSgpr4 = 13,
+  CBranchToElseAfterTwo = 14,
+  IndirectCall = 15,
+  IndirectBranch = 16,
 };
 
 class TestDecoder : public Decoder {
@@ -143,6 +145,8 @@ public:
       return new TestInstruction("test_use_v0", {}, {{RegClass::VGPR, 0, 1}});
     case TestOpcode::UseSgpr4:
       return new TestInstruction("test_use_s4", {}, {{RegClass::SGPR, 4, 1}});
+    case TestOpcode::UseSgpr7:
+      return new TestInstruction("test_use_s7", {}, {{RegClass::SGPR, 7, 1}});
     case TestOpcode::ReadWriteSgpr4:
       return new TestInstruction("test_rw_s4", {{RegClass::SGPR, 4, 1}}, {{RegClass::SGPR, 4, 1}});
     case TestOpcode::PredicatedDefSgpr4:
@@ -174,11 +178,17 @@ build_test_blocks(std::vector<TestOpcode> ops, std::span<const uint64_t> extra_l
 
   TestCodeObject co(std::move(words));
   TestDecoder decoder;
-  return BasicBlock::build(co, decoder, extra_leaders);
+  return BasicBlock::build(co, decoder, ROCJITSU_CODE_ARCH_CDNA3, extra_leaders);
 }
 
 bool has_predecessor(const BasicBlock &block, const BasicBlock *pred) {
   return std::ranges::find(block.predecessors(), pred) != block.predecessors().end();
+}
+
+bool has_successor_start(const BasicBlock &block, uint64_t offset) {
+  return std::ranges::any_of(block.successors(), [offset](const BasicBlock *succ) {
+    return succ != nullptr && succ->start_offset() == offset;
+  });
 }
 
 BasicBlock *block_starting_at(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
@@ -200,6 +210,19 @@ std::vector<BasicBlock *> block_scope(const std::vector<std::unique_ptr<BasicBlo
 LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   auto scope = block_scope(blocks);
   return LivenessAnalysis(KernelBlockScope(scope));
+}
+
+uint32_t pack_sopc(uint32_t op, uint16_t ssrc0, uint16_t ssrc1) {
+  constexpr uint32_t kSopcEncodingPrefix = 0x17e;
+  return (kSopcEncodingPrefix << 23) | ((op & 0x7fu) << 16) | ((ssrc1 & 0xffu) << 8) |
+         (ssrc0 & 0xffu);
+}
+
+uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
+  constexpr uint32_t kSopkEncodingPrefix = 0xb;
+  constexpr uint32_t kSCallB64Opcode = 0x15;
+  return (kSopkEncodingPrefix << 28) | (kSCallB64Opcode << 23) | ((sdst & 0x7fu) << 16) |
+         static_cast<uint16_t>(simm16);
 }
 
 TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
@@ -305,6 +328,257 @@ TEST(CfgAnalysis, IndirectBranchHasNoStaticSuccessor) {
   EXPECT_TRUE(blocks[1]->predecessors().empty());
 }
 
+TEST(CfgAnalysis, RecoveredIndirectBranchEdgeStartsAtConsumerBlock) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // The PC builder and setpc consumer are deliberately separated by an extra
+  // leader. The recovered CFG edge belongs to the setpc block, because that is
+  // where control flow actually leaves the straight-line path.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      20,                                                  // 0x08: target delta.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x10: s_setpc_b64.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x14: not a successor.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: recovered target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> extra_leaders{16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  auto *builder = block_starting_at(blocks, 0);
+  auto *consumer = block_starting_at(blocks, 16);
+  auto *fallthrough = block_starting_at(blocks, 20);
+  auto *target = block_starting_at(blocks, 24);
+  ASSERT_NE(builder, nullptr);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(fallthrough, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  EXPECT_TRUE(builder->static_indirect_call_fixups().empty());
+  ASSERT_EQ(builder->successors().size(), 1u);
+  EXPECT_EQ(builder->successors()[0], consumer);
+
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_call_offset, 16u);
+  ASSERT_EQ(consumer->successors().size(), 1u);
+  EXPECT_EQ(consumer->successors()[0], target);
+  EXPECT_FALSE(has_predecessor(*fallthrough, consumer));
+}
+
+TEST(CfgAnalysis, DirectCallEdgeUsesTerminatorOffset) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  // The call block starts at 0x00, but the s_call_b64 terminator is at 0x04.
+  // CallEdge metadata is consumed later by relocation and must identify the
+  // actual call instruction, not the first instruction in the containing block.
+  std::vector<uint32_t> words = {
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4), // 0x00.
+      build_s_call_b64(kReturnSreg, 1),         // 0x04 -> callee at 0x0c.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x08 continuation.
+      pack_sop1(0x1d, 0, kReturnSreg),          // 0x0c callee return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 8);
+  auto *callee = block_starting_at(blocks, 12);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  ASSERT_EQ(caller->call_edges().size(), 1u);
+  const BasicBlock::CallEdge &edge = caller->call_edges()[0];
+  EXPECT_EQ(edge.kind, BasicBlock::CallEdgeKind::DirectCall);
+  EXPECT_EQ(edge.callee, callee);
+  EXPECT_EQ(edge.continuation, continuation);
+  EXPECT_EQ(edge.source_call_offset, 4u);
+}
+
+TEST(CfgAnalysis, DirectCallKillsCarriedPcBuilderFacts) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalGetpcDelta = 28;
+
+  // Without a context-sensitive call/return model, a builder materialized before
+  // s_call_b64 must not be reused by a continuation setpc. The callee below
+  // writes the same pair before returning, so recovering the continuation setpc
+  // would be a stale-value edge.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      kOriginalGetpcDelta,                                 // 0x08: target delta.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      build_s_call_b64(kReturnSreg, 1),                    // 0x10 -> callee at 0x18.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x14: stale consumer.
+      pack_sop2(0, kPcSreg, kPcSreg, kInlineInt0),         // 0x18: callee clobber.
+      pack_sop1(0x1d, 0, kReturnSreg),                     // 0x1c: callee return.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: stale target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *continuation = block_starting_at(blocks, 20);
+  auto *stale_target = block_starting_at(blocks, 32);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(stale_target, nullptr);
+
+  EXPECT_TRUE(continuation->static_indirect_call_fixups().empty());
+  EXPECT_FALSE(has_successor_start(*continuation, stale_target->start_offset()));
+}
+
+TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalGetpcDelta = 32;
+
+  // Two paths reach the same setpc consumer:
+  //
+  //   * the fallthrough path builds a concrete PC target in s[8:9]
+  //   * the branch path writes s8 through ordinary scalar code, killing that
+  //     pair for this analysis
+  //
+  // The concrete builder path alone is not enough to recover the consumer. A
+  // real unmodeled write reaches the join, so the analysis must fail closed and
+  // leave the setpc for the later DBT diagnostic.
+  std::vector<uint32_t> words = {
+      pack_sopp(5, 5),                                     // 0x00 -> kill path at 0x18.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      kOriginalGetpcDelta,                                 // 0x0c: target delta.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x20.
+      pack_sop2(0, kPcSreg, kPcSreg, kInlineInt0),         // 0x18: unmodeled write.
+      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),         // 0x1c -> consumer at 0x20.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x20: joined consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x28: builder target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> extra_leaders{40};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  auto *consumer = block_starting_at(blocks, 32);
+  auto *target = block_starting_at(blocks, 40);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
+  EXPECT_FALSE(has_successor_start(*consumer, target->start_offset()));
+}
+
+TEST(CfgAnalysis, RecoversSignedDeltaTemplateConsumers) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kTmpSreg = 12;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+  constexpr uint32_t kSignedDeltaLiteral = 44;
+
+  // This is the split signed-delta template matched by static PC recovery:
+  // both the subtract and add halves consume the same getpc-relative target.
+  // The matcher deliberately recognizes this complete shape instead of tracking
+  // arbitrary temporary SGPR values through the branch.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                          // 0x00: s_getpc_b64.
+      pack_sop2(2, kTmpSreg, kLiteralOperand, kInlineInt4), // 0x04: s_add_i32.
+      kSignedDeltaLiteral,                                  // 0x08: literal.
+      pack_sopc(3, kTmpSreg, kInlineInt0),                  // 0x0c: s_cmp_ge_i32.
+      pack_sopp(5, 4),                                      // 0x10 -> add half at 0x24.
+      pack_sop1(0x30, kTmpSreg, kTmpSreg),                  // 0x14: s_abs_i32.
+      pack_sop2(1, kPcSreg, kPcSreg, kTmpSreg),             // 0x18: s_sub_u32.
+      pack_sop2(5, kPcSreg + 1, kPcSreg + 1, kInlineInt0),  // 0x1c: s_subb_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                          // 0x20: subtract consumer.
+      pack_sop2(0, kPcSreg, kPcSreg, kTmpSreg),             // 0x24: s_add_u32.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0),  // 0x28: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                          // 0x2c: add consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),             // 0x30: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),             // 0x34: shared target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *sub_consumer = block_starting_at(blocks, 32);
+  auto *add_consumer = block_starting_at(blocks, 44);
+  auto *target = block_starting_at(blocks, 52);
+  ASSERT_NE(sub_consumer, nullptr);
+  ASSERT_NE(add_consumer, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  ASSERT_EQ(sub_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(sub_consumer->static_indirect_call_fixups()[0].source_call_offset, 32u);
+  EXPECT_EQ(sub_consumer->static_indirect_call_fixups()[0].source_target_offset, 52u);
+  EXPECT_TRUE(has_successor_start(*sub_consumer, target->start_offset()));
+
+  ASSERT_EQ(add_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_call_offset, 44u);
+  EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_target_offset, 52u);
+  EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
+}
+
+TEST(CfgAnalysis, ReversePostOrderStraightLine) {
+  auto blocks =
+      build_test_blocks({TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::UseSgpr4});
+  auto scope = block_scope(blocks);
+  auto rpo = reverse_post_order(KernelBlockScope(scope));
+  ASSERT_EQ(rpo.size(), 1u);
+  EXPECT_EQ(blocks[0].get(), rpo[0]);
+}
+
+TEST(CfgAnalysis, ReversePostOrderIfElseDiamond) {
+  auto blocks = build_test_blocks(
+      {TestOpcode::CBranchToElse, TestOpcode::BranchToJoin, TestOpcode::Nop, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  auto rpo = reverse_post_order(KernelBlockScope(scope));
+  ASSERT_EQ(rpo.size(), 4u);
+  EXPECT_EQ(rpo[0], blocks[0].get());
+  EXPECT_EQ(rpo[1], blocks[1].get());
+  EXPECT_EQ(rpo[2], blocks[2].get());
+  EXPECT_EQ(rpo[3], blocks[3].get());
+}
+
+TEST(CfgAnalysis, ReversePostOrderChangedOrder) {
+  auto blocks = build_test_blocks({TestOpcode::BranchToJoin, TestOpcode::BranchToJoin,
+                                   TestOpcode::BranchBackToStart, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  auto rpo = reverse_post_order(KernelBlockScope(scope));
+  ASSERT_EQ(rpo.size(), 4u);
+  EXPECT_EQ(rpo[0], blocks[0].get());
+  EXPECT_EQ(rpo[1], blocks[2].get());
+  EXPECT_EQ(rpo[2], blocks[1].get());
+  EXPECT_EQ(rpo[3], blocks[3].get());
+}
+
+TEST(CfgAnalysis, ReversePostOrderSelfLoop) {
+  auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::BranchBackToStart});
+  auto scope = block_scope(blocks);
+  auto rpo = reverse_post_order(KernelBlockScope(scope));
+  ASSERT_EQ(rpo.size(), 1u);
+  EXPECT_EQ(blocks[0].get(), rpo[0]);
+}
+
 TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
   auto blocks = build_test_blocks({TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
   LivenessAnalysis liveness = analyze_scope(blocks);
@@ -324,6 +598,47 @@ TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}));
   EXPECT_EQ(liveness.find_free_sgpr(&use, 4), 5);
+}
+
+TEST(LivenessAnalysis, FindValidSgprPair) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}));
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 4), 6);
+}
+
+TEST(LivenessAnalysis, FindSgprPairSkipsStraddle) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::UseSgpr7, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 4), 8);
+}
+
+TEST(LivenessAnalysis, NoSgprPairAvailable) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, REGISTER_SET_ALLOCATABLE_SGPRS + 10), std::nullopt);
+}
+
+TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.min_free_vgpr = 4;
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_FALSE(liveness.is_live_before(use, {RegClass::VGPR, 0, 4}));
+  EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 0);
+  EXPECT_EQ(liveness.find_free_run(&use, 1, 0), 4);
+  EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
 }
 
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
@@ -406,6 +721,32 @@ TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
   std::vector<BasicBlock *> kernel_blocks{kernel0};
   LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks)};
   EXPECT_FALSE(kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
+TEST(InstDefUse, DstOnlyVgpr) {
+  const TestInstruction test_inst("test_def_v0", {{RegClass::VGPR, 0, 1}});
+  InstDefUse idu(test_inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 0, 1}));
+}
+
+TEST(InstDefUse, SrcOnlySgpr) {
+  const TestInstruction test_inst("test_use_s4", {}, {{RegClass::SGPR, 4, 1}});
+  InstDefUse idu(test_inst);
+  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 4, 1}));
+}
+
+TEST(InstDefUse, RWSgpr) {
+  const TestInstruction test_inst("test_rw_s4", {{RegClass::SGPR, 4, 1}}, {{RegClass::SGPR, 4, 1}});
+  InstDefUse idu(test_inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 4, 1}));
+}
+
+TEST(InstDefUse, Predicated) {
+  const TestInstruction test_inst("test_pred_def_s4", {{RegClass::SGPR, 4, 1}}, {}, PREDICATED_DEF);
+  InstDefUse idu(test_inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(idu.has_predicated_def);
 }
 
 } // namespace

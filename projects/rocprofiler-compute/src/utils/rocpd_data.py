@@ -70,7 +70,9 @@ def convert_dbs_to_csv(
 
     with ExitStack() as stack:
         writers = {
-            path: csv.writer(stack.enter_context(open(path, "w", newline="")))
+            path: csv.writer(
+                stack.enter_context(open(path, "w", newline="", encoding="utf-8"))
+            )
             for path in queries
         }
         for db_path in db_paths:

@@ -172,10 +172,11 @@ rocprofiler_spm_destroy_counter_config(rocprofiler_counter_config_id_t config_id
  **/
 typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_record_flag_t
 {
-    ROCPROFILER_SPM_RECORD_FLAG_NONE      = 0,       ///< flag value none
-    ROCPROFILER_SPM_RECORD_FLAG_DATA      = 1 << 0,  ///< records with data
-    ROCPROFILER_SPM_RECORD_FLAG_DATA_LOSS = 1 << 1,  ///< records with data loss
-    ROCPROFILER_SPM_RECORD_FLAG_LAST      = 1 << 2,
+    ROCPROFILER_SPM_RECORD_FLAG_NONE         = 0,       ///< flag value none
+    ROCPROFILER_SPM_RECORD_FLAG_DATA         = 1 << 0,  ///< records with data
+    ROCPROFILER_SPM_RECORD_FLAG_DATA_LOSS    = 1 << 1,  ///< records with data loss
+    ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END = 1 << 2,  ///< dispatch complete, no records
+    ROCPROFILER_SPM_RECORD_FLAG_LAST         = 1 << 3,
 } rocprofiler_spm_record_flag_t;
 
 /**
