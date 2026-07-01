@@ -1535,7 +1535,6 @@ struct GraphLaunchCleanup {
 // ================================================================================================
 hipError_t GraphExecClassic::Init() {
   hipError_t status = hipSuccess;
-  captureDeviceId_ = hip::getCurrentDevice()->deviceId();
 
   // ScheduleNodes does DFS stream assignment + TopologicalOrder
   status = ScheduleNodes();
@@ -1546,6 +1545,15 @@ hipError_t GraphExecClassic::Init() {
   if (max_streams_ >= 1) {
     FindStreamsReqPerDev();
 
+    if (max_streams_dev_.size() == 1) {
+      captureDeviceId_ = max_streams_dev_.begin()->first;
+      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->retain();
+    } else if (max_streams_dev_.size() > 1) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "[hipGraph] Multi-device graph is not supported for classic scheduling path");
+      captureDeviceId_ = -1;
+      return hipErrorNotSupported;
+    }
     for (auto& [dev_id, count] : max_streams_dev_) {
       count = std::min(count, static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES));
     }
@@ -1560,7 +1568,6 @@ hipError_t GraphExecClassic::Init() {
     }
   }
 
-  static_cast<ReferenceCountedObject*>(hip::getCurrentDevice())->retain();
   return status;
 }
 
