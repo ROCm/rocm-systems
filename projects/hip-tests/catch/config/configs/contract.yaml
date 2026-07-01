@@ -270,6 +270,15 @@ contract:
   Contract_GraphChild_NodeType_ReportsGraph:
     <<: *level_0
     tags: [graph_child]
+  Contract_GraphHost_AddHostNode_InvokesCallbackOnLaunch:
+    <<: *level_0
+    tags: [graph_host]
+  Contract_GraphHost_HostNodeGetParams_RoundTripsFnAndUserData:
+    <<: *level_0
+    tags: [graph_host]
+  Contract_GraphHost_NodeType_ReportsHost:
+    <<: *level_0
+    tags: [graph_host]
   Contract_HostMemory_HostMalloc_ReturnsUsablePointer:
     <<: *level_0
     tags: [host_memory]
