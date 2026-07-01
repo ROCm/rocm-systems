@@ -85,6 +85,14 @@ RUN apt-get update \
 ## Set ROCm path
 ENV ROCM_PATH=/opt/rocm
 
+# Workaround: ROCm 7.13 hsakmtTargets.cmake hardcodes RHEL CI build paths:
+#   /usr/lib64/libc.so and -L/__w/rockrel/.../libdrm search path.
+# Symlink libc and libdrm/libdrm_amdgpu so the linker can find them.
+RUN mkdir -p /usr/lib64 \
+ && ln -sf /usr/lib/x86_64-linux-gnu/libc.so /usr/lib64/libc.so \
+ && ln -sf ${ROCM_PATH}/lib/rocm_sysdeps/lib/libdrm.so /usr/lib/x86_64-linux-gnu/libdrm.so \
+ && ln -sf ${ROCM_PATH}/lib/rocm_sysdeps/lib/libdrm_amdgpu.so /usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so
+
 # OPTIONAL: Setup ssh (only needed to use mpirun launch method, e.g., rocshmem functional tests)
 # The following block is OPTIONAL and can be commented out if you only want to run 1-node testing
 # Note: all deployed containers must share the SAME KEY!
