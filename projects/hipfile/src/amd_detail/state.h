@@ -38,6 +38,146 @@ struct file_buffer_stream_tuple {
     std::shared_ptr<IStream> stream;
 };
 
+// The polymorphic interface that internal helpers depend on.
+//
+// Helpers take an `IDriverState&` so production can pass the one real
+// `DriverState` (owned by `Runtime`) while tests pass a mock that inherits this
+// interface directly. A mock therefore has no real `DriverState` behavior to fall
+// through to: an un-mocked call fails loudly instead of silently running
+// production code.
+class IDriverState {
+public:
+    virtual ~IDriverState() = default;
+
+    //
+    // Batch interface
+    //
+
+    /// @brief Create a new batch context
+    /// @param [in] capacity Maximum number of outstanding operations that this context can manage
+    /// @return An opaque handle used to reference this new batch context
+    virtual hipFileBatchHandle_t createBatchContext(unsigned capacity) = 0;
+
+    /// @brief Destroy a batch context and release all associated resources
+    /// @param [in] handle The handle for the batch context to destroy
+    virtual void destroyBatchContext(hipFileBatchHandle_t handle) = 0;
+
+    /// @brief Get a batch context
+    /// @param [in] handle The opaque handle associated with a batch context
+    /// @return A batch context
+    virtual std::shared_ptr<IBatchContext> getBatchContext(hipFileBatchHandle_t handle) = 0;
+
+    //
+    // Buffer interface
+    //
+
+    /// @brief Creates and registers a buffer
+    /// @param [in] buf Buffer pointer
+    /// @param [in] length Buffer length
+    /// @param [in] flags Buffer flags (unused)
+    virtual void registerBuffer(const void *buf, size_t length, int flags) = 0;
+
+    /// @brief Deregisters and destroys a buffer
+    /// @param [in] buf Buffer pointer
+    virtual void deregisterBuffer(const void *buf) = 0;
+
+    /// @brief Look up a registered buffer using the buffer pointer
+    /// @param [in] buf Buffer pointer
+    /// @return A registered buffer
+    virtual std::shared_ptr<IBuffer> getRegisteredBuffer(const void *buf) = 0;
+
+    /// @brief Look up a registered buffer. Returns a temporary unregistered
+    ///        buffer if no matching buffer is found.
+    /// @param [in] buf Buffer pointer
+    /// @return A registered or temporary unregistered buffer
+    virtual std::shared_ptr<IBuffer> getBuffer(const void *buf) = 0;
+
+    //
+    // File interface
+    //
+
+    /// @brief Registers a file. Files must be registered before they can be used with hipFile IO APIs
+    /// @param [in] uf An unregistered file
+    /// @return A handle to be used when calling hipFile IO APIs
+    virtual hipFileHandle_t registerFile(UnregisteredFile &&uf) = 0;
+
+    /// @brief Deregisters the file associated with the provided file handle
+    /// @param [in] fh The handle of the file to deregister
+    virtual void deregisterFile(hipFileHandle_t fh) = 0;
+
+    /// @brief Look up a file given a hipFileHandle_t
+    /// @param [in] fh The file handle to lookup the file with
+    /// @return If file handle is valid, return a shared pointer to the file, otherwise throw
+    /// FileNotRegistered.
+    virtual std::shared_ptr<IFile> getFile(hipFileHandle_t fh) = 0;
+
+    //
+    // Stream interface
+    //
+
+    // @brief Registers a stream. Streams must be registered in order to set usage flags
+    // @param [in] hip_stream A valid hipStream
+    // @param [in] flags Stream flags
+    virtual void registerStream(const hipStream_t hip_stream, uint32_t flags) = 0;
+
+    // @brief Deregisters the stream
+    // @param [in] hip_stream A valid hipStream
+    virtual void deregisterStream(const hipStream_t hip_stream) = 0;
+
+    // @brief Look up a stream given a hipStream_t
+    // @param [in] hip_stream A valid hipStream
+    // @return Return a shared pointer to the Stream
+    virtual std::shared_ptr<IStream> getStream(hipStream_t hip_stream) = 0;
+
+    //
+    // Buffer and file calls
+    //
+    // These are for reducing the number of lock calls and are implemented
+    // as needed for the hipFile code
+    //
+
+    /// @brief Look up a file and registered buffer
+    ///
+    /// This combined file + buffer getter reduces the number of lock calls.
+    ///
+    /// Like the buffer getter, this function emits a temporary unregistered buffer
+    /// if no matching registered buffer is found.
+    ///
+    /// @param [in]  fh      File handle
+    /// @param [in]  buf     Buffer pointer
+    virtual file_buffer_pair getFileAndBuffer(hipFileHandle_t fh, const void *buf) = 0;
+
+    //
+    // Buffer, file, and stream calls
+    //
+    virtual file_buffer_stream_tuple getFileBufferAndStream(hipFileHandle_t fh, const void *buf,
+                                                            hipStream_t hipStream) = 0;
+
+    //
+    // Reference counts
+    //
+
+    /// @brief Increment the driver's reference count
+    virtual void incrRefCount() = 0;
+
+    /// @brief Decrement the driver's reference count
+    ///
+    /// When the count gets to 0, the buffer and file maps will be destroyed.
+    virtual void decrRefCount() = 0;
+
+    /// @brief Get the driver's current reference count
+    /// @return The driver reference count
+    virtual int64_t getRefCount() const = 0;
+
+    /// @brief Ensure the driver is initialized
+    ///
+    /// "Initializes" the driver by setting the reference count to 1
+    /// if it is currently 0.
+    ///
+    /// @note For ensuring NVIDIA cuFile behaviour compatibility
+    virtual void ensureInitialized() = 0;
+};
+
 // hipFile "state"
 //
 // Important for:
@@ -56,135 +196,51 @@ struct file_buffer_stream_tuple {
 // * When the driver transitions to a reference count of zero, the
 //   BufferMap and FileMap will be cleared
 //
-class DriverState {
+class DriverState : public IDriverState {
 public:
     //
     // Batch interface
     //
-
-    /// @brief Create a new batch context
-    /// @param [in] capacity Maximum number of outstanding operations that this context can manage
-    /// @return An opaque handle used to reference this new batch context
-    virtual hipFileBatchHandle_t createBatchContext(unsigned capacity);
-
-    /// @brief Destroy a batch context and release all associated resources
-    /// @param [in] handle The handle for the batch context to destroy
-    virtual void destroyBatchContext(hipFileBatchHandle_t handle);
-
-    /// @brief Get a batch context
-    /// @param [in] handle The opaque handle associated with a batch context
-    /// @return A batch context
-    virtual std::shared_ptr<IBatchContext> getBatchContext(hipFileBatchHandle_t handle);
+    hipFileBatchHandle_t           createBatchContext(unsigned capacity) override;
+    void                           destroyBatchContext(hipFileBatchHandle_t handle) override;
+    std::shared_ptr<IBatchContext> getBatchContext(hipFileBatchHandle_t handle) override;
 
     //
     // Buffer interface
     //
-
-    /// @brief Creates and registers a buffer
-    /// @param [in] buf Buffer pointer
-    /// @param [in] length Buffer length
-    /// @param [in] flags Buffer flags (unused)
-    virtual void registerBuffer(const void *buf, size_t length, int flags);
-
-    /// @brief Deregisters and destroys a buffer
-    /// @param [in] buf Buffer pointer
-    virtual void deregisterBuffer(const void *buf);
-
-    /// @brief Look up a registered buffer using the buffer pointer
-    /// @param [in] buf Buffer pointer
-    /// @return A registered buffer
-    virtual std::shared_ptr<IBuffer> getRegisteredBuffer(const void *buf);
-
-    /// @brief Look up a registered buffer. Returns a temporary unregistered
-    ///        buffer if no matching buffer is found.
-    /// @param [in] buf Buffer pointer
-    /// @return A registered or temporary unregistered buffer
-    virtual std::shared_ptr<IBuffer> getBuffer(const void *buf);
+    void                     registerBuffer(const void *buf, size_t length, int flags) override;
+    void                     deregisterBuffer(const void *buf) override;
+    std::shared_ptr<IBuffer> getRegisteredBuffer(const void *buf) override;
+    std::shared_ptr<IBuffer> getBuffer(const void *buf) override;
 
     //
     // File interface
     //
-
-    /// @brief Registers a file. Files must be registered before they can be used with hipFile IO APIs
-    /// @param [in] uf An unregistered file
-    /// @return A handle to be used when calling hipFile IO APIs
-    virtual hipFileHandle_t registerFile(UnregisteredFile &&uf);
-
-    /// @brief Deregisters the file associated with the provided file handle
-    /// @param [in] fh The handle of the file to deregister
-    virtual void deregisterFile(hipFileHandle_t fh);
-
-    /// @brief Look up a file given a hipFileHandle_t
-    /// @param [in] fh The file handle to lookup the file with
-    /// @return If file handle is valid, return a shared pointer to the file, otherwise throw
-    /// FileNotRegistered.
-    virtual std::shared_ptr<IFile> getFile(hipFileHandle_t fh);
+    hipFileHandle_t        registerFile(UnregisteredFile &&uf) override;
+    void                   deregisterFile(hipFileHandle_t fh) override;
+    std::shared_ptr<IFile> getFile(hipFileHandle_t fh) override;
 
     //
     // Stream interface
     //
-
-    // @brief Registers a stream. Streams must be registered in order to set usage flags
-    // @param [in] hip_stream A valid hipStream
-    // @param [in] flags Stream flags
-    virtual void registerStream(const hipStream_t hip_stream, uint32_t flags);
-
-    // @brief Deregisters the stream
-    // @param [in] hip_stream A valid hipStream
-    virtual void deregisterStream(const hipStream_t hip_stream);
-
-    // @brief Look up a stream given a hipStream_t
-    // @param [in] hip_stream A valid hipStream
-    // @return Return a shared pointer to the Stream
-    virtual std::shared_ptr<IStream> getStream(hipStream_t hip_stream);
+    void                     registerStream(const hipStream_t hip_stream, uint32_t flags) override;
+    void                     deregisterStream(const hipStream_t hip_stream) override;
+    std::shared_ptr<IStream> getStream(hipStream_t hip_stream) override;
 
     //
-    // Buffer and file calls
+    // Combined lookups
     //
-    // These are for reducing the number of lock calls and are implemented
-    // as needed for the hipFile code
-    //
-
-    /// @brief Look up a file and registered buffer
-    ///
-    /// This combined file + buffer getter reduces the number of lock calls.
-    ///
-    /// Like the buffer getter, this function emits a temporary unregistered buffer
-    /// if no matching registered buffer is found.
-    ///
-    /// @param [in]  fh      File handle
-    /// @param [in]  buf     Buffer pointer
-    virtual file_buffer_pair getFileAndBuffer(hipFileHandle_t fh, const void *buf);
-
-    //
-    // Buffer, file, and stream calls
-    //
-    virtual file_buffer_stream_tuple getFileBufferAndStream(hipFileHandle_t fh, const void *buf,
-                                                            hipStream_t hipStream);
+    file_buffer_pair         getFileAndBuffer(hipFileHandle_t fh, const void *buf) override;
+    file_buffer_stream_tuple getFileBufferAndStream(hipFileHandle_t fh, const void *buf,
+                                                    hipStream_t hipStream) override;
 
     //
     // Reference counts
     //
-
-    /// @brief Increment the driver's reference count
-    virtual void incrRefCount();
-
-    /// @brief Decrement the driver's reference count
-    ///
-    /// When the count gets to 0, the buffer and file maps will be destroyed.
-    virtual void decrRefCount();
-
-    /// @brief Get the driver's current reference count
-    /// @return The driver reference count
-    virtual int64_t getRefCount() const;
-
-    /// @brief Ensure the driver is initialized
-    ///
-    /// "Initializes" the driver by setting the reference count to 1
-    /// if it is currently 0.
-    ///
-    /// @note For ensuring NVIDIA cuFile behaviour compatibility
-    void ensureInitialized();
+    void    incrRefCount() override;
+    void    decrRefCount() override;
+    int64_t getRefCount() const override;
+    void    ensureInitialized() override;
 
     //
     // Misc
@@ -199,7 +255,7 @@ public:
     DriverState &operator=(DriverState &&) = delete;
 
     DriverState();
-    virtual ~DriverState();
+    ~DriverState() override;
 
 private:
     // The driver's reference count
