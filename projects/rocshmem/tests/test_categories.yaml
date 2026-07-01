@@ -21,8 +21,13 @@ test_categories:
       - "device_bitcode_.*"
 
       # Baseline RMA tests (single workgroup configuration)
-      - "put_n2_w8_z1_1048576B"
-      - "get_n2_w8_z1_1048576B"
+      # Matches both base variant (MPI) and uuid variant (SLR)
+      - "put_n2_w8_z1_1048576B(_uuid)?"
+      - "get_n2_w8_z1_1048576B(_uuid)?"
+
+      # Workgroup-level RMA tests (basic, any thread count for GPU portability)
+      - "wgput_n2_w1_z.*_1048576B(_uuid)?"
+      - "wgget_n2_w1_z.*_1048576B(_uuid)?"
 
       # Context-specific RMA tests
       - "defaultctxput_.*"
