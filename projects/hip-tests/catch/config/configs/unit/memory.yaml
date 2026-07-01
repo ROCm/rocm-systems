@@ -805,6 +805,9 @@ memory:
   Unit_hipMemsetD32Async_UnalignedPatternFill:
     <<: *level_2
     tags: [memset]
+  Unit_hipMemset_UnalignedKernelCornerCases:
+    <<: *level_2
+    tags: [memset]
   Unit_hipMemcpy2DArrayToArray_Negative:
     <<: *level_2
     tags: [transfer, image]
