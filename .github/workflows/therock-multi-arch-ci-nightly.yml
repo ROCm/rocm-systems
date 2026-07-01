@@ -11,9 +11,6 @@
 name: TheRock Multi-Arch CI Nightly Trigger
 
 on:
-  push:
-    branches:
-      - users/geomin12/ci-nightly-disable
   schedule:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
 
@@ -29,5 +26,5 @@ jobs:
         uses: benc-uk/workflow-dispatch@e2e5e9a103e331dad343f381a29e654aea3cf8fc # v1.2.4
         with:
           workflow: therock-multi-arch-ci.yml
-          ref: users/geomin12/ci-nightly-disable
+          ref: develop
           inputs: '{ "linux_amdgpu_families": "gfx94X,gfx950,gfx125X", "windows_amdgpu_families": "gfx1151", "linux_test_labels": "test_filter:comprehensive", "windows_test_labels": "test_filter:comprehensive" }'
