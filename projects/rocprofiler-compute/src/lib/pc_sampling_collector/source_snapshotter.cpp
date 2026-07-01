@@ -7,6 +7,11 @@
 
 using namespace rocprofiler_compute_tool;
 
+source_snapshotter_t::ptr source_snapshotter_t::create()
+{
+    return std::make_shared<source_snapshotter_impl_t>();
+}
+
 std::filesystem::path source_snapshotter_impl_t::get_destination_path(
     const std::filesystem::path& source_path,
     const std::filesystem::path& destination_root)

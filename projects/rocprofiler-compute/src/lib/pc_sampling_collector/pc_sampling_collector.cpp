@@ -4,13 +4,71 @@
 
 #include "gsl_assert.h"
 
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <set>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 using namespace rocprofiler_compute_tool;
 
-pc_sampling_collector_t::ptr pc_sampling_collector_t::create(code_object_translator_t::ptr translator)
+bool pc_sampling_collector_impl_t::is_source_line_token(std::string_view token)
 {
-    return std::make_shared<pc_sampling_collector_impl_t>(std::move(translator));
+    if (token == "?")
+        return true;
+
+    return !token.empty() &&
+           std::all_of(token.cbegin(),
+                       token.cend(),
+                       [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; });
+}
+
+std::string_view pc_sampling_collector_impl_t::path_from_source_frame(std::string_view frame)
+{
+    const auto separator_position = frame.rfind(':');
+    if (separator_position == std::string_view::npos)
+        return frame;
+
+    const auto line_token = frame.substr(separator_position + 1);
+    if (!is_source_line_token(line_token))
+        return frame;
+
+    return frame.substr(0, separator_position);
+}
+
+std::vector<std::filesystem::path> pc_sampling_collector_impl_t::source_paths_from_comment(
+    std::string_view comment)
+{
+    std::vector<std::filesystem::path> source_paths;
+    size_t                             frame_start = 0;
+
+    while (frame_start <= comment.size())
+    {
+        const auto separator_position = comment.find(source_frame_separator, frame_start);
+        const auto frame_end = separator_position == std::string_view::npos ? comment.size()
+                                                                            : separator_position;
+        const auto frame     = comment.substr(frame_start, frame_end - frame_start);
+        const auto path      = path_from_source_frame(frame);
+        if (!path.empty())
+        {
+            source_paths.emplace_back(std::string{path});
+        }
+
+        if (separator_position == std::string_view::npos)
+            break;
+
+        frame_start = separator_position + source_frame_separator.size();
+    }
+
+    return source_paths;
+}
+
+pc_sampling_collector_t::ptr pc_sampling_collector_t::create()
+{
+    return std::make_shared<pc_sampling_collector_impl_t>(code_object_translator_t::create());
 }
 
 pc_sampling_collector_impl_t::pc_sampling_collector_impl_t(code_object_translator_t::ptr translator)
@@ -58,4 +116,29 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
         }
         writer.end_code_obj();
     }
+}
+
+std::set<std::filesystem::path> pc_sampling_collector_impl_t::create_source_paths() const
+{
+    std::set<std::filesystem::path> source_paths;
+    for (const auto& id : m_translator->get_code_object_ids())
+    {
+        const auto& symbols = m_translator->get_symbols(id);
+        for (const auto& sym : symbols)
+        {
+            uint64_t       pc  = sym.virtual_address;
+            const uint64_t end = sym.virtual_address + sym.size;
+            while (pc < end)
+            {
+                const auto& inst = m_translator->get_instruction(id, pc);
+                if (!inst.size)
+                    break;
+
+                const auto paths = source_paths_from_comment(inst.comment);
+                source_paths.insert(paths.cbegin(), paths.cend());
+                pc += inst.size;
+            }
+        }
+    }
+    return source_paths;
 }

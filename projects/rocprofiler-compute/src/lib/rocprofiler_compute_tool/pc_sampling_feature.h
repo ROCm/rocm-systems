@@ -18,7 +18,6 @@ public:
     pc_sampling_feature_t(PcSamplingMode mode, std::filesystem::path output_path);
     pc_sampling_feature_t(PcSamplingMode                mode,
                           std::filesystem::path         output_path,
-                          code_object_translator_t::ptr translator,
                           pc_sampling_collector_t::ptr  collector,
                           source_snapshotter_t::ptr     snapshotter);
 
@@ -35,7 +34,6 @@ private:
     bool                          m_enabled = false;
     PcSamplingMode                m_mode    = PcSamplingMode::Disabled;
     std::filesystem::path         m_output_path;
-    code_object_translator_t::ptr m_translator;
     pc_sampling_collector_t::ptr  m_collector;
     source_snapshotter_t::ptr     m_snapshotter;
 };

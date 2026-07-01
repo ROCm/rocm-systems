@@ -4,12 +4,9 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace rocprofiler::sdk::codeobj::disassembly
@@ -40,6 +37,7 @@ class code_object_translator_t
 {
 public:
     using ptr = std::shared_ptr<code_object_translator_t>;
+    static ptr create();
 
     virtual ~code_object_translator_t() = default;
     virtual void add_code_object(const char* filepath, size_t id, uint64_t load_addr, uint64_t mem_size) = 0;
@@ -51,7 +49,6 @@ public:
     virtual const std::vector<size_t>& get_code_object_ids() const                          = 0;
     virtual std::vector<symbol_t>      get_symbols(size_t object_id) const                  = 0;
     virtual instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const = 0;
-    virtual std::set<std::filesystem::path> get_source_paths() const                        = 0;
 };
 
 class code_object_translator_impl_t : public code_object_translator_t
@@ -69,11 +66,8 @@ public:
     const std::vector<size_t>& get_code_object_ids() const override;
     std::vector<symbol_t>      get_symbols(size_t object_id) const override;
     instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const override;
-    std::set<std::filesystem::path> get_source_paths() const override;
 
 private:
-    static std::vector<std::filesystem::path> source_paths_from_comment(std::string_view comment);
-
     std::unique_ptr<rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate> m_translator;
     std::vector<size_t>                                                              m_obj_ids;
     std::map<size_t, uint64_t> m_obj_id_to_load_addr;

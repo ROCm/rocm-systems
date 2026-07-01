@@ -14,6 +14,7 @@ class source_snapshotter_t
 {
 public:
     using ptr = std::shared_ptr<source_snapshotter_t>;
+    static ptr create();
 
     virtual ~source_snapshotter_t()                                                = default;
     virtual void snapshot(const std::set<std::filesystem::path>& source_paths,
