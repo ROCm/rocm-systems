@@ -98,9 +98,11 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetLimit_ReportsStackAndHeapAndRejectsInvali
     (void)value;
   }
 
-  // An out-of-range hipLimit_t must not succeed. Backends may report the
-  // specific hipErrorUnsupportedLimit or another non-success error; the
-  // contract only requires that the query does not silently succeed.
+  // hipLimitRange is the trailing sentinel of hipLimit_t (one past the last
+  // real limit), so querying it exercises an out-of-range limit that must not
+  // succeed. Backends may report the specific hipErrorUnsupportedLimit or
+  // another non-success error; the contract only requires that the query does
+  // not silently succeed.
   size_t invalid_value = 0;
   const hipError_t invalid_status =
       hipDeviceGetLimit(&invalid_value, static_cast<hipLimit_t>(hipLimitRange));
@@ -134,11 +136,13 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetDeviceFlagsAndStreamPriorityRange_AreCons
   unsigned int flags = 0;
   HIP_CHECK(hipGetDeviceFlags(&flags));
 
-  // The device flags word is composed of the documented schedule mask plus the
-  // map-host and lmem-resize bits; no undocumented bits should be reported.
-  const unsigned int documented_flags =
-      hipDeviceScheduleMask | hipDeviceMapHost | hipDeviceLmemResizeToMax;
-  REQUIRE((flags & ~documented_flags) == 0u);
+  // The schedule subfield must resolve to one of the documented scheduling
+  // modes. Backends may report additional device-specific flag bits (for
+  // example CUDA sync-memops), so only the schedule subfield is constrained
+  // rather than rejecting the whole flags word.
+  const unsigned int schedule = flags & hipDeviceScheduleMask;
+  REQUIRE((schedule == hipDeviceScheduleAuto || schedule == hipDeviceScheduleSpin ||
+           schedule == hipDeviceScheduleYield || schedule == hipDeviceScheduleBlockingSync));
 
   int least_priority = 0;
   int greatest_priority = 0;
