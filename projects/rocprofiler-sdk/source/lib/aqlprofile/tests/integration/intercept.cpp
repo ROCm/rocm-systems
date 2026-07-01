@@ -30,9 +30,9 @@
 #include <atomic>
 #include <cstring>
 #include <hsa/hsa.h>
-#include <hsa_ext_amd.h>
-#include <hsa_api_trace.h>
-#include <hsa_ven_amd_aqlprofile.h>
+#include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_api_trace.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #define CHECK_HSA(x) { auto _status = (x); if (_status != HSA_STATUS_SUCCESS) { std::cerr << __FILE__ << ':' << __LINE__ << std::endl; abort(); } }
 
