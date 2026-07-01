@@ -16,7 +16,7 @@ std::filesystem::path source_snapshotter_impl_t::get_destination_path(
     const std::filesystem::path& source_path,
     const std::filesystem::path& destination_root)
 {
-    return (destination_root / source_path.relative_path()).lexically_normal();
+    return destination_root / source_path.relative_path().lexically_normal();
 }
 
 source_snapshotter_impl_t::source_snapshotter_impl_t()
