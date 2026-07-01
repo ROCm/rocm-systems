@@ -1,4 +1,5 @@
-#!/bin/bash -e
+#!/bin/sh
+set -e
 ################################################################################
 ##
 ## The University of Illinois/NCSA
@@ -64,8 +65,8 @@ EOF
 shift
 for file in "$@"
 do
-xxd -i $file
-    echo -e '\n'
+xxd -i "$file"
+    printf '\n\n'
 done
 
 cat <<EOF
