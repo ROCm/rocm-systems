@@ -1805,26 +1805,26 @@ ib_recv:
   // QP Sharing: receiver-side primary/secondary determination
   if (rcclParamIbCastCommNGroups() > 0 && !remMeta.isRMA && remMeta.sharedGroupIdx >= 0) {
     int recvGroupIdx = remMeta.sharedGroupIdx;
+    int recvProbeIbDevN;
 
     rComm->base.commId = IbCastAllocCommId(rComm, false);
     if (rComm->base.commId == 0) {
       goto qp_sharing_skip_recv;
     }
-    rComm->base.sharedGroupIdx = recvGroupIdx;
-
     // Build probe key from peer address
     union ncclSocketAddress recvPeerAddr;
     ncclSocketGetAddr(&rComm->base.sock, &recvPeerAddr);
     IbCastStripPort(&recvPeerAddr);
 
-    int recvProbeIbDevN;
+    rComm->base.sharedGroupIdx = recvGroupIdx;
+	rComm->base.remIbDevIdx = remMeta.senderIbDevIdx;
     recvProbeIbDevN = (rComm->base.vProps.ndevs > 0) ? rComm->base.vProps.devs[0] : 0;
 
     IbCastSharedQpKey recvProbeKey;
     memset(&recvProbeKey, 0, sizeof(recvProbeKey));
     recvProbeKey.ibDevN = recvProbeIbDevN;
     recvProbeKey.peerAddr = recvPeerAddr;
-    recvProbeKey.remIbDevIdx = 0;
+    recvProbeKey.remIbDevIdx = remMeta.senderIbDevIdx;
     recvProbeKey.isSend = false;
     recvProbeKey.groupIdx = recvGroupIdx;
     recvProbeKey.qpIdx = 0;
@@ -1838,18 +1838,24 @@ ib_recv:
            __func__, rComm->base.commId, recvGroupIdx);
 
       rComm->base.isSharedQpPrimary = false;
+	  int primaryNqps = IbCastCountGroupQpSlots(&recvPeerAddr, remMeta.senderIbDevIdx, false, remMeta.sharedGroupIdx);
+
+      rComm->base.sharedPrimaryNqps = primaryNqps;
       rComm->useCtsOffload = false;
+
+      IbCastSharedQpKey recvKey;
+      memset(&recvKey, 0, sizeof(recvKey));
+      recvKey.peerAddr = recvPeerAddr;
+      recvKey.isSend = false;
+      recvKey.groupIdx = recvGroupIdx;
 
       int nqps = rComm->base.nqps;
       for (int q = 0; q < nqps; q++) {
-        IbCastSharedQpKey recvKey;
-        memset(&recvKey, 0, sizeof(recvKey));
-        recvKey.ibDevN = rComm->base.vProps.devs[q % rComm->base.vProps.ndevs];
-        recvKey.peerAddr = recvPeerAddr;
-        recvKey.remIbDevIdx = 0;
-        recvKey.isSend = false;
-        recvKey.groupIdx = recvGroupIdx;
-        recvKey.qpIdx = q;
+		int mappedQ = q % primaryNqps;
+		int localDevIdx = mappedQ % rComm->base.vProps.ndevs;
+		recvKey.ibDevN = rComm->base.vProps.devs[localDevIdx];
+        recvKey.remIbDevIdx = remMeta.senderIbDevIdx;
+        recvKey.qpIdx = mappedQ
 
         struct IbCastSharedQp* recvSlot = IbCastFindSharedQp(&recvKey);
         if (recvSlot == NULL) {
@@ -1884,7 +1890,7 @@ ib_recv:
       INFO(NCCL_NET, "NET/IB: %s: QP sharing PRIMARY receiver commId=%u group=%d depthMult=%d",
            __func__, rComm->base.commId, recvGroupIdx, recvDepthMult);
       rComm->base.isSharedQpPrimary = true;
-      rComm->useCtsOffload = false;
+      rComm->useCtsOffload = false; // TODO - QP sharing: check connect side
     }
   }
 
@@ -1897,26 +1903,27 @@ qp_sharing_skip_recv:
     ncclSocketGetAddr(&rComm->base.sock, &recvPeerAddr);
     IbCastStripPort(&recvPeerAddr);
 
+    IbCastSharedQpKey recvKey;
+    memset(&recvKey, 0, sizeof(recvKey));
+    recvKey.peerAddr = recvPeerAddr;
+    recvKey.remIbDevIdx = remMeta.senderIbDevIdx;
+    recvKey.isSend = false;
+    recvKey.groupIdx = rComm->base.sharedGroupIdx;
+
     int nqps = rComm->base.nqps;
     for (int q = 0; q < nqps; q++) {
-      IbCastSharedQpKey recvKey;
-      memset(&recvKey, 0, sizeof(recvKey));
       recvKey.ibDevN = rComm->base.vProps.devs[q % rComm->base.vProps.ndevs];
-      recvKey.peerAddr = recvPeerAddr;
-      recvKey.remIbDevIdx = 0;
-      recvKey.isSend = false;
-      recvKey.groupIdx = rComm->base.sharedGroupIdx;
       recvKey.qpIdx = q;
 
       int devIdx = q % rComm->base.vProps.ndevs;
       struct IbCastSharedQp* entry = IbCastRegisterSharedQp(&recvKey,
           rComm->base.qps[q].qp, rComm->devs[devIdx].base.cq,
           &rComm->devs[devIdx].base, rComm->base.qps[q].devIndex, 1);
-      if (entry && q == 0) {
-        entry->cqRefcount = 1;
-      }
       if (entry) {
         entry->ctsQpSlot = rComm->base.qps[q].ctsQpSlot;
+        if (q == 0) {
+          entry->cqRefcount = 1;
+        }
       }
     }
   }
