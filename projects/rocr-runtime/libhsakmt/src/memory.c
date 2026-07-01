@@ -1262,7 +1262,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandle,
 						HsaMemoryObjectHandle MemoryHandle,
-						HSAuint64* cpu_addr, ...)
+						HSAuint64* cpu_addr)
 {
 	CHECK_KFD_OPEN();
 	int renderFd = hsakmt_fn_amdgpu_device_get_fd((amdgpu_device_handle)DeviceHandle);

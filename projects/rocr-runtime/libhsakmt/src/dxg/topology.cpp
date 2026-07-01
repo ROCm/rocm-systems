@@ -751,12 +751,9 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
     props.Capability.ui32.WatchPointsTotalBits = std::log2(watch_points_num);
   }
   uint32_t simd_per_cu = device->SimdPerCu();
-  if (simd_per_cu == 0) {
-    pr_warn("SimdPerCu is 0 for node %u, forcing MaxWavesPerSIMD to 0\n",
-            node_id);
-    props.MaxWavesPerSIMD = 0;
-  } else {
-    props.MaxWavesPerSIMD = device->WavePerCu() / simd_per_cu;
+  if (simd_per_cu == 0){
+    pr_err("SimdPerCU is 0 for node %u\n", node_id);
+    return HSAKMT_STATUS_ERROR;
   }
   props.LDSSizeInKB = device->LdsSize() / 1024;
   props.GDSSizeInKB = 0;
