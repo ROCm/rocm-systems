@@ -498,3 +498,24 @@ contract:
   Contract_Ipc_EventHandle_SameProcessRoundTrip:
     <<: *level_0
     tags: [ipc]
+  Contract_Module_LoadData_FromRtc_Succeeds:
+    <<: *level_0
+    tags: [module]
+  Contract_Module_LoadData_NullImage_IsRejected:
+    <<: *level_0
+    tags: [module]
+  Contract_Module_GetFunction_ResolvesKnownSymbol:
+    <<: *level_0
+    tags: [module]
+  Contract_Module_GetFunction_UnknownSymbol_IsRejected:
+    <<: *level_0
+    tags: [module]
+  Contract_Module_LaunchKernel_WritesExpectedValue:
+    <<: *level_0
+    tags: [module]
+  Contract_Module_GetGlobal_ReturnsAddressAndSize:
+    <<: *level_0
+    tags: [module]
+  Contract_Module_FuncGetAttribute_ReturnsSaneValues:
+    <<: *level_0
+    tags: [module]

@@ -41,6 +41,7 @@ The first domains are:
 - `memory_pool_access`: current-device memory pool access-control contracts
 - `extension`: proc-address resolution and AMD extension API contracts (`hipGetProcAddress`, `hipApiName`, `hipGetStreamDeviceId`, `hipExtGetLastError`)
 - `ipc`: capability-gated same-process IPC memory and event handle contracts
+- `module`: HIPRTC-backed module load, function, global, launch, and function-attribute contracts
 
 Some domains are capability-gated. For example, `array_memory` skips on devices without image/array support, and `pitched_memory` skips on runtime paths where `hipMallocPitch` reports out of memory for tiny allocations. The AMD-specific extension contracts in `extension` are compiled only on the AMD backend, while the portable `hipGetProcAddress` contracts run on both backends. These gates indicate an unsupported local capability, not a contract failure.
 
