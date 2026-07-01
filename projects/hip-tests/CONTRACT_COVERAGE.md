@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 149
+- Contract tests: 160
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 128
-- Approximate declared API-name coverage: 25.9%
+- Declared HIP runtime APIs directly exercised by contract tests: 135
+- Approximate declared API-name coverage: 27.3%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 
 ## Contract domains
@@ -34,6 +34,9 @@ The percentages below are approximate API-name coverage against declarations par
 | `graph_topology` | 5 |
 | `graph_clone` | 3 |
 | `graph_update` | 3 |
+| `graph_node_types` | 5 |
+| `graph_child` | 3 |
+| `graph_host` | 3 |
 | `host_memory` | 5 |
 | `pitched_memory` | 4 |
 | `array_memory` | 4 |
@@ -55,7 +58,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Error handling | 3 | 3 | 100.0% |
 | Event | 6 | 8 | 75.0% |
 | Occupancy | 3 | 7 | 42.9% |
-| Graph / capture | 25 | 96 | 26.0% |
+| Graph / capture | 32 | 96 | 33.3% |
 | Stream | 5 | 23 | 21.7% |
 | Runtime / device | 21 | 45 | 46.7% |
 | Kernel launch / function attrs | 1 | 13 | 7.7% |
@@ -215,6 +218,13 @@ hipGraphAddMemsetNode
 hipGraphAddKernelNode
 hipGraphAddEventRecordNode
 hipGraphAddEventWaitNode
+hipGraphAddChildGraphNode
+hipGraphChildGraphNodeGetGraph
+hipGraphAddHostNode
+hipGraphHostNodeGetParams
+hipGraphNodeGetType
+hipGraphAddDependencies
+hipGraphRemoveDependencies
 hipGraphExecMemcpyNodeSetParams1D
 hipGraphExecMemsetNodeSetParams
 hipGraphExecKernelNodeSetParams
@@ -264,7 +274,7 @@ hipIpcOpenEventHandle
 2. Texture and surface APIs beyond current basics: texture/surface object create/destroy with resource and texture descriptor round-trips and channel-descriptor queries are now covered; texture reference APIs, mipmapped arrays, and bound/linear texture variants remain.
 3. Module, library, and code-loading APIs.
 4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, and current-context/device queries are now covered; context create/destroy, push/pop/set-current, cache and shared-memory config, and context peer access remain.
-5. Advanced graph APIs: graph update, node find in clone, host nodes, child graphs, memory alloc/free nodes, attributes, debug, user objects.
+5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, and host nodes with param round-trips are now covered; graph update, node find in clone, memory alloc/free nodes, node attributes, debug dot export, and user objects remain.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch and CU-mask stream variants, logging controls, and link-type queries remain.
 
