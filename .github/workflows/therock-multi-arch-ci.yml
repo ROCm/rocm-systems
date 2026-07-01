@@ -27,9 +27,6 @@
 name: TheRock Multi-Arch CI
 
 on:
-  push:
-    branches:
-      - users/geomin12/ci-nightly-disable
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
