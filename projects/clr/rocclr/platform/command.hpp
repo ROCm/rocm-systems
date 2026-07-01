@@ -1278,8 +1278,11 @@ class BatchWriteMemoryCommand : public Command {
  public:
   BatchWriteMemoryCommand(HostQueue& queue, cl_command_type cmd_type,
                           const EventWaitList& event_wait_list,
-                          std::vector<BatchWriteMemoryOp>&& write_ops)
-      : Command(queue, cmd_type, event_wait_list), write_ops_(std::move(write_ops)) {}
+                          std::vector<BatchWriteMemoryOp>&& write_ops,
+                          std::vector<std::vector<char>>&& host_snapshots = {})
+      : Command(queue, cmd_type, event_wait_list),
+        write_ops_(std::move(write_ops)),
+        host_snapshots_(std::move(host_snapshots)) {}
 
   void submit(device::VirtualDevice& device) override { device.SubmitBatchWriteMemory(*this); }
 
@@ -1303,8 +1306,9 @@ class BatchWriteMemoryCommand : public Command {
   const std::vector<BatchWriteMemoryOp>& WriteOps() const { return write_ops_; }
 
  private:
-  std::vector<BatchWriteMemoryOp> write_ops_;  //!< Vector of write operations
-  std::vector<Memory*> pinned_memory_;         //!< Pinned memory used by the batch
+  std::vector<BatchWriteMemoryOp> write_ops_;      //!< Vector of write operations
+  std::vector<Memory*> pinned_memory_;             //!< Pinned memory used by the batch
+  std::vector<std::vector<char>> host_snapshots_;  //!< DuringApiCall source snapshots
 };
 
 /*! \brief  A batch read memory command for multiple device-to-pageable-host

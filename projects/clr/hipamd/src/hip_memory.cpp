@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cstring>
+#include <type_traits>
+
 #include <hip/hip_runtime.h>
 #include "device.hpp"
 #include "hip/driver_types.h"
@@ -2959,7 +2962,23 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
       wait_list.push_back(stream_wait_cmd);
     }
 
-    Command* batch_cmd = new Command(*queue_stream, command_type, wait_list, std::move(operations));
+    Command* batch_cmd = nullptr;
+    if constexpr (std::is_same_v<Operation, amd::BatchWriteMemoryOp>) {
+      std::vector<std::vector<char>> host_snapshots;
+      if (!AMD_DIRECT_DISPATCH) {
+        for (Operation& op : operations) {
+          if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
+            host_snapshots.emplace_back(op.size);
+            std::memcpy(host_snapshots.back().data(), op.src_host, op.size);
+            op.src_host = host_snapshots.back().data();
+          }
+        }
+      }
+      batch_cmd = new amd::BatchWriteMemoryCommand(
+          *queue_stream, command_type, wait_list, std::move(operations), std::move(host_snapshots));
+    } else {
+      batch_cmd = new Command(*queue_stream, command_type, wait_list, std::move(operations));
+    }
     if (batch_cmd == nullptr) {
       return hipErrorOutOfMemory;
     }
