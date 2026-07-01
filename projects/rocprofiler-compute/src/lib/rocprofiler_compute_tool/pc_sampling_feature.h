@@ -15,9 +15,12 @@ class pc_sampling_feature_t
 {
 public:
     pc_sampling_feature_t() = default;
-    pc_sampling_feature_t(PcSamplingMode mode, std::filesystem::path output_path);
+    pc_sampling_feature_t(PcSamplingMode        mode,
+                          std::filesystem::path code_object_info_path,
+                          std::filesystem::path source_snapshot_path);
     pc_sampling_feature_t(PcSamplingMode                mode,
-                          std::filesystem::path         output_path,
+                          std::filesystem::path         code_object_info_path,
+                          std::filesystem::path         source_snapshot_path,
                           pc_sampling_collector_t::ptr  collector,
                           source_snapshotter_t::ptr     snapshotter);
 
@@ -25,7 +28,9 @@ public:
 
     PcSamplingMode mode() const { return m_mode; }
 
-    const std::filesystem::path& output_path() const { return m_output_path; }
+    const std::filesystem::path& code_object_info_path() const { return m_code_object_info_path; }
+
+    const std::filesystem::path& source_snapshot_path() const { return m_source_snapshot_path; }
 
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info);
     void finalize();
@@ -33,7 +38,8 @@ public:
 private:
     bool                          m_enabled = false;
     PcSamplingMode                m_mode    = PcSamplingMode::Disabled;
-    std::filesystem::path         m_output_path;
+    std::filesystem::path         m_code_object_info_path;
+    std::filesystem::path         m_source_snapshot_path;
     pc_sampling_collector_t::ptr  m_collector;
     source_snapshotter_t::ptr     m_snapshotter;
 };

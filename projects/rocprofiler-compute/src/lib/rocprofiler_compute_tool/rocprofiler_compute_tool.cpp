@@ -197,6 +197,15 @@ static std::string generate_output_filename(std::string_view output_path, std::s
     return filename;
 }
 
+static std::string generate_output_directory(std::string_view output_path, std::string_view directory_name)
+{
+    std::string directory{output_path};
+    if (directory.back() != '/')
+        directory += '/';
+    directory.append(directory_name);
+    return directory;
+}
+
 std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
@@ -209,7 +218,9 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     {
         const auto pc_mode = parse_pc_sampling_mode(std::string{pc_sampling_method});
         tool_data->pc_sampling =
-            pc_sampling_feature_t{pc_mode, generate_output_filename(output_path, "_code_obj_info.json")};
+            pc_sampling_feature_t{pc_mode,
+                                  generate_output_filename(output_path, "_code_obj_info.json"),
+                                  generate_output_directory(output_path, "src")};
     }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."

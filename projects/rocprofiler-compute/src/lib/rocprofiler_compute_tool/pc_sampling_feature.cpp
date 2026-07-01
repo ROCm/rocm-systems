@@ -19,22 +19,26 @@ PcSamplingMode rocprofiler_compute_tool::parse_pc_sampling_mode(const std::strin
     return PcSamplingMode::Disabled;
 }
 
-pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode mode, std::filesystem::path output_path)
-    : pc_sampling_feature_t(
-          mode,
-          std::move(output_path),
-          pc_sampling_collector_t::create(),
-          source_snapshotter_t::create())
+pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode        mode,
+                                             std::filesystem::path code_object_info_path,
+                                             std::filesystem::path source_snapshot_path)
+    : pc_sampling_feature_t(mode,
+                            std::move(code_object_info_path),
+                            std::move(source_snapshot_path),
+                            pc_sampling_collector_t::create(),
+                            source_snapshotter_t::create())
 {
 }
 
 pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode                mode,
-                                             std::filesystem::path         output_path,
+                                             std::filesystem::path         code_object_info_path,
+                                             std::filesystem::path         source_snapshot_path,
                                              pc_sampling_collector_t::ptr  collector,
                                              source_snapshotter_t::ptr     snapshotter)
     : m_enabled(true)
     , m_mode(mode)
-    , m_output_path(std::move(output_path))
+    , m_code_object_info_path(std::move(code_object_info_path))
+    , m_source_snapshot_path(std::move(source_snapshot_path))
     , m_collector(std::move(collector))
     , m_snapshotter(std::move(snapshotter))
 {
@@ -55,8 +59,7 @@ void pc_sampling_feature_t::finalize()
     // should not leave an empty artifact behind.
     if (!writer.empty())
     {
-        writer.flush(m_output_path);
-        m_snapshotter->snapshot(m_collector->create_source_paths(),
-                                m_output_path.parent_path() / "sources");
+        writer.flush(m_code_object_info_path);
+        m_snapshotter->snapshot(m_collector->create_source_paths(), m_source_snapshot_path);
     }
 }
