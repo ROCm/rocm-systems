@@ -529,7 +529,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) {}
   void submitThreadTrace(amd::ThreadTraceCommand& vcmd) {}
 
-  virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {}
+  virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) override;
 
   virtual address allocKernelArguments(size_t size, size_t alignment) final;
   virtual void ReleaseSdmaEngines() final;  //!< Release SDMA engine assignments
