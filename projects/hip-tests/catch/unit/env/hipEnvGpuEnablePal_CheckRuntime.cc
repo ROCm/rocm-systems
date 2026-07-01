@@ -17,6 +17,7 @@
 #endif
 
 // Generic helper executable to test environment variables with HIP runtime
+// AMD-only: Tests GPU_ENABLE_PAL (ROCr vs PAL backend selection)
 //
 // USAGE: ./CheckRuntime <env_var_name> <env_var_value>
 //
@@ -32,6 +33,10 @@
 //
 // RETURN CODES:
 //   0 = success, 255 = HIP initialization failed
+
+#ifndef __HIP_PLATFORM_AMD__
+#error "This test is AMD-only (GPU_ENABLE_PAL controls ROCr vs PAL backend)"
+#endif
 
 static int setEnvironmentVariable(const char* name, const char* value) {
 #ifdef _WIN32
