@@ -1,0 +1,80 @@
+name: Resolve CI config
+description: Resolve runner labels from ROCm/therock-ci-config
+
+inputs:
+  config-repository:
+    description: Repository containing the shared CI config
+    required: false
+    default: ROCm/therock-ci-config
+  config-ref:
+    description: Ref to checkout from the shared CI config repository
+    required: false
+    default: main
+  config-path:
+    description: Local checkout path for the shared CI config
+    required: false
+    default: ci-config
+  fallback-gfx94x-runner:
+    description: Runner label to use if the shared CI config cannot be loaded
+    required: false
+    default: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+
+outputs:
+  gfx94x_runner:
+    description: Linux gfx94x test runner label
+    value: ${{ steps.runner.outputs.gfx94x_runner }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout CI config
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: ${{ inputs.config-repository }}
+        ref: ${{ inputs.config-ref }}
+        path: ${{ inputs.config-path }}
+      continue-on-error: true
+
+    - name: Resolve runner labels
+      id: runner
+      shell: bash
+      env:
+        CI_CONFIG_PATH: ${{ inputs.config-path }}
+        FALLBACK_GFX94X_RUNNER: ${{ inputs.fallback-gfx94x-runner }}
+      run: |
+        python3 <<'PY'
+        import os
+        import sys
+        from pathlib import Path
+
+        fallback_runner = os.environ["FALLBACK_GFX94X_RUNNER"]
+        runner = fallback_runner
+        config_path = Path(os.environ["CI_CONFIG_PATH"])
+
+        if config_path.exists():
+            sys.path.insert(0, str(config_path))
+            try:
+                from ci_config_api import load_config_v1
+
+                config = load_config_v1(config_path)
+                runner = (
+                    config.get_gpu_families(["presubmit"])
+                    .get("gfx94x", {})
+                    .get("linux", {})
+                    .get("test-runs-on", fallback_runner)
+                ) or fallback_runner
+            except Exception as exc:
+                print(
+                    f"::warning::Failed to load CI config: {exc}. "
+                    f"Using fallback runner {fallback_runner}."
+                )
+        else:
+            print(
+                "::warning::CI config checkout missing. "
+                f"Using fallback runner {fallback_runner}."
+            )
+
+        print(f"Using gfx94x runner: {runner}")
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"gfx94x_runner={runner}\n")
+        PY
