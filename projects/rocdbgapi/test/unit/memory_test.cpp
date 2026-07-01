@@ -38,15 +38,15 @@
        test.  Tested at the C-API level in feature tests instead.)
      * address_class_t value object: name(), dwarf_value(), address_space()
        and get_info(ADDRESS_SPACE / DWARF) + unknown query.
-     * memory_cache_t<agent_address_t> through a stub delegate fn:
+     * memory_cache_t through a stub delegate fn (no agent_t required):
        - contains_all() false on empty, true after prefetch().
        - prefetch() aligns to cache_line_size (64) and calls the delegate
          once per coalesced span.
-       - write_global_memory() into a prefetched range marks lines dirty
+       - write_agent_memory() into a prefetched range marks lines dirty
          and write_back() commits them via the delegate; clean lines are
          skipped.
        - discard() drops cache lines without invoking the delegate.
-       - read_global_memory() with no prior prefetch goes straight through
+       - read_agent_memory() with no prior prefetch goes straight through
          the delegate (cache miss path).
 
    NOT covered here (deferred):
@@ -443,7 +443,7 @@ TEST (AddressClass, GetInfoIntMaxEnumThrowsInvalidArgument)
 }
 
 /* ------------------------------------------------------------------ */
-/* memory_cache_t<agent_address_t> with a stub delegate                */
+/* memory_cache_t with a stub delegate (no agent_t required)                */
 /* ------------------------------------------------------------------ */
 
 namespace
@@ -487,7 +487,7 @@ struct flat_backing_store_t
 TEST (MemoryCache, ContainsAllFalseOnEmpty)
 {
   flat_backing_store_t store (4096);
-  memory_cache_t<agent_address_t> cache (
+  memory_cache_t cache (
     [&] (agent_address_t a, void *r, const void *w, size_t s) {
       return store.xfer (a, r, w, s);
     });
@@ -502,7 +502,7 @@ TEST (MemoryCache, PrefetchPopulatesAndAlignsToCacheLine)
   for (size_t i = 0; i < 128; ++i)
     store.mem[0x100 + i] = std::byte (i & 0xff);
 
-  memory_cache_t<agent_address_t> cache (
+  memory_cache_t cache (
     [&] (agent_address_t a, void *r, const void *w, size_t s) {
       return store.xfer (a, r, w, s);
     });
@@ -523,7 +523,7 @@ TEST (MemoryCache, PrefetchPopulatesAndAlignsToCacheLine)
   /* Read back through the cache: no additional delegate call.  */
   uint8_t buf[10]{};
   size_t got
-    = cache.read_global_memory (agent_address_t{ 0x105 }, buf, sizeof (buf));
+    = cache.read_agent_memory (agent_address_t{ 0x105 }, buf, sizeof (buf));
   EXPECT_EQ (got, 10u);
   EXPECT_EQ (buf[0], 5u);
   EXPECT_EQ (buf[9], 14u);
@@ -535,7 +535,7 @@ TEST (MemoryCache, PrefetchPopulatesAndAlignsToCacheLine)
 TEST (MemoryCache, WriteBackCommitsDirtyLines)
 {
   flat_backing_store_t store (4096);
-  memory_cache_t<agent_address_t> cache (
+  memory_cache_t cache (
     [&] (agent_address_t a, void *r, const void *w, size_t s) {
       return store.xfer (a, r, w, s);
     });
@@ -548,7 +548,7 @@ TEST (MemoryCache, WriteBackCommitsDirtyLines)
   /* Dirty only the first line.  */
   uint8_t payload[4] = { 0xaa, 0xbb, 0xcc, 0xdd };
   size_t wrote
-    = cache.write_global_memory (agent_address_t{ 0x90 }, payload, 4);
+    = cache.write_agent_memory (agent_address_t{ 0x90 }, payload, 4);
   EXPECT_EQ (wrote, 4u);
   /* write-back policy -> no immediate delegate call on write.  */
   EXPECT_TRUE (store.calls.empty ());
@@ -573,7 +573,7 @@ TEST (MemoryCache, WriteBackCommitsDirtyLines)
 TEST (MemoryCache, DiscardDropsLinesWithoutDelegateCalls)
 {
   flat_backing_store_t store (4096);
-  memory_cache_t<agent_address_t> cache (
+  memory_cache_t cache (
     [&] (agent_address_t a, void *r, const void *w, size_t s) {
       return store.xfer (a, r, w, s);
     });
@@ -594,16 +594,16 @@ TEST (MemoryCache, UncachedReadGoesStraightToDelegate)
   for (size_t i = 0; i < 16; ++i)
     store.mem[i] = std::byte (0xa0 | (i & 0xf));
 
-  memory_cache_t<agent_address_t> cache (
+  memory_cache_t cache (
     [&] (agent_address_t a, void *r, const void *w, size_t s) {
       return store.xfer (a, r, w, s);
     });
 
-  /* No prior prefetch -> contains_all() false -> xfer_global_memory
+  /* No prior prefetch -> contains_all() false -> xfer_agent_memory
      short-circuits to the delegate.  */
   uint8_t buf[8]{};
   size_t got
-    = cache.read_global_memory (agent_address_t{ 0 }, buf, sizeof (buf));
+    = cache.read_agent_memory (agent_address_t{ 0 }, buf, sizeof (buf));
   EXPECT_EQ (got, 8u);
   ASSERT_EQ (store.calls.size (), 1u);
   EXPECT_FALSE (store.calls[0].is_write);

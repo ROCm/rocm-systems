@@ -817,7 +817,7 @@ memory_cache_t::write_back (agent_address_t address, amd_dbgapi_size_t size)
             cache_line_address, nullptr, &staging_buffer[0], request_size);
 
           if (xfer_size != request_size)
-            throw memory_access_error_t (m_agent.agent_address_space (),
+            throw memory_access_error_t (m_agent->agent_address_space (),
                                          cache_line_address + xfer_size);
         }
       catch (const process_exited_exception_t &)
@@ -867,17 +867,21 @@ memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
   if (size == 0)
     return 0;
 
-  /* Clamp to the end of the agent address space.  */
-  auto max = m_agent.agent_address_space ().last_address ();
-  if (address > max)
-    throw memory_access_error_t (m_agent.agent_address_space (), address);
-  /* Clamp SIZE so that the last accessed byte (ADDRESS + SIZE - 1)
-     does not exceed MAX, the last representable address.  The
-     comparison is in terms of the last byte rather than a byte count,
-     because the count MAX - ADDRESS + 1 would wrap to zero when
-     ADDRESS is 0 and MAX is std::numeric_limits<decltype(max)>::max.  */
-  if (size - 1 > max - address)
-    size = static_cast<size_t> (max - address) + 1;
+  /* m_agent is nullptr when constructed without an agent (unit tests only).  */
+  if (m_agent != nullptr)
+    {
+      /* Clamp to the end of the agent address space.  */
+      auto max = m_agent->agent_address_space ().last_address ();
+      if (address > max)
+        throw memory_access_error_t (m_agent->agent_address_space (), address);
+      /* Clamp SIZE so that the last accessed byte (ADDRESS + SIZE - 1)
+         does not exceed MAX, the last representable address.  The
+         comparison is in terms of the last byte rather than a byte count,
+         because the count MAX - ADDRESS + 1 would wrap to zero when
+         ADDRESS is 0 and MAX is std::numeric_limits<decltype(max)>::max.  */
+      if (size - 1 > max - address)
+        size = static_cast<size_t> (max - address) + 1;
+    }
 
   auto first_line = utils::align_down (address, cache_line_size);
   auto last_line = utils::align_down (address + size - 1, cache_line_size);
