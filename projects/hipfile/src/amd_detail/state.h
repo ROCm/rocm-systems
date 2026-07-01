@@ -21,10 +21,6 @@
 #include <vector>
 
 namespace hipFile {
-template <typename T> struct Context;
-}
-
-namespace hipFile {
 
 /// @brief The driver is not initialized
 struct DriverNotInitialized : public std::runtime_error {
@@ -212,19 +208,12 @@ public:
     DriverState(DriverState &&)            = delete;
     DriverState &operator=(DriverState &&) = delete;
 
-protected:
-    // Singletons should have private ctors.
-    // However, it prevents creating Mocks that inherit from the
-    // singleton for testing.
     DriverState();
     virtual ~DriverState();
 
 private:
     // The driver's reference count
     int64_t ref_count;
-
-    // Allows Context to manage DriverState.
-    friend struct Context<DriverState>;
 
     // Manages the driver's File objects
     std::unique_ptr<FileMap> file_map;
