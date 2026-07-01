@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "test_paths.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
@@ -38,10 +39,9 @@ RJ_DIAGNOSTIC_POP
 namespace {
 
 using namespace rocjitsu;
+using test::kernel_path;
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
-
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
 
 constexpr uint32_t TOTAL_XCDS = 8;
 constexpr uint32_t CUS_PER_XCD = 32; // 4 SEs × 8 CUs

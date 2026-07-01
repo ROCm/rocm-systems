@@ -62,6 +62,7 @@ struct AgentGfxRevision {
 
 std::string GetAgentIsaName(hsa_agent_t agent);
 std::string ExtractGfxTarget(const std::string& isa_name);
+bool IsGfx12_5Target(const std::string& gfx_target);
 AgentGfxRevision GetAgentGfxRevision(hsa_agent_t agent);
 void ResetAgentGfxRevisionCache();
 

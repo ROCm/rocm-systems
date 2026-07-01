@@ -744,8 +744,16 @@ endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
-if("${hip_version_string}" VERSION_GREATER_EQUAL "7.12.60540")
+# Uncached (fine-grained) VMM/cuMem allocation type. Available natively on
+# HIP >= 7.12.60540 and via the ROCm 7.0.2.x backport range [7.0.51831, 7.0.60000).
+if(HIP_VMM_UNCACHED_MEMORY_AVAILABLE AND
+   (("${hip_version_string}" VERSION_GREATER_EQUAL "7.12.60540") OR
+    (("${hip_version_string}" VERSION_GREATER_EQUAL "7.0.51831") AND
+     ("${hip_version_string}" VERSION_LESS "7.0.60000"))))
   target_compile_definitions(rccl PRIVATE HIP_VMM_UNCACHED_MEMORY)
+  message(STATUS "HIP_VMM_UNCACHED_MEMORY enabled")
+else()
+  message(STATUS "HIP_VMM_UNCACHED_MEMORY disabled")
 endif()
 
 # ==== rocSHMEM integration (optional) ====
@@ -845,6 +853,10 @@ endif()
 if(CE_ENABLED)
   target_compile_definitions(rccl PRIVATE CE_BATCH_ASYNC_SUPPORTED)
   message(STATUS "CE_BATCH_ASYNC_SUPPORTED compile definition enabled")
+endif()
+if(CUMEM_DMABUF_EXPORT_ENABLED)
+  target_compile_definitions(rccl PRIVATE RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+  message(STATUS "RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED compile definition enabled")
 endif()
 
 ## Set RCCL compile options
