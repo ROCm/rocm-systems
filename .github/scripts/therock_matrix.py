@@ -26,7 +26,6 @@ subtree_to_project_map = {
     "projects/rocprofiler-sdk": "profiler",
     "projects/rocprofiler-systems": "profiler",
     "projects/rocr-debug-agent": "debug_tools-debug-agent",
-    "projects/hotswap": "runtimes",
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",
@@ -36,7 +35,7 @@ subtree_to_project_map = {
 therock_projects_to_test = "aqlprofile, hip-tests, hipblas, hipblaslt, hipcub, hipfft, hiprand, hipsolver, hipsparse, hipsparselt, miopen, miopenprovider, rocblas, rocfft, rocgdb-cpu, rocgdb-gpu, rocprim, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocrand, rocroller, rocrtst, rocsolver, rocsparse, rocthrust, rocwmma"
 project_map = {
     "core": {
-        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF"],
+        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON"],
         "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo and amdsmi
     },
     "emulation": {

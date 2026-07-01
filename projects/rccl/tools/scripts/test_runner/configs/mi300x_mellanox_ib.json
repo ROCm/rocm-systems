@@ -1136,6 +1136,22 @@
       ]
     },
 
+    "fault_inject_ops_unit": {
+      "extends": "net_ib_base",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "description": "Pure-unit coverage of the ops-overload fault mechanism: a fake ibv_context drives the inner ncclIbOpsFault* guards and shim error paths directly. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware).",
+      "tests": [
+        {
+          "name": "FaultInj_OpsUnit_All",
+          "description": "Fake-ibv_context unit tests for net_ib_ops_fault.cc: install/remove lifecycle, NULL/unregistered guards, post_send/post_recv errno shims, poll_cq rewrite/synthesize, lost-real-op defensive guard",
+          "test_filter": "OpsFaultUnit.*"
+        }
+      ]
+    },
+
     "resiliency_failover": {
       "extends": "cast_base",
       "timeout": 300,
@@ -3086,6 +3102,12 @@
       "name": "NET IB - Fault Injection (CAST path, QPS=4, splitData=1)",
       "description": "Per-QP fault injection on CAST multi-QP path: error propagation, RTT rebalancing, data integrity under delay",
       "config": "fault_inject_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Ops Unit (fake ibv_context)",
+      "description": "Pure-unit coverage of the ops-overload mechanism via a fabricated ibv_context: inner guard branches and shim error paths. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware)",
+      "config": "fault_inject_ops_unit",
       "enabled": true
     },
     {

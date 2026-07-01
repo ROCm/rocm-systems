@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -46,6 +47,80 @@ bool daemon_ready(const std::string &path) {
   return ok;
 }
 
+struct TestPaths {
+  std::string daemon_bin = RJ_DAEMON_BIN;
+  std::string daemon_config = RJ_DAEMON_CONFIG;
+  std::string daemon_config_2gpu = RJ_DAEMON_CONFIG_2GPU;
+  std::string preload_lib = RJ_PRELOAD_LIB;
+  std::string hip_vector_add_bin = RJ_HIP_VECTOR_ADD_BIN;
+  std::string hip_memcpy_bin = RJ_HIP_MEMCPY_BIN;
+  std::string hip_rccl_bin = RJ_HIP_RCCL_BIN;
+};
+
+std::filesystem::path resolve_relative_to_exe(const std::filesystem::path &exe_dir,
+                                              const char *path) {
+  std::filesystem::path candidate(path);
+  if (!candidate.is_absolute())
+    candidate = exe_dir / candidate;
+  return candidate.lexically_normal();
+}
+
+std::filesystem::path current_exe_dir() {
+  std::error_code ec;
+  std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+  if (ec)
+    return {};
+  return exe.parent_path();
+}
+
+bool installed_paths_exist(const TestPaths &paths) {
+  return std::filesystem::exists(paths.daemon_bin) &&
+         std::filesystem::exists(paths.daemon_config) &&
+         std::filesystem::exists(paths.daemon_config_2gpu) &&
+         std::filesystem::exists(paths.preload_lib) &&
+         std::filesystem::exists(paths.hip_vector_add_bin) &&
+         std::filesystem::exists(paths.hip_memcpy_bin);
+}
+
+TestPaths installed_paths(const std::filesystem::path &exe_dir) {
+  return {
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_CONFIG).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_CONFIG_2GPU).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_PRELOAD_LIB).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_VECTOR_ADD_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_MEMCPY_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_RCCL_BIN).string(),
+  };
+}
+
+TestPaths &test_paths() {
+  static TestPaths paths = [] {
+    std::filesystem::path exe_dir = current_exe_dir();
+    if (!exe_dir.empty()) {
+      TestPaths installed = installed_paths(exe_dir);
+      if (installed_paths_exist(installed))
+        return installed;
+    }
+    return TestPaths{};
+  }();
+  return paths;
+}
+
+const char *daemon_bin() { return test_paths().daemon_bin.c_str(); }
+
+const char *daemon_config() { return test_paths().daemon_config.c_str(); }
+
+const char *daemon_config_2gpu() { return test_paths().daemon_config_2gpu.c_str(); }
+
+const char *preload_lib() { return test_paths().preload_lib.c_str(); }
+
+const char *hip_vector_add_bin() { return test_paths().hip_vector_add_bin.c_str(); }
+
+const char *hip_memcpy_bin() { return test_paths().hip_memcpy_bin.c_str(); }
+
+const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
+
 class DaemonTest : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -63,7 +138,7 @@ protected:
 
     if (daemon_pid_ == 0) {
       setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
-      execl(RJ_DAEMON_BIN, RJ_DAEMON_BIN, "--daemon", "--config", RJ_DAEMON_CONFIG, nullptr);
+      execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config(), nullptr);
       _exit(127);
     }
 
@@ -95,7 +170,7 @@ protected:
     std::string cmd = "XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " LD_PRELOAD=";
-    cmd += RJ_PRELOAD_LIB;
+    cmd += preload_lib();
     cmd += " HSA_ENABLE_SDMA=1 ";
     cmd += binary;
     if (gtest_filter && gtest_filter[0]) {
@@ -123,11 +198,11 @@ protected:
     std::string cmd = "XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " ";
-    cmd += RJ_DAEMON_BIN;
+    cmd += daemon_bin();
     cmd += " --attach --config ";
-    cmd += RJ_DAEMON_CONFIG;
+    cmd += daemon_config();
     cmd += " -- ";
-    cmd += RJ_HIP_RCCL_BIN;
+    cmd += hip_rccl_bin();
     cmd += " --rank=";
     cmd += std::to_string(rank);
     cmd += " --world-size=";
@@ -182,24 +257,24 @@ protected:
 // --- hip_vector_add_test ---
 
 TEST_F(DaemonTest, HipVectorAdd) {
-  auto r = run_hip_test(RJ_HIP_VECTOR_ADD_BIN, "HipVectorAddTest.CorrectResult");
+  auto r = run_hip_test(hip_vector_add_bin(), "HipVectorAddTest.CorrectResult");
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
 // --- hip_memcpy_test ---
 
 TEST_F(DaemonTest, HipMemcpyRoundTripFloat) {
-  auto r = run_hip_test(RJ_HIP_MEMCPY_BIN, "HipMemcpyTest.RoundTripFloat");
+  auto r = run_hip_test(hip_memcpy_bin(), "HipMemcpyTest.RoundTripFloat");
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
 TEST_F(DaemonTest, HipMemcpyRoundTripInt) {
-  auto r = run_hip_test(RJ_HIP_MEMCPY_BIN, "HipMemcpyTest.RoundTripInt");
+  auto r = run_hip_test(hip_memcpy_bin(), "HipMemcpyTest.RoundTripInt");
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
 TEST_F(DaemonTest, HipMemcpyDeviceToDevice) {
-  auto r = run_hip_test(RJ_HIP_MEMCPY_BIN, "HipMemcpyTest.DeviceToDevice");
+  auto r = run_hip_test(hip_memcpy_bin(), "HipMemcpyTest.DeviceToDevice");
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
@@ -210,8 +285,8 @@ TEST_F(DaemonTest, TwoIndependentClients) {
   ProcessResult r1, r2;
 
   t1 = std::thread(
-      [&] { r1 = run_hip_test(RJ_HIP_VECTOR_ADD_BIN, "HipVectorAddTest.CorrectResult"); });
-  t2 = std::thread([&] { r2 = run_hip_test(RJ_HIP_MEMCPY_BIN, "HipMemcpyTest.RoundTripFloat"); });
+      [&] { r1 = run_hip_test(hip_vector_add_bin(), "HipVectorAddTest.CorrectResult"); });
+  t2 = std::thread([&] { r2 = run_hip_test(hip_memcpy_bin(), "HipMemcpyTest.RoundTripFloat"); });
 
   t1.join();
   t2.join();
@@ -237,7 +312,7 @@ protected:
 
     if (daemon_pid_ == 0) {
       setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
-      execl(RJ_DAEMON_BIN, RJ_DAEMON_BIN, "--daemon", "--config", RJ_DAEMON_CONFIG_2GPU, nullptr);
+      execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config_2gpu(), nullptr);
       _exit(127);
     }
 
@@ -275,11 +350,11 @@ protected:
     cmd += " NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1 HSA_NO_SCRATCH_RECLAIM=1"
            " NCCL_SOCKET_NTHREADS=1 NCCL_NSOCKS_PERTHREAD=1"
            " NCCL_SOCKET_IFNAME=lo ";
-    cmd += RJ_DAEMON_BIN;
+    cmd += daemon_bin();
     cmd += " --attach --config ";
-    cmd += RJ_DAEMON_CONFIG_2GPU;
+    cmd += daemon_config_2gpu();
     cmd += " -- ";
-    cmd += RJ_HIP_RCCL_BIN;
+    cmd += hip_rccl_bin();
     cmd += " --rank=";
     cmd += std::to_string(rank);
     cmd += " --world-size=";

@@ -1548,6 +1548,21 @@ typedef union rocprofiler_hsa_api_args_t
         uint32_t                     num_descs;
     } hsa_amd_queue_create;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x11
+    struct
+    {
+        hsa_queue_t*                 queue;
+        hsa_amd_external_semaphore_t sem;
+        uint64_t                     value;
+    } hsa_amd_queue_signal_external_semaphore;
+
+    struct
+    {
+        hsa_queue_t*                 queue;
+        hsa_amd_external_semaphore_t sem;
+        uint64_t                     value;
+    } hsa_amd_queue_wait_external_semaphore;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 
