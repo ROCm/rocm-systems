@@ -53,19 +53,44 @@ amdcuid_status_t CuidPlatform::discover(std::vector<DevicePtr> &platforms) {
 
 amdcuid_status_t
 CuidPlatform::get_hardware_fingerprint(uint64_t &fingerprint) const {
-  std::string serial;
-  amdcuid_status_t status = SmbiosUtil::get_system_serial(serial);
-  if (status != AMDCUID_STATUS_SUCCESS) {
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
+  // Get system UUID from SMBIOS
+  uint8_t uuid[16] = {0};
+  status = SmbiosUtil::get_system_uuid(uuid);
+  // After getting uuid, check it's not a sentinel "not set" value
+  bool uuid_valid = false;
+  for (int i = 0; i < 16; ++i) {
+    if (uuid[i] != 0x00 && uuid[i] != 0xFF) {
+      uuid_valid = true;
+      break;
+    }
+  }
+  if (status == AMDCUID_STATUS_SUCCESS && uuid_valid) {
+    // use UUID as basis for CUID
+    fingerprint = (static_cast<uint64_t>(uuid[0]) << 56) |
+                  (static_cast<uint64_t>(uuid[1]) << 48) |
+                  (static_cast<uint64_t>(uuid[2]) << 40) |
+                  (static_cast<uint64_t>(uuid[3]) << 32) |
+                  (static_cast<uint64_t>(uuid[4]) << 24) |
+                  (static_cast<uint64_t>(uuid[5]) << 16) |
+                  (static_cast<uint64_t>(uuid[6]) << 8) |
+                  static_cast<uint64_t>(uuid[7]);
+  } else {
+    std::string serial;
+    status = SmbiosUtil::get_system_serial(serial);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      fingerprint = 0;
+      return AMDCUID_STATUS_UNSUPPORTED;
+    }
+
+    // Generate fingerprint from serial number
     fingerprint = 0;
-    return AMDCUID_STATUS_UNSUPPORTED;
+    for (size_t i = 0; i < serial.length() && i < 8; ++i) {
+      fingerprint |= (static_cast<uint64_t>(serial[i]) << (i * 8));
+    }
   }
 
-  // Generate fingerprint from serial number
-  fingerprint = 0;
-  for (size_t i = 0; i < serial.length() && i < 8; ++i) {
-    fingerprint |= (static_cast<uint64_t>(serial[i]) << (i * 8));
-  }
-  return AMDCUID_STATUS_SUCCESS;
+  return status;
 }
 
 amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id &id) const {
@@ -87,33 +112,15 @@ amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id &id) const {
   }
 
   uint64_t fingerprint = 0;
+  status = get_hardware_fingerprint(fingerprint);
 
-  // Get system UUID from SMBIOS
-  uint8_t uuid[16] = {0};
-  status = SmbiosUtil::get_system_uuid(uuid);
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    // use UUID as basis for CUID
-    fingerprint = (static_cast<uint64_t>(uuid[0]) << 56) |
-                  (static_cast<uint64_t>(uuid[1]) << 48) |
-                  (static_cast<uint64_t>(uuid[2]) << 40) |
-                  (static_cast<uint64_t>(uuid[3]) << 32) |
-                  (static_cast<uint64_t>(uuid[4]) << 24) |
-                  (static_cast<uint64_t>(uuid[5]) << 16) |
-                  (static_cast<uint64_t>(uuid[6]) << 8) |
-                  static_cast<uint64_t>(uuid[7]);
-  } else {
-    // Fallback: get fingerprint from other sources
-    status = get_hardware_fingerprint(fingerprint);
-
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      std::string name = "";
-      // family here not used
-      std::string family = "";
-      status = SmbiosUtil::get_product_info(name, family);
-
-      CuidUtilities::make_fallback_fingerprint(name, fingerprint);
-      temp = true;
-    }
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    std::string name = "";
+    // family here not used
+    std::string family_dummy = "";
+    status = SmbiosUtil::get_product_info(name, family_dummy);
+    CuidUtilities::make_fallback_fingerprint(name, fingerprint);
+    temp = true;
   }
 
   status = CuidUtilities::generate_primary_cuid(

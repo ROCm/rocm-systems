@@ -13,12 +13,10 @@ import time
 from pathlib import Path
 
 import common
-import numpy as np
 import pandas as pd
 import pytest
 import yaml
 from conftest import require_torch
-from scipy.stats import zscore
 
 from utils.utils_common import canonical_config_arch
 
@@ -436,7 +434,10 @@ def are_stochastic_counters_similar(test_dfs, baseline_df):
             z_score_threshold = 2.0
 
             test_z_scores_list = [
-                np.abs(zscore(test_counters)) for test_counters in test_counters_list
+                (
+                    (test_counters - test_counters.mean()) / test_counters.std(ddof=0)
+                ).abs()
+                for test_counters in test_counters_list
             ]
             test_counters_list_trimmed = [
                 test_counters[test_z_scores < z_score_threshold]

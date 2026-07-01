@@ -240,23 +240,19 @@ public:
 
   /// @brief Imports a memory object from a shareable handle.
   ///
-  /// @note The handle must be destroyed with @ref DestroyImportedMemoryHandle.
+  /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
   ///
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory; @p handle->size is set to the
   ///             imported allocation size in bytes
   /// @param[in] type @ref ShareType to import
-  /// @param[in] import_handle input handle; @p int* for @p DMABUF_FD,
-  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
+  /// @param[in] import_handle input handle; @p DriverMemoryHandle* whose
+  ///             @p dmabuf_fd field is read for @p DMABUF_FD and whose
+  ///             @p fabric_handle field is read for @p FABRIC_HANDLE
   /// @param[in] mem address of existing buffer, used to bypass import
   virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
                                           ShareType type, void* import_handle,
                                           void* mem = nullptr) = 0;
-
-  /// @brief Destroys the handle created during @ref ImportMemoryHandle.
-  ///
-  /// @param[in] handle handle of the object to release
-  virtual hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -265,9 +261,10 @@ public:
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
   /// @param[out] perms new permissions
+  /// @param[in] node_id driver node id of the target GPU
   virtual hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem,
                            size_t offset, size_t size,
-                           hsa_access_permission_t perms) = 0;
+                           hsa_access_permission_t perms, uint32_t node_id) = 0;
 
   /// @brief Unmaps the memory associated with the handle.
   ///
@@ -275,8 +272,9 @@ public:
   /// @param[in] mem virtual address associated with the handle
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
+  /// @param[in] node_id driver node id of the target GPU
   virtual hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem,
-                             size_t offset, size_t size) = 0;
+                             size_t offset, size_t size, uint32_t node_id) = 0;
 
   /// @brief Maps the virtual address to the physical address and creates a handle to share this
   /// mapping.
@@ -349,6 +347,32 @@ public:
   /// external semaphores.
   virtual hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
     return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Submits a GPU-side signal of an imported external semaphore on
+  /// the given KMD queue.
+  /// @param[in] queue_id KMD queue id (HSA_QUEUEID) the signal is appended to.
+  /// @param[in] sem Semaphore from @ref ImportExternalSemaphore.
+  /// @param[in] value Payload for timeline semaphores (ignored for binary).
+  /// @retval HSA_STATUS_ERROR_NOT_SUPPORTED if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t SignalExternalSemaphore(uint64_t queue_id,
+                                               hsa_amd_external_semaphore_t sem,
+                                               uint64_t value) const {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  }
+
+  /// @brief Submits a GPU-side wait on an imported external semaphore on the
+  /// given KMD queue.
+  /// @param[in] queue_id KMD queue id (HSA_QUEUEID) the wait is appended to.
+  /// @param[in] sem Semaphore from @ref ImportExternalSemaphore.
+  /// @param[in] value Payload for timeline semaphores (ignored for binary).
+  /// @retval HSA_STATUS_ERROR_NOT_SUPPORTED if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t WaitExternalSemaphore(uint64_t queue_id,
+                                             hsa_amd_external_semaphore_t sem,
+                                             uint64_t value) const {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   }
 
   /// @brief Sets trap handler and trap buffer to be used for all queues associated

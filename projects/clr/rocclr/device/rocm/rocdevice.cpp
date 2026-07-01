@@ -138,9 +138,8 @@ Device::Device(hsa_agent_t bkendDevice)
       sdma_engine_allocator_(*this),
       cpu_agent_info_(nullptr),
       numHwPipes_(4) {
-  // Initialize queue pools with proper comparators (requires 'this' pointer)
   for (uint i = 0; i < QueuePriority::Total; ++i) {
-    queuePool_.emplace_back(QueueCompare(this));
+    queuePool_.emplace_back();
   }
 
   group_segment_.handle = 0;
@@ -221,6 +220,9 @@ Device::~Device() {
   // because its destructor will call releaseQueue()
   delete xferQueue_;
   xferQueue_ = nullptr;
+
+  // Final drain of deferred destroys on the main thread before hsa_shut_down.
+  DrainDeferredQueueDestroys();
 
   for (auto& it : queuePool_) {
     for (auto qIter = it.begin(); qIter != it.end();) {
@@ -1522,14 +1524,16 @@ bool Device::populateOCLDeviceConstants() {
     }
     info_.imageMaxBufferSize_ = (amd::IS_HIP) ? image_max_dim[0] : (1 << 27);
 
-    info_.imagePitchAlignment_ = 256;
-
-    info_.imageBaseAddressAlignment_ = 256;
-
-    info_.bufferFromImageSupport_ = false;
-
     info_.imageSupport_ = (info_.maxReadWriteImageArgs_ > 0) ? true : false;
   }
+
+  // These are properties of the device's linear memory layout, not the image
+  // extension.  They must be set unconditionally so that hipMallocPitch /
+  // hipMalloc3D produce correct pitch alignment even when IMAGE_SUPPORT is
+  // off.  The PAL backend already sets them unconditionally.
+  info_.imagePitchAlignment_ = 256;
+  info_.imageBaseAddressAlignment_ = 256;
+  info_.bufferFromImageSupport_ = false;
 
   // Enable SVM Capabilities of Hsa device. Ensure
   // user has not setup memory to be non-coherent
@@ -1752,8 +1756,15 @@ bool Device::populateOCLDeviceConstants() {
 
   // this is required for clustered kernel launches; but it might not be supported in older rocr,
   // so invalid argument might no be necessarily an error
-  if (HSA_STATUS_SUCCESS != hsaStatus && HSA_STATUS_ERROR_INVALID_ARGUMENT != hsaStatus)
+  if (HSA_STATUS_SUCCESS != hsaStatus && HSA_STATUS_ERROR_INVALID_ARGUMENT != hsaStatus) {
     LogError("HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE query failed");
+  } else {
+    // this is a temporary override of the ROCr result (when there is cluster support). This line
+    // will be removed as soon as ROCr provides the correct result
+    info_.clusterMaxSize_ = info_.clusterMaxSize_ > 1?
+                            info_.maxComputeUnits_ / info_.numberOfShaderEngines_ :
+                            1;
+  }
 
   info_.gpuDirectRdmaWithHipVmmSupported_ =
       info_.virtualMemoryManagement_ && info_.dmabufSupported_;
@@ -3172,6 +3183,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   bool dedicated_queue, hsa_queue_t* preferred,
                                   const std::unordered_set<uint64_t>* excluded_ids,
                                   void** metadata_ring_buffer) {
+  // App-thread context: flush queues deferred from the async thread once they
+  // reach the batch threshold, bounding live deferred queues.
+  if (DeferredQueueCount() >= kDeferredQueueDrainThreshold) {
+    DrainDeferredQueueDestroys();
+  }
+
   hsa_amd_queue_priority_t queue_priority;
   uint qIndex;
   switch (priority) {
@@ -3463,8 +3480,36 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
   // hsa queues with cumask set and coop queues are not being reused. Hence, if the app uses such
   // queues, we need to destroy them when the queue is released.
   if (!cuMask.empty() || coop_queue) {
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
-            queue->base_address);
+    // On the async-events thread a non-coop ~AqlQueue self-deadlocks; defer it to an app thread.
+    // Coop queues are recycled synchronously via GWSRelease, so never defer them.
+    if (InAsyncSignalHandler() && !coop_queue) {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deferring CG enabled hardware queue %p destroy",
+              queue->base_address);
+      std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
+      deferredQueueDestroy_.push_back(queue);
+    } else {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
+              queue->base_address);
+      Hsa::queue_destroy(queue);
+    }
+  }
+}
+
+size_t Device::DeferredQueueCount() {
+  std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
+  return deferredQueueDestroy_.size();
+}
+
+void Device::DrainDeferredQueueDestroys() {
+  // Swap out the batch under lock, then destroy without holding it: queue_destroy
+  // is blocking and may run runtime callbacks.
+  std::vector<hsa_queue_t*> pending;
+  {
+    std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
+    pending.swap(deferredQueueDestroy_);
+  }
+  for (hsa_queue_t* queue : pending) {
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p", queue->base_address);
     Hsa::queue_destroy(queue);
   }
 }
@@ -3704,7 +3749,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
     return HSA_STATUS_ERROR;
   }
 
-  gpu_error_ = gpu_error;
+  gpu_error_.store(gpu_error, std::memory_order_relaxed);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4230,7 +4275,7 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
     if (should_abort) {
       abort();
     }
-    amd::Device::gpu_error_ = ConvertHSAErrorIntoCLError(status);
+    amd::Device::gpu_error_.store(ConvertHSAErrorIntoCLError(status), std::memory_order_relaxed);
   }
 }
 

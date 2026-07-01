@@ -168,6 +168,15 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   // Falls back to 0 if VF detection is unavailable.
   info.header.fields.gpu.unit_id = CuidUtilities::get_gpu_vf_id(device_path);
 
+  // check for XCP partitioning by looking for pci config space file on devices
+  // where unit_id is 0 (bare metal or passthrough). If config file is missing,
+  // that indicates partition which is unsupported for CUID generation.
+  std::string config_file = device_path + "/config";
+  if (access(config_file.c_str(), F_OK) == -1 &&
+      info.header.fields.gpu.unit_id == 0) {
+    return AMDCUID_STATUS_UNSUPPORTED;
+  }
+
   std::string vendor = CuidUtilities::read_sysfs_file(device_path + "/vendor");
   if (vendor.empty() && !bdf.empty()) {
     // if file read fails, attempt to get from pci config
@@ -399,7 +408,7 @@ amdcuid_status_t CuidGpu::get_primary_cuid(amdcuid_primary_id &id) const {
 
     CuidFileEntry entry;
     status = primary_file.find_by_device_node(m_info.render_node, entry);
-    if (status == AMDCUID_STATUS_SUCCESS) {
+    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
       id.UUIDv8_representation = entry.primary_cuid;
       CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
       return AMDCUID_STATUS_SUCCESS;

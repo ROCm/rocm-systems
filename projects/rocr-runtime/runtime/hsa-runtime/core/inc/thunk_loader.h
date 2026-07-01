@@ -360,6 +360,12 @@ class ThunkLoader {
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE* OutHandle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore))(HSA_EXTERNAL_SEMAPHORE_HANDLE Handle);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore))(HSA_QUEUEID QueueId, \
+                                      HSA_EXTERNAL_SEMAPHORE_HANDLE Handle, \
+                                      HSAuint64 Value);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore))(HSA_QUEUEID QueueId, \
+                                      HSA_EXTERNAL_SEMAPHORE_HANDLE Handle, \
+                                      HSAuint64 Value);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleExport))(const HsaHandleExportDesc* desc, \
                                       HsaMemoryExportResult* res, \
                                       HsaHandleExportFlags* flags);
@@ -367,11 +373,13 @@ class ThunkLoader {
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
                                       HSAuint64 addr, \
-                                      HsaMemoryMapFlags flags);
+                                      HsaMemoryMapFlags flags, \
+                                      HSAuint32 NodeId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaUnmap))(HsaMemoryObjectHandle Handle, \
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
-                                      HSAuint64 addr);
+                                      HSAuint64 addr, \
+                                      HSAuint32 NodeId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemHandleFree))(HsaMemoryObjectHandle Handle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata))(HsaMemoryObjectHandle Handle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr))(HsaAMDGPUDeviceHandle DeviceHandle, \
@@ -433,7 +441,9 @@ class ThunkLoader {
     bool CreateThunkInstance();
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
-    bool IsDXG() const { return is_dxg_; }
+    bool IsDXG() const { return is_win_dxg_ || is_wsl_dxg_; }
+    bool IsWinDxg() const { return is_win_dxg_; }
+    bool IsWslDxg() const { return is_wsl_dxg_; }
     bool IsDTIF() const { return is_dtif_; }
     bool IsSharedLibraryLoaded() const { return is_loaded_; }
     void* ThunkHandle() const { return thunk_handle; }
@@ -539,6 +549,8 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
     HSAKMT_DEF(hsaKmtImportExternalSemaphore)* HSAKMT_PFN(hsaKmtImportExternalSemaphore);
     HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)* HSAKMT_PFN(hsaKmtDestroyExternalSemaphore);
+    HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore);
+    HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore);
     HSAKMT_DEF(hsaKmtHandleExport)* HSAKMT_PFN(hsaKmtHandleExport);
     HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
     HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);
@@ -565,7 +577,8 @@ class ThunkLoader {
     std::string whoami();
     void *thunk_handle;
     std::string library_name;
-    bool is_dxg_;
+    bool is_win_dxg_;
+    bool is_wsl_dxg_;
     bool is_dtif_;
     bool is_loaded_;
 };
