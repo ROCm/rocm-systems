@@ -5,7 +5,6 @@
 
 #include "batch/batch.h"
 #include "buffer.h"
-#include "configuration.h"
 #include "file.h"
 #include "state.h"
 #include "stream.h"
