@@ -65,8 +65,10 @@ struct CodeObjectView {
   std::string uri;
 };
 
+inline constexpr bool kDefaultGfx12_5EntryTrampolinesEnabled = false;
+
 struct RewriteOptions {
-  bool gfx12_5_rewrite_enabled = true;
+  bool gfx12_5_rewrite_enabled = kDefaultGfx12_5EntryTrampolinesEnabled;
 };
 
 struct RewriteDecision {

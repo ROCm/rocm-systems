@@ -98,8 +98,10 @@ bool IsHotswapDisabledByEnv() { return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE"); 
 
 bool IsGfx12_5RewriteRequested() {
   constexpr char kEnvName[] = "AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES";
-  // Default-on policy owned by ROCR: only literal "0" opts out.
-  return !os::IsEnvVarSet(kEnvName) || os::GetEnvVar(kEnvName) != "0";
+  if (!os::IsEnvVarSet(kEnvName)) {
+    return kDefaultGfx12_5EntryTrampolinesEnabled;
+  }
+  return IsEnvFlagEnabled(kEnvName);
 }
 
 bool IsVerboseLoggingEnabled() {
