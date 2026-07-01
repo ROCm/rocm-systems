@@ -177,22 +177,14 @@ struct context
 };
 
 /// @brief True when this context was configured for kernel replay (multi-pass dispatch counting).
-inline bool
-kernel_replay_is_enabled(const context* ctx)
-{
-    if(!ctx || !ctx->kernel_replay) return false;
-    bool enabled = false;
-    ctx->kernel_replay->enabled.rlock([&](const bool& v) { enabled = v; });
-    return enabled;
-}
+bool
+kernel_replay_is_enabled(const context* ctx);
 
 /// @brief Number of replay passes the tool wants for this context (1 == no replay).
-inline uint64_t
-kernel_replay_pass_count(const context* ctx)
-{
-    if(!ctx || !ctx->kernel_replay || !ctx->kernel_replay->pass_count_cb) return 1;
-    return ctx->kernel_replay->pass_count_cb(ctx->kernel_replay->pass_count_cb_args);
-}
+/// @p dispatch_data provides the tool with dispatch context (kernel/agent/dims) for the decision.
+uint64_t
+kernel_replay_pass_count(const context*                               ctx,
+                         rocprofiler_dispatch_counting_service_data_t dispatch_data);
 
 // set the client index needs to be called before allocate_context()
 void push_client(uint32_t);

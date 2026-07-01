@@ -1791,8 +1791,11 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
 // collected. Each pass collects one batch via counter_dispatch_callback. Returning 1 disables
 // replay. (Targeting/range filtering is intentionally not applied here yet.)
 uint64_t
-counter_replay_pass_count_callback(void* /*callback_data_args*/)
+counter_replay_pass_count_callback(rocprofiler_dispatch_counting_service_data_t /*dispatch_data*/,
+                                   void* /*callback_data_args*/)
 {
+    // dispatch_data (kernel_id/agent/dims) is now available for per-kernel/agent pass-count
+    // decisions and range filtering; not consumed yet.
     const auto n = tool::get_config().counters.size();
     return (n == 0) ? 1 : n;
 }

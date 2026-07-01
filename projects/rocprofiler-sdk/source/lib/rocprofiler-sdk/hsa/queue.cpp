@@ -97,14 +97,44 @@ struct replay_pass_state
     hsa_signal_t              pass_done         = {.handle = 0};
 };
 
+// Build the dispatch info handed to the kernel-replay pass-count callback so the tool can decide
+// the pass count per kernel/agent. dispatch_id is 0 for now: the id is not minted until inside
+// process_packet_batch, and the pass-count query happens before that. Populates from the regular
+// kernel-dispatch packet (the replayed case); ext-dispatch dims are left zero for now.
+rocprofiler_dispatch_counting_service_data_t
+make_replay_pass_count_data(const Queue& queue, const rocprofiler_packet& pkt)
+{
+    auto data = common::init_public_api_struct(rocprofiler_dispatch_counting_service_data_t{});
+    auto info = common::init_public_api_struct(rocprofiler_kernel_dispatch_info_t{});
+
+    const auto& s             = pkt.kernel_dispatch;
+    info.kernel_id            = code_object::get_kernel_id(s.kernel_object);
+    info.queue_id             = queue.get_id();
+    info.private_segment_size = s.private_segment_size;
+    info.group_segment_size   = s.group_segment_size;
+    info.workgroup_size       = {s.workgroup_size_x, s.workgroup_size_y, s.workgroup_size_z};
+    info.grid_size            = {s.grid_size_x, s.grid_size_y, s.grid_size_z};
+
+    // TODO: get the dispatch id from the packet, needs to be inside process_packet_batch
+    info.dispatch_id = 0;
+    if(const auto* agent = queue.get_agent().get_rocp_agent())
+    {
+        info.agent_id = agent->id;
+    }
+
+    data.dispatch_info = info;
+    return data;
+}
+
 // Number of replay passes for the active kernel-replay context (the tool supplies it via the
 // service's pass-count callback). Returns 1 when no replay context is active, which disables
-// replay.
+// replay. @p dispatch_data gives the tool the dispatch context for the decision.
 uint64_t
-kernel_replay_pass_count()
+kernel_replay_pass_count(rocprofiler_dispatch_counting_service_data_t dispatch_data)
 {
     for(const auto* ctx : context::get_active_contexts())
-        if(context::kernel_replay_is_enabled(ctx)) return context::kernel_replay_pass_count(ctx);
+        if(context::kernel_replay_is_enabled(ctx))
+            return context::kernel_replay_pass_count(ctx, dispatch_data);
     return 1;
 }
 
@@ -761,7 +791,8 @@ WriteInterceptor(const void* packets,
     // thread; reuses process_packet_batch for each pass so counter collection, the serializer, the
     // async signal handler, and record_callback all behave exactly as in the single-pass path.
     // Opt-in and gated so non-replay runs are unchanged.
-    if(const int replay_n = static_cast<int>(kernel_replay_pass_count());
+    const auto _replay_pass_count_data = make_replay_pass_count_data(queue, packets_arr[0]);
+    if(const int replay_n = static_cast<int>(kernel_replay_pass_count(_replay_pass_count_data));
        replay_n > 1 && pkt_count == 1 && num_dispatch_packets == 1)
     {
         const auto& core = queue.core_api();
