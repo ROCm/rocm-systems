@@ -152,7 +152,13 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     auto factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
         *agent, params, *table.core_, *table.amd_ext_);
     auto control_packet = factory->construct_control_packet();
-    auto buffer_packet  = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
+    // Mirror ThreadTracerAgent::start_thread_trace: the producer loop submits the
+    // start packets (before_krn_pkt) and, on stop, after_krn_pkt.at(0). Those
+    // vectors are only filled by populate_before()/populate_after(), so populate
+    // them here or the producer aborts with small_vector::at out_of_range.
+    control_packet->populate_before();
+    control_packet->populate_after();
+    auto buffer_packet = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
 
     auto mock_queue          = make_mock_queue(*agent);
     auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
