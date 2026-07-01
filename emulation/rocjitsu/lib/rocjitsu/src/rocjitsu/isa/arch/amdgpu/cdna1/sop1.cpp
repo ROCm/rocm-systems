@@ -513,6 +513,7 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= RESULT_OR;
 }
 
 void SBitset1B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -533,6 +534,7 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= RESULT_OR;
 }
 
 void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {

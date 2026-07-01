@@ -465,6 +465,7 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= RESULT_OR;
 }
 
 void SBitset1B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -492,6 +493,7 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= RESULT_OR;
 }
 
 void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {

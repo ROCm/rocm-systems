@@ -150,6 +150,7 @@ def _result_combinator_flag_stmts(sem) -> list[str]:
     Derived from the per-opcode semantic class/operation.
     EXEC-state analysis uses this to prove an all-ones EXEC write:
     """
+    """
     if sem is None:
         return []
     cls = sem.semantic_class
@@ -159,6 +160,26 @@ def _result_combinator_flag_stmts(sem) -> list[str]:
     if cls in ('scalar_binop', 'scalar_saveexec') and op == 'or':
         return ['flags_ |= RESULT_OR;']
     return []
+    """
+    if sem is None:
+        return []
+    # Lazy import mirrors the execute-body generation path and avoids a
+    # module-load import cycle with the sema_* modules.
+    from amdisa.sema_derive import derive_sema_block
+    from amdisa.sema_properties import InstructionProperty, derive_properties
+
+    block = derive_sema_block(sem)
+    if block is None or block.is_empty:
+        return []
+    props = derive_properties(block)
+    return [
+        f'flags_ |= {name};'
+        for prop, name in (
+            (InstructionProperty.RESULT_S_COPY, 'RESULT_COPY'),
+            (InstructionProperty.RESULT_S_OR, 'RESULT_OR'),
+        )
+        if prop in props
+    ]
 
 
 @dataclass

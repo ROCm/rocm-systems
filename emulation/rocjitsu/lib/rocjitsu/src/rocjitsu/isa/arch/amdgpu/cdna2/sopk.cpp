@@ -27,6 +27,7 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= RESULT_COPY;
 }
 
 void SMovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
