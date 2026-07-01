@@ -26,6 +26,7 @@ set(HIPFILE_SOURCES
     hipfile-stats.cpp
     io.cpp
     mountinfo.cpp
+    runtime.cpp
     state.cpp
     stats.cpp
     stream.cpp
