@@ -8,11 +8,15 @@
 #include <hip_test_process.hh>
 #include <cstdlib>
 
+// These tests are AMD-only (PAL vs ROCr backends)
+#if HT_AMD
+
 /**
  * @addtogroup hipEnvGpuEnablePal hipEnvGpuEnablePal
  * @{
  * @ingroup EnvironmentTest
  * Test GPU_ENABLE_PAL environment variable behavior with platform-specific defaults.
+ * AMD-only: Tests ROCr vs PAL backend selection.
  *
  * Behavior Matrix:
  * ----------------
@@ -161,3 +165,5 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
  * End doxygen group EnvironmentTest.
  * @}
  */
+
+#endif  // HT_AMD
