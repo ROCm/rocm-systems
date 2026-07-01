@@ -45,15 +45,25 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief Returns the number of replay passes (counter batches) to run for a replayed dispatch.
+ * @brief Returns the number of replay passes (counter batches) to run for an upcoming dispatch.
  *
- * Invoked by the SDK on the replay path to learn how many times to re-execute the dispatch. The
- * tool returns the number of counter batches it wants collected (each pass collects one batch via
- * @c dispatch_callback). A return value of 0 or 1 disables replay for the dispatch.
+ * Invoked by the SDK on the replay path (once per dispatch, before any per-pass state is set up) to
+ * learn how many times to replay the dispatch. The tool returns the number of counter batches it
+ * wants collected (each pass collects one batch via @c dispatch_callback). A return value of 0 or 1
+ * disables replay for the dispatch.
  *
+ * @p dispatch_data carries the same dispatch information the per-dispatch counting callback
+ * receives (kernel_id, agent_id, queue_id, grid/workgroup/segment sizes) so the tool can decide the
+ * pass count per kernel/agent. NOTE: @c dispatch_data.dispatch_info.dispatch_id is currently 0 on
+ * this path (the id is not yet minted when the pass count is queried); do not rely on it.
+ * TODO: get the dispatch id from the packet, needs to be inside process_packet_batch.
+ *
+ * @param [in] dispatch_data Dispatch information for the kernel about to be dispatched.
  * @param [in] user_data User data supplied at configuration time.
  */
-typedef uint64_t (*rocprofiler_kernel_replay_pass_count_cb_t)(void* user_data);
+typedef uint64_t (*rocprofiler_kernel_replay_pass_count_cb_t)(
+    rocprofiler_dispatch_counting_service_data_t dispatch_data,
+    void*                                        user_data);
 
 /**
  * @brief Configure dispatch counting with kernel replay enabled on a context.

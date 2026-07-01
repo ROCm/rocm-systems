@@ -193,7 +193,7 @@ null_record_callback(rocprofiler_dispatch_counting_service_data_t,
 {}
 
 uint64_t
-null_pass_count_callback(void*)
+null_pass_count_callback(rocprofiler_dispatch_counting_service_data_t, void*)
 {
     return 1;
 }
