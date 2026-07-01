@@ -318,7 +318,7 @@ list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fsanitize=addre
 list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fno-omit-frame-pointer")
 list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-shared-libasan")
 
-# Asan is not supported by SPIR-V, so the Asan device flags must be dropped in those case.
+# ASan is not supported by SPIR-V, so ASan-related device flags must be dropped in those cases.
 if(ENABLE_SPIRV)
   set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV})
 endif()
