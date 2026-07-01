@@ -34,15 +34,14 @@
 #include <iostream>
 #include <vector>
 #include <map>
-#include <atomic>
 #include <future>
 #include "agent.hpp"
 
 class IWorkload
 {
 public:
-    IWorkload() {}
-    virtual ~IWorkload(){};
+    IWorkload() = default;
+    virtual ~IWorkload()= default;
     virtual void run() = 0;
 };
 

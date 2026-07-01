@@ -31,7 +31,6 @@
 #include <iostream>
 #include <vector>
 #include <map>
-#include <atomic>
 #include <future>
 #include "counter.hpp"
 #include "workload.hpp"
@@ -84,7 +83,7 @@ public:
     Stream(Stream& other) = delete;
     Stream& operator=(Stream& other) = delete;
 
-    void synchronize() { HIP_API_CALL(hipStreamSynchronize(stream)); }
+    void synchronize() const { HIP_API_CALL(hipStreamSynchronize(stream)); }
 
     hipStream_t stream;
 };
@@ -96,7 +95,7 @@ public:
     {
         col = std::make_unique<Collection>(agent, counters);
     }
-    virtual ~HIPWorkload(){};
+    ~HIPWorkload() override= default;
     virtual std::string_view name() = 0;
 
     std::map<std::string, int64_t> collect(Queue& queue)
@@ -163,12 +162,12 @@ public:
     CopyWorkload(AgentInfo& agent, const std::vector<std::string>& counters)
     : HIPWorkload(agent, counters)
     {}
-    virtual void run() override
+    void run() override
     {
         copy_kernel<<<DATA_SIZE / 64, 64, 0, stream.stream>>>(dst.ptr, src.ptr);
         stream.synchronize();
     }
-    virtual std::string_view name() override { return "CopyWorkload"; };
+    std::string_view name() override { return "CopyWorkload"; };
 };
 
 class AtomicWorkload : public HIPWorkload
@@ -177,12 +176,12 @@ public:
     AtomicWorkload(AgentInfo& agent, const std::vector<std::string>& counters)
     : HIPWorkload(agent, counters)
     {}
-    virtual void run() override
+    void run() override
     {
         atomic_kernel<<<DATA_SIZE / 64, 64, 0, stream.stream>>>(dst.ptr, src.ptr);
         stream.synchronize();
     }
-    virtual std::string_view name() override { return "AtomicWorkload"; };
+    std::string_view name() override { return "AtomicWorkload"; };
 };
 
 class IOPSWorkload1 : public HIPWorkload
@@ -191,12 +190,12 @@ public:
     IOPSWorkload1(AgentInfo& agent, const std::vector<std::string>& counters)
     : HIPWorkload(agent, counters)
     {}
-    virtual void run() override
+    void run() override
     {
         iops_kernel1<<<DATA_SIZE / 64, 64, 0, stream.stream>>>();
         stream.synchronize();
     }
-    virtual std::string_view name() override { return "IOPSWorkload1"; };
+    std::string_view name() override { return "IOPSWorkload1"; };
 };
 
 class IOPSWorkload2 : public HIPWorkload
@@ -205,12 +204,12 @@ public:
     IOPSWorkload2(AgentInfo& agent, const std::vector<std::string>& counters)
     : HIPWorkload(agent, counters)
     {}
-    virtual void run() override
+    void run() override
     {
         iops_kernel2<<<DATA_SIZE / 64, 64, 0, stream.stream>>>();
         stream.synchronize();
     }
-    virtual std::string_view name() override { return "IOPSWorkload2"; };
+    std::string_view name() override { return "IOPSWorkload2"; };
 };
 
 class IOPSWorkload3 : public HIPWorkload
@@ -219,12 +218,12 @@ public:
     IOPSWorkload3(AgentInfo& agent, const std::vector<std::string>& counters)
     : HIPWorkload(agent, counters)
     {}
-    virtual void run() override
+    void run() override
     {
         iops_kernel_trans<<<DATA_SIZE / 64, 64, 0, stream.stream>>>();
         stream.synchronize();
     }
-    virtual std::string_view name() override { return "Trans IOPSWorkload"; };
+    std::string_view name() override { return "Trans IOPSWorkload"; };
 };
 
 class GMIWorkload : public HIPWorkload
@@ -233,7 +232,7 @@ public:
     GMIWorkload(AgentInfo& agent, const std::vector<std::string>& counters)
     : HIPWorkload(agent, counters)
     {}
-    virtual void run() override
+    void run() override
     {
         auto policies = std::vector<unsigned>{
             hipHostMallocDefault, hipHostMallocCoherent, hipHostMallocNonCoherent};
@@ -258,7 +257,7 @@ public:
             HIP_API_CALL(hipHostFree(dsthost));
         }
     }
-    virtual std::string_view name() override { return "GMIWorkload"; };
+    std::string_view name() override { return "GMIWorkload"; };
 };
 
 auto
@@ -399,7 +398,7 @@ io_counters(std::string_view gfxip)
 void
 printcounters(const std::map<std::string, int64_t>& map)
 {
-    for(auto& [name, v] : map)
+    for(const auto& [name, v] : map)
         std::cout << " - " << name << ": " << v << std::endl;
 }
 

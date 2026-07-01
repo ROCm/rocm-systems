@@ -33,7 +33,6 @@
 #include <iostream>
 #include <vector>
 #include <map>
-#include <atomic>
 #include <future>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -95,7 +94,7 @@ public:
         if(queue) hsa_queue_destroy(queue);
     }
 
-    bool Submit(hsa_ext_amd_aql_pm4_packet_t* packet);
+    bool Submit(hsa_ext_amd_aql_pm4_packet_t* packet) const;
     void flush();
 
     hsa_queue_t*               queue = nullptr;

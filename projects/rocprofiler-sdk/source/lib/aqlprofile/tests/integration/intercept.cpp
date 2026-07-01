@@ -62,7 +62,7 @@ decltype(hsa_queue_create)*                   hsa_queue_create_fn               
 hsa_amd_memory_pool_t cpu_pool;
 
 hsa_status_t
-FindGlobalPool(hsa_amd_memory_pool_t pool, void* data)
+FindGlobalPool(hsa_amd_memory_pool_t pool, void*  /*data*/)
 {
     hsa_amd_segment_t segment;
     CHECK_HSA(hsa_amd_memory_pool_get_info_fn(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment));
@@ -79,7 +79,7 @@ FindGlobalPool(hsa_amd_memory_pool_t pool, void* data)
 }
 
 hsa_status_t
-iterate_agent_cb(hsa_agent_t agent, void* userdata)
+iterate_agent_cb(hsa_agent_t agent, void*  /*userdata*/)
 {
     hsa_device_type_t type;
 

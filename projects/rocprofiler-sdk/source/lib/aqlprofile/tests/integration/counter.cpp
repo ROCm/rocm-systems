@@ -33,7 +33,7 @@
 
 hsa_status_t
 data_callback(aqlprofile_pmc_event_t event,
-              uint64_t               counter_id,
+              uint64_t                /*counter_id*/,
               uint64_t               counter_value,
               void*                  userdata)
 {
@@ -70,14 +70,14 @@ AQLPacket::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 }
 
 void
-AQLPacket::Free(void* ptr, void* data)
+AQLPacket::Free(void* ptr, void*  /*data*/)
 {
     if(ptr == nullptr) return;
     hsa_amd_memory_pool_free(ptr);
 }
 
 hsa_status_t
-AQLPacket::Copy(void* dst, const void* src, size_t size, void* data)
+AQLPacket::Copy(void* dst, const void* src, size_t size, void*  /*data*/)
 {
     if(size == 0) return HSA_STATUS_SUCCESS;
     return hsa_memory_copy(dst, src, size);
@@ -95,7 +95,7 @@ AQLPacket::AQLPacket(AgentInfo& agent, const std::vector<std::string>& _counters
 
     aqlprofile_pmc_profile_t            profile{};
     std::vector<aqlprofile_pmc_event_t> events;
-    for(auto& counter : _counters)
+    for(const auto& counter : _counters)
     {
         auto& event          = agent.counters.at(counter).at(0);
         results[event]       = 0;
