@@ -1,6 +1,6 @@
 # Mock CPER fixtures
 
-CPER (Common Platform Error Record) fixtures used by `unit/gpu/mock_cper.cc`
+CPER (Common Platform Error Record) fixtures used by `unit/gpu/mock_cper_test.cc`
 to exercise the CPER read path (`amdsmi_get_gpu_cper_entries_by_path`) without
 GPU hardware.
 
