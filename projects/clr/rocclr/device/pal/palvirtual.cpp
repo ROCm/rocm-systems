@@ -562,7 +562,7 @@ bool VirtualGPU::Queue::isDone(uint id) {
     // Flush the current command buffer
     if (!flush()) {
       // If flush failed, then exit earlier...
-      gpu_.dev().gpu_error_ = CL_INVALID_OPERATION;
+      gpu_.dev().gpu_error_.store(CL_INVALID_OPERATION, std::memory_order_relaxed);
       return false;
     }
   }

@@ -186,7 +186,7 @@ jobs:
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
           python3 -m pip install -U --user -r requirements.txt
-          python3 -m pip install -U --user cmake==3.24.0
+          python3 -m pip install -U --user cmake==3.25.0
 
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
@@ -540,7 +540,7 @@ jobs:
         apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
         python3 -m pip install -U --user -r requirements.txt
-        python3 -m pip install -U --user cmake==3.24.0
+        python3 -m pip install -U --user cmake==3.25.0
 
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}

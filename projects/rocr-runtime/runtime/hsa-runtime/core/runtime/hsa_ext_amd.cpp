@@ -54,6 +54,7 @@
 
 #include "core/inc/agent.h"
 #include "core/inc/amd_aie_agent.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
@@ -2204,14 +2205,12 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
       core_agent->device_type() != core::Agent::kAmdGpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  // The descriptor union has separate active members per handle type
-  // (win32_handle for OPAQUE_WIN32 / OPAQUE_WIN32_KMT, fd for OPAQUE_FD).
-  // Only the Win32 NT-handle path is wired through the driver today, so
-  // reject other types up front: reading an inactive union member is
-  // undefined behaviour in C++.
+  // Only the Win32 NT-handle path is wired today. Reject other types up
+  // front: NOT_SUPPORTED (vs malformed-handle INVALID_ARGUMENT), and reading
+  // the wrong union member would be UB anyway.
   if (desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 &&
       desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   }
 
   return core_agent->driver().ImportExternalSemaphore(
@@ -2254,6 +2253,66 @@ hsa_status_t hsa_amd_vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle
   CATCH;
 }
 
+
+// Tool layers wrap the queue in a core::InterceptQueue, which is not an
+// AqlQueue, so a direct static_cast is UB. Peel off any (nestable) wrapper
+// layers and confirm the concrete type via IsType() (dynamic_cast is
+// unavailable; RTTI is off). Returns nullptr if the queue is not, or does
+// not wrap, an AqlQueue.
+static AMD::AqlQueue *UnwrapAqlQueue(core::Queue *core_queue) {
+  while (core_queue != nullptr && core::InterceptQueue::IsType(core_queue)) {
+    core_queue = static_cast<core::InterceptQueue *>(core_queue)->wrapped.get();
+  }
+  if (core_queue == nullptr || !AMD::AqlQueue::IsType(core_queue))
+    return nullptr;
+  return static_cast<AMD::AqlQueue *>(core_queue);
+}
+
+hsa_status_t hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value) {
+  TRY;
+  IS_OPEN();
+  if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  if (sem.handle == 0)  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  core::Queue *core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  // Only AMD AQL queues carry a KMD queue id; unwrap tool layers first.
+  AMD::AqlQueue *aql = UnwrapAqlQueue(core_queue);
+  if (aql == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+
+  core::Agent *core_agent = aql->GetAgent();
+  IS_VALID(core_agent);
+
+  return core_agent->driver().SignalExternalSemaphore(aql->aql_queue_id(), sem, value);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_queue_wait_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value) {
+  TRY;
+  IS_OPEN();
+  if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  if (sem.handle == 0)  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  core::Queue *core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  // Same unwrap as the signal path.
+  AMD::AqlQueue *aql = UnwrapAqlQueue(core_queue);
+  if (aql == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+
+  core::Agent *core_agent = aql->GetAgent();
+  IS_VALID(core_agent);
+
+  return core_agent->driver().WaitExternalSemaphore(aql->aql_queue_id(), sem, value);
+  CATCH;
+}
 
 hsa_status_t hsa_amd_queue_create(hsa_agent_t agent_handle,
                                   hsa_amd_queue_create_desc_t* descs,

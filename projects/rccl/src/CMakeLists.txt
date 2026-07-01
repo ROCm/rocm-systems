@@ -744,8 +744,16 @@ endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
-if("${hip_version_string}" VERSION_GREATER_EQUAL "7.12.60540")
+# Uncached (fine-grained) VMM/cuMem allocation type. Available natively on
+# HIP >= 7.12.60540 and via the ROCm 7.0.2.x backport range [7.0.51831, 7.0.60000).
+if(HIP_VMM_UNCACHED_MEMORY_AVAILABLE AND
+   (("${hip_version_string}" VERSION_GREATER_EQUAL "7.12.60540") OR
+    (("${hip_version_string}" VERSION_GREATER_EQUAL "7.0.51831") AND
+     ("${hip_version_string}" VERSION_LESS "7.0.60000"))))
   target_compile_definitions(rccl PRIVATE HIP_VMM_UNCACHED_MEMORY)
+  message(STATUS "HIP_VMM_UNCACHED_MEMORY enabled")
+else()
+  message(STATUS "HIP_VMM_UNCACHED_MEMORY disabled")
 endif()
 
 # ==== rocSHMEM integration (optional) ====
@@ -845,6 +853,10 @@ endif()
 if(CE_ENABLED)
   target_compile_definitions(rccl PRIVATE CE_BATCH_ASYNC_SUPPORTED)
   message(STATUS "CE_BATCH_ASYNC_SUPPORTED compile definition enabled")
+endif()
+if(CUMEM_DMABUF_EXPORT_ENABLED)
+  target_compile_definitions(rccl PRIVATE RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+  message(STATUS "RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED compile definition enabled")
 endif()
 
 ## Set RCCL compile options
@@ -1137,6 +1149,42 @@ if(CMAKE_BUILD_SUBTYPE MATCHES "DebugFast" AND NOT ENABLE_DEVICE_LINKER)
 endif()
 if(TIMETRACE)
   target_link_options(rccl PRIVATE -ftime-trace)
+endif()
+
+# .hip_fatbin tail-placement linker script.
+#
+# Splices the merged .hip_fatbin output section to the end of librccl.so via
+# lld's INSERT AFTER directive (the default linker script is preserved).
+# Keeps text<->data distances small so host PC32/PLT32/GOTPCRELX/32S
+# relocations stay in range when the bundled device image grows past
+# INT32_MAX.  Applies to the host link only; the offload device-link does
+# not see the script, so it works identically for ENABLE_DEVICE_LINKER=ON
+# (custom pipeline) and OFF (-fgpu-rdc --hip-link).  No-op for static builds
+# (which go through --emit-static-lib and never run ld).
+if(BUILD_SHARED_LIBS AND RCCL_HIP_FATBIN_AT_TAIL)
+  set(_rccl_fatbin_script "${PROJECT_SOURCE_DIR}/cmake/linker_scripts/hip_fatbin_tail.ld")
+  if(NOT EXISTS "${_rccl_fatbin_script}")
+    message(FATAL_ERROR "RCCL_HIP_FATBIN_AT_TAIL=ON but linker script not found: ${_rccl_fatbin_script}")
+  endif()
+  target_link_options(rccl PRIVATE "LINKER:-T,${_rccl_fatbin_script}")
+  set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS "${_rccl_fatbin_script}")
+  message(STATUS "RCCL: .hip_fatbin will be placed at end of librccl.so (${_rccl_fatbin_script})")
+
+  # Post-build safety check: parse the ELF section table and confirm the
+  # host sections (everything except the inert .hip_fatbin spacer) fit within
+  # a 2 GiB window, which is the exact condition for small-code-model host
+  # relocations (PC32/PLT32/GOTPCRELX/32S) to stay in range.  Fails the build
+  # if the window exceeds 2 GiB -- e.g. if the linker silently ignored the
+  # tail-placement script -- so the regression is caught here rather than as
+  # a confusing relocation overflow once the fatbin grows.  Skips cleanly on
+  # non-x86-64 hosts.
+  add_custom_command(TARGET rccl POST_BUILD
+    COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/cmake/scripts/check_hip_fatbin_tail.py
+            $<TARGET_FILE:rccl>
+    COMMENT "Verifying host sections stay within 2 GiB of each other in librccl.so"
+    VERBATIM
+  )
 endif()
 
 if(NOT BUILD_SHARED_LIBS)

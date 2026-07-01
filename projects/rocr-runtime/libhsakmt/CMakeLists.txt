@@ -297,17 +297,18 @@ else()
       ## Fall back to pre-built wkmi.lib
       set(WKMI_SRC_BUILD OFF CACHE INTERNAL "wkmi is built from source")
       message(STATUS "Using pre-built wkmi.lib (set WKMI_SRC_DIR to build from source)")
-      set(WKMI_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
-      set(WKMI_LIB_PATH ${WKMI_INCLUDE_DIR}/win/lib/wkmi.lib)
-      target_include_directories(${HSAKMT_TARGET} PUBLIC
-        $<BUILD_INTERFACE:${WKMI_INCLUDE_DIR}>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi>)
+      if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/win/lib/wkmi.lib)
+      else()
+        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/win/lib/wkmi.lib)
+      endif()
+      target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
       
       # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)
-      target_link_libraries(${HSAKMT_TARGET} PUBLIC
-        $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
-        $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
+      target_link_libraries(${HSAKMT_TARGET} PUBLIC ${WKMI_LIB_PATH})
       
+      # Export wkmi.lib path for downstream static linking
+      set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
     endif()
   endif()
 
@@ -318,18 +319,7 @@ else()
   set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
 
   # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-  if (WIN32)
-    install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
-      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev )
-    if(NOT WKMI_SRC_BUILD)
-      install ( FILES ${WKMI_LIB_PATH}
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        COMPONENT dev )
-      install ( FILES ${WKMI_INCLUDE_DIR}/wkmi.h
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi
-        COMPONENT dev )
-    endif()
-  else()
+  if (NOT WIN32)
     install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
       ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
@@ -342,12 +332,8 @@ else()
   install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
 
-  # Record our usage data for clients find_package calls. On Windows, this is
-  # only relocatable for the prebuilt WKMI path because that path installs
-  # wkmi.h/wkmi.lib and records install-interface paths. A source-built WKMI
-  # target is not exported here, so exporting hsakmt would leave consumers with
-  # an undefined wkmi target in hsakmtTargets.cmake.
-  if(NOT WIN32 OR NOT WKMI_SRC_BUILD)
+  # Record our usage data for clients find_package calls.
+  if (NOT WIN32)
     install ( EXPORT ${HSAKMT_TARGET}Targets
       FILE ${HSAKMT_TARGET}Targets.cmake
       NAMESPACE ${HSAKMT_TARGET}::
@@ -374,7 +360,7 @@ else()
                    VERSION ${BUILD_VERSION_STRING}
                    COMPATIBILITY
                    AnyNewerVersion)
-  if(NOT WIN32 OR NOT WKMI_SRC_BUILD)
+  if (NOT WIN32)
     install(FILES
             ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
             ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
@@ -439,25 +425,23 @@ else()
         target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC wkmi)
         target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${WKMI_SRC_DIR}/lib/inc)
       else()
-        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC
-          $<BUILD_INTERFACE:${WKMI_INCLUDE_DIR}>
-          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi>)
-        set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-          $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
-          $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
+        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
+        set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
       endif()
     endif()
     target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 
-    install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
+    if (NOT WIN32)
+      install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
+              ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
+              LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
 
-    install ( EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
-      FILE ${HSAKMT_STATIC_DRM_TARGET}Targets.cmake
-      NAMESPACE ${HSAKMT_STATIC_DRM_TARGET}::
-      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-      COMPONENT dev)
+      install ( EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
+        FILE ${HSAKMT_STATIC_DRM_TARGET}Targets.cmake
+        NAMESPACE ${HSAKMT_STATIC_DRM_TARGET}::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+        COMPONENT dev)
+    endif()
 
     add_library( ${HSAKMT_STATIC_DRM_TARGET}::${HSAKMT_STATIC_DRM_TARGET} ALIAS ${HSAKMT_STATIC_DRM_TARGET} )
   endif()
