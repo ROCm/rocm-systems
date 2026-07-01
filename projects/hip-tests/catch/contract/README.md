@@ -36,6 +36,7 @@ The first domains are:
 - `array3d`: 3D array allocation and 3D copy-to/from-array contracts
 - `texture`: texture and surface object creation and descriptor-introspection contracts
 - `context`: driver-style device and context query contracts
+- `device_config`: device configuration query, limit, flag, and stream-priority contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
 - `memory_pool_access`: current-device memory pool access-control contracts
 - `extension`: proc-address resolution and AMD extension API contracts (`hipGetProcAddress`, `hipApiName`, `hipGetStreamDeviceId`, `hipExtGetLastError`)
