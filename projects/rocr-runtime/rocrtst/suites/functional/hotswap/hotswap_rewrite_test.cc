@@ -240,18 +240,25 @@ rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target,
   return revision;
 }
 
-TEST(HotswapRewriteDecision, A0RetargetsThroughLegacyPathRegardlessOfOptions) {
-  const rocr::hotswap::RewriteOptions options[] = {{}, {true}, {false}};
-  for (const auto& option : options) {
-    SCOPED_TRACE(option.gfx12_5_rewrite_enabled ? "entry trampolines enabled"
-                                                : "entry trampolines disabled");
+TEST(HotswapRewriteDecision, A0RetargetsWithEntryTrampolinesWhenEnabled) {
+  struct TestCase {
+    rocr::hotswap::RewriteOptions options;
+    bool request_entry_trampolines;
+  };
+  const TestCase cases[] = {{{}, false}, {{true}, true}, {{false}, false}};
+  for (const TestCase& test_case : cases) {
+    SCOPED_TRACE(test_case.request_entry_trampolines
+                     ? "entry trampolines enabled"
+                     : "entry trampolines disabled");
     const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
-        MakeRevision("gfx1250", 0), kGfx1250Isa, kGfx1250Isa, option);
+        MakeRevision("gfx1250", 0), kGfx1250Isa, kGfx1250Isa,
+        test_case.options);
 
     ASSERT_TRUE(decision.has_value());
     EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
     EXPECT_EQ(decision->target_isa, kGfx1250A0Isa);
-    EXPECT_FALSE(decision->request_entry_trampolines);
+    EXPECT_EQ(decision->request_entry_trampolines,
+              test_case.request_entry_trampolines);
   }
 }
 
@@ -425,11 +432,35 @@ TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
+TEST(HotswapRewrite, RuntimeLoadA0UsesEntryTrampolinesWhenEnabled) {
+  ResetRuntimeTestEnv();
+  if (!NewComgrHotswapApiAvailable()) return;
+  g_fake_env_vars["AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES"] = "1";
+  LoadRecorder load;
+  const hsa_executable_t executable = MakeTestExecutable(0x502);
+
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
+      MakeLoadCallbacks(&load));
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load.calls.size(), 1u);
+  EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
+  EXPECT_NE(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
+  EXPECT_GT(load.calls[0].code_object_size, 0u);
+  EXPECT_EQ(
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 1u);
+
+  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
+  EXPECT_EQ(
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+}
+
 TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToOriginal) {
   ResetRuntimeTestEnv();
   g_fake_hsa_env.asic_revision = 1;
   LoadRecorder load;
-  const hsa_executable_t executable = MakeTestExecutable(0x502);
+  const hsa_executable_t executable = MakeTestExecutable(0x503);
 
   const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
       executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
@@ -445,7 +476,7 @@ TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToOriginal) {
 
 TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesDisabled) {
   const char* const env_values[] = {"0", "false", "off", ""};
-  uint64_t executable_handle = 0x503;
+  uint64_t executable_handle = 0x504;
   for (const char* env_value : env_values) {
     SCOPED_TRACE(env_value);
     ResetRuntimeTestEnv();
@@ -471,7 +502,7 @@ TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesDisabled) {
 TEST(HotswapRewrite, RuntimeLoadNonA0UsesEntryTrampolinesWhenEnabled) {
   if (!NewComgrHotswapApiAvailable()) return;
   const char* const env_values[] = {"1", "true", "on"};
-  uint64_t executable_handle = 0x504;
+  uint64_t executable_handle = 0x509;
   for (const char* env_value : env_values) {
     SCOPED_TRACE(env_value);
     ResetRuntimeTestEnv();

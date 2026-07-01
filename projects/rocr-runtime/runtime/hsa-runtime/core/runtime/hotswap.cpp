@@ -298,7 +298,7 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
     return RewriteDecision{
         WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0),
         WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0),
-        false};
+        options.gfx12_5_rewrite_enabled};
   }
 
   if (!options.gfx12_5_rewrite_enabled ||
