@@ -12,7 +12,6 @@
 #include "hip.h"
 #include "hipfile.h"
 #include "hipfile-private.h"
-#include "hipfile-warnings.h"
 #include "api_trace/api-trace-internal.h"
 #include "io.h"
 #include "runtime.h"
@@ -173,16 +172,6 @@ catch (...) {
     return handle_exception();
 }
 
-/// @brief Get the cached list of backends obtained from DriverState
-static const vector<shared_ptr<Backend>> &
-getCachedBackends()
-{
-    HIPFILE_WARN_NO_EXIT_DTOR_OFF
-    static const auto backends{Context<DriverState>::get()->getBackends()};
-    HIPFILE_WARN_NO_EXIT_DTOR_ON
-    return backends;
-}
-
 ssize_t
 hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
           hoff_t buffer_offset, DriverState &state, const vector<shared_ptr<Backend>> &backends)
@@ -240,8 +229,9 @@ ssize_t
 hipFileRead(hipFileHandle_t fh, void *buffer_base, size_t size, hoff_t file_offset, hoff_t buffer_offset)
 try {
     hipFileInit();
-    auto result = hipFileIo(IoType::Read, fh, buffer_base, size, file_offset, buffer_offset,
-                            Runtime::instance().state(), getCachedBackends());
+    Runtime &rt = Runtime::instance();
+    auto     result =
+        hipFileIo(IoType::Read, fh, buffer_base, size, file_offset, buffer_offset, rt.state(), rt.backends());
 
     if (result == -hipFileDriverNotInitialized) {
         // Match cuFile behaviour
@@ -260,8 +250,9 @@ hipFileWrite(hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t fi
              hoff_t buffer_offset)
 try {
     hipFileInit();
-    auto result = hipFileIo(IoType::Write, fh, buffer_base, size, file_offset, buffer_offset,
-                            Runtime::instance().state(), getCachedBackends());
+    Runtime &rt     = Runtime::instance();
+    auto     result = hipFileIo(IoType::Write, fh, buffer_base, size, file_offset, buffer_offset, rt.state(),
+                                rt.backends());
 
     if (result == -hipFileDriverNotInitialized) {
         // Match cuFile behaviour
