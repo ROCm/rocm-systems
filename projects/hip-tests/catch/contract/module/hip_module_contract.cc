@@ -162,10 +162,10 @@ HIP_TEST_CASE(Contract_Module_GetGlobal_ReturnsAddressAndSize) {
   // A device global defined in the module must resolve to a non-null device
   // address with a size that covers the declared type. The exact address is not
   // asserted; only its structural validity is part of the contract.
-  hipDeviceptr_t device_address = nullptr;
+  hipDeviceptr_t device_address = 0;
   size_t byte_count = 0;
   HIP_CHECK(hipModuleGetGlobal(&device_address, &byte_count, module, "g_value"));
-  REQUIRE(device_address != nullptr);
+  REQUIRE(device_address != 0);
   REQUIRE(byte_count >= sizeof(int));
 
   HIP_CHECK(hipModuleUnload(module));
