@@ -21,6 +21,27 @@ void RequireDevice() {
   }
 }
 
+// Saves the current device on construction, switches to a requested ordinal,
+// and restores the original device on destruction so tests that force a specific
+// device do not leak current-device state into later tests when several run in
+// one process. The destructor cannot use Catch assertions, so it ignores the
+// restore status; failures on the switch-in path still surface through
+// HIP_CHECK.
+class ScopedDevice {
+ public:
+  explicit ScopedDevice(int next) {
+    HIP_CHECK(hipGetDevice(&previous_));
+    HIP_CHECK(hipSetDevice(next));
+  }
+  ~ScopedDevice() { static_cast<void>(hipSetDevice(previous_)); }
+
+  ScopedDevice(const ScopedDevice&) = delete;
+  ScopedDevice& operator=(const ScopedDevice&) = delete;
+
+ private:
+  int previous_ = 0;
+};
+
 // Derives the queryable HIP version in the documented 100*major+minor form
 // from the live runtime rather than hardcoding a release number, so the
 // proc-address contracts track whatever runtime the test is linked against.
@@ -121,7 +142,7 @@ HIP_TEST_CASE(Contract_Extension_ApiName_ReturnsNonEmptyString) {
 HIP_TEST_CASE(Contract_Extension_GetStreamDeviceId_MatchesCurrentDevice) {
   RequireDevice();
 
-  HIP_CHECK(hipSetDevice(0));
+  const ScopedDevice scoped_device(0);
 
   int current_device = -1;
   HIP_CHECK(hipGetDevice(&current_device));

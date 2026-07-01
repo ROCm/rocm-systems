@@ -30,6 +30,27 @@ hipDevice_t DeviceForOrdinalZero() {
   HIP_CHECK(hipDeviceGet(&device, 0));
   return device;
 }
+
+// Saves the current device on construction, switches to a requested ordinal,
+// and restores the original device on destruction so tests that force a specific
+// device do not leak current-device state into later tests when several run in
+// one process. The destructor cannot use Catch assertions, so it ignores the
+// restore status; failures on the switch-in path still surface through
+// HIP_CHECK.
+class ScopedDevice {
+ public:
+  explicit ScopedDevice(int next) {
+    HIP_CHECK(hipGetDevice(&previous_));
+    HIP_CHECK(hipSetDevice(next));
+  }
+  ~ScopedDevice() { static_cast<void>(hipSetDevice(previous_)); }
+
+  ScopedDevice(const ScopedDevice&) = delete;
+  ScopedDevice& operator=(const ScopedDevice&) = delete;
+
+ private:
+  int previous_ = 0;
+};
 }  // namespace
 
 HIP_TEST_CASE(Contract_Context_DeviceGet_ReturnsHandleForOrdinalZero) {
@@ -126,8 +147,9 @@ HIP_TEST_CASE(Contract_Context_PrimaryCtxRetainRelease_RoundTrips) {
   REQUIRE((active == 0 || active == 1));
 
   // Making the device current portably activates the primary context across
-  // both AMD HIP and CUDA backends.
-  HIP_CHECK(hipSetDevice(0));
+  // both AMD HIP and CUDA backends. ScopedDevice restores the previous current
+  // device when the test case scope exits so this does not leak into later tests.
+  const ScopedDevice scoped_device(0);
   HIP_CHECK(hipDevicePrimaryCtxGetState(device, &flags, &active));
   REQUIRE(active == 1);
 

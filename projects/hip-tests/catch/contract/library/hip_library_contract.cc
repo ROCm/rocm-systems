@@ -49,10 +49,12 @@ constexpr char const kLibrarySource[] =
     "}\n";
 
 // Compiles kLibrarySource with HIPRTC for the current device and returns the
-// resulting code object. A false return signals that HIPRTC compilation is not
-// available on this device/runtime path so the caller can skip cleanly; any
-// other HIPRTC failure is an unexpected contract violation and aborts through
-// HIPRTC_CHECK.
+// resulting code object. This always returns true on success; a compile failure
+// is treated as a contract violation rather than an unsupported-capability skip,
+// so the HIPRTC log is emitted through INFO and the failure aborts through
+// HIPRTC_CHECK. The bool return is retained only so the callers keep their
+// familiar `if (!Compile...())` shape; the false branch is unreachable because
+// any real failure aborts first.
 bool CompileLibrarySource(std::vector<char>& code) {
   hiprtcProgram program{};
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kLibrarySource, "library_contract.cu", 0, nullptr,
@@ -66,10 +68,18 @@ bool CompileLibrarySource(std::vector<char>& code) {
 
   const hiprtcResult compile_result = hiprtcCompileProgram(program, num_options, options);
   if (compile_result != HIPRTC_SUCCESS) {
-    // A compilation failure here indicates that the in-process HIPRTC path is
-    // not supported by this device/runtime rather than a broken contract, so
-    // release the program and let the caller skip.
+    // A compilation failure is a contract violation, not an unsupported path:
+    // surface the HIPRTC build log so compiler/source/option regressions are
+    // diagnosable, release the program, then fail through HIPRTC_CHECK.
+    size_t log_size = 0;
+    HIPRTC_CHECK(hiprtcGetProgramLogSize(program, &log_size));
+    std::string log(log_size, '\0');
+    if (log_size > 0) {
+      HIPRTC_CHECK(hiprtcGetProgramLog(program, log.data()));
+    }
+    INFO("HIPRTC compile log:\n" << log);
     HIPRTC_CHECK(hiprtcDestroyProgram(&program));
+    HIPRTC_CHECK(compile_result);
     return false;
   }
 

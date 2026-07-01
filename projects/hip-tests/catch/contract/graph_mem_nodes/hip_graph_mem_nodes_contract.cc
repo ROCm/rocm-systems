@@ -30,9 +30,18 @@ hipMemAllocNodeParams CurrentDeviceAllocParams() {
 }
 
 // Trims graph memory for the current device so that the graph memory state is
-// restored to a known baseline before and after a test.
-void TrimGraphMemory() {
-  HIP_CHECK(hipDeviceGraphMemTrim(CurrentDevice()));
+// restored to a known baseline before and after a test. Returns false when the
+// runtime path does not support graph memory trimming (hipErrorNotSupported),
+// which mirrors the unsupported-capability skip used for the alloc-node APIs;
+// any other failure is an unexpected contract violation and aborts through
+// HIP_CHECK.
+bool TryTrimGraphMemory() {
+  const hipError_t status = hipDeviceGraphMemTrim(CurrentDevice());
+  if (status == hipErrorNotSupported) {
+    return false;
+  }
+  HIP_CHECK(status);
+  return true;
 }
 
 // Attempts to add a memory allocation node. Returns false (with graph cleanup)
@@ -50,7 +59,9 @@ bool TryAddMemAllocNode(hipGraphNode_t* node, hipGraph_t graph,
 }  // namespace
 
 HIP_TEST_CASE(Contract_GraphMemNodes_AllocNode_ReturnsDevicePtr) {
-  TrimGraphMemory();
+  if (!TryTrimGraphMemory()) {
+    HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
+  }
 
   hipGraph_t graph = nullptr;
   hipGraphNode_t alloc_node = nullptr;
@@ -60,18 +71,20 @@ HIP_TEST_CASE(Contract_GraphMemNodes_AllocNode_ReturnsDevicePtr) {
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
     HIP_CHECK(hipGraphDestroy(graph));
-    TrimGraphMemory();
+    TryTrimGraphMemory();
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
   }
 
   REQUIRE(params.dptr != nullptr);
 
   HIP_CHECK(hipGraphDestroy(graph));
-  TrimGraphMemory();
+  TryTrimGraphMemory();
 }
 
 HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
-  TrimGraphMemory();
+  if (!TryTrimGraphMemory()) {
+    HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
+  }
 
   hipGraph_t graph = nullptr;
   hipGraphNode_t alloc_node = nullptr;
@@ -81,7 +94,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
     HIP_CHECK(hipGraphDestroy(graph));
-    TrimGraphMemory();
+    TryTrimGraphMemory();
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
   }
 
@@ -94,11 +107,13 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
   REQUIRE(retrieved.poolProps.location.id == CurrentDevice());
 
   HIP_CHECK(hipGraphDestroy(graph));
-  TrimGraphMemory();
+  TryTrimGraphMemory();
 }
 
 HIP_TEST_CASE(Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndLaunches) {
-  TrimGraphMemory();
+  if (!TryTrimGraphMemory()) {
+    HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
+  }
 
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
@@ -111,7 +126,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndLaunches) {
 
   if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
     HIP_CHECK(hipGraphDestroy(graph));
-    TrimGraphMemory();
+    TryTrimGraphMemory();
     HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
   }
 
@@ -123,7 +138,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndLaunches) {
       hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0);
   if (instantiate_status == hipErrorNotSupported) {
     HIP_CHECK(hipGraphDestroy(graph));
-    TrimGraphMemory();
+    TryTrimGraphMemory();
     HIP_SKIP_TEST("Instantiating a graph memory alloc/free graph is not supported by this runtime path.");
   }
   HIP_CHECK(instantiate_status);
@@ -139,7 +154,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndLaunches) {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGraphExecDestroy(graph_exec));
   HIP_CHECK(hipGraphDestroy(graph));
-  TrimGraphMemory();
+  TryTrimGraphMemory();
 }
 
 HIP_TEST_CASE(Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing) {
