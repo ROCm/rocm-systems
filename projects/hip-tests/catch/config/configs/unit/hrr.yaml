@@ -144,6 +144,12 @@ hrr:
   Unit_HRR_DivergenceAbortRoundtrip:
     <<: *level_2
     tags: [capture, playback, roundtrip, repro]
+  Unit_HRR_FirstMallocRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, repro]
+  Unit_HRR_NullOptionalPtrRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, repro]
   Unit_HRR_MultiThreadRoundtrip:
     <<: *level_2
     tags: [capture, multithread, playback, roundtrip]
@@ -237,3 +243,18 @@ hrr:
   Unit_HRR_VMM_Direct:
     <<: *level_2
     tags: [direct, vmm]
+  Unit_HRR_FirstMalloc_Direct:
+    <<: *level_2
+    tags: [direct, repro]
+  Unit_HRR_EmbeddedPtrStruct_Direct:
+    <<: *level_2
+    tags: [direct, repro]
+  Unit_HRR_UncapturedHostWrite_Direct:
+    <<: *level_2
+    tags: [direct, repro]
+  Unit_HRR_NullOptionalPtr_Direct:
+    <<: *level_2
+    tags: [direct, repro]
+  Unit_HRR_ZeroInitRead_Direct:
+    <<: *level_2
+    tags: [direct, repro]
