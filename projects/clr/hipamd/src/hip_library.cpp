@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -14,7 +15,68 @@
 #include "hip_platform.hpp"
 #include "utils/debug.hpp"
 
+#include "amd_hsa_elf.hpp"
+#include <elf/elf.hpp>
+
 namespace hip {
+namespace {
+// Computes the total byte length of an in-memory code-object image so that
+// hipLibraryLoadData can copy it and release the caller's buffer. The three
+// shapes the runtime accepts mirror what ExtractFatBinaryUsingCOMGR parses:
+//   - compressed clang offload bundle ("CCOB"): length is in the header,
+//   - uncompressed clang offload bundle ("__CLANG_OFFLOAD_BUNDLE__"): length is
+//     the end of the farthest bundle entry,
+//   - a bare AMDGPU ELF: length comes from the ELF header.
+// Returns 0 when the header cannot be recognized; the caller treats that as an
+// invalid image rather than copying an unbounded amount of memory.
+size_t ComputeImageSize(const void* image) {
+  if (image == nullptr) {
+    return 0;
+  }
+
+  // Compressed offload bundle: the total size is recorded in the header.
+  if (std::memcmp(image, symbols::kOffloadBundleCompressedMagicStr,
+                  symbols::kOffloadBundleCompressedMagicStrSize - 1) == 0) {
+    const auto* header =
+        reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
+    return static_cast<size_t>(header->totalSize);
+  }
+
+  // Uncompressed offload bundle: the image spans from its start to the end of
+  // the farthest (offset + size) entry in the bundle descriptor table.
+  if (std::memcmp(image, symbols::kOffloadBundleUncompressedMagicStr,
+                  symbols::kOffloadBundleUncompressedMagicStrSize - 1) == 0) {
+    const auto* header =
+        reinterpret_cast<const symbols::ClangOffloadBundleUncompressedHeader*>(image);
+    // Walk the variable-length descriptor list; each entry's bundleEntryId is a
+    // trailing flexible field of length bundleEntryIdSize. The descriptor table
+    // precedes the code objects, so the farthest (offset + size) bounds the whole
+    // image.
+    const auto* info = &header->desc[0];
+    size_t end = 0;
+    for (uint64_t i = 0; i < header->numOfCodeObjects; ++i) {
+      const size_t entry_end = static_cast<size_t>(info->offset) + static_cast<size_t>(info->size);
+      if (entry_end > end) {
+        end = entry_end;
+      }
+      const char* next =
+          reinterpret_cast<const char*>(info) + sizeof(symbols::ClangOffloadBundleInfo) -
+          sizeof(info->bundleEntryId) + static_cast<size_t>(info->bundleEntryIdSize);
+      info = reinterpret_cast<const symbols::ClangOffloadBundleInfo*>(next);
+    }
+    return end;
+  }
+
+  // Bare AMDGPU ELF: use the ELF header to size the image.
+  const auto* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(image);
+  if (ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA) {
+    return static_cast<size_t>(amd::Elf::getElfSize(image));
+  }
+
+  return 0;
+}
+}  // namespace
+
 void LibraryContainer::Register(const std::string &name, int device, hipKernel_t k) {
   std::scoped_lock<std::mutex> lock(lib_mutex_);
   auto key = std::make_pair(name, device);
@@ -99,7 +161,12 @@ hipError_t LibraryContainer::GetManaged(const std::string& name, void** dptr, si
   return dynco_->GetManaged(name, dptr, bytes);
 }
 
-LibraryContainer::LibraryContainer(const char* code_object) : image_(code_object) {}
+LibraryContainer::LibraryContainer(const char* code_object, size_t image_size)
+    : image_bytes_(code_object, code_object + image_size) {
+  // Point image_ at our owned copy so BuildIt() no longer depends on the
+  // caller's buffer, which may be freed once hipLibraryLoadData returns.
+  image_ = image_bytes_.data();
+}
 
 LibraryContainer::LibraryContainer(const std::string &file_name) : filename_(file_name) {}
 
@@ -152,7 +219,15 @@ hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* image, hipJitOp
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  auto* l = new hip::LibraryContainer((const char*)image);
+  // Own the image: copy it so the caller's buffer can be freed once we return,
+  // matching cuLibraryLoadData's default copy semantics. A zero size means the
+  // header was not a recognized code object, which is an invalid image.
+  const size_t image_size = ComputeImageSize(image);
+  if (image_size == 0) {
+    HIP_RETURN(hipErrorInvalidImage);
+  }
+
+  auto* l = new hip::LibraryContainer(static_cast<const char*>(image), image_size);
   *library = reinterpret_cast<hipLibrary_t>(l);
   HIP_RETURN(hipSuccess);
 }

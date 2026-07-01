@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -25,8 +26,11 @@ namespace hip {
 // implementation of code-object symbol resolution.
 class LibraryContainer {
  public:
-  // Create from pointer
-  explicit LibraryContainer(const char* code_object);  // from pointer
+  // Create from an in-memory image. The container copies the image bytes so the
+  // caller's buffer may be freed as soon as hipLibraryLoadData returns, matching
+  // CUDA's cuLibraryLoadData which owns the image by default. `image_size` is the
+  // number of bytes to copy; callers compute it from the code-object header.
+  LibraryContainer(const char* code_object, size_t image_size);  // owns a copy of the image
   // Create from file
   explicit LibraryContainer(const std::string &file_name);  // deep copy from file
   ~LibraryContainer();
@@ -63,7 +67,11 @@ class LibraryContainer {
   std::unique_ptr<hip::DynCO> dynco_;
   // Construction args saved until the lazy BuildIt() runs.
   std::string filename_;          // empty when loading from image
-  const char* image_ = nullptr;   // valid only when filename_ is empty
+  // Owned copy of the in-memory image. Populated for the image constructor so
+  // the runtime does not depend on the caller's buffer outliving the load. Empty
+  // when loading from a file.
+  std::vector<char> image_bytes_;
+  const char* image_ = nullptr;   // points into image_bytes_ for image loads
   // Cache of hipKernel_t handles keyed by (name, device).
   std::map<std::pair<std::string /* name */, int /* device */>, hipKernel_t> kernels_;
 };
