@@ -8,89 +8,110 @@
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
-
-// Helper executable to check which runtime path (PAL vs ROCr) is being used
-// Returns: 0=PAL, 1=ROC, 2=Unknown/Auto
-//
-// Usage: GPU_ENABLE_PAL=<value> ./hipEnvGpuEnablePal_CheckRuntime
-
-int main(int argc, char** argv) {
-  // First argument (if provided) sets GPU_ENABLE_PAL environment variable
-  if (argc > 1) {
+#include <string>
 #ifdef _WIN32
-    _putenv_s("GPU_ENABLE_PAL", argv[1]);
+#include <windows.h>
 #else
-    setenv("GPU_ENABLE_PAL", argv[1], 1);
+#include <unistd.h>
+#include <errno.h>
 #endif
-    std::cerr << "Set GPU_ENABLE_PAL=" << argv[1] << std::endl;
+
+// Generic helper executable to test environment variables with HIP runtime
+//
+// USAGE: ./CheckRuntime <env_var_name> <env_var_value>
+//
+// EXAMPLES:
+//   ./CheckRuntime GPU_ENABLE_PAL 1
+//   ./CheckRuntime HIP_VISIBLE_DEVICES "0,1"
+//   ./CheckRuntime GPU_ENABLE_PAL ""
+//
+// BEHAVIOR:
+//   - Sets the specified environment variable
+//   - Initializes HIP runtime with AMD_LOG_LEVEL=7
+//   - GPU_ENABLE_PAL tests parse logs for "ROCr backend initialized" / "PAL backend initialized"
+//
+// RETURN CODES:
+//   0 = success, 255 = HIP initialization failed
+
+static int setEnvironmentVariable(const char* name, const char* value) {
+#ifdef _WIN32
+  return _putenv_s(name, value);
+#else
+  return setenv(name, value, 1);
+#endif
+}
+
+static int unsetEnvironmentVariable(const char* name) {
+#ifdef _WIN32
+  return _putenv_s(name, "");
+#else
+  return unsetenv(name);
+#endif
+}
+
+// Initialize HIP with AMD_LOG_LEVEL=7, then restore original log level
+static int initializeHIP() {
+  const char* originalLogLevel = getenv("AMD_LOG_LEVEL");
+  std::string savedLogLevel;
+  if (originalLogLevel) {
+    savedLogLevel = originalLogLevel;
   }
 
-  // Initialize HIP runtime
+  setEnvironmentVariable("AMD_LOG_LEVEL", "7");
+
   int deviceCount = 0;
   hipError_t err = hipGetDeviceCount(&deviceCount);
 
-  if (err != hipSuccess) {
-    std::cerr << "hipGetDeviceCount failed: " << hipGetErrorString(err) << std::endl;
-    return 255; // Error code
-  }
-
-  if (deviceCount == 0) {
-    std::cerr << "No devices found" << std::endl;
-    return 255;
-  }
-
-  // Get device properties
-  hipDeviceProp_t prop;
-  err = hipGetDeviceProperties(&prop, 0);
-  if (err != hipSuccess) {
-    std::cerr << "hipGetDeviceProperties failed: " << hipGetErrorString(err) << std::endl;
-    return 255;
-  }
-
-  std::cerr << "Device: " << prop.name << std::endl;
-  std::cerr << "gcnArchName: " << prop.gcnArchName << std::endl;
-
-  // Try to detect which runtime is being used
-  // PAL and ROCr may have different characteristics we can detect
-
-  // Check environment variable directly to see what was requested
-  const char* gpu_enable_pal = getenv("GPU_ENABLE_PAL");
-  if (gpu_enable_pal) {
-    std::cerr << "GPU_ENABLE_PAL env var: '" << gpu_enable_pal << "'" << std::endl;
-    std::cerr << "Length: " << strlen(gpu_enable_pal) << std::endl;
-
-    if (strlen(gpu_enable_pal) == 0) {
-      std::cerr << "Empty string detected - should preserve platform default" << std::endl;
-      // The fix in Device::init() handles empty string with platform-specific defaults:
-      // - Windows: PAL path (value 1)
-      // - Linux: ROCr path (value 0)
-#ifdef _WIN32
-      std::cerr << "Platform: Windows - Expected: PAL path" << std::endl;
-      return 0; // PAL expected on Windows
-#else
-      std::cerr << "Platform: Linux - Expected: ROCr path" << std::endl;
-      return 1; // ROCr expected on Linux
-#endif
-    } else if (strcmp(gpu_enable_pal, "0") == 0) {
-      std::cerr << "Explicit '0' - ROC path requested" << std::endl;
-      return 1; // ROC
-    } else if (strcmp(gpu_enable_pal, "1") == 0) {
-      std::cerr << "Explicit '1' - PAL path requested" << std::endl;
-      return 0; // PAL
-    } else if (strcmp(gpu_enable_pal, "2") == 0) {
-      std::cerr << "Explicit '2' - Auto-select requested" << std::endl;
-      return 2; // Auto
-    }
+  if (!savedLogLevel.empty()) {
+    setEnvironmentVariable("AMD_LOG_LEVEL", savedLogLevel.c_str());
   } else {
-    std::cerr << "GPU_ENABLE_PAL not set - using default" << std::endl;
-#ifdef _WIN32
-    std::cerr << "Platform: Windows - Default should be PAL" << std::endl;
-    return 0; // PAL expected on Windows when not set
-#else
-    std::cerr << "Platform: Linux - Default should be ROCr" << std::endl;
-    return 1; // ROCr expected on Linux when not set
-#endif
+    unsetEnvironmentVariable("AMD_LOG_LEVEL");
   }
 
-  return 2; // Unknown
+  if (err != hipSuccess) {
+    std::cerr << "ERROR: hipGetDeviceCount failed: " << hipGetErrorString(err) << std::endl;
+    return 255;
+  }
+  return 0;
+}
+
+// Test GPU_ENABLE_PAL - logs which backend initialized
+static int checkGpuEnablePal(const char* value) {
+  return initializeHIP();
+}
+
+// Test generic environment variable
+static int testEnvironmentVariable(const std::string& envName, const char* value) {
+  return initializeHIP();
+}
+
+int main(int argc, char** argv) {
+  if (argc != 3) {
+    std::cerr << "Usage: " << argv[0] << " <env_var_name> <env_var_value>" << std::endl;
+    return 255;
+  }
+
+  const std::string envName = argv[1];
+  const char* envValue = argv[2];
+
+  // Handle special "UNSET" marker to test default behavior
+  if (strcmp(envValue, "UNSET") == 0) {
+    unsetEnvironmentVariable(envName.c_str());
+  } else {
+    // Set the environment variable
+    if (setEnvironmentVariable(envName.c_str(), envValue) != 0) {
+      std::cerr << "ERROR: Failed to set " << envName << std::endl;
+      return 255;
+    }
+  }
+
+  // Run the test
+  int result;
+  if (envName == "GPU_ENABLE_PAL") {
+    result = checkGpuEnablePal(envValue);
+  } else {
+    result = testEnvironmentVariable(envName, envValue);
+  }
+
+  return result;
 }
