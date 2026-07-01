@@ -329,12 +329,41 @@ fn accept_loop(
     }
 }
 
+/// Return the connecting client's OS PID via `SO_PEERCRED`, or 0 when it
+/// cannot be determined. The rocjitsu daemon needs the real client PID to
+/// access the workload's address space for cross-process GPU memory.
+fn peer_pid(fd: RawFd) -> i32 {
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut cred as *mut libc::ucred).cast(),
+            &mut len,
+        )
+    };
+    if rc == 0 && cred.pid > 0 {
+        cred.pid
+    } else {
+        0
+    }
+}
+
 /// Serve a single client connection until it closes or errors. Mirrors
 /// the C daemon's `handle_client`.
 fn handle_client(fd: RawFd, shared: &Shared) {
     let lib = &shared.lib;
     let vm = shared.vm;
     let mut process_id: u32 = 0;
+    // The client's real OS PID, needed by the VM for daemon-mode
+    // cross-process memory access (see `rj_vm_device_open`).
+    let client_pid = peer_pid(fd);
 
     loop {
         let mut header = [0u8; RPC_HEADER_LEN];
@@ -345,7 +374,7 @@ fn handle_client(fd: RawFd, shared: &Shared) {
 
         let keep_going = match opcode {
             RPC_HANDSHAKE => {
-                let (status, pid) = unsafe { lib.vm_device_open(vm) };
+                let (status, pid) = unsafe { lib.vm_device_open(vm, client_pid) };
                 if status != rocjitsu_sys::ROCJITSU_STATUS_SUCCESS {
                     let resp = build_header(0, request_id, 0, -1);
                     send_exact(fd, &resp);

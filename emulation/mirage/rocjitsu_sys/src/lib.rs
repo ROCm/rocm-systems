@@ -186,7 +186,7 @@ type FnVmCreateFromString =
 type FnVmRun = unsafe extern "C" fn(*mut RjVm, *mut u64) -> RjStatus;
 type FnVmRequestExit = unsafe extern "C" fn(*mut RjVm, *const c_char);
 type FnVmDestroy = unsafe extern "C" fn(*mut RjVm);
-type FnVmDeviceOpen = unsafe extern "C" fn(*mut RjVm, *mut u32) -> RjStatus;
+type FnVmDeviceOpen = unsafe extern "C" fn(*mut RjVm, i32, *mut u32) -> RjStatus;
 type FnVmDeviceClose = unsafe extern "C" fn(*mut RjVm, u32) -> RjStatus;
 type FnVmExecuteAs = unsafe extern "C" fn(*mut RjVm, u32, *mut RjVmCmd) -> RjStatus;
 type FnVmDeviceMapAs = unsafe extern "C" fn(*mut RjVm, u32, *mut RjVmMap) -> RjStatus;
@@ -342,9 +342,12 @@ impl Lib {
     ///
     /// # Safety
     /// `vm` must be a live handle.
-    pub unsafe fn vm_device_open(&self, vm: *mut RjVm) -> (RjStatus, u32) {
+    ///
+    /// `client_pid` is the connecting client's OS PID (enables daemon-mode
+    /// cross-process memory access and process reuse); pass 0 in local mode.
+    pub unsafe fn vm_device_open(&self, vm: *mut RjVm, client_pid: i32) -> (RjStatus, u32) {
         let mut pid: u32 = 0;
-        let status = unsafe { (self.vm_device_open)(vm, &mut pid) };
+        let status = unsafe { (self.vm_device_open)(vm, client_pid, &mut pid) };
         (status, pid)
     }
 
