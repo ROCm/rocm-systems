@@ -131,7 +131,6 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior) {
                                  kPageSize, stream));
     HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
 
-    HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
