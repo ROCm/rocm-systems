@@ -22,6 +22,12 @@ constexpr int kExpectedValue = 0x1234;
 constexpr char const kWriteKernelName[] = "write_value";
 constexpr char const kGlobalName[] = "g_value";
 
+// Magic that prefixes an uncompressed clang offload bundle. Kept as a local
+// literal so the contract does not depend on hipamd-internal headers; it must
+// stay in sync with symbols::kOffloadBundleUncompressedMagicStr in
+// clr/hipamd/src/hip_code_object.hpp.
+constexpr char const kUncompressedBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+
 // In-source device code compiled at runtime with HIPRTC. It exposes two named
 // kernels plus a resolvable device global so the library lookup, enumeration,
 // launch, and global contracts have portable symbols to resolve without any
@@ -112,6 +118,52 @@ HIP_TEST_CASE(Contract_Library_LoadData_NullImage_IsRejected) {
   const hipError_t status =
       hipLibraryLoadData(&library, nullptr, nullptr, nullptr, 0, nullptr, nullptr, 0);
   REQUIRE(status != hipSuccess);
+}
+
+HIP_TEST_CASE(Contract_Library_LoadData_InvalidImage_IsRejected) {
+  // A buffer whose leading bytes match none of the recognized code-object
+  // headers (compressed/uncompressed clang offload bundle, or a bare AMDGPU
+  // ELF) must be rejected rather than copied as if it were a valid image. The
+  // runtime prefers hipErrorInvalidImage, but the contract only pins a
+  // non-success status so it does not overfit to a single backend code.
+  static const unsigned char kJunk[] = {0x7F, 0x21, 0x00, 0x13, 0x37, 0xAB,
+                                        0xCD, 0xEF, 0x00, 0x42, 0x99, 0x01};
+  hipLibrary_t library = nullptr;
+  const hipError_t status =
+      hipLibraryLoadData(&library, kJunk, nullptr, nullptr, 0, nullptr, nullptr, 0);
+  REQUIRE(status != hipSuccess);
+  REQUIRE(library == nullptr);
+}
+
+HIP_TEST_CASE(Contract_Library_LoadData_TruncatedBundle_IsRejected) {
+  // A buffer that begins with the uncompressed clang offload bundle magic but
+  // is too short to hold the descriptor table it claims must be rejected
+  // without over-reading past the buffer. The header claims a hostile number of
+  // code objects while carrying none of the descriptor records that count
+  // implies, so a naive walk driven by the untrusted count would read far past
+  // the allocation. The contract requires a non-success status and no crash.
+  //
+  // Layout mirrors symbols::ClangOffloadBundleUncompressedHeader: the magic,
+  // then a little-endian uint64 numOfCodeObjects, then (normally) the
+  // descriptor table. We deliberately stop right after the count so the
+  // descriptors are absent.
+  const size_t magic_len = std::strlen(kUncompressedBundleMagic);
+  std::vector<char> truncated(kUncompressedBundleMagic, kUncompressedBundleMagic + magic_len);
+
+  // numOfCodeObjects = 0xFFFFFFFF: absurdly larger than any real fat binary, so
+  // the runtime must reject on the count alone instead of walking descriptors
+  // that do not exist.
+  const uint64_t hostile_count = 0xFFFFFFFFull;
+  for (size_t i = 0; i < sizeof(hostile_count); ++i) {
+    truncated.push_back(static_cast<char>((hostile_count >> (8 * i)) & 0xFF));
+  }
+  // No descriptor records follow: the buffer ends here, truncated.
+
+  hipLibrary_t library = nullptr;
+  const hipError_t status = hipLibraryLoadData(&library, truncated.data(), nullptr, nullptr, 0,
+                                               nullptr, nullptr, 0);
+  REQUIRE(status != hipSuccess);
+  REQUIRE(library == nullptr);
 }
 
 HIP_TEST_CASE(Contract_Library_LoadData_CopiesImageForLaterAccess) {

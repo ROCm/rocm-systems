@@ -525,6 +525,12 @@ contract:
   Contract_Library_LoadData_NullImage_IsRejected:
     <<: *level_0
     tags: [library]
+  Contract_Library_LoadData_InvalidImage_IsRejected:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_LoadData_TruncatedBundle_IsRejected:
+    <<: *level_0
+    tags: [library]
   Contract_Library_LoadData_CopiesImageForLaterAccess:
     <<: *level_0
     tags: [library]
