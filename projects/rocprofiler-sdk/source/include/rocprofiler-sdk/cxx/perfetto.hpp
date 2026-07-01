@@ -103,6 +103,7 @@ ROCPROFILER_DEFINE_CATEGORY(category, rocjpeg_api, "rocJPEG API function")
 ROCPROFILER_DEFINE_CATEGORY(category, counter_collection, "Counter Collection")
 ROCPROFILER_DEFINE_CATEGORY(category, kfd_events, "KFD events collection")
 ROCPROFILER_DEFINE_CATEGORY(category, scratch_memory, "Scratch Memory Allocation")
+ROCPROFILER_DEFINE_CATEGORY(category, gpu_events, "GPU events")
 ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
 
 #define ROCPROFILER_PERFETTO_CATEGORIES                                                            \
@@ -118,6 +119,7 @@ ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
         ROCPROFILER_PERFETTO_CATEGORY(category::rocdecode_api),                                    \
         ROCPROFILER_PERFETTO_CATEGORY(category::rocjpeg_api),                                      \
         ROCPROFILER_PERFETTO_CATEGORY(category::scratch_memory),                                   \
+        ROCPROFILER_PERFETTO_CATEGORY(category::gpu_events),                                       \
         ROCPROFILER_PERFETTO_CATEGORY(category::none)
 
 #include <perfetto.h>
@@ -238,6 +240,7 @@ ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(KFD_EVENT_DROPPED_EVENTS, kfd_event
 ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(KFD_PAGE_MIGRATE, kfd_events)
 ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(KFD_PAGE_FAULT, kfd_events)
 ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(KFD_QUEUE, kfd_events)
+ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(GPU_EVENTS, gpu_events)
 
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(NONE, none)
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(HSA_CORE_API, hsa_api)
@@ -261,6 +264,7 @@ ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(RUNTIME_INITIALIZATION, none)
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(ROCDECODE_API, rocdecode_api)
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(ROCJPEG_API, rocjpeg_api)
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(HIP_STREAM, hip_api)
+ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(GPU_EVENTS, gpu_events)
 
 template <typename KindT, size_t Idx, size_t... Tail>
 const char*

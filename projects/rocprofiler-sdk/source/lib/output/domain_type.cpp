@@ -77,6 +77,7 @@ DEFINE_BUFFER_TYPE_NAME(SPM_COUNTER_VALUES,
                         "SPM_counter_values",
                         "SPM_counter_values")
 DEFINE_BUFFER_TYPE_NAME(OMPT, "OMPT", "ompt_trace", "ompt_stats")
+DEFINE_BUFFER_TYPE_NAME(GPU_EVENTS, "GPU_EVENTS", "gpu_events_trace", "gpu_events_stats")
 
 #undef DEFINE_BUFFER_TYPE_NAME
 

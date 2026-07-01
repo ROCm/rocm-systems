@@ -183,6 +183,7 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,  ///< @see ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                          ///< ::rocprofiler_marker_core_range_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,            ///< @see rocprofiler_gpu_event_operation_t  
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -234,6 +235,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,         ///< @see rocprofiler_kfd_queue_operation_t
     ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                        ///< ::rocprofiler_marker_core_range_api_id_t
+    ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,  ///< @see rocprofiler_gpu_event_operation_t
     ROCPROFILER_BUFFER_TRACING_LAST,
 
     /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
@@ -497,6 +499,21 @@ typedef enum rocprofiler_pc_sampling_record_kind_t
     ROCPROFILER_PC_SAMPLING_RECORD_STOCHASTIC_V0_SAMPLE,  ///< ::rocprofiler_pc_sampling_record_stochastic_v0_t
     ROCPROFILER_PC_SAMPLING_RECORD_LAST,
 } rocprofiler_pc_sampling_record_kind_t;
+ 
+/**
+ * @brief Enumeration for distinguishing different event record kinds within the
+ * ::ROCPROFILER_BUFFER_CATEGORY_GPU_EVENTS category
+ */
+typedef enum rocprofiler_gpu_event_operation_t
+{
+    ROCPROFILER_GPU_EVENT_NONE              = 0,  ///< Unknown GPU event operation
+    ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE      = 1,  ///< Enqueue a GPU wait operation
+    ROCPROFILER_GPU_EVENT_WAIT_COMPLETE     = 2,  ///< Completion of a GPU wait operation
+    ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE    = 3,  ///< Enqueue a GPU record/signal operation
+    ROCPROFILER_GPU_EVENT_RECORD_COMPLETE   = 4,  ///< Completion of a GPU record/signal operation
+    ROCPROFILER_GPU_EVENT_LAST,
+
+} rocprofiler_event_operation_t;
 
 //--------------------------------------------------------------------------------------//
 //
@@ -869,6 +886,20 @@ ROCPROFILER_SDK_DEPRECATED("profile_config renamed to counter_config")
 typedef rocprofiler_counter_config_id_t rocprofiler_profile_config_id_t;
 
 #endif
+
+/**
+ * @brief (experimental) ROCProfiler GPU event record information.
+ */
+typedef struct rocprofiler_gpu_event_info_t
+{
+    uint64_t                  size;         ///< Size of this struct
+    uint64_t                  issue_id;     ///< Issue index for this command
+    rocprofiler_agent_id_t    agent_id;     ///< Agent ID where gpu event op is encoded
+    rocprofiler_queue_id_t    queue_id;     ///< Queue ID where gpu event packet is enqueued
+    rocprofiler_stream_id_t   stream_id;    ///< Stream ID where gpu event packet is enqueued
+    uint64_t                  event_id;     ///< Event ID being operated upon
+    uint8_t                   type_id;      ///< Type of operation
+} rocprofiler_gpu_event_info_t;
 
 /** @} */
 

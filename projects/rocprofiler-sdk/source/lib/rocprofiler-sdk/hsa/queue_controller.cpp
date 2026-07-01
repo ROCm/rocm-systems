@@ -559,10 +559,13 @@ enable_queue_intercept()
 
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+ 
+        bool has_events_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS) ||
+                                  itr->is_tracing(ROCPROFILER_BUFFER_TRACING_GPU_EVENTS);
 
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
-           itr->device_thread_trace || itr->dispatch_thread_trace)
+           itr->device_thread_trace || itr->dispatch_thread_trace || has_events_reporting)
             return true;
     }
     return false;
