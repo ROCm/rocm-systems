@@ -50,6 +50,9 @@ meaningful timing data.
 
 ### Directory layout
 
+> **Notation.** In the tree below, `<name>{.h,_test.cc}` is shorthand for the pair
+> `<name>.h` and `<name>_test.cc`. See [Naming conventions](#naming-conventions) for the rules.
+
 ```text
 tests/amd_smi_test/
 ├── main.cc                          # GTest entry point; registers all TestBase tests
@@ -61,10 +64,10 @@ tests/amd_smi_test/
 │
 ├── unit/                            # No hardware required; pure TEST() macro tests
 │   └── gpu/
-│       ├── dynamic_metrics.cc       # Metric struct versioning and compatibility checks
-│       ├── cper_read.cc             # CPER read path: synthetic edge cases (no fixtures)
-│       ├── mock_cper.cc             # CPER parse/severity filtering vs mock_cper/ fixtures
-│       └── mock_cper/               # Sanitized real CPER fixtures used by mock_cper.cc
+│       ├── dynamic_metrics_test.cc  # Metric struct versioning and compatibility checks
+│       ├── cper_read_test.cc        # CPER read path: synthetic edge cases (no fixtures)
+│       ├── mock_cper_test.cc        # CPER parse/severity filtering vs mock_cper/ fixtures
+│       └── mock_cper/               # Sanitized real CPER fixtures used by mock_cper_test.cc
 │           ├── README.md            # Fixture provenance and scrubbing notes
 │           ├── sanitize_cper.py     # Regenerates fixtures from raw captures
 │           ├── cper_corrected.cper
@@ -75,79 +78,79 @@ tests/amd_smi_test/
 └── functional/                      # Requires live hardware; uses TestBase lifecycle
     ├── gpu/
     │   ├── clock/
-    │   │   ├── frequencies_read.{h,cc}
-    │   │   └── frequencies_read_write.{h,cc}
+    │   │   ├── frequencies_read{.h,_test.cc}
+    │   │   └── frequencies_read_write{.h,_test.cc}
     │   ├── events/
-    │   │   └── evt_notif_read_write.{h,cc}
+    │   │   └── evt_notif_read_write{.h,_test.cc}
     │   ├── identity/
-    │   │   ├── id_info_read.{h,cc}
-    │   │   └── version_read.{h,cc}
+    │   │   ├── id_info_read{.h,_test.cc}
+    │   │   └── version_read{.h,_test.cc}
     │   ├── memory/
-    │   │   ├── mem_page_info_read.{h,cc}
-    │   │   ├── mem_util_read.{h,cc}
-    │   │   └── memory_read_write.{h,cc}
+    │   │   ├── mem_page_info_read{.h,_test.cc}
+    │   │   ├── mem_util_read{.h,_test.cc}
+    │   │   └── memory_read_write{.h,_test.cc}
     │   ├── metrics/
-    │   │   ├── gpu_busy_read.{h,cc}
-    │   │   ├── gpu_cache_read.{h,cc}
-    │   │   ├── gpu_metrics_read.{h,cc}
-    │   │   ├── gpu_partition_metrics_read.{h,cc}
-    │   │   ├── metrics_counter_read.{h,cc}
-    │   │   └── process_info_read.{h,cc}
+    │   │   ├── gpu_busy_read{.h,_test.cc}
+    │   │   ├── gpu_cache_read{.h,_test.cc}
+    │   │   ├── gpu_metrics_read{.h,_test.cc}
+    │   │   ├── gpu_partition_metrics_read{.h,_test.cc}
+    │   │   ├── metrics_counter_read{.h,_test.cc}
+    │   │   └── process_info_read{.h,_test.cc}
     │   ├── partition/
-    │   │   ├── computepartition_read_write.{h,cc}
-    │   │   ├── computepartition_memallocmode_read_write.{h,cc}
-    │   │   └── memorypartition_read_write.{h,cc}
+    │   │   ├── computepartition_read_write{.h,_test.cc}
+    │   │   ├── computepartition_memallocmode_read_write{.h,_test.cc}
+    │   │   └── memorypartition_read_write{.h,_test.cc}
     │   ├── pci/
-    │   │   └── pci_read_write.{h,cc}
+    │   │   └── pci_read_write{.h,_test.cc}
     │   ├── perf/
-    │   │   ├── overdrive_read.{h,cc}
-    │   │   ├── overdrive_read_write.{h,cc}
-    │   │   ├── perf_cntr_read_write.{h,cc}
-    │   │   ├── perf_determinism.{h,cc}
-    │   │   ├── perf_level_read.{h,cc}
-    │   │   ├── perf_level_read_write.{h,cc}
-    │   │   ├── volt_freq_curv_read.{h,cc}
-    │   │   └── volt_read.{h,cc}
+    │   │   ├── overdrive_read{.h,_test.cc}
+    │   │   ├── overdrive_read_write{.h,_test.cc}
+    │   │   ├── perf_cntr_read_write{.h,_test.cc}
+    │   │   ├── perf_determinism{.h,_test.cc}
+    │   │   ├── perf_level_read{.h,_test.cc}
+    │   │   ├── perf_level_read_write{.h,_test.cc}
+    │   │   ├── volt_freq_curv_read{.h,_test.cc}
+    │   │   └── volt_read{.h,_test.cc}
     │   ├── power/
-    │   │   ├── power_cap_read_write.{h,cc}
-    │   │   ├── power_read.{h,cc}
-    │   │   └── power_read_write.{h,cc}
+    │   │   ├── power_cap_read_write{.h,_test.cc}
+    │   │   ├── power_read{.h,_test.cc}
+    │   │   └── power_read_write{.h,_test.cc}
     │   ├── ras/
-    │   │   └── err_cnt_read.{h,cc}
+    │   │   └── err_cnt_read{.h,_test.cc}
     │   ├── thermal/
-    │   │   ├── fan_read.{h,cc}
-    │   │   ├── fan_read_write.{h,cc}
-    │   │   └── temp_read.{h,cc}
+    │   │   ├── fan_read{.h,_test.cc}
+    │   │   ├── fan_read_write{.h,_test.cc}
+    │   │   └── temp_read{.h,_test.cc}
     │   └── xgmi/
-    │       └── xgmi_read_write.{h,cc}
+    │       └── xgmi_read_write{.h,_test.cc}
     ├── system/
-    │   ├── cross_process_serialization.{h,cc}
-    │   ├── hw_topology_read.{h,cc}
-    │   ├── init_shutdown_refcount.{h,cc}
-    │   ├── kfd_atfork_read.{h,cc}
-    │   ├── mutual_exclusion.{h,cc}
-    │   └── sys_info_read.{h,cc}
+    │   ├── cross_process_serialization{.h,_test.cc}
+    │   ├── hw_topology_read{.h,_test.cc}
+    │   ├── init_shutdown_refcount{.h,_test.cc}
+    │   ├── kfd_atfork_read{.h,_test.cc}
+    │   ├── mutual_exclusion{.h,_test.cc}
+    │   └── sys_info_read{.h,_test.cc}
     ├── cpu/
     │   ├── clock/
-    │   │   └── placeholder.cc       # Stub — CPU clock C++ tests added here
+    │   │   └── placeholder_test.cc  # Stub — CPU clock C++ tests added here
     │   └── power/
-    │       └── placeholder.cc       # Stub — CPU power C++ tests added here
+    │       └── placeholder_test.cc  # Stub — CPU power C++ tests added here
     ├── nic/
     │   ├── discovery/
-    │   │   └── placeholder.cc       # Stub — NIC/switch discovery C++ tests added here
+    │   │   └── placeholder_test.cc  # Stub — NIC/switch discovery C++ tests added here
     │   └── identity/
-    │       └── placeholder.cc       # Stub — NIC/switch identity C++ tests added here
+    │       └── placeholder_test.cc  # Stub — NIC/switch identity C++ tests added here
     └── ifoe/
         ├── fabric/
-        │   └── fabric_read.{h,cc}   # IFoE fabric link reads
+        │   └── fabric_read{.h,_test.cc}   # IFoE fabric link reads
         └── identity/
-            └── ifoe_info_read.{h,cc} # IFoE endpoint info reads
+            └── ifoe_info_read{.h,_test.cc} # IFoE endpoint info reads
 ```
 
 ### Component subdirectory depth
 
 Each component groups tests into per-feature subdirectories (`<component>/<feature>/`, like `gpu/`).
-A feature gets its own subdirectory even for a single test. A `placeholder.cc` holds a feature
+A feature gets its own subdirectory even for a single test. A `placeholder_test.cc` holds a feature
 directory until its first real test lands.
 
 The names below are suggestions that mirror the Python suite's `test_<feature>.py` files. Sharing
@@ -161,10 +164,15 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 
 ### Naming conventions
 
-**Files**: `{feature}_{operation}.{h|cc}` where operation is `read`, `read_write`, or a descriptive
-term such as `perf_determinism` or `dynamic_metrics`.
+**Files**:
 
-**Classes**: `Test{FeatureName}{Operation}` derived from `TestBase` for functional tests; plain
+- `<feature>_<operation>_test.cc` — the test implementation. Keep the `_test` suffix — some CI checks
+  use it to identify tests.
+- `<feature>_<operation>.h` — fixture header, functional tests only (unit tests have none).
+- `<feature>` — for example: `fan`, `clock`, or `dynamic_metrics`.
+- `<operation>` — for example: `read` or `read_write`.
+
+**Classes**: `Test<FeatureName><Operation>` derived from `TestBase` for functional tests; plain
 `TEST(Suite, Name)` for unit tests.
 
 **GTest suites registered in `main.cc`**:
@@ -191,15 +199,15 @@ isolated.
 
 The cper suite shows both styles:
 
-- `unit/gpu/cper_read.cc` — builds CPER byte blobs in memory at runtime (no fixtures); covers
+- `unit/gpu/cper_read_test.cc` — builds CPER byte blobs in memory at runtime (no fixtures); covers
   read-path edge cases and error handling (zero-size file, empty ring, partial reads, buffer
   overflow, invalid args).
-- `unit/gpu/mock_cper.cc` — drives the same API against committed `.cper` fixtures and validates
+- `unit/gpu/mock_cper_test.cc` — drives the same API against committed `.cper` fixtures and validates
   record counting and severity-mask filtering on realistic records.
 
 **To add a mocked unit test**, follow the `mock_cper` pattern:
 
-1. Put the test at `unit/<component>/mock_<feature>.cc` and its fixtures in a sibling
+1. Put the test at `unit/<component>/mock_<feature>_test.cc` and its fixtures in a sibling
    `unit/<component>/mock_<feature>/` folder — one folder per test, no shared catch-all.
 2. Load fixtures relative to the per-test folder; the existing `MockDir()` helper finds it
    next to the installed binary or via the `AMDSMI_TEST_MOCK_DIR` build define.
@@ -520,55 +528,58 @@ The top-level `CMakeLists.txt` wires this in with `add_subdirectory("tests/pytho
 
 ### C++ file mapping
 
+> **Note.** `<name>{.h,_test.cc}` in the *New path* column denotes the pair `<name>.h` + `<name>_test.cc`
+> (see [Directory layout](#directory-layout)).
+
 | Old path (`tests/amd_smi_test/`) | New path (`tests/amd_smi_test/`) |
 | :--- | :--- |
 | `functional/api_support_read.{h,cc}` | _Removed_ — amd-smi has no supported-function iterator API to exercise (support is reported per call via `AMDSMI_STATUS_NOT_SUPPORTED`), so the ported test had an empty `Run()`. |
-| `functional/computepartition_read_write.{h,cc}` | `functional/gpu/partition/computepartition_read_write.{h,cc}` |
-| `functional/dynamic_metrics_test.cc` | `unit/gpu/dynamic_metrics.cc` |
-| `functional/cper_read.cc` | `unit/gpu/cper_read.cc` |
-| `functional/mock_cper.cc` | `unit/gpu/mock_cper.cc` |
+| `functional/computepartition_read_write.{h,cc}` | `functional/gpu/partition/computepartition_read_write{.h,_test.cc}` |
+| `functional/dynamic_metrics_test.cc` | `unit/gpu/dynamic_metrics_test.cc` |
+| `functional/cper_read.cc` | `unit/gpu/cper_read_test.cc` |
+| `functional/mock_cper.cc` | `unit/gpu/mock_cper_test.cc` |
 | `functional/mock_values/` | `unit/gpu/mock_cper/` |
-| `functional/cross_process_serialization.{h,cc}` | `functional/system/cross_process_serialization.{h,cc}` |
-| `functional/kfd_atfork_read.{h,cc}` | `functional/system/kfd_atfork_read.{h,cc}` |
-| `functional/fabric_read.{h,cc}` | `functional/ifoe/fabric/fabric_read.{h,cc}` |
-| `functional/ifoe_info_read.{h,cc}` | `functional/ifoe/identity/ifoe_info_read.{h,cc}` |
-| `functional/computepartition_memallocmode_read_write.{h,cc}` | `functional/gpu/partition/computepartition_memallocmode_read_write.{h,cc}` |
-| `functional/err_cnt_read.{h,cc}` | `functional/gpu/ras/err_cnt_read.{h,cc}` |
-| `functional/evt_notif_read_write.{h,cc}` | `functional/gpu/events/evt_notif_read_write.{h,cc}` |
-| `functional/fan_read.{h,cc}` | `functional/gpu/thermal/fan_read.{h,cc}` |
-| `functional/fan_read_write.{h,cc}` | `functional/gpu/thermal/fan_read_write.{h,cc}` |
-| `functional/frequencies_read.{h,cc}` | `functional/gpu/clock/frequencies_read.{h,cc}` |
-| `functional/frequencies_read_write.{h,cc}` | `functional/gpu/clock/frequencies_read_write.{h,cc}` |
-| `functional/gpu_busy_read.{h,cc}` | `functional/gpu/metrics/gpu_busy_read.{h,cc}` |
-| `functional/gpu_cache_read.{h,cc}` | `functional/gpu/metrics/gpu_cache_read.{h,cc}` |
-| `functional/gpu_metrics_read.{h,cc}` | `functional/gpu/metrics/gpu_metrics_read.{h,cc}` |
-| `functional/gpu_partition_metrics_read.{h,cc}` | `functional/gpu/metrics/gpu_partition_metrics_read.{h,cc}` |
-| `functional/hw_topology_read.{h,cc}` | `functional/system/hw_topology_read.{h,cc}` |
-| `functional/id_info_read.{h,cc}` | `functional/gpu/identity/id_info_read.{h,cc}` |
-| `functional/init_shutdown_refcount.{h,cc}` | `functional/system/init_shutdown_refcount.{h,cc}` |
-| `functional/mem_page_info_read.{h,cc}` | `functional/gpu/memory/mem_page_info_read.{h,cc}` |
-| `functional/mem_util_read.{h,cc}` | `functional/gpu/memory/mem_util_read.{h,cc}` |
-| `functional/memory_read_write.{h,cc}` | `functional/gpu/memory/memory_read_write.{h,cc}` |
-| `functional/memorypartition_read_write.{h,cc}` | `functional/gpu/partition/memorypartition_read_write.{h,cc}` |
-| `functional/metrics_counter_read.{h,cc}` | `functional/gpu/metrics/metrics_counter_read.{h,cc}` |
-| `functional/mutual_exclusion.{h,cc}` | `functional/system/mutual_exclusion.{h,cc}` |
-| `functional/overdrive_read.{h,cc}` | `functional/gpu/perf/overdrive_read.{h,cc}` |
-| `functional/overdrive_read_write.{h,cc}` | `functional/gpu/perf/overdrive_read_write.{h,cc}` |
-| `functional/pci_read_write.{h,cc}` | `functional/gpu/pci/pci_read_write.{h,cc}` |
-| `functional/perf_cntr_read_write.{h,cc}` | `functional/gpu/perf/perf_cntr_read_write.{h,cc}` |
-| `functional/perf_determinism.{h,cc}` | `functional/gpu/perf/perf_determinism.{h,cc}` |
-| `functional/perf_level_read.{h,cc}` | `functional/gpu/perf/perf_level_read.{h,cc}` |
-| `functional/perf_level_read_write.{h,cc}` | `functional/gpu/perf/perf_level_read_write.{h,cc}` |
-| `functional/power_cap_read_write.{h,cc}` | `functional/gpu/power/power_cap_read_write.{h,cc}` |
-| `functional/power_read.{h,cc}` | `functional/gpu/power/power_read.{h,cc}` |
-| `functional/power_read_write.{h,cc}` | `functional/gpu/power/power_read_write.{h,cc}` |
-| `functional/process_info_read.{h,cc}` | `functional/gpu/metrics/process_info_read.{h,cc}` |
-| `functional/sys_info_read.{h,cc}` | `functional/system/sys_info_read.{h,cc}` |
-| `functional/temp_read.{h,cc}` | `functional/gpu/thermal/temp_read.{h,cc}` |
-| `functional/version_read.{h,cc}` | `functional/gpu/identity/version_read.{h,cc}` |
-| `functional/volt_freq_curv_read.{h,cc}` | `functional/gpu/perf/volt_freq_curv_read.{h,cc}` |
-| `functional/volt_read.{h,cc}` | `functional/gpu/perf/volt_read.{h,cc}` |
-| `functional/xgmi_read_write.{h,cc}` | `functional/gpu/xgmi/xgmi_read_write.{h,cc}` |
+| `functional/cross_process_serialization.{h,cc}` | `functional/system/cross_process_serialization{.h,_test.cc}` |
+| `functional/kfd_atfork_read.{h,cc}` | `functional/system/kfd_atfork_read{.h,_test.cc}` |
+| `functional/fabric_read.{h,cc}` | `functional/ifoe/fabric/fabric_read{.h,_test.cc}` |
+| `functional/ifoe_info_read.{h,cc}` | `functional/ifoe/identity/ifoe_info_read{.h,_test.cc}` |
+| `functional/computepartition_memallocmode_read_write.{h,cc}` | `functional/gpu/partition/computepartition_memallocmode_read_write{.h,_test.cc}` |
+| `functional/err_cnt_read.{h,cc}` | `functional/gpu/ras/err_cnt_read{.h,_test.cc}` |
+| `functional/evt_notif_read_write.{h,cc}` | `functional/gpu/events/evt_notif_read_write{.h,_test.cc}` |
+| `functional/fan_read.{h,cc}` | `functional/gpu/thermal/fan_read{.h,_test.cc}` |
+| `functional/fan_read_write.{h,cc}` | `functional/gpu/thermal/fan_read_write{.h,_test.cc}` |
+| `functional/frequencies_read.{h,cc}` | `functional/gpu/clock/frequencies_read{.h,_test.cc}` |
+| `functional/frequencies_read_write.{h,cc}` | `functional/gpu/clock/frequencies_read_write{.h,_test.cc}` |
+| `functional/gpu_busy_read.{h,cc}` | `functional/gpu/metrics/gpu_busy_read{.h,_test.cc}` |
+| `functional/gpu_cache_read.{h,cc}` | `functional/gpu/metrics/gpu_cache_read{.h,_test.cc}` |
+| `functional/gpu_metrics_read.{h,cc}` | `functional/gpu/metrics/gpu_metrics_read{.h,_test.cc}` |
+| `functional/gpu_partition_metrics_read.{h,cc}` | `functional/gpu/metrics/gpu_partition_metrics_read{.h,_test.cc}` |
+| `functional/hw_topology_read.{h,cc}` | `functional/system/hw_topology_read{.h,_test.cc}` |
+| `functional/id_info_read.{h,cc}` | `functional/gpu/identity/id_info_read{.h,_test.cc}` |
+| `functional/init_shutdown_refcount.{h,cc}` | `functional/system/init_shutdown_refcount{.h,_test.cc}` |
+| `functional/mem_page_info_read.{h,cc}` | `functional/gpu/memory/mem_page_info_read{.h,_test.cc}` |
+| `functional/mem_util_read.{h,cc}` | `functional/gpu/memory/mem_util_read{.h,_test.cc}` |
+| `functional/memory_read_write.{h,cc}` | `functional/gpu/memory/memory_read_write{.h,_test.cc}` |
+| `functional/memorypartition_read_write.{h,cc}` | `functional/gpu/partition/memorypartition_read_write{.h,_test.cc}` |
+| `functional/metrics_counter_read.{h,cc}` | `functional/gpu/metrics/metrics_counter_read{.h,_test.cc}` |
+| `functional/mutual_exclusion.{h,cc}` | `functional/system/mutual_exclusion{.h,_test.cc}` |
+| `functional/overdrive_read.{h,cc}` | `functional/gpu/perf/overdrive_read{.h,_test.cc}` |
+| `functional/overdrive_read_write.{h,cc}` | `functional/gpu/perf/overdrive_read_write{.h,_test.cc}` |
+| `functional/pci_read_write.{h,cc}` | `functional/gpu/pci/pci_read_write{.h,_test.cc}` |
+| `functional/perf_cntr_read_write.{h,cc}` | `functional/gpu/perf/perf_cntr_read_write{.h,_test.cc}` |
+| `functional/perf_determinism.{h,cc}` | `functional/gpu/perf/perf_determinism{.h,_test.cc}` |
+| `functional/perf_level_read.{h,cc}` | `functional/gpu/perf/perf_level_read{.h,_test.cc}` |
+| `functional/perf_level_read_write.{h,cc}` | `functional/gpu/perf/perf_level_read_write{.h,_test.cc}` |
+| `functional/power_cap_read_write.{h,cc}` | `functional/gpu/power/power_cap_read_write{.h,_test.cc}` |
+| `functional/power_read.{h,cc}` | `functional/gpu/power/power_read{.h,_test.cc}` |
+| `functional/power_read_write.{h,cc}` | `functional/gpu/power/power_read_write{.h,_test.cc}` |
+| `functional/process_info_read.{h,cc}` | `functional/gpu/metrics/process_info_read{.h,_test.cc}` |
+| `functional/sys_info_read.{h,cc}` | `functional/system/sys_info_read{.h,_test.cc}` |
+| `functional/temp_read.{h,cc}` | `functional/gpu/thermal/temp_read{.h,_test.cc}` |
+| `functional/version_read.{h,cc}` | `functional/gpu/identity/version_read{.h,_test.cc}` |
+| `functional/volt_freq_curv_read.{h,cc}` | `functional/gpu/perf/volt_freq_curv_read{.h,_test.cc}` |
+| `functional/volt_read.{h,cc}` | `functional/gpu/perf/volt_read{.h,_test.cc}` |
+| `functional/xgmi_read_write.{h,cc}` | `functional/gpu/xgmi/xgmi_read_write{.h,_test.cc}` |
 
 ### Python file mapping
 

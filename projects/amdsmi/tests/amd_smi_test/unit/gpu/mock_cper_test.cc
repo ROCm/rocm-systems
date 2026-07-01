@@ -27,7 +27,7 @@
 // See that folder's README for provenance. The fixtures are installed next to
 // the test binary and located at runtime (see MockDir); AMDSMI_TEST_MOCK_DIR is
 // the build-tree fallback for in-tree runs.
-// Single-record parsing is also covered synthetically in cper_read.cc; these
+// Single-record parsing is also covered synthetically in cper_read_test.cc; these
 // fixtures add real-capture coverage: header byte alignment, multi-record
 // rings, and severity_mask filtering.
 
