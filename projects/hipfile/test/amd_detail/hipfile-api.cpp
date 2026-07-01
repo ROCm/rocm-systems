@@ -174,7 +174,9 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipPointerGetAttributesError)
 {
     StrictMock<MHip> mhip;
     EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
-    ASSERT_EQ(hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, mbackends), -hipErrorUnknown);
+    ASSERT_EQ(
+        hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, *Context<DriverState>::get(), mbackends),
+        -hipErrorUnknown);
 }
 
 TEST_P(HipFileIoParam, HipFileIoHandlesUnsupportedHipMemoryType)
@@ -184,7 +186,8 @@ TEST_P(HipFileIoParam, HipFileIoHandlesUnsupportedHipMemoryType)
         hipPointerAttribute_t attrs{};
         attrs.type = memoryType;
         EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
-        ASSERT_EQ(hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, mbackends),
+        ASSERT_EQ(hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, *Context<DriverState>::get(),
+                            mbackends),
                   -static_cast<ssize_t>(hipFileHipMemoryTypeInvalid));
     }
 }
@@ -192,7 +195,8 @@ TEST_P(HipFileIoParam, HipFileIoHandlesUnsupportedHipMemoryType)
 TEST_P(HipFileIoParam, HipFileIoHandlesInvalidFileHandle)
 {
     auto invalid_handle{reinterpret_cast<hipFileHandle_t>(0xdeadbeef)};
-    ASSERT_EQ(hipFileIo(GetParam(), invalid_handle, bufptr, 0, 0, 0, mbackends), -hipFileHandleNotRegistered);
+    ASSERT_EQ(hipFileIo(GetParam(), invalid_handle, bufptr, 0, 0, 0, *Context<DriverState>::get(), mbackends),
+              -hipFileHandleNotRegistered);
 }
 
 TEST_P(HipFileIoParam, HipFileIoHandlesSysRuntimeError)
@@ -200,7 +204,9 @@ TEST_P(HipFileIoParam, HipFileIoHandlesSysRuntimeError)
     EXPECT_CALL(*mbackend, score).WillOnce(Return(1));
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(std::system_error(EBADFD, std::generic_category())));
     errno = 0;
-    ASSERT_EQ(hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, mbackends), -1);
+    ASSERT_EQ(
+        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, *Context<DriverState>::get(), mbackends),
+        -1);
     ASSERT_EQ(errno, EBADFD);
 }
 
@@ -208,21 +214,27 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipRuntimeError)
 {
     EXPECT_CALL(*mbackend, score).WillOnce(Return(1));
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
-    ASSERT_EQ(hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, mbackends), -hipErrorUnknown);
+    ASSERT_EQ(
+        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, *Context<DriverState>::get(), mbackends),
+        -hipErrorUnknown);
 }
 
 TEST_P(HipFileIoParam, HipFileIoHandlesInvalidArgumentError)
 {
     EXPECT_CALL(*mbackend, score).WillOnce(Return(1));
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(std::invalid_argument("")));
-    ASSERT_EQ(hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, mbackends), -hipFileInvalidValue);
+    ASSERT_EQ(
+        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, *Context<DriverState>::get(), mbackends),
+        -hipFileInvalidValue);
 }
 
 TEST_P(HipFileIoParam, HipFileIoHandlesBackendDisabled)
 {
     EXPECT_CALL(*mbackend, score).WillOnce(Return(1));
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(BackendDisabled()));
-    ASSERT_EQ(hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, mbackends), -hipFileInternalError);
+    ASSERT_EQ(
+        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, *Context<DriverState>::get(), mbackends),
+        -hipFileInternalError);
 }
 
 INSTANTIATE_TEST_SUITE_P(HipFileIo, HipFileIoParam, Values(IoType::Read, IoType::Write));

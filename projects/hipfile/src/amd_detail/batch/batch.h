@@ -19,6 +19,9 @@ class IBuffer;
 namespace hipFile {
 class IFile;
 }
+namespace hipFile {
+class DriverState;
+}
 
 namespace hipFile {
 
@@ -54,9 +57,10 @@ class IBatchContext {
 public:
     static constexpr unsigned MAX_SIZE = 128;
 
-    virtual ~IBatchContext()                                                                 = default;
-    virtual unsigned get_capacity() const noexcept                                           = 0;
-    virtual void     submit_operations(const hipFileIOParams_t *params, unsigned num_params) = 0;
+    virtual ~IBatchContext()                               = default;
+    virtual unsigned get_capacity() const noexcept         = 0;
+    virtual void     submit_operations(const hipFileIOParams_t *params, unsigned num_params,
+                                       DriverState &state) = 0;
 };
 
 class BatchContext : public IBatchContext {
@@ -76,7 +80,8 @@ public:
     /// @note This is an All or None operation. If one submitted operation is not valid, no operations
     ///       will be submitted.
     ///
-    void submit_operations(const hipFileIOParams_t *params, const unsigned num_params) override;
+    void submit_operations(const hipFileIOParams_t *params, const unsigned num_params,
+                           DriverState &state) override;
 
 private:
     const unsigned capacity;

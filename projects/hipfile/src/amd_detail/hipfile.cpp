@@ -66,9 +66,9 @@ checkNull(std::initializer_list<void *> ptrs)
 // count if the driver is already initialized. Used by hipFile to ensure its
 // behaviour is consistent on AMD and NVIDIA
 static inline void
-ensureDriverInit()
+ensureDriverInit(DriverState &state)
 {
-    hipFile::Context<hipFile::DriverState>::get()->ensureInitialized();
+    state.ensureInitialized();
 }
 
 hipFileError_t
@@ -182,9 +182,9 @@ getCachedBackends()
 
 ssize_t
 hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
-          hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
+          hoff_t buffer_offset, DriverState &state, const vector<shared_ptr<Backend>> &backends)
 try {
-    auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
+    auto [file, buffer] = state.getFileAndBuffer(fh, buffer_base);
     int                      score{-1};
     std::shared_ptr<Backend> backend{};
 
@@ -237,8 +237,8 @@ ssize_t
 hipFileRead(hipFileHandle_t fh, void *buffer_base, size_t size, hoff_t file_offset, hoff_t buffer_offset)
 try {
     hipFileInit();
-    auto result =
-        hipFileIo(IoType::Read, fh, buffer_base, size, file_offset, buffer_offset, getCachedBackends());
+    auto result = hipFileIo(IoType::Read, fh, buffer_base, size, file_offset, buffer_offset,
+                            *Context<DriverState>::get(), getCachedBackends());
 
     if (result == -hipFileDriverNotInitialized) {
         // Match cuFile behaviour
@@ -257,8 +257,8 @@ hipFileWrite(hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t fi
              hoff_t buffer_offset)
 try {
     hipFileInit();
-    auto result =
-        hipFileIo(IoType::Write, fh, buffer_base, size, file_offset, buffer_offset, getCachedBackends());
+    auto result = hipFileIo(IoType::Write, fh, buffer_base, size, file_offset, buffer_offset,
+                            *Context<DriverState>::get(), getCachedBackends());
 
     if (result == -hipFileDriverNotInitialized) {
         // Match cuFile behaviour
@@ -401,7 +401,7 @@ try {
     }
 
     std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
-    batch_context->submit_operations(iocbp, nr);
+    batch_context->submit_operations(iocbp, nr, *Context<DriverState>::get());
 
     return {hipFileSuccess, hipSuccess};
 }
@@ -455,17 +455,17 @@ catch (...) {
 
 static hipFileError_t
 hipFileIOAsync(IoType io_type, hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
-               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t hipStream)
+               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t hipStream,
+               DriverState &state)
 try {
-    if (Context<DriverState>::get()->getRefCount() == 0) {
-        ensureDriverInit();
+    if (state.getRefCount() == 0) {
+        ensureDriverInit(state);
         return {hipFileInvalidValue, hipSuccess};
     }
 
     checkNull({buffer_base, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p});
 
-    auto [file, buffer, stream] =
-        Context<DriverState>::get()->getFileBufferAndStream(fh, buffer_base, hipStream);
+    auto [file, buffer, stream] = state.getFileBufferAndStream(fh, buffer_base, hipStream);
     Fallback().async_io(io_type, file, buffer, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p,
                         stream);
 
@@ -493,7 +493,7 @@ hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *
 try {
     hipFileInit();
     return hipFileIOAsync(IoType::Read, fh, buffer_base, size_p, file_offset_p, buffer_offset_p, bytes_read_p,
-                          stream);
+                          stream, *Context<DriverState>::get());
 }
 catch (...) {
     return handle_exception();
@@ -505,7 +505,7 @@ hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t 
 try {
     hipFileInit();
     return hipFileIOAsync(IoType::Write, fh, buffer_base, size_p, file_offset_p, buffer_offset_p,
-                          bytes_written_p, stream);
+                          bytes_written_p, stream, *Context<DriverState>::get());
 }
 catch (...) {
     return handle_exception();

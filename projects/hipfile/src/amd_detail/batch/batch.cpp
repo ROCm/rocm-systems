@@ -5,7 +5,6 @@
 
 #include "batch.h"
 #include "buffer.h"
-#include "context.h"
 #include "file.h"
 #include "hipfile.h"
 #include "state.h"
@@ -106,7 +105,7 @@ BatchContext::get_capacity() const noexcept
 }
 
 void
-BatchContext::submit_operations(const hipFileIOParams_t *params, unsigned num_params)
+BatchContext::submit_operations(const hipFileIOParams_t *params, unsigned num_params, DriverState &state)
 {
     std::unique_lock<std::shared_mutex> _ulock{context_mutex};
 
@@ -128,9 +127,8 @@ BatchContext::submit_operations(const hipFileIOParams_t *params, unsigned num_pa
         auto param_copy = std::make_unique<const hipFileIOParams_t>(params[i]);
         // flags currently unused. Ambiguous if flags in hipFileBatchIOSubmit is for buffer or
         // file flags.
-        auto [_file, _buffer] =
-            Context<DriverState>::get()->getFileAndBuffer(param_copy->fh, param_copy->u.batch.devPtr_base);
-        auto op = std::make_shared<BatchOperation>(std::move(param_copy), _buffer, _file);
+        auto [_file, _buffer] = state.getFileAndBuffer(param_copy->fh, param_copy->u.batch.devPtr_base);
+        auto op               = std::make_shared<BatchOperation>(std::move(param_copy), _buffer, _file);
 
         pending_ops.push_back(std::move(op));
     }

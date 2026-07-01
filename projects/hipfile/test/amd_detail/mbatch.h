@@ -6,6 +6,7 @@
 #pragma once
 
 #include "batch/batch.h"
+#include "state.h"
 
 #include <gmock/gmock.h>
 
@@ -18,8 +19,8 @@ namespace hipFile {
 class MBatchContext : public IBatchContext {
 public:
     MOCK_METHOD(unsigned, get_capacity, (), (const, noexcept, override));
-    MOCK_METHOD(void, submit_operations, (const hipFileIOParams_t *params, const unsigned num_params),
-                (override));
+    MOCK_METHOD(void, submit_operations,
+                (const hipFileIOParams_t *params, const unsigned num_params, DriverState &state), (override));
 };
 
 }

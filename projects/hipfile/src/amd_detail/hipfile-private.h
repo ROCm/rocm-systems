@@ -14,8 +14,9 @@
 namespace hipFile {
 enum class IoType;
 struct Backend;
+class DriverState;
 
 ssize_t hipFileIo(hipFile::IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size,
-                  hoff_t file_offset, hoff_t buffer_offset,
+                  hoff_t file_offset, hoff_t buffer_offset, hipFile::DriverState &state,
                   const std::vector<std::shared_ptr<hipFile::Backend>> &backends);
 }
