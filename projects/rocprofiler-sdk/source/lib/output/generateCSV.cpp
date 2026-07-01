@@ -981,6 +981,59 @@ generate_csv(const output_config&                                               
         }
     }
 }
+ 
+void
+generate_csv(const output_config&                                               cfg,
+             const metadata&                                                    tool_metadata,
+             const generator<rocprofiler_buffer_tracing_gpu_event_record_t>&    data,
+             const stats_entry_t&                                               stats)
+{
+    if(data.empty()) return;
+
+    if(cfg.stats && stats)
+        write_stats(get_stats_output_file(cfg, domain_type::GPU_EVENTS), stats.entries);
+
+    auto ofs = tool::csv_output_file{cfg,
+                                     domain_type::GPU_EVENTS,
+                                     tool::csv::gpu_events_csv_encoder{},
+                                     {"Kind",
+                                      "Operation",
+                                      "Correlation_Id",
+                                      "Thread_Id",
+                                      "Start_Timestamp",
+                                      "End_Timestamp",
+                                      "Issue_Id",
+                                      "Agent_Id",
+                                      "Queue_Id",
+                                      "Stream_Id",
+                                      "Event_Id",
+                                      "Type_Id"}};
+
+    for(auto ditr : data)
+    {
+        for(const auto& record : data.get(ditr))
+        {
+            auto row_ss = std::stringstream{};
+            rocprofiler::tool::csv::gpu_events_csv_encoder::write_row(
+                row_ss,
+                record.kind,
+                record.operation,
+                record.correlation_id.internal,
+                record.thread_id,
+                record.start_timestamp,
+                record.end_timestamp,
+                record.event_info.issue_id,
+                record.event_info.agent_id.handle,
+                record.event_info.queue_id.handle,
+                record.event_info.stream_id.handle,
+                record.event_info.event_id,
+                record.event_info.type_id
+            );
+
+            ofs << row_ss.str();
+        }
+    }
+}
 
 // CSV output for HIP graph launch summary records is deprecated; consume via rocpd/JSON.
 void

@@ -144,3 +144,10 @@ SELECT
     *
 FROM
     `rocpd_graph_launch{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_event_operation` AS
+SELECT
+    *
+FROM
+    `rocpd_event_operation{{uuid}}`;

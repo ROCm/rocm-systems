@@ -82,6 +82,7 @@
 #include <rocprofiler-sdk/version.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/cxx/enum_string.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -130,6 +131,17 @@ namespace fs     = ::rocprofiler::common::filesystem;
 extern "C" {
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
+}
+ 
+struct hip_event_api_record_t
+{
+    rocprofiler_hip_runtime_api_id_t operation;
+    hipEvent_t event;
+    uint64_t event_id;
+};
+
+extern "C" {
+    ROCPROFILER_API void SetHipEventRecordTag(void* record);
 }
 
 namespace
@@ -220,10 +232,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t hip_graph_trace         = {};
     rocprofiler_buffer_id_t rocshmem_api_trace      = {};
     rocprofiler_buffer_id_t hipfile_api_trace       = {};
+    rocprofiler_buffer_id_t gpu_events              = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 17>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 18>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -239,7 +252,8 @@ struct buffer_ids
                                                        ompt_trace,
                                                        hip_graph_trace,
                                                        rocshmem_api_trace,
-                                                       hipfile_api_trace};
+                                                       hipfile_api_trace,
+                                                       gpu_events};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1410,6 +1424,17 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 tool::write_ring_buffer(*record, domain_type::HIPFILE);
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_GPU_EVENTS)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_gpu_event_record_t*>(
+                    header->payload);
+
+                auto stream_id = get_stream_id(record);
+                record->event_info.stream_id = stream_id;
+                tool::write_ring_buffer(
+                    *record,
+                    domain_type::GPU_EVENTS);
+            }
             else
             {
                 ROCP_CI_LOG(WARNING) << fmt::format(
@@ -2510,6 +2535,208 @@ assign_attach_output_session_suffix()
                   << ". Base file name is " << cfg.output_file;
     }
 }
+ 
+struct EventMap
+{
+    std::map<hipEvent_t, uint64_t> event_ids;
+    std::mutex event_mutex;
+    uint64_t event_index = 0;
+};
+
+static EventMap event_map;
+
+static t_hipEventCreate baseEventCreate = nullptr;
+hipError_t 	hipEventCreateWrapper(hipEvent_t *event)
+{
+    hipError_t err = baseEventCreate(event);
+
+    if (event && *event && err == hipSuccess)
+    {
+        event_map.event_mutex.lock();
+        event_map.event_ids.insert(std::make_pair(*event, ++event_map.event_index));
+        printf("hipEventCreate: %p:%llu\n", *event, event_map.event_index);
+        event_map.event_mutex.unlock();
+    }
+
+    return err;
+}
+
+static t_hipEventCreateWithFlags baseEventCreateWithFlags = nullptr;
+hipError_t 	hipEventCreateWithFlagsWrapper(hipEvent_t *event, unsigned flags)
+{
+    hipError_t err = baseEventCreateWithFlags(event, flags);
+
+    if (event && *event && err == hipSuccess)
+    {
+        event_map.event_mutex.lock();
+        event_map.event_ids.insert(std::make_pair(*event, ++event_map.event_index));
+        printf("hipEventCreateWithFlags: %p:%llu\n", *event, event_map.event_index);
+        event_map.event_mutex.unlock();
+    }
+
+    return err;
+}
+
+static t_hipStreamWaitEvent baseStreamWaitEvent = nullptr;
+hipError_t hipStreamWaitEventWrapper(hipStream_t stream, hipEvent_t event,
+                                           unsigned int flags)
+{
+    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
+    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent;
+    hip_record->event = event;
+    hip_record->event_id = 0;
+
+    event_map.event_mutex.lock();
+    auto it = event_map.event_ids.find(hip_record->event);
+    if (it != event_map.event_ids.end())
+    {
+        hip_record->event_id = it->second;
+    }
+    printf("EventOp: %p:%llu\n", hip_record->event, hip_record->event_id);
+    event_map.event_mutex.unlock();
+
+    SetHipEventRecordTag(hip_record);
+
+    hipError_t err = baseStreamWaitEvent(stream, event, flags);
+
+    SetHipEventRecordTag(nullptr);
+
+    return err;
+}
+
+static t_hipStreamWaitEvent_spt baseStreamWaitEventSpt = nullptr;
+hipError_t hipStreamWaitEventSptWrapper(hipStream_t stream, hipEvent_t event,
+                                           unsigned int flags)
+{
+    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
+    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt;
+    hip_record->event = event;
+    hip_record->event_id = 0;
+
+    event_map.event_mutex.lock();
+    auto it = event_map.event_ids.find(hip_record->event);
+    if (it != event_map.event_ids.end())
+    {
+        hip_record->event_id = it->second;
+    }
+    printf("EventOp: %p:%llu\n", hip_record->event, hip_record->event_id);
+    event_map.event_mutex.unlock();
+
+    SetHipEventRecordTag(hip_record);
+
+    hipError_t err = baseStreamWaitEventSpt(stream, event, flags);
+
+    SetHipEventRecordTag(nullptr);
+
+    return err;
+}
+
+static t_hipEventRecord baseEventRecord = nullptr;
+hipError_t hipEventRecordWrapper(hipEvent_t event, hipStream_t stream)
+{
+    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
+    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt;
+    hip_record->event = event;
+    hip_record->event_id = 0;
+
+    event_map.event_mutex.lock();
+    auto it = event_map.event_ids.find(hip_record->event);
+    if (it != event_map.event_ids.end())
+    {
+        hip_record->event_id = it->second;
+    }
+    printf("hipEventRecord: %p:%llu\n", hip_record->event, hip_record->event_id);
+    event_map.event_mutex.unlock();
+
+    SetHipEventRecordTag(hip_record);
+
+    hipError_t err = baseEventRecord(event, stream);
+
+    SetHipEventRecordTag(nullptr);
+
+    return err;
+}
+
+static t_hipEventRecord_spt baseEventRecordSpt = nullptr;
+hipError_t hipEventRecordSptWrapper(hipEvent_t event, hipStream_t stream)
+{
+    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
+    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt;
+    hip_record->event = event;
+    hip_record->event_id = 0;
+
+    event_map.event_mutex.lock();
+    auto it = event_map.event_ids.find(hip_record->event);
+    if (it != event_map.event_ids.end())
+    {
+        hip_record->event_id = it->second;
+    }
+    printf("hipEventRecordSpt: %p:%llu\n", hip_record->event, hip_record->event_id);
+    event_map.event_mutex.unlock();
+
+    SetHipEventRecordTag(hip_record);
+
+    hipError_t err = baseEventRecordSpt(event, stream);
+
+    SetHipEventRecordTag(nullptr);
+
+    return err;
+}
+
+static t_hipEventRecordWithFlags baseEventRecordWithFlags = nullptr;
+hipError_t hipEventRecordWithFlagsWrapper(hipEvent_t event, hipStream_t stream,
+                                                unsigned int flags)
+{
+    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
+    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt;
+    hip_record->event = event;
+    hip_record->event_id = 0;
+
+    event_map.event_mutex.lock();
+    auto it = event_map.event_ids.find(hip_record->event);
+    if (it != event_map.event_ids.end())
+    {
+        hip_record->event_id = it->second;
+    }
+    printf("hipEventRecordWithFlags: %p:%llu\n", hip_record->event, hip_record->event_id);
+    event_map.event_mutex.unlock();
+
+    SetHipEventRecordTag(hip_record);
+
+    hipError_t err = baseEventRecordWithFlags(event, stream, flags);
+
+    SetHipEventRecordTag(nullptr);
+
+    return err;
+}
+
+void
+api_registration_callback(rocprofiler_intercept_table_t type,
+                          uint64_t                      lib_version,
+                          uint64_t                      lib_instance,
+                          void**                        tables,
+                          uint64_t                      num_tables,
+                          void*                         user_data)
+{
+
+    auto* hip_api_table = static_cast<HipDispatchTable*>(tables[0]);
+
+    baseEventCreate = hip_api_table->hipEventCreate_fn;
+    baseEventCreateWithFlags = hip_api_table->hipEventCreateWithFlags_fn;
+    baseStreamWaitEvent = hip_api_table->hipStreamWaitEvent_fn;
+    baseStreamWaitEventSpt = hip_api_table->hipStreamWaitEvent_spt_fn;
+    baseEventRecord = hip_api_table->hipEventRecord_fn;
+    baseEventRecordSpt = hip_api_table->hipEventRecord_spt_fn;
+    baseEventRecordWithFlags = hip_api_table->hipEventRecordWithFlags_fn;
+
+    hip_api_table->hipEventCreate_fn = &hipEventCreateWrapper;
+    hip_api_table->hipEventCreateWithFlags_fn = &hipEventCreateWithFlagsWrapper;
+    hip_api_table->hipStreamWaitEvent_fn = &hipStreamWaitEventWrapper;
+    hip_api_table->hipStreamWaitEvent_spt_fn = &hipStreamWaitEventSptWrapper;
+    hip_api_table->hipEventRecord_fn = &hipEventRecordWrapper;
+    hip_api_table->hipEventRecord_spt_fn = &hipEventRecordSptWrapper;
+    hip_api_table->hipEventRecordWithFlags_fn = &hipEventRecordWithFlagsWrapper;
+}
 
 int
 tool_attach(rocprofiler_client_detach_t /*detach_func*/,
@@ -2795,6 +3022,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                       buffer_service_config{tool::get_config().hipfile_api_trace,
                                             ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT,
                                             get_buffers().hipfile_api_trace},
+                      buffer_service_config{tool::get_config().gpu_events,
+                                            ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
+                                            get_buffers().gpu_events},
                       // Enable only the ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED operation
                       // for KFD QUEUE events; all other QUEUE related events are published as range
                       // records
@@ -2923,6 +3153,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                               dummy_callback_tracing_callback},
                       callback_service_config{tool::get_config().hipfile_api_trace,
                                               ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().gpu_events,
+                                              ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
                                               dummy_callback_tracing_callback}})
     {
         if(itr.option)
@@ -3160,6 +3393,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr),
         "hip stream tracing configure failed");
 
+    ROCPROFILER_CALL(
+        rocprofiler_at_intercept_table_registration(api_registration_callback,
+                                                    ROCPROFILER_HIP_RUNTIME_TABLE,
+                                                    nullptr),
+        "runtime api registration");
+
     start_context(hip_stream_display_ctx, "hip stream");
 
     // Enable HIP graph attribution whenever any consumer can carry graph-attributed records:
@@ -3206,11 +3445,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
         auto external_corr_id_request_kinds =
-            std::array<rocprofiler_external_correlation_id_request_kind_t, 4>{
+            std::array<rocprofiler_external_correlation_id_request_kind_t, 5>{
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API};
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_GPU_EVENTS};
 
         ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
                              get_client_ctx(),
@@ -3545,6 +3785,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     auto hip_graph_output =
         rocprofiler::tool::hip_graph_buffered_output_t{tool::get_config().hip_graph_trace};
 
+    auto gpu_event_output = rocprofiler::tool::gpu_events_buffered_output_t{tool::get_config().gpu_events};
+
     auto hsa_output = tool::hsa_buffered_output_t{tool::get_config().hsa_core_api_trace ||
                                                   tool::get_config().hsa_amd_ext_api_trace ||
                                                   tool::get_config().hsa_image_ext_api_trace ||
@@ -3623,6 +3865,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     generate_output(hip_graph_output, outdata, contributions, cleanups, skip_output);
     generate_output(rocshmem_output, outdata, contributions, cleanups, skip_output);
     generate_output(hipfile_output, outdata, contributions, cleanups, skip_output);
+    generate_output(gpu_event_output, outdata, contributions, cleanups, skip_output);
 
     if(!skip_output && tool::get_config().advanced_thread_trace &&
        !tool_metadata->att_filenames.empty())
@@ -3713,7 +3956,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                              rccl_output.get_generator(),
                              memory_allocation_output.get_generator(),
                              rocdecode_output.get_generator(),
-                             rocjpeg_output.get_generator());
+                             rocjpeg_output.get_generator(),
+                             gpu_event_output.get_generator());
     }
 
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
@@ -3737,7 +3981,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           ompt_output.get_generator(),
                           hip_graph_output.get_generator(),
                           rocshmem_output.get_generator(),
-                          hipfile_output.get_generator());
+                          hipfile_output.get_generator(),
+                          gpu_event_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&

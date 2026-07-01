@@ -148,6 +148,7 @@ struct config : output_config
     bool   output_config_file            = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
     bool   attach_output_generation_sync = get_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", false);
     bool   spm_counter_collection        = get_env("ROCPROF_SPM_COUNTER_COLLECTION", false);
+    bool   gpu_events                    = get_env("ROCPROF_GPU_EVENTS", false);
     bool   pc_sampling_host_trap         = false;
     bool   pc_sampling_stochastic        = false;
     size_t pc_sampling_interval          = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);

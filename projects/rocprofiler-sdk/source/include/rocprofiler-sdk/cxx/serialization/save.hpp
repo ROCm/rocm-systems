@@ -1478,6 +1478,43 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_runtime_initialization_record_t da
     ROCP_SDK_SAVE_DATA_FIELD(instance);
 }
 
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_gpu_event_info_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(issue_id);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(queue_id);
+    ROCP_SDK_SAVE_DATA_FIELD(stream_id);
+    ROCP_SDK_SAVE_DATA_FIELD(event_id);
+    ROCP_SDK_SAVE_DATA_FIELD(type_id);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_gpu_event_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(event_info);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_gpu_event_record_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
+    ROCP_SDK_SAVE_DATA_FIELD(operation);
+    ROCP_SDK_SAVE_DATA_FIELD(thread_id);
+    ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
+    ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(event_info);
+}
+
 template <typename ArchiveT, typename EnumT, typename ValueT>
 void
 save(ArchiveT& ar, const rocprofiler::sdk::utility::name_info<EnumT, ValueT>& data)

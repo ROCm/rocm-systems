@@ -367,6 +367,17 @@ typedef struct rocprofiler_callback_tracing_hip_stream_data_t
     rocprofiler_stream_id_t stream_id;     ///< HIP stream ID
     rocprofiler_address_t   stream_value;  ///< HIP stream value
 } rocprofiler_callback_tracing_hip_stream_data_t;
+ 
+/**
+ * @brief ROCProfiler GPU event Callback Data.
+ */
+typedef struct rocprofiler_callback_tracing_gpu_event_data_t
+{
+    uint64_t                           size;             ///< size of this struct
+    rocprofiler_timestamp_t            start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t            end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_gpu_event_info_t       event_info;       ///< Event info
+} rocprofiler_callback_tracing_gpu_event_data_t;
 
 /**
  * @brief ROCProfiler HIP Graph Callback Data.

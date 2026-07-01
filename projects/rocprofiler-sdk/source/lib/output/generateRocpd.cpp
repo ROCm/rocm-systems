@@ -1042,7 +1042,8 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen,
     const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&         graph_launch_gen,
     const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>&  rocshmem_api_gen,
-    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen)
+    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen,
+    const generator<rocprofiler_buffer_tracing_gpu_event_record_t>&         gpu_event_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -1742,6 +1743,55 @@ write_rocpd(
         }
     };
 
+    auto insert_event_operation =
+        [&conn, &tool_metadata, &gpu_event_gen, &string_entries, node_id, this_pid]() {
+            auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_event_operation");
+
+            for(auto pitr : gpu_event_gen)
+            {
+                auto _deferred = sql::deferred_transaction{conn};
+                for(auto itr : gpu_event_gen.get(pitr))
+                {
+                    // insert thread info if it doesn't already exist
+                    get_thread_id(itr.thread_id);
+
+                    auto kind = tool_metadata.buffer_names.at(itr.kind);
+
+                    auto evt_id = create_event(
+                        conn,
+                        {
+                            insert_value("category_id", string_entries.at(kind)),
+                            insert_value("stack_id", itr.correlation_id.internal),
+                            insert_value("parent_stack_id", itr.correlation_id.internal),
+                            insert_value("correlation_id", itr.correlation_id.external.value),
+                        });
+
+                    auto type = itr.event_info.type_id == 1 ? std::string("WAIT") : std::string("SIGNAL");
+
+                    auto stmt = get_insert_statement(
+                        "rocpd_event_operation{{uuid}}",
+                        {
+                            insert_value("id", itr.event_info.issue_id),
+                            insert_value("nid", node_id),
+                            insert_value("pid", this_pid),
+                            insert_value("tid", itr.thread_id),
+                            insert_value("agent_id", tool_metadata.get_agent(itr.event_info.agent_id)->node_id),
+                            insert_value("event_obj", itr.event_info.event_id),
+                            insert_value("issue_id", itr.event_info.issue_id),
+                            insert_value("queue_id", get_queue_id(itr.event_info.queue_id)),
+                            insert_value("type", type),
+                            insert_value("stream_id", get_stream_id(itr.event_info.stream_id)),
+                            insert_value("type_id", itr.event_info.type_id),
+                            insert_value("start", itr.start_timestamp),
+                            insert_value("end", itr.end_timestamp),
+                            insert_value("event_id", evt_id),
+                        });
+
+                    execute_raw_sql_statements(conn, stmt);
+                }
+            }
+        };
+
     auto insert_memory_copy_data =
         [&db, &tool_metadata, &string_entries, node_id, this_pid, &get_thread_id, &get_stream_id](
             const auto& _gen) {
@@ -2222,6 +2272,7 @@ write_rocpd(
     insert_pmc_event_data(dispatch_to_evt_id);
     insert_memory_copy_data(memory_copy_gen);
     insert_graph_launch_data(graph_launch_gen);
+    insert_event_operation();
 
     {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_allocate");

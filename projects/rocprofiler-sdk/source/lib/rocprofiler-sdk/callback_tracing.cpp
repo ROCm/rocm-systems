@@ -40,6 +40,7 @@
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
 #include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
+#include "lib/rocprofiler-sdk/gpu_events/gpu_events.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -104,6 +105,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_GRAPH)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCSHMEM_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIPFILE_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(GPU_EVENTS)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -324,6 +326,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::hipfile::name_by_id<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(operation);
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS:
+        {
+            val = rocprofiler::gpu_events::name_by_id(operation);
+            break;
+        }
     }
 
     if(!val)
@@ -486,6 +493,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
         {
             ops = rocprofiler::hipfile::get_ids<ROCPROFILER_HIPFILE_TABLE_ID_CORE>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS:
+        {
+            ops = rocprofiler::gpu_events::get_ids();
             break;
         }
     }
@@ -666,6 +678,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
         case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        case ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

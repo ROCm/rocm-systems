@@ -51,6 +51,7 @@ struct packet_data_t
 {
     using callback_record_t = rocprofiler_callback_tracing_kernel_dispatch_data_t;
     using pooled_signal_t   = common::container::pool_object<signal_t>;
+    using event_record_t    = rocprofiler_callback_tracing_gpu_event_data_t;
 
     tracing::tracing_data   tracing_data            = {};
     rocprofiler_packet      kernel_packet           = {};
@@ -58,6 +59,7 @@ struct packet_data_t
     hsa_signal_t            completion_signal       = {.handle = 0};
     hsa_signal_t            interrupt_signal        = {.handle = 0};
     callback_record_t       callback_record         = {};
+    event_record_t          event_record            = {};
     rocprofiler_user_data_t user_data               = {.value = 0};
     pooled_signal_t*        pooled_signal           = nullptr;
     bool                    is_serialized           = false;

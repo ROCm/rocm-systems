@@ -41,6 +41,8 @@
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
+#include "lib/rocprofiler-sdk/gpu_events/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/gpu_events/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
@@ -76,6 +78,29 @@ static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
                   offsetof(hsa_amd_ext_kernel_dispatch_packet_t, completion_signal),
               "unexpected ABI incompatibility");
 #endif
+ 
+struct hip_event_api_record_t
+{
+    rocprofiler_hip_runtime_api_id_t operation;
+    hipEvent_t event;
+    uint64_t event_id;
+};
+
+thread_local hip_event_api_record_t* hip_event_record_tls = nullptr;
+
+extern "C" {
+
+ROCPROFILER_API void SetHipEventRecordTag(void* record)
+{
+    printf("SetHipEventRecordTag: %p\n", record);
+
+    if (record == nullptr)
+        delete hip_event_record_tls;
+    
+    hip_event_record_tls = (hip_event_api_record_t*)record;
+}
+
+}
 
 namespace rocprofiler
 {
@@ -151,8 +176,13 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     for(auto& packet : queue_info_session.packet_data)
     {
-        auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
-        kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);
+        bool is_dispatch = packet.callback_record.size > 0;
+
+        auto dispatch_time = is_dispatch ? kernel_dispatch::get_dispatch_time(queue_info_session, packet) : gpu_events::get_gpu_event_time(queue_info_session, packet);
+        if (is_dispatch)
+            kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);
+        else
+            gpu_events::gpu_event_complete(queue_info_session, packet, dispatch_time);
 
         // Calls our internal callbacks to callers who need to be notified post
         // kernel execution.
@@ -282,10 +312,12 @@ WriteInterceptor(const void* packets,
     ROCP_TRACE << fmt::format("WriteInterceptor called with pkt_count={}", pkt_count);
 
     using callback_record_t = packet_data_t::callback_record_t;
+    using event_record_t = packet_data_t::event_record_t;
     using packet_vector_t   = common::container::small_vector<rocprofiler_packet, 512>;
 
     // unique sequence id for the dispatch
     static auto sequence_counter = std::atomic<rocprofiler_dispatch_id_t>{0};
+    static auto event_counter = std::atomic<rocprofiler_dispatch_id_t>{0};
 
     // cannot capture since static
     static auto CreateBarrierPacket = [](hsa_signal_t*    dependency_signal,
@@ -317,12 +349,22 @@ WriteInterceptor(const void* packets,
 
     const auto* packets_arr          = static_cast<const rocprofiler_packet*>(packets);
     auto        num_dispatch_packets = size_t{0};
+    auto        num_evt_bari_packets = size_t{0};
+    auto        num_evt_sigl_packets = size_t{0};
     for(size_t i = 0; i < pkt_count; ++i)
     {
         const auto& original_packet = packets_arr[i].kernel_dispatch;
         auto        packet_type     = bit_extract(original_packet.header,
                                        HSA_PACKET_HEADER_TYPE,
                                        HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+
+        if ((hip_event_record_tls != nullptr) && (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC))
+        {
+            num_evt_sigl_packets++;
+            printf("HSA_PACKET_TYPE_VENDOR_SPECIFIC\n");
+            printf("\tcompletion_signal: %lu\n", packets_arr[i].ext_amd_aql_pm4.completion_signal.handle);
+        }
+
         if(packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
         {
             ++num_dispatch_packets;
@@ -337,9 +379,22 @@ WriteInterceptor(const void* packets,
             }
         }
 #endif
+        else if (packet_type == HSA_PACKET_TYPE_BARRIER_AND)
+        {
+            if (hip_event_record_tls != nullptr)
+            {
+                num_evt_bari_packets++;
+                printf("HSA_PACKET_TYPE_BARRIER_AND\n");
+
+                for (uint32_t j = 0; j < 5; j++)
+                    printf("\tdep_signal: %lu\n", packets_arr[i].barrier_and.dep_signal[j].handle);
+
+                printf("\tcompletion_signal: %lu\n", packets_arr[i].barrier_and.completion_signal.handle);
+            }
+        }
     }
 
-    if(num_dispatch_packets == 0)
+    if(num_dispatch_packets == 0 && num_evt_bari_packets == 0 && num_evt_sigl_packets == 0)
     {
         writer(packets, pkt_count);
         return;
@@ -364,9 +419,18 @@ WriteInterceptor(const void* packets,
     };
 
     auto tracing_data_v = tracing::tracing_data{};
-    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                               tracing_data_v);
+    if (num_dispatch_packets)
+    {
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                tracing_data_v);
+    }
+    if (num_evt_bari_packets || num_evt_sigl_packets)
+    {
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
+                               ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
+                                tracing_data_v);
+    }
 
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
         tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
@@ -406,7 +470,7 @@ WriteInterceptor(const void* packets,
 
     using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
-    auto process_packet_batch = [&queue, &corr_id, tracing_data_v](
+    auto process_packet_batch = [&queue, &corr_id, num_evt_bari_packets, num_evt_sigl_packets, tracing_data_v](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
                                     const packet_writer_fn_t& _writer) {
@@ -432,6 +496,8 @@ WriteInterceptor(const void* packets,
         // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
         {
+            const auto& barrier_and = _packets[i].barrier_and;
+            const auto& ext_amd_aql_pm4 = _packets[i].ext_amd_aql_pm4;
             const auto& original_packet = _packets[i].kernel_dispatch;
             auto        packet_type =
                 bit_extract(original_packet.header,
@@ -439,6 +505,8 @@ WriteInterceptor(const void* packets,
                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
             bool is_kernel_dispatch     = (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
             bool is_ext_kernel_dispatch = false;
+            bool is_evt_sigl_packets = (num_evt_sigl_packets > 0) && (hip_event_record_tls != nullptr) && (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC);
+            bool is_evt_bari_packets = (num_evt_bari_packets > 0) && (hip_event_record_tls != nullptr) && (packet_type == HSA_PACKET_TYPE_BARRIER_AND);
 
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
             if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
@@ -451,7 +519,7 @@ WriteInterceptor(const void* packets,
             }
 #endif
 
-            if(!is_kernel_dispatch && !is_ext_kernel_dispatch)
+            if(!is_kernel_dispatch && !is_ext_kernel_dispatch && !is_evt_sigl_packets && !is_evt_bari_packets)
             {
                 transformed_packets.emplace_back(_packets[i]);
                 continue;
@@ -467,12 +535,37 @@ WriteInterceptor(const void* packets,
             // make a copy of the tracing data
             _packet_data.tracing_data = tracing_data_v;
 
-            tracing::populate_external_correlation_ids(
-                _packet_data.tracing_data.external_correlation_ids,
-                thr_id,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
-                ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-                internal_corr_id);
+            hsa_signal_t     original_completion_signal = original_packet.completion_signal;
+            
+            if (is_kernel_dispatch || is_ext_kernel_dispatch)
+            {
+                tracing::populate_external_correlation_ids(
+                    _packet_data.tracing_data.external_correlation_ids,
+                    thr_id,
+                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+                    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                    internal_corr_id);
+            }
+            else if (is_evt_sigl_packets)
+            {
+                tracing::populate_external_correlation_ids(
+                    _packet_data.tracing_data.external_correlation_ids,
+                    thr_id,
+                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_GPU_EVENTS,
+                    ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE,
+                    internal_corr_id);
+                original_completion_signal = ext_amd_aql_pm4.completion_signal;
+            }
+            else if (is_evt_bari_packets)
+            {
+                tracing::populate_external_correlation_ids(
+                    _packet_data.tracing_data.external_correlation_ids,
+                    thr_id,
+                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_GPU_EVENTS,
+                    ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE,
+                    internal_corr_id);
+                original_completion_signal = barrier_and.completion_signal;
+            }
 
             // Lambda to extract packet info regardless of packet type
             auto extract_packet_info = [](const rocprofiler_packet& pkt, bool is_ext) {
@@ -520,102 +613,152 @@ WriteInterceptor(const void* packets,
             };
 
             const auto     pkt_info = extract_packet_info(_packets[i], is_ext_kernel_dispatch);
-            const auto     original_completion_signal = pkt_info.completion_signal;
             const bool     existing_completion_signal = (original_completion_signal.handle != 0);
-            const uint64_t kernel_id = code_object::get_kernel_id(pkt_info.kernel_object);
+            const uint64_t kernel_id = is_kernel_dispatch ? code_object::get_kernel_id(original_packet.kernel_object) : 0;
 
             // Copy kernel pkt, copy is to allow for signal to be modified
             _packet_data.kernel_packet = _packets[i];
             // create a reference for short hand access
             auto& kernel_packet = _packet_data.kernel_packet;
 
-            // create our own signal that we can get a callback on. if there is an original
-            // completion signal we will create a barrier packet, assign the original completion
-            // signal that that barrier packet, and add it right after the kernel packet
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
-            if(is_ext_kernel_dispatch)
-                _packet_data.pooled_signal = queue.create_signal(
-                    0, &kernel_packet.ext_kernel_dispatch.completion_signal, true);
-            else
-#endif
-                _packet_data.pooled_signal =
-                    queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
-
-            // computes the "size" based on the offset of reserved_padding field
-            constexpr auto kernel_dispatch_info_rt_size =
-                common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
-
-            static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
-                          "failed to compute size field based on offset of reserved_padding field");
-
-            auto dispatch_id = ++sequence_counter;
-
-            // Always feed HIP_GRAPH summary's kernel_dispatch_count (independent of
-            // subscription).
-            if(auto* graph_launch_state = ::rocprofiler::hip::graph::current_launch_state();
-               graph_launch_state != nullptr)
-                ++graph_launch_state->dispatch_count;
-
-            _packet_data.callback_record =
-                callback_record_t{sizeof(callback_record_t),
-                                  rocprofiler_timestamp_t{0},
-                                  rocprofiler_timestamp_t{0},
-                                  rocprofiler_kernel_dispatch_info_t{
-                                      .size        = kernel_dispatch_info_rt_size,
-                                      .agent_id    = queue.get_agent().get_rocp_agent()->id,
-                                      .queue_id    = queue.get_id(),
-                                      .kernel_id   = kernel_id,
-                                      .dispatch_id = dispatch_id,
-                                      .private_segment_size = pkt_info.private_segment_size,
-                                      .group_segment_size   = pkt_info.group_segment_size,
-                                      .workgroup_size       = pkt_info.workgroup_size,
-                                      .grid_size            = pkt_info.grid_size,
-                                      .reserved_padding     = {0}}};
-
+            if(is_kernel_dispatch || is_ext_kernel_dispatch)
             {
-                auto tracer_data = _packet_data.callback_record;
-                tracing::execute_phase_enter_callbacks(
-                    _packet_data.tracing_data.callback_contexts,
-                    thr_id,
-                    internal_corr_id,
-                    _packet_data.tracing_data.external_correlation_ids,
-                    ancestor_corr_id,
-                    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-                    tracer_data);
-            }
+                // create our own signal that we can get a callback on. if there is an original
+                // completion signal we will create a barrier packet, assign the original completion
+                // signal that that barrier packet, and add it right after the kernel packet
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+                if(is_ext_kernel_dispatch)
+                    _packet_data.pooled_signal = queue.create_signal(
+                        0, &kernel_packet.ext_kernel_dispatch.completion_signal, true);
+                else
+#endif
+                    _packet_data.pooled_signal =
+                        queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
 
-            // map all the external correlation ids (after enqueue enter phase) for all the contexts
-            // captured by the info session
-            tracing::update_external_correlation_ids(
-                _packet_data.tracing_data.external_correlation_ids,
-                thr_id,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
+                // computes the "size" based on the offset of reserved_padding field
+                constexpr auto kernel_dispatch_info_rt_size =
+                    common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
 
-            // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
-            // along with an ID of the client we got the packet from (this will be returned via
-            // completed_cb_t)
+                static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
+                              "failed to compute size field based on offset of reserved_padding field");
 
-            // Signal callbacks that a kernel_packet is being enqueued
-            queue.signal_callback([&](const auto& map) {
-                for(const auto& [client_id, cb_data] : map)
+                auto dispatch_id = ++sequence_counter;
+
+                // Always feed HIP_GRAPH summary's kernel_dispatch_count (independent of
+                // subscription).
+                if(auto* graph_launch_state = ::rocprofiler::hip::graph::current_launch_state();
+                   graph_launch_state != nullptr)
+                    ++graph_launch_state->dispatch_count;
+
+                _packet_data.callback_record =
+                    callback_record_t{sizeof(callback_record_t),
+                                      rocprofiler_timestamp_t{0},
+                                      rocprofiler_timestamp_t{0},
+                                      rocprofiler_kernel_dispatch_info_t{
+                                          .size        = kernel_dispatch_info_rt_size,
+                                          .agent_id    = queue.get_agent().get_rocp_agent()->id,
+                                          .queue_id    = queue.get_id(),
+                                          .kernel_id   = kernel_id,
+                                          .dispatch_id = dispatch_id,
+                                          .private_segment_size = pkt_info.private_segment_size,
+                                          .group_segment_size   = pkt_info.group_segment_size,
+                                          .workgroup_size       = pkt_info.workgroup_size,
+                                          .grid_size            = pkt_info.grid_size,
+                                          .reserved_padding     = {0}}};
+
                 {
-                    // NOTE: if map.size() > 1, multiple callbacks will be sharing the same user
-                    // data. This needs to be fixed. (bewelton)
-                    auto [packet, bSerial] = cb_data.write_interceptor(
-                        queue,
-                        kernel_packet,
-                        kernel_id,
-                        dispatch_id,
-                        &_packet_data.user_data,
+                    auto tracer_data = _packet_data.callback_record;
+                    tracing::execute_phase_enter_callbacks(
+                        _packet_data.tracing_data.callback_contexts,
+                        thr_id,
+                        internal_corr_id,
                         _packet_data.tracing_data.external_correlation_ids,
-                        corr_id);
-                    _packet_data.is_serialized |= bSerial;
-                    if(packet)
-                        _packet_data.instrumentation_packets.push_back(
-                            std::make_pair(std::move(packet), client_id));
+                        ancestor_corr_id,
+                        ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                        ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                        tracer_data);
                 }
-            });
+
+                // map all the external correlation ids (after enqueue enter phase) for all the contexts
+                // captured by the info session
+                tracing::update_external_correlation_ids(
+                    _packet_data.tracing_data.external_correlation_ids,
+                    thr_id,
+                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
+
+                // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
+                // along with an ID of the client we got the packet from (this will be returned via
+                // completed_cb_t)
+
+                // Signal callbacks that a kernel_packet is being enqueued
+                queue.signal_callback([&](const auto& map) {
+                    for(const auto& [client_id, cb_data] : map)
+                    {
+                        // NOTE: if map.size() > 1, multiple callbacks will be sharing the same user
+                        // data. This needs to be fixed. (bewelton)
+                        auto [packet, bSerial] = cb_data.write_interceptor(
+                            queue,
+                            kernel_packet,
+                            kernel_id,
+                            dispatch_id,
+                            &_packet_data.user_data,
+                            _packet_data.tracing_data.external_correlation_ids,
+                            corr_id);
+                        _packet_data.is_serialized |= bSerial;
+                        if(packet)
+                            _packet_data.instrumentation_packets.push_back(
+                                std::make_pair(std::move(packet), client_id));
+                    }
+                });
+            }
+            else if(is_evt_bari_packets || is_evt_sigl_packets)
+            {
+                auto dispatch_id = ++event_counter;
+
+                rocprofiler_gpu_event_operation_t op = ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE;
+                if(is_evt_bari_packets)
+                {
+                    op = ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE;
+                    _packet_data.pooled_signal =
+                        queue.create_signal(0, &kernel_packet.barrier_and.completion_signal, true);
+                }
+                else if(is_evt_sigl_packets)
+                {
+                    op = ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE;
+                    _packet_data.pooled_signal =
+                        queue.create_signal(0, &kernel_packet.ext_amd_aql_pm4.completion_signal, true);
+                }
+                _packet_data.event_record =
+                    event_record_t{sizeof(event_record_t),
+                                   rocprofiler_timestamp_t{0},
+                                   rocprofiler_timestamp_t{0},
+                                   rocprofiler_gpu_event_info_t{
+                                       .size     = common::compute_runtime_sizeof<rocprofiler_gpu_event_info_t>(),
+                                       .issue_id = dispatch_id,
+                                       .agent_id = queue.get_agent().get_rocp_agent()->id,
+                                       .queue_id = queue.get_id(),
+                                       .stream_id = 0,
+                                       .event_id  = hip_event_record_tls->event_id,
+                                       .type_id   = op}};
+
+                {
+                    auto tracer_data = _packet_data.callback_record;
+                    tracing::execute_phase_enter_callbacks(
+                        _packet_data.tracing_data.callback_contexts,
+                        thr_id,
+                        internal_corr_id,
+                        _packet_data.tracing_data.external_correlation_ids,
+                        ancestor_corr_id,
+                        ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
+                        op,
+                        tracer_data);
+                }
+
+                tracing::update_external_correlation_ids(
+                    _packet_data.tracing_data.external_correlation_ids,
+                    thr_id,
+                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_GPU_EVENTS);
+            }
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)
@@ -662,7 +805,14 @@ WriteInterceptor(const void* packets,
 
             // If a profiling packet was inserted, wait for completion before executing the dispatch
             if(inserted_before)
-                transformed_packets.back().kernel_dispatch.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+            {
+                if (is_kernel_dispatch || is_ext_kernel_dispatch)
+                    transformed_packets.back().kernel_dispatch.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+                else if (is_evt_bari_packets)
+                    transformed_packets.back().barrier_and.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+                else if (is_evt_sigl_packets)
+                    transformed_packets.back().ext_amd_aql_pm4.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+            }
 
             // if the original completion signal exists, trigger it via a barrier packet
             if(existing_completion_signal)
@@ -691,18 +841,32 @@ WriteInterceptor(const void* packets,
                 // Adding a barrier packet with the original packet's completion signal.
                 queue.create_signal(0, &interrupt_signal, false);
                 completion_signal                                            = interrupt_signal;
-                transformed_packets.back().kernel_dispatch.completion_signal = interrupt_signal;
+                
+                if (is_kernel_dispatch || is_ext_kernel_dispatch)
+                    transformed_packets.back().kernel_dispatch.completion_signal = interrupt_signal;
+                else if (is_evt_bari_packets)
+                    transformed_packets.back().barrier_and.completion_signal = interrupt_signal;
+                else if (is_evt_sigl_packets)
+                    transformed_packets.back().ext_amd_aql_pm4.completion_signal = interrupt_signal;
+
                 CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
             }
             else
-            {
-                completion_signal = kernel_packet.kernel_dispatch.completion_signal;
+            {                
+                if (is_kernel_dispatch || is_ext_kernel_dispatch)
+                    completion_signal = kernel_packet.kernel_dispatch.completion_signal;
+                else if (is_evt_bari_packets)
+                    completion_signal = kernel_packet.barrier_and.completion_signal;
+                else if (is_evt_sigl_packets)
+                    completion_signal = kernel_packet.ext_amd_aql_pm4.completion_signal;
+
                 get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
             }
 
-            ROCP_FATAL_IF(!(is_kernel_dispatch || is_ext_kernel_dispatch))
+            ROCP_FATAL_IF(!(is_kernel_dispatch || is_ext_kernel_dispatch || is_evt_bari_packets || is_evt_sigl_packets))
                 << "get_kernel_id below might need to be updated";
 
+            if (is_kernel_dispatch || is_ext_kernel_dispatch)
             {
                 auto tracer_data = _packet_data.callback_record;
                 tracing::execute_phase_exit_callbacks(
@@ -710,6 +874,22 @@ WriteInterceptor(const void* packets,
                     _packet_data.tracing_data.external_correlation_ids,
                     ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                     ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                    tracer_data);
+            }
+            else
+            {
+                rocprofiler_gpu_event_operation_t op = ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE;
+                if (is_evt_bari_packets)
+                    op = ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE;
+                else if (is_evt_sigl_packets)
+                    op = ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE;
+                    
+                auto tracer_data = _packet_data.callback_record;
+                tracing::execute_phase_exit_callbacks(
+                    _packet_data.tracing_data.callback_contexts,
+                    _packet_data.tracing_data.external_correlation_ids,
+                    ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
+                    op,
                     tracer_data);
             }
 

@@ -491,6 +491,20 @@ generate_stats(const output_config& /* cfg*/,
     // TODO: sames TODOS from the function above applies here.
     return stats_entry_t{};
 }
+ 
+stats_entry_t
+generate_stats(const output_config& /* cfg*/,
+               const metadata& /*tool_metadata*/,
+               const generator<rocprofiler_buffer_tracing_gpu_event_record_t>& /*data*/)
+{
+    // TODO:
+    // 1. Implement serialization for PC sampling stats.
+    //    The format differs significantly from tracing stats.
+    // 2. Decide what is going to be part of the stats.
+    //    Some basic information is already available in the tool_metadata.pc_sampling_stats.
+    //    This contains the total number of valid VS invalid samples.
+    return stats_entry_t{};
+}
 
 stats_entry_t
 generate_stats(const output_config& /*cfg*/,

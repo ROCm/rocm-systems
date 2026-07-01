@@ -61,6 +61,7 @@ add_subdirectory(details)
 add_subdirectory(platform)
 add_subdirectory(ompt)
 add_subdirectory(registration)
+add_subdirectory(gpu_events)
 
 target_link_libraries(
     rocprofiler-sdk-object-library
