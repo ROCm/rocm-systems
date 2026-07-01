@@ -270,6 +270,9 @@ __host__ __device__ constexpr typename Provider::OpCode QueuePairMux::provider_o
     return Provider::OpCode::ATOMIC_FA;
   } else if constexpr (Op == OpCode::ATOMIC_CS) {
     return Provider::OpCode::ATOMIC_CS;
+  } else {
+    // might need some tricks if CWG2518 / P2593R1 isn't implemented by a supported compiler
+    static_assert(false, "Invalid or unimplemented OpCode");
   }
 }
 
