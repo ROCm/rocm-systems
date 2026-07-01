@@ -3,6 +3,7 @@
 #include "pc_sampling_collector.h"
 
 #include "gsl_assert.h"
+#include "sdk_wrapper.h"
 
 #include <algorithm>
 #include <cctype>
@@ -26,6 +27,12 @@ bool pc_sampling_collector_impl_t::is_source_line_token(std::string_view token)
                        [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; });
 }
 
+std::string_view pc_sampling_collector_impl_t::source_frame_separator()
+{
+    static const auto sdk_wrapper = sdk_wrapper_t::create();
+    return sdk_wrapper->source_frame_separator();
+}
+
 std::string_view pc_sampling_collector_impl_t::path_from_source_frame(std::string_view frame)
 {
     const auto separator_position = frame.rfind(':');
@@ -44,10 +51,11 @@ std::vector<std::filesystem::path> pc_sampling_collector_impl_t::source_paths_fr
 {
     std::vector<std::filesystem::path> source_paths;
     size_t                             frame_start = 0;
+    const auto                         separator   = source_frame_separator();
 
     while (frame_start <= comment.size())
     {
-        const auto separator_position = comment.find(source_frame_separator, frame_start);
+        const auto separator_position = comment.find(separator, frame_start);
         const auto frame_end = separator_position == std::string_view::npos ? comment.size()
                                                                             : separator_position;
         const auto frame     = comment.substr(frame_start, frame_end - frame_start);
@@ -60,7 +68,7 @@ std::vector<std::filesystem::path> pc_sampling_collector_impl_t::source_paths_fr
         if (separator_position == std::string_view::npos)
             break;
 
-        frame_start = separator_position + source_frame_separator.size();
+        frame_start = separator_position + separator.size();
     }
 
     return source_paths;

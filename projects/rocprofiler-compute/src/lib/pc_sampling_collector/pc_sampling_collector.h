@@ -43,8 +43,7 @@ public:
     std::set<std::filesystem::path> create_source_paths() const override;
 
 private:
-    static constexpr std::string_view source_frame_separator = " -> ";
-
+    static std::string_view source_frame_separator();
     static bool is_source_line_token(std::string_view token);
     static std::string_view path_from_source_frame(std::string_view frame);
     static std::vector<std::filesystem::path> source_paths_from_comment(
