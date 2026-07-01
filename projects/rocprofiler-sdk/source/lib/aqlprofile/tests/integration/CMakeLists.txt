@@ -2,11 +2,9 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 project(Aqlprofile_v2_tests LANGUAGES C CXX HIP)
 set(CMAKE_CXX_STANDARD 17)
 
-
 if(NOT DEFINED AQLPROFILE_TARGET)
     find_library(
-        AQLPROFILE_TARGET
-        REQUIRED
+        AQLPROFILE_TARGET REQUIRED
         NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
         HINTS /opt/rocm ${CMAKE_INSTALL_PREFIX}
         PATHS /opt/rocm
@@ -15,12 +13,7 @@ if(NOT DEFINED AQLPROFILE_TARGET)
     include(CTest)
 endif()
 
-find_package(
-    hsa-runtime64
-    REQUIRED
-    CONFIG
-    HINTS /opt/rocm/
-    PATHS /opt/rocm/)
+find_package(hsa-runtime64 REQUIRED CONFIG HINTS /opt/rocm/ PATHS /opt/rocm/)
 
 get_property(
     HSA_RUNTIME_INCLUDE_DIRECTORIES
@@ -51,20 +44,30 @@ endif()
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 
 set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O1" )
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O1")
 
 add_library(intercept SHARED)
-target_include_directories(intercept PRIVATE ${HSA_RUNTIME_INC_PATH} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/core/include/)
+target_include_directories(
+    intercept PRIVATE ${HSA_RUNTIME_INC_PATH} ${CMAKE_CURRENT_SOURCE_DIR}
+                      ${CMAKE_SOURCE_DIR}/src/core/include/)
 target_sources(intercept PRIVATE intercept.cpp)
 target_link_libraries(intercept PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_TARGET})
-target_link_options(intercept PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
+target_link_options(
+    intercept PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap
+    -Wl,--no-undefined)
 target_compile_definitions(intercept PUBLIC AMD_INTERNAL_BUILD)
 add_executable(testv2)
 target_sources(testv2 PRIVATE main.cpp workload.cpp counter.cpp agent.cpp)
-target_include_directories(testv2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/core/include/ ${HSA_RUNTIME_INC_PATH} /opt/rocm/include)
+target_include_directories(
+    testv2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/core/include/
+                   ${HSA_RUNTIME_INC_PATH} /opt/rocm/include)
 target_link_libraries(testv2 PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_TARGET})
 target_compile_definitions(testv2 PUBLIC AMD_INTERNAL_BUILD)
 
 # Add a PRELOAD environment with libintercept
 add_test(NAME testv2 COMMAND testv2)
-set_tests_properties(testv2 PROPERTIES ENVIRONMENT "${LD_PRELOAD}:${CMAKE_CURRENT_BINARY_DIR}/libintercept.so" TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+set_tests_properties(
+    testv2
+    PROPERTIES ENVIRONMENT "${LD_PRELOAD}:${CMAKE_CURRENT_BINARY_DIR}/libintercept.so"
+               TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")

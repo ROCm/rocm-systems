@@ -42,7 +42,7 @@ class IWorkload
 {
 public:
     IWorkload() {}
-    virtual ~IWorkload() {};
+    virtual ~IWorkload(){};
     virtual void run() = 0;
 };
 
@@ -55,7 +55,7 @@ public:
     std::map<std::string, int64_t> iterate(Queue& queue, IWorkload& load);
 
 private:
-    void start(Queue& queue);
-    void stop(Queue& queue);
+    void                       start(Queue& queue);
+    void                       stop(Queue& queue);
     std::unique_ptr<AQLPacket> packet{nullptr};
 };

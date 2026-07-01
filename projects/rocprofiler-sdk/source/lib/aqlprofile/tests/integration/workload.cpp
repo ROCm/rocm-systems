@@ -38,11 +38,13 @@
 #include "counter.hpp"
 
 Collection::Collection(AgentInfo& agent, const std::vector<std::string>& counters)
-    : packet(std::make_unique<AQLPacket>(agent, counters)) {}
+: packet(std::make_unique<AQLPacket>(agent, counters))
+{}
 
 Collection::~Collection() {}
 
-std::map<std::string, int64_t> Collection::iterate(Queue& queue, IWorkload& load)
+std::map<std::string, int64_t>
+Collection::iterate(Queue& queue, IWorkload& load)
 {
     start(queue);
     load.run();
@@ -50,14 +52,16 @@ std::map<std::string, int64_t> Collection::iterate(Queue& queue, IWorkload& load
     return packet->get();
 }
 
-void Collection::start(Queue& queue)
+void
+Collection::start(Queue& queue)
 {
     assert(packet);
     queue.flush();
     queue.Submit(&packet->packets.start_packet);
 }
 
-void Collection::stop(Queue& queue)
+void
+Collection::stop(Queue& queue)
 {
     assert(packet);
     queue.flush();
