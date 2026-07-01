@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 138
+- Contract tests: 149
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 118
-- Approximate declared API-name coverage: 23.8%
+- Declared HIP runtime APIs directly exercised by contract tests: 128
+- Approximate declared API-name coverage: 25.9%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 
 ## Contract domains
@@ -24,6 +24,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `async_transfer` | 4 |
 | `memset` | 6 |
 | `error_api` | 6 |
+| `extension` | 6 |
 | `kernel` | 4 |
 | `graph` | 5 |
 | `occupancy` | 3 |
@@ -45,13 +46,14 @@ The percentages below are approximate API-name coverage against declarations par
 | `array3d` | 3 |
 | `texture` | 7 |
 | `context` | 6 |
+| `ipc` | 5 |
 
 ## Coverage by API category
 
 | Category | Covered | Total parsed | Approx. coverage |
 |---|---:|---:|---:|
 | Error handling | 3 | 3 | 100.0% |
-| Event | 5 | 8 | 62.5% |
+| Event | 6 | 8 | 75.0% |
 | Occupancy | 3 | 7 | 42.9% |
 | Graph / capture | 25 | 96 | 26.0% |
 | Stream | 5 | 23 | 21.7% |
@@ -62,8 +64,8 @@ The percentages below are approximate API-name coverage against declarations par
 | Module / library loading | 0 | 29 | 0.0% |
 | Texture / surface | 7 | 44 | 15.9% |
 | Context / driver | 2 | 16 | 12.5% |
-| Extension / proc address | 0 | 13 | 0.0% |
-| IPC | 0 | 5 | 0.0% |
+| Extension / proc address | 4 | 13 | 30.8% |
+| IPC | 5 | 5 | 100.0% |
 
 ## Covered APIs
 
@@ -185,6 +187,7 @@ hipStreamSynchronize
 hipStreamQuery
 hipStreamWaitEvent
 hipEventCreate
+hipEventCreateWithFlags
 hipEventDestroy
 hipEventRecord
 hipEventSynchronize
@@ -236,6 +239,25 @@ hipOccupancyMaxPotentialBlockSize
 hipOccupancyAvailableDynamicSMemPerBlock
 ```
 
+### Extension / proc address
+
+```text
+hipGetProcAddress
+hipApiName
+hipGetStreamDeviceId
+hipExtGetLastError
+```
+
+### IPC
+
+```text
+hipIpcGetMemHandle
+hipIpcOpenMemHandle
+hipIpcCloseMemHandle
+hipIpcGetEventHandle
+hipIpcOpenEventHandle
+```
+
 ## Largest remaining gaps
 
 1. Memory surface beyond current basics: peer copies, advanced VMM operations (multi-device access descriptors, export/import handles, and protection-mode matrices), and remaining advanced memory-pool operations (pool export/import handles and multi-device access descriptors). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, 3D pitched allocation with host-device 3D copies, 3D array allocation with 3D copy-to/from-array, managed allocation with prefetch, default memory pools with stream-ordered allocation, basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access), explicit memory-pool lifecycle (create/destroy, release-threshold, trim, and pool-specific async allocation), and current-device memory-pool access control are now covered.
@@ -243,7 +265,8 @@ hipOccupancyAvailableDynamicSMemPerBlock
 3. Module, library, and code-loading APIs.
 4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, and current-context/device queries are now covered; context create/destroy, push/pop/set-current, cache and shared-memory config, and context peer access remain.
 5. Advanced graph APIs: graph update, node find in clone, host nodes, child graphs, memory alloc/free nodes, attributes, debug, user objects.
-6. IPC, peer, and multigpu APIs.
+6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
+7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch and CU-mask stream variants, logging controls, and link-type queries remain.
 
 ## Update procedure
 
