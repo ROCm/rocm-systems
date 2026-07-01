@@ -189,17 +189,17 @@ TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
   allocSize = ((granularity + allocSize -1) / granularity) * granularity;
 
   hipDeviceptr_t addr = 0;
-  HIP_CHECK(hipMemAddressReserve(&addr, allocSize, 0, 0, 0));
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&addr), allocSize, 0, 0, 0));
 
   hipMemGenericAllocationHandle_t allocHandle;
   HIP_CHECK(hipMemCreate(&allocHandle, granularity * 2, &prop, 0));
 
-  HIP_CHECK(hipMemMap(addr, allocSize, 0, allocHandle, 0));
+  HIP_CHECK(hipMemMap(reinterpret_cast<void*>(addr), allocSize, 0, allocHandle, 0));
 
   hipMemAccessDesc accessDesc{};
   accessDesc.location = prop.location;
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-  HIP_CHECK(hipMemSetAccess(addr, allocSize, &accessDesc, 1));
+  HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(addr), allocSize, &accessDesc, 1));
 
   int fabrichandle;
   HIP_CHECK(hipMemExportToShareableHandle(reinterpret_cast<void*>(&fabrichandle), allocHandle,
@@ -207,9 +207,9 @@ TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
 
   REQUIRE(fabrichandle != 0);
 
-  HIP_CHECK(hipMemUnmap(addr, allocSize));
+  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(addr), allocSize));
   HIP_CHECK(hipMemRelease(allocHandle));
-  HIP_CHECK(hipMemAddressFree(addr, allocSize));
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(addr), allocSize));
 
   CTX_DESTROY();
 }

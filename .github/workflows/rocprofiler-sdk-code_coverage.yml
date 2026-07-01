@@ -131,7 +131,7 @@ jobs:
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ${{ steps.submods.outputs.paths }}
@@ -161,7 +161,7 @@ jobs:
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
       id: load-coverage
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         key: ${{ github.event.pull_request.base.sha }}-codecov
         path: .codecov/**
@@ -186,7 +186,7 @@ jobs:
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential ccache python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
-        python3 -m pip install -U --user cmake==3.24.0
+        python3 -m pip install -U --user cmake==3.25.0
         python3 -m pip install -U --user -r requirements.txt
 
     - name: Sync gcov with compilers

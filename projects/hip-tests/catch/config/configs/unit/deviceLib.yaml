@@ -503,6 +503,9 @@ deviceLib:
   Unit_hipTestHalfConstexpr_DeviceConstexpr:
     <<: *level_2
     tags: [types]
+  Unit_device_memcpy_async:
+    <<: *level_2
+    tags: [memory]
   Unit_MemcpyToSymbolInParallelWithStreamLaunch:
     <<: *level_3
     tags: [misc]

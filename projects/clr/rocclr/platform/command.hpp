@@ -327,6 +327,7 @@ class Command : public Event {
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
+  std::vector<uint8_t*>* gpuMetadataPackets_ = nullptr;  //!< Metadata packets (parallel to gpuPackets_)
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
   const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
@@ -377,9 +378,11 @@ class Command : public Event {
   //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
-                            const std::string** capturedKernelName) {
+                            const std::string** capturedKernelName,
+                            std::vector<uint8_t*>* metadataPackets = nullptr) {
     packetCapturing_ = state;
     gpuPackets_ = packet;
+    gpuMetadataPackets_ = metadataPackets;
     graphKernArgMgr_ = graphKernArgMgr;
     capturedKernelName_ = capturedKernelName;
   }
@@ -395,6 +398,17 @@ class Command : public Event {
   const uint8_t* getAqlPacket() const {
     uint8_t* packet = new uint8_t[64];
     gpuPackets_->push_back(packet);
+    return packet;
+  }
+
+  //! Allocates and returns a metadata packet buffer for graph capture.
+  //! Returns nullptr if metadata capture is not enabled.
+  uint8_t* getMetadataPacket() const {
+    if (gpuMetadataPackets_ == nullptr) {
+      return nullptr;
+    }
+    uint8_t* packet = new uint8_t[256]();
+    gpuMetadataPackets_->push_back(packet);
     return packet;
   }
 
@@ -442,6 +456,10 @@ class Command : public Event {
    *  \note This function will execute in the command queue thread.
    */
   virtual void submit(device::VirtualDevice& device) = 0;
+
+  //! True only for marker commands; lets the device layer keep its coalescing
+  //! window across markers while resetting it for any other (intervening) command.
+  virtual bool isMarkerCommand() const { return false; }
 
   //! Release the resources associated with this event.
   virtual void releaseResources();
@@ -1497,6 +1515,10 @@ class ExternalSemaphoreCmd : public Command {
 class Marker : public Command {
   device::Signal* ipc_completion_signal_ = nullptr;
   device::Signal* ipc_dep_signal_ = nullptr;
+  //! Monotonic client (HIP) coalesce identity for detecting consecutive records;
+  //! a non-zero value also opts the record into coalescing. 0 = not coalesceable.
+  uint64_t coalesce_event_ = 0;
+  bool synced_since_record_ = false;  //!< Client synced the event since its last record
 
  public:
   //! Create a new Marker
@@ -1514,6 +1536,15 @@ class Marker : public Command {
   void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
   device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
 
+  //! Coalescing metadata set by the client layer (opaque to rocclr). A non-zero
+  //! coalesceEvent() both identifies the event and marks the record eligible.
+  void setCoalesceEvent(uint64_t id) { coalesce_event_ = id; }
+  uint64_t coalesceEvent() const { return coalesce_event_; }
+  void setSyncedSinceRecord(bool v) { synced_since_record_ = v; }
+  bool syncedSinceRecord() const { return synced_since_record_; }
+
+  bool isMarkerCommand() const override { return true; }
+
   //! The actual command implementation.
   virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
 };
@@ -1523,6 +1554,13 @@ class AccumulateCommand : public Command {
   //! Kernel names and timestamps list for activity profiling
   std::vector<const std::string*> kernelNames_;
   const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
+  //! Optional owner of the borrowed kernel-name strings (e.g. the GraphExec
+  //! whose nodes own them). Retained while this command lives so the strings
+  //! outlive ReportActivity(), which runs at the end of setStatus(CL_COMPLETE)
+  //! -- after OnLaunchComplete() may have dropped the launch's reference. This
+  //! ties the strings' lifetime to the consumer (this command) rather than to
+  //! the graph launch, with no string copies. Set via the constructor.
+  ReferenceCountedObject* kernelNamesOwner_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
@@ -1531,10 +1569,21 @@ class AccumulateCommand : public Command {
   bool owns_hw_events_ = true;
 
  public:
-  //! Create a new Marker
+  //! Create a new accumulate command. kernelNamesOwner, when given, is the
+  //! object that owns the borrowed kernel-name strings (e.g. the GraphExec);
+  //! it is retained for the command's whole lifetime and released in the
+  //! destructor, so the borrowed strings stay valid through ReportActivity()
+  //! even after OnLaunchComplete() drops the launch's reference -- with no
+  //! string copies.
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
-                    const Event* waitingEvent = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+                    const Event* waitingEvent = nullptr,
+                    ReferenceCountedObject* kernelNamesOwner = nullptr)
+      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent),
+        kernelNamesOwner_(kernelNamesOwner) {
+    if (kernelNamesOwner_ != nullptr) {
+      kernelNamesOwner_->retain();
+    }
+  }
 
   //! Destructor - release all retained HW events
   virtual ~AccumulateCommand();
@@ -1570,7 +1619,9 @@ class AccumulateCommand : public Command {
     kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
   }
 
-  //! Set kernel names by reference
+  //! Set kernel names by reference (cheap; borrows the caller's vector and
+  //! strings). Safe only while that storage outlives this command. Used on the
+  //! hot path when no profiler is active, where the names are never read.
   void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
     kernelNamesRef_ = kernelNames;
   }
