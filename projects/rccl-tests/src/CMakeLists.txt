@@ -133,7 +133,7 @@ add_custom_target(git_version_check
 add_custom_target(hipify DEPENDS ${HIP_COMMON_SOURCES})
 add_library(rccl_common OBJECT ${HIP_COMMON_SOURCES})
 add_dependencies(rccl_common hipify git_version_check)
-target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads dl hsakmt)
+target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads dl)
 if(USE_MPI)
   target_link_libraries(rccl_common MPI::MPI_CXX)
 endif()
@@ -148,7 +148,7 @@ if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY)
     target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
     find_library(_DRM drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
     find_library(_DRM_AMDGPU drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-    target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY} ibverbs hsa-runtime64 numa ${_DRM} ${_DRM_AMDGPU})
+    target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY} ibverbs hsa-runtime64 hsakmt numa ${_DRM} ${_DRM_AMDGPU})
     # -rdynamic exports symbols so librccl.so can resolve rocshmem host functions
     # from this executable (librccl.so is built with ENABLE_ROCSHMEM_GIN which
     # leaves rocshmem host symbols unresolved)
