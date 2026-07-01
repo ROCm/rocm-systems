@@ -4991,10 +4991,20 @@ static void convertDynDataPrefetchToHsa(const amd::DynDataPrefetchRegion* region
                                         uint8_t hints,
                                         amd_data_prefetch_t* hw,
                                         uint32_t numRegions) {
+  ClPrint(amd::LOG_EXTRA_DEBUG, amd::LOG_AQL,
+          "convertDynDataPrefetchToHsa: Converting %u prefetch regions, hints=0x%x",
+          numRegions, hints);
+
   for (uint32_t i = 0; i < numRegions && i < amd::kDynDataPrefetchMaxRegions; ++i) {
     const auto& r = regions[i];
 
     uintptr_t addr = reinterpret_cast<uintptr_t>(r.baseAddress);
+
+    // Log input (CLR format)
+    ClPrint(amd::LOG_EXTRA_DEBUG, amd::LOG_AQL,
+            "  Region[%u] CLR: baseAddr=%p, burstSize=%zu, numBursts=%u, stride=%zu",
+            i, r.baseAddress, r.burstSize, r.numBursts, r.stride);
+
     // addr_lo is VA[31:8] (256B aligned), addr_hi is VA[56:32]
     hw[i].addr_lo = static_cast<uint32_t>((addr >> 8) & 0xFFFFFFu);
     hw[i].addr_hi = static_cast<uint32_t>((addr >> 32) & 0x1FFFFFFu);
@@ -5006,6 +5016,12 @@ static void convertDynDataPrefetchToHsa(const amd::DynDataPrefetchRegion* region
     hw[i].temporal = hints & 0x3u;
     hw[i].scope = 2; // DEVICE
     hw[i].mode = 1; // ABSOLUTE_VA
+
+    // Log output (HW format)
+    ClPrint(amd::LOG_EXTRA_DEBUG, amd::LOG_AQL,
+            "  Region[%u] HW: addr_lo=0x%x, addr_hi=0x%x, burst_size=%u, num_burst=%u, stride=%u, temporal=%u, scope=%u, mode=%u, cooperative=%u",
+            i, hw[i].addr_lo, hw[i].addr_hi, hw[i].burst_size, hw[i].num_burst,
+            hw[i].stride, hw[i].temporal, hw[i].scope, hw[i].mode, hw[i].cooperative);
   }
 }
 
