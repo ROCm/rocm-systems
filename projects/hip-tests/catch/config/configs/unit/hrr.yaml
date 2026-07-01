@@ -114,3 +114,81 @@ hrr:
   Unit_HRR_MultiThreadRoundtrip:
     <<: *level_2
     tags: [capture, multithread, playback, roundtrip]
+  Unit_HRR_AllApis_Direct:
+    <<: *level_2
+    tags: [direct, allapis]
+  Unit_HRR_ChevronLaunch_Direct:
+    <<: *level_2
+    tags: [direct, launch]
+  Unit_HRR_Context_Direct:
+    <<: *level_2
+    tags: [direct, context]
+  Unit_HRR_DeviceExtra_Direct:
+    <<: *level_2
+    tags: [direct, device]
+  Unit_HRR_DeviceInfo_Direct:
+    <<: *level_2
+    tags: [direct, device]
+  Unit_HRR_DrvMemcpy3D_Direct:
+    <<: *level_2
+    tags: [direct, memcpy]
+  Unit_HRR_DrvMemcpy_Direct:
+    <<: *level_2
+    tags: [direct, memcpy]
+  Unit_HRR_GpuWorkload_Direct:
+    <<: *level_2
+    tags: [direct]
+  Unit_HRR_GraphExplicit_Direct:
+    <<: *level_2
+    tags: [direct, graph]
+  Unit_HRR_GraphWorkload_Direct:
+    <<: *level_2
+    tags: [direct, graph]
+  Unit_HRR_HostAliases_Direct:
+    <<: *level_2
+    tags: [direct, hostmem]
+  Unit_HRR_HostMemWorkload_Direct:
+    <<: *level_2
+    tags: [direct, hostmem]
+  Unit_HRR_HostRegLaunch_Direct:
+    <<: *level_2
+    tags: [direct, hostmem, launch]
+  Unit_HRR_MemPoolExtended_Direct:
+    <<: *level_2
+    tags: [direct, mempool]
+  Unit_HRR_MemcpyExtra_Direct:
+    <<: *level_2
+    tags: [direct, memcpy]
+  Unit_HRR_MemsetExtra_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_MemsetVariants_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_MiscAPIs_Direct:
+    <<: *level_2
+    tags: [direct, misc]
+  Unit_HRR_ModuleAPI_Direct:
+    <<: *level_2
+    tags: [direct, module, launch]
+  Unit_HRR_ModuleExtra_Direct:
+    <<: *level_2
+    tags: [direct, module]
+  Unit_HRR_Occupancy_Direct:
+    <<: *level_2
+    tags: [direct, occupancy]
+  Unit_HRR_StreamAdvanced2_Direct:
+    <<: *level_2
+    tags: [direct, stream]
+  Unit_HRR_StreamAdvanced_Direct:
+    <<: *level_2
+    tags: [direct, stream]
+  Unit_HRR_StressApis_Direct:
+    <<: *level_2
+    tags: [direct, stress]
+  Unit_HRR_Texture_Direct:
+    <<: *level_2
+    tags: [direct, texture]
+  Unit_HRR_VMM_Direct:
+    <<: *level_2
+    tags: [direct, vmm]

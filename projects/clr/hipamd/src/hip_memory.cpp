@@ -1397,6 +1397,10 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
       memFlags |= ROCCLR_MEM_IO_MEMORY;
     }
 
+    if (flags & hipExtHostRegisterCoarseGrained) {
+      memFlags &= ~CL_MEM_SVM_ATOMICS;
+    }
+
     amd::Memory* mem =
         new (*hip::host_context) amd::Buffer(*hip::host_context, memFlags, sizeBytes);
 
@@ -3379,6 +3383,10 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
   command->enqueue();
   if (!isAsync) {
     hip_stream->finish();
+    if (command->status() == CL_INVALID_OPERATION) {
+      command->release();
+      return hipErrorIllegalState;
+    }
   }
   command->release();
   return hip_error;

@@ -97,9 +97,18 @@ struct ompt_domain_info
 using buffer_ompt_record_t = rocprofiler_buffer_tracing_ompt_record_t;
 using callback_ompt_data_t = rocprofiler_callback_tracing_ompt_data_t;
 
+// First member of both ompt_save_state and ompt_task_save_state so a shared
+// ompt_data_t slot can be told apart (see ompt_task_schedule_callback).
+enum class ompt_save_state_kind
+{
+    event,  // ompt_save_state (scope begin/end)
+    task,   // ompt_task_save_state (explicit task)
+};
+
 // save state for ompt between callbacks
 struct ompt_save_state
 {
+    ompt_save_state_kind                   kind = ompt_save_state_kind::event;
     uint64_t                               thr_id;           // thread this was created on
     uint64_t                               start_timestamp;  // timestamp when it was created
     rocprofiler_ompt_operation_t           operation_idx;    // for error checking
@@ -151,6 +160,7 @@ proxy_data_ptr(ompt_data_t* real_ptr);
 
 struct ompt_task_save_state
 {
+    ompt_save_state_kind     kind = ompt_save_state_kind::task;
     context::correlation_id* corr_id;
     int                      task_flags;
 };
