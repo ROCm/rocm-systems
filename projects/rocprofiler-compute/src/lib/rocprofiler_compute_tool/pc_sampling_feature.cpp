@@ -54,12 +54,12 @@ void pc_sampling_feature_t::on_code_object_load(const rocprofiler_callback_traci
 void pc_sampling_feature_t::finalize()
 {
     code_object_writer_json_t writer;
-    m_collector->write(writer);
+    m_collector->finalize(writer);
     // Processes that loaded no code objects (e.g. non-GPU launchers/forks)
     // should not leave an empty artifact behind.
     if (!writer.empty())
     {
         writer.flush(m_code_object_info_path);
-        m_snapshotter->snapshot(m_collector->create_source_paths(), m_source_snapshot_path);
+        m_snapshotter->snapshot(m_collector->get_source_paths(), m_source_snapshot_path);
     }
 }

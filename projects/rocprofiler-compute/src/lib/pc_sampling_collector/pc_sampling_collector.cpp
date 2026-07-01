@@ -102,7 +102,7 @@ void pc_sampling_collector_impl_t::on_code_object_load(
     }
 }
 
-void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
+void pc_sampling_collector_impl_t::finalize(code_object_writer_t& writer)
 {
     for (const auto& id : m_translator->get_code_object_ids())
     {
@@ -118,6 +118,8 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
                 const auto& inst = m_translator->get_instruction(id, pc);
                 Expects(inst.size);
                 writer.write_instruction(inst);
+                const auto paths = source_paths_from_comment(inst.comment);
+                m_source_paths.insert(paths.cbegin(), paths.cend());
                 pc += inst.size;
             }
             writer.end_symbol();
@@ -126,27 +128,7 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
     }
 }
 
-std::set<std::filesystem::path> pc_sampling_collector_impl_t::create_source_paths() const
+const std::set<std::filesystem::path>& pc_sampling_collector_impl_t::get_source_paths() const
 {
-    std::set<std::filesystem::path> source_paths;
-    for (const auto& id : m_translator->get_code_object_ids())
-    {
-        const auto& symbols = m_translator->get_symbols(id);
-        for (const auto& sym : symbols)
-        {
-            uint64_t       pc  = sym.virtual_address;
-            const uint64_t end = sym.virtual_address + sym.size;
-            while (pc < end)
-            {
-                const auto& inst = m_translator->get_instruction(id, pc);
-                if (!inst.size)
-                    break;
-
-                const auto paths = source_paths_from_comment(inst.comment);
-                source_paths.insert(paths.cbegin(), paths.cend());
-                pc += inst.size;
-            }
-        }
-    }
-    return source_paths;
+    return m_source_paths;
 }

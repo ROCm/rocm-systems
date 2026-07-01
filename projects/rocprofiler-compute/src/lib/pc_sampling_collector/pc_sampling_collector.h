@@ -30,8 +30,8 @@ public:
 
     virtual ~pc_sampling_collector_t() = default;
     virtual void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) = 0;
-    virtual void write(code_object_writer_t& writer) = 0;
-    virtual std::set<std::filesystem::path> create_source_paths() const = 0;
+    virtual void finalize(code_object_writer_t& writer) = 0;
+    virtual const std::set<std::filesystem::path>& get_source_paths() const = 0;
 };
 
 class pc_sampling_collector_impl_t : public pc_sampling_collector_t
@@ -39,8 +39,8 @@ class pc_sampling_collector_impl_t : public pc_sampling_collector_t
 public:
     pc_sampling_collector_impl_t(code_object_translator_t::ptr translator);
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
-    void write(code_object_writer_t& writer) override;
-    std::set<std::filesystem::path> create_source_paths() const override;
+    void finalize(code_object_writer_t& writer) override;
+    const std::set<std::filesystem::path>& get_source_paths() const override;
 
 private:
     static std::string_view source_frame_separator();
@@ -50,5 +50,6 @@ private:
         std::string_view comment);
 
     code_object_translator_t::ptr m_translator;
+    std::set<std::filesystem::path> m_source_paths;
 };
 }  // namespace rocprofiler_compute_tool
