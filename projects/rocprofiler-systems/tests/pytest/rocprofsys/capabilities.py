@@ -480,9 +480,8 @@ class SystemCapabilities:
         ) as probe_file:
             probe_file.write("#!/bin/sh\nprintf '%s\\n' \"$1\"\n")
             probe_path = probe_file.name
-        os.chmod(probe_path, 0o755)
-
         try:
+            os.chmod(probe_path, 0o755)
             for extra in ([], ["--allow-run-as-root"]):
                 cmd = (
                     [str(self.oshrun_exec)]
