@@ -914,8 +914,9 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   packet.kernel_object = code_object_va + kernel_descriptor_offset;
   std::memcpy(ring.data(), &packet, sizeof(packet));
 
+  constexpr uint32_t queue_id = 7;
   amdgpu::HwQueue queue{};
-  queue.queue_id = 7;
+  queue.queue_id = queue_id;
   queue.process_id = process_id;
   queue.ring_base_va = ring_va;
   queue.ring_size = static_cast<uint32_t>(ring.size());
@@ -930,12 +931,17 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   auto it = std::find_if(plugin->events.begin(), plugin->events.end(), [](const HookEvent &event) {
     return event.kind == HookEvent::DISPATCH_PACKET_PROCESSED;
   });
-  ASSERT_NE(it, plugin->events.end());
-  EXPECT_EQ(it->kernel_name, "vmid_dispatch_kernel");
-  EXPECT_EQ(it->kernel_symbol, "vmid_dispatch_kernel");
+  bool found_dispatch = it != plugin->events.end();
+  std::string kernel_name = found_dispatch ? it->kernel_name : "";
+  std::string kernel_symbol = found_dispatch ? it->kernel_symbol : "";
 
+  f.cp()->unregister_queue(queue_id, process_id);
   f.shutdown();
   f.mem->unregister_process(process_id);
+
+  ASSERT_TRUE(found_dispatch);
+  EXPECT_EQ(kernel_name, "vmid_dispatch_kernel");
+  EXPECT_EQ(kernel_symbol, "vmid_dispatch_kernel");
 }
 
 // -- Ordering tests ----------------------------------------------------------
