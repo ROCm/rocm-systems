@@ -279,6 +279,18 @@ contract:
   Contract_GraphHost_NodeType_ReportsHost:
     <<: *level_0
     tags: [graph_host]
+  Contract_GraphMemNodes_AllocNode_ReturnsDevicePtr:
+    <<: *level_0
+    tags: [graph_mem_nodes]
+  Contract_GraphMemNodes_GetParams_RoundTripsBytesize:
+    <<: *level_0
+    tags: [graph_mem_nodes]
+  Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndLaunches:
+    <<: *level_0
+    tags: [graph_mem_nodes]
+  Contract_GraphMemNodes_GraphMemAttribute_QueryIsNonDecreasing:
+    <<: *level_0
+    tags: [graph_mem_nodes]
   Contract_HostMemory_HostMalloc_ReturnsUsablePointer:
     <<: *level_0
     tags: [host_memory]
