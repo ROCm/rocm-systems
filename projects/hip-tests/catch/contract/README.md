@@ -23,6 +23,7 @@ The first domains are:
 - `graph_topology`: graph node, root, edge, dependency, and dependent introspection contracts
 - `graph_clone`: graph clone lifecycle and cloned memcpy graph contracts
 - `graph_update`: graph exec memcpy and memset node parameter update contracts
+- `graph_node_types`: graph node type introspection and dependency edit contracts
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
 - `array_memory`: HIP array allocation and 2D array copy contracts
