@@ -6,7 +6,7 @@
 #include "backend.h"
 #include "backend/fallback.h"
 #include "buffer.h"
-#include "context.h"
+#include "runtime.h"
 #include "file.h"
 #include "hip.h"
 #include "hipfile.h"
@@ -124,11 +124,11 @@ struct FallbackIo : public HipFileOpened {
     {
 
         expect_buffer_registration(mhip, hipMemoryTypeDevice);
-        Context<DriverState>::get()->registerBuffer(buffer_data.data(), buffer_data.size(), 0);
-        buffer = Context<DriverState>::get()->getRegisteredBuffer(buffer_data.data());
+        Runtime::instance().state().registerBuffer(buffer_data.data(), buffer_data.size(), 0);
+        buffer = Runtime::instance().state().getRegisteredBuffer(buffer_data.data());
 
         expect_file_registration(msys, mlibmounthelper);
-        file = Context<DriverState>::get()->getFile(Context<DriverState>::get()->registerFile(0xBADF00D));
+        file = Runtime::instance().state().getFile(Runtime::instance().state().registerFile(0xBADF00D));
     }
 
     virtual ~FallbackIo() override
@@ -196,11 +196,11 @@ struct FallbackParam : ::testing::TestWithParam<IoType> {
 
         expect_buffer_registration(mhip, hipMemoryTypeDevice);
         void *buf{reinterpret_cast<void *>(0xFEFEFEFE)};
-        Context<DriverState>::get()->registerBuffer(buf, 4096, 0);
-        buffer = Context<DriverState>::get()->getRegisteredBuffer(buf);
+        Runtime::instance().state().registerBuffer(buf, 4096, 0);
+        buffer = Runtime::instance().state().getRegisteredBuffer(buf);
 
         expect_file_registration(msys, mlibmounthelper);
-        file = Context<DriverState>::get()->getFile(Context<DriverState>::get()->registerFile(0xBADF00D));
+        file = Runtime::instance().state().getFile(Runtime::instance().state().registerFile(0xBADF00D));
     }
 
     ~FallbackParam() override
@@ -263,8 +263,8 @@ TEST_P(FallbackParam, FallbackIoTruncatesSizeToMAX_RW_COUNT)
 {
     expect_buffer_registration(mhip, hipMemoryTypeDevice);
     auto buf{reinterpret_cast<void *>(0xABABABAB)};
-    Context<DriverState>::get()->registerBuffer(buf, hipFile::getMaxRwCount() + 1, 0);
-    auto big_buffer{Context<DriverState>::get()->getRegisteredBuffer(buf)};
+    Runtime::instance().state().registerBuffer(buf, hipFile::getMaxRwCount() + 1, 0);
+    auto big_buffer{Runtime::instance().state().getRegisteredBuffer(buf)};
 
     EXPECT_CALL(mcfg, fallback()).WillOnce(Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Return(reinterpret_cast<void *>(0xFEFEFEFE)));

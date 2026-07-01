@@ -11,6 +11,7 @@
 #include "file.h"
 #include "hipfile.h"
 #include "hipfile-literals.h"
+#include "hipfile-private.h"
 #include "hipfile-test.h"
 #include "hipfile-warnings.h"
 #include "hip.h"
@@ -324,10 +325,11 @@ TEST_F(HipFileAsyncMonitor, addOp_without_completeOp_prints_error_on_AsyncMonito
 HIPFILE_WARN_NO_EXIT_DTOR_OFF
 struct AsyncIoFunction {
     hipFileError_t (*function)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
+    IoType      io_type;
     std::string name;
 };
-static std::array<AsyncIoFunction, 2> asyncIOFns{
-    {{hipFileReadAsync, "hipFileReadAsync"}, {hipFileWriteAsync, "hipFileWriteAsync"}}};
+static std::array<AsyncIoFunction, 2> asyncIOFns{{{hipFileReadAsync, IoType::Read, "hipFileReadAsync"},
+                                                  {hipFileWriteAsync, IoType::Write, "hipFileWriteAsync"}}};
 HIPFILE_WARN_NO_EXIT_DTOR_ON
 
 struct HipFileReadWriteAsync : public HipFileOpened, public ::testing::WithParamInterface<AsyncIoFunction> {
@@ -339,6 +341,7 @@ struct HipFileReadWriteAsync : public HipFileOpened, public ::testing::WithParam
         nonnull_ssize  = reinterpret_cast<ssize_t *>(1);
         nonnull_stream = reinterpret_cast<hipStream_t>(1);
         io_op          = GetParam().function;
+        io_type        = GetParam().io_type;
         name           = GetParam().name;
     }
     StrictMock<MHip> mhip;
@@ -349,6 +352,7 @@ struct HipFileReadWriteAsync : public HipFileOpened, public ::testing::WithParam
     hoff_t          *nonnull_offset;
     hipStream_t      nonnull_stream;
     hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
+    IoType      io_type;
     std::string name;
 };
 
@@ -394,10 +398,10 @@ TEST_P(HipFileReadWriteAsync, unregisteredFileReturnsError)
 
 TEST_P(HipFileReadWriteAsync, badAllocReturnsHipErrorOutOfMemory)
 {
-    MDriverState driver;
+    StrictMock<MDriverState> driver;
     EXPECT_CALL(driver, getRefCount).WillOnce(Throw(std::bad_alloc()));
-    ASSERT_EQ(io_op(nonnull_void, nonnull_void, nonnull_size, nonnull_offset, nonnull_offset, nullptr,
-                    nonnull_stream),
+    ASSERT_EQ(hipFileIOAsync(io_type, nonnull_void, nonnull_void, nonnull_size, nonnull_offset,
+                             nonnull_offset, nullptr, nonnull_stream, driver),
               HipFileHipError(hipErrorOutOfMemory));
 }
 

@@ -7,7 +7,7 @@
 //
 // Just run the program. It takes no special arguments.
 
-#include "context.h"
+#include "runtime.h"
 #include "file.h"
 #include "hipfile.h"
 #include "state.h"
@@ -84,7 +84,7 @@ thread_function(int id)
     constexpr int N_CYCLES  = 100; // # of cycles before checking the run flag
     constexpr int N_PRELOAD = 10;  // # of files/buffers to load before cycling
 
-    auto *ds = Context<DriverState>::get();
+    auto *ds = &Runtime::instance().state();
 
     vector<pair<int, hipFileHandle_t>> files;
     vector<void *>                     buffers;

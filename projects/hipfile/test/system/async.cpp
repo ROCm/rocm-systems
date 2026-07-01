@@ -10,6 +10,7 @@
 #include "context.h"
 #include "hip.h"
 #include "io.h"
+#include "runtime.h"
 #include "state.h"
 #include "stream.h"
 #endif
@@ -247,7 +248,7 @@ public:
         ASSERT_EQ(hipStreamCreateWithFlags(&hip_stream, hipStreamNonBlocking), hipSuccess);
         ASSERT_EQ(hipFileStreamRegister(hip_stream, 0xf), HIPFILE_SUCCESS);
         auto [_file, _buffer, _stream] =
-            Context<DriverState>::get()->getFileBufferAndStream(fh, dev_ptr, hip_stream);
+            Runtime::instance().state().getFileBufferAndStream(fh, dev_ptr, hip_stream);
         file              = _file;
         buffer            = _buffer;
         stream            = _stream;

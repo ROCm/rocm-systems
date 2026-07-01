@@ -19,4 +19,14 @@ class DriverState;
 ssize_t hipFileIo(hipFile::IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size,
                   hoff_t file_offset, hoff_t buffer_offset, hipFile::DriverState &state,
                   const std::vector<std::shared_ptr<hipFile::Backend>> &backends);
+
+hipFileError_t hipFileIOAsync(hipFile::IoType io_type, hipFileHandle_t fh, void *buffer_base, size_t *size_p,
+                              hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
+                              hipStream_t hipStream, hipFile::DriverState &state);
+
+hipFileError_t hipFileBatchSetUp(hipFileBatchHandle_t *batch_idp, unsigned max_nr,
+                                 hipFile::DriverState &state);
+
+hipFileError_t hipFileBatchSubmit(hipFileBatchHandle_t batch_idp, unsigned nr, hipFileIOParams_t *iocbp,
+                                  unsigned flags, hipFile::DriverState &state);
 }

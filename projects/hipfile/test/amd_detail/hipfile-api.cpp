@@ -28,6 +28,7 @@
 #include "mmountinfo.h"
 #include "mstate.h"
 #include "msys.h"
+#include "runtime.h"
 #include "state.h"
 
 #include <array>
@@ -67,7 +68,7 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSetupSuccess)
 
     EXPECT_CALL(mock_state, createBatchContext).WillOnce(Return(expected_b_handle));
 
-    auto result = hipFileBatchIOSetUp(&b_handle, 1);
+    auto result = hipFileBatchSetUp(&b_handle, 1, mock_state);
     EXPECT_EQ(result, HIPFILE_SUCCESS);
     EXPECT_EQ(b_handle, expected_b_handle);
 }
@@ -78,14 +79,14 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSetupBadArgument)
 
     EXPECT_CALL(mock_state, createBatchContext).WillOnce(Throw(std::invalid_argument("")));
 
-    auto result = hipFileBatchIOSetUp(&b_handle, 0);
+    auto result = hipFileBatchSetUp(&b_handle, 0, mock_state);
     EXPECT_EQ(result, HIPFILE_INVALID_VALUE);
     EXPECT_EQ(b_handle, nullptr);
 }
 
 TEST_F(HipFileUnit, TestHipFileBatchIOSetupNullptrHandle)
 {
-    auto result = hipFileBatchIOSetUp(nullptr, 1);
+    auto result = hipFileBatchSetUp(nullptr, 1, mock_state);
     ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
 }
 
@@ -98,7 +99,7 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitSuccess)
     EXPECT_CALL(mock_state, getBatchContext).WillOnce(Return(mock_b_context));
     EXPECT_CALL(*mock_b_context, submit_operations);
 
-    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    auto result = hipFileBatchSubmit(b_handle, 1, &io_param, 0, mock_state);
     ASSERT_EQ(result, HIPFILE_SUCCESS);
 }
 
@@ -111,7 +112,7 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadHandle)
     EXPECT_CALL(mock_state, getBatchContext).WillOnce(Throw(InvalidBatchHandle()));
     EXPECT_CALL(*mock_b_context, submit_operations).Times(0);
 
-    auto           result          = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    auto           result          = hipFileBatchSubmit(b_handle, 1, &io_param, 0, mock_state);
     hipFileError_t expected_result = {hipFileInvalidValue, hipSuccess};
     ASSERT_EQ(result, expected_result);
 }
@@ -125,7 +126,7 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitBadArgument)
     EXPECT_CALL(mock_state, getBatchContext).WillOnce(Return(mock_b_context));
     EXPECT_CALL(*mock_b_context, submit_operations).WillOnce(Throw(std::invalid_argument("")));
 
-    auto result = hipFileBatchIOSubmit(b_handle, 1, &io_param, 0);
+    auto result = hipFileBatchSubmit(b_handle, 1, &io_param, 0, mock_state);
     ASSERT_EQ(result, HIPFILE_INVALID_VALUE);
 }
 
@@ -139,7 +140,7 @@ TEST_F(HipFileUnit, TestHipFileBatchIOSubmitNullptrParams)
     EXPECT_CALL(mock_state, getBatchContext).Times(0);
     EXPECT_CALL(*mock_b_context, submit_operations).Times(0);
 
-    auto           result          = hipFileBatchIOSubmit(b_handle, 1, nullptr, 0);
+    auto           result          = hipFileBatchSubmit(b_handle, 1, nullptr, 0, mock_state);
     hipFileError_t expected_result = {hipFileInvalidValue, hipSuccess};
     ASSERT_EQ(result, expected_result);
 }
@@ -159,13 +160,13 @@ struct HipFileIoParam : public TestWithParam<IoType> {
             StrictMock<MSys>            msys;
             StrictMock<MLibMountHelper> mlmh;
             expect_file_registration(msys, mlmh);
-            file_handle = Context<DriverState>::get()->registerFile(0x0BADCAFE);
+            file_handle = Runtime::instance().state().registerFile(0x0BADCAFE);
         }
 
         {
             StrictMock<MHip> mhip;
             expect_buffer_registration(mhip, hipMemoryTypeDevice);
-            Context<DriverState>::get()->registerBuffer(bufptr, buflen, 0);
+            Runtime::instance().state().registerBuffer(bufptr, buflen, 0);
         }
     }
 };
@@ -175,7 +176,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipPointerGetAttributesError)
     StrictMock<MHip> mhip;
     EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     ASSERT_EQ(
-        hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, *Context<DriverState>::get(), mbackends),
+        hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, Runtime::instance().state(), mbackends),
         -hipErrorUnknown);
 }
 
@@ -186,16 +187,16 @@ TEST_P(HipFileIoParam, HipFileIoHandlesUnsupportedHipMemoryType)
         hipPointerAttribute_t attrs{};
         attrs.type = memoryType;
         EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
-        ASSERT_EQ(hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, *Context<DriverState>::get(),
-                            mbackends),
-                  -static_cast<ssize_t>(hipFileHipMemoryTypeInvalid));
+        ASSERT_EQ(
+            hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, Runtime::instance().state(), mbackends),
+            -static_cast<ssize_t>(hipFileHipMemoryTypeInvalid));
     }
 }
 
 TEST_P(HipFileIoParam, HipFileIoHandlesInvalidFileHandle)
 {
     auto invalid_handle{reinterpret_cast<hipFileHandle_t>(0xdeadbeef)};
-    ASSERT_EQ(hipFileIo(GetParam(), invalid_handle, bufptr, 0, 0, 0, *Context<DriverState>::get(), mbackends),
+    ASSERT_EQ(hipFileIo(GetParam(), invalid_handle, bufptr, 0, 0, 0, Runtime::instance().state(), mbackends),
               -hipFileHandleNotRegistered);
 }
 
@@ -205,8 +206,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesSysRuntimeError)
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(std::system_error(EBADFD, std::generic_category())));
     errno = 0;
     ASSERT_EQ(
-        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, *Context<DriverState>::get(), mbackends),
-        -1);
+        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, Runtime::instance().state(), mbackends), -1);
     ASSERT_EQ(errno, EBADFD);
 }
 
@@ -215,7 +215,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipRuntimeError)
     EXPECT_CALL(*mbackend, score).WillOnce(Return(1));
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
     ASSERT_EQ(
-        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, *Context<DriverState>::get(), mbackends),
+        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, Runtime::instance().state(), mbackends),
         -hipErrorUnknown);
 }
 
@@ -224,7 +224,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesInvalidArgumentError)
     EXPECT_CALL(*mbackend, score).WillOnce(Return(1));
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(std::invalid_argument("")));
     ASSERT_EQ(
-        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, *Context<DriverState>::get(), mbackends),
+        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, Runtime::instance().state(), mbackends),
         -hipFileInvalidValue);
 }
 
@@ -233,7 +233,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesBackendDisabled)
     EXPECT_CALL(*mbackend, score).WillOnce(Return(1));
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(BackendDisabled()));
     ASSERT_EQ(
-        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, *Context<DriverState>::get(), mbackends),
+        hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, Runtime::instance().state(), mbackends),
         -hipFileInternalError);
 }
 
@@ -267,23 +267,12 @@ struct HipFileIoBackendSelectionParam : public ::testing::TestWithParam<IoType> 
 
 TEST_P(HipFileIoBackendSelectionParam, HipFileIoThrowsIfThereAreNoBackends)
 {
-    auto backends{std::vector<std::shared_ptr<Backend>>()};
+    std::vector<std::shared_ptr<Backend>> backends{};
 
     EXPECT_CALL(mds, getFileAndBuffer(handle, buffer)).WillOnce(Return(file_buffer_pair{mfile, mbuffer}));
-    EXPECT_CALL(mds, getBackends).WillOnce(Return(std::move(backends)));
 
-    switch (io_type) {
-        case IoType::Read:
-            ASSERT_EQ(hipFileRead(handle, buffer, io_size, file_offset, buffer_offset),
-                      -hipFileInternalError);
-            break;
-        case IoType::Write:
-            ASSERT_EQ(hipFileWrite(handle, buffer, io_size, file_offset, buffer_offset),
-                      -hipFileInternalError);
-            break;
-        default:
-            FAIL() << "Unhandled IO Type";
-    }
+    ASSERT_EQ(hipFileIo(io_type, handle, buffer, io_size, file_offset, buffer_offset, mds, backends),
+              -hipFileInternalError);
 }
 
 TEST_P(HipFileIoBackendSelectionParam, HipFileIoThrowsIfAllBackendsRejectTheIO)
@@ -291,7 +280,6 @@ TEST_P(HipFileIoBackendSelectionParam, HipFileIoThrowsIfAllBackendsRejectTheIO)
     std::vector<std::shared_ptr<Backend>> backends{mbe1, mbe2, mbe3};
 
     EXPECT_CALL(mds, getFileAndBuffer(handle, buffer)).WillOnce(Return(file_buffer_pair{mfile, mbuffer}));
-    EXPECT_CALL(mds, getBackends).WillOnce(Return(std::move(backends)));
     EXPECT_CALL(*mbe1, score(Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
         .WillOnce(Return(-1));
     EXPECT_CALL(*mbe2, score(Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
@@ -299,18 +287,8 @@ TEST_P(HipFileIoBackendSelectionParam, HipFileIoThrowsIfAllBackendsRejectTheIO)
     EXPECT_CALL(*mbe3, score(Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
         .WillOnce(Return(-1));
 
-    switch (io_type) {
-        case IoType::Read:
-            ASSERT_EQ(hipFileRead(handle, buffer, io_size, file_offset, buffer_offset),
-                      -hipFileInternalError);
-            break;
-        case IoType::Write:
-            ASSERT_EQ(hipFileWrite(handle, buffer, io_size, file_offset, buffer_offset),
-                      -hipFileInternalError);
-            break;
-        default:
-            FAIL() << "Unhandled IO Type";
-    }
+    ASSERT_EQ(hipFileIo(io_type, handle, buffer, io_size, file_offset, buffer_offset, mds, backends),
+              -hipFileInternalError);
 }
 
 TEST_P(HipFileIoBackendSelectionParam, HipFileIoIssuesIoToHighestScoringBackend)
@@ -318,30 +296,17 @@ TEST_P(HipFileIoBackendSelectionParam, HipFileIoIssuesIoToHighestScoringBackend)
     std::vector<std::shared_ptr<Backend>> backends{mbe1, mbe2, mbe3};
 
     EXPECT_CALL(mds, getFileAndBuffer(handle, buffer)).WillOnce(Return(file_buffer_pair{mfile, mbuffer}));
-    EXPECT_CALL(mds, getBackends).WillOnce(Return(std::move(backends)));
     EXPECT_CALL(*mbe1, score(Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
         .WillOnce(Return(0));
     EXPECT_CALL(*mbe2, score(Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
         .WillOnce(Return(2));
     EXPECT_CALL(*mbe3, score(Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
         .WillOnce(Return(1));
+    EXPECT_CALL(*mbe2, io(Eq(io_type), Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
+        .WillOnce(Return(io_size));
 
-    switch (io_type) {
-        case IoType::Read:
-            EXPECT_CALL(*mbe2,
-                        io(Eq(IoType::Read), Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
-                .WillOnce(Return(io_size));
-            ASSERT_EQ(hipFileRead(handle, buffer, io_size, file_offset, buffer_offset), io_size);
-            break;
-        case IoType::Write:
-            EXPECT_CALL(*mbe2,
-                        io(Eq(IoType::Write), Eq(mfile), Eq(mbuffer), io_size, file_offset, buffer_offset))
-                .WillOnce(Return(io_size));
-            ASSERT_EQ(hipFileWrite(handle, buffer, io_size, file_offset, buffer_offset), io_size);
-            break;
-        default:
-            FAIL() << "Unhandled IO Type";
-    }
+    ASSERT_EQ(hipFileIo(io_type, handle, buffer, io_size, file_offset, buffer_offset, mds, backends),
+              io_size);
 }
 
 INSTANTIATE_TEST_SUITE_P(HipFileIoBackendSelection, HipFileIoBackendSelectionParam,

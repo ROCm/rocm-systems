@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "context.h"
 #include "file.h"
 #include "hipfile.h"
 #include "hipfile-test.h"
@@ -12,6 +11,7 @@
 #include "msys.h"
 #include "mmountinfo.h"
 #include "mountinfo.h"
+#include "runtime.h"
 #include "state.h"
 
 #include <cerrno>
@@ -162,7 +162,7 @@ TEST_F(HipFileHandle, register_handle_internal_linux_fd)
     int fd{0xBADF00D};
 
     ExpectUnregisteredFileBuilder(msys, mlibmounthelper).build();
-    ASSERT_NE(Context<DriverState>::get()->registerFile(fd), nullptr);
+    ASSERT_NE(Runtime::instance().state().registerFile(fd), nullptr);
 }
 
 TEST_F(HipFileHandle, file_initialization)
@@ -195,8 +195,8 @@ TEST_F(HipFileHandle, file_initialization)
         .mountinfo(mountinfo)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_EQ(fh, file->handle());
     EXPECT_EQ(fd, file->clientFd());
@@ -219,9 +219,9 @@ TEST_F(HipFileHandle, register_handle_internal_linux_fd_already_registered)
 {
     int fd{0xBADF00D};
     ExpectUnregisteredFileBuilder(msys, mlibmounthelper).build();
-    ASSERT_NE(Context<DriverState>::get()->registerFile(fd), nullptr);
+    ASSERT_NE(Runtime::instance().state().registerFile(fd), nullptr);
     ExpectUnregisteredFileBuilder(msys, mlibmounthelper).build();
-    ASSERT_THROW(Context<DriverState>::get()->registerFile(fd), FileAlreadyRegistered);
+    ASSERT_THROW(Runtime::instance().state().registerFile(fd), FileAlreadyRegistered);
 }
 
 TEST_F(HipFileHandle, register_handle_linux_fd)
@@ -331,7 +331,7 @@ TEST_F(HipFileHandle, register_handle_invalid_type_not_supported)
 
 TEST_F(HipFileHandle, deregister_handle_internal_throws_if_not_registered)
 {
-    ASSERT_THROW(Context<DriverState>::get()->deregisterFile(reinterpret_cast<hipFileHandle_t>(0xdeadbeef)),
+    ASSERT_THROW(Runtime::instance().state().deregisterFile(reinterpret_cast<hipFileHandle_t>(0xdeadbeef)),
                  FileNotRegistered);
 }
 
@@ -343,9 +343,9 @@ TEST_F(HipFileHandle, deregister_handle_doesnt_throw_if_not_registered)
 TEST_F(HipFileHandle, deregister_handle_internal)
 {
     ExpectUnregisteredFileBuilder(msys, mlibmounthelper).build();
-    auto fh = Context<DriverState>::get()->registerFile(0xBADF00D);
-    Context<DriverState>::get()->deregisterFile(fh);
-    ASSERT_THROW(Context<DriverState>::get()->deregisterFile(fh), FileNotRegistered);
+    auto fh = Runtime::instance().state().registerFile(0xBADF00D);
+    Runtime::instance().state().deregisterFile(fh);
+    ASSERT_THROW(Runtime::instance().state().deregisterFile(fh), FileNotRegistered);
 }
 
 TEST_F(HipFileHandle, deregister_handle)
@@ -365,12 +365,12 @@ TEST_F(HipFileHandle, deregister_handle)
 TEST_F(HipFileHandle, deregister_handle_internal_fails_when_operations_are_oustanding)
 {
     ExpectUnregisteredFileBuilder(msys, mlibmounthelper).build();
-    auto fh = Context<DriverState>::get()->registerFile(0xBADF00D);
+    auto fh = Runtime::instance().state().registerFile(0xBADF00D);
     {
-        auto file = Context<DriverState>::get()->getFile(fh);
-        ASSERT_THROW(Context<DriverState>::get()->deregisterFile(fh), FileOperationsOutstanding);
+        auto file = Runtime::instance().state().getFile(fh);
+        ASSERT_THROW(Runtime::instance().state().deregisterFile(fh), FileOperationsOutstanding);
     }
-    Context<DriverState>::get()->deregisterFile(fh);
+    Runtime::instance().state().deregisterFile(fh);
 }
 
 TEST_F(HipFileHandle, deregister_handle_fails_when_operations_are_oustanding)
@@ -384,7 +384,7 @@ TEST_F(HipFileHandle, deregister_handle_fails_when_operations_are_oustanding)
     ExpectUnregisteredFileBuilder(msys, mlibmounthelper).build();
     ASSERT_EQ(hipFileHandleRegister(&fh, &rfd), HIPFILE_SUCCESS);
     {
-        auto file = Context<DriverState>::get()->getFile(fh);
+        auto file = Runtime::instance().state().getFile(fh);
         hipFileHandleDeregister(fh);
     }
     hipFileHandleDeregister(fh);
@@ -572,8 +572,8 @@ TEST_F(HipFileHandle, IsBlockDeviceReturnsTrueForBlockDevice)
         .statx(stxbuf)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_TRUE(file->isBlockDevice());
 }
@@ -595,8 +595,8 @@ TEST_F(HipFileHandle, IsBlockDeviceReturnsFalseForRegularFile)
         .statx(stxbuf)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_FALSE(file->isBlockDevice());
 }
@@ -618,8 +618,8 @@ TEST_F(HipFileHandle, IsBlockDeviceReturnsFalseWhenStatxTypeNotAvailable)
         .statx(stxbuf)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_FALSE(file->isBlockDevice());
 }
@@ -641,8 +641,8 @@ TEST_F(HipFileHandle, IsRegularFileReturnsTrueForRegularFile)
         .statx(stxbuf)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_TRUE(file->isRegularFile());
 }
@@ -664,8 +664,8 @@ TEST_F(HipFileHandle, IsRegularFileReturnsFalseForBlockDevice)
         .statx(stxbuf)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_FALSE(file->isRegularFile());
 }
@@ -687,8 +687,8 @@ TEST_F(HipFileHandle, IsRegularFileReturnsFalseWhenStatxTypeNotAvailable)
         .statx(stxbuf)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_FALSE(file->isRegularFile());
 }
@@ -711,8 +711,8 @@ TEST_F(HipFileHandle, OnExt4OrderedReturnsTrueForExt4Ordered)
         .mountinfo(mountinfo)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_TRUE(file->onExt4Ordered());
 }
@@ -735,8 +735,8 @@ TEST_F(HipFileHandle, OnExt4OrderedReturnsFalseForExt4Journal)
         .mountinfo(mountinfo)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_FALSE(file->onExt4Ordered());
 }
@@ -758,8 +758,8 @@ TEST_F(HipFileHandle, OnExt4OrderedReturnsFalseForOtherFileSystem)
         .mountinfo(mountinfo)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_FALSE(file->onExt4Ordered());
 }
@@ -781,8 +781,8 @@ TEST_F(HipFileHandle, OnXfsReturnsTrueForXfs)
         .mountinfo(mountinfo)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_TRUE(file->onXfs());
 }
@@ -804,8 +804,8 @@ TEST_F(HipFileHandle, OnXfsReturnsFalseForOtherFileSystem)
         .mountinfo(mountinfo)
         .open_fd(open_fd)
         .build();
-    auto fh{Context<DriverState>::get()->registerFile(fd)};
-    auto file{Context<DriverState>::get()->getFile(fh)};
+    auto fh{Runtime::instance().state().registerFile(fd)};
+    auto file{Runtime::instance().state().getFile(fh)};
 
     EXPECT_FALSE(file->onXfs());
 }
