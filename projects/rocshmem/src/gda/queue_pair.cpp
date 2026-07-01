@@ -497,7 +497,7 @@ extern "C" void rocshmem_gin_init_constmem(int provider, int rank) {
   constmem_t* cm_addr{nullptr};
   if (hipGetSymbolAddress(reinterpret_cast<void**>(&cm_addr),
                           HIP_SYMBOL(constmem)) == hipSuccess) {
-    hipMemcpy(&cm_addr->gda_provider, &gda_prov, sizeof(gda_prov), hipMemcpyDefault);
+    CHECK_HIP(hipMemcpy(&cm_addr->gda_provider, &gda_prov, sizeof(gda_prov), hipMemcpyDefault));
   }
 
   // Initialize logd_constants for device-side error reporting
@@ -512,6 +512,6 @@ extern "C" void rocshmem_gin_init_constmem(int provider, int rank) {
   struct logd_constants* logd_addr{nullptr};
   if (hipGetSymbolAddress(reinterpret_cast<void**>(&logd_addr),
                           HIP_SYMBOL(logd_constants)) == hipSuccess) {
-    hipMemcpy(logd_addr, &host_logd, sizeof(host_logd), hipMemcpyDefault);
+    CHECK_HIP(hipMemcpy(logd_addr, &host_logd, sizeof(host_logd), hipMemcpyDefault));
   }
 }
