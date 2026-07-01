@@ -53,6 +53,9 @@ rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
 rj_add_device_kernel(dynamic_copy_loop gfx950)
+rj_add_device_kernel(multikernel_indirect_branch gfx950)
+rj_add_device_kernel(multikernel_indirect_branch_part0 gfx950)
+rj_add_device_kernel(multikernel_indirect_branch_part1 gfx950)
 
 # Triton-generated assembly fixtures. The checked-in assembly records the
 # original Triton-generated kernels, so normal test builds only need the ROCm
@@ -131,6 +134,9 @@ add_custom_target(
         kernel_vector_add
         kernel_vector_add_gfx90a
         kernel_dynamic_copy_loop
+        kernel_multikernel_indirect_branch
+        kernel_multikernel_indirect_branch_part0
+        kernel_multikernel_indirect_branch_part1
         kernel_triton_cdna4_matmul_dynamic_32x32x64
         kernel_triton_cdna4_matmul_buffer_async_1024
         kernel_triton_cdna4_flash_attention_no_async_1024

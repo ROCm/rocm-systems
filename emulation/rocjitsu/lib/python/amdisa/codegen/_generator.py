@@ -2646,6 +2646,14 @@ class CodeGenerator:
             L.append('  wf.end();')
             return '\n'.join(L)
 
+        if cls == 'trap':
+            # S_TRAP is an exceptional control-flow terminator for CFG and DBT
+            # purposes, but rocjitsu does not currently model trap-handler
+            # execution in the wavefront simulator. Make dynamic execution fail
+            # explicitly while the generated PROGRAM_TERMINATOR flag carries the
+            # static-control-flow meaning for CFG construction.
+            return '  (void)wf;\n  throw util::UnimplementedInst(mnemonic());'
+
         if cls == 'waitcnt':
             L.append(
                 f'  uint16_t imm = static_cast<uint16_t>({src_ops[0]}.encoding_value_);'
@@ -5216,11 +5224,14 @@ class CodeGenerator:
                         ),
                         None,
                     )
-                    if (
-                        inst_sem
-                        and inst_sem.semantic_class in ('branch', 'cbranch')
-                        and label_operand
+                    branch_offset_operand = None
+                    if inst_sem and inst_sem.semantic_class in (
+                        'branch',
+                        'cbranch',
+                        'scalar_call',
                     ):
+                        branch_offset_operand = label_operand
+                    if branch_offset_operand:
                         public_members.append(
                             cgen.Statement(
                                 'std::optional<int64_t> branch_offset_bytes() const override'
@@ -5474,7 +5485,11 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class == 'cbranch':
                         ctor_body_parts.append('flags_ |= COND_BRANCH;')
-                    if _mem_sem and _mem_sem.semantic_class == 'endpgm':
+                    if _mem_sem and _mem_sem.semantic_class in ('endpgm', 'trap'):
+                        # BasicBlock splitting treats PROGRAM_TERMINATOR as a
+                        # hard stop. S_TRAP needs the same metadata as S_ENDPGM:
+                        # without it, CFG recovery can add a bogus fallthrough
+                        # edge into padding or a following ELF FUNC symbol.
                         ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
                     if _mem_sem and _mem_sem.semantic_class in (
                         'scalar_setpc',
@@ -5905,19 +5920,15 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    if (
-                        inst_sem
-                        and inst_sem.semantic_class in ('branch', 'cbranch')
-                        and label_operand
-                    ):
+                    if branch_offset_operand:
                         inst_impls.append(
                             cgen.Line(
                                 f'std::optional<int64_t> '
                                 f'{inst.fmt_name}::branch_offset_bytes() const {{\n'
-                                f'  // AMDGPU direct branch labels are signed '
+                                f'  // AMDGPU PC-relative branch immediates are signed '
                                 f'instruction-count deltas.\n'
                                 f'  return static_cast<int64_t>('
-                                f'static_cast<int16_t>({label_operand}.encoding_value_)) * 4;\n'
+                                f'static_cast<int16_t>({branch_offset_operand}.encoding_value_)) * 4;\n'
                                 f'}}'
                             )
                         )
