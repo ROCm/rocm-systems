@@ -220,7 +220,7 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
-      IommuPassthroughTests.cpp
+      IommuPassthrough_test.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
