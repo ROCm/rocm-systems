@@ -80,7 +80,7 @@ _PERFETTO_TRACE_GLOB = "perfetto-trace-*.proto"
 _PERFETTO_MERGE_SCRIPT = "rocprof-sys-merge-output.sh"
 _MERGE_WAIT_ATTEMPTS = 20
 _MERGE_WAIT_INTERVAL_S = 0.1
-_MERGE_SCRIPT_TIMEOUT_S = 60
+_MERGE_SCRIPT_TIMEOUT_S = 10
 
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_CLASSES = {
@@ -2458,8 +2458,7 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
                     pytest.fail(f"Perfetto trace file {perfetto} not found")
 
                 recovery = _recover_merged_perfetto_trace(perfetto, tests_dir)
-                # Recovery may have produced the missing merged trace.
-                if not perfetto.exists():
+                if not recovery.ok:
                     pytest.fail(
                         f"Perfetto trace file {perfetto} not found\n"
                         f"{recovery.message}"
