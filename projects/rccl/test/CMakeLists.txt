@@ -178,8 +178,10 @@ if(BUILD_TESTS)
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
+    VersionGateTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    DdaIpcTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp

@@ -70,6 +70,25 @@ inline uint32_t mad_i24_u32(uint32_t lhs, uint32_t rhs, uint32_t addend) {
   return mul_i24_u32(lhs, rhs) + addend;
 }
 
+/// Return whether signed integer add/sub overflows. The unsigned parameter type
+/// is deduced, so the same helper serves 32- and 64-bit scalar add/sub.
+template <typename U> inline bool signed_add_overflows(U a, U b) {
+  static_assert(std::is_unsigned_v<U>, "operands must be unsigned");
+  const U sum = static_cast<U>(a + b);
+  constexpr U sign_bit = U{1} << (sizeof(U) * 8 - 1);
+  // Overflow iff the operands share a sign that differs from the result's.
+  return ((a ^ sum) & (b ^ sum) & sign_bit) != 0;
+}
+
+template <typename U> inline bool signed_sub_overflows(U a, U b) {
+  static_assert(std::is_unsigned_v<U>, "operands must be unsigned");
+  const U diff = static_cast<U>(a - b);
+  constexpr U sign_bit = U{1} << (sizeof(U) * 8 - 1);
+  // Overflow iff the operands differ in sign and a's sign differs from the
+  // result's.
+  return ((a ^ b) & (a ^ diff) & sign_bit) != 0;
+}
+
 /// Write an explicit SGPR lane-mask destination. Wave32 targets use the low
 /// dword only; writing a pair would clobber the next SGPR, which codegen may
 /// legally use for unrelated scalar state.

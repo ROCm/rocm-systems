@@ -2502,7 +2502,7 @@ void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
   streams_.clear();
   streams_.push_back(launch_stream);
   if (parallel_streams_.find(devId) == parallel_streams_.end()) {
-    LogPrintfError("UpdateStreams failed for device id:%d", devId);
+    // No parallel streams were created for this device
     return;
   }
   auto& parallel_streams = parallel_streams_[devId];

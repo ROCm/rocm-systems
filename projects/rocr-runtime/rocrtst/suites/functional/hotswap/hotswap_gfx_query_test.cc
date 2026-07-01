@@ -33,6 +33,8 @@ const char* kGfx1250IsaWithFeatures =
     "amdgcn-amd-amdhsa--gfx1250:sramecc+:xnack-";
 const char* kGfx942Isa = "amdgcn-amd-amdhsa--gfx942";
 const char* kGfx1251Isa = "amdgcn-amd-amdhsa--gfx1251";
+const char* kGfx12_5GenericIsaWithFeatures =
+    "amdgcn-amd-amdhsa--gfx12-5-generic:sramecc+";
 
 void ResetTestEnv() {
   g_fake_hsa_env = FakeHsaEnv{};
@@ -97,6 +99,7 @@ namespace {
 
 using rocr::hotswap::AgentGfxRevision;
 using rocr::hotswap::GetAgentGfxRevision;
+using rocr::hotswap::IsGfx12_5Target;
 using rocr::hotswap::IsHotswapSupportedGfxRevision;
 
 TEST(HotswapGfxQuery, Gfx1250A0Passes) {
@@ -143,6 +146,26 @@ TEST(HotswapGfxQuery, NearMissTargetBlocks) {
 
   EXPECT_EQ(revision.gfx_target, "gfx1251");
   EXPECT_FALSE(IsHotswapSupportedGfxRevision(revision));
+}
+
+TEST(HotswapGfxQuery, Gfx12_5GenericFeatureSuffixParsed) {
+  ResetTestEnv();
+  g_fake_hsa_env.isa_name = kGfx12_5GenericIsaWithFeatures;
+  g_fake_hsa_env.asic_revision = 0;
+
+  const AgentGfxRevision revision = GetAgentGfxRevision(MakeFreshAgent());
+
+  EXPECT_EQ(revision.gfx_target, "gfx12-5-generic");
+  EXPECT_FALSE(IsHotswapSupportedGfxRevision(revision));
+}
+
+TEST(HotswapGfxQuery, Gfx12_5TargetPredicateIsStrict) {
+  EXPECT_TRUE(IsGfx12_5Target("gfx1250"));
+  EXPECT_TRUE(IsGfx12_5Target("gfx1251"));
+  EXPECT_TRUE(IsGfx12_5Target("gfx12-5-generic"));
+  EXPECT_FALSE(IsGfx12_5Target("gfx125"));
+  EXPECT_FALSE(IsGfx12_5Target("gfx125foo"));
+  EXPECT_FALSE(IsGfx12_5Target("gfx942"));
 }
 
 TEST(HotswapGfxQuery, Gfx1250NonA0Blocks) {

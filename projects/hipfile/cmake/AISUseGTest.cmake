@@ -97,8 +97,31 @@ endforeach()
 
 include(GoogleTest)
 
+# Absolute path to the LeakSanitizer suppression file. Only applied when
+# building with the (non-TSAN) sanitizers.
+set(AIS_LSAN_SUPPRESSIONS_FILE "${HIPFILE_ROOT_PATH}/cmake/lsan-suppressions.supp")
+
 function(ais_gtest_discover_tests target)
-    cmake_language(CALL gtest_discover_tests ${ARGV})
+    set(forwarded_args ${ARGV})
+
+    # When the address sanitizer is on, force every discovered test to load the
+    # LSan suppression file via LSAN_OPTIONS. We splice an ENVIRONMENT entry into
+    # the PROPERTIES list that gtest_discover_tests applies to each test case, so
+    # the suppression travels with the test regardless of how ctest is invoked.
+    if(AIS_USE_SANITIZERS)
+        set(lsan_env "LSAN_OPTIONS=suppressions=${AIS_LSAN_SUPPRESSIONS_FILE}")
+        list(FIND forwarded_args "PROPERTIES" props_idx)
+        if(props_idx EQUAL -1)
+            list(APPEND forwarded_args PROPERTIES ENVIRONMENT "${lsan_env}")
+        else()
+            # Insert ENVIRONMENT right after the PROPERTIES keyword so it joins
+            # the existing property name/value pairs the caller passed.
+            math(EXPR insert_idx "${props_idx} + 1")
+            list(INSERT forwarded_args ${insert_idx} ENVIRONMENT "${lsan_env}")
+        endif()
+    endif()
+
+    cmake_language(CALL gtest_discover_tests ${forwarded_args})
 
     if(AIS_USE_CODE_COVERAGE)
         set(options)
