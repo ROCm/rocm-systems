@@ -241,7 +241,7 @@ rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target,
 }
 
 TEST(HotswapRewriteDecision, A0RetargetsThroughLegacyPathRegardlessOfOptions) {
-  const rocr::hotswap::RewriteOptions options[] = {{}, {false}};
+  const rocr::hotswap::RewriteOptions options[] = {{}, {true}, {false}};
   for (const auto& option : options) {
     SCOPED_TRACE(option.gfx12_5_rewrite_enabled ? "entry trampolines enabled"
                                                 : "entry trampolines disabled");
@@ -255,9 +255,16 @@ TEST(HotswapRewriteDecision, A0RetargetsThroughLegacyPathRegardlessOfOptions) {
   }
 }
 
-TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOnRoutesNonA0Gfx1250) {
+TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOffBlocksNonA0Gfx1250) {
   const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
       MakeRevision("gfx1250", 1), kGfx1250Isa, kGfx1250Isa, {});
+
+  EXPECT_FALSE(decision.has_value());
+}
+
+TEST(HotswapRewriteDecision, EntryTrampolinesEnabledRoutesNonA0Gfx1250) {
+  const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
+      MakeRevision("gfx1250", 1), kGfx1250Isa, kGfx1250Isa, {true});
 
   ASSERT_TRUE(decision.has_value());
   EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
@@ -274,10 +281,10 @@ TEST(HotswapRewriteDecision, EntryTrampolinesDisabledBlocksNonA0Gfx1250) {
 
 TEST(HotswapRewriteDecision, EntryTrampolinesRouteGfx12_5Family) {
   const auto concrete = rocr::hotswap::DecideHotswapRewriteForTesting(
-      MakeRevision("gfx1251", 1), kGfx1251Isa, kGfx1251Isa, {});
+      MakeRevision("gfx1251", 1), kGfx1251Isa, kGfx1251Isa, {true});
   const auto generic = rocr::hotswap::DecideHotswapRewriteForTesting(
       MakeRevision("gfx12-5-generic", 1), kGfx12_5GenericIsa,
-      kGfx12_5GenericIsa, {});
+      kGfx12_5GenericIsa, {true});
 
   ASSERT_TRUE(concrete.has_value());
   EXPECT_EQ(concrete->source_isa, kGfx1251Isa);
@@ -291,7 +298,7 @@ TEST(HotswapRewriteDecision, EntryTrampolinesRouteGfx12_5Family) {
 
 TEST(HotswapRewriteDecision, EntryTrampolinesUseGenericSourceAsTarget) {
   const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
-      MakeRevision("gfx1251", 1), kGfx12_5GenericIsa, kGfx1251Isa, {});
+      MakeRevision("gfx1251", 1), kGfx12_5GenericIsa, kGfx1251Isa, {true});
 
   ASSERT_TRUE(decision.has_value());
   EXPECT_EQ(decision->source_isa, kGfx12_5GenericIsa);
@@ -301,7 +308,7 @@ TEST(HotswapRewriteDecision, EntryTrampolinesUseGenericSourceAsTarget) {
 
 TEST(HotswapRewriteDecision, EntryTrampolinesBlockNonGfx12_5) {
   const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
-      MakeRevision("gfx942", 0), kGfx942Isa, kGfx942Isa, {});
+      MakeRevision("gfx942", 0), kGfx942Isa, kGfx942Isa, {true});
 
   EXPECT_FALSE(decision.has_value());
 }
@@ -418,36 +425,11 @@ TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
-TEST(HotswapRewrite, RuntimeLoadNonA0UsesDefaultEntryTrampolines) {
+TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToOriginal) {
   ResetRuntimeTestEnv();
-  if (!NewComgrHotswapApiAvailable()) return;
   g_fake_hsa_env.asic_revision = 1;
   LoadRecorder load;
   const hsa_executable_t executable = MakeTestExecutable(0x502);
-
-  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
-      executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
-      MakeLoadCallbacks(&load));
-
-  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
-  ASSERT_EQ(load.calls.size(), 1u);
-  EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
-  EXPECT_NE(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_GT(load.calls[0].code_object_size, 0u);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 1u);
-
-  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
-}
-
-TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesAreZero) {
-  ResetRuntimeTestEnv();
-  g_fake_hsa_env.asic_revision = 1;
-  g_fake_env_vars["AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES"] = "0";
-  LoadRecorder load;
-  const hsa_executable_t executable = MakeTestExecutable(0x503);
 
   const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
       executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
@@ -461,9 +443,34 @@ TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesAreZero) {
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
-TEST(HotswapRewrite, RuntimeLoadNonA0UsesEntryTrampolinesUnlessEnvIsZero) {
+TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesDisabled) {
+  const char* const env_values[] = {"0", "false", "off", ""};
+  uint64_t executable_handle = 0x503;
+  for (const char* env_value : env_values) {
+    SCOPED_TRACE(env_value);
+    ResetRuntimeTestEnv();
+    g_fake_hsa_env.asic_revision = 1;
+    g_fake_env_vars["AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES"] = env_value;
+    LoadRecorder load;
+    const hsa_executable_t executable =
+        MakeTestExecutable(executable_handle++);
+
+    const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+        executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
+        MakeLoadCallbacks(&load));
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    ASSERT_EQ(load.calls.size(), 1u);
+    EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
+    EXPECT_EQ(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
+    EXPECT_EQ(
+        rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+  }
+}
+
+TEST(HotswapRewrite, RuntimeLoadNonA0UsesEntryTrampolinesWhenEnabled) {
   if (!NewComgrHotswapApiAvailable()) return;
-  const char* const env_values[] = {"false", ""};
+  const char* const env_values[] = {"1", "true", "on"};
   uint64_t executable_handle = 0x504;
   for (const char* env_value : env_values) {
     SCOPED_TRACE(env_value);
