@@ -824,6 +824,8 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                     break;
             }
         }
+        jpeg_stream_key.width = jpeg_stream_key.width > default_surface_width_ ? jpeg_stream_key.width : default_surface_width_;
+        jpeg_stream_key.height = jpeg_stream_key.height > default_surface_height_ ? jpeg_stream_key.height : default_surface_height_;
         jpeg_stream_groups[jpeg_stream_key].push_back(i);
     }
 
