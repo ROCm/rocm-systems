@@ -178,6 +178,7 @@ def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
         return False
 
     hip_rocr_prefixes = [
+        "projects/clr/",
         "projects/hip/",
         "projects/hip-tests/",
         "projects/rocr-runtime/",
@@ -451,12 +452,12 @@ def run(args):
             base_ref = args.get("base_ref")
             modified_paths = get_modified_paths(base_ref)
             if check_hip_rocr_changes(modified_paths):
-                outputs["run_mi455_ci"] = "true"
+                outputs["run_mi455_test"] = "true"
             else:
-                outputs["run_mi455_ci"] = "false"
+                outputs["run_mi455_test"] = "false"
         else:
             # MI455 CI only runs on PRs, not push/nightly/workflow_dispatch
-            outputs["run_mi455_ci"] = "false"
+            outputs["run_mi455_test"] = "false"
 
     set_github_output(outputs)
     return outputs

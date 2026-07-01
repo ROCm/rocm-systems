@@ -47,7 +47,7 @@ jobs:
       linux_projects: ${{ steps.linux_projects.outputs.projects }}
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
-      run_mi455_ci: ${{ steps.linux_projects.outputs.run_mi455_ci }}
+      run_mi455_test: ${{ steps.linux_projects.outputs.run_mi455_test }}
       package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
@@ -123,7 +123,7 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950' }}
+          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx125X' }}
           CI_CONFIG_PATH: ci-config
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
@@ -184,34 +184,32 @@ jobs:
         -DTHEROCK_ENABLE_MPI=ON
 
   # =============================================================================
-  # TEMPORARY JOB - MI455 BRINGUP
+  # TEMPORARY JOB - MI455 BRINGUP TEST
   # =============================================================================
-  # This job is temporary and will be removed once MI455 bringup is complete.
+  # This test job is temporary and will be removed once MI455 bringup is complete.
   # After bringup, MI455 (gfx125X-dcgpu) will be onboarded into the standard
   # multi-arch CI via therock-ci-config.
+  #
+  # Build: gfx125X is included in the regular therock-ci-linux build matrix
+  # Test: Only runs when HIP/CLR/hip-tests/ROCR changes (limited to 1 test node)
   #
   # TODO(geomin12): Delete this job once MI455 is fully enabled in
   #                 therock-ci-config and the multi-arch CI.
   # =============================================================================
-  therock-mi455-ci-linux:
-    name: MI455 Linux (hip-tests, rocrtst | gfx125X-dcgpu)
-    needs: setup
-    # Only run on PRs when HIP or ROCR files are modified
-    if: ${{ github.event_name == 'pull_request' && needs.setup.outputs.run_mi455_ci == 'true' }}
+  therock-mi455-test-linux:
+    name: MI455 Linux Test (hip-tests, rocrtst | gfx125X-dcgpu)
+    needs: [setup, therock-ci-linux]
+    # Tests only run when HIP/CLR/hip-tests/ROCR files are modified
+    if: ${{ github.event_name == 'pull_request' && needs.setup.outputs.run_mi455_test == 'true' }}
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/therock-ci-linux.yml
-    secrets: inherit
+    uses: ./.github/workflows/therock-test-packages.yml
     with:
-      cmake_options: >
-        -DTHEROCK_ENABLE_ALL=ON
-        -DTHEROCK_BUILD_TESTING=ON
       projects_to_test: "hip-tests, rocrtst"
-      package_version: ${{ needs.setup.outputs.package_version }}
       amdgpu_families: "gfx125X-dcgpu"
       test_runs_on: "linux-mi455-gpu-rocm"
-      build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
+      platform: "linux"
 
   therock-ci-windows:
     name: Windows (${{ matrix.projects.projects_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
@@ -242,7 +240,6 @@ jobs:
       - setup
       - therock-ci-linux
       - therock-rccl-ci-linux
-      - therock-mi455-ci-linux
       - therock-ci-windows
     runs-on: ubuntu-24.04
     steps:
