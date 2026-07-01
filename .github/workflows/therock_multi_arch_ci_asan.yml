@@ -62,7 +62,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: ROCm/TheRock
       ref: "b0545c3f4c66c42526f9905266b5b697d7d26f5c" # 2026-06-23
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}", "family_overrides": ""}'
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
