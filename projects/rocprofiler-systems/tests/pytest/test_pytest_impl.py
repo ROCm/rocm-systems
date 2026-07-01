@@ -8,7 +8,7 @@ Unit tests for GPU-specific test counter selection.
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
-from rocprofsys import GPUInfo
+from rocprofsys import GPUInfo, TestResult
 
 pytestmark = [pytest.mark.pytest_impl]
 
@@ -34,10 +34,10 @@ class TestGPUInfo(RocprofsysTest):
             "TX_VCA_VCA_BUSY",
         ]
         assert gpu_info.expected_counter_files == [
-            "rocprof-device-[0-9]-GRBM_COUNT.txt",
-            "rocprof-device-[0-9]-SQ_WAVES.txt",
-            "rocprof-device-[0-9]-SQ_INSTS_VALU.txt",
-            "rocprof-device-[0-9]-TX_VCA_VCA_BUSY.txt",
+            "rocprof-device-[0-9]-GRBM_COUNT*.txt",
+            "rocprof-device-[0-9]-SQ_WAVES*.txt",
+            "rocprof-device-[0-9]-SQ_INSTS_VALU*.txt",
+            "rocprof-device-[0-9]-TX_VCA_VCA_BUSY*.txt",
         ]
 
     def test_mi300_and_later_keep_ta_ta_busy(self):
@@ -69,3 +69,28 @@ class TestGPUInfo(RocprofsysTest):
 
         assert gpu_info.rocm_events_for_test == "SQ_WAVES"
         assert gpu_info.counter_names == ["SQ_WAVES"]
+
+
+@pytest.mark.class_name("test-result")
+class TestTestResult(RocprofsysTest):
+    def test_rocpd_files_prefers_default_database(self, tmp_path):
+        default_db = tmp_path / "rocpd.db"
+        rank_db = tmp_path / "rocpd-2-0.db"
+        default_db.touch()
+        rank_db.touch()
+
+        result = TestResult(0, "", tmp_path, [], {})
+
+        assert result.rocpd_files == [default_db]
+        assert result.rocpd_file == default_db
+
+    def test_rocpd_files_returns_sorted_rank_databases(self, tmp_path):
+        higher_pid_db = tmp_path / "rocpd-66607-0.db"
+        lower_pid_db = tmp_path / "rocpd-66606-0.db"
+        higher_pid_db.touch()
+        lower_pid_db.touch()
+
+        result = TestResult(0, "", tmp_path, [], {})
+
+        assert result.rocpd_files == [lower_pid_db, higher_pid_db]
+        assert result.rocpd_file == lower_pid_db

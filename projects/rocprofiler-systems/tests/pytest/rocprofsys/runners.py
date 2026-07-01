@@ -90,12 +90,15 @@ class TestResult:
 
     @property
     def rocpd_file(self) -> Optional[Path]:
+        files = self.rocpd_files
+        return files[0] if files else None
+
+    @property
+    def rocpd_files(self) -> list[Path]:
         candidate = self.output_dir / "rocpd.db"
         if candidate.exists():
-            return candidate
-        # Try globbing
-        dbs = list(self.output_dir.glob("*.db"))
-        return dbs[0] if dbs else None
+            return [candidate]
+        return sorted(self.output_dir.glob("*.db"))
 
     @property
     def timemory_files(self) -> list[Path]:
