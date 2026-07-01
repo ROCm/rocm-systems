@@ -439,3 +439,15 @@ stream:
   Unit_hipStreamValue_Wait_Blocking:
     <<: *level_2
     tags: [synchronization]
+  Unit_hipStreamWriteValue_Decrement_Default:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipStreamWriteValue_Decrement_MultiStream_MultiDevice:
+    <<: *level_2
+    tags: [synchronization, multigpu]
+  Unit_hipStreamWriteValue_Increment_Default:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice:
+    <<: *level_2
+    tags: [synchronization, multigpu]

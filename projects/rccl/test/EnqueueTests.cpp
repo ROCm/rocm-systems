@@ -935,4 +935,45 @@ TEST_F(EnqueueTests, ncclEnqueueCheck_InvalidBuffers)
     );
 }
 
+// Regression: ncclInitKernelsForDevice calls hipFuncGetAttributes for
+// each kernel. When hipFuncGetAttributes fails it leaves a sticky HIP
+// error. RCCL's CUDASUCCESS macro wraps the call with cuda_clear(),
+// which drains the error via hipGetLastError. This test verifies that
+// (1) ncclInitKernelsForDevice itself does not leak errors, and
+// (2) the cuda_clear drain mechanism works on a failing
+// hipFuncGetAttributes — the same mechanism that protects the caller.
+TEST_F(EnqueueTests, ncclInitKernelsForDevice_NoStickyErrorAfterCall)
+{
+    RUN_ISOLATED_TEST(
+        "ncclInitKernelsForDevice_NoStickyErrorAfterCall",
+        []()
+        {
+            (void)hipGetLastError();
+
+            size_t       maxStackSize = 0;
+            ncclResult_t result = ncclInitKernelsForDevice(906, 65536, &maxStackSize);
+            EXPECT_EQ(result, ncclSuccess);
+
+            hipError_t lastErr = hipGetLastError();
+            EXPECT_EQ(lastErr, hipSuccess)
+                << "ncclInitKernelsForDevice leaked a sticky HIP error: "
+                << hipGetErrorString(lastErr);
+
+            // Verify the cuda_clear drain mechanism directly: a failing
+            // hipFuncGetAttributes leaves a sticky error, but wrapping
+            // it with cuda_clear (as CUDASUCCESS does) must drain it.
+            hipFuncAttributes attr = {0};
+            hipError_t err = cuda_clear(
+                hipFuncGetAttributes(&attr, (const void*)0xDEADBEEF));
+            EXPECT_NE(err, hipSuccess)
+                << "Expected hipFuncGetAttributes to fail on a bogus pointer";
+
+            hipError_t afterDrain = hipGetLastError();
+            EXPECT_EQ(afterDrain, hipSuccess)
+                << "cuda_clear should have drained the sticky HIP error, "
+                << "but it leaked: " << hipGetErrorString(afterDrain);
+        }
+    );
+}
+
 } // namespace RcclUnitTesting
