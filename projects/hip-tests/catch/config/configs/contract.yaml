@@ -288,7 +288,7 @@ contract:
   Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndLaunches:
     <<: *level_0
     tags: [graph_mem_nodes]
-  Contract_GraphMemNodes_GraphMemAttribute_QueryIsNonDecreasing:
+  Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing:
     <<: *level_0
     tags: [graph_mem_nodes]
   Contract_HostMemory_HostMalloc_ReturnsUsablePointer:

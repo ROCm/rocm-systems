@@ -142,7 +142,7 @@ HIP_TEST_CASE(Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndLaunches) {
   TrimGraphMemory();
 }
 
-HIP_TEST_CASE(Contract_GraphMemNodes_GraphMemAttribute_QueryIsNonDecreasing) {
+HIP_TEST_CASE(Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing) {
   const int device = CurrentDevice();
 
   uint64_t reserved_before = 0;
