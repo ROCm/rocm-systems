@@ -12,7 +12,7 @@ on:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
-      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -27,7 +27,7 @@ on:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
-      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -84,16 +84,17 @@ jobs:
       contents: read
     outputs:
       gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
     steps:
-    - name: Checkout workflow actions
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      with:
-        sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
-        set-safe-directory: true
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
 
-    - name: Resolve runner labels
-      id: runner
-      uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   code-coverage:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}

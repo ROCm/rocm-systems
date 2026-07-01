@@ -14,7 +14,7 @@ on:
       - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
       - '.github/workflows/rocprofiler-sdk-docs.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
-      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/*.md'
@@ -25,7 +25,7 @@ on:
       - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
       - '.github/workflows/rocprofiler-sdk-docs.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
-      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,6 +49,7 @@ jobs:
       contents: read
     outputs:
       gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
     steps:
       - name: Checkout workflow actions
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
