@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include "context.h"
 #include "state.h"
 
 #include "mbuffer.h"
@@ -21,12 +20,6 @@ namespace hipFile {
 
 class MDriverState : public DriverState {
 public:
-    ContextOverride<DriverState> o_co;
-
-    MDriverState() : o_co{this}
-    {
-    }
-
     MOCK_METHOD(hipFileBatchHandle_t, createBatchContext, (unsigned capacity), (override));
     MOCK_METHOD(void, destroyBatchContext, (hipFileBatchHandle_t handle), (override));
     MOCK_METHOD(std::shared_ptr<IBatchContext>, getBatchContext, (hipFileBatchHandle_t handle), (override));

@@ -5,7 +5,7 @@
 
 #include "context.h"
 #include "hip.h"
-#include "state.h"
+#include "runtime.h"
 #include "stats.h"
 #include "sys.h"
 
@@ -17,7 +17,7 @@ hipFileInit()
     Context<Hip>::get();
     Context<Sys>::get();
     Context<IStatsServer>::get();
-    Context<DriverState>::get();
+    Runtime::instance();
 }
 
 }
