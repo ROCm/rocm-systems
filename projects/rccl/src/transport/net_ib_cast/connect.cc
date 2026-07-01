@@ -1038,8 +1038,8 @@ ib_recv_dev_list:
       int nqps = comm->base.nqps;
       for (int q = 0; q < nqps; q++) {
         int mappedQP = q % primaryNqps;
-        key.ibDevN = comm->base.vProps.devs[mappedQ % comm->base.vProps.ndevs];
-        key.remIbDevIdx = remoteVProps.devs[mappedQ % remoteVProps.ndevs];
+        key.ibDevN = comm->base.vProps.devs[mappedQP % comm->base.vProps.ndevs];
+        key.remIbDevIdx = remoteVProps.devs[mappedQP % remoteVProps.ndevs];
         key.qpIdx = mappedQP;
 
         struct IbCastSharedQp* slot = IbCastFindSharedQp(&key);
@@ -1855,7 +1855,7 @@ ib_recv:
 		int localDevIdx = mappedQ % rComm->base.vProps.ndevs;
 		recvKey.ibDevN = rComm->base.vProps.devs[localDevIdx];
         recvKey.remIbDevIdx = remMeta.senderIbDevIdx;
-        recvKey.qpIdx = mappedQ
+        recvKey.qpIdx = mappedQ;
 
         struct IbCastSharedQp* recvSlot = IbCastFindSharedQp(&recvKey);
         if (recvSlot == NULL) {
@@ -2202,7 +2202,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
         struct ncclIbRecvCommDev* commDev = comm->devs + i;
         if (comm->flushEnabled) {
           if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-            NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr));
+            CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
             commDev->gpuFlush.gpuFlushGpuMem = nullptr;
             if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
             commDev->gpuFlush.gpuMr = nullptr;
@@ -2231,7 +2231,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
         struct ncclIbRecvCommDev* commDev = comm->devs + i;
         if (comm->flushEnabled) {
           if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-            NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr));
+            CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
             commDev->gpuFlush.gpuFlushGpuMem = nullptr;
             if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
             commDev->gpuFlush.gpuMr = nullptr;

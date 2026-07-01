@@ -111,7 +111,7 @@ struct ncclIbConnectionMetadata {
   int      senderIbDevIdx;      // sender's IB device index
 };
 
-ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs, int depthMultiplier = 1, int groupIdx = -1);
+ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out);
 ncclResult_t IbCastQpInit(struct ncclIbQp* qp);
 ncclResult_t IbCastQpRtr(struct ncclIbQp* qp);

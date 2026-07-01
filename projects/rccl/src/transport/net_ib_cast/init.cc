@@ -7,6 +7,7 @@
 
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
+#include "qp_sharing.h"
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);

@@ -929,7 +929,8 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
   }
 
   if (commBase->isSend) {
-    req = commBase->sendReqs[wc->wr_id & 0xff][0];
+    struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)commBase;
+    req = sendComm->sendReqs[wc->wr_id & 0xff][0];
   } else {
     // TODO - QP sharing: 
     //        confirm for matchingScheme ByOrder, limiting num requests (from wr_id) to 8 bits is correct. 
@@ -1238,7 +1239,7 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
           if (rcclParamIbCastCommNGroups() > 0) {
               uint16_t wridCommId = (wc->wr_id >> WR_ID_RX_COMM_ID_SHIFT) & WR_ID_RX_COMM_ID_MASK;
               if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
-                if (g_commTable[wridCommId].isSend) {
+                if (g_IbCastCommTable[wridCommId].isSend) {
                   targetBase = &((struct ncclIbSendComm*)g_IbCastCommTable[wridCommId].comm)->base;
                 } else {
                   targetBase = &((struct ncclIbRecvComm*)g_IbCastCommTable[wridCommId].comm)->base;
