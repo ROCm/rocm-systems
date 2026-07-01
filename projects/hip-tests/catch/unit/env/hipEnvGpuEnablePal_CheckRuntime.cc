@@ -17,7 +17,11 @@
 int main(int argc, char** argv) {
   // First argument (if provided) sets GPU_ENABLE_PAL environment variable
   if (argc > 1) {
+#ifdef _WIN32
+    _putenv_s("GPU_ENABLE_PAL", argv[1]);
+#else
     setenv("GPU_ENABLE_PAL", argv[1], 1);
+#endif
     std::cerr << "Set GPU_ENABLE_PAL=" << argv[1] << std::endl;
   }
 

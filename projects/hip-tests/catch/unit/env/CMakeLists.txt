@@ -10,9 +10,8 @@ set(TEST_SRC
 # Helper executable to check runtime path (PAL vs ROCr)
 add_executable(hipEnvGpuEnablePal_CheckRuntime EXCLUDE_FROM_ALL hipEnvGpuEnablePal_CheckRuntime.cc)
 set_source_files_properties(hipEnvGpuEnablePal_CheckRuntime.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
-target_compile_options(hipEnvGpuEnablePal_CheckRuntime PRIVATE ${HIP_COMPILE_OPTIONS})
-target_include_directories(hipEnvGpuEnablePal_CheckRuntime PRIVATE ${HIP_INCLUDE_DIR})
-target_link_libraries(hipEnvGpuEnablePal_CheckRuntime PRIVATE ${HIP_LINK_OPTIONS})
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipEnvGpuEnablePal_CheckRuntime)
+target_link_libraries(hipEnvGpuEnablePal_CheckRuntime ${GPGPU_LINKER_LIBRARIES})
 add_dependencies(build_tests hipEnvGpuEnablePal_CheckRuntime)
 
 hip_add_exe_to_target(NAME EnvironmentTest
