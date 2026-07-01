@@ -81,7 +81,6 @@ pc_sampling_collector_t::ptr pc_sampling_collector_t::create()
 pc_sampling_collector_impl_t::pc_sampling_collector_impl_t(code_object_translator_t::ptr translator)
     : m_translator(std::move(translator))
 {
-    Expects(m_translator);
 }
 
 void pc_sampling_collector_impl_t::on_code_object_load(
