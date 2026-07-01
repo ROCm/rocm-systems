@@ -38,7 +38,6 @@ set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 set(_v2_common_libs
     -Wl,--start-group
     rocprofiler-sdk::rocprofiler-sdk-aqlprofile
-    rocprofiler-sdk::rocprofiler-sdk-static-library
     rocprofiler-sdk::rocprofiler-sdk-common-library
     -Wl,--end-group
     rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
