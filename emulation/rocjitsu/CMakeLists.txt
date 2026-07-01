@@ -66,6 +66,9 @@ set(DRM_INCLUDE_DIR
 
 include(rj_log)
 
+# Install directory variables are used by subdirectories that add install rules.
+include(GNUInstallDirs)
+
 # Sanitizer and static analysis options.
 option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
@@ -77,6 +80,7 @@ option(
     "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
     OFF
 )
+option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
@@ -299,8 +303,6 @@ endif()
 # ---------------------------------------------------------------------------
 # Install rules.
 # ---------------------------------------------------------------------------
-
-include(GNUInstallDirs)
 
 # Public headers: include/rocjitsu/
 install(

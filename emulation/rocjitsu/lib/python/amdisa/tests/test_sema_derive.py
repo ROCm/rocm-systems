@@ -195,25 +195,29 @@ class TestDeriveScalarBinop:
         assert 'uint32_t result' in cpp
         assert re.search(r'\bint32_t\s+result\b', cpp) is None
 
-    def test_signed_co_uses_signed_overflow(self):
+    def test_signed_co_uses_unsigned_overflow(self):
+        # Signed s_add_co_i32 / s_sub_co_i32 must emulate the hardware's
+        # wrap-around add/sub entirely in unsigned (signed overflow is undefined
+        # behavior and unnecessary).
         sem = derive_semantics('S_ADD_CO_I32', 'ENC_SOP2')
         assert sem.sets_scc == 'overflow'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
 
-        assert 'int32_t' in cpp
-        assert 'int64_t' in cpp
-        assert 'write_scc' in cpp
-        assert 'static_cast<uint64_t>' not in cpp
+        assert 'uint32_t result = (s0 + s1)' in cpp
+        assert re.search(r'\bint32_t\b', cpp) is None
+        assert re.search(r'\bint64_t\b', cpp) is None
+        # SCC overflow is detected by the unsigned helper (simd_glue.h).
+        assert 'wf.write_scc(signed_add_overflows(s0, s1))' in cpp
 
         sem = derive_semantics('S_SUB_CO_I32', 'ENC_SOP2')
         assert sem.sets_scc == 'overflow'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'int32_t' in cpp
-        assert 'int64_t' in cpp
-        assert 'write_scc' in cpp
-        assert 'static_cast<uint64_t>' not in cpp
+        assert 'uint32_t result = (s0 - s1)' in cpp
+        assert re.search(r'\bint32_t\b', cpp) is None
+        assert re.search(r'\bint64_t\b', cpp) is None
+        assert 'wf.write_scc(signed_sub_overflows(s0, s1))' in cpp
 
     @pytest.mark.parametrize(
         'name,operation,dtype,scc',
@@ -2052,6 +2056,11 @@ class TestDeriveControlFlow:
         sem = _FakeSem('S_ENDPGM', 'endpgm')
         block = derive_sema_block(sem)
         assert block is not None
+
+    def test_trap_is_classified_as_control_flow_terminator(self):
+        sem = derive_semantics('S_TRAP', 'ENC_SOPP')
+        assert sem is not None
+        assert sem.semantic_class == 'trap'
 
     def test_nop(self):
         sem = _FakeSem('S_NOP', 'nop')
