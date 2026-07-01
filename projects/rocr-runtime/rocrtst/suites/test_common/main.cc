@@ -90,7 +90,9 @@
 #include "suites/functional/filter_devices.h"
 #include "suites/functional/fp_exception_shutdown.h"
 #include "suites/functional/gpu_coredump.h"
+#ifdef HAVE_AMD_SMI
 #include "amd_smi/amdsmi.h"
+#endif
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
 #include "suites/functional/queue_create.h"
@@ -917,12 +919,16 @@ int main(int argc, char** argv) {
   sRocrtstGlvalues = &settings;
 
   if (settings.monitor_verbosity > 0) {
+#ifdef HAVE_AMD_SMI
     amdsmi_status_t amdsmi_ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
     if (amdsmi_ret != AMDSMI_STATUS_SUCCESS) {
       std::cout << "Failed to initialize AMD smi" << std::endl;
       return 1;
     }
     DumpMonitorInfo();
+#else
+    std::cout << "Note: AMD SMI not available, GPU monitoring disabled" << std::endl;
+#endif
   }
 
   int result = RUN_ALL_TESTS();

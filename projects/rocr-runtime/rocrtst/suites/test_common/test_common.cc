@@ -53,7 +53,9 @@
 
 #include "suites/test_common/test_base.h"
 #include "suites/test_common/test_common.h"
+#ifdef HAVE_AMD_SMI
 #include "amd_smi/amdsmi.h"
+#endif
 
 static const struct option long_options[] = {
   {"iterations", required_argument, nullptr, 'i'},
@@ -135,6 +137,7 @@ static std::string IntegerToString(T intVal, bool hex = true) {
   return stream.str();
 }
 
+#ifdef HAVE_AMD_SMI
 int DumpMonitorInfo() {
   int ret = 0;
   uint64_t value_u64;
@@ -303,3 +306,6 @@ int DumpMonitorInfo() {
   std::cout << delim << std::endl;
   return dump_ret;
 }
+#else
+int DumpMonitorInfo() { return 0; }
+#endif

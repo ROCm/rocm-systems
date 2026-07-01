@@ -132,7 +132,10 @@ endif()
 
 # Required Defines first:
 find_package(hsa-runtime64 REQUIRED)
-find_package(amd_smi REQUIRED)
+find_package(amd_smi)
+if(amd_smi_FOUND)
+  add_compile_definitions(HAVE_AMD_SMI)
+endif()
 
 # Find yaml-cpp library with proper target handling
 set(HAVE_YAML_CPP FALSE)
@@ -435,7 +438,9 @@ aux_source_directory(${ROCRTST_ROOT}/common common_srcs)
 # Extend the list of libraries to be used for linking ROC Perf Apps
 #
 set(ROCRTST_LIBS ${ROCRTST_LIBS} hsa-runtime64::hsa-runtime64)
-set(ROCRTST_LIBS ${ROCRTST_LIBS} amd_smi)
+if(amd_smi_FOUND)
+  set(ROCRTST_LIBS ${ROCRTST_LIBS} amd_smi)
+endif()
 
 
 # Set Name for rocrtst
