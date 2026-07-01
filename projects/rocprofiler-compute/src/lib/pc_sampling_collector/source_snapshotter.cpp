@@ -16,7 +16,7 @@ std::filesystem::path source_snapshotter_impl_t::get_destination_path(
     const std::filesystem::path& source_path,
     const std::filesystem::path& destination_root)
 {
-    return destination_root / source_path.relative_path();
+    return (destination_root / source_path.relative_path()).lexically_normal();
 }
 
 source_snapshotter_impl_t::source_snapshotter_impl_t()
@@ -34,17 +34,15 @@ void source_snapshotter_impl_t::snapshot(const std::set<std::filesystem::path>& 
 {
     for (const auto& source_path : source_paths)
     {
-        std::filesystem::path absolute_source_path;
-        if (!is_copyable(source_path, absolute_source_path))
+        if (!is_copyable(source_path))
             continue;
 
-        const auto destination_path = get_destination_path(absolute_source_path, destination_root);
-        copy_source(absolute_source_path, destination_path);
+        const auto destination_path = get_destination_path(source_path, destination_root);
+        copy_source(source_path, destination_path);
     }
 }
 
-bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_path,
-                                            std::filesystem::path&       absolute_source_path)
+bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_path)
 {
     if (source_path.empty())
     {
@@ -54,7 +52,7 @@ bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_
     }
 
     std::error_code error;
-    absolute_source_path = m_filesystem->absolute(source_path, error);
+    const auto absolute_source_path = m_filesystem->absolute(source_path, error);
     if (error)
     {
         std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping file: " << source_path
