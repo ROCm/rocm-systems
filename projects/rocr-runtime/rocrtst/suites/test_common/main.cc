@@ -43,9 +43,14 @@
  *
  */
 
-#include <string>
-#include <vector>
+#include <climits>
+#include <cstdlib>
+#include <fstream>
+#include <map>
 #include <memory>
+#include <string>
+#include <unistd.h>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "suites/functional/agent_props.h"
@@ -837,6 +842,64 @@ TEST(rocrtstPerf, Agent_Preload_Latency) {
 }
 
 
+static std::string GetFFMVersionInfo() {
+  // Derive FFM root from standard FFM env vars (set by FFM launch scripts).
+  // HSA_MODEL_LIB=/path/to/FFM/libhsakmtmodel.so  -> parent is FFM root
+  // HSA_MODEL_TOPOLOGY=/path/to/FFM/topology/<arch> -> two levels up is FFM root
+  std::string ffm_root;
+  const char* model_lib = getenv("HSA_MODEL_LIB");
+  if (model_lib && model_lib[0]) {
+    std::string p(model_lib);
+    auto pos = p.rfind('/');
+    if (pos != std::string::npos) ffm_root = p.substr(0, pos);
+  }
+  if (ffm_root.empty()) {
+    const char* model_topo = getenv("HSA_MODEL_TOPOLOGY");
+    if (model_topo && model_topo[0]) {
+      std::string p(model_topo);
+      if (p.back() == '/') p.pop_back();
+      auto pos = p.rfind('/');
+      if (pos != std::string::npos) p = p.substr(0, pos);
+      pos = p.rfind('/');
+      if (pos != std::string::npos) ffm_root = p.substr(0, pos);
+    }
+  }
+  if (ffm_root.empty()) return "(HSA_MODEL_LIB/HSA_MODEL_TOPOLOGY not set)";
+
+  // Resolve symlink to get distro name (e.g. "FFM_Jun04_2026")
+  char resolved[PATH_MAX] = {};
+  std::string distro_name;
+  if (realpath(ffm_root.c_str(), resolved)) {
+    std::string rpath(resolved);
+    auto pos = rpath.rfind('/');
+    distro_name = (pos != std::string::npos) ? rpath.substr(pos + 1) : rpath;
+  }
+
+  std::string version_path = ffm_root + "/VERSION";
+  std::ifstream f(version_path);
+  if (!f.is_open())
+    return distro_name.empty() ? "(no VERSION file)" : distro_name + " (no VERSION file)";
+
+  std::map<std::string, std::string> fields;
+  std::string line;
+  while (std::getline(f, line)) {
+    auto eq = line.find('=');
+    if (eq != std::string::npos)
+      fields[line.substr(0, eq)] = line.substr(eq + 1);
+  }
+
+  std::string info = distro_name;
+  auto add = [&](const char* key, const char* label) {
+    auto it = fields.find(key);
+    if (it != fields.end()) info += std::string(" ") + label + it->second;
+  };
+  add("build_number", "build=");
+  add("date_utc",     "date=");
+  add("asic",         "asic=");
+  add("build_type",   "type=");
+  return info;
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
 
@@ -857,6 +920,8 @@ int main(int argc, char** argv) {
   std::cout << "ROC Runtime Test Suite\n";
   std::cout << "Platform detected: "
             << rocrtst::PlatformDetector::platformName(platform) << '\n';
+  if (platform == rocrtst::PlatformType::FFM_SIMULATOR)
+    std::cout << "FFM version: " << GetFFMVersionInfo() << '\n';
   std::cout << "Configuration: " << filterMgr.getConfigPath() << '\n';
 
   std::vector<std::string> activeGroups = filterMgr.getActiveGroups();
