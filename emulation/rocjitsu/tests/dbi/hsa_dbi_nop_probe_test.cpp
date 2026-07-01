@@ -26,6 +26,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
+#include "../test_paths.h"
 #include "hsa_dispatch_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
@@ -57,8 +58,8 @@ using namespace rocjitsu::dbi_test;
 
 namespace {
 
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
-std::string probe_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".hsaco"; }
+using test::kernel_hsaco_path;
+using test::kernel_path;
 
 // Decode @p text starting at @p offset and walk forward up to @p max_insts
 // instructions, returning true if any decodes to @p mnemonic.
@@ -107,7 +108,7 @@ protected:
 
     // Load the compiled rj_nop_probe device ELF (the probe to call) and resolve
     // its body so the static test can compare the copied bytes.
-    Executable pexec(probe_path("rj_nop_probe_gfx90a"));
+    Executable pexec(kernel_hsaco_path("rj_nop_probe_gfx90a"));
     ASSERT_TRUE(pexec.is_valid()) << "Failed to load rj_nop_probe_gfx90a.hsaco";
     ASSERT_GT(pexec.num_code_objects(ROCJITSU_CODE_TARGET_GFX90A), 0u);
     const AmdGpuCodeObject *probe_co = pexec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
