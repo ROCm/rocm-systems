@@ -126,6 +126,7 @@ if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
     exit 1
   fi
   echo "Tests are non-gating (GIN WIP); not failing the job."
+  echo "Jira ID: AICOMRCCL-1478 Enable GIN test gating."
   exit 0
 fi
 

@@ -71,7 +71,7 @@ export PATH="${MPI_HOME}/bin:${ROCM_PATH}/bin:${PATH}"
 export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
 
 PERF_DIR=build
-if [[ ! -d "${PERF_DIR}" || ! -f "${PERF_DIR}/all_gather_perf" ]]; then
+if [[ ! -d "${PERF_DIR}" || ! -f "${PERF_DIR}/all_reduce_perf" ]]; then
   echo "rccl-tests perf binaries not found under ${PERF_DIR}"
   ls -la
   exit 1
