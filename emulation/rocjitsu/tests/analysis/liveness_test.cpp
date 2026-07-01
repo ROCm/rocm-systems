@@ -34,7 +34,7 @@ class TestOperand : public Operand {
 public:
   TestOperand() = default;
   explicit TestOperand(RegisterRef ref) : Operand(ref.width * 32, ref.index), ref_(ref) {}
-  // Sub-lane operand: same RegisterRef, but a caller-chosen bit width so partial
+  // Sub-register operand: same RegisterRef, but a caller-chosen bit width so partial
   // (less-than-32-bit) defs can be exercised.
   TestOperand(RegisterRef ref, int size_bits) : Operand(size_bits, ref.index), ref_(ref) {}
 

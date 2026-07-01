@@ -10,6 +10,8 @@ namespace rocjitsu {
 
 namespace {
 
+constexpr int MaxLaneWidth = 32;
+
 // TODO: Replace this class-based approximation with instruction metadata that
 // identifies vector defs whose inactive lanes are preserved under EXEC, and pair
 // it with program-point EXEC state so full-EXEC writes can be treated as normal
@@ -22,7 +24,7 @@ namespace {
 // operand narrower than that (e.g. a 16-bit dst) writes only part of its
 // lowest lane and leaves the remaining bits intact, so the instruction
 // read-modify-writes that register rather than fully redefining it.
-[[nodiscard]] bool is_partial_def(int size_bits) { return size_bits > 0 && size_bits < 32; }
+[[nodiscard]] bool is_partial_def(int size_bits) { return size_bits > 0 && size_bits < MaxLaneWidth; }
 
 void add_def(InstDefUse &du, RegisterRef ref, int size_bits) {
   du.defs.expand(ref);
