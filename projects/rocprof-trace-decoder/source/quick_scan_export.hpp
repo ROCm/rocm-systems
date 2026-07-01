@@ -52,8 +52,10 @@ namespace quick_scan
 // EVENT_CS(8), REG_CS_PRIV(15).
 //
 // `offset` is the token's first-byte position within the buffer passed to
-// scan_gfx9 (i.e. post-header for chunk 0; callers that need an offset
-// relative to their original `data` buffer must add the header skip).
+// scan_* (for nibble-packed gfx12 streams, this is the containing byte).
+// gfx9 scans chunk 0 post-header, so callers that need an offset relative to
+// their original `data` buffer must add the header skip; RDNA/MI400 buffers are
+// scanned without a header skip.
 // Packed as a 16:48 bitfield with `type` to keep sizeof at 16B. 48 bits of
 // offset covers chunks up to 256 TiB; placing `type` in the low bits lets
 // the consumer's hot dispatch (cmp tok.type, ...) fold the load+mask into
@@ -88,6 +90,7 @@ struct QuickToken
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
 size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
+size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
 #endif
 
 // Returns true iff the running CPU supports AVX-512 (vbmi+bw+f) and the
@@ -97,3 +100,16 @@ size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out,
 // ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED.
 bool avx512_available();
 }; // namespace quick_scan
+
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+namespace gfx9::quick_scan
+{
+// Testing-visible entry point for the AVX2 implementation. Production code
+// uses quick_scan::scan_gfx9(), which chooses the best supported SIMD path at
+// runtime. Tests call this to verify the AVX2 scanner's public scanner
+// contract even on hosts where the default runtime path is AVX-512.
+size_t scan_gfx9_avx2_for_testing(
+    const uint8_t* buf, size_t size, ::quick_scan::QuickToken* __restrict__ out, size_t out_cap
+);
+} // namespace gfx9::quick_scan
+#endif

@@ -11,6 +11,7 @@
 /// process -- once forcing the scalar body, once the SIMD fast path, with
 /// identical inputs/EXEC -- and the f64 dst results are asserted equal with
 /// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
+/// The wide MAD cases also compare the explicit SGPR-pair carry/overflow mask.
 /// In-process inactive lanes must keep the sentinel.
 
 #include "util/simd_test_hooks.h"
@@ -29,6 +30,7 @@
 #include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -40,6 +42,7 @@ constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr = 6; // v6:v7
+constexpr uint64_t SDST_SENTINEL = 0xDEADBEEFCAFEF00DULL;
 
 constexpr uint64_t dst_sentinel(uint32_t lane) {
   return (static_cast<uint64_t>(0xCAFE0000u | lane) << 32) | (0xBEEF0000u + lane);
@@ -50,6 +53,13 @@ constexpr uint64_t dst_sentinel(uint32_t lane) {
 constexpr void vop3_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1, uint32_t src2,
                            uint32_t words[2]) {
   words[0] = (vdst & 0xFF) | ((op & 0x3FF) << 16) | (0x34u << 26);
+  words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
+}
+
+// VOP3_SDST_ENC: word0 also carries sdst[14:8].
+constexpr void vop3_sdstenc_encode(uint32_t op, uint32_t vdst, uint32_t sdst, uint32_t src0,
+                                   uint32_t src1, uint32_t src2, uint32_t words[2]) {
+  words[0] = (vdst & 0xFF) | ((sdst & 0x7F) << 8) | ((op & 0x3FF) << 16) | (0x34u << 26);
   words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
 }
 
@@ -96,6 +106,13 @@ struct Fixture {
   }
   uint64_t read64(uint32_t reg, uint32_t lane) {
     return static_cast<uint64_t>(cu->read_vgpr(reg + 1, lane)) << 32 | cu->read_vgpr(reg, lane);
+  }
+  void write_sgpr64(uint32_t reg, uint64_t v) {
+    cu->write_sgpr(reg, static_cast<uint32_t>(v));
+    cu->write_sgpr(reg + 1, static_cast<uint32_t>(v >> 32));
+  }
+  uint64_t read_sgpr64(uint32_t reg) {
+    return static_cast<uint64_t>(cu->read_sgpr(reg + 1)) << 32 | cu->read_sgpr(reg);
   }
 };
 
@@ -195,17 +212,62 @@ void check_lshl_add(uint64_t exec) {
     }
 }
 
+struct Mad64Result {
+  uint64_t value;
+  bool carry;
+};
+
+Mad64Result expected_mad_u64_u32(uint32_t a, uint32_t b, uint64_t c) {
+  uint64_t product = static_cast<uint64_t>(a) * static_cast<uint64_t>(b);
+  uint64_t value = product + c;
+  return {value, value < product};
+}
+
+Mad64Result expected_mad_i64_i32(uint32_t a, uint32_t b, uint64_t c) {
+  int64_t lhs = static_cast<int64_t>(static_cast<int32_t>(a));
+  int64_t rhs = static_cast<int64_t>(static_cast<int32_t>(b));
+  int64_t product_signed = lhs * rhs;
+  uint64_t product = static_cast<uint64_t>(product_signed);
+  uint64_t value = product + c;
+  int64_t addend = static_cast<int64_t>(c);
+  bool overflow = (addend > 0 && product_signed > std::numeric_limits<int64_t>::max() - addend) ||
+                  (addend < 0 && product_signed < std::numeric_limits<int64_t>::min() - addend);
+  return {value, overflow};
+}
+
+uint64_t expected_mad64_sdst(bool is_signed, uint64_t exec, uint32_t arot, uint32_t crot) {
+  uint64_t sdst = 0;
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    if (((exec >> lane) & 1ULL) == 0)
+      continue;
+    uint32_t a = kShifts[lane % kShifts.size()];
+    uint32_t b = kShifts[(lane + arot) % kShifts.size()];
+    uint64_t c = kVals64[(lane + crot) % kVals64.size()];
+    const auto result = is_signed ? expected_mad_i64_i32(a, b, c) : expected_mad_u64_u32(a, b, c);
+    if (result.carry)
+      sdst |= (1ULL << lane);
+  }
+  return sdst;
+}
+
+struct Mad64Output {
+  std::array<uint64_t, WF_SIZE> dst{};
+  uint64_t sdst = 0;
+};
+
 // v_mad_u64_u32 / v_mad_i64_i32: src0 = v0 (32-bit), src1 = v2 (32-bit),
 // src2 = v4:v5 (64-bit addend), dst = v6:v7.
-void check_mad64(const char *name, uint32_t op, uint64_t exec) {
+void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
   ForceScalarGuard gate_guard;
-  auto run = [&](bool force_scalar, uint32_t arot, uint32_t crot) -> std::array<uint64_t, WF_SIZE> {
+  auto run = [&](bool force_scalar, uint32_t arot, uint32_t crot) -> Mad64Output {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
+    uint32_t sb = fx.wf->sgpr_alloc().base;
+    EXPECT_EQ(sb % 2u, 0u) << name << ": sgpr_alloc base not pair-aligned";
     uint32_t words[2] = {0u, 0u};
-    vop3_encode(op, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
+    vop3_sdstenc_encode(op, kDstVgpr, sb, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
     Instruction *inst = fx.decoder->decode(words);
     EXPECT_NE(inst, nullptr) << name << " decode failed";
     uint32_t vb = fx.wf->vgpr_alloc().base;
@@ -215,11 +277,13 @@ void check_mad64(const char *name, uint32_t op, uint64_t exec) {
       fx.write64(vb + 4, lane, kVals64[(lane + crot) % kVals64.size()]);
       fx.write64(vb + kDstVgpr, lane, dst_sentinel(lane));
     }
+    fx.write_sgpr64(sb, SDST_SENTINEL);
     fx.wf->set_exec(exec);
     fx.cu->execute_instruction(inst, *fx.wf);
-    std::array<uint64_t, WF_SIZE> out{};
+    Mad64Output out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
-      out[lane] = fx.read64(vb + kDstVgpr, lane);
+      out.dst[lane] = fx.read64(vb + kDstVgpr, lane);
+    out.sdst = fx.read_sgpr64(sb);
     delete inst;
     return out;
   };
@@ -227,7 +291,12 @@ void check_mad64(const char *name, uint32_t op, uint64_t exec) {
     for (uint32_t crot = 0; crot < kVals64.size(); crot += 3) {
       const auto scalar_out = run(/*force_scalar=*/true, arot, crot);
       const auto simd_out = run(/*force_scalar=*/false, arot, crot);
-      compare_and_check_inactive(name, exec, scalar_out, simd_out,
+      const uint64_t expected_sdst = expected_mad64_sdst(is_signed, exec, arot, crot);
+      EXPECT_EQ(scalar_out.sdst, expected_sdst)
+          << name << ": scalar sdst mismatch for a" << arot << ":c" << crot;
+      EXPECT_EQ(simd_out.sdst, expected_sdst)
+          << name << ": SIMD sdst mismatch for a" << arot << ":c" << crot;
+      compare_and_check_inactive(name, exec, scalar_out.dst, simd_out.dst,
                                  "a" + std::to_string(arot) + ":c" + std::to_string(crot));
     }
 }
@@ -237,10 +306,10 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  check_mad64("v_mad_u64_u32_vop3", 488, ~0ULL);
-  check_mad64("v_mad_i64_i32_vop3", 489, ~0ULL);
-  check_mad64("v_mad_u64_u32_vop3", 488, 0xA5A5'F0F0'1234'8001ULL);
-  check_mad64("v_mad_i64_i32_vop3", 489, 0xA5A5'F0F0'1234'8001ULL);
+  check_mad64("v_mad_u64_u32_vop3", 488, /*is_signed=*/false, ~0ULL);
+  check_mad64("v_mad_i64_i32_vop3", 489, /*is_signed=*/true, ~0ULL);
+  check_mad64("v_mad_u64_u32_vop3", 488, /*is_signed=*/false, 0xA5A5'F0F0'1234'8001ULL);
+  check_mad64("v_mad_i64_i32_vop3", 489, /*is_signed=*/true, 0xA5A5'F0F0'1234'8001ULL);
 }
 
 TEST(Vop3Shift64SimdCorrectness, RevShiftsFullExec) {

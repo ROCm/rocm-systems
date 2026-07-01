@@ -265,7 +265,8 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
             if (__builtin_expect(v & INFO_RARE, 0))
             {
                 if (__builtin_expect(n_out < out_cap, 1))
-                    out[n_out++] = QuickToken{load_contents64(buf, size, global_nibble), T.rare_type[key]};
+                    out[n_out++] =
+                        QuickToken{load_contents64(buf, size, global_nibble), T.rare_type[key], global_nibble >> 1};
             }
 
             if ((v & INFO_NOP) == 0) ext = (v & INFO_EXT) != 0;
@@ -293,7 +294,7 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
 
         if (__builtin_expect(v & INFO_RARE, 0))
         {
-            out[n_out++] = QuickToken{load_contents64(buf, size, tail_pos), T.rare_type[key]};
+            out[n_out++] = QuickToken{load_contents64(buf, size, tail_pos), T.rare_type[key], tail_pos >> 1};
             if (n_out >= out_cap) break;
         }
 

@@ -1,0 +1,116 @@
+---
+hrr:
+  Unit_HRR_Format_Roundtrip:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_Format_BadMagic:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_Format_TruncatedEvent:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_Format_HashHex:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_Format_EventTypeName:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_TranslatePtr_ExactMatch:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_TranslatePtr_Zero_ReturnsNull:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_Format_SmallPayloadForType:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_Format_UnknownEventType:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_AllApisRoundtrip:
+    <<: *level_2
+    tags: [capture, allapis, playback, roundtrip]
+  Unit_HRR_CaptureReplayRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip]
+  Unit_HRR_GraphRoundtrip:
+    <<: *level_2
+    tags: [capture, graph, playback, roundtrip]
+  Unit_HRR_HostMemRoundtrip:
+    <<: *level_2
+    tags: [capture, hostmem, playback, roundtrip]
+  Unit_HRR_StressApisRoundtrip:
+    <<: *level_2
+    tags: [capture, stress, playback, roundtrip]
+  Unit_HRR_MemsetVariantsRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
+  Unit_HRR_DeviceInfoRoundtrip:
+    <<: *level_2
+    tags: [capture, device, playback, roundtrip]
+  Unit_HRR_StreamAdvancedRoundtrip:
+    <<: *level_2
+    tags: [capture, stream, playback, roundtrip]
+  Unit_HRR_DrvMemcpyRoundtrip:
+    <<: *level_2
+    tags: [capture, memcpy, playback, roundtrip]
+  Unit_HRR_OccupancyRoundtrip:
+    <<: *level_2
+    tags: [capture, occupancy, playback, roundtrip]
+  Unit_HRR_HostAliasesRoundtrip:
+    <<: *level_2
+    tags: [capture, hostmem, playback, roundtrip]
+  Unit_HRR_MemPoolExtendedRoundtrip:
+    <<: *level_2
+    tags: [capture, mempool, playback, roundtrip]
+  Unit_HRR_MemsetExtraRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
+  Unit_HRR_MemcpyExtraRoundtrip:
+    <<: *level_2
+    tags: [capture, memcpy, playback, roundtrip]
+  Unit_HRR_DeviceExtraRoundtrip:
+    <<: *level_2
+    tags: [capture, device, playback, roundtrip]
+  Unit_HRR_StreamAdvanced2Roundtrip:
+    <<: *level_2
+    tags: [capture, stream, playback, roundtrip]
+  Unit_HRR_ContextRoundtrip:
+    <<: *level_2
+    tags: [capture, context, playback, roundtrip]
+  Unit_HRR_ModuleExtraRoundtrip:
+    <<: *level_2
+    tags: [capture, module, playback, roundtrip]
+  Unit_HRR_MiscAPIsRoundtrip:
+    <<: *level_2
+    tags: [capture, misc, playback, roundtrip]
+  Unit_HRR_DrvMemcpy3DRoundtrip:
+    <<: *level_2
+    tags: [capture, memcpy, playback, roundtrip]
+  Unit_HRR_TextureRoundtrip:
+    <<: *level_2
+    tags: [capture, texture, playback, roundtrip]
+  Unit_HRR_GraphExplicitRoundtrip:
+    <<: *level_2
+    tags: [capture, graph, playback, roundtrip]
+  Unit_HRR_HostRegLaunchRoundtrip:
+    <<: *level_2
+    tags: [capture, hostmem, launch, playback, roundtrip]
+  Unit_HRR_ModuleAPIRoundtrip:
+    <<: *level_2
+    tags: [capture, module, launch, playback, roundtrip]
+  Unit_HRR_VMMRoundtrip:
+    <<: *level_2
+    tags: [capture, vmm, playback, roundtrip]
+  Unit_HRR_ChevronLaunchRoundtrip:
+    <<: *level_2
+    tags: [capture, launch, playback, roundtrip]
+  Unit_HRR_MultiThreadRoundtrip:
+    <<: *level_2
+    tags: [capture, multithread, playback, roundtrip]

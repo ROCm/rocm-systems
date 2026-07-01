@@ -270,7 +270,9 @@ std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
 }
 
 void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.vcc() == 0) {
+  const uint64_t live_vcc =
+      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  if (live_vcc == 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
   }
@@ -292,7 +294,9 @@ std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
 }
 
 void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.vcc() != 0) {
+  const uint64_t live_vcc =
+      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  if (live_vcc != 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
   }
@@ -515,6 +519,7 @@ SWaitXcntSopp::SWaitXcntSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= WAITCNT;
 }
 
 void SWaitXcntSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }

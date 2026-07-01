@@ -1,4 +1,4 @@
-name: Publish GHCR Packages for rocprofiler-compute CI Images
+name: rocprofiler-compute GHCR Packages for CI Images
 
 on:
   workflow_dispatch:
@@ -80,22 +80,6 @@ jobs:
           fi
           echo "docker_file=${DOCKER_FILE}" >> $GITHUB_OUTPUT
 
-      - name: Get the latest build of The Rock tarball
-        id: therock
-        run: |
-          sudo apt-get install -y python3-pip
-          python3 -m pip install -U pip
-          python3 -m pip install -U awscli
-          export PATH=~/.local/bin:$PATH
-          KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}')], &LastModified)[-1].Key")
-          KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
-          echo "tarball=${KEY}" >> $GITHUB_OUTPUT
-
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
@@ -113,7 +97,6 @@ jobs:
             DISTRO=${{ steps.setup_vars_gfx.outputs.distro_image }}
             VERSION=${{ matrix.system.version }}
             GPU_TYPE=${{ matrix.gpu }}
-            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
           tags: |
             ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-compute-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -130,7 +113,6 @@ jobs:
             DISTRO=${{ steps.setup_vars_gfx.outputs.distro_image }}
             VERSION=${{ matrix.system.version }}
             GPU_TYPE=${{ matrix.gpu }}
-            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
           tags: |
             ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-compute-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}

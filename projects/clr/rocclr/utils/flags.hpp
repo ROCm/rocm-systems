@@ -247,6 +247,11 @@ release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
         "Number of graph nodes to batch at a time")                           \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 1,                          \
         "0 = Disable, 1 = Enable, 2 = Force")                                 \
+release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
+        "Min overlappable work (in occupancy passes) per unit of cross-stream "\
+        "sync (barrier packets + completion signals) to keep a graph "         \
+        "multi-stream; below this ratio it collapses to a single stream. "     \
+        "0 = off.")                                                            \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \
@@ -270,6 +275,8 @@ release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
         "1 = Disable Image support for ROC path")                             \
 release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
         "Enable metadata prefetch for some Aql packets")                      \
+release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
+        "Set to a directory path to enable HRR capture; archive written there") \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \

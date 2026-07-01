@@ -13,6 +13,63 @@ import subprocess
 import re
 
 
+def _get_amdsmi_version_output(rocm_path: Optional[Path] = None) -> Optional[str]:
+    """Return combined stdout/stderr of ``amd-smi version`` if available, else None."""
+    amdsmi_exe = None
+    if rocm_path is not None:
+        candidate = Path(rocm_path) / "bin" / "amd-smi"
+        if candidate.exists():
+            amdsmi_exe = str(candidate)
+    if not amdsmi_exe:
+        amdsmi_exe = shutil.which("amd-smi")
+    if not amdsmi_exe:
+        rocm_env = os.environ.get("ROCM_PATH", "/opt/rocm")
+        candidate = Path(rocm_env) / "bin" / "amd-smi"
+        if candidate.exists():
+            amdsmi_exe = str(candidate)
+    if not amdsmi_exe:
+        return None
+    try:
+        result = subprocess.run(
+            [amdsmi_exe, "version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return (result.stdout or "") + " " + (result.stderr or "")
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, int]]:
+    """Return (major, minor) of amd-smi if available, else None."""
+    raw = _get_amdsmi_version_output(rocm_path)
+    if raw is None:
+        return None
+    # e.g. Output from `amd-smi version` = "AMDSMI Tool: 26.4.0+... | AMDSMI Library version: 26.4.0 | ROCm version: 7.13.0 ..."
+    m = re.search(r"AMDSMI\s+(?:Tool|Library version):\s*(\d+)\.(\d+)", raw)
+    if m:
+        return (int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def get_amdgpu_version(
+    rocm_path: Optional[Path] = None,
+) -> Optional[tuple[int, int, int]]:
+    """Return (major, minor, patch) of the amdgpu driver if available, else None."""
+    raw = _get_amdsmi_version_output(rocm_path)
+    if raw is None:
+        return None
+    # amdgpu version is "major.minor[.patch[.build]]"; e.g. "6.19.14.31400000"
+    # or "6.19.4". Compare on (major, minor, patch) only — the build suffix is
+    # ignored, and an absent patch is treated as .0.
+    m = re.search(r"amdgpu version:\s*(\d+)\.(\d+)(?:\.(\d+))?", raw)
+    if m:
+        patch = int(m.group(3)) if m.group(3) is not None else 0
+        return (int(m.group(1)), int(m.group(2)), patch)
+    return None
+
+
 @dataclass
 class SystemCapabilities:
     """
@@ -106,6 +163,42 @@ class SystemCapabilities:
             return result.stdout.strip()
         except (subprocess.SubprocessError, OSError):
             return None
+
+    @cached_property
+    def ai_nic_devices(self) -> list[str]:
+        """Get the unique AI NIC device names reported by AMD SMI.
+
+        Runs ``amd-smi static`` and extracts every distinct NETDEV value.
+        Returns an empty list when AMD SMI is unavailable or reports no NICs.
+
+        Example output line from ``amd-smi static``:
+        ``NETDEV: enp137s0np0``
+        """
+        amd_smi = shutil.which("amd-smi")
+        if not amd_smi:
+            return []
+        try:
+            result = subprocess.run(
+                [amd_smi, "static"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if result.returncode != 0:
+                return []
+            seen: set[str] = set()
+            devices: list[str] = []
+            for line in result.stdout.splitlines():
+                if "netdev" in line.lower():
+                    colon_idx = line.find(":")
+                    if colon_idx != -1:
+                        name = line[colon_idx + 1 :].strip()
+                        if name and name not in seen:
+                            seen.add(name)
+                            devices.append(name)
+            return devices
+        except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
+            return []
 
     @cached_property
     def papi_nic_events(self) -> Optional[str]:
@@ -245,6 +338,19 @@ class SystemCapabilities:
             return result.stdout.strip() == "1"
         except (subprocess.SubprocessError, OSError):
             return False
+
+    @cached_property
+    def perf_events_usable(self) -> bool:
+        """Whether perf_event_open-based features can actually be used.
+
+        This gates anything that opens Linux perf events, including PAPI
+        hardware/software counters and overflow sampling. It mirrors the
+        runtime gate in ``source/lib/core/config.cpp``, which disables PAPI
+        when ``/proc/sys/kernel/perf_event_paranoid`` is greater than 2 unless
+        ``CAP_SYS_ADMIN`` is held. Note the runtime does not consult
+        ``CAP_PERFMON``, so it is intentionally not checked here.
+        """
+        return self.perf_event_paranoid <= 2 or self.cap_sys_admin
 
     @cached_property
     def papi_availability(self) -> bool:
@@ -410,6 +516,16 @@ class SystemCapabilities:
             return "mpi" in result.stdout.lower()
         except (subprocess.SubprocessError, OSError):
             return False
+
+    @cached_property
+    def amdsmi_version(self) -> Optional[tuple[int, int]]:
+        """Get (major, minor) version of amd-smi, or None if not available."""
+        return get_amdsmi_version(self.rocm_path)
+
+    @cached_property
+    def amdgpu_version(self) -> Optional[tuple[int, int, int]]:
+        """Get (major, minor, patch) of the amdgpu driver, or None if not available."""
+        return get_amdgpu_version(self.rocm_path)
 
 
 _ROCPROFILER_SDK_VERSION_H_RE = re.compile(

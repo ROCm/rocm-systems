@@ -240,7 +240,7 @@ resolve_attach_tid(pid_t pid)
 rocattach_status_t
 setup(int pid)
 {
-    // Setup attachement for rocprofiler
+    // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_attach function called "
                   "for pid "
                << pid;
@@ -398,7 +398,7 @@ collect_process_tree(pid_t root_pid)
 rocattach_status_t
 teardown(int pid)
 {
-    // Setup attachement for rocprofiler
+    // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_detach function called "
                   "for pid "
                << pid;

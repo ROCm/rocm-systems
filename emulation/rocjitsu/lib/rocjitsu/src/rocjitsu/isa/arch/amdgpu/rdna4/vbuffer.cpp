@@ -22,11 +22,22 @@
 namespace rocjitsu {
 namespace rdna4 {
 
+namespace {
+uint32_t vbuffer_vaddr_bits(const VbufferMachineInst *inst) {
+  if (inst->idxen && inst->offen)
+    return 64;
+  if (inst->idxen || inst->offen)
+    return 32;
+  return 0;
+}
+} // namespace
+
 BufferLoadFormatXVbuffer::BufferLoadFormatXVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadFormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -46,7 +57,8 @@ BufferLoadFormatXyVbuffer::BufferLoadFormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadFormatXyVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -66,7 +78,8 @@ BufferLoadFormatXyzVbuffer::BufferLoadFormatXyzVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadFormatXyzVbuffer>()),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -86,7 +99,8 @@ BufferLoadFormatXyzwVbuffer::BufferLoadFormatXyzwVbuffer(const MachineInst *inst
     : Vbuffer("buffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadFormatXyzwVbuffer>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -106,7 +120,8 @@ BufferStoreFormatXVbuffer::BufferStoreFormatXVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreFormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -126,7 +141,8 @@ BufferStoreFormatXyVbuffer::BufferStoreFormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreFormatXyVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -146,7 +162,8 @@ BufferStoreFormatXyzVbuffer::BufferStoreFormatXyzVbuffer(const MachineInst *inst
     : Vbuffer("buffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreFormatXyzVbuffer>()),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -166,7 +183,8 @@ BufferStoreFormatXyzwVbuffer::BufferStoreFormatXyzwVbuffer(const MachineInst *in
     : Vbuffer("buffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreFormatXyzwVbuffer>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -186,7 +204,8 @@ BufferLoadD16FormatXVbuffer::BufferLoadD16FormatXVbuffer(const MachineInst *inst
     : Vbuffer("buffer_load_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16FormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -206,7 +225,8 @@ BufferLoadD16FormatXyVbuffer::BufferLoadD16FormatXyVbuffer(const MachineInst *in
     : Vbuffer("buffer_load_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16FormatXyVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -226,7 +246,8 @@ BufferLoadD16FormatXyzVbuffer::BufferLoadD16FormatXyzVbuffer(const MachineInst *
     : Vbuffer("buffer_load_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16FormatXyzVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -246,7 +267,8 @@ BufferLoadD16FormatXyzwVbuffer::BufferLoadD16FormatXyzwVbuffer(const MachineInst
     : Vbuffer("buffer_load_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16FormatXyzwVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -266,7 +288,8 @@ BufferStoreD16FormatXVbuffer::BufferStoreD16FormatXVbuffer(const MachineInst *in
     : Vbuffer("buffer_store_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreD16FormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -286,7 +309,8 @@ BufferStoreD16FormatXyVbuffer::BufferStoreD16FormatXyVbuffer(const MachineInst *
     : Vbuffer("buffer_store_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreD16FormatXyVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -306,7 +330,8 @@ BufferStoreD16FormatXyzVbuffer::BufferStoreD16FormatXyzVbuffer(const MachineInst
     : Vbuffer("buffer_store_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreD16FormatXyzVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -326,7 +351,8 @@ BufferStoreD16FormatXyzwVbuffer::BufferStoreD16FormatXyzwVbuffer(const MachineIn
     : Vbuffer("buffer_store_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreD16FormatXyzwVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -346,7 +372,8 @@ BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_u8", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadU8Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -375,7 +402,8 @@ BufferLoadI8Vbuffer::BufferLoadI8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_i8", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadI8Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -405,7 +433,8 @@ BufferLoadU16Vbuffer::BufferLoadU16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_u16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadU16Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -434,7 +463,8 @@ BufferLoadI16Vbuffer::BufferLoadI16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_i16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadI16Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -464,7 +494,8 @@ BufferLoadB32Vbuffer::BufferLoadB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadB32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -493,7 +524,8 @@ BufferLoadB64Vbuffer::BufferLoadB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadB64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -522,7 +554,8 @@ BufferLoadB96Vbuffer::BufferLoadB96Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b96", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadB96Vbuffer>()),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -551,7 +584,8 @@ BufferLoadB128Vbuffer::BufferLoadB128Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b128", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadB128Vbuffer>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -580,7 +614,8 @@ BufferStoreB8Vbuffer::BufferStoreB8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b8", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreB8Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -618,7 +653,8 @@ BufferStoreB16Vbuffer::BufferStoreB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreB16Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -656,7 +692,8 @@ BufferStoreB32Vbuffer::BufferStoreB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreB32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -694,7 +731,8 @@ BufferStoreB64Vbuffer::BufferStoreB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreB64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -734,7 +772,8 @@ BufferStoreB96Vbuffer::BufferStoreB96Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b96", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreB96Vbuffer>()),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -776,7 +815,8 @@ BufferStoreB128Vbuffer::BufferStoreB128Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b128", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreB128Vbuffer>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -820,7 +860,8 @@ BufferLoadD16U8Vbuffer::BufferLoadD16U8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16U8Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -850,7 +891,8 @@ BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16I8Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -881,7 +923,8 @@ BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16B16Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -911,7 +954,8 @@ BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16HiU8Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -941,7 +985,8 @@ BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16HiI8Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -972,7 +1017,8 @@ BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16HiB16Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -1002,7 +1048,8 @@ BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreD16HiB8Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1041,7 +1088,8 @@ BufferStoreD16HiB16Vbuffer::BufferStoreD16HiB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreD16HiB16Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1080,7 +1128,8 @@ BufferLoadD16HiFormatXVbuffer::BufferLoadD16HiFormatXVbuffer(const MachineInst *
     : Vbuffer("buffer_load_d16_hi_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferLoadD16HiFormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -1100,7 +1149,8 @@ BufferStoreD16HiFormatXVbuffer::BufferStoreD16HiFormatXVbuffer(const MachineInst
     : Vbuffer("buffer_store_d16_hi_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferStoreD16HiFormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1120,7 +1170,8 @@ BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicSwapB32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1138,7 +1189,7 @@ void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1160,7 +1211,8 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
     : Vbuffer("buffer_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicCmpswapB32Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1176,9 +1228,9 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
 void BufferAtomicCmpswapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 8;
+  d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1202,7 +1254,8 @@ BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicAddU32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1220,7 +1273,7 @@ void BufferAtomicAddU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1242,7 +1295,8 @@ BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicSubU32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1260,7 +1314,7 @@ void BufferAtomicSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1282,7 +1336,8 @@ BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst
     : Vbuffer("buffer_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicSubClampU32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1300,7 +1355,7 @@ void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1322,7 +1377,8 @@ BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMinI32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1340,7 +1396,7 @@ void BufferAtomicMinI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1362,7 +1418,8 @@ BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMinU32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1380,7 +1437,7 @@ void BufferAtomicMinU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1402,7 +1459,8 @@ BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMaxI32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1420,7 +1478,7 @@ void BufferAtomicMaxI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1442,7 +1500,8 @@ BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMaxU32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1460,7 +1519,7 @@ void BufferAtomicMaxU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1482,7 +1541,8 @@ BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicAndB32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1500,7 +1560,7 @@ void BufferAtomicAndB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1522,7 +1582,8 @@ BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicOrB32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1540,7 +1601,7 @@ void BufferAtomicOrB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1562,7 +1623,8 @@ BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicXorB32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1580,7 +1642,7 @@ void BufferAtomicXorB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1602,7 +1664,8 @@ BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicIncU32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1620,7 +1683,7 @@ void BufferAtomicIncU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1642,7 +1705,8 @@ BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicDecU32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1660,7 +1724,7 @@ void BufferAtomicDecU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1682,7 +1746,8 @@ BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicSwapB64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1700,48 +1765,8 @@ void BufferAtomicSwapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
-}
-
-BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *inst)
-    : Vbuffer("buffer_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<BufferAtomicCmpswapB64Vbuffer>()),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
-      soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_[0] = &vdata;
-  dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
-  src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
-}
-
-void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1760,11 +1785,59 @@ void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
+BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *inst)
+    : Vbuffer("buffer_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<BufferAtomicCmpswapB64Vbuffer>()),
+      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
+      soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &rsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
+  flags_ |= MEMORY_OP;
+}
+
+void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, *d);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  d->store_data.resize(wf.wf_size() * 16);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
+    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
+    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
+  }
+  set_data(std::move(d));
+}
+
 BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicAddU64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1782,7 +1855,7 @@ void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1790,12 +1863,14 @@ void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -1804,7 +1879,8 @@ BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicSubU64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1822,7 +1898,7 @@ void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1830,12 +1906,14 @@ void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -1844,7 +1922,8 @@ BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMinI64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1862,7 +1941,7 @@ void BufferAtomicMinI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1886,7 +1965,8 @@ BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMinU64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1904,7 +1984,7 @@ void BufferAtomicMinU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1928,7 +2008,8 @@ BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMaxI64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1946,7 +2027,7 @@ void BufferAtomicMaxI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1970,7 +2051,8 @@ BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMaxU64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -1988,7 +2070,7 @@ void BufferAtomicMaxU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2012,7 +2094,8 @@ BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicAndB64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2030,7 +2113,7 @@ void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2038,12 +2121,14 @@ void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -2052,7 +2137,8 @@ BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicOrB64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2070,7 +2156,7 @@ void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2078,12 +2164,14 @@ void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -2092,7 +2180,8 @@ BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicXorB64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2110,7 +2199,7 @@ void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2118,12 +2207,14 @@ void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -2132,7 +2223,8 @@ BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicIncU64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2150,7 +2242,7 @@ void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2158,12 +2250,14 @@ void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -2172,7 +2266,8 @@ BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicDecU64Vbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2190,7 +2285,7 @@ void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2198,12 +2293,14 @@ void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -2212,7 +2309,8 @@ BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *
     : Vbuffer("buffer_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicCondSubU32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2230,7 +2328,7 @@ void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2252,7 +2350,8 @@ BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *in
     : Vbuffer("buffer_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMinNumF32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2270,7 +2369,7 @@ void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2292,7 +2391,8 @@ BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *in
     : Vbuffer("buffer_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicMaxNumF32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2310,7 +2410,7 @@ void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2332,7 +2432,8 @@ BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicAddF32Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2350,7 +2451,7 @@ void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2372,7 +2473,8 @@ BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst
     : Vbuffer("buffer_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicPkAddF16Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2390,7 +2492,7 @@ void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2412,7 +2514,8 @@ BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *in
     : Vbuffer("buffer_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<BufferAtomicPkAddBf16Vbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2430,7 +2533,7 @@ void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -2452,7 +2555,8 @@ TbufferLoadFormatXVbuffer::TbufferLoadFormatXVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferLoadFormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -2472,7 +2576,8 @@ TbufferLoadFormatXyVbuffer::TbufferLoadFormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferLoadFormatXyVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -2492,7 +2597,8 @@ TbufferLoadFormatXyzVbuffer::TbufferLoadFormatXyzVbuffer(const MachineInst *inst
     : Vbuffer("tbuffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferLoadFormatXyzVbuffer>()),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -2512,7 +2618,8 @@ TbufferLoadFormatXyzwVbuffer::TbufferLoadFormatXyzwVbuffer(const MachineInst *in
     : Vbuffer("tbuffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferLoadFormatXyzwVbuffer>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -2532,7 +2639,8 @@ TbufferStoreFormatXVbuffer::TbufferStoreFormatXVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferStoreFormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2552,7 +2660,8 @@ TbufferStoreFormatXyVbuffer::TbufferStoreFormatXyVbuffer(const MachineInst *inst
     : Vbuffer("tbuffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferStoreFormatXyVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2572,7 +2681,8 @@ TbufferStoreFormatXyzVbuffer::TbufferStoreFormatXyzVbuffer(const MachineInst *in
     : Vbuffer("tbuffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferStoreFormatXyzVbuffer>()),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2592,7 +2702,8 @@ TbufferStoreFormatXyzwVbuffer::TbufferStoreFormatXyzwVbuffer(const MachineInst *
     : Vbuffer("tbuffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferStoreFormatXyzwVbuffer>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2612,7 +2723,8 @@ TbufferLoadD16FormatXVbuffer::TbufferLoadD16FormatXVbuffer(const MachineInst *in
     : Vbuffer("tbuffer_load_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferLoadD16FormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -2632,7 +2744,8 @@ TbufferLoadD16FormatXyVbuffer::TbufferLoadD16FormatXyVbuffer(const MachineInst *
     : Vbuffer("tbuffer_load_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferLoadD16FormatXyVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -2652,7 +2765,8 @@ TbufferLoadD16FormatXyzVbuffer::TbufferLoadD16FormatXyzVbuffer(const MachineInst
     : Vbuffer("tbuffer_load_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferLoadD16FormatXyzVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -2672,7 +2786,8 @@ TbufferLoadD16FormatXyzwVbuffer::TbufferLoadD16FormatXyzwVbuffer(const MachineIn
     : Vbuffer("tbuffer_load_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferLoadD16FormatXyzwVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   dst_operands_[0] = &vdata;
@@ -2692,7 +2807,8 @@ TbufferStoreD16FormatXVbuffer::TbufferStoreD16FormatXVbuffer(const MachineInst *
     : Vbuffer("tbuffer_store_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferStoreD16FormatXVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2712,7 +2828,8 @@ TbufferStoreD16FormatXyVbuffer::TbufferStoreD16FormatXyVbuffer(const MachineInst
     : Vbuffer("tbuffer_store_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferStoreD16FormatXyVbuffer>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2732,7 +2849,8 @@ TbufferStoreD16FormatXyzVbuffer::TbufferStoreD16FormatXyzVbuffer(const MachineIn
     : Vbuffer("tbuffer_store_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferStoreD16FormatXyzVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
@@ -2752,7 +2870,8 @@ TbufferStoreD16FormatXyzwVbuffer::TbufferStoreD16FormatXyzwVbuffer(const Machine
     : Vbuffer("tbuffer_store_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<TbufferStoreD16FormatXyzwVbuffer>()),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset) {
   src_operands_[0] = &vdata;
