@@ -138,6 +138,8 @@ extern struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 extern int IbCastRelaxedOrderingEnabled;
 extern bool IbCastUseInline;
 
+#define WR_ID_RX_COMM_ID_MASK  0xffff
+#define WR_ID_RX_COMM_ID_SHIFT 48
 #define WR_IMM_RX_REQ_IDX_MASK 0xff
 #define WR_IMM_RX_REQ_IDX_SHIFT 24
 #define WR_IMM_SPLIT_DATA_FLAG 0x00800000

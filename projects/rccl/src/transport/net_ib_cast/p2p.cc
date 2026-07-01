@@ -67,14 +67,14 @@ static ncclResult_t IbCastPrintWr(struct ibv_send_wr* wr, char* wrStr) {
   switch (wr->opcode) {
   case IBV_WR_RDMA_WRITE:
     sprintf(wrStr,
-            "wr=%p, wr_id=%ld, opcode=%s, num_sge=%d, sge[0].length=%" PRIu32 ", sge[0].addr=0x%016" PRIx64
+            "wr=%p, wr_id=0x%lx, opcode=%s, num_sge=%d, sge[0].length=%" PRIu32 ", sge[0].addr=0x%016" PRIx64
             ", rdma.remote_addr=0x%016" PRIx64 ", rdma.rkey=0x%x",
             wr, wr->wr_id, opcodeStr, wr->num_sge, (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->length : 0,
             (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->addr : 0, wr->wr.rdma.remote_addr, wr->wr.rdma.rkey);
     break;
   case IBV_WR_RDMA_WRITE_WITH_IMM:
     sprintf(wrStr,
-            "wr=%p, wr_id=%ld, opcode=%s, num_sge=%d, sge[0].length=%" PRIu32 ", sge[0].addr=0x%016" PRIx64
+            "wr=%p, wr_id=0x%lx, opcode=%s, num_sge=%d, sge[0].length=%" PRIu32 ", sge[0].addr=0x%016" PRIx64
             ", rdma.remote_addr=0x%016" PRIx64 ",  rdma.rkey=0x%x, imm_data=0x%x",
             wr, wr->wr_id, opcodeStr, wr->num_sge, (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->length : 0,
             (wr->num_sge > 0 && wr->sg_list) ? wr->sg_list->addr : 0, wr->wr.rdma.remote_addr, wr->wr.rdma.rkey,
@@ -114,9 +114,10 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     wr->wr.rdma.remote_addr = comm->useCtsOffload ? 0xdeadbeef : slots[r].addr;
     wr->next = wr + 1;
     wr_id += (uint64_t)(slot & 0xff) << (r * 8);
+    // TODO - QP sharing: ib-cast change - check why wr_id is encoded in each wr-> instead of lastWr.
     // QP Sharing: encode commId in upper 16 bits of wr_id for completion routing
     if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
-      wr->wr_id = wr_id | ((uint64_t)comm->base.commId << 48);
+      wr->wr_id = wr_id | ((uint64_t)comm->base.commId << WR_ID_RX_COMM_ID_SHIFT);
     } else {
       wr->wr_id = wr_id;
     }
@@ -147,19 +148,23 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     uint32_t immData;
     if (comm->base.recvMatchingScheme != BY_INDEX) {
       immData = (uint32_t)(reqs[0]->id % UINT32_MAX);
+      // TODO - QP sharing
+      //        check for matchingScheme BY_ID or BY_ORDER, do we have free bits available for encoding rxReqIdx & remCommId
+      //        if no, free bits available, then for this matchingSchemes we need to disable QP sharing or change matchingScheme to BY_INDEX if QP sharing is enabled.
+      //if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0 && comm->remCommId != 0) {
+      //  immData = ((uint32_t)rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT) | (uint32_t)comm->remCommId;
+      //}
     } else {
       uint32_t rxReqIdx = (uint32_t)slots[0].rxReqIndex;
+      // TODO - QP Sharing: MSB(bits 31-24) 8bits rxReqIdx & LSB 16bits remCommId
       // QP Sharing: encode receiver's commId + rxReqIndex in imm_data
       if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0 && comm->remCommId != 0) {
-        immData = ((uint32_t)rxReqIdx << 16) | (uint32_t)comm->remCommId;
-        if (nqps > 1) {
-          immData |= WR_IMM_SPLIT_DATA_FLAG;
-        }
+        immData = ((uint32_t)rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT) | (uint32_t)comm->remCommId;
       } else {
         immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT);
-        if (nqps > 1) {
-          immData |= WR_IMM_SPLIT_DATA_FLAG;
-        }
+      }
+      if (nqps > 1) {
+        immData |= WR_IMM_SPLIT_DATA_FLAG;
       }
     }
 
@@ -180,7 +185,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   }
   // QP Sharing: encode commId in upper 16 bits of final wr_id
   if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
-    lastWr->wr_id = wr_id | ((uint64_t)comm->base.commId << 48);
+    lastWr->wr_id = wr_id | ((uint64_t)comm->base.commId << WR_ID_RX_COMM_ID_SHIFT);
   } else {
     lastWr->wr_id = wr_id;
   }
@@ -195,7 +200,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     NCCLCHECK(IbCastCommBaseGetQpForRequest(&comm->base, startQpIndex, i, &qp, &qpIndex));
 
     TRACE(NCCL_NET,
-          "NET/IB: %s: Posting send (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld) on QP (qp_num=%u, "
+          "NET/IB: %s: Posting send (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=0x%lx) on QP (qp_num=%u, "
           "devIndex=%d, qpIndex=%d)",
           __func__, reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs, wr_id, qp->qp->qp_num, qp->devIndex, qpIndex);
 
@@ -340,8 +345,8 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       reqs[r]->send.sentData[qpIndex] = true;
 
       TRACE(NCCL_VERBS,
-            "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%d, opcode=%d, send_flags=%d, "
-            "imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
+            "Posted send wr_id=0x%lx, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%d, opcode=%d, send_flags=%d, "
+            "imm_data=0x%x, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
             comm->wrs[r].wr_id, r, qp->qp->qp_num, comm->devs[qp->devIndex].base.ibDevN,
             comm->base.remDevs[qp->remDevIdx].ibv_dev_index, comm->base.remDevs[qp->remDevIdx].lid, comm->wrs[r].opcode,
             comm->wrs[r].send_flags, comm->wrs[r].imm_data, comm->wrs[r].wr.rdma.remote_addr, comm->wrs[r].wr.rdma.rkey,
@@ -350,7 +355,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     }
   }
 
-  TRACE(NCCL_NET, "NET/IB: %s: Send request posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld)", __func__,
+  TRACE(NCCL_NET, "NET/IB: %s: Send request posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=0x%lx)", __func__,
         reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs, wr_id);
   if (nowNs) {
     if (comm->base.nextQpTxSchedUpdateNs == 0)
@@ -556,23 +561,19 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   if (comm->useCtsOffload && (slot == ctsQp->ctsQpSlot)) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = (req - req->base->reqs);
-    // QP Sharing: encode commId in upper bits of CTS wr_id
-    if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
-      wr.wr_id |= ((uint64_t)comm->base.commId << 48);
-    }
     IbCastAddEvent(req, ctsQp->devIndex);
   } else if (!comm->useCtsOffload && (slot == ctsQp->devIndex || comm->base.resiliency)) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = slot;
     // QP Sharing: encode commId in upper bits of CTS wr_id
     if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
-      wr.wr_id |= ((uint64_t)comm->base.commId << 48);
+      wr.wr_id |= ((uint64_t)comm->base.commId << WR_ID_RX_COMM_ID_SHIFT);
     }
     IbCastAddEventCTS(req, ctsQp->devIndex);
   }
 
   TRACE(NCCL_NET,
-        "NET/IB: %s: Posting a CTS (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
+        "NET/IB: %s: Posting a CTS (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=0x%lx, opcode=%d, send_flags=%d, "
         "qp_num=%u)",
         __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num);
 
@@ -580,7 +581,7 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   NCCLCHECK(wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr));
 
   TRACE(NCCL_NET,
-        "NET/IB: %s: CTS posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
+        "NET/IB: %s: CTS posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=0x%lx, opcode=%d, send_flags=%d, "
         "qp_num=%u)",
         __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num);
 
@@ -743,7 +744,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     wr.opcode = IBV_WR_RDMA_READ;
     wr.send_flags = IBV_SEND_SIGNALED;
 
-    TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+    TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=0x%lx)", __func__, req, req->base,
           wr.wr_id);
     TIME_START(4);
     struct ibv_send_wr* bad_wr;
@@ -752,7 +753,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
 
     IbCastAddEvent(req, i);
 
-    TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+    TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=0x%lx)", __func__, req, req->base,
           wr.wr_id);
   }
 
@@ -774,6 +775,7 @@ static int getReqQpIndex(struct ncclIbRequest* req, int request, int qpNumber) {
 
 static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetCommBase* base, ibv_wc* wc,
                                                                ncclIbRequest** req) {
+  // QP sharing: incoming base is the targetBase routed based on commId encoded in wr_id 
   assert(req != NULL);
   assert(wc != NULL);
 
@@ -781,73 +783,58 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
   // of the completion are valid.
   assert(wc->status == IBV_WC_SUCCESS);
 
-  TRACE(NCCL_NET, "NET/IB: %s: Retrieving a %s request (wr_id=%ld, opcode=%s)", __func__,
+  TRACE(NCCL_NET, "NET/IB: %s: Retrieving a %s request (wr_id=0x%lx, opcode=%s)", __func__,
         base->isSend ? "send" : "recv", wc->wr_id, ibvWcOpcodeStr(wc->opcode));
   if (!base->isSend && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM && base->recvMatchingScheme == BY_ID) {
-    TRACE(NCCL_NET, "NET/IB: %s: Retrieving a receive request (wr_id=%ld, opcode=%s, imm_data=%d, byte_len=%d)",
+    TRACE(NCCL_NET, "NET/IB: %s: Retrieving a receive request (wr_id=0x%lx, opcode=%s, imm_data=0x%x, byte_len=%d)",
           __func__, wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len);
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
+    // TODO - QP sharing:
+    //        though at sender side all 32 bits of imm_data seems to encode reqs[0]->id (32bits max), here at receiver it is limiting the requests to 256 (8 bits) only.
+    //        if so then we are good with using similar mechanism for QP sharing encoding of remmCommid(lsb 16 bits) and rxReqIdx (msb 8 bits) ?
+    //        find out what is max value for NET_IB_MAX_REQUESTS across all use case (cast/fusion).
     *req = recvComm->recvReqs[be32toh(wc->imm_data) % NET_IB_MAX_REQUESTS];
   } else if (!base->isSend && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM && base->recvMatchingScheme == BY_INDEX) {
     // QP Sharing: recv-side completion routing via imm_data
-    if (rcclParamIbCastCommNGroups() > 0) {
-      uint32_t immDataHost = be32toh(wc->imm_data);
-      uint16_t immCommId = immDataHost & 0xFFFF;
-      if (immCommId != 0 && immCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[immCommId].used) {
-        uint8_t reqIdx = (immDataHost >> 16) & 0xFF;
-        struct ncclIbRecvComm* targetComm = (struct ncclIbRecvComm*)g_IbCastCommTable[immCommId].comm;
-        *req = &targetComm->base.reqs[reqIdx];
-        return ncclSuccess;
-      }
+    uint32_t immDataHost = be32toh(wc->imm_data);
+    uint8_t reqIdx = (immDataHost >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK;
+    uint16_t immCommId = immDataHost & WR_ID_RX_COMM_ID_MASK;
+    if ((rcclParamIbCastCommNGroups() > 0) && (immCommId != 0) && (immCommId < IBCAST_MAX_COMMS) && (g_IbCastCommTable[immCommId].used)) {
+      struct ncclIbRecvComm* targetComm = (struct ncclIbRecvComm*)g_IbCastCommTable[immCommId].comm;
+      *req = &targetComm->base.reqs[reqIdx];
+    } else {
+      *req = &base->reqs[reqIdx];
     }
-    *req = &base->reqs[((be32toh(wc->imm_data) >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK)];
   } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
     NCCLCHECK(IbCastRequestRetrieveAsIndex(base->reqs, (wc->wr_id - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
   } else if (!base->isSend) {
-    // QP Sharing: extract commId from upper bits and route to correct recv comm
-    uint64_t rawWrId = wc->wr_id;
+    // TODO - QP sharing for (non-wr-imm) rdma wr messages, fetch req based on wr_id; target base is already routed from the caller.
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
-    if (rcclParamIbCastCommNGroups() > 0) {
-      uint16_t wridCommId = (rawWrId >> 48) & 0xFFFF;
-      if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
-        recvComm = (struct ncclIbRecvComm*)g_IbCastCommTable[wridCommId].comm;
-      }
-    }
-    *req = recvComm->recvReqs[rawWrId & 0xFFFF];
+    *req = recvComm->recvReqs[wc->wr_id & 0xFFFF];
   } else {
+    // TODO - QP sharing:
+    //        for sender the caller has routed the targetBase based on wr_id
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)base;
     if (base->recvMatchingScheme == BY_INDEX) {
+      // TODO - QP sharing
+      //        for remapped wr_id at sender side use the origWrId from remappedWr for extracting commId
       // BY_INDEX: wr_id was remapped by CAST scheduler for RTT timing
       struct ncclIbRemapWrId* remapWrId = (struct ncclIbRemapWrId*)wc->wr_id;
       assert(remapWrId != NULL);
       assert(remapWrId->state == NCCL_NET_IB_REMAP_USED);
-      uint64_t origWrId = remapWrId->origWrId;
-      // QP Sharing: send-side completion routing via commId in upper bits of wr_id
-      if (rcclParamIbCastCommNGroups() > 0) {
-        uint16_t wridCommId = (origWrId >> 48) & 0xFFFF;
-        if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
-          sendComm = (struct ncclIbSendComm*)g_IbCastCommTable[wridCommId].comm;
-        }
-      }
-      *req = sendComm->sendReqs[origWrId & 0xff][0];
+      *req = sendComm->sendReqs[remapWrId->origWrId & 0xff][0];
       if (remapWrId->parms.enable) IbCastQpSchedUpdateTxStats(remapWrId, base);
       IbCastQpSchedFreeRemap(remapWrId);
     } else {
+      // TODO - QP sharing
+      //        check and confirm for recvMatchingScheme BY_ID/BY_ORDER do we even have QP sharing use-case
       // BY_ID / other: wr_id is raw slot-encoded value (no remap)
-      uint64_t rawWrId = wc->wr_id;
-      // QP Sharing: send-side completion routing via commId in upper bits of wr_id
-      if (rcclParamIbCastCommNGroups() > 0) {
-        uint16_t wridCommId = (rawWrId >> 48) & 0xFFFF;
-        if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
-          sendComm = (struct ncclIbSendComm*)g_IbCastCommTable[wridCommId].comm;
-        }
-      }
-      *req = sendComm->sendReqs[rawWrId & 0xff][0];
+      *req = sendComm->sendReqs[wc->wr_id & 0xff][0];
     }
   }
   TRACE(NCCL_NET,
-        "NET/IB: %s: Retrieved a %s request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=%ld, wc.opcode=%s, "
-        "wc.imm_data=%d, wc.byte_len=%d, wc.qp_num=%u)",
+        "NET/IB: %s: Retrieved a %s request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=0x%lx, wc.opcode=%s, "
+        "wc.imm_data=0x%x, wc.byte_len=%d, wc.qp_num=%u)",
         __func__, base->isSend ? "send" : "recv", *req, (*req)->base, (*req)->id, IbCastReqTypeStr[(*req)->type],
         wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len, wc->qp_num);
   return ncclSuccess;
@@ -933,21 +920,24 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
   assert(wc->status == IBV_WC_SUCCESS);
   ncclIbRequest* req = nullptr;
 
-  TRACE(NCCL_NET, "NET/IB: %s: Retrieving a %s request (wr_id=%ld, opcode=%s)", __func__,
+  // QP sharing: incoming commBase is the targetBase routed based on commId encoded in wr_id 
+  TRACE(NCCL_NET, "NET/IB: %s: Retrieving a %s request (wr_id=0x%lx, opcode=%s)", __func__,
         commBase->isSend ? "send" : "recv", wc->wr_id, ibvWcOpcodeStr(wc->opcode));
   if (commBase->recvMatchingScheme != BY_ORDER) {
     WARN("NET/IB: %s: recvMatchingScheme not supported", __func__);
     return ncclInternalError;
   }
+
   if (commBase->isSend) {
-    struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)commBase;
-    req = sendComm->sendReqs[wc->wr_id & 0xff][0];
+    req = commBase->sendReqs[wc->wr_id & 0xff][0];
   } else {
-    req = &(commBase->reqs[wc->wr_id]);
+    // TODO - QP sharing: 
+    //        confirm for matchingScheme ByOrder, limiting num requests (from wr_id) to 8 bits is correct. 
+    req = &(commBase->reqs[wc->wr_id & 0xff]);
   }
 
   if (req == NULL) {
-    WARN("NET/IB: %s: %s comm could not retreive a request found for a successful completion (comm=%p, wc.wr_id=%ld, "
+    WARN("NET/IB: %s: %s comm could not retreive a request found for a successful completion (comm=%p, wc.wr_id=0x%lx, "
          "opcode=%d, qp_num=%u)",
          __func__, commBase->isSend ? "Send" : "Recv", commBase, wc->wr_id, wc->opcode, wc->qp_num);
     return ncclInternalError;
@@ -958,7 +948,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
   union ncclSocketAddress addr;
   ncclSocketGetAddr(&commBase->sock, &addr);
   TRACE(NCCL_NET,
-        "Got completion from peer %s with status=%d opcode=%d len=%u wr_id=%lu r=%p type=%d events={%d,%d,%d,%d}, "
+        "Got completion from peer %s with status=%d opcode=%d len=%u wr_id=0x%lx r=%p type=%d events={%d,%d,%d,%d}, "
         "devIndex=%d",
         ncclSocketToString(&addr, line), wc->status, wc->opcode, wc->byte_len, wc->wr_id, req, req->type,
         req->events[0], req->events[1], req->events[2], req->events[3], devIndex);
@@ -966,7 +956,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
 
   if (commBase->isSend) {
     if (req->type != NCCL_NET_IB_REQ_SEND) {
-      WARN("NET/IB: %s: Sender expected a 'send' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=%ld, "
+      WARN("NET/IB: %s: Sender expected a 'send' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=0x%lx, "
            "wc.opcode=%s(%d), wc.qp_num=%u)",
            __func__, IbCastReqTypeStr[req->type], req, commBase, req->id, wc->wr_id, ibvWcOpcodeStr(wc->opcode),
            wc->opcode, wc->qp_num);
@@ -995,7 +985,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
   } else {
     if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
       if (req->type != NCCL_NET_IB_REQ_RECV && !commBase->resiliency) {
-        WARN("NET/IB: %s: Receiver expected a 'recv' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=%ld, "
+        WARN("NET/IB: %s: Receiver expected a 'recv' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=0x%lx, "
              "wc.status=%s(%d) wc.opcode=%s(%d), wc.qp_num=%u)",
              __func__, IbCastReqTypeStr[req->type], req, req->base, req->id, wc->wr_id, ibvWcStatusStr(wc->status),
              wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
@@ -1021,8 +1011,8 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
       req->events[devIndex]--;
       return ncclSuccess;
     } else {
-      WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=%ld, "
-           "wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=%d)",
+      WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=0x%lx, "
+           "wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=0x%x)",
            __func__, req, commBase, req ? req->id : -1, devIndex, IbCastReqTypeStr[req->type], wc->wr_id,
            ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num, be32toh(wc->imm_data));
       return ncclInternalError;
@@ -1047,7 +1037,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
   struct ncclIbRequest* req = NULL;
   NCCLCHECK(IbCastRequestRetrieveFromCompletion(commBase, wc, &req));
   if (req == NULL) {
-    WARN("NET/IB: %s: %s comm could not retreive a request found for a successful completion (comm=%p, wc.wr_id=%ld, "
+    WARN("NET/IB: %s: %s comm could not retreive a request found for a successful completion (comm=%p, wc.wr_id=0x%lx, "
          "opcode=%d, qp_num=%u)",
          __func__, commBase->isSend ? "Send" : "Recv", commBase, wc->wr_id, wc->opcode, wc->qp_num);
     return ncclInternalError;
@@ -1056,7 +1046,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
 #ifdef ENABLE_TRACE
   char line[SOCKET_NAME_MAXLEN + 1];
   TRACE(NCCL_NET,
-        "Got completion from peer %s with status=%d opcode=%d len=%u wr_id=%lu r=%p type=%d events={%d,%d,%d,%d}, "
+        "Got completion from peer %s with status=%d opcode=%d len=%u wr_id=0x%lx r=%p type=%d events={%d,%d,%d,%d}, "
         "devIndex=%d",
         ncclSocketToString(&addr, line), wc->status, wc->opcode, wc->byte_len, wc->wr_id, req, req->type,
         req->events[0], req->events[1], req->events[2], req->events[3], devIndex);
@@ -1064,7 +1054,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
 
   if (commBase->isSend) {
     if (req->type != NCCL_NET_IB_REQ_SEND) {
-      WARN("NET/IB: %s: Sender expected a 'send' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=%ld, "
+      WARN("NET/IB: %s: Sender expected a 'send' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=0x%lx, "
            "wc.opcode=%s(%d), wc.qp_num=%u)",
            __func__, IbCastReqTypeStr[req->type], req, commBase, req->id, wc->wr_id, ibvWcOpcodeStr(wc->opcode),
            wc->opcode, wc->qp_num);
@@ -1096,13 +1086,13 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
       if (req->type == NCCL_NET_IB_REQ_UNUSED && commBase->resiliency) {
         INFO(NCCL_NET,
              "NET/IB: %s: Receiver got a completion for a data transfer but retrieved an 'unused' request (req=%p, "
-             "comm=%p, id=%ld, wc.status=%s(%d), wc.wr_id=%ld, wc.imm_data=%d, wc.opcode=%s(%d), wc.qp_num=%u)",
+             "comm=%p, id=%ld, wc.status=%s(%d), wc.wr_id=0x%lx, wc.imm_data=0x%x, wc.opcode=%s(%d), wc.qp_num=%u)",
              __func__, req, commBase, req->id, ibvWcStatusStr(wc->status), wc->status, wc->wr_id, be32toh(wc->imm_data),
              ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
         return ncclSuccess;
       }
       if (req->type != NCCL_NET_IB_REQ_RECV && !commBase->resiliency) {
-        WARN("NET/IB: %s: Receiver expected a 'recv' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=%ld, "
+        WARN("NET/IB: %s: Receiver expected a 'recv' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=0x%lx, "
              "wc.status=%s(%d) wc.opcode=%s(%d), wc.qp_num=%u)",
              __func__, IbCastReqTypeStr[req->type], req, req->base, req->id, wc->wr_id, ibvWcStatusStr(wc->status),
              wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
@@ -1129,14 +1119,12 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
       } else {
         // In the prepost path wr_id is UINT64_MAX (sentinel); only decrement rxPosts
         // in the non-prepost path where wr_id is a valid slot index.
-        commBase->rxPosts[wc->wr_id]--;
+        // TODO: QP sharing - mask commId bits (msb 16 bits) and confirm if there are any assumption on if all 64 bits of wr_id is used anywhere
+        uint64_t rawWrId = (wc->wr_id & ~((uint64_t) WR_ID_RX_COMM_ID_MASK << WR_ID_RX_COMM_ID_SHIFT));
+        commBase->rxPosts[rawWrId]--;
       }
 
       if (commBase->recvMatchingScheme == BY_INDEX) {
-        // QP Sharing: split_data_flag is in bit 23 of original layout, but for QP sharing
-        // the imm_data layout is (rxReqIdx << 16) | commId, so check WR_IMM_SPLIT_DATA_FLAG
-        // which is bit 23 — this falls in rxReqIdx area for sharing layout but the sender
-        // encodes it correctly in both layouts
         if (be32toh(wc->imm_data) & WR_IMM_SPLIT_DATA_FLAG) {
           req->events[devIndex]--;
         } else { // Single QP send path
@@ -1165,14 +1153,14 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
       if (req->type == NCCL_NET_IB_REQ_UNUSED) {
         INFO(NCCL_NET,
              "NET/IB: %s: Receiver got a completion for a CTS but retrieved an 'unused' request (req=%p, comm=%p, "
-             "id=%ld, wc.wr_id=%ld, wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=%d)",
+             "id=%ld, wc.wr_id=0x%lx, wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=0x%x)",
              __func__, req, req->base, req->id, wc->wr_id, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num,
              be32toh(wc->imm_data));
         return ncclSuccess;
       }
     } else {
-      WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=%ld, "
-           "wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=%d)",
+      WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=0x%lx, "
+           "wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=0x%x)",
            __func__, req, commBase, req ? req->id : -1, devIndex, IbCastReqTypeStr[req->type], wc->wr_id,
            ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num, be32toh(wc->imm_data));
       return ncclInternalError;
@@ -1235,7 +1223,7 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
         struct ibv_wc* wc = wcs + w;
         if (wc->status != IBV_WC_SUCCESS) {
           if (r->base->resiliency == NULL) {
-            WARN("NET/IB: %s: Got CQE with error (devIndex=%d, req=%p, comm=%p (%s), wr_id=%lu, qp_num=%d)", __func__,
+            WARN("NET/IB: %s: Got CQE with error (devIndex=%d, req=%p, comm=%p (%s), wr_id=0x%lx, qp_num=%d)", __func__,
                  i, r, r->base, r->base->isSend ? "send" : "recv", wc->wr_id, wc->qp_num);
             IbCastLogCompletionWithError(r->base, wc, i);
             // If resiliency is not enabled, we cannot recover from any error.
@@ -1243,13 +1231,30 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
           }
           NCCLCHECK(IbCastResiliencyHandleCompletionError(r->base->resiliency, wc, i));
         } else {
+          // TODO - QP sharing:
+          //        extract wr_id based to get targetBase and use that for checking mactching scheme and not on incoming req->base's matching scheme
+          //        route the completions based on commId in wr_id. Pick target commBase based on the encoded commId
+          struct ncclIbNetCommBase* targetBase = (struct ncclIbNetCommBase*)r->base;
+          if (rcclParamIbCastCommNGroups() > 0) {
+              uint16_t wridCommId = (wc->wr_id >> WR_ID_RX_COMM_ID_SHIFT) & WR_ID_RX_COMM_ID_MASK;
+              if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
+                if (g_commTable[wridCommId].isSend) {
+                  targetBase = &((struct ncclIbSendComm*)g_IbCastCommTable[wridCommId].comm)->base;
+                } else {
+                  targetBase = &((struct ncclIbRecvComm*)g_IbCastCommTable[wridCommId].comm)->base;
+                }
+              }
+          }
+
+          // TODO - QP sharing: for display of req ptr 'r' see how we can fetch the info from targetBase or just remove req from trace
           TRACE(NCCL_NET,
-                "NET/IB: %s: Processing a completion event (devIndex=%d, comm=%p (%s), req=%p, wr_id=%lu, qp_num=%d)",
+                "NET/IB: %s: Processing a completion event (devIndex=%d, comm=%p (%s), req=%p, wr_id=0x%lx, qp_num=%d)",
                 __func__, i, r->base, r->base->isSend ? "send" : "recv", r, wc->wr_id, wc->qp_num);
           if (r->base->recvMatchingScheme != BY_ORDER) {
-            NCCLCHECK(IbCastCompletionEventProcess(r->base, wc, i));
+            // TODO - QP sharing: check for sender BY_INDEX scheme, routing target base above base on wr_id is correct or not, as there is a possibility of wr_id remapped by CAST scheduler for RTT timing. 
+            NCCLCHECK(IbCastCompletionEventProcess(targetBase, wc, i));
           } else {
-            NCCLCHECK(IbCastCompletionEventByOrder(r->base, wc, i));
+            NCCLCHECK(IbCastCompletionEventByOrder(targetBase, wc, i));
           }
         }
       }
