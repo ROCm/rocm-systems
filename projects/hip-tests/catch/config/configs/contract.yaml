@@ -261,6 +261,15 @@ contract:
   Contract_GraphNodeTypes_RemoveDependencies_ClearsEdge:
     <<: *level_0
     tags: [graph_node_types]
+  Contract_GraphChild_AddChildGraphNode_ExecutesEmbeddedMemcpy:
+    <<: *level_0
+    tags: [graph_child]
+  Contract_GraphChild_ChildGraphNodeGetGraph_ReturnsHandle:
+    <<: *level_0
+    tags: [graph_child]
+  Contract_GraphChild_NodeType_ReportsGraph:
+    <<: *level_0
+    tags: [graph_child]
   Contract_HostMemory_HostMalloc_ReturnsUsablePointer:
     <<: *level_0
     tags: [host_memory]
