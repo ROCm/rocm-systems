@@ -32,16 +32,14 @@
 #include <iostream>
 #include <vector>
 #include <map>
-#include <atomic>
 #include <future>
 #include "workload.hpp"
-#include "counter.hpp"
 
 Collection::Collection(AgentInfo& agent, const std::vector<std::string>& counters)
 : packet(std::make_unique<AQLPacket>(agent, counters))
 {}
 
-Collection::~Collection() {}
+Collection::~Collection() = default;
 
 std::map<std::string, int64_t>
 Collection::iterate(Queue& queue, IWorkload& load)

@@ -53,7 +53,7 @@ AgentInfo::add_event(aqlprofile_pmc_event_t block,
 }
 
 hsa_status_t
-AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void* userdata)
+AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void*  /*userdata*/)
 {
     hsa_device_type_t type;
 
@@ -191,7 +191,7 @@ AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void* userdata)
 }
 
 hsa_status_t
-FindGlobalPool(hsa_amd_memory_pool_t pool, void* data)
+FindGlobalPool(hsa_amd_memory_pool_t pool, void*  /*data*/)
 {
     hsa_amd_segment_t segment;
     CHECK_HSA(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment));
@@ -202,7 +202,7 @@ FindGlobalPool(hsa_amd_memory_pool_t pool, void* data)
     CHECK_HSA(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag));
     uint32_t karg_st = flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
 
-    if(karg_st)
+    if(karg_st != 0u)
         AgentInfo::kernarg_pool = pool;
     else
         AgentInfo::cpu_pool = pool;
@@ -218,7 +218,7 @@ AgentInfo::iterate_agents()
 }
 
 bool
-Queue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet)
+Queue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet) const
 {
     const uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
 
@@ -254,8 +254,8 @@ Queue::Queue(std::shared_ptr<AgentInfo>& _agent)
     CHECK_HSA(hsa_queue_create(agent->hsa_agent,
                                64,
                                HSA_QUEUE_TYPE_SINGLE,
-                               NULL,
-                               NULL,
+                               nullptr,
+                               nullptr,
                                UINT32_MAX,
                                UINT32_MAX,
                                &this->queue));
