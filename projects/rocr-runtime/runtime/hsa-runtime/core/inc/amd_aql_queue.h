@@ -48,6 +48,7 @@
 #include "core/inc/queue.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/util/locks.h"
+#include "core/inc/amd_drm_driver.h"
 
 namespace rocr {
 namespace AMD {
@@ -57,7 +58,8 @@ namespace AMD {
 /// provide the interface for things such as Doorbell register, read,
 /// write pointers and a buffer.
 class AqlQueue : public core::Queue, private core::LocalSignal, public core::DoorbellSignal {
- public:
+
+public:
   static __forceinline bool IsType(core::Signal* signal) {
     return signal->IsType(&rtti_id());
   }
@@ -265,12 +267,28 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Check if the queue is currently suspended.
   bool IsSuspended() const { return suspended_; }
 
+  /// @brief Return the agent that created this queue
+  GpuAgent *GetAgent() const { return agent_; }
+
+  /// @brief Return the queue ID (used by unified interface only)
+  uint32_t GetDrmQueueId() const { assert(core::Runtime::runtime_singleton_->flag().enable_drm()); return drm_queue_id_; }
+
+  /// @brief Return the doorbell offset used by the queue (used by unified interface only)
+  uint32_t GetDoorbellOffset() const { assert(core::Runtime::runtime_singleton_->flag().enable_drm()); return drm_doorbell_offset_; }
+
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
  private:
+  /// @brief Helper to create ModifyQueueInParams from queue state
+  /// @return ModifyQueueInParams with current queue parameters
+  DrmDriver::ModifyQueueInParams CreateModifyQueueParams();
+
   uint32_t ComputeRingBufferMinPkts();
   uint32_t ComputeRingBufferMaxPkts();
+
+  /// @brief Free user queue in kernel driver
+  void FreeUserQueue();
 
   // (De)allocates and (de)registers ring_buf_.
   void AllocRegisteredRingBuffer(uint32_t queue_size_pkts);
@@ -328,8 +346,19 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // Size of ring_buf_ allocation.
   uint32_t ring_buf_metadata_alloc_bytes_;
 
+  // EOP memory (used by unified interface)
+  void *eop_buf_;
+
+  // CWSR memory (used by unified interface)
+  void *cwsr_buf_;
+
   // Id of the Queue used in communication with thunk
   HSA_QUEUEID queue_id_;
+
+  // Queue ID (unified interface)
+  uint32_t drm_queue_id_;
+  // Doorbell offset (unified interface)
+  uint32_t drm_doorbell_offset_;
 
   // Indicates if queue is active
   std::atomic<bool> active_;
