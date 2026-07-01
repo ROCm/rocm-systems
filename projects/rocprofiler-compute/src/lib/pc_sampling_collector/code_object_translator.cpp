@@ -5,8 +5,6 @@
 #include "gsl_assert.h"
 #include "rocprofiler-sdk/cxx/codeobj/code_printing.hpp"
 
-#include <iostream>
-
 using namespace rocprofiler_compute_tool;
 
 code_object_translator_t::ptr code_object_translator_t::create()

@@ -3,10 +3,6 @@
 #include "pc_sampling_feature.h"
 
 #include "code_object_writer.h"
-#include "gsl_assert.h"
-
-#include <memory>
-#include <utility>
 
 using namespace rocprofiler_compute_tool;
 
@@ -42,8 +38,6 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode                mode,
     , m_collector(std::move(collector))
     , m_snapshotter(std::move(snapshotter))
 {
-    Expects(m_collector);
-    Expects(m_snapshotter);
 }
 
 void pc_sampling_feature_t::on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info)
