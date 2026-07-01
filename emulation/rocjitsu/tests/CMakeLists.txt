@@ -674,17 +674,20 @@ gtest_discover_tests(hsa_hooks_unit_test)
 
 add_library(early_mmap_preload SHARED early_mmap_preload_test.cpp)
 rj_configure_target(early_mmap_preload TEST)
-add_dependencies(early_mmap_preload rocjitsu_kmd_shim)
+add_dependencies(early_mmap_preload rocjitsu_shared)
+
+add_executable(early_mmap_driver early_mmap_driver_test.cpp)
+rj_configure_target(early_mmap_driver TEST)
 
 add_test(
     NAME "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
-    COMMAND /bin/true
+    COMMAND $<TARGET_FILE:early_mmap_driver>
 )
 set_tests_properties(
     "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
     PROPERTIES
         ENVIRONMENT
-            "LD_PRELOAD=$<TARGET_FILE:early_mmap_preload>:$<TARGET_FILE:rocjitsu_kmd_shim>"
+            "LD_PRELOAD=$<TARGET_FILE:early_mmap_preload>:$<TARGET_FILE:rocjitsu_shared>"
 )
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
