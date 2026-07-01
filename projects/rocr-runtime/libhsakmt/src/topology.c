@@ -1112,7 +1112,7 @@ static int topology_get_node_props_from_drm(HsaNodeProperties *props)
 	if (file) {
 		char accel_state[16] = {0};
 		if (fgets(accel_state, sizeof(accel_state), file) &&
-		    strncmp(accel_state, "ready", 5) == 0)
+		    strncmp(accel_state, "ready", sizeof("ready") - 1) == 0)
 			props->FabricHandleSupported = 1;
 		fclose(file);
 	}
