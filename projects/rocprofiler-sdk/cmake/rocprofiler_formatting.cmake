@@ -21,6 +21,30 @@ else()
     set(_FMT_REQUIRED)
 endif()
 
+# returns the major version number of black, or 0 if it cannot be determined
+function(_rocprofiler_get_black_major_version _OUT _EXE)
+    execute_process(
+        COMMAND ${_EXE} --version
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        OUTPUT_VARIABLE _BLACK_VERSION_OUT
+        RESULT_VARIABLE _BLACK_VERSION_RET
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_BLACK_VERSION_RET EQUAL 0)
+        string(REGEX MATCH "([0-9]+)\\." _BLACK_VERSION_MATCH "${_BLACK_VERSION_OUT}")
+        if(_BLACK_VERSION_MATCH)
+            string(REGEX REPLACE "([0-9]+)\\." "\\1" _BLACK_VERSION
+                                 "${_BLACK_VERSION_MATCH}")
+            set(${_OUT}
+                ${_BLACK_VERSION}
+                PARENT_SCOPE)
+            return()
+        endif()
+    endif()
+    set(${_OUT}
+        0
+        PARENT_SCOPE)
+endfunction()
+
 # checks that clang-format is version 11.x.x
 function(_rocprofiler_check_clang_format_version _OUT _EXE)
     execute_process(
@@ -88,6 +112,12 @@ find_program(
     PATHS ${_PYTHON_USER_BIN}
     HINTS ${_PYTHON_USER_BIN}
     PATH_SUFFIXES bin)
+# Version number is also enforced in .github/workflows/rocprofiler-sdk-formatting.yml
+set(_BLACK_REQUIRED_MAJOR_VERSION 26)
+if(ROCPROFILER_BLACK_FORMAT_EXE)
+    _rocprofiler_get_black_major_version(_BLACK_MAJOR_VERSION
+                                         "${ROCPROFILER_BLACK_FORMAT_EXE}")
+endif()
 _rocprofiler_check_clang_format_version(_IS_VALID_CLANG_FMT
                                         "${ROCPROFILER_CLANG_FORMAT_EXE}")
 if(NOT _IS_VALID_CLANG_FMT)
@@ -188,13 +218,26 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
     endif()
 
     if(ROCPROFILER_BLACK_FORMAT_EXE AND rocp_python_files)
-        # black already uses parallelization internally, so no macro is needed
-        add_custom_target(
-            format-rocprofiler-python
-            ${ROCPROFILER_BLACK_FORMAT_EXE} -q ${rocp_python_files}
-            COMMENT
-                "[rocprofiler] Running python formatter ${ROCPROFILER_BLACK_FORMAT_EXE}..."
-            )
+        # black already uses parallelization internally, so no xargs macro is needed
+        if(_BLACK_MAJOR_VERSION LESS _BLACK_REQUIRED_MAJOR_VERSION)
+            add_custom_target(
+                format-rocprofiler-python
+                COMMAND
+                    ${CMAKE_COMMAND} -E echo
+                    "WARNING: Your black version is ${_BLACK_MAJOR_VERSION} but the required version is ${_BLACK_REQUIRED_MAJOR_VERSION}. Formatted code might not pass pull request checks."
+                COMMAND ${ROCPROFILER_BLACK_FORMAT_EXE} -q ${rocp_python_files}
+                COMMENT
+                    "[rocprofiler] Running python formatter ${ROCPROFILER_BLACK_FORMAT_EXE}..."
+                )
+        else()
+            add_custom_target(
+                format-rocprofiler-python
+                COMMAND ${ROCPROFILER_BLACK_FORMAT_EXE} -q --required-version
+                        ${_BLACK_REQUIRED_MAJOR_VERSION} ${rocp_python_files}
+                COMMENT
+                    "[rocprofiler] Running python formatter ${ROCPROFILER_BLACK_FORMAT_EXE}..."
+                )
+        endif()
     endif()
 
     foreach(_TYPE source python cmake)

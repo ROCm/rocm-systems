@@ -22,5 +22,4 @@ exclude = '''
     | build-rocprofiler-sdk
   )/
 )
-required_version = 26
 '''
