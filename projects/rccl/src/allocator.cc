@@ -36,13 +36,16 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
 
   if (ncclCuMemEnable()) {
     size_t handleSize = size;
-    int requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-#if CUDART_VERSION >= 12030
-    // Query device to see if FABRIC handle support is available
-    flag = 0;
-    (void) CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
-    if (flag) requestedHandleTypes |= CU_MEM_HANDLE_TYPE_FABRIC;
-#endif
+    int requestedHandleTypes = ncclCuMemHandleType;
+    if (requestedHandleTypes == CU_MEM_HANDLE_TYPE_FABRIC) {
+      flag = 0;
+      // Check if the device supports FABRIC handles
+      CUresult err = CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
+      if (err != CUDA_SUCCESS || !flag) {
+        WARN("ncclMemAlloc: device %d has no FABRIC handles support, falling back to POSIX", cudaDev);
+        requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+      }
+    }
 #if defined(HIP_VMM_UNCACHED_MEMORY)
     memprop.type = hipMemAllocationTypeUncached;
 #else
@@ -66,25 +69,8 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     CUDACHECK(cudaGetDeviceCount(&dcnt));
     ALIGN_SIZE(handleSize, memGran);
 
-#if CUDART_VERSION >= 12030
-    if (requestedHandleTypes & CU_MEM_HANDLE_TYPE_FABRIC) {
-      /* First try cuMemCreate() with FABRIC handle support and then remove if it fails */
-      CUresult err = CUPFN(cuMemCreate(&handle, handleSize, &memprop, 0));
-      if (err == CUDA_ERROR_NOT_SUPPORTED) {
-        requestedHandleTypes &= ~CU_MEM_HANDLE_TYPE_FABRIC;
-        memprop.requestedHandleTypes = (CUmemAllocationHandleType) requestedHandleTypes;
-        /* Allocate the physical memory on the device */
-        CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
-      } else if (err != CUDA_SUCCESS) {
-        // Catch and report any error from above
-        CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
-      }
-    } else
-#endif
-    {
-      /* Allocate the physical memory on the device */
-      CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
-    }
+    /* Allocate the physical memory on the device */
+    CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
     /* Reserve a virtual address range */
     CUCHECK(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0));
     /* Map the virtual address range to the physical allocation */
@@ -115,7 +101,6 @@ exit:
 fail:
   goto exit;
 }
-
 NCCL_API(ncclResult_t, ncclMemFree, void *ptr);
 ncclResult_t  ncclMemFree_impl(void *ptr) {
   NCCL_NVTX3_FUNC_RANGE;
