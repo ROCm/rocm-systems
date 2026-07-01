@@ -40,3 +40,4 @@ set(OPENMP_GPU_TARGETS
     CACHE STRING "GPU targets to compile for")
 
 add_subdirectory(target)
+add_subdirectory(host)

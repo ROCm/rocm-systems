@@ -508,7 +508,7 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
     amdgpu_bo_import_result res;
     auto ret = vamdgpu_bo_import(
@@ -525,11 +525,6 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-}
-
-hsa_status_t KfdVirtioDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Calls DestroyMemoryHandle, as an amdgpu_bo_handle object is created during import.
-  return DestroyMemoryHandle(handle);
 }
 
 hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
