@@ -20,6 +20,24 @@
 
 namespace hip {
 namespace {
+// Upper bound on the number of descriptor records this function will walk in an
+// uncompressed clang offload bundle. hipLibraryLoadData receives only a bare
+// image pointer with no accompanying length, so the descriptor walk cannot be
+// validated against the true buffer bounds. A malformed or truncated header can
+// therefore claim an arbitrarily large numOfCodeObjects (or per-record
+// bundleEntryIdSize) and drive the walk far past the caller's allocation. We
+// cap the record count against a value that comfortably exceeds any real fat
+// binary (one native code object per supported GPU target, plus generic/SPIR-V
+// variants) so a hostile count is rejected before it can over-read.
+constexpr uint64_t kMaxBundleCodeObjects = 256;
+
+// Upper bound on a single descriptor's trailing bundleEntryId length. A record
+// advances the walk cursor by sizeof(info) - sizeof(bundleEntryId) +
+// bundleEntryIdSize; an untrusted oversized bundleEntryIdSize would step the
+// cursor past the buffer. Bundle entry ids are short target-triple strings, so
+// a few KiB is an ample ceiling that still rejects hostile values.
+constexpr uint64_t kMaxBundleEntryIdSize = 4096;
+
 // Computes the total byte length of an in-memory code-object image so that
 // hipLibraryLoadData can copy it and release the caller's buffer. The three
 // shapes the runtime accepts mirror what ExtractFatBinaryUsingCOMGR parses:
@@ -27,8 +45,10 @@ namespace {
 //   - uncompressed clang offload bundle ("__CLANG_OFFLOAD_BUNDLE__"): length is
 //     the end of the farthest bundle entry,
 //   - a bare AMDGPU ELF: length comes from the ELF header.
-// Returns 0 when the header cannot be recognized; the caller treats that as an
-// invalid image rather than copying an unbounded amount of memory.
+// Returns 0 when the header cannot be recognized OR when an uncompressed bundle
+// header carries descriptor fields that would drive the walk past a sane bound;
+// the caller treats 0 as an invalid image rather than copying an unbounded or
+// out-of-range amount of memory.
 size_t ComputeImageSize(const void* image) {
   if (image == nullptr) {
     return 0;
@@ -48,13 +68,26 @@ size_t ComputeImageSize(const void* image) {
                   symbols::kOffloadBundleUncompressedMagicStrSize - 1) == 0) {
     const auto* header =
         reinterpret_cast<const symbols::ClangOffloadBundleUncompressedHeader*>(image);
+    // Reject counts that are zero (nothing to size) or larger than any real fat
+    // binary. Because we cannot see the caller's buffer length, an unbounded
+    // count is the primary lever a truncated/hostile header uses to over-read.
+    const uint64_t num_code_objects = header->numOfCodeObjects;
+    if (num_code_objects == 0 || num_code_objects > kMaxBundleCodeObjects) {
+      return 0;
+    }
+
     // Walk the variable-length descriptor list; each entry's bundleEntryId is a
     // trailing flexible field of length bundleEntryIdSize. The descriptor table
     // precedes the code objects, so the farthest (offset + size) bounds the whole
     // image.
     const auto* info = &header->desc[0];
     size_t end = 0;
-    for (uint64_t i = 0; i < header->numOfCodeObjects; ++i) {
+    for (uint64_t i = 0; i < num_code_objects; ++i) {
+      // A record must not claim a bundleEntryId longer than any real target
+      // triple; an oversized value would step the cursor past the buffer.
+      if (info->bundleEntryIdSize > kMaxBundleEntryIdSize) {
+        return 0;
+      }
       const size_t entry_end = static_cast<size_t>(info->offset) + static_cast<size_t>(info->size);
       if (entry_end > end) {
         end = entry_end;
