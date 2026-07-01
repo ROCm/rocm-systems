@@ -165,6 +165,12 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	envvar = getenv("PM4_TARGET_XCC");
 	if (envvar)
 		hsakmt_pm4_target_xcc = hsakmt_safe_env_to_int(envvar, 0);
+
+	/* Check if using unified interface */
+	envvar = getenv("HSA_ENABLE_DRM_DEBUG");
+	if (envvar)
+		hsakmt_enable_drm = atoi(envvar);
+
 	return HSAKMT_STATUS_SUCCESS;
 }
 

@@ -67,7 +67,7 @@ namespace AMD {
 /// agents. Provides APIs for the ROCr core to discover the topology produced
 /// by the KFD, allocate memory out of the KFD, manage DMA bufs, allocate queues,
 /// and more.
-class KfdDriver final : public core::Driver {
+class KfdDriver : public core::Driver {
 public:
   KfdDriver(std::string devnode_name);
 
@@ -157,6 +157,11 @@ public:
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
+ protected:
+  /// @brief Constructor for subclasses (e.g. DrmDriver) to register under a
+  /// specific DriverType while reusing the KFD driver implementation.
+  KfdDriver(core::DriverType type, std::string devnode_name);
 
  private:
   /// @brief Flags for @ref ExportMemoryHandleImpl.

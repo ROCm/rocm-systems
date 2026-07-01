@@ -50,6 +50,21 @@ HSAKMT_STATUS hsakmt_fmm_get_amdgpu_device_handle(HsaKFDContext *ctx,
 HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx, unsigned int NumNodes);
 void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx);
 
+typedef struct {
+	uint64_t lds_base;
+	uint64_t lds_limit;
+	uint64_t scratch_base;
+	uint64_t scratch_limit;
+	uint64_t gpuvm_base;
+	uint64_t gpuvm_limit;
+	uint64_t gpu_id;
+} aperture_info_t;
+
+typedef struct device_apertures {
+	uint32_t num_devices_;
+	aperture_info_t *device_aperture_info;
+} device_apertures_t;
+
 /* Memory interface */
 // Memory allocation/free functions
 void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,

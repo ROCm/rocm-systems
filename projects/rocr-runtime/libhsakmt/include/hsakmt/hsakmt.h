@@ -1401,6 +1401,20 @@ hsaKmtModelEnabled(
     bool* enable // OUT
 );
 
+/**
+ * Map HSA queue priority to hardware queue priority
+ *
+ *  Arguments:
+ *   @Priority (IN) - HSA queue priority (-3 to +3)
+ *
+ *  Return:
+ *   Hardware queue priority value (0-15)
+ */
+HSAuint32
+HSAKMTAPI
+hsaKmtMapPriorityToHw(
+    HSA_QUEUE_PRIORITY priority // IN
+);
 
 /**
  * Forwards the SIGBUS delay

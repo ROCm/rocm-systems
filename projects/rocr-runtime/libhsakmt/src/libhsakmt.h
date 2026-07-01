@@ -45,6 +45,7 @@ extern pthread_mutex_t hsakmt_mutex;
 extern bool hsakmt_is_dgpu;
 extern int hsakmt_zfb_support;
 extern int hsakmt_pm4_target_xcc;
+extern bool hsakmt_enable_drm;
 
 extern HsaVersionInfo hsakmt_kfd_version_info;
 extern HsaKFDContext hsakmt_primary_kfd_ctx;
@@ -292,5 +293,9 @@ int hsakmt_safe_env_to_int(const char* envvar, int default_val);
 #ifdef __cplusplus
 }
 #endif
+
+/* Utility functions to test if unified interface is supported by GPU. */
+bool hsakmt_fmm_use_drm_by_gpu_id(struct hsa_kfd_fmm_context *fmm_ctx, uint32_t gpu_id);
+bool hsakmt_fmm_use_drm_by_node_id(struct hsa_kfd_fmm_context *fmm_ctx, uint32_t node_id);
 
 #endif

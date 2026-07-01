@@ -550,6 +550,21 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   /// Minimum submission size in bytes.
   size_t min_submission_size_;
 
+  // Layout for read/write pointer memory
+  typedef struct {
+    uint32_t *rptr;
+    uint32_t *wptr;
+  } queue_shared_t;
+
+  // Memory for read/write pointer, GPU and CPU accessible (for DRM unified interface)
+  // Includes also CSA (context save area) memory.
+  queue_shared_t *queue_shared_;
+
+  // Queue ID (for DRM unified interface)
+  uint32_t drm_queue_id_;
+  // Doorbell offset (for DRM unified interface)
+  uint32_t drm_doorbell_offset_;
+
   /// Cached at init to avoid pointer chasing in the hot path.
   bool needs_kmt_doorbell_;
   bool sdma_wait_idle_;

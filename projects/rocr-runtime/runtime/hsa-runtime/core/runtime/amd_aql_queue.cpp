@@ -48,6 +48,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <amdgpu_drm.h>
 #endif
 
 #include <algorithm>
@@ -73,6 +74,8 @@
 #include "core/inc/hsa_amd_tool_int.hpp"
 #include "core/inc/amd_core_dump.hpp"
 
+#include "core/inc/amd_drm_driver.h"
+
 namespace rocr {
 namespace AMD {
 
@@ -88,7 +91,11 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       ring_buf_alloc_bytes_(0),
       ring_buf_metadata_(nullptr),
       ring_buf_metadata_alloc_bytes_(0),
+      eop_buf_(nullptr),
+      cwsr_buf_(nullptr),
       queue_id_(HSA_QUEUEID(-1)),
+      drm_queue_id_(0),
+      drm_doorbell_offset_(0),
       active_(false),
       agent_(agent),
       queue_scratch_(scratch),
@@ -101,7 +108,6 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       suspended_(false),
       priority_(HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL),
       exception_signal_(nullptr) {
-
   // Queue size is a function of several restrictions.
   const uint32_t min_pkts = ComputeRingBufferMinPkts();
   const uint32_t max_pkts = ComputeRingBufferMaxPkts();
@@ -270,31 +276,76 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   // is a KFD queue. The debugger may access the aperture addresses, queue
   // scratch base, and queue type.
 
-  hsa_status_t status;
-  if (core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging) {
-    queue_rsrc.ErrorReason = &exception_signal_->signal_.value;
-    status =
-        agent->driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0,
-                                    ring_buf_, ring_buf_alloc_bytes_,
-                                    ring_buf_metadata_alloc_bytes_,
-                                    queue_event(), queue_rsrc);
-  } else {
-    status = agent->driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0,
-                                         ring_buf_, ring_buf_alloc_bytes_,
-                                         ring_buf_metadata_alloc_bytes_,
-                                         NULL, queue_rsrc);
+  bool drm_queue_created = false;
+
+  if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
+      // DRM mode: attempt queue creation via DRM, fall back to KFD if unsupported.
+      drm_amdgpu_info_uq_metadata info;
+      struct drm_amdgpu_info_cwsr cwsr_info;
+
+      do {
+        if (static_cast<DrmDriver &>(agent_->driver()).GetUserQueueMetadata(*agent_, DrmDriver::AQL_QUEUE, &info) != HSA_STATUS_SUCCESS)
+          break;
+
+        eop_buf_ = agent_->coarsegrain_allocator()(info.compute.eop_size, core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
+        if (!eop_buf_) break;
+
+        if (amdgpu_query_cwsr_info(agent_->libDrmDev(), &cwsr_info) != 0)
+          break;
+
+        cwsr_buf_ = agent_->coarsegrain_allocator()(cwsr_info.min_save_area_size, core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
+        if (!cwsr_buf_) break;
+
+        DrmDriver::CreateQueueInParams queueIn(*agent_, DrmDriver::AQL_QUEUE, ring_buf_, ring_buf_alloc_bytes_, (uint64_t) &amd_queue_.read_dispatch_id, (uint64_t) &amd_queue_.write_dispatch_id, (uint64_t) eop_buf_, (uint64_t) cwsr_buf_, cwsr_info.min_save_area_size);
+        DrmDriver::CreateQueueOutParams queueOut;
+
+        if (static_cast<DrmDriver&>(agent_->driver()).CreateQueue(&queueIn, &queueOut) != HSA_STATUS_SUCCESS)
+          break;
+
+        signal_.hardware_doorbell_ptr = queueOut.doorbell_ptr;
+        queue_id_ = queueOut.queue_id;
+        drm_queue_id_ = queueOut.queue_id;
+        drm_doorbell_offset_ = queueOut.doorbell_offset;
+        drm_queue_created = true;
+      } while (false);
+
+      if (!drm_queue_created) {
+        // DRM queue creation not supported on this GPU; free any allocations and fall back to KFD.
+        if (eop_buf_) { agent_->coarsegrain_deallocator()(eop_buf_); eop_buf_ = nullptr; }
+        if (cwsr_buf_) { agent_->coarsegrain_deallocator()(cwsr_buf_); cwsr_buf_ = nullptr; }
+        debug_print("DRM queue creation failed, falling back to KFD path\n");
+      }
   }
-  if (status != HSA_STATUS_SUCCESS)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                             "Queue create failed\n");
-  // Complete populating the doorbell signal structure.
-  signal_.hardware_doorbell_ptr = queue_rsrc.Queue_DoorBell_aql;
+
+  if (!drm_queue_created) {
+      // KFD mode: create the queue via the KFD driver (matches develop;
+      // KfdDriver::CreateQueue uses hsaKmtCreateQueueV2 internally).
+      hsa_status_t status;
+      if (core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging) {
+        queue_rsrc.ErrorReason = &exception_signal_->signal_.value;
+        status = agent->driver().CreateQueue(agent->node_id(), HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0,
+                                             ring_buf_, ring_buf_alloc_bytes_,
+                                             ring_buf_metadata_alloc_bytes_,
+                                             queue_event(), queue_rsrc);
+      } else {
+        status = agent->driver().CreateQueue(agent->node_id(), HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0,
+                                             ring_buf_, ring_buf_alloc_bytes_,
+                                             ring_buf_metadata_alloc_bytes_,
+                                             NULL, queue_rsrc);
+      }
+      if (status != HSA_STATUS_SUCCESS)
+        throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                 "Queue create failed\n");
+
+      // Complete populating the doorbell signal structure.
+      signal_.hardware_doorbell_ptr = queue_rsrc.Queue_DoorBell_aql;
+      queue_id_ = queue_rsrc.QueueId;
+  }
 
   // Bind Id of Queue such that is unique i.e. it is not re-used by another
   // queue (AQL, HOST) in the same process during its lifetime.
   amd_queue_.hsa_queue.id = this->GetQueueId();
 
-  queue_id_ = queue_rsrc.QueueId;
   MAKE_NAMED_SCOPE_GUARD(QueueGuard, [&]() { agent_->driver().DestroyQueue(queue_id_); });
 
   amd_queue_.scratch_max_use_index = UINT64_MAX;
@@ -349,6 +400,19 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   QueueGuard.Dismiss();
   EventGuard.Dismiss();
   SignalGuard.Dismiss();
+}
+
+void AqlQueue::FreeUserQueue() {
+  if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
+    DrmDriver::DestroyQueueInParams queueIn(*agent_, drm_queue_id_, drm_doorbell_offset_);
+    auto err = static_cast<DrmDriver&>(agent_->driver()).DestroyQueue(&queueIn);
+    assert(err == HSA_STATUS_SUCCESS && "DestroyQueue failed.");
+    drm_doorbell_offset_ = 0;
+    drm_queue_id_ = 0;
+  } else {
+    auto err = HSAKMT_CALL(hsaKmtDestroyQueue(queue_id_));
+    assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtDestroyQueue failed.");
+  }
 }
 
 AqlQueue::~AqlQueue() {
@@ -662,7 +726,18 @@ void AqlQueue::FreeQueueMemory() {
     }
   }
 
-  ring_buf_ = nullptr;
+  if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
+    if (eop_buf_) {
+      agent_->coarsegrain_deallocator()(eop_buf_);
+      eop_buf_ = NULL;
+    }
+    if (cwsr_buf_) {
+      agent_->coarsegrain_deallocator()(cwsr_buf_);
+      cwsr_buf_ = NULL;
+    }
+  }
+
+  ring_buf_ = NULL;
   ring_buf_alloc_bytes_ = 0;
 
   ring_buf_metadata_ = nullptr;
@@ -713,19 +788,37 @@ int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
 
 void AqlQueue::Suspend() {
   suspended_ = true;
-  auto err =
-      agent_->driver().UpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL);
-  assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
-  (void)err;
+
+  if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+    // DRM path - use ModifyQueue with 0% allocation to suspend
+    auto queueIn = CreateModifyQueueParams();
+    queueIn.queue_percentage = 0;  // 0% = suspend
+    auto err = static_cast<DrmDriver&>(agent_->driver()).ModifyQueue(&queueIn);
+    assert(err == HSA_STATUS_SUCCESS && "ModifyQueue suspend failed.");
+  } else {
+    // KFD path (or DRM mode with KFD-created queue fallback)
+    auto err = agent_->driver().UpdateQueue(queue_id_, 0, priority_,
+                                            ring_buf_, ring_buf_alloc_bytes_, NULL);
+    assert(err == HSA_STATUS_SUCCESS && "UpdateQueue failed.");
+  }
 }
 
 void AqlQueue::Resume() {
   if (suspended_) {
     suspended_ = false;
-    auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
-                                            ring_buf_alloc_bytes_, NULL);
-    assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
-    (void)err;
+
+    if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+      // DRM path - use ModifyQueue with 100% allocation to resume
+      auto queueIn = CreateModifyQueueParams();
+      queueIn.queue_percentage = 100;  // 100% = resume
+      auto err = static_cast<DrmDriver&>(agent_->driver()).ModifyQueue(&queueIn);
+      assert(err == HSA_STATUS_SUCCESS && "ModifyQueue resume failed.");
+    } else {
+      // KFD path (or DRM mode with KFD-created queue fallback)
+      auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_,
+                                              ring_buf_, ring_buf_alloc_bytes_, NULL);
+      assert(err == HSA_STATUS_SUCCESS && "UpdateQueue failed.");
+    }
   }
 }
 
@@ -740,15 +833,37 @@ hsa_status_t AqlQueue::Inactivate() {
   return HSA_STATUS_SUCCESS;
 }
 
+DrmDriver::ModifyQueueInParams AqlQueue::CreateModifyQueueParams() {
+  return DrmDriver::ModifyQueueInParams(
+      *agent_, drm_queue_id_, DrmDriver::AQL_QUEUE,
+      ring_buf_, ring_buf_alloc_bytes_,
+      (uint64_t)&amd_queue_.read_dispatch_id,
+      (uint64_t)&amd_queue_.write_dispatch_id,
+      (uint64_t)eop_buf_);
+}
+
 hsa_status_t AqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
   if (suspended_) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
   priority_ = priority;
-  auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
-                                          ring_buf_alloc_bytes_, NULL);
-  return (err == HSA_STATUS_SUCCESS ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+
+  if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+    // DRM path - only when DRM actually created the queue
+    auto queueIn = CreateModifyQueueParams();
+    queueIn.hqd_queue_priority = DrmDriver::MapHsaPriorityToHqd(static_cast<HSA_QUEUE_PRIORITY>(priority));
+    if (static_cast<DrmDriver&>(agent_->driver()).ModifyQueue(&queueIn) != HSA_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // KFD path (or DRM mode with KFD-created queue fallback)
+  auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_,
+                         ring_buf_, ring_buf_alloc_bytes_, NULL);
+  return (err == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS :
+          HSA_STATUS_ERROR_OUT_OF_RESOURCES);
 }
 
 void AqlQueue::CheckScratchLimits() {
@@ -1557,8 +1672,18 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
       }
     }
 
-    return agent_->driver().SetQueueCUMask(queue_id_, mask.size() * 32,
-                                           reinterpret_cast<HSAuint32*>(&mask[0]));
+    if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+      // DRM path - only when DRM actually created the queue
+      auto queueIn = CreateModifyQueueParams();
+      queueIn.cu_mask = &mask[0];
+      queueIn.cu_mask_count = mask.size() * 32;
+      if (static_cast<DrmDriver&>(agent_->driver()).ModifyQueue(&queueIn) != HSA_STATUS_SUCCESS) {
+        return HSA_STATUS_ERROR;
+      }
+    } else {
+      return agent_->driver().SetQueueCUMask(queue_id_, mask.size() * 32,
+                                    reinterpret_cast<HSAuint32*>(&mask[0]));
+    }
   }
 
   // update current cu masking tracking.

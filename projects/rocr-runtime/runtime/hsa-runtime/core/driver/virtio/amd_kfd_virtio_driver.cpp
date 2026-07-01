@@ -275,8 +275,11 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
   if (m_region.IsLocalMemory() && !kmt_alloc_flags.ui32.NoAddress) {
     bool subAllocEnabled = !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
     // Avoid modifying executable or queue allocations.
+    // Allow AllocateCodeObject flag since it's only used for tracking in allocation_map_
+    // and doesn't require bypassing the fragment allocator.
     bool useSubAlloc = subAllocEnabled;
-    useSubAlloc &= ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
+    useSubAlloc &= ((alloc_flags & (~(core::MemoryRegion::AllocateRestrict |
+                                      core::MemoryRegion::AllocateCodeObject))) == 0);
 
     if (useSubAlloc) {
       mem = m_region.fragment_alloc(size);

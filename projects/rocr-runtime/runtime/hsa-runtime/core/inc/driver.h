@@ -62,6 +62,9 @@ enum class DriverQuery { GET_DRIVER_VERSION };
 enum class DriverType {
   XDNA = 0,
   KFD,
+#ifdef __linux__
+  DRM,
+#endif
 #ifdef HSAKMT_VIRTIO_ENABLED
   KFD_VIRTIO,
 #endif
@@ -106,6 +109,10 @@ class Driver {
 public:
   Driver(DriverType kernel_driver_type, std::string devnode_name);
   virtual ~Driver() = default;
+
+  /// @brief Release per-agent driver resources (e.g. DRM doorbell memory).
+  /// Default no-op; overridden by drivers (DrmDriver) that hold such state.
+  virtual void ReleaseResources(core::Agent& agent) {}
 
   /// @brief Initialize the driver's state after opening.
   virtual hsa_status_t Init() = 0;

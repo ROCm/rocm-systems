@@ -600,7 +600,9 @@ class Runtime {
 
   static bool IsGPUDriver(DriverType driver_type) {
     return driver_type == core::DriverType::KFD
-
+#ifdef __linux__
+        || driver_type == core::DriverType::DRM
+#endif
 #if defined(HSAKMT_VIRTIO_ENABLED) && defined(__linux__)
         || driver_type == core::DriverType::KFD_VIRTIO
 #endif
