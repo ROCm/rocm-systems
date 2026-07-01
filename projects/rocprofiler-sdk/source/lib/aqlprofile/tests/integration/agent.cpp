@@ -53,7 +53,7 @@ AgentInfo::add_event(aqlprofile_pmc_event_t block,
 }
 
 hsa_status_t
-AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void*  /*userdata*/)
+AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void* /*userdata*/)
 {
     hsa_device_type_t type;
 
@@ -191,7 +191,7 @@ AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void*  /*userdata*/)
 }
 
 hsa_status_t
-FindGlobalPool(hsa_amd_memory_pool_t pool, void*  /*data*/)
+FindGlobalPool(hsa_amd_memory_pool_t pool, void* /*data*/)
 {
     hsa_amd_segment_t segment;
     CHECK_HSA(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment));

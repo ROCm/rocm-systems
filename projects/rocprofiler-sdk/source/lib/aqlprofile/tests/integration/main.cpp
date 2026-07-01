@@ -95,7 +95,7 @@ public:
     {
         col = std::make_unique<Collection>(agent, counters);
     }
-    ~HIPWorkload() override= default;
+    ~HIPWorkload() override         = default;
     virtual std::string_view name() = 0;
 
     std::map<std::string, int64_t> collect(Queue& queue)
