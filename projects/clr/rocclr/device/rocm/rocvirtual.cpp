@@ -3380,42 +3380,33 @@ void VirtualGPU::SchedulePinnedMemoryRelease(amd::HostQueue& queue,
     return;
   }
 
-  std::unique_ptr<std::vector<amd::Memory*>> callback_data(
-      new (std::nothrow) std::vector<amd::Memory*>(std::move(pinned_memory)));
-  if (callback_data == nullptr) {
-    releaseGpuMemoryFence();
-    for (amd::Memory* pinned_memory_ref : pinned_memory) {
-      pinned_memory_ref->release();
-    }
-    return;
-  }
+  std::unique_ptr<std::vector<amd::Memory*>> pinned_memory_ptr =
+      std::make_unique<std::vector<amd::Memory*>>(std::move(pinned_memory));
 
   amd::Command* marker = new amd::Marker(queue, false);
   if (marker == nullptr) {
-    LogWarning("Failed to enqueue pinned memory release marker; releasing after GPU wait.");
     releaseGpuMemoryFence();
-    for (amd::Memory* pinned_memory_ref : *callback_data) {
-      pinned_memory_ref->release();
+    for (amd::Memory* pinned : *pinned_memory_ptr) {
+      pinned->release();
     }
     return;
   }
 
   marker->setCommandEntryScope(amd::Device::kCacheStateIgnore);
   constexpr bool kNonBlockingCallback = false;
-  if (!marker->setCallback(CL_COMPLETE, ReleasePinnedMemoryCallback, callback_data.get(),
+  if (!marker->setCallback(CL_COMPLETE, ReleasePinnedMemoryCallback, pinned_memory_ptr.get(),
                            kNonBlockingCallback)) {
     marker->release();
-    LogWarning("Failed to enqueue pinned memory release marker; releasing after GPU wait.");
     releaseGpuMemoryFence();
-    for (amd::Memory* pinned_memory_ref : *callback_data) {
-      pinned_memory_ref->release();
+    for (amd::Memory* pinned : *pinned_memory_ptr) {
+      pinned->release();
     }
     return;
   }
 
   marker->enqueue();
   marker->release();
-  callback_data.release();
+  pinned_memory_ptr.release();
 }
 
 // ================================================================================================

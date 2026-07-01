@@ -3041,7 +3041,6 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
       if ((staging_batch_size + max_staging_size) > StagingXferSize) {
         if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
-          staging_batch_size = 0;
           gpu().releaseGpuMemoryFence();
           gpu().command()->ReleasePinnedMemory();
           return false;

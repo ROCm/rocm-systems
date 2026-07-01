@@ -1300,7 +1300,6 @@ class BatchWriteMemoryCommand : public Command {
     return pinned_memory;
   }
 
-  //! Return the vector of write operations
   const std::vector<BatchWriteMemoryOp>& WriteOps() const { return write_ops_; }
 
  private:
@@ -1339,7 +1338,6 @@ class BatchReadMemoryCommand : public Command {
     return pinned_memory;
   }
 
-  //! Return the vector of read operations
   const std::vector<BatchReadMemoryOp>& ReadOps() const { return read_ops_; }
 
  private:
