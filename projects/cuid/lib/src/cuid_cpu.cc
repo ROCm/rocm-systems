@@ -406,48 +406,47 @@ CuidCpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
 
 amdcuid_status_t CuidCpu::get_primary_cuid(amdcuid_primary_id &id) const {
   bool temp = false;
-  if (geteuid() != 0) {
-    temp = true;
-  }
+  uint64_t fingerprint = 0;
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
 
-  // Attempt to read the CUID from the file first
-  std::string cuid_file_path = CuidUtilities::priv_cuid_file();
-  CuidFile primary_file(cuid_file_path, false);
-  primary_file.load();
-  std::vector<CuidFileEntry> entries = primary_file.get_entries();
+  if (geteuid() == 0) {
+    // Attempt to read the CUID from the file first
+    std::string cuid_file_path = CuidUtilities::priv_cuid_file();
+    CuidFile primary_file(cuid_file_path, false);
+    primary_file.load();
+    std::vector<CuidFileEntry> entries = primary_file.get_entries();
 
-  CuidFileEntry entry;
+    CuidFileEntry entry;
 
-  // First, try lookup by device_node which is unique per logical CPU
-  // (package_core_id is not unique on SMT systems where sibling threads
-  // share the same physical_id:core_id)
-  if (!m_info.device_node.empty()) {
-    amdcuid_status_t status =
-        primary_file.find_by_device_node(m_info.device_node, entry);
-    if (status == AMDCUID_STATUS_SUCCESS) {
+    // First, try lookup by device_node which is unique per logical CPU
+    // (package_core_id is not unique on SMT systems where sibling threads
+    // share the same physical_id:core_id)
+    if (!m_info.device_node.empty()) {
+      status = primary_file.find_by_device_node(m_info.device_node, entry);
+      if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
+        id.UUIDv8_representation = entry.primary_cuid;
+        CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation,
+                                          id.raw_bits);
+        return AMDCUID_STATUS_SUCCESS;
+      }
+    }
+
+    // Fallback: try lookup by package_core_id for backward compatibility
+    // with files that don't have device_node for CPU entries
+    std::string package_core_id =
+        std::to_string(m_info.header.fields.cpu.physical_id) + ":" +
+        std::to_string(m_info.header.fields.cpu.core);
+    status = primary_file.find_by_package_core_id(package_core_id, entry);
+    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
       id.UUIDv8_representation = entry.primary_cuid;
       CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
       return AMDCUID_STATUS_SUCCESS;
     }
-  }
 
-  // Fallback: try lookup by package_core_id for backward compatibility
-  // with files that don't have device_node for CPU entries
-  std::string package_core_id =
-      std::to_string(m_info.header.fields.cpu.physical_id) + ":" +
-      std::to_string(m_info.header.fields.cpu.core);
-  amdcuid_status_t status =
-      primary_file.find_by_package_core_id(package_core_id, entry);
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    id.UUIDv8_representation = entry.primary_cuid;
-    CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-    return AMDCUID_STATUS_SUCCESS;
+    // Get hardware fingerprint (PPIN, ACPI UID, or fallback)
+    status = get_hardware_fingerprint(fingerprint);
   }
-
-  // Get hardware fingerprint (PPIN, ACPI UID, or fallback)
-  uint64_t fingerprint = 0;
-  status = get_hardware_fingerprint(fingerprint);
-  if (status != AMDCUID_STATUS_SUCCESS) {
+  if (geteuid() != 0 || status != AMDCUID_STATUS_SUCCESS) {
     // if hardware fingerprint is not available, use physical_id + core +
     // machine_id as fallback, but set a flag bit to indicate it's not a true
     // hardware fingerprint

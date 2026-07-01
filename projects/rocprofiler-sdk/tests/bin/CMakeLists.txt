@@ -5,9 +5,16 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(rocprofiler-sdk-tests-bin LANGUAGES C CXX)
 
-set(CMAKE_BUILD_RPATH
-    "\$ORIGIN:\$ORIGIN/../lib:$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>"
-    )
+# The roctx shared-library target is not always available when configuring the tests
+# standalone against an installed SDK (e.g. TheRock package builds), so only add its
+# directory to the build RPATH when the target exists.
+if(TARGET rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library)
+    set(CMAKE_BUILD_RPATH
+        "\$ORIGIN:\$ORIGIN/../lib:$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>"
+        )
+else()
+    set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
+endif()
 
 # Find rocdecode and rocjpeg packages for testing
 find_package(rocdecode)

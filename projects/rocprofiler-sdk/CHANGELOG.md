@@ -6,6 +6,31 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+**API:**
+
+  - Streaming Performance Monitor (SPM) counter collection support (beta):
+    - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
+    - GPU-timestamped counter values alongside kernel dispatch information.
+  - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
+
+**rocprofv3 (CLI):**
+
+  - SPM counter collection support in `rocprofv3` (beta):
+    - `--spm <counter>` flag to specify counters for SPM collection.
+    - `--spm-sample-interval` and `--spm-sample-interval-unit` parameters to configure sampling rate.
+    - `--spm-beta-enabled` flag to opt in to the beta SPM feature.
+    - `--spm-config` option in `rocprofv3-avail` to list available SPM configurations.
+  - JSON and rocpd output format support for SPM.
+  - OpenMP (OMPT) tracing via the new `--ompt-trace` flag:
+    - Accepts a bare boolean or category list (`all, thread, parallel, task, sync, mutex, target, device, error`); also folded into `--sys-trace`/`--runtime-trace`.
+    - rocpd-only trace: records go to the rocpd database (auto-added when another format is requested) and export via `rocpd convert`.
+
+**Documentation:**
+
+  - SPM API reference guide (`api-reference/spm.rst`).
+  - SPM usage guide for `rocprofv3` (`how-to/using-spm.rst`).
+  - `--spm-config` documentation to `rocprofv3-avail` usage guide.
+
 ### Changed
 - Bump rocpd schema to version 3.0.1 which supports NIC agent types.
 

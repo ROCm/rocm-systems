@@ -285,7 +285,7 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
                     ev.me_id = static_cast<uint8_t>(r.me);
                     ev.pipe_id = static_cast<uint8_t>(r.pipe);
                     ev.flags = ROCPROF_TRACE_DECODER_EVENT_FLAGS_NONE;
-                    ev.payload = 0;
+                    ev.payload.raw = 0;
                     ev.byte_offset = static_cast<uint64_t>(tok.offset) + header_skip;
                     auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &ev, 1, userdata);
                     if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status;
@@ -375,7 +375,7 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
             ev.pipe_id = static_cast<uint8_t>(event.pipe);
             ev.flags = ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE;
             if (event.bop) ev.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP;
-            ev.payload = 0;
+            ev.payload.raw = 0;
             ev.byte_offset = static_cast<uint64_t>(tok.offset);
             auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &ev, 1, userdata);
             if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status;
@@ -425,6 +425,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     {
         uint64_t header_word = load_header_word(data);
         gfxip = extract_gfxip(header_word);
+        if (gfxip > 9) local.tt_version = mi400::header_type{.raw = header_word}.version;
 
         auto decoder = HandleData::get_write_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -603,10 +604,18 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     size_t ntokens = 0;
+    const uint64_t header_offset = (gfxip == 9 && chunk_index == 0) ? sizeof(uint64_t) : 0;
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
     if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
     if (gfxip == 1250) scanner = &quick_scan::scan_mi400;
+
+    if (header_offset != 0)
+    {
+        buf += header_offset;
+        offset_end -= header_offset;
+        offset_begin = (offset_begin > header_offset) ? offset_begin - header_offset : 0;
+    }
 
     ntokens = scanner(buf, offset_begin, raw.data(), raw.size());
     while (ntokens == raw.size())
@@ -619,7 +628,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 #endif
 
     if (gfxip == 9)
-        process_events_gfx9<false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
+        process_events_gfx9<false>(temp, raw, static_cast<int>(ntokens), header_offset, nullptr, nullptr);
     else if (gfxip != 0)
         process_events_gfx12<false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
 

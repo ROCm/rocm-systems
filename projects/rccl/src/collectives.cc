@@ -259,7 +259,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     case RCCL_AG_HIERARCHICAL:
     return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
     case RCCL_AG_DIRECT:
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
+    INFO(NCCL_TUNING, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
       sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
     // Use direct allgather (only when not in a group; in-group use Ring so
     // ncclGroupSimulateEnd gets estimatedTime).
@@ -587,7 +587,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   }
 
   if (!symEligible && rcclUseReduceScatterDirect(comm, msgSize)) {
-    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
+    INFO(NCCL_TUNING, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
       recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
 
     // Temporary Buffer to store data from each rank

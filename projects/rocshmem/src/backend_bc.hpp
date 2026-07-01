@@ -320,14 +320,30 @@ class Backend {
   BackendType type;
 
   /**
-   * @brief Dumps derived class statistics.
+   * @brief Copies per-context device-side stats from the hipMalloc ctx_array
+   *        into globalStats via hipMemcpy, so that dump_stats() can read them
+   *        from the host.  Default implementation is a no-op for backends that
+   *        do not have a device ctx_array.
    */
-  virtual void dump_backend_stats() = 0;
+  virtual void accumulate_ctx_device_stats() {}
 
   /**
-   * @brief Resets derived class statistics.
+   * @brief Accumulates the default host context's ctxHostStats into
+   *        globalHostStats.  The default host context is not in list_of_ctxs
+   *        (to avoid a double-free with its owning unique_ptr), so it must be
+   *        handled separately.  Default is a no-op.
    */
-  virtual void reset_backend_stats() = 0;
+  virtual void accumulate_default_host_ctx_stats() {}
+
+  /**
+   * @brief Dumps derived class statistics. Default is a no-op.
+   */
+  virtual void dump_backend_stats() {}
+
+  /**
+   * @brief Resets derived class statistics. Default is a no-op.
+   */
+  virtual void reset_backend_stats() {}
 
  private:
   /**

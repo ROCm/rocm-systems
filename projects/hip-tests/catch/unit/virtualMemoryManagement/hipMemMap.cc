@@ -844,9 +844,9 @@ HIP_TEST_CASE(Unit_hipMemMap_Positive_APU_LargeAllocSpill) {
   HIP_CHECK(hipMemAddressReserve(&va, size, 0, nullptr, 0));
   REQUIRE(va != nullptr);
 
-  hipMemGenericAllocationHandle_t handle = nullptr;
+  hipMemGenericAllocationHandle_t handle{};
   HIP_CHECK(hipMemCreate(&handle, size, &aprop, 0));
-  REQUIRE(handle != nullptr);
+  REQUIRE(handle != hipMemGenericAllocationHandle_t{});
 
   HIP_CHECK(hipMemMap(va, size, 0, handle, 0));
 
@@ -912,7 +912,7 @@ HIP_TEST_CASE(Unit_hipMemMap_Retrieve_AllocationHandle) {
   HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0));
 
   // Confirm hipMemRetainAllocationHandle retrieves correct base handle
-  hipMemGenericAllocationHandle_t retrieved = nullptr;
+  hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
   HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr));
   REQUIRE(retrieved == handle);
   HIP_CHECK(hipMemRelease(retrieved));
@@ -963,7 +963,7 @@ HIP_TEST_CASE(Unit_hipMemMap_Retrieve_MultiAllocationHandle) {
 
   // Every alias must resolve sub_obj -> phys -> ga back to handle.
   for (int i = 0; i < num_buf; ++i) {
-    hipMemGenericAllocationHandle_t retrieved = nullptr;
+    hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
     HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptrs[i]));
     REQUIRE(retrieved == handle);
     HIP_CHECK(hipMemRelease(retrieved));
@@ -1012,7 +1012,7 @@ HIP_TEST_CASE(Unit_hipMemMap_CheckAddMemObj) {
   HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0));
 
   // Before map: retainAllocationHandle must fail.
-  hipMemGenericAllocationHandle_t retrieved = nullptr;
+  hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
   REQUIRE(hipMemRetainAllocationHandle(&retrieved, ptr) == hipErrorInvalidValue);
 
   HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0));
@@ -1091,7 +1091,7 @@ HIP_TEST_CASE(Unit_hipMemMap_RoundTrip) {
 
   // Bookkeeping cross-link must be wired by the direct path (lean on the
   // dedicated bookkeeping tests for finer-grained assertions).
-  hipMemGenericAllocationHandle_t retrieved = nullptr;
+  hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
   HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr));
   REQUIRE(retrieved == handle);
   HIP_CHECK(hipMemRelease(retrieved));

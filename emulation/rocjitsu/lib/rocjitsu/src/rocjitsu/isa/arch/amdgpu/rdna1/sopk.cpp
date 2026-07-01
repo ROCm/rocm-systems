@@ -409,8 +409,8 @@ SWaitcntVscntSopk::SWaitcntVscntSopk(const MachineInst *inst)
 }
 
 void SWaitcntVscntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_target_vscnt(static_cast<uint8_t>(cnt));
 }
 
 SWaitcntVmcntSopk::SWaitcntVmcntSopk(const MachineInst *inst)
@@ -426,8 +426,8 @@ SWaitcntVmcntSopk::SWaitcntVmcntSopk(const MachineInst *inst)
 }
 
 void SWaitcntVmcntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_target_loadcnt(static_cast<uint8_t>(cnt));
 }
 
 SWaitcntExpcntSopk::SWaitcntExpcntSopk(const MachineInst *inst)
@@ -443,8 +443,8 @@ SWaitcntExpcntSopk::SWaitcntExpcntSopk(const MachineInst *inst)
 }
 
 void SWaitcntExpcntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_expcnt", cnt);
 }
 
 SWaitcntLgkmcntSopk::SWaitcntLgkmcntSopk(const MachineInst *inst)
@@ -460,8 +460,9 @@ SWaitcntLgkmcntSopk::SWaitcntLgkmcntSopk(const MachineInst *inst)
 }
 
 void SWaitcntLgkmcntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  const auto current_wait = wf.wait_target();
+  wf.set_wait_target(current_wait.vmcnt, static_cast<uint8_t>(cnt), current_wait.expcnt);
 }
 
 SSubvectorLoopBeginSopk::SSubvectorLoopBeginSopk(const MachineInst *inst)

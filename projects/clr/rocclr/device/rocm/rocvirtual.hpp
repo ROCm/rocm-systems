@@ -28,6 +28,9 @@ class Memory;
 struct ProfilingSignal;
 class Timestamp;
 
+//! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
+bool InAsyncSignalHandler();
+
 // Initial HSA signal value
 constexpr static hsa_signal_value_t kInitSignalValueOne = 1;
 
@@ -392,6 +395,35 @@ class VirtualGPU : public device::VirtualDevice {
         dyn_data_prefetch_enabled_ = false;
       }
 
+      //! Whether the preloader has a metadata queue attached
+      bool HasMetadataQueue() const { return IsAttached(); }
+
+      //! Returns the metadata ring buffer base (nullptr if not attached)
+      void* GetQueueBase() const { return queue_base_; }
+
+      //! Capture a metadata packet into a host buffer (for graph capture).
+      //! Fills the 256-byte buffer with the same content that Set() would write
+      //! to the queue metadata ring, but targets an arbitrary host pointer instead.
+      template <class AqlPacket>
+      void CaptureMetadata(AqlPacket* packet, uint16_t header, uint8_t* host_metadata) {
+        if (host_metadata == nullptr || !IsAttached()) {
+          return;
+        }
+        if constexpr (std::is_same_v<AqlPacket, hsa_kernel_dispatch_packet_t>) {
+          if (pending_descriptor_ == nullptr) {
+            return;
+          }
+          auto* metadata = reinterpret_cast<hsa_amd_metadata_kernel_dispatch_packet_t*>(
+              host_metadata);
+          SetPacket(packet, header, metadata);
+        } else if constexpr (std::is_same_v<AqlPacket, hsa_barrier_and_packet_t> ||
+                             std::is_same_v<AqlPacket, hsa_amd_barrier_value_packet_t>) {
+          auto* metadata = reinterpret_cast<hsa_amd_metadata_barrier_packet_t*>(
+              host_metadata);
+          SetPacket(packet, header, metadata);
+        }
+      }
+
     private:
       //! Return whether the loader is attached to a gpu queue
       bool IsAttached() const { return queue_base_ != nullptr; }
@@ -497,7 +529,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) {}
   void submitThreadTrace(amd::ThreadTraceCommand& vcmd) {}
 
-  virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {}
+  virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) override;
 
   virtual address allocKernelArguments(size_t size, size_t alignment) final;
   virtual void ReleaseSdmaEngines() final;  //!< Release SDMA engine assignments
@@ -636,7 +668,8 @@ class VirtualGPU : public device::VirtualDevice {
                                   bool attach_signal = false,
                                   const std::vector<const std::string*>* kernelNames = nullptr,
                                   bool pre_patched = false,
-                                  bool blocking = false) override;
+                                  bool blocking = false,
+                                  const std::vector<uint8_t>* flatMetadataData = nullptr) override;
 
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
@@ -753,6 +786,23 @@ class VirtualGPU : public device::VirtualDevice {
   //! one and retaining the new one. No-op if cmd or hw_event is null.
   static void AttachHwEvent(amd::Command* cmd, void* hw_event);
 
+  //! Spin-wait until queue has space for a packet at \p write_index.
+  //! Uses cached_read_dispatch_id_ to avoid DRAM traffic on the fast path;
+  //! only re-reads the hardware read_dispatch_id when the cached value
+  //! indicates the queue might be full.
+  void WaitForQueueSlot(uint64_t write_index, uint32_t capacity) {
+    if ((write_index - cached_read_dispatch_id_) < capacity) {
+      return;
+    }
+    do {
+      cached_read_dispatch_id_ = Hsa::queue_load_read_index_scacquire(gpu_queue_);
+      if ((write_index - cached_read_dispatch_id_) < capacity) {
+        return;
+      }
+      amd::Os::yield();
+    } while (true);
+  }
+
   //! Queue state flags
   union {
     struct {
@@ -780,6 +830,10 @@ class VirtualGPU : public device::VirtualDevice {
   hsa_barrier_and_packet_t barrier_packet_ {};
   hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
+  uint64_t cached_read_dispatch_id_ = 0;  //!< Cached read_dispatch_id to avoid DRAM reads
+                                          //!< when queue is not full. GPU updates to
+                                          //!< amd_queue_t.read_dispatch_id probe-invalidate
+                                          //!< CPU caches; this local copy stays in L1/L2.
   uint32_t skippedDispatches_;  //!< Count of consecutive dispatches that skipped the doorbell flush.
   uint32_t dispatch_id_;  //!< This variable must be updated atomically.
   Device& roc_device_;    //!< roc device object

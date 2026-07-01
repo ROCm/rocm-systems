@@ -72,6 +72,8 @@
 #include "library_info_tester.hpp"
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
+#include "tile_broadcast_tester.hpp"
+#include "tile_allgather_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
@@ -382,6 +384,66 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case HostAmoSelfTestType:
       test_name = "Host_Amo_Self";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoAddTestType:
+      test_name = "Host_Amo_Add";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilTestType:
+      test_name = "Host_Wait_Until";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostTestTestType:
+      test_name = "Host_Test";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllTestType:
+      test_name = "Host_Wait_Until_All";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyTestType:
+      test_name = "Host_Wait_Until_Any";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeTestType:
+      test_name = "Host_Wait_Until_Some";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllVectorTestType:
+      test_name = "Host_Wait_Until_All_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyVectorTestType:
+      test_name = "Host_Wait_Until_Any_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeVectorTestType:
+      test_name = "Host_Wait_Until_Some_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllStatusTestType:
+      test_name = "Host_Wait_Until_All_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyStatusTestType:
+      test_name = "Host_Wait_Until_Any_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeStatusTestType:
+      test_name = "Host_Wait_Until_Some_Status";
       if (BackendType::IPC_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
@@ -774,6 +836,30 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Team Split 2D";
       testers.push_back(new TeamSplit2DTester(args));
       break;
+    case TileBroadcastTestType:
+      test_name = "Tile Broadcast";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileBroadcastWaveTestType:
+      test_name = "Tile Broadcast Wave-Collective";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileBroadcastWGTestType:
+      test_name = "Tile Broadcast Workgroup-Collective";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileAllgatherTestType:
+      test_name = "Tile Allgather";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
+    case TileAllgatherWaveTestType:
+      test_name = "Tile Allgather Wave-Collective";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
+    case TileAllgatherWGTestType:
+      test_name = "Tile Allgather Workgroup-Collective";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
     default:
       test_name = "Empty";
       break;
@@ -929,6 +1015,12 @@ bool Tester::peLaunchesKernel() {
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:
     case FenceOrderPutWaveNbiChunksTestType:
+    case TileBroadcastTestType:
+    case TileBroadcastWaveTestType:
+    case TileBroadcastWGTestType:
+    case TileAllgatherTestType:
+    case TileAllgatherWaveTestType:
+    case TileAllgatherWGTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:
@@ -941,6 +1033,17 @@ bool Tester::peLaunchesKernel() {
     case HostIntAmoFCswapTestType:
     case HostAmoAllPesTestType:
     case HostAmoSelfTestType:
+    case HostWaitUntilTestType:
+    case HostTestTestType:
+    case HostWaitUntilAllTestType:
+    case HostWaitUntilAnyTestType:
+    case HostWaitUntilSomeTestType:
+    case HostWaitUntilAllVectorTestType:
+    case HostWaitUntilAnyVectorTestType:
+    case HostWaitUntilSomeVectorTestType:
+    case HostWaitUntilAllStatusTestType:
+    case HostWaitUntilAnyStatusTestType:
+    case HostWaitUntilSomeStatusTestType:
       is_launcher = true;
       break;
     default:
