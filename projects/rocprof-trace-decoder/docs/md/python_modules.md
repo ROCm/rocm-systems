@@ -71,8 +71,9 @@ LLVM disassembly backend. Builds without that backend raise `DecoderError` with
 `DecoderStatus.ERROR_NOT_IMPLEMENTED` when code objects are loaded or parsed
 without a custom ISA provider.
 
-The package also defines `__version__`. The version currently matches the
-project version used by the Python packaging metadata.
+The package also defines `__version__`. The value is stored in `_version.py`,
+and the Python packaging metadata reads the same value through
+`tool.setuptools.dynamic`, so wheel builds and runtime imports use one source.
 
 ## `rocprof_trace_decoder.records`
 

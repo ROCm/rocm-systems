@@ -4,8 +4,7 @@ from .code_index import CodeEntry, CodeIndex
 from .codegen import CodeArtifacts, CodeObject, generate_code_artifacts, generate_code_index
 from .records import *
 from .records import __all__ as _record_names
-
-__version__ = "0.2.0"
+from ._version import __version__
 
 __all__ = [
     "__version__",

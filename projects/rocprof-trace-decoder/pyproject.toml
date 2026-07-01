@@ -4,16 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rocprof-trace-decoder"
-version = "0.2.0"
 description = "Python API for rocprof-trace-decoder"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [{ name = "Advanced Micro Devices, Inc." }]
 dependencies = ["pyelftools>=0.31"]
+dynamic = ["version"]
 
 [tool.setuptools]
 package-dir = { "" = "python" }
+
+[tool.setuptools.dynamic]
+version = { attr = "rocprof_trace_decoder._version.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["python"]

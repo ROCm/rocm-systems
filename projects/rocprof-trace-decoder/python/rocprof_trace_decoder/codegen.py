@@ -482,11 +482,17 @@ def parse_disassembly(elf_path: str) -> list[tuple[int, str]]:
     """Return [(vaddr, instruction_text)] from llvm-objdump output."""
     proc = subprocess.run(
         [llvm_objdump(), "-d", "--no-show-raw-insn", elf_path],
-        check=True,
         capture_output=True,
         text=True,
         errors="replace",
     )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        message = f"llvm-objdump failed for {elf_path} with exit code {proc.returncode}"
+        if detail:
+            message = f"{message}: {detail}"
+        raise RuntimeError(message)
+
     insts: list[tuple[int, str]] = []
 
     for raw in proc.stdout.splitlines():
@@ -552,6 +558,13 @@ def _normalize_code_objects(code_objects: Iterable[CodeObject]) -> list[CodeObje
 
 
 def generate_code_artifacts(code_objects: Iterable[CodeObject]) -> CodeArtifacts:
+    """Build RCV code metadata and source snapshot inputs from code objects.
+
+    The caller supplies explicit code object ids. This function disassembles
+    each ELF, combines that ISA with DWARF source ranges and symbol labels, and
+    returns an in-memory CodeIndex plus the source paths referenced by the ISA
+    comments.
+    """
     normalized = _normalize_code_objects(code_objects)
     rows: list[list] = []
     comments: list[str] = []
@@ -566,6 +579,9 @@ def generate_code_artifacts(code_objects: Iterable[CodeObject]) -> CodeArtifacts
         kernels, debug_labels = read_symbol_labels(elf_path)
 
         for vaddr, inst in insts:
+            # Kernel and debug labels are emitted as code rows immediately
+            # before the instruction at the same vaddr so branch targets in RCV
+            # can land on the following ISA line.
             kernel = kernels.get(vaddr)
             if kernel is not None:
                 kernel_name, kernel_demangled = kernel

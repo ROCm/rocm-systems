@@ -21,6 +21,25 @@ CODE_ROW_IDLE = 9
 CODE_ROW_COUNTERS = (CODE_ROW_HIT, CODE_ROW_LATENCY, CODE_ROW_STALL, CODE_ROW_IDLE)
 CODE_ROW_WIDTH = CODE_ROW_IDLE + 1
 
+STATS_COL_CODE_OBJECT = "CodeObj"
+STATS_COL_VADDR = "Vaddr"
+STATS_COL_INSTRUCTION = "Instruction"
+STATS_COL_HITCOUNT = "Hitcount"
+STATS_COL_LATENCY = "Latency"
+STATS_COL_STALL = "Stall"
+STATS_COL_IDLE = "Idle"
+STATS_COL_SOURCE = "Source"
+STATS_CSV_HEADER = [
+    STATS_COL_CODE_OBJECT,
+    STATS_COL_VADDR,
+    STATS_COL_INSTRUCTION,
+    STATS_COL_HITCOUNT,
+    STATS_COL_LATENCY,
+    STATS_COL_STALL,
+    STATS_COL_IDLE,
+    STATS_COL_SOURCE,
+]
+
 
 @dataclass
 class CodeEntry:
@@ -97,10 +116,10 @@ class CodeIndex:
                     if not row:
                         continue
                     pc = Pc(
-                        address=int(row["Vaddr"].strip(), 0),
-                        code_object_id=int(row["CodeObj"].strip(), 0),
+                        address=int(row[STATS_COL_VADDR].strip(), 0),
+                        code_object_id=int(row[STATS_COL_CODE_OBJECT].strip(), 0),
                     )
-                    inst = row["Instruction"].strip()
+                    inst = row[STATS_COL_INSTRUCTION].strip()
                     if _is_code_label(inst):
                         continue
 
@@ -110,13 +129,13 @@ class CodeIndex:
                             pc=pc,
                             inst=inst,
                             line_number=len(entries) + 1,
-                            source=row.get("Source", ""),
+                            source=row.get(STATS_COL_SOURCE, ""),
                         ),
                     )
-                    entry.expected_hitcount += _int_cell(row.get("Hitcount"))
-                    entry.expected_latency += _int_cell(row.get("Latency"))
-                    entry.expected_stall += _int_cell(row.get("Stall"))
-                    entry.expected_idle += _int_cell(row.get("Idle"))
+                    entry.expected_hitcount += _int_cell(row.get(STATS_COL_HITCOUNT))
+                    entry.expected_latency += _int_cell(row.get(STATS_COL_LATENCY))
+                    entry.expected_stall += _int_cell(row.get(STATS_COL_STALL))
+                    entry.expected_idle += _int_cell(row.get(STATS_COL_IDLE))
         return cls(entries.values())
 
     def isa_for_pc(self, pc: Pc) -> tuple[str, int] | None:
@@ -165,39 +184,23 @@ class CodeIndex:
         rows = []
         seen: set[Pc] = set()
         for row in self.document.get("code", []):
-            if len(row) < 10 or _is_code_label(str(row[0])):
+            if len(row) < CODE_ROW_WIDTH or _is_code_label(str(row[CODE_ROW_INST])):
                 rows.append(row)
                 continue
-            pc = Pc(address=int(row[5]), code_object_id=int(row[4]))
+            pc = _pc_from_code_row(row)
             seen.add(pc)
             entry = self.entries.get(pc)
             if entry is None:
                 rows.append(row)
                 continue
             updated = list(row)
-            updated[6] = entry.hitcount
-            updated[7] = entry.latency
-            updated[8] = entry.stall
-            updated[9] = entry.idle
+            _set_code_row_counts(updated, entry)
             rows.append(updated)
         for entry in sorted(
             (entry for pc, entry in self.entries.items() if pc not in seen),
             key=lambda e: e.line_number,
         ):
-            rows.append(
-                [
-                    entry.inst,
-                    0,
-                    entry.line_number,
-                    entry.source,
-                    entry.pc.code_object_id,
-                    entry.pc.address,
-                    entry.hitcount,
-                    entry.latency,
-                    entry.stall,
-                    entry.idle,
-                ]
-            )
+            rows.append(_code_row(entry))
         out_doc["code"] = rows
         out_doc.setdefault("header", CODE_HEADER)
         Path(path).write_text(json.dumps(out_doc, indent=2))
@@ -205,25 +208,25 @@ class CodeIndex:
     def write_stats_csv(self, path: str | Path) -> None:
         with Path(path).open("w", newline="") as fh:
             writer = csv.writer(fh)
-            writer.writerow(
-                [
-                    "CodeObj",
-                    "Vaddr",
-                    "Instruction",
-                    "Hitcount",
-                    "Latency",
-                    "Stall",
-                    "Idle",
-                    "Source",
-                ]
-            )
+            writer.writerow(STATS_CSV_HEADER)
             seen: set[Pc] = set()
             for row in self.document.get("code", []):
-                if len(row) < 10:
+                if len(row) < CODE_ROW_WIDTH:
                     continue
-                pc = Pc(address=int(row[5]), code_object_id=int(row[4]))
-                if _is_code_label(str(row[0])):
-                    writer.writerow([pc.code_object_id, pc.address, row[0], 0, 0, 0, 0, row[3]])
+                pc = _pc_from_code_row(row)
+                if _is_code_label(str(row[CODE_ROW_INST])):
+                    writer.writerow(
+                        [
+                            pc.code_object_id,
+                            pc.address,
+                            row[CODE_ROW_INST],
+                            0,
+                            0,
+                            0,
+                            0,
+                            row[CODE_ROW_SOURCE],
+                        ]
+                    )
                     continue
                 entry = self.entries.get(pc)
                 if entry is not None:
@@ -286,6 +289,31 @@ def _int_cell(value: str | None) -> int:
 
 def _is_code_label(inst: str) -> bool:
     return inst.startswith(";") or inst.startswith("label")
+
+
+def _pc_from_code_row(row: list) -> Pc:
+    return Pc(
+        address=int(row[CODE_ROW_VADDR]),
+        code_object_id=int(row[CODE_ROW_CODE_OBJECT]),
+    )
+
+
+def _set_code_row_counts(row: list, entry: CodeEntry) -> None:
+    row[CODE_ROW_HIT] = entry.hitcount
+    row[CODE_ROW_LATENCY] = entry.latency
+    row[CODE_ROW_STALL] = entry.stall
+    row[CODE_ROW_IDLE] = entry.idle
+
+
+def _code_row(entry: CodeEntry) -> list[object]:
+    row: list[object] = [0] * CODE_ROW_WIDTH
+    row[CODE_ROW_INST] = entry.inst
+    row[CODE_ROW_LINE] = entry.line_number
+    row[CODE_ROW_SOURCE] = entry.source
+    row[CODE_ROW_CODE_OBJECT] = entry.pc.code_object_id
+    row[CODE_ROW_VADDR] = entry.pc.address
+    _set_code_row_counts(row, entry)
+    return row
 
 
 def _clear_document_counts(document: dict) -> None:

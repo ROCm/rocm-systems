@@ -451,6 +451,12 @@ class Decoder:
         isa: IsaProvider | None = None,
         on_batch: Callable[[RecordType, list[object] | int], None] | None = None,
     ) -> TraceRecords:
+        """Decode a binary ATT payload into Python records.
+
+        *isa* is called by the native decoder when it needs instruction text
+        for a PC. *on_batch*, when provided, receives each converted native
+        record batch before this method returns the accumulated TraceRecords.
+        """
         self._ensure_open()
 
         raw = bytes(data)
@@ -567,7 +573,15 @@ class Decoder:
 
 
 def _convert_perf(c: _PerfEvent) -> PerfEvent:
-    return PerfEvent(c.time, c.events0, c.events1, c.events2, c.events3, c.CU, c.bank)
+    return PerfEvent(
+        time=int(c.time),
+        events0=int(c.events0),
+        events1=int(c.events1),
+        events2=int(c.events2),
+        events3=int(c.events3),
+        cu=int(c.CU),
+        bank=int(c.bank),
+    )
 
 
 def _convert_occupancy(c: _Occupancy) -> Occupancy:
@@ -603,7 +617,10 @@ def _convert_wave(c: _Wave) -> Wave:
     timeline = []
     if c.timeline_array:
         timeline = [
-            WaveState(int(c.timeline_array[i].type), int(c.timeline_array[i].duration))
+            WaveState(
+                type=int(c.timeline_array[i].type),
+                duration=int(c.timeline_array[i].duration),
+            )
             for i in range(int(c.timeline_size))
         ]
 
@@ -631,15 +648,33 @@ def _convert_wave(c: _Wave) -> Wave:
 
 
 def _convert_realtime(c: _Realtime) -> Realtime:
-    return Realtime(int(c.shader_clock), int(c.realtime_clock), int(c.reserved))
+    return Realtime(
+        shader_clock=int(c.shader_clock),
+        realtime_clock=int(c.realtime_clock),
+        reserved=int(c.reserved),
+    )
 
 
 def _convert_shaderdata(c: _ShaderData) -> ShaderData:
-    return ShaderData(c.time, c.value, c.cu, c.simd, c.wave_id, c.flags, c.reserved)
+    return ShaderData(
+        time=int(c.time),
+        value=int(c.value),
+        cu=int(c.cu),
+        simd=int(c.simd),
+        wave_id=int(c.wave_id),
+        flags=int(c.flags),
+        reserved=int(c.reserved),
+    )
 
 
 def _convert_other_simd(c: _OtherSimdInstruction) -> OtherSimdInstruction:
-    return OtherSimdInstruction(c.size, c.time, c.cycles, c.wgp, c.category)
+    return OtherSimdInstruction(
+        size=int(c.size),
+        time=int(c.time),
+        cycles=int(c.cycles),
+        wgp=int(c.wgp),
+        category=int(c.category),
+    )
 
 
 def _convert_event(c: _Event) -> Event:
@@ -649,7 +684,16 @@ def _convert_event(c: _Event) -> Event:
         cluster_id=int(c.payload.cluster_barrier.cluster_id),
         barrier_id=int(c.payload.cluster_barrier.barrier_id),
     )
-    return Event(c.size, c.time, c.type, c.me_id, c.pipe_id, c.flags, payload, c.byte_offset)
+    return Event(
+        size=int(c.size),
+        time=int(c.time),
+        type=int(c.type),
+        me_id=int(c.me_id),
+        pipe_id=int(c.pipe_id),
+        flags=int(c.flags),
+        payload=payload,
+        byte_offset=int(c.byte_offset),
+    )
 
 
 def _convert_dispatch(c: _Dispatch) -> Dispatch:
