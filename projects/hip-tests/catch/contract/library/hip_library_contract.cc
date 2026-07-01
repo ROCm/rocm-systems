@@ -83,10 +83,11 @@ bool CompileLibrarySource(std::vector<char>& code) {
 
 // Compiles the library source into the caller-owned `code` buffer or skips the
 // test when HIPRTC is unavailable. On a successful return the library is loaded
-// and ready for the per-test contract. The runtime borrows the image pointer and
-// parses it lazily on the first accessor, so `code` must outlive the returned
-// `hipLibrary_t` and all of its accessors; the caller owns `code` and must keep
-// it alive until after hipLibraryUnload.
+// and ready for the per-test contract. hipLibraryLoadData owns a copy of the
+// image once it returns, so `code` does not need to outlive the returned
+// `hipLibrary_t` (see Contract_Library_LoadData_CopiesImageForLaterAccess).
+// Callers keep `code` alive for simplicity, but that is not required for
+// correctness.
 void LoadContractLibrary(std::vector<char>& code, hipLibrary_t& library) {
   if (!CompileLibrarySource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
