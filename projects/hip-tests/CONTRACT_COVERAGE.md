@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 160
+- Contract tests: 166
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 135
-- Approximate declared API-name coverage: 27.3%
+- Declared HIP runtime APIs directly exercised by contract tests: 142
+- Approximate declared API-name coverage: 28.7%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 
 ## Contract domains
@@ -20,6 +20,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `transfer` | 4 |
 | `runtime` | 10 |
 | `device` | 7 |
+| `device_config` | 6 |
 | `stream_event` | 7 |
 | `async_transfer` | 4 |
 | `memset` | 6 |
@@ -60,7 +61,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Occupancy | 3 | 7 | 42.9% |
 | Graph / capture | 32 | 96 | 33.3% |
 | Stream | 5 | 23 | 21.7% |
-| Runtime / device | 21 | 45 | 46.7% |
+| Runtime / device | 28 | 45 | 62.2% |
 | Kernel launch / function attrs | 1 | 13 | 7.7% |
 | Memory / copy / memset | 45 | 137 | 32.8% |
 | Other runtime APIs | 1 | 56 | 1.8% |
@@ -151,6 +152,13 @@ hipDeviceGetPCIBusId
 hipDevicePrimaryCtxRetain
 hipDevicePrimaryCtxGetState
 hipDevicePrimaryCtxRelease
+hipDeviceGetCacheConfig
+hipDeviceSetCacheConfig
+hipDeviceGetSharedMemConfig
+hipDeviceGetLimit
+hipDeviceSetLimit
+hipGetDeviceFlags
+hipDeviceGetStreamPriorityRange
 ```
 
 ### Context / driver
@@ -273,7 +281,7 @@ hipIpcOpenEventHandle
 1. Memory surface beyond current basics: peer copies, advanced VMM operations (multi-device access descriptors, export/import handles, and protection-mode matrices), and remaining advanced memory-pool operations (pool export/import handles and multi-device access descriptors). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, 3D pitched allocation with host-device 3D copies, 3D array allocation with 3D copy-to/from-array, managed allocation with prefetch, default memory pools with stream-ordered allocation, basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access), explicit memory-pool lifecycle (create/destroy, release-threshold, trim, and pool-specific async allocation), and current-device memory-pool access control are now covered.
 2. Texture and surface APIs beyond current basics: texture/surface object create/destroy with resource and texture descriptor round-trips and channel-descriptor queries are now covered; texture reference APIs, mipmapped arrays, and bound/linear texture variants remain.
 3. Module, library, and code-loading APIs.
-4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, and current-context/device queries are now covered; context create/destroy, push/pop/set-current, cache and shared-memory config, and context peer access remain.
+4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; context create/destroy, push/pop/set-current, shared-memory config setter, and context peer access remain.
 5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, and host nodes with param round-trips are now covered; graph update, node find in clone, memory alloc/free nodes, node attributes, debug dot export, and user objects remain.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch and CU-mask stream variants, logging controls, and link-type queries remain.
