@@ -252,3 +252,4 @@ performance:
   Performance_hipPerfMultiStreamKernelLaunch: *level_2
   Performance_hipPerfVMMAllocSpeed_test: *level_2
   Performance_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU: *level_2
+  Performance_Graph_CollapseCorrectness: *level_2

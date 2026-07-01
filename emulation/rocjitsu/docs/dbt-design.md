@@ -67,6 +67,52 @@ relocated fallthrough instruction. The `s_branch` target is computed as
 cave sits next to its kernel body, branch reach is bounded by one kernel instead
 of the entire original `.text`.
 
+### Branch relocation and static PC recovery
+
+Relocation changes instruction offsets, so every explicit control-flow edge is
+fixed up after the compact kernel body and its local cave have final positions.
+Direct PC-relative branches are recorded while emitting the relocated body and
+patched later through the kernel-local source-to-target placement map. The
+translator patches only the immediate field, preserving the already-translated
+target opcode and operands.
+
+Some code generators materialize a static PC-relative target in scalar registers
+and branch through it with `s_setpc_b64` or `s_swappc_b64`. These are indirect
+control-flow instructions in the ISA model, but the target is recoverable when
+the input uses the canonical static builder:
+
+```asm
+s_getpc_b64 s[pc:pc+1]
+s_add_u32  pc, pc, literal
+s_addc_u32 pc+1, pc+1, 0-or-literal
+s_setpc_b64 or s_swappc_b64 s[pc:pc+1]
+```
+
+`BasicBlock::build()` performs this static PC recovery before block splitting.
+Recovered destinations become block leaders before the final `BasicBlock`
+objects are built. Non-returning `s_setpc_b64` targets become ordinary CFG
+successors. Recovered `s_swappc_b64` and direct `s_call_b64` calls are modeled
+separately as `BasicBlock::CallEdge` records when the callee reaches a matching
+`s_setpc_b64` return through the saved return SGPR.
+
+That split is intentional: ordinary successors are context-free direct control
+flow, while call edges carry a callee, a call-site-specific continuation, and the
+return SGPR. Keeping call edges out of the successor list prevents a shared
+helper from gaining every possible return continuation globally; DBT adds the
+temporary call/return edges only inside the kernel scope that owns the call site.
+The source block also stores an `IndirectCallFixup` describing the `s_getpc`,
+the replaceable address-builder byte range, the branch consumer, and the
+recovered source target. DBT only records patterns whose builder range is large
+enough to be replaced in place by the canonical relocated PC-delta builder.
+
+After all reachable blocks have been relocated, `BinaryTranslator` resolves each
+recovered source target through the kernel-local placement map and rewrites the
+old builder range to add the new relocated delta to the original `s_getpc`
+result. Any leftover words in the recorded range are padded with `s_nop`. The
+`s_setpc_b64` / `s_swappc_b64` instruction itself remains in the relocated
+stream. Unrecognized indirect branches still fail closed with a legalization
+diagnostic rather than preserving a stale source PC.
+
 ---
 
 ## Encoding Translator
@@ -180,14 +226,16 @@ For each code object:
 
 1. **Descriptor translate:** Parse kernel descriptors and compute descriptor byte patches plus any kernel-entry prologue words.
 2. **Decode:** Create a `Decoder` for the guest ISA and build basic blocks from the `.text` section.
-3. **Analyze:** Build per-kernel CFG scopes from kernel descriptor entry offsets and compute `LivenessAnalysis` for each scope.
-4. **Per-instruction pass:** For each instruction in each basic block:
+3. **Recover static indirect targets:** During basic-block construction, detect statically-built `s_getpc_b64` targets feeding `s_setpc_b64` / `s_swappc_b64`, add the recovered target as a CFG edge, and retain the address-builder fixup metadata for final relocation.
+4. **Analyze:** Build per-kernel CFG scopes from kernel descriptor entry offsets and compute `LivenessAnalysis` for each scope.
+5. **Per-instruction pass:** For each instruction in each basic block:
    - Call `try_lower_expand(inst, offset, liveness)` — binary search the expand rules table by `(encoding_id, opcode)`. If a rule matches, the `ExpandFn` generates replacement instruction words using the `HazardTracker` for automatic `s_delay_alu` insertion and liveness-based register allocation for temp VGPRs/SGPRs.
    - If no expand rule matched, look up the legalization table. If Identity or Substitute, call the encoding translator. If Expand with no handler, report `ExpandMissing` and leave translation unchanged.
    - If the replacement is larger than the source instruction, create a kernel-local code cave in `.text` with a branch stub and return branch.
-5. **Entry prologues:** `BinaryTranslator` places descriptor-provided prologue words in the kernel-local cave and records the redirected descriptor entry.
-6. **Patch:** Replace `.text`, update ELF flags, and write descriptor byte patches.
-7. **Emit:** Return the modified ELF bytes.
+6. **Fix branches:** Patch direct branch immediates and rewrite recovered indirect PC builders using final relocated offsets.
+7. **Entry prologues:** `BinaryTranslator` places descriptor-provided prologue words in the kernel-local cave and records the redirected descriptor entry.
+8. **Patch:** Replace `.text`, update ELF flags, and write descriptor byte patches.
+9. **Emit:** Return the modified ELF bytes.
 
 **Code cave sizing:** Cave bodies are placed in each kernel's local `.text`
 cave, so branch reach no longer depends on the size of the whole original

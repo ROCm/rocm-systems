@@ -78,9 +78,10 @@
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
  * - 1.26 - hsa_amd_queue_create: batch queue creation with descriptor
+ * - 1.27 - hsa_amd_queue_signal_external_semaphore, hsa_amd_queue_wait_external_semaphore
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 26
+#define HSA_AMD_INTERFACE_VERSION_MINOR 27
 
 #ifdef __cplusplus
 extern "C" {
@@ -3219,12 +3220,8 @@ typedef enum {
  * @brief Imported external semaphore. Opaque; created by
  * hsa_amd_external_semaphore_handle_open and released by
  * hsa_amd_external_semaphore_handle_close. Internally encodes the
- * libhsakmt HSA_EXTERNAL_SEMAPHORE_HANDLE.
- *
- * @note This release adds the import / close half only. The HSA queue
- * signal/wait APIs that consume hsa_amd_external_semaphore_t will land
- * in a separate change; until then the imported handle is only useful
- * as a lifecycle owner.
+ * libhsakmt HSA_EXTERNAL_SEMAPHORE_HANDLE. Consumed by
+ * hsa_amd_queue_signal_external_semaphore / _wait_external_semaphore.
  */
 typedef struct hsa_amd_external_semaphore_s {
   uint64_t handle;
@@ -3246,11 +3243,6 @@ typedef struct {
  * agent's KMD node. The returned semaphore must be released with
  * hsa_amd_external_semaphore_handle_close.
  *
- * @note This release adds the import / close path only. There is no
- * HSA queue signal/wait API in this header that consumes
- * hsa_amd_external_semaphore_t yet; the submission half will land in
- * a separate change.
- *
  * @param[in] agent A GPU agent whose node owns the imported syncobj.
  * @param[in] desc Descriptor naming the OS handle and its type.
  * @param[out] out_sem On success, the imported semaphore.
@@ -3258,8 +3250,10 @@ typedef struct {
  * @retval HSA_STATUS_SUCCESS Imported.
  * @retval HSA_STATUS_ERROR_INVALID_AGENT Agent is not a GPU, or its
  *   KMD node has no associated WDDM device.
- * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null,
- *   the OS handle is null, or the handle type is unsupported.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null, or the
+ *   OS handle is null.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED The handle type is unsupported,
+ *   or libhsakmt lacks the import/destroy thunks (incl. Linux/KFD stub).
  * @retval HSA_STATUS_ERROR Underlying KMD import failed.
  */
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
@@ -3268,13 +3262,80 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
     hsa_amd_external_semaphore_t *out_sem);
 
 /**
- * @brief Releases an imported external semaphore. Until the HSA queue
- * signal/wait API for hsa_amd_external_semaphore_t is added, callers
- * are expected to keep the handle alive only for as long as the
- * higher-level (HIP / rocclr) wrapper that owns the same syncobj.
+ * @brief Releases an imported external semaphore. Keep the handle alive
+ * as long as any queued signal/wait that references it may still be
+ * in flight, and as long as the higher-level (HIP / rocclr) wrapper that
+ * owns the same syncobj.
  */
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem);
+
+/**
+ * @brief Submits a GPU-side signal of an imported external semaphore
+ * onto @p queue, queued behind prior packets on the AQL ring. Windows
+ * routes to D3DKMTSignalSynchronizationObjectFromGpu via libhsakmt;
+ * Linux / KFD is currently a stub (HSA_STATUS_ERROR_NOT_SUPPORTED).
+ *
+ * @param queue Must be an AMD GPU AQL queue. A null, non-GPU, or
+ *   non-AQL queue returns HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL
+ *   queue whose node differs from the one that imported @p sem returns
+ *   HSA_STATUS_ERROR_INVALID_AGENT.
+ * @param sem   Handle from hsa_amd_external_semaphore_handle_open.
+ * @param value Fence value written to the syncobj (passed verbatim).
+ *
+ * @retval HSA_STATUS_SUCCESS                Signal queued.
+ * @retval HSA_STATUS_ERROR_INVALID_QUEUE    Null/invalid/non-GPU queue.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    Queue's node has no WDDM
+ *   device, or its node differs from the one that imported @p sem.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
+ *   (incl. Linux/KFD stub).
+ * @retval HSA_STATUS_ERROR                  KMD signal ioctl failed.
+ */
+hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t                  *queue,
+    hsa_amd_external_semaphore_t  sem,
+    uint64_t                      value);
+
+/**
+ * @brief Submits a GPU-side wait on an imported external semaphore
+ * onto @p queue. The wait blocks any subsequent packets on the AQL
+ * ring until the imported syncobj reaches @p value. Ordering against
+ * prior submissions is the caller's responsibility (rocclr's
+ * host-queue worker submits commands sequentially, so the wait is
+ * appended in program order ahead of subsequent submitKernel /
+ * submitCopyMemory calls).
+ *
+ * Wired to KMD via libhsakmt's hsaKmtQueueWaitExternalSemaphore,
+ * which on Windows resolves to D3DKMTWaitForSynchronizationObjectFromGpu
+ * against the queue's WDDM context. Linux / KFD route is currently a
+ * stub returning HSA_STATUS_ERROR_NOT_SUPPORTED.
+ *
+ * @param queue Must be an AMD GPU AQL queue. Null, HostQueue, and AIE
+ *   queues return HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL queue
+ *   whose node differs from the one that imported @p sem returns
+ *   HSA_STATUS_ERROR_INVALID_AGENT.
+ * @param sem   Handle returned by hsa_amd_external_semaphore_handle_open.
+ * @param value Fence value to wait for. Vulkan binary semaphores
+ *   conventionally use 0 / 1 but the value is passed through verbatim
+ *   so timeline-style callers can pick their own.
+ *
+ * @retval HSA_STATUS_SUCCESS                Wait queued successfully.
+ * @retval HSA_STATUS_ERROR_INVALID_QUEUE    queue is null, invalid, or
+ *   not an AMD GPU AQL queue.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    The queue's KMD node has
+ *   no associated WDDM device, or it differs from the one that
+ *   imported @p sem.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
+ *   (incl. Linux/KFD stub).
+ * @retval HSA_STATUS_ERROR                  Underlying KMD wait
+ *   ioctl failed.
+ */
+hsa_status_t HSA_API hsa_amd_queue_wait_external_semaphore(
+    hsa_queue_t                  *queue,
+    hsa_amd_external_semaphore_t  sem,
+    uint64_t                      value);
 
 /** @} */
 

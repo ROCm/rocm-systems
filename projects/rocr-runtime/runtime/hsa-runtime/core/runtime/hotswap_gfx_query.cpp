@@ -44,6 +44,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <mutex>
 #include <unordered_map>
 
@@ -85,8 +86,26 @@ std::string ExtractGfxTarget(const std::string& isa_name) {
   }
 
   auto end = std::find_if_not(isa_name.begin() + pos, isa_name.end(),
-                              [](unsigned char c) { return std::isalnum(c); });
+                              [](unsigned char c) {
+                                return std::isalnum(c) || c == '-';
+                              });
   return isa_name.substr(pos, end - isa_name.begin() - pos);
+}
+
+bool IsGfx12_5Target(const std::string& gfx_target) {
+  constexpr char kGfx125Prefix[] = "gfx125";
+  constexpr char kGfx12_5Generic[] = "gfx12-5-generic";
+  constexpr size_t kGfx125PrefixLen = sizeof(kGfx125Prefix) - 1;
+  if (gfx_target == kGfx12_5Generic) {
+    return true;
+  }
+  if (gfx_target.size() <= kGfx125PrefixLen ||
+      gfx_target.compare(0, kGfx125PrefixLen, kGfx125Prefix) != 0) {
+    return false;
+  }
+  return std::all_of(gfx_target.begin() + kGfx125PrefixLen,
+                     gfx_target.end(),
+                     [](unsigned char c) { return std::isdigit(c); });
 }
 
 namespace {
