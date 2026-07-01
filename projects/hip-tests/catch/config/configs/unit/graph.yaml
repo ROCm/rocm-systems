@@ -1236,6 +1236,9 @@ graph:
     # https://github.com/ROCm/rocm-systems/issues/7148
     disabled: [amd_windows, amd_wsl]
     tags: [capture]
+  Unit_hipGraphAddHostNode_CallbackSeesUpstreamDtoH:
+    <<: *level_2
+    tags: [node]
   Unit_hipUserObjectCreate_Functional_1:
     <<: *level_2
     tags: [userobj]

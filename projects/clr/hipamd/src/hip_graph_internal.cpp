@@ -2470,9 +2470,31 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         if (status != hipSuccess) return status;
       }
     } else {
-      // Node doesn't support capture - execute individually. Upstream flat batches
-      // hand off via attach_signal (SDMA memcpy) or BuildSyncPlan dep barriers;
-      // no pre/post Markers needed around the uncaptured node.
+      // Node doesn't support capture - execute individually.
+      //
+      // Pre-marker resyncs the Barriers() tracker before the uncaptured node.
+      // The preceding captured batch is flat-dispatched with attach_signal=false,
+      // which leaves ActiveSignal stale (no tracked completion). Dispatched into
+      // that stale state, the node's completion never becomes the tracked signal,
+      // so the graph-end fence (releaseGpuMemoryFence/WaitCurrent) neither waits
+      // for nor flushes its writes. Where the default fence release is
+      // AGENT-scope, an uncaptured DtoH result stays in GPU cache and the CPU
+      // reads stale data (e.g. hipMallocManaged memset + DtoH memcpy).
+      //
+      // This marker only resyncs the tracker; the graph-end fence performs the
+      // system-scope flush for results the CPU reads after the graph completes.
+      // Host nodes are the exception: their callback reads on the CPU mid-graph,
+      // so that flush is done by the host node's own marker (system scope), not
+      // here.
+      auto pre_marker = new amd::Marker(*stream, kMarkerDisableFlush, {});
+      if (pre_marker != nullptr) {
+        // Resync only: dispatch a NOP-scope barrier (no cache flush). Without
+        // this, the default entry scope makes submitMarker() emit a full
+        // cache-flushing barrier on every uncaptured node.
+        pre_marker->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+        pre_marker->enqueue();
+        pre_marker->release();
+      }
       if (DEBUG_HIP_GRAPH_DOT_PRINT) {
         node->stream_id_ = stream->GetStreamId();
         node->hw_queue_id_ = stream->getQueueID();

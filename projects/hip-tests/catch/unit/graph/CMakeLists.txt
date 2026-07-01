@@ -119,6 +119,7 @@ set(TEST_SRC
   hipGraphDestroy.cc
   hipThreadExchangeStreamCaptureMode.cc
   hipLaunchHostFuncWithGraph.cc
+  hipGraphHostNodeCacheVisibility.cc
   hipUserObjectCreate.cc
   hipUserObjectRelease.cc
   hipUserObjectRetain.cc
