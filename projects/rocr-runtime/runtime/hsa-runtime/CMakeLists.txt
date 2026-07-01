@@ -423,6 +423,14 @@ else()
   endif()
 endif()#end BUILD_SHARED_LIBS
 
+## Optional GPU-free unit tests for host-side runtime logic (e.g. the InterceptQueue
+## retry/overflow slot accounting). Off by default so normal library builds are unaffected.
+option(HSA_BUILD_TESTS "Build GPU-free hsa-runtime unit tests" OFF)
+if(HSA_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(core/runtime/test)
+endif()
+
 ## Set the VERSION and SOVERSION values
 set_property ( TARGET ${CORE_RUNTIME_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}" )
 set_property ( TARGET ${CORE_RUNTIME_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}" )

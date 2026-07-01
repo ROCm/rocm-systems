@@ -224,10 +224,6 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   // Post interception packet overflow buffer
   std::vector<AqlPacket> overflow_;
 
-  // Wrapped-queue slot of the last inserted retry barrier. Retained for diagnostics only;
-  // it is no longer part of the "is a retry pending" decision (see IsPendingRetryPoint).
-  uint64_t retry_index_;
-
   // Authoritative "a retry barrier is outstanding" flag: set when one is inserted, cleared
   // by its dedicated retry_doorbell_ completion handler. The wrapped queue read index is not
   // used for this, since it can race a delayed completion handler.

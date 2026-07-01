@@ -1,44 +1,7 @@
-////////////////////////////////////////////////////////////////////////////////
-//
-// The University of Illinois/NCSA
-// Open Source License (NCSA)
-//
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-//
-// Developed by:
-//
-//                 AMD Research and AMD HSA Software Development
-//
-//                 Advanced Micro Devices, Inc.
-//
-//                 www.amd.com
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to
-// deal with the Software without restriction, including without limitation
-// the rights to use, copy, modify, merge, publish, distribute, sublicense,
-// and/or sell copies of the Software, and to permit persons to whom the
-// Software is furnished to do so, subject to the following conditions:
-//
-//  - Redistributions of source code must retain the above copyright notice,
-//    this list of conditions and the following disclaimers.
-//  - Redistributions in binary form must reproduce the above copyright
-//    notice, this list of conditions and the following disclaimers in
-//    the documentation and/or other materials provided with the distribution.
-//  - Neither the names of Advanced Micro Devices, Inc,
-//    nor the names of its contributors may be used to endorse or promote
-//    products derived from this Software without specific prior written
-//    permission.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-// DEALINGS WITH THE SOFTWARE.
-//
-////////////////////////////////////////////////////////////////////////////////
+/*
+Copyright © Advanced Micro Devices, Inc., or its affiliates.
+SPDX-License-Identifier: MIT
+*/
 
 #ifndef HSA_RUNTIME_CORE_INC_INTERCEPT_QUEUE_LOGIC_H_
 #define HSA_RUNTIME_CORE_INC_INTERCEPT_QUEUE_LOGIC_H_
@@ -77,7 +40,12 @@ inline SubmitPlan PlanSubmit(uint64_t write, uint64_t read, uint64_t qsize, uint
     submitted_count = (free_slots > reserve) ? (free_slots - reserve) : 0;
   } else if (free_slots < submitted_count + (pending_retry_point ? 0 : 1)) {
     // Out of space: prefer all-or-nothing, but when draining overflow submit what fits.
+    // The minimum footprint to make progress is a data packet plus a retry barrier (2)
+    // when none is pending, or just a data packet (1) when a retry is already pending
+    // (no new barrier needed). Require strictly more free slots than that footprint so at
+    // least one data packet is actually drained beyond the reserved barrier slot.
     if (overflow_nonempty && free_slots > (pending_retry_point ? 1 : 2)) {
+      // Reserve one slot for the new retry barrier unless a retry is already pending.
       submitted_count = free_slots - (pending_retry_point ? 0 : 1);
     } else {
       submitted_count = 0;

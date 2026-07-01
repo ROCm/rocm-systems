@@ -98,7 +98,6 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       next_packet_(0),
-      retry_index_(0),
       quit_(false),
       active_(true) {
   // retry_outstanding_ defaults to false, so IsPendingRetryPoint() is false before the
@@ -262,8 +261,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       // Mark the retry outstanding BEFORE publishing the packet and ringing the doorbell.
       // The GPU may complete the barrier immediately; HandleRetryDoorbell() must then observe
       // retry_outstanding_ == true so it clears it (otherwise the flag is left stuck true and
-      // overflow_ is stranded). retry_index_ is retained for diagnostics only.
-      retry_index_ = barrier;
+      // overflow_ is stranded).
       retry_outstanding_.store(true, std::memory_order_release);
 
       // Barrier wakes async queue processing; completion signal is the dedicated
