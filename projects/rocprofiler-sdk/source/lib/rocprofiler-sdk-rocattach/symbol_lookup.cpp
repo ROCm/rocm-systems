@@ -22,24 +22,26 @@
 
 #include "symbol_lookup.hpp"
 
-#include "lib/common/dl.hpp"
-#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 
-#include <rocprofiler-sdk/version.h>
-
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 
-#include <dlfcn.h>
-#include <link.h>
+#include <elf.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <unistd.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <exception>
+#include <fstream>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
-
-namespace fs = rocprofiler::common::filesystem;
 
 namespace rocprofiler
 {
@@ -47,220 +49,634 @@ namespace rocattach
 {
 namespace
 {
-constexpr auto                         ROCATTACH_LIBRARY_NAME = "librocprofiler-sdk-rocattach.so";
-std::unordered_map<std::string, void*> m_target_library_addrs = {};
-std::unordered_map<std::string, void*> m_target_symbol_addrs  = {};
-
-auto
-get_this_library_path()
+struct memory_mapping
 {
-    const auto libnames = std::array<std::string, 3>{
-        fmt::format("{}.{}.{}.{}",
-                    ROCATTACH_LIBRARY_NAME,
-                    ROCPROFILER_VERSION_MAJOR,
-                    ROCPROFILER_VERSION_MINOR,
-                    ROCPROFILER_VERSION_PATCH),
-        fmt::format("{}.{}", ROCATTACH_LIBRARY_NAME, ROCPROFILER_SOVERSION),
-        fmt::format("{}", ROCATTACH_LIBRARY_NAME),
-    };
+    uintptr_t   start        = 0;
+    uintptr_t   end          = 0;
+    uint64_t    file_offset  = 0;
+    std::string permissions  = {};
+    uint32_t    device_major = 0;
+    uint32_t    device_minor = 0;
+    uint64_t    inode        = 0;
+    std::string path         = {};
+};
 
-    for(const auto& itr : libnames)
-    {
-        ROCP_INFO << fmt::format("Searching for {} library path", itr);
-        if(auto _this_lib_path =
-               rocprofiler::common::dl::get_linked_path(itr, {RTLD_NOLOAD | RTLD_LAZY});
-           _this_lib_path)
-        {
-            auto _val = fs::path{*_this_lib_path}.parent_path().string();
-            ROCP_INFO << fmt::format("Found {} library path: {}", itr, _val);
-            return _val;
-        }
-    }
+struct mapped_object
+{
+    uint32_t                    device_major = 0;
+    uint32_t                    device_minor = 0;
+    uint64_t                    inode        = 0;
+    std::string                 path         = {};
+    std::vector<memory_mapping> mappings     = {};
+};
 
-    ROCP_FATAL << fmt::format(
-        "{} could not locate itself in the list of loaded libraries. Tried: {}",
-        ROCATTACH_LIBRARY_NAME,
-        fmt::join(libnames, ", "));
-    return std::string{};
+struct target_elf
+{
+    std::string             path          = {};
+    std::vector<uint8_t>    data          = {};
+    std::vector<Elf64_Phdr> load_segments = {};
+};
+
+uint64_t
+align_down(uint64_t value, uint64_t alignment)
+{
+    return value - (value % alignment);
 }
 
-void*
-get_library_handle(std::string_view _lib_name)
+bool
+has_range(size_t file_size, uint64_t offset, uint64_t size)
 {
-    void* _lib_handle = nullptr;
+    return offset <= file_size && size <= file_size - offset;
+}
 
-    if(_lib_name.empty()) return nullptr;
+template <typename Tp>
+std::optional<Tp>
+read_as(const std::vector<uint8_t>& data, uint64_t offset)
+{
+    if(!has_range(data.size(), offset, sizeof(Tp))) return std::nullopt;
 
-    auto _lib_path       = fs::path{_lib_name};
-    auto _lib_path_fname = _lib_path.filename();
-    auto _lib_path_abs =
-        (_lib_path.is_absolute()) ? _lib_path : (fs::path{get_this_library_path()} / _lib_path);
+    auto value = Tp{};
+    std::memcpy(&value, data.data() + offset, sizeof(Tp));
+    return value;
+}
 
-    // check to see if the rocprofiler library is already loaded
-    _lib_handle = dlopen(_lib_path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+std::string
+trim_left(std::string value)
+{
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char ch) {
+                    return !std::isspace(ch);
+                }));
+    return value;
+}
 
-    if(_lib_handle)
+std::string
+strip_deleted_suffix(std::string value)
+{
+    constexpr auto deleted_suffix = std::string_view{" (deleted)"};
+    if(value.size() >= deleted_suffix.size() &&
+       value.compare(value.size() - deleted_suffix.size(), deleted_suffix.size(), deleted_suffix) ==
+           0)
     {
-        LOG(INFO) << "[rocprofiler-sdk-rocattach] loaded " << _lib_name << " library at "
-                  << _lib_path.string() << " (handle=" << _lib_handle
-                  << ") via RTLD_NOLOAD | RTLD_LAZY";
+        value.resize(value.size() - deleted_suffix.size());
+    }
+    return value;
+}
+
+std::string
+basename(std::string path)
+{
+    path     = strip_deleted_suffix(std::move(path));
+    auto pos = path.find_last_of('/');
+    return (pos == std::string::npos) ? path : path.substr(pos + 1);
+}
+
+bool
+library_name_matches(const memory_mapping& mapping, const std::string& library)
+{
+    if(mapping.path.empty()) return false;
+
+    auto clean_path = strip_deleted_suffix(mapping.path);
+    if(clean_path == library) return true;
+
+    auto map_base = basename(clean_path);
+    auto lib_base = basename(library);
+    return map_base == lib_base || map_base.rfind(fmt::format("{}.", lib_base), 0) == 0;
+}
+
+std::optional<memory_mapping>
+parse_maps_line(const std::string& line)
+{
+    auto        iss = std::istringstream{line};
+    std::string range;
+    std::string offset;
+    std::string device;
+    auto        mapping = memory_mapping{};
+
+    if(!(iss >> range >> mapping.permissions >> offset >> device >> mapping.inode))
+    {
+        return std::nullopt;
     }
 
-    // try to load with the given path
-    if(!_lib_handle)
-    {
-        _lib_handle = dlopen(_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    auto dash_pos = range.find('-');
+    auto dev_pos  = device.find(':');
+    if(dash_pos == std::string::npos || dev_pos == std::string::npos) return std::nullopt;
 
-        if(_lib_handle)
+    try
+    {
+        mapping.start = static_cast<uintptr_t>(std::stoull(range.substr(0, dash_pos), nullptr, 16));
+        mapping.end = static_cast<uintptr_t>(std::stoull(range.substr(dash_pos + 1), nullptr, 16));
+        mapping.file_offset = std::stoull(offset, nullptr, 16);
+        mapping.device_major =
+            static_cast<uint32_t>(std::stoul(device.substr(0, dev_pos), nullptr, 16));
+        mapping.device_minor =
+            static_cast<uint32_t>(std::stoul(device.substr(dev_pos + 1), nullptr, 16));
+
+        auto path = std::string{};
+        std::getline(iss, path);
+        mapping.path = trim_left(std::move(path));
+    } catch(const std::exception& e)
+    {
+        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Failed to parse maps line: " << line
+                   << ". error: " << e.what();
+        return std::nullopt;
+    }
+
+    return mapping;
+}
+
+std::vector<memory_mapping>
+parse_maps(pid_t pid)
+{
+    auto filename = fmt::format("/proc/{}/maps", pid);
+    auto maps     = std::ifstream{filename};
+    auto result   = std::vector<memory_mapping>{};
+
+    if(!maps)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't open " << filename;
+        return result;
+    }
+
+    auto line = std::string{};
+    while(std::getline(maps, line))
+    {
+        if(auto mapping = parse_maps_line(line); mapping) result.emplace_back(*mapping);
+    }
+    return result;
+}
+
+std::vector<mapped_object>
+find_mapped_objects(pid_t pid, const std::string& library)
+{
+    auto objects = std::unordered_map<std::string, mapped_object>{};
+
+    for(const auto& mapping : parse_maps(pid))
+    {
+        if(mapping.inode == 0 || !library_name_matches(mapping, library)) continue;
+
+        auto key =
+            fmt::format("{}:{}:{}", mapping.device_major, mapping.device_minor, mapping.inode);
+        auto& object        = objects[key];
+        object.device_major = mapping.device_major;
+        object.device_minor = mapping.device_minor;
+        object.inode        = mapping.inode;
+        if(object.path.empty()) object.path = mapping.path;
+        object.mappings.emplace_back(mapping);
+    }
+
+    auto result = std::vector<mapped_object>{};
+    result.reserve(objects.size());
+    for(auto& itr : objects)
+    {
+        std::sort(itr.second.mappings.begin(),
+                  itr.second.mappings.end(),
+                  [](const auto& lhs, const auto& rhs) { return lhs.start < rhs.start; });
+        result.emplace_back(std::move(itr.second));
+    }
+
+    std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.mappings.front().start < rhs.mappings.front().start;
+    });
+    return result;
+}
+
+std::optional<std::vector<uint8_t>>
+read_file(const std::string& path)
+{
+    auto input = std::ifstream{path, std::ios::binary};
+    if(!input) return std::nullopt;
+
+    input.seekg(0, std::ios::end);
+    auto size = input.tellg();
+    if(size < 0) return std::nullopt;
+    input.seekg(0, std::ios::beg);
+
+    auto data = std::vector<uint8_t>(static_cast<size_t>(size));
+    if(!data.empty()) input.read(reinterpret_cast<char*>(data.data()), size);
+    if(!input && !input.eof()) return std::nullopt;
+    return data;
+}
+
+bool
+stat_matches_mapping(const std::string& path, const mapped_object& object)
+{
+    struct stat st
+    {};
+    if(::stat(path.c_str(), &st) != 0) return false;
+    return major(st.st_dev) == object.device_major && minor(st.st_dev) == object.device_minor &&
+           static_cast<uint64_t>(st.st_ino) == object.inode;
+}
+
+std::optional<target_elf>
+open_target_elf(pid_t pid, const mapped_object& object)
+{
+    for(const auto& mapping : object.mappings)
+    {
+        auto map_files_path = fmt::format("/proc/{}/map_files/{:x}-{:x}",
+                                          pid,
+                                          static_cast<uint64_t>(mapping.start),
+                                          static_cast<uint64_t>(mapping.end));
+        if(stat_matches_mapping(map_files_path, object))
         {
-            LOG(INFO) << "[rocprofiler-sdk-rocattach] loaded " << _lib_name << " library at "
-                      << _lib_path.string() << " (handle=" << _lib_handle
-                      << ") via RTLD_GLOBAL | RTLD_LAZY";
+            if(auto data = read_file(map_files_path); data && !data->empty())
+            {
+                ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via "
+                           << map_files_path;
+                return target_elf{map_files_path, std::move(*data), {}};
+            }
         }
     }
 
-    // try to load with the absolute path
-    if(!_lib_handle)
+    auto target_path = strip_deleted_suffix(object.path);
+    if(!target_path.empty() && target_path.front() == '/')
     {
-        _lib_path   = _lib_path_abs;
-        _lib_handle = dlopen(_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+        auto root_path = fmt::format("/proc/{}/root{}", pid, target_path);
+        if(stat_matches_mapping(root_path, object))
+        {
+            if(auto data = read_file(root_path); data && !data->empty())
+            {
+                ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << root_path;
+                return target_elf{root_path, std::move(*data), {}};
+            }
+        }
+        else
+        {
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Refusing to use " << root_path
+                         << " because its device/inode does not match the mapped object";
+        }
     }
 
-    // try to load with the basename path
-    if(!_lib_handle)
+    ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not open mapped target ELF for " << object.path
+               << " via /proc/" << pid << "/map_files or /proc/" << pid << "/root";
+    return std::nullopt;
+}
+
+bool
+parse_elf_headers(target_elf& elf)
+{
+    auto ehdr = read_as<Elf64_Ehdr>(elf.data, 0);
+    if(!ehdr)
     {
-        _lib_path   = _lib_path_fname;
-        _lib_handle = dlopen(_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Target ELF is too small: " << elf.path;
+        return false;
     }
 
-    LOG(INFO) << "[rocprofiler-sdk-rocattach] loaded " << _lib_name << " library at "
-              << _lib_path.string() << " (handle=" << _lib_handle << ")";
+    if(std::memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0 || ehdr->e_ident[EI_CLASS] != ELFCLASS64 ||
+       ehdr->e_ident[EI_DATA] != ELFDATA2LSB || ehdr->e_machine != EM_X86_64 ||
+       ehdr->e_phentsize != sizeof(Elf64_Phdr))
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Unsupported target ELF format: " << elf.path;
+        return false;
+    }
 
-    LOG_IF(WARNING, _lib_handle == nullptr) << _lib_name << " failed to load\n";
+    if(ehdr->e_phnum == 0 || !has_range(elf.data.size(),
+                                        ehdr->e_phoff,
+                                        static_cast<uint64_t>(ehdr->e_phnum) * sizeof(Elf64_Phdr)))
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid program header table in " << elf.path;
+        return false;
+    }
 
-    return _lib_handle;
+    elf.load_segments.clear();
+    for(size_t i = 0; i < ehdr->e_phnum; ++i)
+    {
+        auto phdr = read_as<Elf64_Phdr>(elf.data, ehdr->e_phoff + i * sizeof(Elf64_Phdr));
+        if(!phdr) return false;
+        if(phdr->p_type == PT_LOAD) elf.load_segments.emplace_back(*phdr);
+    }
+
+    if(elf.load_segments.empty())
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Target ELF has no PT_LOAD segments: "
+                   << elf.path;
+        return false;
+    }
+
+    return true;
+}
+
+std::optional<uint64_t>
+calculate_load_bias(const target_elf& elf, const mapped_object& object)
+{
+    auto page_size = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
+    if(page_size == 0) page_size = 4096;
+
+    for(const auto& mapping : object.mappings)
+    {
+        for(const auto& segment : elf.load_segments)
+        {
+            auto segment_file_page    = align_down(segment.p_offset, page_size);
+            auto segment_virtual_page = align_down(segment.p_vaddr, page_size);
+            if(mapping.file_offset != segment_file_page) continue;
+
+            auto load_bias = static_cast<uint64_t>(mapping.start) - segment_virtual_page;
+            ROCP_TRACE << "[rocprofiler-sdk-rocattach] Calculated target load bias for "
+                       << object.path << " as 0x" << std::hex << load_bias << std::dec;
+            return load_bias;
+        }
+    }
+
+    ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not match target mappings for " << object.path
+               << " to ELF PT_LOAD segments";
+    return std::nullopt;
+}
+
+std::optional<uint64_t>
+vaddr_to_offset(const target_elf& elf, uint64_t vaddr, uint64_t size)
+{
+    for(const auto& segment : elf.load_segments)
+    {
+        if(segment.p_type != PT_LOAD) continue;
+        if(vaddr < segment.p_vaddr) continue;
+        auto delta = vaddr - segment.p_vaddr;
+        if(delta > segment.p_filesz || size > segment.p_filesz - delta) continue;
+        return segment.p_offset + delta;
+    }
+    return std::nullopt;
+}
+
+bool
+symbol_is_supported_function(const Elf64_Sym& sym)
+{
+    auto type       = ELF64_ST_TYPE(sym.st_info);
+    auto bind       = ELF64_ST_BIND(sym.st_info);
+    auto visibility = ELF64_ST_VISIBILITY(sym.st_other);
+
+    return sym.st_shndx != SHN_UNDEF && type == STT_FUNC &&
+           (bind == STB_GLOBAL || bind == STB_WEAK) &&
+           (visibility == STV_DEFAULT || visibility == STV_PROTECTED);
+}
+
+std::optional<Elf64_Sym>
+lookup_symbol_from_sections(const target_elf& elf, std::string_view symbol_name)
+{
+    auto ehdr = read_as<Elf64_Ehdr>(elf.data, 0);
+    if(!ehdr || ehdr->e_shoff == 0 || ehdr->e_shnum == 0 ||
+       ehdr->e_shentsize != sizeof(Elf64_Shdr) ||
+       !has_range(elf.data.size(),
+                  ehdr->e_shoff,
+                  static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr)))
+    {
+        return std::nullopt;
+    }
+
+    for(size_t i = 0; i < ehdr->e_shnum; ++i)
+    {
+        auto shdr = read_as<Elf64_Shdr>(elf.data, ehdr->e_shoff + i * sizeof(Elf64_Shdr));
+        if(!shdr || shdr->sh_type != SHT_DYNSYM || shdr->sh_entsize < sizeof(Elf64_Sym))
+        {
+            continue;
+        }
+        if(shdr->sh_link >= ehdr->e_shnum) continue;
+
+        auto strtab =
+            read_as<Elf64_Shdr>(elf.data, ehdr->e_shoff + shdr->sh_link * sizeof(Elf64_Shdr));
+        if(!strtab || !has_range(elf.data.size(), strtab->sh_offset, strtab->sh_size) ||
+           !has_range(elf.data.size(), shdr->sh_offset, shdr->sh_size))
+        {
+            continue;
+        }
+
+        auto symbol_count = shdr->sh_size / shdr->sh_entsize;
+        for(size_t idx = 0; idx < symbol_count; ++idx)
+        {
+            auto sym = read_as<Elf64_Sym>(elf.data, shdr->sh_offset + idx * shdr->sh_entsize);
+            if(!sym || sym->st_name >= strtab->sh_size) continue;
+            const auto* name =
+                reinterpret_cast<const char*>(elf.data.data() + strtab->sh_offset + sym->st_name);
+            auto max_name_len = strtab->sh_size - sym->st_name;
+            if(std::string_view{name, strnlen(name, max_name_len)} == symbol_name) return sym;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<size_t>
+symbol_count_from_sysv_hash(const target_elf& elf, uint64_t hash_vaddr)
+{
+    auto hash_offset = vaddr_to_offset(elf, hash_vaddr, 2 * sizeof(uint32_t));
+    if(!hash_offset) return std::nullopt;
+
+    auto nchain = read_as<uint32_t>(elf.data, *hash_offset + sizeof(uint32_t));
+    if(!nchain) return std::nullopt;
+    return static_cast<size_t>(*nchain);
+}
+
+std::optional<size_t>
+symbol_count_from_gnu_hash(const target_elf& elf, uint64_t hash_vaddr)
+{
+    auto hash_offset = vaddr_to_offset(elf, hash_vaddr, 4 * sizeof(uint32_t));
+    if(!hash_offset) return std::nullopt;
+
+    auto nbuckets  = read_as<uint32_t>(elf.data, *hash_offset);
+    auto symndx    = read_as<uint32_t>(elf.data, *hash_offset + sizeof(uint32_t));
+    auto maskwords = read_as<uint32_t>(elf.data, *hash_offset + 2 * sizeof(uint32_t));
+    if(!nbuckets || !symndx || !maskwords) return std::nullopt;
+
+    auto buckets_offset =
+        *hash_offset + 4 * sizeof(uint32_t) + static_cast<uint64_t>(*maskwords) * sizeof(uint64_t);
+    if(!has_range(
+           elf.data.size(), buckets_offset, static_cast<uint64_t>(*nbuckets) * sizeof(uint32_t)))
+    {
+        return std::nullopt;
+    }
+
+    auto max_bucket = uint32_t{0};
+    for(uint32_t i = 0; i < *nbuckets; ++i)
+    {
+        auto bucket = read_as<uint32_t>(elf.data, buckets_offset + i * sizeof(uint32_t));
+        if(bucket) max_bucket = std::max(max_bucket, *bucket);
+    }
+    if(max_bucket < *symndx) return *symndx;
+
+    auto chains_offset = buckets_offset + static_cast<uint64_t>(*nbuckets) * sizeof(uint32_t);
+    auto chain_index   = static_cast<uint64_t>(max_bucket - *symndx);
+    while(has_range(
+        elf.data.size(), chains_offset + chain_index * sizeof(uint32_t), sizeof(uint32_t)))
+    {
+        auto chain = read_as<uint32_t>(elf.data, chains_offset + chain_index * sizeof(uint32_t));
+        if(!chain) return std::nullopt;
+        if((*chain & 1U) != 0) return static_cast<size_t>(*symndx + chain_index + 1);
+        ++chain_index;
+    }
+    return std::nullopt;
+}
+
+std::optional<Elf64_Sym>
+lookup_symbol_from_dynamic(const target_elf& elf, std::string_view symbol_name)
+{
+    auto dynamic_segment = std::optional<Elf64_Phdr>{};
+    auto ehdr            = read_as<Elf64_Ehdr>(elf.data, 0);
+    if(!ehdr) return std::nullopt;
+
+    for(size_t i = 0; i < ehdr->e_phnum; ++i)
+    {
+        auto phdr = read_as<Elf64_Phdr>(elf.data, ehdr->e_phoff + i * sizeof(Elf64_Phdr));
+        if(phdr && phdr->p_type == PT_DYNAMIC)
+        {
+            dynamic_segment = *phdr;
+            break;
+        }
+    }
+    if(!dynamic_segment ||
+       !has_range(elf.data.size(), dynamic_segment->p_offset, dynamic_segment->p_filesz))
+    {
+        return std::nullopt;
+    }
+
+    auto symtab_vaddr   = std::optional<uint64_t>{};
+    auto strtab_vaddr   = std::optional<uint64_t>{};
+    auto strsz          = std::optional<uint64_t>{};
+    auto syment         = uint64_t{sizeof(Elf64_Sym)};
+    auto hash_vaddr     = std::optional<uint64_t>{};
+    auto gnu_hash_vaddr = std::optional<uint64_t>{};
+
+    auto entries = dynamic_segment->p_filesz / sizeof(Elf64_Dyn);
+    for(size_t i = 0; i < entries; ++i)
+    {
+        auto dyn = read_as<Elf64_Dyn>(elf.data, dynamic_segment->p_offset + i * sizeof(Elf64_Dyn));
+        if(!dyn) return std::nullopt;
+        if(dyn->d_tag == DT_NULL) break;
+        if(dyn->d_tag == DT_SYMTAB) symtab_vaddr = dyn->d_un.d_ptr;
+        if(dyn->d_tag == DT_STRTAB) strtab_vaddr = dyn->d_un.d_ptr;
+        if(dyn->d_tag == DT_STRSZ) strsz = dyn->d_un.d_val;
+        if(dyn->d_tag == DT_SYMENT) syment = dyn->d_un.d_val;
+        if(dyn->d_tag == DT_HASH) hash_vaddr = dyn->d_un.d_ptr;
+        if(dyn->d_tag == DT_GNU_HASH) gnu_hash_vaddr = dyn->d_un.d_ptr;
+    }
+
+    if(!symtab_vaddr || !strtab_vaddr || !strsz || syment < sizeof(Elf64_Sym)) return std::nullopt;
+
+    auto symbol_count = std::optional<size_t>{};
+    if(hash_vaddr) symbol_count = symbol_count_from_sysv_hash(elf, *hash_vaddr);
+    if(!symbol_count && gnu_hash_vaddr)
+    {
+        symbol_count = symbol_count_from_gnu_hash(elf, *gnu_hash_vaddr);
+    }
+    if(!symbol_count) return std::nullopt;
+
+    auto symtab_offset = vaddr_to_offset(elf, *symtab_vaddr, *symbol_count * syment);
+    auto strtab_offset = vaddr_to_offset(elf, *strtab_vaddr, *strsz);
+    if(!symtab_offset || !strtab_offset) return std::nullopt;
+
+    for(size_t idx = 0; idx < *symbol_count; ++idx)
+    {
+        auto sym = read_as<Elf64_Sym>(elf.data, *symtab_offset + idx * syment);
+        if(!sym || sym->st_name >= *strsz) continue;
+        const auto* name =
+            reinterpret_cast<const char*>(elf.data.data() + *strtab_offset + sym->st_name);
+        auto max_name_len = *strsz - sym->st_name;
+        if(std::string_view{name, strnlen(name, max_name_len)} == symbol_name) return sym;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<Elf64_Sym>
+lookup_dynamic_symbol(const target_elf& elf, std::string_view symbol_name)
+{
+    if(auto sym = lookup_symbol_from_sections(elf, symbol_name)) return sym;
+    return lookup_symbol_from_dynamic(elf, symbol_name);
+}
+
+bool
+address_in_executable_mapping(const mapped_object& object, uint64_t address)
+{
+    for(const auto& mapping : object.mappings)
+    {
+        if(mapping.permissions.find('x') == std::string::npos) continue;
+        if(address >= mapping.start && address < mapping.end) return true;
+    }
+    return false;
+}
+
+std::optional<uint64_t>
+resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view symbol)
+{
+    auto elf = open_target_elf(pid, object);
+    if(!elf || !parse_elf_headers(*elf)) return std::nullopt;
+
+    auto load_bias = calculate_load_bias(*elf, object);
+    if(!load_bias) return std::nullopt;
+
+    auto sym = lookup_dynamic_symbol(*elf, symbol);
+    if(!sym)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not find dynamic symbol " << symbol
+                   << " in target ELF " << elf->path;
+        return std::nullopt;
+    }
+
+    if(!symbol_is_supported_function(*sym))
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Symbol " << symbol
+                   << " is not a supported exported function in " << elf->path;
+        return std::nullopt;
+    }
+
+    auto address = *load_bias + sym->st_value;
+    if(!address_in_executable_mapping(object, address))
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Resolved address 0x" << std::hex << address
+                   << std::dec << " for " << symbol << " is not inside an executable mapping for "
+                   << object.path;
+        return std::nullopt;
+    }
+
+    ROCP_INFO << "[rocprofiler-sdk-rocattach] Resolved " << symbol << " in target pid " << pid
+              << " from " << elf->path << " (mapped as " << object.path << ", dev "
+              << object.device_major << ":" << object.device_minor << ", inode " << object.inode
+              << ") at 0x" << std::hex << address << std::dec;
+    return address;
 }
 }  // namespace
 
 bool
 find_library(void*& addr, int inpid, const std::string& library)
 {
-    std::stringstream searchname;
-    searchname << inpid << "::" << library;
-    // TODO: add this back
-    // if (target_library_addrs.find(searchname.str()) != target_library_addrs.end())
-    //{
-    //    return target_library_addrs[searchname.str()];
-    //}
-
-    // uses "maps" file to find where library has been loaded in target process
-    // does not require this process to be attached
-    std::stringstream filename;
-    filename << "/proc/" << inpid << "/maps";
-    std::ifstream maps(filename.str().c_str());
-
-    if(!maps)
+    for(const auto& object : find_mapped_objects(inpid, library))
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't open " << filename.str();
-        return false;
+        for(const auto& mapping : object.mappings)
+        {
+            if(mapping.file_offset != 0) continue;
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            addr = reinterpret_cast<void*>(mapping.start);
+            return true;
+        }
     }
 
-    std::string line;
-    bool        found = false;
-    while(std::getline(maps, line))
-    {
-        if(line.find(library) == std::string::npos) continue;
-
-        std::istringstream iss(line);
-        std::string        addr_range;
-        std::string        perms;
-        std::string        offset_str;
-        if(!(iss >> addr_range >> perms >> offset_str)) continue;
-        if(std::stoull(offset_str, nullptr, 16) != 0) continue;
-
-        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Entry in pid " << inpid
-                   << " maps file is: " << line;
-        found = true;
-        break;
-    }
-
-    if(!found)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find library " << library
-                   << " (with file offset 0) in " << filename.str();
-        return false;
-    }
-
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    addr = reinterpret_cast<void*>(std::stoull(line, nullptr, 16));
-    //  target_library_addrs[searchname.str()] = addr;
-    return true;
+    ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find library " << library
+               << " (with file offset 0) in /proc/" << inpid << "/maps";
+    return false;
 }
 
 bool
 find_symbol(int target_pid, void*& addr, const std::string& library, const std::string& symbol)
 {
-    auto searchname = std::stringstream{};
-    searchname << target_pid << "::" << library << "::" << symbol;
-    if(auto itr = m_target_symbol_addrs.find(searchname.str()); itr != m_target_symbol_addrs.end())
+    addr = nullptr;
+
+    auto objects = find_mapped_objects(target_pid, library);
+    if(objects.empty())
     {
-        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Found symbol for " << searchname.str() << " at "
-                   << itr->second;
-        return itr->second != nullptr;
-    }
-
-    void* libraryaddr = nullptr;
-    void* symboladdr  = nullptr;
-
-    // Load the library in our process to determine the offset of the requested symbol from the
-    // start address of the library
-    addr        = nullptr;
-    libraryaddr = get_library_handle(library);
-
-    if(!libraryaddr)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Host couldn't dlopen " << library;
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find mapped target library " << library
+                   << " in /proc/" << target_pid << "/maps";
         return false;
     }
 
-    symboladdr = dlsym(libraryaddr, symbol.c_str());
-    if(!symboladdr)
+    for(const auto& object : objects)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Host couldn't dlsym " << symbol;
-        return false;
+        if(auto resolved = resolve_target_symbol(target_pid, object, symbol))
+        {
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            addr = reinterpret_cast<void*>(*resolved);
+            return true;
+        }
     }
 
-    // Find the start address of the library in our process
-    void* hostlibraryaddr;
-    if(!find_library(hostlibraryaddr, getpid(), library))
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't determine where " << library
-                   << " was loaded for host";
-        return false;
-    }
-
-    // Calculate the offset
-    size_t offset =
-        reinterpret_cast<size_t>(symboladdr) - reinterpret_cast<size_t>(hostlibraryaddr);
-    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Offset of " << symbol << " into " << library
-               << " calculated as " << offset;
-
-    // Find the start address of the library in the target process
-    void* targetlibraryaddr;
-    if(!find_library(targetlibraryaddr, target_pid, library))
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't determine where " << library
-                   << " was loaded for target";
-        return false;
-    }
-
-    // Calculate address of symbol in the target process using the offset
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    addr = reinterpret_cast<void*>(reinterpret_cast<size_t>(targetlibraryaddr) + offset);
-    m_target_symbol_addrs[searchname.str()] = addr;
-    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Found symbol for " << searchname.str() << " at "
-               << addr;
-    return true;
+    ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to resolve " << library << "::" << symbol
+               << " from target pid " << target_pid << " ELF mappings";
+    return false;
 }
 }  // namespace rocattach
 }  // namespace rocprofiler
