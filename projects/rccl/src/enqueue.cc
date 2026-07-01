@@ -171,6 +171,9 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
 }
 
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
+RCCL_PARAM_DECLARE(CePipeline);
+RCCL_PARAM_DECLARE(CePipelineChunkBytes);
+
 /*****************************************************************************/
 /*       Launch system : synchronization and CUDA kernel launch              */
 /*****************************************************************************/
@@ -1987,6 +1990,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->redOp = task->opHost;
         plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
         plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
+        plan->ceCollArgs->ceDdaPipeline = task->ceDdaPipeline;
+        plan->ceCollArgs->ceDdaSubChunkBytes = task->ceDdaSubChunkBytes;
 
         if (comm->rank == 0) {
           const char* nvlsSync = comm->nvlsSupport ? "; CE synchronization with NVLS" : "";
@@ -3417,7 +3422,9 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
                                      struct ncclDevrWindow* recvWin,
                                      void* ddaRecvBase, // non-null -> DDA path: local scratch buffer
                                      void** ddaPeerBasesHost, // host [nRanks] peer scratch bases (DDA path)
-                                     struct ncclDevRedOpFull opDev) {
+                                     bool ddaPipeline,            
+    size_t ddaSubChunkBytes,      
+    struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner* planner = &comm->planner;
 
   // CE init is triggered in taskAppend() before this function is called,
@@ -3445,6 +3452,8 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
   // site (ncclLaunchCeColl).
   t->ddaUserRecvBuff = ddaRecvBase != nullptr ? info->recvbuff : nullptr;
   t->ddaCopyBackBytes = 0;
+  t->ceDdaPipeline      = ddaPipeline;
+  t->ceDdaSubChunkBytes = ddaSubChunkBytes;
   t->count = info->count;
   t->root = info->root;
   t->datatype = info->datatype;

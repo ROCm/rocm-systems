@@ -251,6 +251,8 @@ struct ncclTaskColl {
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
   bool useDda; // true if CE is using DDA staging
   void** ddaPeerBases; // host-side table of every rank's DDA scratch base pointer
+  bool   ceDdaPipeline;
+  size_t ceDdaSubChunkBytes;
   void* sendMhandle;
   void* recvMhandle;
   void** sendNetHandles;
