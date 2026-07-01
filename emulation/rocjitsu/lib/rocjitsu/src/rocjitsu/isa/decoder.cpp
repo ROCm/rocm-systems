@@ -26,6 +26,13 @@ Decoder::~Decoder() {
     deactivate_pool();
 }
 
+Instruction *Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc) {
+  Instruction *decoded = decode(inst);
+  if (decoded != nullptr)
+    decoded->src_loc_ = src_loc;
+  return decoded;
+}
+
 std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
