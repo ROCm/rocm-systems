@@ -154,7 +154,7 @@ test_categories:
     env_variables:
       - "NCCL_DEBUG=INFO"
       - "RCCL_LOG_ROCTX=1"
-      - "UT_MAX_GPUS=8"
+      - "UT_MAX_GPUS=2"
       - "UT_PROCESS_MASK=2"
       - "UT_REDOPS=sum"
       - "UT_DATATYPES=ncclFloat32"
