@@ -2,14 +2,6 @@ name: Resolve CI config
 description: Resolve runner labels from ROCm/therock-ci-config
 
 inputs:
-  config-repository:
-    description: Repository containing the shared CI config
-    required: false
-    default: ROCm/therock-ci-config
-  config-ref:
-    description: Ref to checkout from the shared CI config repository
-    required: false
-    default: main
   config-path:
     description: Local checkout path for the shared CI config
     required: false
@@ -37,8 +29,8 @@ runs:
     - name: Checkout CI config
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
-        repository: ${{ inputs.config-repository }}
-        ref: ${{ inputs.config-ref }}
+        repository: ROCm/therock-ci-config
+        ref: main
         path: ${{ inputs.config-path }}
       continue-on-error: true
 
