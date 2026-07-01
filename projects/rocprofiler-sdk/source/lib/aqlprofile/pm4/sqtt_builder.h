@@ -24,6 +24,7 @@
 #define SRC_PM4_SQTT_BUILDER_H_
 
 #include <stdint.h>
+#include <cstring>
 #include <iostream>
 #include <algorithm>
 #include <unordered_map>
@@ -137,6 +138,10 @@ public:
 
     virtual void InsertTimestampMarker(CmdBuffer* cmd_buffer, uint64_t* addr){};
 
+    // Whether the active agent supports SQTT double buffering. When true, the buffer-full status
+    // lives in the STATUS2 register; consumers must read STATUS2 instead of STATUS.
+    virtual bool SupportsDoubleBuffer() const = 0;
+
     // Returns TT_CONTROL_UTC_ERR_MASK
     virtual size_t GetUTCErrorMask() const = 0;
     // Returns TT_CONTROL_FULL_MASK
@@ -172,12 +177,35 @@ public:
     , se_number_total(agent_info->se_num)
     , timestamp_freq(agent_info->timestamp_freq)
     , cu_per_se(agent_info->cu_num / agent_info->se_num)
+    , double_buffer_supported_(DetectDoubleBufferSupport(agent_info))
     {}
+
+    // gfx11.0 has a hardware bug that prevents reliable double buffering, but gfx11.5 and gfx11.7
+    // do not, so they can use the same double-buffer scheme as gfx12. Other GFXIP levels keep
+    // their existing behavior (gfx12 always supports double buffering, gfx9/10 never do).
+    static bool DetectDoubleBufferSupport(const AgentInfo* agent_info)
+    {
+        if(Primitives::GFXIP_LEVEL != 11) return Primitives::GFXIP_LEVEL == 12;
+        if(agent_info == nullptr) return false;
+        // Match on the full ISA name (e.g. "gfx1151"); AgentInfo::gfxip is normalized to the
+        // family ("gfx11") and cannot distinguish gfx11.0 from gfx11.5/11.7.
+        return std::strncmp(agent_info->name, "gfx115", 6) == 0 ||
+               std::strncmp(agent_info->name, "gfx117", 6) == 0;
+    }
+
+    // Whether the active agent supports SQTT double buffering.
+    virtual bool SupportsDoubleBuffer() const override { return double_buffer_supported_; }
 
     // Returns TT_CONTROL_UTC_ERR_MASK
     virtual size_t GetUTCErrorMask() const override { return Primitives::TT_CONTROL_UTC_ERR_MASK; };
-    // Returns TT_CONTROL_FULL_MASK
-    virtual size_t GetBufferFullMask() const override { return Primitives::TT_CONTROL_FULL_MASK; };
+    // Returns TT_CONTROL_FULL_MASK. On gfx11 the full bits live in STATUS2, which is only valid for
+    // double-buffer-capable parts (gfx11.5/11.7); gfx11.0 keeps its historical behavior of never
+    // reporting full so it does not misinterpret STATUS bits.
+    virtual size_t GetBufferFullMask() const override
+    {
+        if(Primitives::GFXIP_LEVEL == 11 && !double_buffer_supported_) return 0;
+        return Primitives::TT_CONTROL_FULL_MASK;
+    };
     virtual size_t GetLockDownFailMask() const override { return Primitives::TT_LOCKDOWN_FAIL; };
     // Returns TT_WRITE_PTR_MASK
     virtual size_t GetWritePtrMask() const override { return Primitives::TT_WRITE_PTR_MASK; };
@@ -252,7 +280,11 @@ public:
         // to 4KB per thread trace specification
         const uint64_t se_number_xcc = se_number_total / GetXCCNumber();
         uint64_t       base_addr     = reinterpret_cast<uint64_t>(config->data_buffer_ptr);
-        if(Primitives::GFXIP_LEVEL == 10 || Primitives::GFXIP_LEVEL == 11)
+        // gfx10/gfx11 single-buffer mode reserves a minimal stub per disabled SE. In double-buffer
+        // mode gfx11 follows the gfx12 scheme (disabled SEs are skipped), so the enabled SE gets
+        // the full buffer and the per-SE capacity matches the buffer size the consumer expects.
+        if(Primitives::GFXIP_LEVEL == 10 ||
+           (Primitives::GFXIP_LEVEL == 11 && config->buffer_data.empty()))
             config->capacity_per_disabled_se = 1 << Primitives::TT_BUFF_ALIGN_SHIFT;
 
         const uint64_t base_step = GetBaseStep(config);
@@ -471,24 +503,48 @@ public:
                         cmd_buffer, Primitives::SQ_THREAD_TRACE_TOKEN_MASK_ADDR, token_mask);
                     // Program the thread trace ctrl register
                     WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR, ctrl_val);
-                    // If we are in double buffer mode
-                    if(!config->buffer_data.empty())
+                    // If we are in double buffer mode. Only masked-in SEs have a second buffer in
+                    // buffer_data; on gfx11 disabled SEs are not skipped above
+                    // (capacity_per_disabled_se is non-zero) so they must not index into
+                    // buffer_data here.
+                    if(bMaskedIn && !config->buffer_data.empty())
                     {
-                        if(Primitives::GFXIP_LEVEL != 12) throw std::runtime_error("Not supported");
+                        if(!SupportsDoubleBuffer())
+                            throw std::runtime_error(
+                                "Double buffering not supported on this agent");
 
                         uint64_t buf1_addr =
                             reinterpret_cast<uint64_t>(config->buffer_data.at(global_se).at(0));
                         unsigned buff1_lo = Low32(buf1_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
                         unsigned buff1_hi = High32(buf1_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
 
-                        WriteConfigPacket(cmd_buffer,
-                                          Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR,
-                                          Primitives::sqtt_buffer0_size_value(sqtt_size));
-                        WriteConfigPacket(
-                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR, buff1_lo);
-                        builder.BuildWriteWaitIdlePacket(cmd_buffer);
-                        WriteConfigPacket(
-                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR, buff1_hi);
+                        if(Primitives::GFXIP_LEVEL == 12)
+                        {
+                            WriteConfigPacket(cmd_buffer,
+                                              Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR,
+                                              Primitives::sqtt_buffer0_size_value(sqtt_size));
+                            WriteConfigPacket(cmd_buffer,
+                                              Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR,
+                                              buff1_lo);
+                            builder.BuildWriteWaitIdlePacket(cmd_buffer);
+                            WriteConfigPacket(cmd_buffer,
+                                              Primitives::SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR,
+                                              buff1_hi);
+                        }
+                        else
+                        {
+                            // gfx11 packs BASE_HI into the SIZE register and has no separate
+                            // BUF1_BASE_HI register, so program BUF1_SIZE (size + BASE_HI) then
+                            // BUF1_BASE (low bits).
+                            WriteConfigPacket(
+                                cmd_buffer,
+                                Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR,
+                                Primitives::sqtt_buffer_size_value(sqtt_size, buff1_hi));
+                            builder.BuildWriteWaitIdlePacket(cmd_buffer);
+                            WriteConfigPacket(cmd_buffer,
+                                              Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR,
+                                              buff1_lo);
+                        }
                     }
                     base_addr += sqtt_size;
                 }
@@ -687,7 +743,8 @@ public:
                                        Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                        true);
 
-        if(Primitives::GFXIP_LEVEL >= 12)
+        if(Primitives::GFXIP_LEVEL >= 12 ||
+           (Primitives::GFXIP_LEVEL == 11 && double_buffer_supported_))
             builder.BuildCopyRegDataPacket(cmd_buffer,
                                            Primitives::SQ_THREAD_TRACE_STATUS2_ADDR,
                                            &control.status2,
@@ -779,9 +836,10 @@ public:
             builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
         }
 
-        auto status_addr = (Primitives::GFXIP_LEVEL >= 12)
-                               ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR
-                               : Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
+        const bool use_status2 = Primitives::GFXIP_LEVEL >= 12 ||
+                                 (Primitives::GFXIP_LEVEL == 11 && double_buffer_supported_);
+        auto status_addr = use_status2 ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR
+                                       : Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
         builder.BuildCopyRegDataPacket(cmd_buffer,
                                        status_addr,
                                        &control.status_double_buffer,
@@ -824,6 +882,24 @@ public:
                                                Primitives::SQ_THREAD_TRACE_BASE2_ADDR,
                                                Primitives::sqtt_base_value_hi(base_addr));
         }
+        else if(Primitives::GFXIP_LEVEL == 11)
+        {
+            // gfx11 has no separate BUF0 base register (buf0 uses SQ_THREAD_TRACE_BASE/SIZE) and
+            // packs the high address bits into the SIZE register, so reprogram the SIZE register
+            // (size + BASE_HI) and the low base register for the buffer being swapped.
+            const unsigned base_lo = Low32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
+            const unsigned base_hi = High32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
+
+            auto reg_base = buf1 ? Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR
+                                 : Primitives::SQ_THREAD_TRACE_BASE_ADDR;
+            auto reg_size = buf1 ? Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR
+                                 : Primitives::SQ_THREAD_TRACE_SIZE_ADDR;
+
+            WriteConfigPacket(cmd_buffer,
+                              reg_size,
+                              Primitives::sqtt_buffer_size_value(config->capacity_per_se, base_hi));
+            WriteConfigPacket(cmd_buffer, reg_base, base_lo);
+        }
         else
         {
             unsigned buff1_lo = Low32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
@@ -846,6 +922,7 @@ public:
     size_t   xcc_number_{};
     uint32_t timestamp_freq{};
     uint32_t cu_per_se{};
+    bool     double_buffer_supported_{false};
 };
 
 }  // namespace pm4_builder

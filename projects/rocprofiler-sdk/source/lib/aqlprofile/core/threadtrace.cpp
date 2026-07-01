@@ -94,9 +94,8 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
             ERR_LOGGING("SQTT memory error received, SE({})", se_index);
             status = HSA_STATUS_ERROR_EXCEPTION;
         }
-        auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID)
-                                 ? control_ptr[se_index].status2
-                                 : control_ptr[se_index].status;
+        auto status2_value = sqttbuilder->SupportsDoubleBuffer() ? control_ptr[se_index].status2
+                                                                 : control_ptr[se_index].status;
         if(status2_value & sqttbuilder->GetBufferFullMask())
         {
             AQL_WARNING << "SQTT data buffer full, SE(" << se_index << ")";
