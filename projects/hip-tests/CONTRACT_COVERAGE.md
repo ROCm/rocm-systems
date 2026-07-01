@@ -6,11 +6,12 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 166
+- Contract tests: 173
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 142
-- Approximate declared API-name coverage: 28.7%
+- Declared HIP runtime APIs directly exercised by contract tests: 148
+- Approximate declared API-name coverage: 29.9%
 - Additional public macro exercised: `hipLaunchKernelGGL`
+- Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
 ## Contract domains
 
@@ -51,6 +52,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `texture` | 7 |
 | `context` | 6 |
 | `ipc` | 5 |
+| `module` | 7 |
 
 ## Coverage by API category
 
@@ -62,10 +64,10 @@ The percentages below are approximate API-name coverage against declarations par
 | Graph / capture | 32 | 96 | 33.3% |
 | Stream | 5 | 23 | 21.7% |
 | Runtime / device | 28 | 45 | 62.2% |
-| Kernel launch / function attrs | 1 | 13 | 7.7% |
+| Kernel launch / function attrs | 2 | 13 | 15.4% |
 | Memory / copy / memset | 45 | 137 | 32.8% |
 | Other runtime APIs | 1 | 56 | 1.8% |
-| Module / library loading | 0 | 29 | 0.0% |
+| Module / library loading | 5 | 29 | 17.2% |
 | Texture / surface | 7 | 44 | 15.9% |
 | Context / driver | 2 | 16 | 12.5% |
 | Extension / proc address | 4 | 13 | 30.8% |
@@ -205,11 +207,22 @@ hipEventSynchronize
 hipEventQuery
 ```
 
-### Kernel launch
+### Kernel launch / function attrs
 
 ```text
 hipLaunchKernel
 hipLaunchKernelGGL
+hipFuncGetAttribute
+```
+
+### Module / library loading
+
+```text
+hipModuleLoadData
+hipModuleUnload
+hipModuleGetFunction
+hipModuleGetGlobal
+hipModuleLaunchKernel
 ```
 
 ### Graph / capture / graph nodes
@@ -280,7 +293,7 @@ hipIpcOpenEventHandle
 
 1. Memory surface beyond current basics: peer copies, advanced VMM operations (multi-device access descriptors, export/import handles, and protection-mode matrices), and remaining advanced memory-pool operations (pool export/import handles and multi-device access descriptors). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, 3D pitched allocation with host-device 3D copies, 3D array allocation with 3D copy-to/from-array, managed allocation with prefetch, default memory pools with stream-ordered allocation, basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access), explicit memory-pool lifecycle (create/destroy, release-threshold, trim, and pool-specific async allocation), and current-device memory-pool access control are now covered.
 2. Texture and surface APIs beyond current basics: texture/surface object create/destroy with resource and texture descriptor round-trips and channel-descriptor queries are now covered; texture reference APIs, mipmapped arrays, and bound/linear texture variants remain.
-3. Module, library, and code-loading APIs.
+3. Module, library, and code-loading APIs: HIPRTC-backed module load-from-data, unload, function and global lookup, and module kernel launch (with `hipFuncGetAttribute`) are now covered; module load from file/fat-binary, `hipModuleLoadDataEx`, tex-ref and function-count queries, cooperative module launches, module occupancy helpers, and the entire library-loading family remain.
 4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; context create/destroy, push/pop/set-current, shared-memory config setter, and context peer access remain.
 5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, and host nodes with param round-trips are now covered; graph update, node find in clone, memory alloc/free nodes, node attributes, debug dot export, and user objects remain.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
