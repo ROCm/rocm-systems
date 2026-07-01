@@ -215,7 +215,7 @@ namespace RcclUnitTesting
     // NOTE: Cannot use HIP call prior to launching unless it is inside another child process
     numDetectedGpus = 0;
     if(!isIsolatedChild) getDeviceCount(&numDetectedGpus);
-    numDetectedGpus = min(numDetectedGpus, 16);
+    numDetectedGpus = min(numDetectedGpus, 64);
     isGfx94 = false;
     if(!isIsolatedChild) getArchInfo(&isGfx94, "gfx94");
     isGfx95 = false;
