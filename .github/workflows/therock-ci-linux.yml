@@ -41,6 +41,7 @@ jobs:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+      THEROCK_REQUIRE_HIP_YAML_ENTRIES: 1
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
