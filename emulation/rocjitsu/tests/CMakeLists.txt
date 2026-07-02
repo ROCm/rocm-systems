@@ -435,7 +435,7 @@ get_filename_component(
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
 set(RJ_KMD_PRELOAD_ENV
-    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
+    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
 )
 
@@ -472,7 +472,7 @@ if(ROCMINFO_EXECUTABLE)
             RJ_INSTALLED_CONFIG_PATH="${_rj_installed_cdna4_kmd_config}"
     )
     target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
-    add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_kmd_shim)
+    add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_shared)
 
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(rocminfo_test)
@@ -529,7 +529,7 @@ if(HSA_RUNTIME64)
     )
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
-    add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_kmd_shim)
+    add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_shared)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hsa_init_test)
     endif()
@@ -931,7 +931,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             VERBATIM
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
-        add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_kmd_shim)
+        add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_shared)
         if(RJ_INSTALL_TESTS)
             rj_install_test_program(${HIP_TEST_BIN})
         endif()
@@ -1056,7 +1056,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
             RJ_DAEMON_CONFIG="${RJ_CDNA4_KMD_CONFIG}"
             RJ_DAEMON_CONFIG_2GPU="${RJ_CDNA4_KMD_2GPU_CONFIG}"
-            RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_kmd_shim>"
+            RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_shared>"
             RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
             RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
             RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
@@ -1236,7 +1236,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         VERBATIM
     )
     add_custom_target(hip_cvt_narrow_test_target ALL DEPENDS ${CVT_NARROW_BIN})
-    add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_kmd_shim)
+    add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_shared)
     if(RJ_INSTALL_TESTS)
         rj_install_test_program(${CVT_NARROW_BIN})
     endif()
