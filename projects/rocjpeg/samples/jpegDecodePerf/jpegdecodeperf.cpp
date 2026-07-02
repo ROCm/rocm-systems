@@ -74,20 +74,44 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
     CHECK_HIP(hipSetDevice(device_id));
 
     // Pre-allocate GPU memory at 2560x1440 to minimize hipMalloc/hipFree during decoding.
-    // Sizes use mem_alignment=16 (matching GetChannelPitchAndSizes) so comparisons against
-    // computed channel_sizes are consistent. Channel 0 covers luma (Y), packed YUV (e.g. YUV 4:2:2),
-    // or packed RGB; channels 1 and 2 cover planar U/V, packed UV (e.g. NV12), or planar G/B;
-    // channel 3 is unused.
+    // Sizes mirror GetChannelPitchAndSizes logic: only channels required by the selected
+    // output_format are allocated. For NATIVE/YUV_PLANAR the subsampling is unknown upfront,
+    // so worst-case sizes are used per channel (ch0: packed 4:2:2 = 2w; ch1/2: 4:4:4 full height).
     static constexpr uint32_t kMemAlignment = 16;
     static constexpr uint32_t kPreAllocWidth = 2560;
     static constexpr uint32_t kPreAllocHeight = 1440;
     auto align_up = [](uint32_t v, uint32_t a) { return (v + a - 1) & ~(a - 1); };
-    const uint32_t kPreAllocSizes[ROCJPEG_MAX_COMPONENT] = {
-        align_up(kPreAllocWidth * 3, kMemAlignment) * align_up(kPreAllocHeight, kMemAlignment), // channel 0: packed RGB or luma plane
-        align_up(kPreAllocWidth,     kMemAlignment) * align_up(kPreAllocHeight, kMemAlignment), // channel 1: chroma U/Cb plane
-        align_up(kPreAllocWidth,     kMemAlignment) * align_up(kPreAllocHeight, kMemAlignment), // channel 2: chroma V/Cr plane
-        0                                                                                        // channel 3: unused
-    };
+    const uint32_t aligned_w  = align_up(kPreAllocWidth, kMemAlignment);
+    const uint32_t aligned_w2 = align_up(kPreAllocWidth, kMemAlignment) * 2; // packed YUV 4:2:2
+    const uint32_t aligned_w3 = align_up(kPreAllocWidth, kMemAlignment) * 3; // packed RGB
+    const uint32_t aligned_h  = align_up(kPreAllocHeight, kMemAlignment);
+    uint32_t kPreAllocSizes[ROCJPEG_MAX_COMPONENT] = {};
+    switch (decode_params.output_format) {
+        case ROCJPEG_OUTPUT_Y:
+            // 1 channel: luma plane only
+            kPreAllocSizes[0] = aligned_w * aligned_h;
+            break;
+        case ROCJPEG_OUTPUT_RGB:
+            // 1 channel: packed RGB (pitch = width * 3)
+            kPreAllocSizes[0] = aligned_w3 * aligned_h;
+            break;
+        case ROCJPEG_OUTPUT_RGB_PLANAR:
+            // 3 channels: planar R, G, B — all full resolution
+            kPreAllocSizes[0] = kPreAllocSizes[1] = kPreAllocSizes[2] = aligned_w * aligned_h;
+            break;
+        case ROCJPEG_OUTPUT_YUV_PLANAR:
+            // up to 3 channels; worst case is 4:4:4 where all planes are full resolution
+            kPreAllocSizes[0] = kPreAllocSizes[1] = kPreAllocSizes[2] = aligned_w * aligned_h;
+            break;
+        case ROCJPEG_OUTPUT_NATIVE:
+        default:
+            // Subsampling unknown at pre-alloc time; cover worst case per channel:
+            //   ch0: packed 4:2:2 uses pitch=2w (largest single-channel layout)
+            //   ch1/ch2: 4:4:4 uses full height (largest multi-channel layout)
+            kPreAllocSizes[0] = aligned_w2 * aligned_h;
+            kPreAllocSizes[1] = kPreAllocSizes[2] = aligned_w * aligned_h;
+            break;
+    }
     for (int b = 0; b < batch_size; b++) {
         for (int n = 0; n < ROCJPEG_MAX_COMPONENT; n++) {
             if (kPreAllocSizes[n] > 0) {
@@ -96,6 +120,22 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
             }
         }
     }
+
+    // RAII guard: ensures all pre-allocated device buffers are freed on any exit path,
+    // including early returns from I/O or API errors.
+    struct OutputImagesGuard {
+        std::vector<RocJpegImage>& images;
+        ~OutputImagesGuard() {
+            for (auto& it : images) {
+                for (int i = 0; i < ROCJPEG_MAX_COMPONENT; i++) {
+                    if (it.channel[i] != nullptr) {
+                        (void)hipFree((void*)it.channel[i]);
+                        it.channel[i] = nullptr;
+                    }
+                }
+            }
+        }
+    } output_images_guard{output_images};
 
     for (int i = 0; i < decode_info.file_paths.size(); i += batch_size) {
         int batch_end = std::min(i + batch_size, static_cast<int>(decode_info.file_paths.size()));
@@ -210,14 +250,6 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
     decode_info.images_per_sec = avg_time_per_image > 0 ? 1000 / avg_time_per_image : 0;
     decode_info.image_size_in_mpixels_per_sec = decode_info.num_decoded_images > 0 ? decode_info.images_per_sec * image_size_in_mpixels_all / decode_info.num_decoded_images : 0;
 
-    for (auto& it : output_images) {
-        for (int i = 0; i < ROCJPEG_MAX_COMPONENT; i++) {
-            if (it.channel[i] != nullptr) {
-                CHECK_HIP(hipFree((void *)it.channel[i]));
-                it.channel[i] = nullptr;
-            }
-        }
-    }
 }
 
 int main(int argc, char **argv) {
