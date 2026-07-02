@@ -909,7 +909,7 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
 
     // Resolve the emulator-level injection (env vars, LD_PRELOAD, ...)
     // for this exec's session. For a rocjitsu session this is what wires
-    // `LD_PRELOAD=librocjitsu_kmd.so` plus `ROCJITSU_RUNTIME_DIR` into
+    // `LD_PRELOAD=librocjitsu.so` plus `ROCJITSU_RUNTIME_DIR` into
     // every spawned child so the workload actually runs under emulation.
     //
     // Crucially, this happens *after* the initial `status.json` and node

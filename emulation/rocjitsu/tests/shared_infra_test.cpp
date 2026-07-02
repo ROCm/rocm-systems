@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
@@ -1242,6 +1243,62 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   rdna4::flat_calculate_addresses(scratch_inst, *wf, d);
   EXPECT_EQ(d.per_lane_addr[0], 0x6'0000'7010ULL);
   EXPECT_EQ(d.per_lane_addr[1], 0x6'0000'7110ULL);
+}
+
+TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
+  amdgpu::GpuMemory mem("gfx1250_flat_private_mem");
+  amdgpu::L2Cache l2("gfx1250_flat_private_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_flat_private_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec(0x7ULL);
+
+  constexpr uint64_t kScratchBase = 0x0002'0000'0000'0000ULL;
+  constexpr uint64_t kPrivateBase = 0x0007'0000'0000'0000ULL;
+  constexpr uint32_t kPrivateSegmentSize = 0x80;
+  wf->set_scratch_base(kScratchBase);
+  wf->set_scratch_lane_size(kPrivateSegmentSize);
+  wf->set_apertures(0x0001'0000'0000'0000ULL, 0x0001'0000'ffff'ffffULL, kPrivateBase,
+                    kPrivateBase + 0xffff'ffffULL);
+
+  gfx1250::Operand flat_scratch_base(
+      64, gfx1250::OperandType::OPR_SRC,
+      static_cast<int>(gfx1250::OpSelSrc::OPR_SRC_SRC_FLAT_SCRATCH_BASE_LO));
+  ASSERT_EQ(flat_scratch_base.read_scalar64(*wf), kScratchBase);
+
+  const uint64_t private_offsets[] = {0x10, 0x14, kPrivateSegmentSize + 0x20};
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 3; ++lane) {
+    uint64_t private_offset = private_offsets[lane];
+    uint64_t flat_private_addr =
+        kScratchBase + (static_cast<uint64_t>(lane) << 52) + private_offset;
+    cu->write_vgpr(vbase, lane, static_cast<uint32_t>(flat_private_addr));
+    cu->write_vgpr(vbase + 1, lane, static_cast<uint32_t>(flat_private_addr >> 32));
+  }
+
+  gfx1250::VflatMachineInst inst{};
+  inst.saddr = gfx1250::OPR_SREG_NULL;
+  inst.vaddr = 0;
+  inst.ioffset = 4;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  gfx1250::flat_calculate_addresses(inst, *wf, d);
+
+  for (uint32_t lane = 0; lane < 3; ++lane) {
+    uint64_t private_offset = private_offsets[lane] + inst.ioffset;
+    uint64_t expected =
+        kScratchBase + static_cast<uint64_t>(lane) * kPrivateSegmentSize + private_offset;
+    EXPECT_EQ(d.per_lane_addr[lane], expected) << "lane " << lane;
+  }
 }
 
 TEST(RdnaAddrCalcTest, Rdna4SmemSoffsetHandlesNullM0AndSgprSelectors) {
