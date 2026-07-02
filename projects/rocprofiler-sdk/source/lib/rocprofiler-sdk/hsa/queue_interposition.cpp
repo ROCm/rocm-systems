@@ -66,10 +66,10 @@ namespace hsa
 {
 namespace queue_interposition
 {
-auto s_active_inline_qi_consumers = std::atomic<uint32_t>{0};
-
 namespace
 {
+auto s_active_inline_qi_consumers = std::atomic<uint32_t>{0};
+
 // NOTE:
 //  - "installed" is for checking whether HSA functions have been passed
 //  - "active" is for controlling whether wrappers are intercepting or passing through
@@ -1067,8 +1067,13 @@ void
 notify_inline_qi_consumer_context_stopped(const context::context* ctx)
 {
     if(!context_needs_inline_qi_tracing(ctx)) return;
-    auto prev = s_active_inline_qi_consumers.fetch_sub(1, std::memory_order_release);
-    if(prev == 0) s_active_inline_qi_consumers.store(0, std::memory_order_release);
+    auto cur = s_active_inline_qi_consumers.load(std::memory_order_relaxed);
+    while(cur > 0)
+    {
+        if(s_active_inline_qi_consumers.compare_exchange_weak(
+               cur, cur - 1, std::memory_order_release, std::memory_order_relaxed))
+            return;
+    }
 }
 
 void
