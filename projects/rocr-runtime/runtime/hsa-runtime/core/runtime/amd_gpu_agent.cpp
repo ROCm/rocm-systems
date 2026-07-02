@@ -2599,6 +2599,10 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         *((uint32_t*)value) = 0;
       }
       break;
+    case HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED:                                                                                                                                        
+      // GPU agents can participate in host memory DMA-BUF export if the system supports virtual memory APIs                                                                                                                                         
+      *static_cast<bool*>(value) = core::Runtime::runtime_singleton_->VirtualMemApiSupported();                                                                                           
+      break; 
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;

@@ -79,9 +79,10 @@
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
  * - 1.26 - hsa_amd_queue_create: batch queue creation with descriptor
  * - 1.27 - hsa_amd_queue_signal_external_semaphore, hsa_amd_queue_wait_external_semaphore
+ * - 1.28 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 27
+#define HSA_AMD_INTERFACE_VERSION_MINOR 28
 
 #ifdef __cplusplus
 extern "C" {
@@ -970,6 +971,14 @@ typedef enum hsa_amd_agent_info_s {
    * Returns uint32_t. Zero if the device does not support dynamic data prefetch.
    */
   HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS = 0xA123,
+  /**
+   * Queries whether the agent supports virtual memory API operations on
+   * host memory that can be exported as a DMA-BUF file descriptor.
+   * For CPU agents: indicates host memory can be allocated and exported.
+   * For GPU agents: indicates the GPU can access such host-allocated memory.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
 } hsa_amd_agent_info_t;
 
 /**
@@ -4450,7 +4459,7 @@ typedef enum {
  * To minimize internal memory fragmentation, align the size to the recommended allocation granule
  * size, see HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE
  *
- * @param[in] pool memory to use. Only GPU agent pools are supported.
+ * @param[in] pool memory to use.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
  * @param[in] flags - currently unsupported
