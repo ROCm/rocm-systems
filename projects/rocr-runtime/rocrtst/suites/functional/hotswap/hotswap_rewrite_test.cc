@@ -230,6 +230,19 @@ rocr::hotswap::CodeObjectView MakeRealCodeObjectView() {
   return code_object;
 }
 
+std::vector<unsigned char> CopyLoadedCodeObject(const LoadCall& call) {
+  const auto* bytes = static_cast<const unsigned char*>(call.code_object);
+  return std::vector<unsigned char>(bytes, bytes + call.code_object_size);
+}
+
+bool LoadedCodeObjectDiffersFrom(const LoadCall& call,
+                                 const std::vector<unsigned char>& expected) {
+  if (call.code_object_size != expected.size()) {
+    return true;
+  }
+  return std::memcmp(call.code_object, expected.data(), expected.size()) != 0;
+}
+
 rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target,
                                              uint32_t asic_revision,
                                              bool has_asic_revision = true) {
@@ -432,35 +445,70 @@ TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
-TEST(HotswapRewrite, RuntimeLoadA0UsesEntryTrampolinesWhenEnabled) {
+TEST(HotswapRewrite, RuntimeLoadA0EntryTrampolinesChangeRewrittenCodeObject) {
   ResetRuntimeTestEnv();
   if (!NewComgrHotswapApiAvailable()) return;
-  g_fake_env_vars["AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES"] = "1";
-  LoadRecorder load;
-  const hsa_executable_t executable = MakeTestExecutable(0x502);
+  LoadRecorder legacy_load;
+  const hsa_executable_t legacy_executable = MakeTestExecutable(0x502);
 
   const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
-      executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
-      MakeLoadCallbacks(&load));
+      legacy_executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr,
+      nullptr, MakeLoadCallbacks(&legacy_load));
 
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
-  ASSERT_EQ(load.calls.size(), 1u);
-  EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
-  EXPECT_NE(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_GT(load.calls[0].code_object_size, 0u);
+  ASSERT_EQ(legacy_load.calls.size(), 1u);
+  ASSERT_EQ(legacy_load.calls[0].path, LoadPath::kRewritten);
+  ASSERT_NE(legacy_load.calls[0].code_object,
+            static_cast<const void*>(kGfx1250MinCo));
+  ASSERT_GT(legacy_load.calls[0].code_object_size, 0u);
+  const std::vector<unsigned char> legacy_code_object =
+      CopyLoadedCodeObject(legacy_load.calls[0]);
   EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 1u);
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(
+          legacy_executable),
+      1u);
 
-  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
+  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(legacy_executable);
   EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(
+          legacy_executable),
+      0u);
+
+  ResetRuntimeTestEnv();
+  g_fake_env_vars["AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES"] = "1";
+  LoadRecorder entry_load;
+  const hsa_executable_t entry_executable = MakeTestExecutable(0x503);
+
+  const hsa_status_t entry_status =
+      rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+          entry_executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr,
+          nullptr, MakeLoadCallbacks(&entry_load));
+
+  EXPECT_EQ(entry_status, HSA_STATUS_SUCCESS);
+  ASSERT_EQ(entry_load.calls.size(), 1u);
+  EXPECT_EQ(entry_load.calls[0].path, LoadPath::kRewritten);
+  EXPECT_NE(entry_load.calls[0].code_object,
+            static_cast<const void*>(kGfx1250MinCo));
+  EXPECT_GT(entry_load.calls[0].code_object_size, 0u);
+  EXPECT_TRUE(
+      LoadedCodeObjectDiffersFrom(entry_load.calls[0], legacy_code_object));
+  EXPECT_EQ(
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(
+          entry_executable),
+      1u);
+
+  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(entry_executable);
+  EXPECT_EQ(
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(
+          entry_executable),
+      0u);
 }
 
 TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToOriginal) {
   ResetRuntimeTestEnv();
   g_fake_hsa_env.asic_revision = 1;
   LoadRecorder load;
-  const hsa_executable_t executable = MakeTestExecutable(0x503);
+  const hsa_executable_t executable = MakeTestExecutable(0x504);
 
   const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
       executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
@@ -476,7 +524,7 @@ TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToOriginal) {
 
 TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesDisabled) {
   const char* const env_values[] = {"0", "false", "off", ""};
-  uint64_t executable_handle = 0x504;
+  uint64_t executable_handle = 0x510;
   for (const char* env_value : env_values) {
     SCOPED_TRACE(env_value);
     ResetRuntimeTestEnv();
