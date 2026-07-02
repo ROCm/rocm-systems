@@ -3037,7 +3037,8 @@ class GraphMemAllocNode final : public GraphNode {
       if (dptr == nullptr) {
         LogError("Graph MemAlloc node failed to allocate device memory");
         setStatus(CL_OUT_OF_RESOURCES);
-        // Report on the launching stream; surfaced at hipStreamSynchronize.
+        // Report on the launching stream. Leave mapped_ref_ false so a later
+        // launch retries allocation instead of treating this VA as mapped.
         static_cast<hip::Stream*>(queue())->SetAsyncError(hipErrorLaunchOutOfResources);
         if (!AMD_DIRECT_DISPATCH) {
           WorkerThreadLock_.unlock();

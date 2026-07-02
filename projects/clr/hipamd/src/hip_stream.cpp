@@ -555,7 +555,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   amd::Command* command = hip_stream->getLastQueuedCommand(true);
   if (command == nullptr) {
     // Nothing was submitted to the queue.
-    return hipSuccess;
+    return hip_stream->GetAndClearAsyncError();
   }
 
   amd::Event& event = command->event();
@@ -576,7 +576,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
 
   // Stream is complete — opportunistically release its HW queue if idle.
   hip_stream->vdev()->ReleaseHwQueue();
-  return hipSuccess;
+  return hip_stream->GetAndClearAsyncError();
 }
 
 // ================================================================================================
