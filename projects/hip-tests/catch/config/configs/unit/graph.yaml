@@ -1509,7 +1509,7 @@ graph:
   Unit_hipGraphAddMemAllocNode_Negative_NotSupported:
     <<: *level_2
     tags: [node]
-  Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfResources:
+  Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory:
     <<: *level_2
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph:

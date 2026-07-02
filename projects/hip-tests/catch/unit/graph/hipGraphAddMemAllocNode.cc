@@ -312,8 +312,8 @@ static hipError_t queryUntilComplete(hipStream_t stream) {
 /**
  * Test Description
  * ------------------------
- *  - Test to verify launch-time graph mem-alloc node failures are surfaced through stream
- *    completion APIs.
+ *  - Test to verify launch-time graph mem-alloc node failures are surfaced as out-of-memory
+ *    errors through stream completion APIs.
  * Test source
  * ------------------------
  *  - /unit/graph/hipGraphAddMemAllocNode.cc
@@ -321,7 +321,7 @@ static hipError_t queryUntilComplete(hipStream_t stream) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfResources) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -341,7 +341,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfResources) {
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipDeviceGraphMemTrim(0));
-    REQUIRE(ret == hipErrorLaunchOutOfResources);
+    REQUIRE(ret == hipErrorOutOfMemory);
   }
 
   SECTION("hipStreamQuery") {
@@ -350,7 +350,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfResources) {
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipDeviceGraphMemTrim(0));
-    REQUIRE(ret == hipErrorLaunchOutOfResources);
+    REQUIRE(ret == hipErrorOutOfMemory);
     REQUIRE(second_query == hipSuccess);
   }
 }
