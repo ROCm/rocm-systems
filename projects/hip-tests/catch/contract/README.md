@@ -28,6 +28,7 @@ The first domains are:
 - `graph_host`: host graph node callback, parameter, and node-type contracts
 - `graph_mem_nodes`: graph memory allocation/free node and graph memory attribute contracts
 - `graph_node_find`: graph node lookup in cloned graph contracts
+- `graph_user_objects`: graph user object create, retain, release, and graph lifetime contracts
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
 - `array_memory`: HIP array allocation and 2D array copy contracts

@@ -300,6 +300,18 @@ contract:
   Contract_GraphNodeFind_NodeOnlyInOriginal_ReturnsInvalidValue:
     <<: *level_0
     tags: [graph_node_find]
+  Contract_GraphUserObjects_CreateRelease_InvokesDestructorOnce:
+    <<: *level_0
+    tags: [graph_user_objects]
+  Contract_GraphUserObjects_RetainRelease_BalancesRefcount:
+    <<: *level_0
+    tags: [graph_user_objects]
+  Contract_GraphUserObjects_GraphRetainRelease_TiedToGraphLifetime:
+    <<: *level_0
+    tags: [graph_user_objects]
+  Contract_GraphUserObjects_CreateNullObject_ReturnsInvalidValue:
+    <<: *level_0
+    tags: [graph_user_objects]
   Contract_HostMemory_HostMalloc_ReturnsUsablePointer:
     <<: *level_0
     tags: [host_memory]
