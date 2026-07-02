@@ -1042,8 +1042,10 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     initAttr->state = IBV_QPS_INIT;
     initAttr->pkeyIndex = ncclParamIbPkey();
     initAttr->portNum = ibDev->portNum;
-    // Remote Atomic operations are used for GIN! REMOTE_READ is required for GIN Get (RDMA READ).
-    initAttr->qpAccessFlags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ;
+    // Remote Atomic operations are used for GIN on mlx5. REMOTE_READ is required for GIN Get (RDMA READ).
+    // Only enable REMOTE_ATOMIC on mlx5; bnxt_re rejects it on peermem GPU MRs (vendor_err 6).
+    initAttr->qpAccessFlags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
+    if (ibDev->ibProvider == IB_PROVIDER_MLX5) initAttr->qpAccessFlags |= IBV_ACCESS_REMOTE_ATOMIC;
     NCCLCHECK(ncclIbQpInit(localQp));
 
     if (remQpInfo->ece_supported) {
