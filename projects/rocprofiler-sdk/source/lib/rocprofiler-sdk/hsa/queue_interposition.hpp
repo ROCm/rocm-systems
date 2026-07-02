@@ -29,7 +29,6 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <atomic>
-#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -158,9 +157,6 @@ cas_write_index_impl(QueueState*       state,
  */
 uint64_t
 load_write_index_impl(const QueueState* state, std::memory_order order = std::memory_order_relaxed);
-
-size_t
-get_async_signal_handler_thread_count();
 
 /// Type alias for doorbell function callback
 using doorbell_fn_t = std::function<void(hsa_signal_t, hsa_signal_value_t)>;

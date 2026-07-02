@@ -41,7 +41,6 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
-#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -55,8 +54,13 @@
 #include <hsa/hsa_api_trace.h>
 #include <pthread.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -207,9 +211,6 @@ get_doorbell_tls()
     return _v;
 }
 
-using async_signal_task_t        = std::function<void()>;
-using async_signal_task_vector_t = std::vector<async_signal_task_t>;
-
 inline void
 publish_submitted_packets(QueueState* state, uint64_t submit_pos)
 {
@@ -292,55 +293,388 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
     }
 }
 
-auto
-async_signal_handler_exists()
+// Post-wait completion body for a fully-drained dispatch batch: dispatch-complete tracing
+// callbacks, completion-signal release/decrement, and correlation-id refcount decrement for
+// every packet in the session. Shared by batched_wait::batched_waiter_t::run() below.
+void
+complete_queue_info_session(queue_info_session_t& session)
 {
-    return common::static_object<internal_threading::task_group_t>::get();
-}
-}  // namespace
-
-size_t
-get_async_signal_handler_thread_count()
-{
-    constexpr auto fallback_thread_count = int64_t{4};
-
-    const auto gpu_thread_count = common::get_env("GPU_MAX_HW_QUEUES", fallback_thread_count);
-    const auto thread_count =
-        common::get_env("ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS", gpu_thread_count);
-
-    if(thread_count < 1)
+    for(auto& packet : session.packet_data)
     {
-        ROCP_WARNING << "ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS/GPU_MAX_HW_QUEUES resolved to "
-                     << thread_count << "; using 1 async signal handler thread";
-        return 1;
+        auto dispatch_time = kernel_dispatch::get_dispatch_time(session, packet);
+        kernel_dispatch::dispatch_complete(session, packet, dispatch_time);
+
+        // if the completion signal was from the pool, we just release it back to the pool for
+        // reuse.
+        if(packet.pooled_signal)
+        {
+            Queue::release_signal(packet.pooled_signal);
+        }
+        else
+        {
+            // if the signal was not from the pool, we need to decrement the signal value to clean
+            // up the signal for the application
+            get_core_table()->hsa_signal_subtract_relaxed_fn(packet.completion_signal, 1);
+        }
+
+        // we need to decrement this reference count at the end of the functions
+        auto* _corr_id = session.correlation_id;
+        if(_corr_id)
+        {
+            ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
+                << "reference counter for correlation id " << _corr_id->internal << " from thread "
+                << _corr_id->thread_idx << " has no reference count";
+            _corr_id->sub_kern_count();
+            _corr_id->sub_ref_count();
+        }
+    }
+}
+
+// Batched hsa_amd_signal_wait_any completion waiter for inline queue interposition.
+namespace batched_wait
+{
+// Producer-side descriptor for a single dispatch batch's completion wait, built by
+// process_packet_batch() in write_interceptor().
+struct pending_task_t
+{
+    hsa_signal_t                          signal  = {.handle = 0};
+    hsa_signal_value_t                    value   = 0;
+    std::shared_ptr<queue_info_session_t> session = {};
+};
+
+using pending_task_vector_t = std::vector<pending_task_t>;
+
+// Per-entry storage for the waiter thread's shared pending vector. Tracked by a stable
+// `id` rather than vector index, since indices shift under concurrent enqueue/erase.
+struct pending_entry_t
+{
+    uint64_t                              id      = 0;
+    hsa_signal_t                          signal  = {.handle = 0};
+    hsa_signal_value_t                    value   = 0;
+    std::shared_ptr<queue_info_session_t> session = {};
+};
+
+// A single, dedicated waiter thread (not a pool) that batches all outstanding
+// completion signals into one hsa_amd_signal_wait_any_fn call, avoiding the
+// head-of-line blocking of waiting on one signal at a time. A dedicated "wake" signal
+// is always appended to the batch so enqueue()/shutdown_and_join() can interrupt an
+// in-progress wait without a polling timeout.
+class batched_waiter_t
+{
+public:
+    batched_waiter_t()
+    {
+        ROCP_HSA_TABLE_CALL(
+            FATAL, get_amd_ext_table()->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &m_wake_signal))
+            << "Error creating batched-wait wake signal";
+        m_thread = std::thread{&batched_waiter_t::run, this};
     }
 
-    return static_cast<size_t>(thread_count);
+    // Safety net only: shutdown_and_join() is expected to already have run explicitly
+    // from interposition_fini() while HSA is still alive; this is a no-op then, since
+    // shutdown_and_join() is idempotent.
+    ~batched_waiter_t() { shutdown_and_join(); }
+
+    batched_waiter_t(const batched_waiter_t&) = delete;
+    batched_waiter_t& operator=(const batched_waiter_t&) = delete;
+
+    // Called from the producer thread after the real doorbell has already been
+    // published and gate_lock already unlocked (see process_doorbell_impl()).
+    void enqueue(pending_task_t&& task)
+    {
+        bool _shutdown = false;
+        {
+            std::lock_guard<std::mutex> _lk{m_mutex};
+            _shutdown = m_shutdown.load(std::memory_order_acquire);
+            if(!_shutdown)
+            {
+                m_pending.emplace_back(
+                    pending_entry_t{m_next_id++, task.signal, task.value, std::move(task.session)});
+
+                // Bumping the wake signal under the same lock as the m_shutdown check
+                // (and shutdown_and_join()'s m_shutdown exchange) guarantees a producer
+                // that observes m_shutdown==false here always bumps a still-live signal,
+                // since m_wake_signal is only destroyed after shutdown_and_join() has
+                // exchanged m_shutdown to true under this same mutex.
+                get_core_table()->hsa_signal_add_scacq_screl_fn(m_wake_signal, 1);
+            }
+        }
+
+        if(_shutdown)
+        {
+            // Extremely rare finalization-only race: a producer raced past
+            // should_bypass_inline_intercept()'s fini check just before teardown() ran, so
+            // the waiter thread is already gone and m_wake_signal/m_pending may be
+            // destroyed. Fall back to performing the same completion wait synchronously
+            // here, using only the entry's own signal, then run the shared completion body.
+            get_core_table()->hsa_signal_wait_relaxed_fn(task.signal,
+                                                          HSA_SIGNAL_CONDITION_LT,
+                                                          task.value,
+                                                          UINT64_MAX,
+                                                          HSA_WAIT_STATE_BLOCKED);
+            if(task.session) complete_queue_info_session(*task.session);
+            return;
+        }
+    }
+
+    // Blocks until every currently-pending entry has been fully processed, including the
+    // shared completion body -- not just removed from m_pending. Does not stop/join the
+    // waiter thread. Only for genuine runtime sync points (interposition_sync());
+    // finalization uses shutdown_and_join() instead, which cannot block forever on a
+    // signal that never satisfies (see teardown()).
+    void drain()
+    {
+        std::unique_lock<std::mutex> _lk{m_mutex};
+        m_drain_cv.wait(_lk,
+                         [this] { return m_pending.empty() && m_processing_count == 0; });
+    }
+
+    // Explicit, HSA-alive-guaranteed shutdown: signals the waiter thread to exit, joins
+    // it, and destroys the wake signal. Idempotent. Deliberately does not drain() first
+    // -- a pending signal that never satisfies (hung/crashed dispatch) would otherwise
+    // block finalization forever; run()'s final-drain loop below is bounded instead.
+    void shutdown_and_join()
+    {
+        {
+            std::lock_guard<std::mutex> _lk{m_mutex};
+            if(m_shutdown.exchange(true, std::memory_order_acq_rel)) return;
+
+            // Wake-signal bump under the same lock as the m_shutdown exchange; see
+            // enqueue()'s comment for why this closes the enqueue/shutdown race.
+            get_core_table()->hsa_signal_add_scacq_screl_fn(m_wake_signal, 1);
+        }
+
+        // Must not hold m_mutex across join(): run() re-acquires m_mutex every
+        // iteration before it can observe m_shutdown and return.
+        if(m_thread.joinable()) m_thread.join();
+
+        // Safe to destroy m_wake_signal now: the waiter thread has exited and
+        // m_shutdown is already true, so no enqueue() can touch it from here on.
+        {
+            std::lock_guard<std::mutex> _lk{m_mutex};
+            get_core_table()->hsa_signal_destroy_fn(m_wake_signal);
+            m_wake_signal = hsa_signal_t{.handle = 0};
+        }
+    }
+
+private:
+    struct local_entry_t
+    {
+        uint64_t                              id      = 0;
+        std::shared_ptr<queue_info_session_t> session = {};
+    };
+
+    // Erases the pending entry identified by `done.id` (by stable id, not index, since
+    // indices shift across concurrent enqueue/erase), then runs the shared completion
+    // body. Tracks in-flight completion work via m_processing_count so drain() cannot
+    // return while it is still running on this thread.
+    void complete_entry(const local_entry_t& done)
+    {
+        {
+            std::lock_guard<std::mutex> _lk{m_mutex};
+            auto                        it = std::find_if(
+                m_pending.begin(), m_pending.end(), [id = done.id](const pending_entry_t& e) {
+                    return e.id == id;
+                });
+            if(it != m_pending.end()) m_pending.erase(it);
+            ++m_processing_count;
+        }
+
+        if(done.session) complete_queue_info_session(*done.session);
+
+        {
+            std::lock_guard<std::mutex> _lk{m_mutex};
+            --m_processing_count;
+            if(m_pending.empty() && m_processing_count == 0) m_drain_cv.notify_all();
+        }
+    }
+
+    void run()
+    {
+        // Baseline value the wake signal must exceed. hsa_signal_condition_t has no
+        // strict-greater-than condition, so "signal > last_wake_value" is expressed as
+        // HSA_SIGNAL_CONDITION_GTE against (last_wake_value + 1) below. Updated to the
+        // observed satisfying_value every time the wake index resolves so the same
+        // increment cannot re-trigger it.
+        uint64_t last_wake_value = 0;
+
+        auto signals       = std::vector<hsa_signal_t>{};
+        auto conds         = std::vector<hsa_signal_condition_t>{};
+        auto values        = std::vector<hsa_signal_value_t>{};
+        auto local_entries = std::vector<local_entry_t>{};
+
+        while(true)
+        {
+            signals.clear();
+            conds.clear();
+            values.clear();
+            local_entries.clear();
+
+            {
+                std::lock_guard<std::mutex> _lk{m_mutex};
+                signals.reserve(m_pending.size() + 1);
+                conds.reserve(m_pending.size() + 1);
+                values.reserve(m_pending.size() + 1);
+                local_entries.reserve(m_pending.size());
+                for(auto& entry : m_pending)
+                {
+                    signals.emplace_back(entry.signal);
+                    conds.emplace_back(HSA_SIGNAL_CONDITION_LT);
+                    values.emplace_back(entry.value);
+                    local_entries.emplace_back(local_entry_t{entry.id, entry.session});
+                }
+            }
+
+            // wake_index also equals the number of real (non-wake) entries in this
+            // snapshot, since the wake signal is always appended last.
+            const size_t wake_index = signals.size();
+            signals.emplace_back(m_wake_signal);
+            conds.emplace_back(HSA_SIGNAL_CONDITION_GTE);
+            values.emplace_back(static_cast<hsa_signal_value_t>(last_wake_value + 1));
+
+            hsa_signal_value_t satisfying_value = 0;
+            const uint32_t     idx              = get_amd_ext_table()->hsa_amd_signal_wait_any_fn(
+                static_cast<uint32_t>(signals.size()),
+                signals.data(),
+                conds.data(),
+                values.data(),
+                UINT64_MAX,
+                HSA_WAIT_STATE_BLOCKED,
+                &satisfying_value);
+
+            const bool woke_on_real_entry = (idx < wake_index);
+
+            if(idx == wake_index)
+            {
+                last_wake_value = static_cast<uint64_t>(satisfying_value);
+            }
+            else if(!woke_on_real_entry)
+            {
+                // Defensive: should not happen with timeout_hint=UINT64_MAX (no timeout
+                // path exists), but do nothing this iteration rather than dereference
+                // OOB; the local drain-satisfied sweep below and the next wait_any call
+                // still make progress.
+            }
+            else
+            {
+                // One of the real pending entries satisfied its condition via the
+                // wait-any call above.
+                complete_entry(local_entries[idx]);
+            }
+
+            // Drain every other already-satisfied entry in this same snapshot via cheap
+            // relaxed loads before re-snapshotting; otherwise a backlog costs one
+            // wait_any round trip per entry instead of per snapshot.
+            for(size_t i = 0; i < wake_index; ++i)
+            {
+                if(woke_on_real_entry && i == idx) continue;  // already handled above
+
+                const auto value = get_core_table()->hsa_signal_load_relaxed_fn(signals[i]);
+                if(value < values[i])  // matches HSA_SIGNAL_CONDITION_LT set above
+                {
+                    complete_entry(local_entries[i]);
+                }
+            }
+
+            // Once shutdown is requested, stop looping into another (potentially
+            // unbounded) wait_any call. Entries still outstanding afterward are either
+            // legitimately in flight or a hung/crashed dispatch; either way finalization
+            // must make forward progress rather than wait on them indefinitely.
+            if(m_shutdown.load(std::memory_order_acquire))
+            {
+                // A producer's enqueue() can land strictly between the snapshot taken
+                // above and this shutdown observation, stranding that entry in
+                // m_pending forever. Re-snapshot + drain a final, bounded number of
+                // times (with brief sleeps) to catch any such late arrivals without
+                // risking an unbounded hang on a genuinely stuck signal.
+                constexpr int                       kMaxFinalDrainAttempts = 20;
+                constexpr std::chrono::milliseconds kFinalDrainSleep{5};
+
+                for(int attempt = 0; attempt < kMaxFinalDrainAttempts; ++attempt)
+                {
+                    auto _final_signals = std::vector<hsa_signal_t>{};
+                    auto _final_values  = std::vector<hsa_signal_value_t>{};
+                    auto _final_entries = std::vector<local_entry_t>{};
+
+                    {
+                        std::lock_guard<std::mutex> _lk{m_mutex};
+                        if(m_pending.empty()) break;
+                        _final_signals.reserve(m_pending.size());
+                        _final_values.reserve(m_pending.size());
+                        _final_entries.reserve(m_pending.size());
+                        for(auto& entry : m_pending)
+                        {
+                            _final_signals.emplace_back(entry.signal);
+                            _final_values.emplace_back(entry.value);
+                            _final_entries.emplace_back(local_entry_t{entry.id, entry.session});
+                        }
+                    }
+
+                    for(size_t i = 0; i < _final_entries.size(); ++i)
+                    {
+                        const auto value =
+                            get_core_table()->hsa_signal_load_relaxed_fn(_final_signals[i]);
+                        if(value < _final_values[i])  // matches HSA_SIGNAL_CONDITION_LT
+                        {
+                            complete_entry(_final_entries[i]);
+                        }
+                    }
+
+                    bool _empty = false;
+                    {
+                        std::lock_guard<std::mutex> _lk{m_mutex};
+                        _empty = m_pending.empty();
+                    }
+                    if(_empty) break;
+
+                    if(attempt + 1 < kMaxFinalDrainAttempts)
+                        std::this_thread::sleep_for(kFinalDrainSleep);
+                }
+
+                return;
+            }
+        }
+    }
+
+    std::mutex                   m_mutex;
+    std::condition_variable      m_drain_cv;
+    std::vector<pending_entry_t> m_pending;
+    uint64_t                     m_next_id     = 0;
+    hsa_signal_t                 m_wake_signal = {.handle = 0};
+    std::atomic<bool>            m_shutdown    = {false};
+    // Entries past m_pending-removal but still running the completion body; accessed
+    // under m_mutex. See drain() and complete_entry().
+    size_t                       m_processing_count = 0;
+    std::thread                  m_thread;
+};
+
+// Query without constructing, so interposition_sync()/interposition_fini() do not spin
+// up the waiter thread if it was never needed.
+batched_waiter_t*
+waiter_exists()
+{
+    return common::static_object<batched_waiter_t>::get();
 }
 
-namespace
+batched_waiter_t&
+get_waiter()
 {
-internal_threading::task_group_t*
-get_async_signal_handler()
-{
-    using task_group_t           = internal_threading::task_group_t;
-    using create_task_group_fn_t = task_group_t* (*) (void*, size_t);
-
-    // default to 4 threads if neither GPU_MAX_HW_QUEUES or ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS
-    // is set, since the async signal handler is primarily intended for handling queue completion
-    // signals and a typical GPU may have on the order of 4 hardware queues. Note: GPU_MAX_HW_QUEUES
-    // is a ROCr/HSA environment variable. If GPU_MAX_HW_QUEUES is set but
-    // ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS is not set, we will use the value of
-    // GPU_MAX_HW_QUEUES to determine the number of threads for the async signal handler. If
-    // ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS is set, it will take precedence over
-    // GPU_MAX_HW_QUEUES.
-    static auto*& _v =
-        common::static_object<internal_threading::task_group_t>::construct_via_function(
-            static_cast<create_task_group_fn_t>(&internal_threading::create_task_group),
-            get_async_signal_handler_thread_count());
-
-    return _v;
+    static auto*& _v = common::static_object<batched_waiter_t>::construct();
+    return *_v;
 }
+
+// Called once from interposition_fini(). Deliberately shuts down directly rather than
+// draining first: an unconditional pre-drain would block finalization forever on a
+// signal that never satisfies.
+void
+teardown()
+{
+    if(auto* bw = waiter_exists(); bw)
+    {
+        bw->shutdown_and_join();
+    }
+}
+}  // namespace batched_wait
 
 bool
 context_filter(const context::context* ctx)
@@ -371,95 +705,16 @@ bit_extract(Integral x, int first, int last)
     return (x >> first) & bit_mask(0, last - first);
 }
 
-void
-async_signal_handler(hsa_signal_t                            completion_signal,
-                     hsa_signal_value_t                      starting_value,
-                     std::shared_ptr<queue_info_session_t>&& session)
-{
-    constexpr auto timeout_hint =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds{10});
-
-    auto signal_value = starting_value;
-    auto niterations  = uint64_t{0};
-
-    // Stop only on completion or finalization; never run cleanup while the kernel is live.
-    while(true)
-    {
-        signal_value = get_core_table()->hsa_signal_wait_relaxed_fn(completion_signal,
-                                                                    HSA_SIGNAL_CONDITION_LT,
-                                                                    starting_value,
-                                                                    timeout_hint.count(),
-                                                                    HSA_WAIT_STATE_ACTIVE);
-
-        if(signal_value < starting_value) break;         // kernel completed
-        if(registration::get_fini_status() != 0) break;  // tearing down: run cleanup path
-        ++niterations;
-
-        // Surface long-running waits for diagnostics without giving up the wait.
-        constexpr auto warn_interval = (1UL << 20);
-        if(niterations % warn_interval == 0)
-            ROCP_WARNING << fmt::format(
-                "Async signal handler still waiting on signal {{.handle={}}} after {} iterations "
-                "(value={}, starting_value={})",
-                completion_signal.handle,
-                niterations,
-                signal_value,
-                starting_value);
-    }
-
-    ROCP_INFO << fmt::format("Async signal handler invoked for signal {{.handle={}}} with "
-                             "value {} (original value={}, iterations={})",
-                             completion_signal.handle,
-                             signal_value,
-                             starting_value,
-                             niterations);
-
-    if(auto delay_us = common::get_env("ROCPROFILER_TEST_INLINE_ASYNC_DELAY_US", 0); delay_us > 0)
-    {
-        std::this_thread::sleep_for(std::chrono::microseconds{delay_us});
-    }
-
-    for(auto& packet : session->packet_data)
-    {
-        auto dispatch_time = kernel_dispatch::get_dispatch_time(*session, packet);
-        kernel_dispatch::dispatch_complete(*session, packet, dispatch_time);
-
-        // if the completion signal was from the pool, we just release it back to the pool for
-        // reuse.
-        if(packet.pooled_signal)
-        {
-            Queue::release_signal(packet.pooled_signal);
-        }
-        else
-        {
-            // if the signal was not from the pool, we need to decrement the signal value to clean
-            // up the signal for the application
-            get_core_table()->hsa_signal_subtract_relaxed_fn(packet.completion_signal, 1);
-        }
-
-        // we need to decrement this reference count at the end of the functions
-        auto* _corr_id = session->correlation_id;
-        if(_corr_id)
-        {
-            ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
-                << "reference counter for correlation id " << _corr_id->internal << " from thread "
-                << _corr_id->thread_idx << " has no reference count";
-            _corr_id->sub_kern_count();
-            _corr_id->sub_ref_count();
-        }
-    }
-}
-
-// Local kernel-dispatch tracing path: swaps in pooled completion signals,
-// runs KERNEL_DISPATCH_ENQUEUE tracer hooks, and prepares a completion-signal
-// waiter for the async signal handler pool. Strict 1:1 packet forwarding; does
-// not insert PM4 packets. Distinct from Queue::WriteInterceptor (legacy path).
+// Local kernel-dispatch tracing path: swaps in pooled completion signals, runs
+// KERNEL_DISPATCH_ENQUEUE tracer hooks, and defers a completion-signal wait entry for
+// the batched waiter. Strict 1:1 packet forwarding; does not insert PM4 packets.
+// Distinct from Queue::WriteInterceptor (legacy path).
 void
 write_interceptor(Queue*                                queue,
                   const void*                           packets,
                   uint64_t                              pkt_count,
                   hsa_amd_queue_intercept_packet_writer writer,
-                  async_signal_task_vector_t*           deferred_async_tasks)
+                  batched_wait::pending_task_vector_t&  deferred_batched_tasks)
 {
     using callback_record_t = packet_data_t::callback_record_t;
     using packet_vector_t   = common::container::small_vector<rocprofiler_packet, 512>;
@@ -544,10 +799,12 @@ write_interceptor(Queue*                                queue,
 
     using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
-    auto process_packet_batch = [&queue, &corr_id, tracing_data_v, deferred_async_tasks](
-                                    const rocprofiler_packet* _packets,
-                                    uint64_t                  _num_packets,
-                                    const packet_writer_fn_t& _writer) {
+    auto process_packet_batch = [&queue,
+                                 &corr_id,
+                                 tracing_data_v,
+                                 &deferred_batched_tasks](const rocprofiler_packet* _packets,
+                                                         uint64_t                  _num_packets,
+                                                         const packet_writer_fn_t& _writer) {
         static constexpr auto null_signal = hsa_signal_t{.handle = 0};
 
         auto transformed_packets = packet_vector_t{};
@@ -728,16 +985,11 @@ write_interceptor(Queue*                                queue,
 
         if(_shared_info_session)
         {
-            auto _task = [_signal_v          = last_completion_signal,
-                          _expected_signal_v = current_signal_value,
-                          _session_v         = std::move(_shared_info_session)]() mutable {
-                async_signal_handler(_signal_v, _expected_signal_v, std::move(_session_v));
-            };
-
-            if(deferred_async_tasks)
-                deferred_async_tasks->emplace_back(std::move(_task));
-            else
-                get_async_signal_handler()->async(std::move(_task));
+            // Deferred, not enqueued directly: write_interceptor() runs before the real
+            // doorbell is published and gate_lock is unlocked (see
+            // process_doorbell_impl()), and the waiter must only be armed after that.
+            deferred_batched_tasks.emplace_back(batched_wait::pending_task_t{
+                last_completion_signal, current_signal_value, std::move(_shared_info_session)});
         }
     };
 
@@ -757,8 +1009,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 {
     if(!state) return;
 
-    auto* state_ptr            = state.get();
-    auto  deferred_async_tasks = async_signal_task_vector_t{};
+    auto* state_ptr              = state.get();
+    auto  deferred_batched_tasks = batched_wait::pending_task_vector_t{};
 
     // gate_lock serializes doorbell processing; producers never take it, so no deadlock.
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
@@ -835,7 +1087,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                           source_snapshot,
                           pkt_count,
                           ring_buffer_writer,
-                          &deferred_async_tasks);
+                          deferred_batched_tasks);
     }
     else
     {
@@ -874,8 +1126,10 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     // so they can never wait on unpublished packets.
     lock.unlock();
 
-    for(auto& itr : deferred_async_tasks)
-        get_async_signal_handler()->async(std::move(itr));
+    for(auto& itr : deferred_batched_tasks)
+    {
+        batched_wait::get_waiter().enqueue(std::move(itr));
+    }
 }
 
 std::shared_ptr<QueueState>
@@ -1023,7 +1277,8 @@ ROCP_QUEUE_LOAD_WRITE_INDEX(scacquire, std::memory_order_acquire)
         }                                                                                          \
         /* it is too late to create queue state at this point so do not create if missing. */      \
         constexpr auto create_if_missing = false;                                                  \
-        if(auto s = lookup_queue_state_by_doorbell(sig, create_if_missing); s)                     \
+        auto           s = lookup_queue_state_by_doorbell(sig, create_if_missing);                 \
+        if(s)                                                                                      \
         {                                                                                          \
             process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {              \
                 get_next_table()->hsa_signal_##NAME##_fn(db, v);                                   \
@@ -1048,16 +1303,16 @@ supports_queue_interposition()
     return s_intercept_installed.load(std::memory_order_acquire);
 }
 
+// Genuine runtime sync point (called from code_object.cpp / queue_controller.cpp), NOT
+// finalization: waits for all currently in-flight batched-wait completions to fully
+// finish, including their completion bodies. interposition_fini() below deliberately
+// does not call this -- see batched_wait::teardown().
 void
 interposition_sync()
 {
-    if(async_signal_handler_exists())  // query without constructing
+    if(auto* bw = batched_wait::waiter_exists(); bw)
     {
-        constexpr auto async_only = true;
-        if(auto* tg = get_async_signal_handler(); tg)
-        {
-            tg->join(async_only);
-        }
+        bw->drain();
     }
 }
 
@@ -1116,8 +1371,12 @@ interposition_fini()
     // disable active interception
     s_intercept_active.store(false, std::memory_order_release);
 
-    // wait for any in-flight signal handlers to complete and clean up the signal pool
-    interposition_sync();
+    // Permanently shut down the batched-wait waiter thread and destroy its wake signal
+    // now, while HSA is still guaranteed alive -- mirrors signal_pool_fini()'s explicit
+    // pre-teardown HSA-object cleanup immediately below. Deliberately not
+    // interposition_sync(), which unconditionally drain()s and could block finalization
+    // forever on a signal that never satisfies.
+    batched_wait::teardown();
 
     // clean up signal pool
     signal_pool_fini();
