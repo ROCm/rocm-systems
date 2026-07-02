@@ -115,11 +115,10 @@ directly). To get real GPU emulation you need the rocjitsu libraries.
 
 ### Option A — let mirage find them
 
-mirage discovers the rocjitsu KMD library (`librocjitsu_kmd.so`, or
-`librocjitsu.so` as a fallback) in this order:
+mirage discovers the rocjitsu library (`librocjitsu.so`) in this order:
 
 1. a sibling monorepo build, relative to the `mirage` binary
-   (`../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux`);
+   (`../../../rocjitsu/build`);
 2. `$ROCM_HOME/lib`;
 3. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
    is active).
@@ -176,6 +175,6 @@ signal → stop) through the public CLI and HTTP surfaces.
   mirage to run doesn't exist on `PATH` inside the session; the exec ends
   with exit code 127 and the message is shown on its stdout.
 - **rocjitsu reported as not installed** — build rocjitsu (Option B) and
-  ensure `librocjitsu_kmd.so` is reachable (a sibling monorepo build,
+  ensure `librocjitsu.so` is reachable (a sibling monorepo build,
   `$ROCM_HOME/lib`, or `$(rocm-sdk path --root)/lib`), or run
   `mirage state builtins` to extract any embedded assets.
