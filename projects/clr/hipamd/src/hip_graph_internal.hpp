@@ -1194,6 +1194,9 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     static void appendPacketToFlatBuffer(const uint8_t* pkt_raw,
                                          std::vector<uint8_t>& flatData,
                                          std::vector<uint32_t>& fullHeaders);
+    // Stamp the four packet headers of a 256-byte metadata slot with
+    // HSA_PACKET_TYPE_INVALID (type=1) so the CP metadata-prefetch engine skips it.
+    static void invalidateMetadataSlot(uint8_t* slot);
   };
 
   //! Structure linking packet batches to segments
@@ -2085,7 +2088,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
     size_t dOffset = 0;
     amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
-    
+
     hip::MemcpyType memType = hipHostToHost;
     if (srcMemory != nullptr && dstMemory == nullptr) {
         memType = ihipGetMemcpyType(srcMemory, dst_);

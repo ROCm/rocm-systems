@@ -1580,18 +1580,34 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
              (thisChunk - firstCount) * kPacketSize);
     }
 
-    // Copy this chunk's metadata packets to the metadata ring buffer.
+    // Copy this chunk's metadata packets to the metadata ring buffer, following the
+    // same publish protocol as the live single-dispatch path (MetaDataPreloader::Set):
+    // write each packet body first with the headers held at HSA_PACKET_TYPE_INVALID,
+    // then arm the four packet headers last. This guarantees the CP prefetch engine
+    // never observes an armed header over a partially-written body. The captured
+    // buffer already carries the armed header value for real slots and INVALID for
+    // slots without metadata (barriers), so re-arming from it preserves both cases.
     if (flatMetadataData != nullptr && metadata_preloader_.HasMetadataQueue()) {
       static constexpr size_t kMetaSize = 256;
+      // Header dword offsets within a 256B AqlMetadataPrefetchPacket.
+      static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
+      static constexpr uint32_t kInvalidMetaHeader = HSA_PACKET_TYPE_INVALID;
       auto* metaBase = static_cast<uint8_t*>(metadata_preloader_.GetQueueBase());
-      const uint8_t* metaSrc = flatMetadataData->data() + chunkStart * kMetaSize;
-      if (chunkSlot + thisChunk <= queueSize) {
-        memcpy(metaBase + chunkSlot * kMetaSize, metaSrc, thisChunk * kMetaSize);
-      } else {
-        const size_t firstCount = queueSize - chunkSlot;
-        memcpy(metaBase + chunkSlot * kMetaSize, metaSrc, firstCount * kMetaSize);
-        memcpy(metaBase, metaSrc + firstCount * kMetaSize,
-               (thisChunk - firstCount) * kMetaSize);
+      for (size_t j = 0; j < thisChunk; ++j) {
+        const uint64_t slot = (startIndex + chunkStart + j) & queueMask;
+        uint8_t* dst = metaBase + slot * kMetaSize;
+        const uint8_t* src = flatMetadataData->data() + (chunkStart + j) * kMetaSize;
+        for (size_t h = 0; h < 4; ++h) {
+          // Hold the header INVALID while the body region after it is copied.
+          std::memcpy(dst + kHdrOff[h], &kInvalidMetaHeader, sizeof(kInvalidMetaHeader));
+          const size_t bodyStart = kHdrOff[h] + sizeof(uint32_t);
+          const size_t bodyEnd = (h + 1 < 4) ? kHdrOff[h + 1] : kMetaSize;
+          std::memcpy(dst + bodyStart, src + bodyStart, bodyEnd - bodyStart);
+        }
+        // Arm the headers last, in reverse order (header3 -> header0)
+        for (size_t h = 4; h-- > 0;) {
+          std::memcpy(dst + kHdrOff[h], src + kHdrOff[h], sizeof(uint32_t));
+        }
       }
     }
 
