@@ -461,6 +461,11 @@ Optional:
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
   --overwrite               Overwrite previous workspace directories
   --report-suffix SUFFIX    Suffix for report directory (default: blank)
+  --emit-results            Emit structured results (JSON/JSONL + tarball) for the dashboard
+  --results-dir DIR         Directory for emitted results + tarballs (default: <workspace>/results)
+  --run-label LABEL         Optional label stored with the emitted run (e.g. 'nightly', a PR number)
+  --db-push                 Also push results to PostgreSQL (DSN from RCCL_RESULTS_DSN); implies --emit-results
+  --db-timeout SECONDS      PostgreSQL connect + statement timeout for --db-push (default: 10)
   -h, --help                Show help message and exit
 ```
 
@@ -497,6 +502,46 @@ When `--coverage-report` is specified, the runner generates:
 - Merges profiles with `llvm-profdata`
 - Generates reports with `llvm-cov show` and `llvm-cov report`
 - Filters out irrelevant files (test/, gtest, external dependencies)
+
+## Result Emission & Dashboard
+
+The runner can emit structured, machine-readable results, either as local files
+(picked up by the dashboard's periodic sweep) or pushed directly to PostgreSQL.
+
+### Emitting results
+
+```bash
+# Local files only (durable; feeds the dashboard sweep):
+python test_runner.py -c configs/rccl_perf_tests.json --emit-results --results-dir /path/to/results
+
+# Local files + best-effort direct DB push:
+export RCCL_RESULTS_DSN='postgresql://<user>:<pass>@<host>:5432/<db>'
+python test_runner.py -c configs/rccl_perf_tests.json --db-push
+```
+
+- `--db-push` implies `--emit-results`. If the DB push fails or times out, the
+  run still succeeds and the local tarball is retained for the sweep.
+- The DSN is read only from `RCCL_RESULTS_DSN`; it is never hardcoded or written
+  into the emitted files.
+- Enabling emission also turns on per-test log capture so `busbw`/`algbw` can be
+  parsed from rccl-tests output. Default behaviour (no capture) is unchanged when
+  emission is off.
+
+### What is emitted
+
+Per invocation, under `--results-dir` (default `<workspace>/results`):
+
+- `run.json` - run manifest: RCCL SHA, host/telemetry metadata, config, env, summary.
+- `tests.jsonl` - one line per test (status PASSED/FAILED/SKIPPED/TIMEOUT, exec mode, dtype, duration).
+- `perf.jsonl` - one line per (size, place) perf row (latency, algbw, busbw).
+- `coverage.json` - llvm-cov totals (only when `--coverage-report` produced a report).
+- `<run_id>.tar.gz` and `latest.tar.gz` - self-contained snapshots the sweep pulls.
+
+Coverage is emitted only where the host has an instrumented build plus
+`llvm-profdata`/`llvm-cov`; perf and per-test results do not require them.
+
+See [`db/README.md`](db/README.md) for the database schema and the full
+emission and scrape/sweep contract.
 
 ## Examples
 
