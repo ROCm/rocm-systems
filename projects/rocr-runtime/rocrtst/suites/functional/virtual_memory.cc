@@ -1749,7 +1749,6 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(void) {
   }
 
   if (verbosity() > 0) {
-    std::cout << "    Device memory VA alias test PASSED" << std::endl;
     std::cout << "    Subtest finished" << std::endl;
     std::cout << kSubTestSeparator << std::endl;
   }
