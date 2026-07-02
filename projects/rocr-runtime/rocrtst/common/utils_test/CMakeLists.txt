@@ -5,6 +5,7 @@ set (rocrtstUtilsTestSrcs utils_timer_gtest.cpp)
 set (rocrtstUtilsTestSrcs ${rocrtstUtilsTestSrcs} utils_timer_test.cpp)
 set (rocrtstUtilsTestSrcs ${rocrtstUtilsTestSrcs} utils_cpp11_gtest.cpp)
 set (rocrtstUtilsTestSrcs ${rocrtstUtilsTestSrcs} poll_backoff_test.cpp)
+set (rocrtstUtilsTestSrcs ${rocrtstUtilsTestSrcs} signal_wait_multi_test.cpp)
 
 #
 # Header files include path(s).
