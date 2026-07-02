@@ -40,15 +40,20 @@ bool hsakmt_hsa_loader_init() {
   // links against it), promote it to RTLD_GLOBAL so dlsym(RTLD_DEFAULT,...)
   // can resolve its symbols without a filesystem lookup.
   void *handle = dlopen("libhsa-runtime64.so.1", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
-  if (!handle) {
-    // Fallback: full load for callers that don't pre-link libhsa-runtime64.
-    handle = dlopen("libhsa-runtime64.so.1", RTLD_NOW | RTLD_GLOBAL);
+  if (handle) {
+    // Library was already resident; drop our temporary reference — the caller
+    // holds its own so the library stays loaded.
+    dlclose(handle);
+    return true;
   }
+  // Fallback: full load for callers that don't pre-link libhsa-runtime64.
+  // Do not dlclose — the library must remain resident for subsequent
+  // dlsym(RTLD_DEFAULT, ...) calls in the hsakmt_hsa_* wrappers to work.
+  handle = dlopen("libhsa-runtime64.so.1", RTLD_NOW | RTLD_GLOBAL);
   if (!handle) {
     pr_err("dlopen libhsa-runtime64.so.1 failed - %s\n", dlerror());
     return false;
   }
-  dlclose(handle);
   return true;
 }
 
