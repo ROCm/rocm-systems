@@ -22,7 +22,8 @@
 // one reduce-scratch slot (chunkBytes = totalBytes/nRanks), so the buffer
 // must satisfy: totalBytes * (nRanks+1)/nRanks <= ceARTmpBufSize.
 //
-// Default is <= 2 MiB (covers most deep-learning AllReduce sizes).  
+// Default is <= 2 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots), 
+// and the reduced output goes to the user recvbuff, and one more reduce-scratch slot.)
 #define NCCL_CE_AR_MAX_MSG_BYTES  (256ull * 1024 * 1024)
 
 struct ncclCeColl {
@@ -42,11 +43,19 @@ struct ncclCeColl {
   uint32_t ceFaults;  // bitmask of CE_FAULT_* bits; see ce_fault_inject.h
 #endif
 
-  // CE AllReduce staging buffer (symmetric, size = nRanks*maxChunk + maxChunk).
-  // Layout: [0 .. nRanks*chunkBytes) scatter staging,
-  //         [nRanks*chunkBytes .. (nRanks+1)*chunkBytes) reduce scratch.
+  // CE AllReduce staging buffer (symmetric), double-buffered scatter staging:
+  // Layout: [slot 0: nRanks chunks][slot 1: nRanks chunks], slot stride = nRanks*chunkBytes.
+  // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t*               ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
+  uint32_t* signalBuffer;
+  struct ncclDevrWindow* signalWin;
+  uint32_t* d_kernelReady;
+  uint32_t* d_quitFlag;
+  uint32_t* d_reduceDone; // kernel sets this to chunkIndex+1 after each chunk reduction
+  cudaStream_t computeStream;
+  cudaStream_t gatherStream;     // trails the reduce kernel: waits d_reduceDone, then all-gathers
+  cudaEvent_t  gatherDoneEvent;  // join gatherStream back onto the caller's stream
 };
 
 struct ncclCeInitTask {
