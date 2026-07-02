@@ -48,15 +48,6 @@ __host__ QueuePairMux::QueuePairMux(QueuePairIONIC&& ionic)
 
 __host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairIONIC&& ionic)
   : ionic{std::move(ionic)} { }
-
-__host__ QueuePairMux::QueuePairUnion&
-QueuePairMux::QueuePairUnion::operator=(QueuePairIONIC&& ionic) {
-  /* Assume that ionic subobject is currently active,
-   * clean up its resources by calling the destructor */
-  this->ionic.~QueuePairIONIC();
-  new (&this->ionic) QueuePairIONIC{std::move(ionic)};
-  return *this;
-}
 #endif
 
 #if defined(GDA_BNXT)
@@ -65,15 +56,6 @@ __host__ QueuePairMux::QueuePairMux(QueuePairBNXT&& bnxt)
 
 __host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairBNXT&& bnxt)
   : bnxt{std::move(bnxt)} { }
-
-__host__ QueuePairMux::QueuePairUnion&
-QueuePairMux::QueuePairUnion::operator=(QueuePairBNXT&& bnxt) {
-  /* Assume that bnxt subobject is currently active,
-   * clean up its resources by calling the destructor */
-  this->bnxt.~QueuePairBNXT();
-  new (&this->bnxt) QueuePairBNXT{std::move(bnxt)};
-  return *this;
-}
 #endif
 
 #if defined(GDA_MLX5)
@@ -82,15 +64,6 @@ __host__ QueuePairMux::QueuePairMux(QueuePairMLX5&& mlx5)
 
 __host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairMLX5&& mlx5)
   : mlx5{std::move(mlx5)} { }
-
-__host__ QueuePairMux::QueuePairUnion&
-QueuePairMux::QueuePairUnion::operator=(QueuePairMLX5&& mlx5) {
-  /* Assume that mlx5 subobject is currently active,
-   * clean up its resources by calling the destructor */
-  this->mlx5.~QueuePairMLX5();
-  new (&this->mlx5) QueuePairMLX5{std::move(mlx5)};
-  return *this;
-}
 #endif
 
 __host__ QueuePairMux::QueuePairUnion QueuePairMux::QueuePairUnion::construct(
@@ -112,6 +85,31 @@ __host__ QueuePairMux::QueuePairUnion QueuePairMux::QueuePairUnion::construct(
     assert(false /* invalid GDAProvider */);
     __builtin_unreachable();
   }
+}
+
+__host__ QueuePairMux::QueuePairUnion& QueuePairMux::QueuePairUnion::assign(
+    QueuePairUnion&& other, GDAProvider provider) {
+  switch (provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    ionic = std::move(other.ionic);
+    break;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    bnxt = std::move(other.bnxt);
+    break;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    mlx5 = std::move(other.mlx5);
+    break;
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    __builtin_unreachable();
+  }
+  return *this;
 }
 
 __host__ void QueuePairMux::QueuePairUnion::destruct(GDAProvider provider) {
@@ -147,31 +145,29 @@ __host__ QueuePairMux::QueuePairMux(QueuePairMux&& other)
     provider{std::move(other.provider)} { }
 
 __host__ QueuePairMux& QueuePairMux::operator=(QueuePairMux&& other) {
-  /* Step 1: clean up resources held by active subobject */
-  qp.destruct(provider);
-
-  /* Step 2: move active subobject of other to *this
-   * Must use move constructor using placement-new because the move assignment operator
-   * might try to destroy resources in the now-invalid subobject of this->qp */
-  switch (other.provider) {
-#if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
-    new (&qp.ionic) QueuePairIONIC{std::move(other.qp.ionic)};
-    break;
-#endif
-#if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
-    new (&qp.bnxt) QueuePairBNXT{std::move(other.qp.bnxt)};
-    break;
-#endif
-#if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
-    new (&qp.mlx5) QueuePairMLX5{std::move(other.qp.mlx5)};
-    break;
-#endif
-  default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+  if (provider == other.provider) [[likely]] {
+    /* Common case where both use the same provider
+     *
+     * Steps 1 & 2: clean up resources held by active subobject of this->qp
+     * and move active subobject of other.qp to this->qp
+     * QueuePairUnion::assign uses the assignment operator of the active subobject,
+     * which will internally clean up resources held by the active subobject */
+    qp.assign(std::move(other.qp), provider);
+  } else {
+    /* Different providers, so obviously cannot be the same object
+     *
+     * Must manually end the lifetime of the active subobject of this->qp
+     * so that its storage can be reused by the moved-from object
+     * Also end the lifetime of the union itself: QueuePairUnion::~QueuePairUnion() is empty,
+     * but this is formally required so that its lifetime ends
+     * before we reuse the storage via placement-new and begin the lifetime of a new object
+     *
+     * Step 1: end lifetime of and clean up resources held by union and its active subobject */
+    qp.destruct(provider);
+    qp.~QueuePairUnion();
+    /* Step 2: construct new QueuePairUnion in the storage of this->qp,
+     * moving the active subobject from other.qp */
+    new (&qp) QueuePairUnion{QueuePairUnion::construct(std::move(other.qp), other.provider)};
   }
 
   /* Step 3: member-wise move of remaining data members from other to *this */
