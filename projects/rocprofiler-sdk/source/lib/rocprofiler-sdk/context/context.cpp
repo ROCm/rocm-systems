@@ -28,6 +28,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
@@ -347,6 +348,8 @@ start_context(rocprofiler_context_id_t context_id)
     if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
 #endif
 
+    rocprofiler::hsa::queue_interposition::notify_inline_qi_consumer_context_started(cfg);
+
     return status;
 }
 
@@ -381,6 +384,9 @@ stop_context(rocprofiler_context_id_t idx)
                 if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
                 if(_expected->dispatch_thread_trace)
                     _expected->dispatch_thread_trace->stop_context();
+
+                rocprofiler::hsa::queue_interposition::notify_inline_qi_consumer_context_stopped(
+                    _expected);
 
                 if(_expected->device_counter_collection)
                 {
@@ -445,6 +451,7 @@ deactivate_client_contexts(rocprofiler_client_id_t client_id)
         const auto* itr_v = itr.load();
         if(itr_v && itr_v->client_idx == client_id.handle)
         {
+            rocprofiler::hsa::queue_interposition::notify_inline_qi_consumer_context_stopped(itr_v);
             itr.store(nullptr);
         }
     }

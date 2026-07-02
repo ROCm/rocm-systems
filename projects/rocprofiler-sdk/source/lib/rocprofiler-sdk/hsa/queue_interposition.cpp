@@ -66,6 +66,8 @@ namespace hsa
 {
 namespace queue_interposition
 {
+auto s_active_inline_qi_consumers = std::atomic<uint32_t>{0};
+
 namespace
 {
 // NOTE:
@@ -78,13 +80,20 @@ auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
 
 bool
+has_active_inline_qi_consumers()
+{
+    return s_active_inline_qi_consumers.load(std::memory_order_acquire) > 0;
+}
+
+bool
 should_bypass_inline_intercept()
 {
     return (!s_intercept_installed.load(std::memory_order_acquire) ||
             !s_intercept_active.load(std::memory_order_acquire) ||
             registration::get_fini_status() != 0 ||
             // TODO: debug and enable queue interposition for attachment
-            registration::supports_attachment());
+            registration::supports_attachment() ||
+            !has_active_inline_qi_consumers());
 }
 
 auto*&
@@ -1046,6 +1055,21 @@ bool
 supports_queue_interposition()
 {
     return s_intercept_installed.load(std::memory_order_acquire);
+}
+
+void
+notify_inline_qi_consumer_context_started(const context::context* ctx)
+{
+    if(!context_needs_inline_qi_tracing(ctx)) return;
+    s_active_inline_qi_consumers.fetch_add(1, std::memory_order_release);
+}
+
+void
+notify_inline_qi_consumer_context_stopped(const context::context* ctx)
+{
+    if(!context_needs_inline_qi_tracing(ctx)) return;
+    auto prev = s_active_inline_qi_consumers.fetch_sub(1, std::memory_order_release);
+    if(prev == 0) s_active_inline_qi_consumers.store(0, std::memory_order_release);
 }
 
 void

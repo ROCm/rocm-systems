@@ -37,6 +37,10 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct context;
+}
 namespace hsa
 {
 namespace queue_interposition
@@ -219,6 +223,17 @@ destroy_queue_state(const hsa_queue_t* queue);
  */
 bool
 supports_queue_interposition();
+
+/**
+ * @brief Increment/decrement the active inline-QI consumer count (hot-path bypass gate).
+ *
+ * Called from context start/stop when a context uses kernel-dispatch or scratch-memory tracing.
+ */
+void
+notify_inline_qi_consumer_context_started(const context::context* ctx);
+
+void
+notify_inline_qi_consumer_context_stopped(const context::context* ctx);
 
 /**
  * @brief Install interposition wrappers into the HSA core API table

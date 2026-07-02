@@ -38,6 +38,10 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct context;
+}
 namespace hsa
 {
 // Tracks and manages HSA queues
@@ -124,6 +128,10 @@ get_queue_controller();
 
 bool
 enable_queue_intercept();
+
+/// True when this context uses inline QI (kernel-dispatch or scratch-memory tracing).
+bool
+context_needs_inline_qi_tracing(const context::context* ctx);
 
 void
 queue_controller_init(HsaApiTable* table);
