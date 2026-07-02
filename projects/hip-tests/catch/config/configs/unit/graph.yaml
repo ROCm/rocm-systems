@@ -1509,6 +1509,9 @@ graph:
   Unit_hipGraphAddMemAllocNode_Negative_NotSupported:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfResources:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph:
     <<: *level_2
     # Below tests are failing PSDB
