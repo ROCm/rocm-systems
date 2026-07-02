@@ -109,8 +109,8 @@ HIP_TEST_CASE(Contract_GraphUserObjects_CreateNullObject_ReturnsInvalidValue) {
 
   // A null out-object pointer is an invalid argument, so create must report a
   // portable invalid-value error rather than an unsupported-capability code.
-  const hipError_t status =
-      hipUserObjectCreate(nullptr, &counter, DestroyCounter, 1, 0);
+  const hipError_t status = hipUserObjectCreate(
+      nullptr, &counter, DestroyCounter, 1, hipUserObjectNoDestructorSync);
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("User objects are not supported by this runtime path.");
   }
