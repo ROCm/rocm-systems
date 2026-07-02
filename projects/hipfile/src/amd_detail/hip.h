@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
 #include <hip/driver_types.h>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -91,6 +92,28 @@ struct Hip {
         {
         }
     };
+
+private:
+    // Proc addresses resolved once per Hip instance on first hipAmdFileRead/Write
+    // call and cached for the instance lifetime. Keeps the two-call HIP symbol
+    // lookup (hipRuntimeGetVersion + hipGetProcAddress) off the per-I/O data plane.
+    // Mutable so the const virtual methods can populate them lazily.
+    //
+    // NOTE: the real Hip is a process-global singleton (Context<Hip>), so this
+    // cache is effectively process-global and is NOT rebuilt by
+    // Runtime::resetForTesting() the way the rest of the per-test state is. That
+    // is safe today only because MHip (test mock) overrides
+    // hipAmdFileRead/hipAmdFileWrite wholesale, so the real methods below — and
+    // this cache — never run under test. If you ever add a test that drives the
+    // REAL Hip::hipAmdFileRead/Write, the first test's resolution will leak into
+    // later tests; move the cache to a per-run object (e.g. Fastpath, which is
+    // reconstructed per test) instead.
+    mutable hipAmdFileRead_t  read_ptr_{nullptr};
+    mutable hipAmdFileWrite_t write_ptr_{nullptr};
+    mutable std::once_flag    ptrs_once_;
+
+    // Resolve read_ptr_/write_ptr_ exactly once for this instance.
+    void resolveProcPtrs() const;
 };
 
 }

@@ -6,7 +6,6 @@
 #pragma once
 
 #include "hipfile.h"
-#include "magic-word.h"
 
 #include <cerrno>
 #include <cstdint>

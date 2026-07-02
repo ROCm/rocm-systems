@@ -8,6 +8,7 @@
 #include "hip.h"
 
 #include <cstdio>
+#include <mutex>
 #include <optional>
 
 using namespace hipFile;
@@ -15,10 +16,12 @@ using namespace hipFile;
 bool
 Configuration::fastpath() const noexcept
 {
-    static bool fastpath_env{!Environment::force_compat_mode().value_or(false)};
-    static bool readExists{!!getHipAmdFileReadPtr()};
-    static bool writeExists{!!getHipAmdFileWritePtr()};
-    return readExists && writeExists && m_fastpath_override.value_or(fastpath_env);
+    std::call_once(m_fastpath_once, [this] {
+        m_fastpath_env          = !Environment::force_compat_mode().value_or(false);
+        m_fastpath_read_exists  = !!getHipAmdFileReadPtr();
+        m_fastpath_write_exists = !!getHipAmdFileWritePtr();
+    });
+    return m_fastpath_read_exists && m_fastpath_write_exists && m_fastpath_override.value_or(m_fastpath_env);
 }
 
 void
@@ -30,7 +33,7 @@ Configuration::fastpath(bool enabled) noexcept
 bool
 Configuration::fallback() const noexcept
 {
-    static bool fallback_env{[] {
+    std::call_once(m_fallback_once, [this] {
         bool force_compat = Environment::force_compat_mode().value_or(false);
         bool allow_compat = Environment::allow_compat_mode().value_or(true);
         if (force_compat && !allow_compat) {
@@ -38,11 +41,13 @@ Configuration::fallback() const noexcept
             fprintf(stderr, "hipFile: HIPFILE_FORCE_COMPAT_MODE=true and HIPFILE_ALLOW_COMPAT_MODE=false "
                             "would disable all I/O backends; enabling the fallback path to avoid "
                             "failing all I/O.\n");
-            return true;
+            m_fallback_env = true;
         }
-        return allow_compat;
-    }()};
-    return m_fallback_override.value_or(fallback_env);
+        else {
+            m_fallback_env = allow_compat;
+        }
+    });
+    return m_fallback_override.value_or(m_fallback_env);
 }
 
 void
@@ -54,13 +59,15 @@ Configuration::fallback(bool enabled) noexcept
 unsigned int
 Configuration::statsLevel() const noexcept
 {
-    static unsigned int stats_level_env{Environment::stats_level().value_or(1)};
-    return stats_level_env;
+    std::call_once(m_stats_once, [this] { m_stats_level = Environment::stats_level().value_or(1); });
+    return m_stats_level;
 }
 
 bool
 Configuration::unsupportedFileSystems() const noexcept
 {
-    static bool unsupported_file_systems_env{Environment::unsupported_file_systems().value_or(false)};
-    return unsupported_file_systems_env;
+    std::call_once(m_fs_once, [this] {
+        m_unsupported_file_systems = Environment::unsupported_file_systems().value_or(false);
+    });
+    return m_unsupported_file_systems;
 }

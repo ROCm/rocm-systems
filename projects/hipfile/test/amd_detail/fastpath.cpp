@@ -26,11 +26,13 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <latch>
 #include <linux/stat.h>
 #include <memory>
 #include <stdexcept>
 #include <sys/types.h>
 #include <system_error>
+#include <thread>
 #include <tuple>
 #include <utility>
 
@@ -884,5 +886,125 @@ TEST_P(FastpathIoParam, FallbackRejectsIoRequest)
 }
 
 INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathIoParam, Values(IoType::Read, IoType::Write));
+
+// ***********************************************************************
+//  Multithreaded hipInit() tests
+//
+//  These tests verify two invariants for the one-shot hipInit() guard,
+//  for both the Read and Write I/O paths:
+//
+//  1. Per-thread: every new thread that performs its first fastpath I/O
+//     calls hipInit(), even when other threads have already done so on
+//     the same Fastpath instance.
+//
+//  2. Per-instance reset: a fresh Fastpath object (as created in each unit
+//     test) causes all threads to re-init, regardless of what they did for
+//     the previous instance.
+//
+//  Each test drives io() from kThreadCount std::threads simultaneously,
+//  using a std::latch as a start barrier to maximise the chance the threads
+//  hit the init guard concurrently. The mocked I/O returns successfully; the
+//  main thread joins all workers and then verifies mock expectations.
+// ***********************************************************************
+
+struct FastpathHipInitThreading : public FastpathTestBase, public TestWithParam<IoType> {
+
+    static constexpr int kThreadCount{2};
+
+    StrictMock<MHip> mhip;
+
+    // Run io() on a fresh thread, released together with the others by the
+    // shared start latch. io() completes normally (the I/O mock returns
+    // success); the try/catch only guards the worker against an unexpected
+    // throw so a regression surfaces as a mock-expectation failure on join
+    // rather than a std::terminate.
+    void run_io_on_thread(std::latch &start_latch, Fastpath &fp)
+    {
+        threads_.emplace_back([&] {
+            start_latch.arrive_and_wait();
+            try {
+                fp.io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET,
+                      DEFAULT_BUFFER_OFFSET);
+            }
+            catch (...) {
+            }
+        });
+    }
+
+    // Set up mock expectations for n concurrent io() calls of the current
+    // IoType. Shared mocks use Times(n)/WillRepeatedly so every thread can
+    // call them.
+    void expect_n_io(int n)
+    {
+        EXPECT_CALL(mcfg, fastpath()).Times(n).WillRepeatedly(Return(DEFAULT_ENABLE));
+        EXPECT_CALL(*mbuffer, getBuffer)
+            .Times(n)
+            .WillRepeatedly(Return(reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR)));
+        EXPECT_CALL(*mbuffer, getLength).Times(n).WillRepeatedly(Return(DEFAULT_BUFFER_LENGTH));
+        EXPECT_CALL(*mfile, unbufferedFd).Times(n).WillRepeatedly(Return(DEFAULT_UNBUFFERED_FD));
+        EXPECT_CALL(mstats, addIo).Times(n);
+        if (GetParam() == IoType::Read) {
+            EXPECT_CALL(mhip, hipAmdFileRead).Times(n).WillRepeatedly(Return(DEFAULT_IO_SIZE));
+        }
+        else {
+            EXPECT_CALL(mhip, hipAmdFileWrite).Times(n).WillRepeatedly(Return(DEFAULT_IO_SIZE));
+        }
+    }
+
+    // Drive kThreadCount threads through one fresh Fastpath instance and
+    // expect exactly one hipInit() per thread.
+    void expect_init_once_per_thread_on(Fastpath &fp)
+    {
+        std::latch start{kThreadCount};
+
+        EXPECT_CALL(mhip, hipInit).Times(kThreadCount);
+        expect_n_io(kThreadCount);
+
+        for (int i = 0; i < kThreadCount; ++i) {
+            run_io_on_thread(start, fp);
+        }
+        join_all();
+    }
+
+    void join_all()
+    {
+        for (auto &t : threads_) {
+            t.join();
+        }
+        threads_.clear();
+    }
+
+    ~FastpathHipInitThreading() override
+    {
+        join_all();
+    }
+
+private:
+    vector<std::thread> threads_;
+};
+
+// Every thread calls hipInit() exactly once on its first I/O through a
+// shared Fastpath instance.
+TEST_P(FastpathHipInitThreading, HipInitCalledOncePerThread)
+{
+    Fastpath fp{};
+    expect_init_once_per_thread_on(fp);
+}
+
+// A second Fastpath instance gets a new identity, so threads that already
+// inited for the first instance re-init for the second.
+TEST_P(FastpathHipInitThreading, HipInitCalledAgainForNewFastpathInstance)
+{
+    {
+        Fastpath fp{};
+        expect_init_once_per_thread_on(fp);
+    }
+    {
+        Fastpath fp{};
+        expect_init_once_per_thread_on(fp);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathHipInitThreading, Values(IoType::Read, IoType::Write));
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

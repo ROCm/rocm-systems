@@ -5,14 +5,25 @@
 
 #pragma once
 
+#include <mutex>
 #include <optional>
 
 namespace hipFile {
 
 class Configuration {
 
-    std::optional<bool> m_fastpath_override;
-    std::optional<bool> m_fallback_override;
+    mutable bool           m_fastpath_env{};
+    mutable bool           m_fastpath_read_exists{};
+    mutable bool           m_fastpath_write_exists{};
+    mutable bool           m_fallback_env{};
+    mutable unsigned int   m_stats_level{};
+    mutable bool           m_unsupported_file_systems{};
+    mutable std::once_flag m_fastpath_once;
+    mutable std::once_flag m_fallback_once;
+    mutable std::once_flag m_stats_once;
+    mutable std::once_flag m_fs_once;
+    std::optional<bool>    m_fastpath_override;
+    std::optional<bool>    m_fallback_override;
 
 public:
     virtual ~Configuration() = default;

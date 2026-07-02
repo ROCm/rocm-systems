@@ -6,7 +6,6 @@ include(AISAddExecutable)
 find_package(Threads REQUIRED)
 
 set(SHARED_SOURCE_FILES
-    "${HIPFILE_TEST_COMMON_PATH}/magic-word.cpp"
 )
 
 set(TEST_SOURCE_FILES

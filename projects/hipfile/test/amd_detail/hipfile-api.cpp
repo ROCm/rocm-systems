@@ -156,6 +156,8 @@ struct HipFileIoParam : public TestWithParam<IoType> {
 
     HipFileIoParam()
     {
+        Runtime::instance().resetForTesting();
+
         {
             StrictMock<MSys>            msys;
             StrictMock<MLibMountHelper> mlmh;
@@ -168,6 +170,11 @@ struct HipFileIoParam : public TestWithParam<IoType> {
             expect_buffer_registration(mhip, hipMemoryTypeDevice);
             Runtime::instance().state().registerBuffer(bufptr, buflen, 0);
         }
+    }
+
+    ~HipFileIoParam() override
+    {
+        Runtime::instance().resetForTesting();
     }
 };
 

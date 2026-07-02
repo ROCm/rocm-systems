@@ -13,6 +13,7 @@
 #include "io.h"
 #include "stats.h"
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +27,16 @@
 
 using namespace hipFile;
 using namespace std;
+
+namespace {
+// Monotonic source of Fastpath instance ids. Relaxed ordering is sufficient:
+// we only need uniqueness, not ordering between threads.
+std::atomic<std::uint64_t> s_next_fastpath_id{1};
+}
+
+Fastpath::Fastpath() : instance_id_{s_next_fastpath_id.fetch_add(1, std::memory_order_relaxed)}
+{
+}
 
 /* The fastpath backend is used when:
  *  - The file has been opened with the O_DIRECT flag
@@ -190,13 +201,20 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
     // this can be removed.
     size = std::min(size, hipFile::getMaxRwCount());
 
-    // Ensure HIP Runtime is initialized. This is a temporary fix to a SEGFAULT
-    // in the HIP Runtime when hipFileRead/hipFileWrite is the first HIP API
-    // call of a new thread.
-    thread_local bool hip_inited{false};
-    if (!hip_inited) {
+    // Ensure HIP Runtime is initialized once per thread. Temporary fix for a
+    // SEGFAULT in the HIP runtime when hipFileRead/hipFileWrite is the first
+    // HIP API call of a new thread.
+    //
+    // thread_local gives per-thread semantics; comparing against instance_id_
+    // (rather than a plain bool) also forces a re-init whenever a new Fastpath
+    // object is used — giving per-test isolation without losing the per-thread
+    // production invariant. Note: if two Fastpath instances were used alternately
+    // on the same thread, that thread would re-init on every switch. This never
+    // occurs: production has exactly one instance; tests use one at a time.
+    thread_local std::uint64_t inited_for_instance = 0; // 0 = none; real ids start at 1
+    if (inited_for_instance != instance_id_) {
         Context<Hip>::get()->hipInit();
-        hip_inited = true;
+        inited_for_instance = instance_id_;
     }
 
     try {

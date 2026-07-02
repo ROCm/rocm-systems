@@ -15,7 +15,9 @@
 
 namespace hipFile {
 
-Runtime::Runtime() = default;
+Runtime::Runtime() : state_{std::make_unique<DriverState>()}
+{
+}
 
 Runtime::~Runtime() = default;
 

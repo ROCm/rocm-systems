@@ -31,8 +31,23 @@ public:
     /// @return A reference to the owned DriverState
     DriverState &state()
     {
-        return state_;
+        return *state_;
     }
+
+#ifdef AIS_TESTING
+    /// @brief Rebuild the owned DriverState, discarding all registered files,
+    ///        buffers, streams, and batch contexts.
+    ///
+    /// Test-only. Call from fixture SetUp/TearDown to get a clean state per
+    /// test without relying on process-per-test isolation.
+    ///
+    /// @warning Invalidates any DriverState&/IDriverState& handed out earlier.
+    ///          Never call while a prior reference is still in use.
+    void resetForTesting()
+    {
+        state_ = std::make_unique<DriverState>();
+    }
+#endif
 
     /// @brief The backends that can service IO requests
     ///
@@ -55,7 +70,10 @@ private:
     Runtime();
     ~Runtime();
 
-    DriverState state_;
+    // Held by pointer (not by value) so it can be re-seated by
+    // resetForTesting(). The indirection is negligible: every DriverState
+    // method already takes a shared_mutex, which dwarfs a pointer deref.
+    std::unique_ptr<DriverState> state_;
 
     mutable std::vector<std::shared_ptr<Backend>> backends_;
     mutable std::once_flag                        backends_once_;

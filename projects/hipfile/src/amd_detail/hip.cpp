@@ -7,6 +7,7 @@
 #include "hip.h"
 
 #include <cstdlib>
+#include <mutex>
 #include <system_error>
 
 namespace hipFile {
@@ -24,17 +25,22 @@ catch (...) {
 hipAmdFileRead_t
 getHipAmdFileReadPtr()
 {
-    static hipAmdFileRead_t hipAmdFileReadPtr{
-        reinterpret_cast<hipAmdFileRead_t>(hipGetProcAddressHelper("hipAmdFileRead"))};
-    return hipAmdFileReadPtr;
+    return reinterpret_cast<hipAmdFileRead_t>(hipGetProcAddressHelper("hipAmdFileRead"));
 }
 
 hipAmdFileWrite_t
 getHipAmdFileWritePtr()
 {
-    static hipAmdFileWrite_t hipAmdFileWritePtr{
-        reinterpret_cast<hipAmdFileWrite_t>(hipGetProcAddressHelper("hipAmdFileWrite"))};
-    return hipAmdFileWritePtr;
+    return reinterpret_cast<hipAmdFileWrite_t>(hipGetProcAddressHelper("hipAmdFileWrite"));
+}
+
+void
+Hip::resolveProcPtrs() const
+{
+    std::call_once(ptrs_once_, [this] {
+        read_ptr_  = getHipAmdFileReadPtr();
+        write_ptr_ = getHipAmdFileWritePtr();
+    });
 }
 
 /// Throws Hip::RuntimeError(error) if error != hipSuccess
@@ -119,15 +125,16 @@ Hip::hipGetProcAddress(const char *symbol, int hipVersion, uint64_t flags,
 uint64_t
 Hip::hipAmdFileRead(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size, int64_t file_offset) const
 {
-    static const hipAmdFileRead_t hipAmdFileReadPtr{getHipAmdFileReadPtr()};
-    uint64_t                      bytes_read{};
-    int                           status{};
+    resolveProcPtrs();
 
-    if (!hipAmdFileReadPtr) {
+    if (!read_ptr_) {
         throw Hip::SymbolNotFound("Could not find hipAmdFileRead()");
     }
 
-    auto hip_error{(*hipAmdFileReadPtr)(handle, devicePtr, size, file_offset, &bytes_read, &status)};
+    uint64_t bytes_read{};
+    int      status{};
+
+    auto hip_error{(*read_ptr_)(handle, devicePtr, size, file_offset, &bytes_read, &status)};
 
     if (status) {
         throw std::system_error(abs(status), std::generic_category());
@@ -142,15 +149,16 @@ Hip::hipAmdFileRead(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size, i
 uint64_t
 Hip::hipAmdFileWrite(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size, int64_t file_offset) const
 {
-    static const hipAmdFileWrite_t hipAmdFileWritePtr{getHipAmdFileWritePtr()};
-    uint64_t                       bytes_written{};
-    int32_t                        status{};
+    resolveProcPtrs();
 
-    if (!hipAmdFileWritePtr) {
+    if (!write_ptr_) {
         throw Hip::SymbolNotFound("Could not find hipAmdFileWrite()");
     }
 
-    auto hip_error{(*hipAmdFileWritePtr)(handle, devicePtr, size, file_offset, &bytes_written, &status)};
+    uint64_t bytes_written{};
+    int32_t  status{};
+
+    auto hip_error{(*write_ptr_)(handle, devicePtr, size, file_offset, &bytes_written, &status)};
 
     if (status) {
         throw std::system_error(abs(status), std::generic_category());

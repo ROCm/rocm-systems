@@ -8,10 +8,10 @@
 // Common hipFile test functionality
 
 #include "hipfile.h"
-#include "magic-word.h"
 #include "mhip.h"
 #include "mmountinfo.h"
 #include "msys.h"
+#include "runtime.h"
 
 #include <array>
 #include <cassert>
@@ -76,6 +76,7 @@ struct HipFileOpened : public ::testing::Test {
 
     HipFileOpened()
     {
+        hipFile::Runtime::instance().resetForTesting();
         assert(hipFileUseCount() == 0);
         assert(hipFileDriverOpen() == HIPFILE_SUCCESS);
     }
@@ -86,6 +87,7 @@ struct HipFileOpened : public ::testing::Test {
             assert(hipFileDriverClose() == HIPFILE_SUCCESS);
         }
         assert(hipFileUseCount() == 0);
+        hipFile::Runtime::instance().resetForTesting();
     }
 };
 
@@ -94,6 +96,7 @@ struct HipFileUnopened : public ::testing::Test {
 
     HipFileUnopened()
     {
+        hipFile::Runtime::instance().resetForTesting();
         assert(hipFileUseCount() == 0);
     }
 
@@ -103,6 +106,7 @@ struct HipFileUnopened : public ::testing::Test {
             assert(hipFileDriverClose() == HIPFILE_SUCCESS);
         }
         assert(hipFileUseCount() == 0);
+        hipFile::Runtime::instance().resetForTesting();
     }
 };
 

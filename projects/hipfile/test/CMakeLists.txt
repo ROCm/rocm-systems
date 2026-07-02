@@ -5,7 +5,6 @@
 include(AISAddExecutable)
 
 set(SHARED_SOURCE_FILES
-    common/magic-word.cpp
 )
 
 # These tests do not require a HIP capable GPU.
