@@ -1094,7 +1094,7 @@ protected:
    *
    * Cleans up all resources allocated by *this.
    */
-  __host__   ~QueuePairBase();
+  __host__ ~QueuePairBase();
 /**@}*/
 
 

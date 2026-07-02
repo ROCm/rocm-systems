@@ -194,17 +194,14 @@ private:
 #if defined(GDA_IONIC)
     QueuePairIONIC ionic;
     __host__ QueuePairUnion(QueuePairIONIC&& ionic);
-    __host__ QueuePairUnion& operator=(QueuePairIONIC&& ionic);
 #endif
 #if defined(GDA_BNXT)
     QueuePairBNXT  bnxt;
     __host__ QueuePairUnion(QueuePairBNXT&& bnxt);
-    __host__ QueuePairUnion& operator=(QueuePairBNXT&& bnxt);
 #endif
 #if defined(GDA_MLX5)
     QueuePairMLX5  mlx5;
     __host__ QueuePairUnion(QueuePairMLX5&& mlx5);
-    __host__ QueuePairUnion& operator=(QueuePairMLX5&& mlx5);
 #endif
 
     /* Copy and move constructors and assignment operators are deleted,
@@ -232,12 +229,23 @@ private:
     /*
      * @brief Construct new QueuePairUnion, moving the active subobject from other.
      *
-     * @param[in,out] other QueuePairUnion object to move from.
+     * @param[in,out] other QueuePairUnion object to move-construct from.
      * @param[in] provider Type of active subobject of other.
      *
      * @return QueuePairUnion with an active subobject moved from other.
      */
     static __host__ QueuePairUnion construct(QueuePairUnion&& other, GDAProvider provider);
+
+    /*
+     * @brief Assign *this, moving the active subobject from other.
+     * Both *this and other must have the same member active.
+     *
+     * @param[in,out] other QueuePairUnion object to move-assign from.
+     * @param[in] provider Type of active subobject of both *this and other.
+     *
+     * @return Reference to *this after assigning the active subobject moved from other.
+     */
+    __host__ QueuePairUnion& assign(QueuePairUnion&& other, GDAProvider provider);
 
     /*
      * @brief Call destructor of active subobject.
