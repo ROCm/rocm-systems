@@ -1117,14 +1117,21 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
     return std::numeric_limits<uint32_t>::max();
   }
 
-  std::vector<hsa_signal_value_t> satisfying_value_vec(1);
-  uint32_t satisfying_signal_idx =
+  // Sized to valid_signals.size() since WaitMultiple() may return/write any index in
+  // [0, valid_signals.size()), not just 0.
+  std::vector<hsa_signal_value_t> satisfying_value_vec(valid_signals.size());
+  uint32_t local_satisfying_signal_idx =
       core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), conds, values, timeout_hint, wait_hint,
                                  satisfying_value_vec, false);
-  //  Map back the index
-  satisfying_signal_idx = valid_signal_ids[satisfying_signal_idx];
 
-  if (satisfying_value) *satisfying_value = satisfying_value_vec.at(0);
+  if (local_satisfying_signal_idx == uint32_t(-1)) {
+    return local_satisfying_signal_idx;
+  }
+
+  if (satisfying_value) *satisfying_value = satisfying_value_vec.at(local_satisfying_signal_idx);
+
+  // Map from WaitMultiple()'s local index back to the caller's original signal array index.
+  uint32_t satisfying_signal_idx = valid_signal_ids[local_satisfying_signal_idx];
 
   return satisfying_signal_idx;
   CATCHRET(uint32_t);
