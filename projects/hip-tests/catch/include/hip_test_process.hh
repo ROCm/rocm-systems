@@ -281,6 +281,8 @@ class SpawnProc {
       resultStr_ = std::string((std::istreambuf_iterator<char>(t)),
                                 std::istreambuf_iterator<char>());
       t.close();
+      // Clean up temp file after reading
+      fs::remove(tmpFileName_);
     }
     spawned_ = false;
     return exitCode;
