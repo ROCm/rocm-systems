@@ -297,10 +297,13 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
       }
       if (condition_met) {
         it = unmet_condition_ids.erase(it);
-        satisfying_values[i] = value;
-        if (!wait_on_all)
+        if (!wait_on_all) {
+          // wait-any callers only need satisfying_values[0] per WaitMultiple()'s contract.
+          satisfying_values[0] = value;
           return i;
-        else if (unmet_condition_ids.empty())
+        }
+        satisfying_values[i] = value;
+        if (unmet_condition_ids.empty())
           return 0;
       } else {
         ++it;
