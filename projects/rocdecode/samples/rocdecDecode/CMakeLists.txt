@@ -41,9 +41,11 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+if(NOT WIN32)
+  if (NOT DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  endif()
 endif()
 
 project(rocdecdecode)
@@ -56,19 +58,17 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "rocdecode Default Build Type" FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4 -Wall")
-else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC -Wall")
+if(NOT WIN32)
+  if(CMAKE_BUILD_TYPE MATCHES Debug)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4 -Wall")
+  else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC -Wall")
+  endif()
 endif()
 
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
+find_package(Threads QUIET)
 find_package(FFmpeg QUIET)
 find_package(rocdecode QUIET)
 
@@ -91,7 +91,9 @@ if(HIP_FOUND AND rocdecode_FOUND)
     endif()
 
     # STD Filesystem
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
+    if(NOT WIN32)
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
+    endif()
 
     # rocdecode and utils
     include_directories(${rocdecode_INCLUDE_DIR} ${ROCM_PATH}/lib)
@@ -101,7 +103,11 @@ if(HIP_FOUND AND rocdecode_FOUND)
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} rocdecdecode.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
+    if(NOT WIN32)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
+    else()
+        add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    endif()
     if(FFMPEG_FOUND AND rocdecode-host_FOUND AND NOT USING_THE_ROCK)
       target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=1)
     else()

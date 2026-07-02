@@ -22,13 +22,15 @@ THE SOFTWARE.
 
 #include <iostream>
 #include <iomanip>
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <chrono>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#endif
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -215,7 +217,7 @@ int main(int argc, char **argv) {
         int hip_vis_dev_count = 0;
         GetEnvVar("HIP_VISIBLE_DEVICES", hip_vis_dev_count);
 
-        std::size_t found_file = input_file_path.find_last_of('/');
+        std::size_t found_file = input_file_path.find_last_of("/\\");
         std::cout << "info: Input file: " << input_file_path.substr(found_file + 1) << std::endl;
         std::cout << "info: Number of threads: " << n_thread << std::endl;
 
@@ -254,8 +256,8 @@ int main(int argc, char **argv) {
             v_viddec.push_back(std::move(dec));
         }
 
-        float total_fps = 0;
-        float total_fps_dec = 0;
+        double total_fps = 0;
+        double total_fps_dec = 0;
         std::vector<std::thread> v_thread;
         std::vector<double> v_fps, v_fps_dec;
         std::vector<int> v_frame, v_frame_dec;
@@ -265,8 +267,6 @@ int main(int argc, char **argv) {
         v_frame_dec.resize(n_thread, 0);
         int n_total = 0;
         int n_total_dec = 0;
-        OutputSurfaceInfo *p_surf_info;
-
         std::string device_name;
         int pci_bus_id, pci_domain_id, pci_device_id;
 

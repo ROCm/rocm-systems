@@ -23,14 +23,20 @@ THE SOFTWARE.
 #include <chrono>
 #include <iostream>
 #include <fstream>
+#include <sstream>
+#include <string>
 #include <vector>
 #include <algorithm>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
     namespace fs = std::filesystem;
 #else
     #include <experimental/filesystem>
     namespace fs = std::experimental::filesystem;
+#endif
+
+#ifdef _MSC_VER
+#define __attribute__(x)
 #endif
 
 #include <hip/hip_runtime.h>
@@ -193,7 +199,7 @@ struct DecoderInfo {
 void save_frame_to_file(DecoderInfo *p_dec_info, void *surf_mem[], uint32_t *pitch) {
     uint8_t *hst_ptr = nullptr;
     uint64_t output_image_size_luma = pitch[0] * p_dec_info->coded_height;
-    uint64_t output_image_size_chroma = pitch[1] * ((p_dec_info->coded_height * GetChromaHeightFactor(p_dec_info->surf_format)));
+    uint64_t output_image_size_chroma = static_cast<uint64_t>(pitch[1] * (p_dec_info->coded_height * GetChromaHeightFactor(p_dec_info->surf_format)));
     if (p_dec_info->mem_type == OUT_SURFACE_MEM_DEV_INTERNAL) {
         if (hst_ptr == nullptr) {
             hst_ptr = new uint8_t [output_image_size_luma + output_image_size_chroma];
@@ -614,7 +620,7 @@ void decode_frames(DecoderInfo& dec_info, const std::vector<std::vector<uint8_t>
     if (dec_info.backend == DECODER_BACKEND_DEVICE) {
         for (int i=0; i < static_cast<int>(frames.size()); ++i) {
             RocdecSourceDataPacket packet = {};
-            packet.payload_size = frames[i].size();
+            packet.payload_size = static_cast<uint32_t>(frames[i].size());
             packet.payload = frames[i].data();
             if (i == static_cast<int>(frames.size() - 1)) {
                 packet.flags = ROCDEC_PKT_ENDOFPICTURE;     // mark end_of_picture flag for last frame
@@ -752,14 +758,14 @@ int main(int argc, char** argv) {
                     if (fs::is_directory(entry.path())) {
                         std::vector<std::string> file_names_sub_folder;
                         for (const auto& sub_entry : fs::directory_iterator(entry.path())) {
-                            file_names_sub_folder.push_back(sub_entry.path());
+                            file_names_sub_folder.push_back(sub_entry.path().string());
                         }
                         std::sort(file_names_sub_folder.begin(), file_names_sub_folder.end(), compareFilenames);
                         input_file_names.insert(input_file_names.end(), file_names_sub_folder.begin(), file_names_sub_folder.end());
                         file_names_sub_folder.clear();
                     } else if(fs::is_regular_file(entry.path())) {
                         b_sort_filenames = true;
-                        input_file_names.push_back(entry.path());
+                        input_file_names.push_back(entry.path().string());
                     }
                     else {
                         std::cout << "unknown file type in input folder: " << entry.path().string() << '\n';

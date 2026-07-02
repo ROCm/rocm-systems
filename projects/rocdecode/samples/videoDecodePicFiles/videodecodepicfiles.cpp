@@ -25,12 +25,14 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <chrono>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
+#endif
 #include "video_demuxer.h"
 #include "rocdecode/roc_bitstream_reader.h"
 #include "roc_video_dec.h"
@@ -233,13 +235,17 @@ int main(int argc, char **argv) {
         if (!backend)   // gpu backend
             viddec = new RocVideoDecoder(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay);
         else {
+        #if ENABLE_HOST_DECODE
             std::cout << "info: RocDecode is using CPU backend!" << std::endl;
-            bool use_threading = false;
             if (mem_type == OUT_SURFACE_MEM_DEV_INTERNAL) mem_type = OUT_SURFACE_MEM_DEV_COPIED;    // mem_type internal is not supported in this mode
             if (backend == 1) {
                 viddec = new FFMpegVideoDecoder(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay);
             } else
                 viddec = new FFMpegVideoDecoder(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay, true);
+        #else
+            std::cout << "Error: RocDecode HOST library is not found and backend is not supported!" << std::endl;
+            return 0;
+        #endif
         }
 
         std::string device_name, gcn_arch_name;
@@ -251,14 +257,14 @@ int main(int argc, char **argv) {
         std::right << std::hex << pci_domain_id << "." << pci_device_id << std::dec << std::endl;
         std::cout << "info: decoding started, please wait!" << std::endl;
 
-        int n_video_bytes = 0, n_frame_returned = 0, n_frame = 0;
+        int n_video_bytes = 0, n_frame_returned = 0;
+        uint32_t n_frame = 0;
         int n_pic_decoded = 0, decoded_pics = 0;
         std::vector<uint8_t> bitstream(5 * 1024 * 1024);
         int pkg_flags = 0;
         uint8_t *pframe = nullptr;
         int64_t pts = 0;
         OutputSurfaceInfo *surf_info;
-        uint32_t width, height;
         double total_dec_time = 0;
         bool first_frame = true;
         MD5Generator *md5_generator = nullptr;
@@ -293,7 +299,7 @@ int main(int argc, char **argv) {
                     exit(1);
                 }
                 in_file.seekg(0, std::ios::end);
-                n_video_bytes = in_file.tellg();
+                n_video_bytes = static_cast<int>(in_file.tellg());
                 if (n_video_bytes > bitstream.size()) {
                     bitstream.resize(n_video_bytes);
                 }

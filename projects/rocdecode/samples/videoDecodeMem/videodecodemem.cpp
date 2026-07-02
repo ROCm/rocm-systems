@@ -23,14 +23,16 @@ THE SOFTWARE.
 #include <iostream>
 #include <fstream>
 #include <iomanip>
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <fstream>
 #include <chrono>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#endif
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -48,7 +50,7 @@ public:
             exit(-1);
         }
         fp_in_.seekg (0, fp_in_.end);
-        int length = fp_in_.tellg();
+        size_t length = static_cast<size_t>(fp_in_.tellg());
         fp_in_.seekg (0, fp_in_.beg);
         io_buffer_size_ = length;
     }
@@ -209,7 +211,6 @@ int main(int argc, char **argv) {
         uint8_t *pframe = nullptr;
         int64_t pts = 0;
         OutputSurfaceInfo *surf_info;
-        uint32_t width, height;
         double total_dec_time = 0;
         MD5Generator *md5_generator = nullptr;
 

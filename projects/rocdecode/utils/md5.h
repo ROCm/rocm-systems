@@ -70,7 +70,7 @@ public:
     *  \param [in] surf_info Surface info
     */
     void UpdateMd5ForFrame(void *surf_mem, OutputSurfaceInfo *surf_info) {
-        int i;
+        uint32_t i;
         uint8_t *hst_ptr = nullptr;
         uint64_t output_image_size = surf_info->output_surface_size_in_bytes;
         if (surf_info->mem_type == OUT_SURFACE_MEM_DEV_INTERNAL || surf_info->mem_type == OUT_SURFACE_MEM_DEV_COPIED) {
@@ -98,8 +98,8 @@ public:
         int output_stride =  surf_info->output_pitch;
         tmp_hst_ptr += (surf_info->disp_rect.top * output_stride) + surf_info->disp_rect.left * surf_info->bytes_per_pixel;
         uint8_t *tmp_stacked_ptr = stacked_ptr;
-        int img_width = surf_info->output_width;
-        int img_height = surf_info->output_height;
+        uint32_t img_width = surf_info->output_width;
+        uint32_t img_height = surf_info->output_height;
         // Luma
         if (img_width * surf_info->bytes_per_pixel == output_stride && img_height == surf_info->output_vstride) {
             memcpy(stacked_ptr, hst_ptr, img_width * surf_info->bytes_per_pixel * img_height);
@@ -111,7 +111,7 @@ public:
             }
         }
         // Chroma
-        int img_width_chroma = img_width >> 1;
+        uint32_t img_width_chroma = img_width >> 1;
         tmp_hst_ptr = hst_ptr + output_stride * surf_info->output_vstride;
         if (surf_info->mem_type == OUT_SURFACE_MEM_DEV_INTERNAL) {
             tmp_hst_ptr += ((surf_info->disp_rect.top >> 1) * output_stride) + (surf_info->disp_rect.left * surf_info->bytes_per_pixel);
@@ -119,7 +119,7 @@ public:
         tmp_stacked_ptr = stacked_ptr + img_width * surf_info->bytes_per_pixel * img_height; // Cb
         uint8_t *tmp_stacked_ptr_v = tmp_stacked_ptr + img_width_chroma * surf_info->bytes_per_pixel * surf_info->chroma_height; // Cr
         for (i = 0; i < surf_info->chroma_height; i++) {
-            for ( int j = 0; j < img_width_chroma; j++) {
+            for (uint32_t j = 0; j < img_width_chroma; j++) {
                 uint8_t *src_ptr, *dst_ptr;
                 // Cb
                 src_ptr = &tmp_hst_ptr[j * surf_info->bytes_per_pixel * 2];
@@ -135,7 +135,7 @@ public:
             tmp_stacked_ptr_v += img_width_chroma * surf_info->bytes_per_pixel;
         }
 
-        int img_size = img_width * surf_info->bytes_per_pixel * (img_height + surf_info->chroma_height);
+        uint32_t img_size = img_width * surf_info->bytes_per_pixel * (img_height + surf_info->chroma_height);
         // For 10/12 bit, convert from P010/P012 to LSB to match reference decoder output
         if (surf_info->bytes_per_pixel == 2) {
             uint16_t *ptr = reinterpret_cast<uint16_t *> (stacked_ptr);

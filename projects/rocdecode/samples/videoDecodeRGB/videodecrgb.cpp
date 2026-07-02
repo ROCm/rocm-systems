@@ -23,13 +23,15 @@ THE SOFTWARE.
 #include <iostream>
 #include <iomanip>
 #include <fstream>
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <chrono>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#endif
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -147,7 +149,7 @@ void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool con
         }
         if (b_generate_md5) {
             if (convert_to_rgb) {
-                md5_gen_handle->UpdateMd5ForDataBuffer(p_rgb_dev_mem, rgb_image_size);
+                md5_gen_handle->UpdateMd5ForDataBuffer(p_rgb_dev_mem, static_cast<int>(rgb_image_size));
             } else {
                 md5_gen_handle->UpdateMd5ForFrame(frame, p_surf_info);
             }
@@ -175,15 +177,12 @@ int main(int argc, char **argv) {
     Rect crop_rect = {};
     Dim resize_dim = {};
     Rect *p_crop_rect = nullptr;
-    size_t rgb_image_size;
-    uint32_t rgb_image_stride;
     hipError_t hip_status = hipSuccess;
     uint8_t *p_rgb_dev_mem = nullptr;
     uint8_t *p_resize_dev_mem = nullptr;
     OutputSurfaceMemoryType mem_type = OUT_SURFACE_MEM_DEV_INTERNAL;
     OutputFormatEnum e_output_format = native;
     int col_standard = ColorSpaceStandard_BT709;
-    int rgb_width;
     int current_frame_index = 0;
     hipStream_t hip_stream_dec = 0;
     hipStream_t hip_stream_csc = 0;
@@ -322,13 +321,13 @@ int main(int argc, char **argv) {
             md5_generator->InitMd5();
         }
 
-        int n_video_bytes = 0, n_frames_returned = 0, n_frame = 0;
+        int n_video_bytes = 0, n_frames_returned = 0;
+        uint32_t n_frame = 0;
         uint8_t *p_video = nullptr;
         uint8_t *p_frame = nullptr;
         int64_t pts = 0;
         OutputSurfaceInfo *surf_info;
         OutputSurfaceInfo *resize_surf_info = nullptr;
-        uint32_t width, height;
         double total_dec_time = 0;
         convert_to_rgb = e_output_format != native;
         std::atomic<bool> continue_processing(true);

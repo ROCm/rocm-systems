@@ -35,8 +35,13 @@ extern "C" {
 #include <cstring>
 #include <ctime>
 #include <time.h>
+#ifdef _WIN32
+#include <process.h>
+#include <windows.h>
+#else
 #include <unistd.h>
 #include <sys/syscall.h>
+#endif
 #include <thread>
 #include <sstream>
 #include <iomanip>
@@ -45,6 +50,25 @@ extern "C" {
 // Minimal critical logging for video_demuxer.h.
 // Matches the format produced by the full logger in src/commons.h:
 //   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y hashid:0xZZZZZ] func(): message
+#ifdef _WIN32
+#define DemuxCriticalLog(msg) \
+    do { \
+        LARGE_INTEGER _freq_, _cnt_; \
+        QueryPerformanceFrequency(&_freq_); \
+        QueryPerformanceCounter(&_cnt_); \
+        uint64_t _us_ = static_cast<uint64_t>(_cnt_.QuadPart * 1000000ULL / _freq_.QuadPart); \
+        const char *_f_ = strrchr(__FILE__, '\\'); \
+        if (!_f_) _f_ = strrchr(__FILE__, '/'); \
+        DWORD _tid_ = GetCurrentThreadId(); \
+        std::ostringstream _htid_oss_; \
+        _htid_oss_ << "0x" << std::hex << std::setw(5) << std::setfill('0') \
+                  << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
+        std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
+                  << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
+                  << _getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
+                  << __func__ << "(): " << (msg) << std::endl; \
+    } while (0)
+#else
 #define DemuxCriticalLog(msg) \
     do { \
         struct timespec _ts_; \
@@ -60,6 +84,7 @@ extern "C" {
                   << getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
                   << __func__ << "(): " << (msg) << std::endl; \
     } while (0)
+#endif
 
 /*!
  * \file
@@ -240,7 +265,7 @@ class VideoDemuxer {
                         memcpy(data_with_header_, av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata, ext_data_size);
                         memcpy(data_with_header_ + ext_data_size, packet_->data + 3, payload);
                         *video = data_with_header_;
-                        *video_size = total;
+                        *video_size = static_cast<int>(total);
                     }
                 } else {
                     *video = packet_->data;
@@ -288,7 +313,7 @@ class VideoDemuxer {
                         ret = av_seek_frame(av_fmt_input_ctx_, av_stream_, timestamp, seek_backward ? AVSEEK_FLAG_BACKWARD | flags : flags);
                         break;
                     case SEEK_CRITERIA_TIME_STAMP:
-                        timestamp = TsFromTime(seek_ctx.seek_frame_);
+                        timestamp = TsFromTime(static_cast<double>(seek_ctx.seek_frame_));
                         ret = av_seek_frame(av_fmt_input_ctx_, av_stream_, timestamp, seek_backward ? AVSEEK_FLAG_BACKWARD | flags : flags);
                         break;
                     default:
@@ -310,7 +335,7 @@ class VideoDemuxer {
                         target_ts = TsFromFrameNumber(seek_ctx.seek_frame_);
                         break;
                     case SEEK_CRITERIA_TIME_STAMP:
-                        target_ts = TsFromTime(seek_ctx.seek_frame_);
+                        target_ts = TsFromTime(static_cast<double>(seek_ctx.seek_frame_));
                         break;
                     default:
                         DemuxCriticalLog("Invalid seek criteria");
@@ -434,7 +459,7 @@ class VideoDemuxer {
             width_ = av_fmt_input_ctx_->streams[av_stream_]->codecpar->width;
             height_ = av_fmt_input_ctx_->streams[av_stream_]->codecpar->height;
             chroma_format_ = (AVPixelFormat)av_fmt_input_ctx_->streams[av_stream_]->codecpar->format;
-            bit_rate_ = av_fmt_input_ctx_->streams[av_stream_]->codecpar->bit_rate;
+            bit_rate_ = static_cast<uint32_t>(av_fmt_input_ctx_->streams[av_stream_]->codecpar->bit_rate);
             if (av_fmt_input_ctx_->streams[av_stream_]->r_frame_rate.den != 0)
                 frame_rate_ = static_cast<double>(av_fmt_input_ctx_->streams[av_stream_]->r_frame_rate.num) / static_cast<double>(av_fmt_input_ctx_->streams[av_stream_]->r_frame_rate.den);
             if (av_fmt_input_ctx_->streams[av_stream_]->avg_frame_rate.den != 0)
@@ -547,7 +572,7 @@ class VideoDemuxer {
                 return nullptr;
             }
             uint8_t *avioc_buffer = nullptr;
-            int avioc_buffer_size = stream_provider->GetBufferSize();
+            int avioc_buffer_size = static_cast<int>(stream_provider->GetBufferSize());
             avioc_buffer = (uint8_t *)av_malloc(avioc_buffer_size);
             if (!avioc_buffer) {
                 DemuxCriticalLog("av_malloc failed!");

@@ -23,15 +23,18 @@ THE SOFTWARE.
 #include <iostream>
 #include <fstream>
 #include <cstring>
+#include <cinttypes>
 #include <string>
 #include <iomanip>
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <chrono>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#endif
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -201,7 +204,7 @@ int main(int argc, char **argv) {
             continue;
         }
         if (!strcmp(argv[i], "-seek_criteria")) {
-            if (++i == argc || 2 != sscanf(argv[i], "%d,%lu", &seek_criteria, &seek_to_frame)) {
+            if (++i == argc || 2 != sscanf(argv[i], "%d,%" SCNu64, &seek_criteria, &seek_to_frame)) {
                 ShowHelpAndExit("-seek_criteria");
             }
             if (0 > seek_criteria || seek_criteria >= 3)
@@ -229,7 +232,7 @@ int main(int argc, char **argv) {
     }
 
     try {
-        std::size_t found_file = input_file_path.find_last_of('/');
+        std::size_t found_file = input_file_path.find_last_of("/\\");
         std::cout << "info: Input file: " << input_file_path.substr(found_file + 1) << std::endl;
         VideoDemuxer *demuxer;
         RocdecBitstreamReader bs_reader = nullptr;
@@ -291,14 +294,14 @@ int main(int argc, char **argv) {
         std::right << std::hex << pci_domain_id << "." << pci_device_id << std::dec << std::endl;
         std::cout << "info: decoding started, please wait!" << std::endl;
 
-        int n_video_bytes = 0, n_frame_returned = 0, n_frame = 0;
+        int n_video_bytes = 0, n_frame_returned = 0;
+        uint32_t n_frame = 0;
         int n_pic_decoded = 0, decoded_pics = 0;
         uint8_t *pvideo = nullptr;
         int pkg_flags = 0;
         uint8_t *pframe = nullptr;
         int64_t pts = 0;
         OutputSurfaceInfo *surf_info;
-        uint32_t width, height;
         double total_dec_time = 0;
         bool first_frame = true;
         MD5Generator *md5_generator = nullptr;

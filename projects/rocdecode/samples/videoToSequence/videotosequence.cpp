@@ -25,7 +25,6 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <chrono>
@@ -35,10 +34,13 @@ THE SOFTWARE.
 #include <atomic>
 #include <thread>
 #include <functional>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
+#endif
 
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -134,7 +136,7 @@ void DecProc(RocVideoDecoder *p_dec, VideoDemuxer *demuxer, int *pn_frame, doubl
     int seq_id = 0;
     OutputSurfaceInfo *surf_info;
     VideoSeekContext video_seek_ctx;
-    int seq_frame_start[seq_info.batch_size];
+    std::vector<int> seq_frame_start(seq_info.batch_size);
     seq_frame_start[0] = 0;
     for (int i = 1; i < seq_info.batch_size; i++) {
         seq_frame_start[i] = seq_frame_start[i-1] +  (seq_info.seq_length - 1) * seq_info.stride + seq_info.step;
@@ -215,7 +217,7 @@ void DecProc(RocVideoDecoder *p_dec, VideoDemuxer *demuxer, int *pn_frame, doubl
     double average_decoding_time = total_dec_time / n_frame;
     double n_fps = 1000 / average_decoding_time;
     *pn_fps = n_fps;
-    *pn_frame = n_frame;
+    *pn_frame = static_cast<int>(n_frame);
     p_dec->ResetSaveFrameToFile();
     decoding_complete = true;
 }
@@ -281,7 +283,7 @@ void ParseCommandLine(std::string &input_folder_path, std::string &output_folder
             }
             output_folder_path = argv[i];
             if (!output_folder_path.empty()) {
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
                 if (std::filesystem::is_directory(output_folder_path)) {
                     std::filesystem::remove_all(output_folder_path);
                 }
@@ -372,12 +374,12 @@ int main(int argc, char **argv) {
 
     try {
 
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
         for (const auto& entry : std::filesystem::directory_iterator(input_folder_path)) {
 #else
         for (const auto& entry : std::experimental::filesystem::directory_iterator(input_folder_path)) {
 #endif
-            input_file_names.push_back(entry.path());
+            input_file_names.push_back(entry.path().string());
             num_files++;
         }
         n_threads = ((n_threads > num_files) ? num_files : n_threads);
@@ -429,7 +431,7 @@ int main(int argc, char **argv) {
 
         for (int i = 0; i < num_files; i++) {
             v_demuxer.push_back(std::make_unique<VideoDemuxer>(input_file_names[i].c_str()));
-            std::size_t found_file = input_file_names[i].find_last_of('/');
+            std::size_t found_file = input_file_names[i].find_last_of("/\\");
             input_file_names[i] = input_file_names[i].substr(found_file + 1);
             if (b_dump_output_frames) {
                 std::size_t found_ext = input_file_names[i].find_last_of('.');
@@ -465,7 +467,7 @@ int main(int argc, char **argv) {
                 {
                     std::unique_lock<std::mutex> lock(mutex);
                     while (!v_dec_info[thread_idx]->decoding_complete)
-                        sleep(1);
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
                     v_dec_info[thread_idx]->decoding_complete = false;
                 }
                 uint32_t bit_depth = v_demuxer[j]->GetBitDepth();

@@ -48,9 +48,11 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+if(NOT WIN32)
+  if (NOT DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  endif()
 endif()
 
 project(videodecodergb)
@@ -64,15 +66,12 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "rocdecode Default Build Type" FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
-else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+if(NOT WIN32)
+  if(CMAKE_BUILD_TYPE MATCHES Debug)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  endif()
 endif()
 
 # Set supported GPU Targets
@@ -114,13 +113,19 @@ message("-- ${White}${PROJECT_NAME} -- AMD GPU_TARGETS: ${GPU_TARGETS}${ColourRe
 set(HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(rocdecode QUIET)
-find_package(rocprofiler-register QUIET)
+if(NOT WIN32)
+    find_package(rocprofiler-register QUIET)
+endif()
 find_package(FFmpeg QUIET)
 find_package(Threads QUIET)
 
-if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
+if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND AND rocprofiler-register_FOUND)))
     # HIP
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
+    if(WIN32)
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
+    else()
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
+    endif()
     # FFMPEG
     include_directories(${AVUTIL_INCLUDE_DIR} ${AVCODEC_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${FFMPEG_LIBRARIES})
@@ -128,19 +133,62 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofi
     include_directories (${CMAKE_CURRENT_SOURCE_DIR}/../../utils ${rocdecode_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode)
     # threads
-    set(THREADS_PREFER_PTHREAD_FLAG ON)
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+    if(Threads_FOUND)
+        set(THREADS_PREFER_PTHREAD_FLAG ON)
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+    endif()
     # rocprofiler-register
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
+    if(rocprofiler-register_FOUND)
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
+    endif()
+    if(WIN32)
+        add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    endif()
 
     # sample app exe
-    list(APPEND SOURCES ${PROJECT_SOURCE_DIR} 
-                        videodecrgb.cpp 
-                        ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp 
-                        ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/colorspace_kernels.cpp
-                        ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
+    list(APPEND SOURCES ${PROJECT_SOURCE_DIR}
+                        videodecrgb.cpp
+                        ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)
+    if(WIN32)
+        # HIP kernel files must be compiled with hipcc on Windows (VS generator does not support HIP language)
+        set(HIPCC ${ROCM_PATH}/bin/hipcc.exe)
+        set(KERNEL_SOURCES
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/colorspace_kernels.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
+        set(KERNEL_OBJS)
+        foreach(KSRC ${KERNEL_SOURCES})
+            get_filename_component(KNAME ${KSRC} NAME_WE)
+            set(KOBJ ${CMAKE_CURRENT_BINARY_DIR}/${KNAME}.obj)
+            add_custom_command(
+                OUTPUT ${KOBJ}
+                COMMAND ${HIPCC} -c ${KSRC} -o ${KOBJ}
+                    --offload-arch=${GPU_TARGETS}
+                    --rocm-path=${ROCM_PATH}
+                    --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../utils
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode
+                    -I${rocdecode_INCLUDE_DIR}
+                    -I${ROCM_PATH}/include
+                    -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS
+                    -fms-runtime-lib=dll
+                    -O2
+                DEPENDS ${KSRC}
+                COMMENT "Compiling HIP kernel ${KNAME}"
+            )
+            list(APPEND KERNEL_OBJS ${KOBJ})
+        endforeach()
+        add_custom_target(hip_kernels DEPENDS ${KERNEL_OBJS})
+    else()
+        list(APPEND SOURCES
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/colorspace_kernels.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
+    endif()
 
     add_executable(${PROJECT_NAME} ${SOURCES})
+    if(WIN32)
+        add_dependencies(${PROJECT_NAME} hip_kernels)
+        target_link_libraries(${PROJECT_NAME} ${KERNEL_OBJS})
+    endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
     # FFMPEG multi-version support
     if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100)
@@ -159,10 +207,10 @@ else()
     if (NOT rocdecode_FOUND)
         message(FATAL_ERROR "-- ERROR!: rocdecode Not Found!")
     endif()
-    if (NOT Threads_FOUND)
+    if (NOT WIN32 AND NOT Threads_FOUND)
         message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
     endif()
-    if (NOT rocprofiler-register_FOUND)
+    if (NOT WIN32 AND NOT rocprofiler-register_FOUND)
         message(FATAL_ERROR "-- ERROR!: rocprofiler-register Not Found!")
     endif()
 endif()

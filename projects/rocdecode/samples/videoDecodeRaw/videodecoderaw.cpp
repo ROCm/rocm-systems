@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
     }
 
     try {
-        std::size_t found_file = input_file_path.find_last_of('/');
+        std::size_t found_file = input_file_path.find_last_of("/\\");
         std::cout << "info: Input file: " << input_file_path.substr(found_file + 1) << std::endl;
         std::cout << "info: Using built-in bitstream reader" << std::endl;
         RocdecBitstreamReader bs_reader = nullptr;
