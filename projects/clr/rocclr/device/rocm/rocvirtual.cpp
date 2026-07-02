@@ -29,6 +29,7 @@
 #include <vector>
 #include <atomic>
 #include <cinttypes>
+#include <mutex>
 
 #if defined(__AVX__)
 #if defined(__MINGW64__)
@@ -1580,18 +1581,34 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
              (thisChunk - firstCount) * kPacketSize);
     }
 
-    // Copy this chunk's metadata packets to the metadata ring buffer.
+    // Copy this chunk's metadata packets to the metadata ring buffer, following the
+    // same publish protocol as the live single-dispatch path (MetaDataPreloader::Set):
+    // write each packet body first with the headers held at HSA_PACKET_TYPE_INVALID,
+    // then arm the four packet headers last. This guarantees the CP prefetch engine
+    // never observes an armed header over a partially-written body. The captured
+    // buffer already carries the armed header value for real slots and INVALID for
+    // slots without metadata (barriers), so re-arming from it preserves both cases.
     if (flatMetadataData != nullptr && metadata_preloader_.HasMetadataQueue()) {
       static constexpr size_t kMetaSize = 256;
+      // Header dword offsets within a 256B AqlMetadataPrefetchPacket.
+      static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
+      static constexpr uint32_t kInvalidMetaHeader = HSA_PACKET_TYPE_INVALID;
       auto* metaBase = static_cast<uint8_t*>(metadata_preloader_.GetQueueBase());
-      const uint8_t* metaSrc = flatMetadataData->data() + chunkStart * kMetaSize;
-      if (chunkSlot + thisChunk <= queueSize) {
-        memcpy(metaBase + chunkSlot * kMetaSize, metaSrc, thisChunk * kMetaSize);
-      } else {
-        const size_t firstCount = queueSize - chunkSlot;
-        memcpy(metaBase + chunkSlot * kMetaSize, metaSrc, firstCount * kMetaSize);
-        memcpy(metaBase, metaSrc + firstCount * kMetaSize,
-               (thisChunk - firstCount) * kMetaSize);
+      for (size_t j = 0; j < thisChunk; ++j) {
+        const uint64_t slot = (startIndex + chunkStart + j) & queueMask;
+        uint8_t* dst = metaBase + slot * kMetaSize;
+        const uint8_t* src = flatMetadataData->data() + (chunkStart + j) * kMetaSize;
+        for (size_t h = 0; h < 4; ++h) {
+          // Hold the header INVALID while the body region after it is copied.
+          std::memcpy(dst + kHdrOff[h], &kInvalidMetaHeader, sizeof(kInvalidMetaHeader));
+          const size_t bodyStart = kHdrOff[h] + sizeof(uint32_t);
+          const size_t bodyEnd = (h + 1 < 4) ? kHdrOff[h + 1] : kMetaSize;
+          std::memcpy(dst + bodyStart, src + bodyStart, bodyEnd - bodyStart);
+        }
+        // Arm the headers last, in reverse order (header3 -> header0)
+        for (size_t h = 4; h-- > 0;) {
+          std::memcpy(dst + kHdrOff[h], src + kHdrOff[h], sizeof(uint32_t));
+        }
       }
     }
 
@@ -2316,6 +2333,35 @@ void VirtualGPU::ReleaseHwQueue() {
 }
 
 // ================================================================================================
+// hsa_amd_profiling_async_copy_enable() is a process-global toggle shared by
+// every agent/queue, so it cannot be scoped per-stream. Multiple VirtualGPUs
+// (one per stream, potentially on different host threads) may want SDMA
+// profiling enabled for their in-flight command at the same time. Guard the
+// global with a process-wide refcount under a lock: enable on the 0->1
+// transition, disable on the 1->0 transition, so it stays on exactly while at
+// least one profiled command is outstanding and is never toggled off from
+// under a concurrent profiled command on another stream.
+namespace {
+std::mutex g_sdmaProfilingLock;
+uint32_t g_sdmaProfilingRefCount = 0;
+
+void acquireSdmaProfiling() {
+  std::lock_guard<std::mutex> lock(g_sdmaProfilingLock);
+  if (g_sdmaProfilingRefCount++ == 0) {
+    Hsa::profiling_async_copy_enable(true);
+  }
+}
+
+void releaseSdmaProfiling() {
+  std::lock_guard<std::mutex> lock(g_sdmaProfilingLock);
+  assert(g_sdmaProfilingRefCount > 0 && "unbalanced SDMA profiling release");
+  if (--g_sdmaProfilingRefCount == 0) {
+    Hsa::profiling_async_copy_enable(false);
+  }
+}
+}  // namespace
+
+// ================================================================================================
 /* profilingBegin, when profiling is enabled, creates a timestamp to save in
  * virtualgpu's timestamp_, saves the pointer timestamp_ to the command's data
  * and then calls start() to get the current host timestamp.
@@ -2349,10 +2395,14 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
     timestamp_ = new Timestamp(this, command);
     command.data().emplace_back(timestamp_);
     timestamp_->start();
-    // Enable SDMA profiling on the first access if profiling is set
-    // Its not per command basis
-    if (sdmaProfiling && !Barriers().GetSDMAProfiling()) {
-      Barriers().SetSDMAProfiling(true);
+    // Enable SDMA profiling for this command only; disabled in profilingEnd().
+    // The underlying HSA async-copy profiling flag is process-global, so use a
+    // refcounted, locked acquire instead of a per-stream bool (which races
+    // across concurrent streams and could disable profiling out from under
+    // another stream's in-flight profiled copy).
+    if (sdmaProfiling) {
+      acquireSdmaProfiling();
+      sdma_profiling_for_cmd_ = true;
     }
   }
 
@@ -2403,6 +2453,11 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
       }
       timestamp_ = nullptr;
     }
+  }
+
+  if (sdma_profiling_for_cmd_) {
+    releaseSdmaProfiling();
+    sdma_profiling_for_cmd_ = false;
   }
 
   // Certain commands like map/unmap memory may not need hw_events as its not a

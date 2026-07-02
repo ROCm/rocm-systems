@@ -403,11 +403,17 @@ class Command : public Event {
 
   //! Allocates and returns a metadata packet buffer for graph capture.
   //! Returns nullptr if metadata capture is not enabled.
+  //! The buffer is initialized with HSA_PACKET_TYPE_INVALID
   uint8_t* getMetadataPacket() const {
     if (gpuMetadataPackets_ == nullptr) {
       return nullptr;
     }
     uint8_t* packet = new uint8_t[256]();
+    static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
+    static constexpr uint32_t kInvalidMetadataHeader = 1;  // HSA_PACKET_TYPE_INVALID
+    for (size_t h = 0; h < 4; ++h) {
+      memcpy(packet + kHdrOff[h], &kInvalidMetadataHeader, sizeof(kInvalidMetadataHeader));
+    }
     gpuMetadataPackets_->push_back(packet);
     return packet;
   }
