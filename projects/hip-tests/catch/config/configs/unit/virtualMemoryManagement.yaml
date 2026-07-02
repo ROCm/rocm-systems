@@ -263,3 +263,4 @@ virtualMemoryManagement:
     # Below tests are failing PSDB
     disabled: [nvidia_linux, nvidia_windows]
   Unit_hipMemSetAccess_SegmentsAccess: *level_2
+  Unit_hipMemExportFabricHandleToStdout_Positive_Basic: *level_2

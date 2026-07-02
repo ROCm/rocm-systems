@@ -435,6 +435,18 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
 hsa_status_t hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem);
 
+// Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value);
+
+// Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_queue_wait_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value);
+
 }  // namespace amd
 }  // namespace rocr
 

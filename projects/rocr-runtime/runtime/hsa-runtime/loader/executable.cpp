@@ -237,7 +237,7 @@ static void RemoveCodeObjectInfoFromDebugMap(link_map* map) {
       map->l_next->l_prev = map->l_prev;
   }
 
-  free(map->l_name);
+  free(const_cast<char*>(map->l_name));
   memset(map, 0, sizeof(link_map));
 }
 
@@ -1323,7 +1323,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     }
   }
 
-  loaded_code_objects.back()->r_debug_info.l_addr = loaded_code_objects.back()->getDelta();
+  loaded_code_objects.back()->r_debug_info.l_addr = (decltype(link_map::l_addr))loaded_code_objects.back()->getDelta();
   loaded_code_objects.back()->r_debug_info.l_name = strdup(uri.c_str());
   loaded_code_objects.back()->r_debug_info.l_prev = nullptr;
   loaded_code_objects.back()->r_debug_info.l_next = nullptr;

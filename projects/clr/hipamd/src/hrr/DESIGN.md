@@ -1,36 +1,6 @@
 # HIP Record & Replay (HRR) — In-Tree Dispatch Table Design
 
-## Summary of Changes from Original Out-of-Tree HRR
-
-The original HRR system (`hip_hrr.cpp` + out-of-tree proxy DLL / LD_PRELOAD interposer) has
-been replaced by an in-tree capture layer built directly into `amdhip64`. Key changes:
-
-| Area                           | Before                                    | After                                              |
-|--------------------------------|-------------------------------------------|----------------------------------------------------|
-| **API coverage**               | ~20 hand-maintained APIs                  | Every HIP API (~529 total, fully generated)        |
-| **Platform support**           | Separate Windows DLL + Linux LD_PRELOAD   | Single in-tree code path                           |
-| **Capture enable**             | Hard-coded at build time                  | `HIP_HRR_CAPTURE_OUTPUT=<dir>` env var             |
-| **Kernel arg introspection**   | ~360 lines of ELF + msgpack parsing       | `kernel->signature()` — zero added lines           |
-| **Kernel arg pointer detect**  | `value_kind` string matching              | `desc.type_ == T_POINTER`                          |
-| **Handle IDs**                 | Sequential `uint32_t` per type            | Raw pointer cast to `uint64_t`                     |
-| **Stream capture**             | Not captured                              | Full stream create/destroy + event record           |
-| **Graph capture**              | Not captured                              | Full `hipStreamBeginCapture` → `hipGraphLaunch`    |
-| **Fat-binary launch path**     | Not captured                              | Compiler dispatch table slot + TLS                 |
-| **Capture shim generation**    | Manual updates per new API                | `gen_hrr_api_args.py` auto-generates all shims     |
-| **D2H data validation**        | None                                      | Blob compare on every D2H memcpy                   |
-| **Pinned host mem (register)** | Not captured                              | `hipHostRegister` blob snapshot + playback restore |
-| **Multi-threaded replay**      | No                                        | `--multi-thread`: one CPU thread per captured thread (default: single-threaded) |
-| **Kernel filter + warm-up**    | No                                        | `--kernel-filter STR` with silent warm-up pass     |
-| **Timing**                     | No                                        | `--timing`: wall time + GPU kernel time + GPU graph time |
-| **GPU error surfacing**        | No                                        | `--sync-after-launch`: device sync after every launch |
-| **MT-safe replay context**     | No                                        | `shared_mutex` reads, atomic stats counters        |
-| **Archive info (no GPU)**      | Separate `hrr-info` tool                  | `hrr-playback --info [--events]`                   |
-| **Playback tools**             | `hrr-replay` + `hrr-info`                 | Single `hrr-playback` (`--info` flag)         |
-| **Playback built**             | Separate CMake tree                       | Part of main `amdhip` CMake build                  |
-| **Code-object layout**         | `hipamd/src'                              | All under `hipamd/src/hrr/`                        |
-| **Copyright**                  | Ad-hoc                                    | SPDX `MIT` on every file + generated output        |
-
-### Quick Start
+## Quick Start
 
 ```bash
 # Capture
@@ -66,12 +36,78 @@ followed by a retry with a smaller allocation) will not replay faithfully —
 the retry branch produces a different allocation layout than the successful original.
 This is a known limitation with no current workaround.
 
+### Crash Resilience (capture durability)
+
+`events.bin` is written through a raw file descriptor with a small app-managed
+buffer (not buffered stdio). Two mechanisms keep an archive usable even if the
+recorded process dies before its `atexit` finalizer runs (e.g. a GPU memory
+fault aborts the host, or a host SIGSEGV):
+
+- **Periodic checkpoints.** The writer flushes the buffer and `fsync`s every
+  `kCheckpointEvents` (4096) events, bounding how much a crash can lose.
+- **CLR crash callback.** When capture is enabled and `writer::open()` succeeds,
+  `hip_capture_init` registers a crash callback through
+  `amd::Os::installExceptionHandlers()` instead of installing an HRR-owned
+  Linux-only signal chain. On fatal signals/exceptions supported by CLR, the
+  callback `writer::emergency_finalize()`s with `complete:false` and deliberately
+  does **not** write the clean trailer — its absence is how the reader detects a
+  crash-truncated archive. Orderly shutdown is handled by the existing
+  `std::atexit(hip_capture_shutdown)` path, which writes the clean trailer and
+  `complete:true`.
+- **Clean-shutdown trailer.** A normal `writer::flush` appends an
+  `hrr_eof_record` (event_type `HRR_EOF_MARKER`, payload carries the final event
+  count + `HRR_EOF_MAGIC`) and writes `manifest.json` with `complete:true`. The
+  trailer's **absence** is how the reader detects a crash-truncated archive.
+
+Blobs and code objects were already crash-safe (written to a temp file then
+atomically renamed), so a crash never leaves a partial final blob.
+
+On the read side, `load_archive` is append-only-aware: a torn record can only be
+the last one, so a partial header/payload at the tail is a recovery point — all
+complete records are kept and `Archive::truncated` is set, rather than failing
+the whole load. `Archive::complete` reflects whether the trailer was found.
+`hrr-playback --info` reports both; `hrr-playback --repair` rewrites a truncated
+archive (trimmed to the last complete record, trailer + manifest added) into a
+clean one.
+
+### Per-Process Archive Layout
+
+A single `HIP_HRR_CAPTURE_OUTPUT` directory can be inherited by multiple
+processes. Every HIP-owning process writes an independent sub-archive at
+`<base>/pid-<pid>/`, with its own `events.bin`, `blobs/`, `code_objects/`,
+`writer_state.json`, and per-process `manifest.json`. This avoids interleaving
+two live writers into one `events.bin` without needing an advisory lock.
+
+`writer::open()` (`hip_capture_writer.cpp`) always selects the current process's
+PID directory. A `fork()` child re-opens from the base dir in `atfork_child`, so
+the child naturally switches to its own `pid-<childpid>/` sub-archive. The root
+`manifest.json` is a common aggregate index with the schema fields
+`version`, `capture_mode`, `owner_pid`, and `processes[]`; each process rewrites
+it best-effort on clean shutdown by scanning existing `pid-*/manifest.json`
+files. Per-process manifests carry `pid`, `parent_pid`, `complete`,
+`event_count`, and `blob_count`.
+
+Because the PID directory is always part of the archive path, a crashed process
+that is restarted with a new PID creates a new sub-archive rather than resuming
+the prior process's `events.bin`. Resuming still applies if the same process
+re-opens its own writer and finds an existing `pid-<pid>/events.bin`.
+
+**Playback note:** `hrr-playback --info <base>` prints the root process summary.
+Point `hrr-playback` at a specific `<base>/pid-<pid>/` for detailed event info or
+replay. If a root contains exactly one `pid-<pid>/` sub-archive, the reader
+auto-resolves it for compatibility with simple single-process captures; a root
+with multiple process captures must be disambiguated.
+
 ### Archive Format (v3)
 ```
 capture.hrr/
-  events.bin         hrr_file_header(8) + [EventHeader(32) + payload]*
-  blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
-  code_objects/      .hsaco ELFs (unused in current fat-binary path)
+  manifest.json      { version, capture_mode, owner_pid, processes[] }
+  pid-<pid>/
+    events.bin         hrr_file_header(8) + [EventHeader(32) + payload]* + [hrr_eof_record(44)]
+    manifest.json      { pid, parent_pid, complete, event_count, blob_count }
+    writer_state.json  checkpoint cursor (present only mid-capture; removed on clean shutdown)
+    blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
+    code_objects/      .hsaco ELFs (unused in current fat-binary path)
 ```
 All handle values (stream, event, module, graph, device pointer) are stored as raw `uint64_t` pointer casts. Sequence IDs are a global atomic counter providing causal ordering across threads.
 
@@ -101,12 +137,13 @@ Run from `hipamd/src/hrr/`: `python gen_hrr_api_args.py`
 
 ### Build
 ```bash
-# Capture DLL
-cmake --build C:/MIGraphX/amdhip --config Release -j 6 --target amdhip64
+# Configure the CLR/HIP build tree once (Ninja, single-config)
+cmake -S projects/clr -B build -GNinja -DCLR_BUILD_HIP=ON -DHIP_PLATFORM=amd \
+      -DCMAKE_BUILD_TYPE=Release
 
-# Playback tool (same tree)
-cmake --build C:/MIGraphX/amdhip --config Release --target hrr-playback
-# Output: hipamd/src/hrr/playback/Release/hrr-playback.exe
+# Build the capture runtime + playback tool (same tree)
+ninja -C build amdhip64 hrr-playback
+# Output: build/hipamd/lib/libamdhip64.so*  and  build/.../hrr/playback/hrr-playback
 ```
 
 ### Usage
@@ -176,15 +213,15 @@ hipamd/src/hrr/
 test/ (separate tree, not part of this PR)
   hip_raw_trace.cpp               — multi-threaded integration test workload
                                     (threadFunc ×4 + graphFunc + pinnedFunc + hostRegisterFunc)
-                                    capture: HIP_HRR_CAPTURE_OUTPUT=out.hrr hip_raw_trace.exe
+                                    capture: HIP_HRR_CAPTURE_OUTPUT=out.hrr ./hip_raw_trace
                                     replay:  hrr-playback out.hrr
 ```
 
 ## Core Mechanism
 
 At init time the capture layer snapshots `g_real_table` from `GetHipDispatchTable()`,
-builds `g_cap_table` as a copy with the 12 manual shims overridden, then installs it
-atomically. All shims call through `g_real_table` — never back into the dispatch table —
+builds `g_cap_table` as a copy with the manual shims (`MANUAL_CAPTURE_APIS`) overridden,
+then installs it atomically. All shims call through `g_real_table` — never back into the dispatch table —
 preventing re-entrancy. Uninstall restores the snapshot.
 
 ### `<<<>>>` Launch Path — Compiler Dispatch Table
@@ -193,6 +230,13 @@ preventing re-entrancy. Uninstall restores the snapshot.
 grid/block/shared/stream into thread-local storage) then `hipLaunchByPtr`. Both slots
 are hooked in `HipCompilerDispatchTable`; `hipLaunchByPtr` reads the TLS values and
 calls `serialize_kernel_launch()`.
+
+Kernel arguments are captured from the per-thread exec stack: `hipSetupArgument`
+accumulates the packed kernarg buffer into `hip::tls.exec_stack_.top().arguments_`
+(indexed by descriptor offset), which `capture_hipLaunchByPtr` snapshots *before*
+calling the real function — the real `hipLaunchByPtr` `PopExec`'s (moves out) that
+exec, so the copy must happen first. The snapshot feeds the same `kbuf` serialization
+path used by `hipModuleLaunchKernel`.
 
 ## Generator — `gen_hrr_api_args.py`
 
@@ -206,7 +250,7 @@ A single Python script produces three files from `hip_api_trace.hpp`:
 
 Script location: `hipamd/src/hrr/gen_hrr_api_args.py`
 
-Run from `hipamd/src/hrr/`: `C:/Users/gandryey/AppData/Local/Programs/Python/Python312/python.exe gen_hrr_api_args.py`
+Run from `hipamd/src/hrr/`: `python3 gen_hrr_api_args.py`
 
 The generator classifies each API:
 - **`MANUAL_CAPTURE_APIS`** (27): kernel launches ×4, memcpy H2D+D2H ×8, module load ×3, `__hipRegisterFatBinary`, `hipHostRegister/Unregister`, `hipMemcpy3D` variants ×4, array creation ×2, VMM, stream/memory attribute APIs, `hipMemcpyWithStream`
@@ -226,10 +270,16 @@ HRR_VERSION = 3
 
 ```
 <output_dir>/
-  manifest.json      { version, capture_mode, event_count, blob_count }
-  events.bin         8-byte hrr_file_header, then repeated records
-  blobs/<2hex>/      FNV-1a-128 content-addressed raw buffers (.blob ext)
-  code_objects/      .hsaco ELFs keyed by hash
+  manifest.json      { version, capture_mode, owner_pid, processes[] }
+                     (version here is the manifest schema = 1, distinct from the
+                      events.bin HRR_VERSION = 3)
+  pid-<pid>/
+    manifest.json      { pid, parent_pid, complete, event_count, blob_count }
+    writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
+                       size); present only mid-capture, removed on clean shutdown
+    events.bin         8-byte hrr_file_header, then repeated records
+    blobs/<2hex>/      FNV-1a-128 content-addressed raw buffers (.blob ext)
+    code_objects/      .hsaco ELFs keyed by hash
 ```
 
 ### `events.bin` Layout
@@ -242,12 +292,18 @@ HRR_VERSION = 3
               sequence_id    u64   monotonically increasing (atomic)
               timestamp_ns   u64   MONOTONIC wall clock
               thread_id      u64   OS thread ID (cached per-thread)
-              payload_length u16   total size INCLUDING this 32-byte header
-              reserved       u8[4] zero
+              payload_length u32   total size INCLUDING this 32-byte header (v4)
+              reserved       u8[2] zero
             payload bytes    (payload_length - 32 bytes)
               ret            i32   hipError_t return value
               params         per hrr_args_* struct fields
               [extra fields] blob_hash_lo/hi, co_hash_lo/hi, module_id
+
+          OPTIONAL trailer (clean shutdown only) hrr_eof_record (44 bytes):
+            hdr            32    event_type = HRR_EOF_MARKER (0xFFFF)
+            total_events   u64   real events written before the trailer
+            eof_magic      u32   HRR_EOF_MAGIC ("HEOF")
+          Absent => capture was interrupted (crash); reader recovers the tail.
 ```
 
 ### `hrr_args_*` Struct Layout Rules
@@ -377,9 +433,113 @@ required ~360 lines for this). Hidden runtime-injected args are skipped via
 `extra[]` (pre-packed buffer pointed to by `HIP_LAUNCH_PARAM_BUFFER_POINTER`) and
 `kernelParams[]` (void** array reconstructed into a packed buffer using the signature).
 
-`co_hash` is always written as 0 in kernel launch events — no cheap mapping from
-kernel to code object at dispatch time. Playback resolves kernels by name, scanning
-all loaded modules.
+The `<<<>>>` path (`hipLaunchByPtr`) is also fully supported: `hipSetupArgument` packs
+the kernarg buffer into the per-thread exec stack (`hip::tls.exec_stack_.top().arguments_`)
+before the launch, and `capture_hipLaunchByPtr` snapshots it (a copy, since the real
+`hipLaunchByPtr` moves the exec out via `PopExec`) and feeds it through the same
+signature-driven serialization path.
+
+### Pointers Embedded in By-Value Struct Args (`value_kind == 3`)
+
+`KernelSignature` classifies an argument as a GPU pointer only when
+`desc.type_ == T_POINTER`. A pointer that is a *member* of a struct passed by
+value is reported as a plain scalar, so the type metadata cannot say "bytes
+`o..o+7` of this argument are a device address". This is common in PyTorch/ATen
+`<<<>>>` kernels: `vectorized_elementwise_kernel` takes a `std::array<char*,N>`
+by value, and `reduce_kernel` takes a ~720-byte config struct that mixes scalar
+sizes/strides with device pointers at arbitrary offsets (e.g. +656, +664). Before
+this was handled, those addresses were stored verbatim and replay launched the
+kernel with the original (untranslated) GPU VAs — a guaranteed memory fault.
+
+Capture detects them by value: for every non-pointer argument,
+`find_embedded_ptr_offsets` scans the bytes and asks the runtime
+(`hipPointerGetAttributes`, via `g_real_table` so it is not itself captured)
+whether a candidate word is a live device/unified allocation. Matching offsets
+are recorded as a new arg encoding `value_kind == 3`: the raw struct bytes
+followed by `u16 n_ptrs` and `n_ptrs × u16` byte offsets. Probing perturbs the
+thread's HIP last-error, so `hip::tls.last_command_error_/last_error_` are saved
+and restored around the scan. At replay, `replay_kernel_launch` copies the
+struct bytes and overwrites each recorded offset with `translate_ptr(rec)`
+before launch, so embedded pointers resolve to live allocations exactly like
+top-level pointer args. As a defensive measure it **also re-scans every word**
+of the struct (not just the recorded offsets) and translates any additional word
+that resolves to a known allocation — catching pointers the capture-time
+heuristic missed (e.g. a conditionally-populated field that was null at capture).
+Set `HIP_HRR_REPLAY_NO_RESCAN=1` to disable the rescan and `HIP_HRR_PTR_RELAX=1`
+to relax the guard for debugging. Old archives (no `value_kind == 3`) parse unchanged.
+
+This detector is a value-based heuristic with three deliberate properties:
+
+- **Memoized per-word verdict (perf + low perturbation).** `hipPointerGetAttributes`
+  is a locked allocation-tree walk; issuing one per candidate word of every
+  by-value arg of every launch (millions on an LLM workload) slows capture and
+  distorts the timing/ordering HRR records. `scan_embedded_ptr_offsets` therefore
+  caches a per-word verdict keyed by `(kernel, arg-index, size, offset)`
+  (thread-local, lock-free). Each entry stores the verdict (POINTER/SCALAR) **and
+  the probed word value**, and is **re-probed whenever the word's value changes**,
+  so a slot that held a scalar on one launch and a live pointer on the next is not
+  frozen as a scalar. A verdict is cached **only from an actual probe** (word value
+  ≥ `0x10000`); a null/small word is skipped *without* caching. This is essential:
+  a conditionally-populated pointer field — e.g. the
+  multi-block reduction scratch/semaphore pointers in ATen's `ReduceOp` struct,
+  which are null on single-block launches — must stay re-checkable, so it is
+  detected on the first launch where it is actually non-null rather than frozen
+  as a scalar from an earlier launch. (Caching the whole offset *list* per
+  `(kernel, arg)` instead would drop such fields and replay the kernel with an
+  untranslated capture-time VA — a memory fault, e.g. the ArgMax sampler.)
+  Because device VAs are always huge, a non-null embedded pointer never looks
+  "small" and is never skipped.
+- **Unaligned scan.** The scan steps byte-by-byte (skipping a full pointer width
+  on a hit, since pointers do not overlap) so a pointer at an unaligned offset
+  inside a packed struct (`#pragma pack` `{char; void*}`) is still found. Most
+  ABIs 8-byte-align pointer members, but packed structs would otherwise slip
+  through silently.
+- **False-positive guard (capture + replay).** Because the detector flags any word
+  whose bit pattern lands in a live VA, a large scalar/double can be mis-flagged. To
+  avoid silently corrupting such a scalar, replay overwrites a `value_kind == 3`
+  offset **only when the recorded value resolves** to a known allocation; an
+  unresolved word is left as its original bytes (logged under `--verbose`). Two
+  value-shape guards run on **both** the capture and replay sides: the
+  `cand < 0x10000` guard skips small scalars, and a packed-integer guard rejects
+  candidates whose **low 32 bits** look like a small scalar
+  (`(value & 0xFFFFFFFF) < 0x10000`) — these are typically two packed 32-bit
+  values mistaken for one 64-bit VA, a non-deterministic false positive that
+  previously caused occasional replay faults on ATen elementwise kernels.
+  `HIP_HRR_PTR_RELAX=1` disables the replay-side guard for debugging.
+
+**Scope:** only `hipMemoryTypeDevice`/`Unified` words are flagged. A pinned/host
+(`hipMemoryTypeHost`) pointer embedded by value keeps its capture-time host VA at
+replay (invalid in the replay process); translating embedded host pointers is
+intentionally out of scope.
+
+A per-launch `co_hash` (the FNV-1a-128 hash of the owning code object) **is** recorded
+in kernel launch events. Playback resolves kernels by `(co_hash, name)`: it first looks
+up the module for that hash and binds the named kernel within it, falling back to a
+name-only scan across all loaded modules when the hash is unknown (0) or unresolved.
+This disambiguates non-unique symbol names — e.g. Triton/inductor emits the generic
+entry symbol `triton_` from many distinct code objects.
+
+### Debugging kernel args (`HIP_HRR_DEBUG_ARGS`)
+
+Setting `HIP_HRR_DEBUG_ARGS=<non-empty>` dumps every captured arg to stderr
+(`[HRR args] <kernel> arg[i] kind=.. size=.. value/bytes=..`). Two markers make
+common failure modes unambiguous:
+
+- `[TRUNCATED:no-bytes]` — the arg's bytes were unavailable at capture (the packed
+  kernarg buffer was shorter than the signature offset), so the arg is zero-filled.
+  A pointer arg printing `value=0x0` **without** this marker is a *genuine* null in
+  the application, **not** a capture loss. This distinction matters: a null pointer
+  arg at replay (`arg[i]: ptr 0x0 -> (nil) (MISSING!)`) is expected and harmless
+  when the original value was also null.
+- `[KBUF-TOO-SMALL]` (kbuf/`extra[]` path only) — the app-provided buffer size
+  (`ksz`) is smaller than the signature extent (`need`); trailing args will be
+  truncated. Triton-style launches that use `kernelParams[]` never hit this path.
+
+A GPU fault at a small fixed address (e.g. `0x20000`) with all captured pointer
+args translating correctly indicates a **data** divergence (a buffer's *contents*
+differ at replay so the kernel computes an out-of-bounds index), not an argument
+capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` that the nulls are genuine
+before suspecting the `<<<>>>` / kernarg capture path.
 
 ## Fat Binary Registration
 
@@ -412,10 +572,15 @@ with `hipEventRecord` to accumulate elapsed time into `total_graph_ms`.
 
 ## Init / Shutdown
 
-`hip_capture_init()` is called from `hip_context.cpp` at HIP init. It always snapshots
-the dispatch tables; if `HIP_HRR_CAPTURE_OUTPUT` is set it opens the writer, recovers
-pre-init fat binaries, installs the capture shims, and registers `hip_capture_shutdown`
-via `atexit`. Shutdown uninstalls shims and flushes `events.bin` + `manifest.json`.
+`hip_capture_init()` is called from `hip_context.cpp` at HIP init (after `amd::Runtime`
+and the live `HipDispatchTable` are ready). If `HIP_HRR_CAPTURE_OUTPUT` is set it
+snapshots the runtime dispatch table, installs runtime capture shims, opens the writer,
+recovers pre-init fat binaries (compiler-table shims + retroactive sweep), and
+registers `hip_capture_shutdown` via `atexit`. Runtime shims are **not** installed at
+`libamdhip64` static-init time: that pulled every HIP call through capture from DSO
+load before `hip::init()` completed and disturbed host stacks that load HIP early
+(e.g. Python + `spawn`). Events before `writer::open()` were never persisted anyway.
+Shutdown uninstalls shims and flushes `events.bin` + `manifest.json`.
 
 ## Enable Flag
 
@@ -438,6 +603,8 @@ only when the variable is set (non-default) and non-empty.
 ```
 hrr-playback <capture.hrr> [options]
   --info                Print archive summary and exit (no GPU required)
+                        (reports Complete: yes/NO and Recovered: <n> events)
+  --repair              Rewrite a crash-truncated archive as a clean one and exit
   --events              With --info: also print the full event log
   --verbose             Print each event as it is processed
   --skip-device-sync    Skip hipDeviceSynchronize / hipStreamSynchronize events
@@ -445,17 +612,68 @@ hrr-playback <capture.hrr> [options]
   --timing              Report wall time, GPU kernel time, GPU graph time, and combined total
   --kernel-filter STR   Only launch kernels whose name contains STR
                         (silent full warm-up pass runs first to populate GPU state)
+  --replace-kernel N=P  Launch the kernel whose recorded name is exactly N from the
+                        external code object at path P instead of the recorded one
   --sync-after-launch   hipDeviceSynchronize after every kernel (surfaces GPU errors)
   --sync-after-event    hipDeviceSynchronize after every event (HW hang debug; very slow)
+  --sync-watchdog-ms N  Abort with a diagnostic if any device sync exceeds N ms
+  --trace-kernels       Print one compact line before every kernel launch
+  --progress-kernels N  Print a heartbeat every N launched kernels
+  --progress-seconds S  Print a heartbeat at most every S seconds
 ```
+
+Several options have `HIP_HRR_REPLAY_*` environment-variable equivalents (e.g.
+`HIP_HRR_REPLAY_TRACE_KERNELS`, `HIP_HRR_REPLAY_PROGRESS_KERNELS`,
+`HIP_HRR_REPLAY_PROGRESS_SECONDS`, `HIP_HRR_REPLAY_SYNC_WATCHDOG_MS`).
+
+**Replay `hipMalloc` padding:** `hip_playback.cpp` replays each device allocation at
+`max(recorded_size, min(recorded_size × factor, cap))` (defaults: factor **1** for
+exact recorded sizes, cap **1 GiB**).  Legacy pool-style workloads (MIOpen / large
+virtual batch grids) may need **`HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=256`** so kernels
+that over-read contiguous pools do not fault when replay uses independent
+`hipMalloc`s.  That multiplier can make large LLM replays hit **`hipErrorMemoryAllocation`**
+early; lower **`HIP_HRR_REPLAY_ALLOC_PAD_MAX`** or use factor **1** (default) to reduce VRAM.
+
+```
+HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=256   # legacy padding (more VRAM; fewer pool faults)
+HIP_HRR_REPLAY_ALLOC_PAD_MAX=268435456   # example: 256 MiB cap per allocation
+```
+
+**Zero-init of replayed allocations.** Replay zero-initialises each device
+allocation (`hrr_replay_zero_init`) so kernels that read padded/over-allocated tail
+regions observe deterministic zeros rather than stale VRAM. This injected `memset`
+and the `--sync-after-launch` post-launch sync are **skipped while a stream is in
+graph capture** (`in_graph_capture`) — issuing an unrelated memset/sync into a
+capturing stream corrupts the graph (HIP error 901).
 
 For each D2H memcpy event that has a captured expected-data blob:
 1. Translates the recorded device src pointer to the live address
 2. Copies the result back to a host buffer via `hipMemcpy`
-3. Compares byte-for-byte with the expected blob from the archive
-4. Increments `ctx.d2h_pass` or `ctx.d2h_fail`
+3. Validates against the expected blob with `hrr_d2h_validate` (see below)
+4. Increments `ctx.d2h_pass` (byte-exact), `ctx.d2h_pass_tol` (within tolerance),
+   or `ctx.d2h_fail`
 
-Exits 0 if all checks pass (or no D2H blobs in archive), 1 on any failure.
+**Tolerance-based validation.** A byte-exact `memcmp` is tried first as a fast path.
+On mismatch, the validator interprets both buffers as each candidate float encoding
+(fp32, bf16, fp16, fp64) and passes when every element satisfies
+`|live − expected| ≤ atol + rtol·|expected|`. This absorbs benign GPU
+non-determinism (atomicAdd reduction order, dropout RNG ordering) that produces tiny
+floating-point differences without indicating a replay-fidelity bug. Thresholds and
+behavior are configurable:
+
+```
+HIP_HRR_D2H_ATOL=<float>   # absolute tolerance (default tuned for bf16/fp16)
+HIP_HRR_D2H_RTOL=<float>   # relative tolerance
+HIP_HRR_D2H_EXACT=1        # disable tolerance; require byte-exact match
+```
+
+On failure the validator reports element counts, max absolute/relative error, and
+64-bit FNV-1a content hashes (useful for replay-vs-replay determinism comparison).
+The summary distinguishes exact passes, within-tolerance passes, and failures.
+
+**Exit codes:** `0` if all checks pass or are within tolerance (or no D2H blobs);
+`1` on any unexplained D2H failure; `2` for an early "replay diverged" abort triggered
+once accumulated failures cross `HIP_HRR_REPLAY_DIVERGENCE_ABORT` (`note_d2h_fail`).
 
 ### Multi-Threaded Replay
 
@@ -466,47 +684,39 @@ synchronisation between threads is not replicated — see Limitations section.
 
 ## Build System
 
-The playback tools are now built as part of the main `amdhip` CMake tree via
+The playback tools are built as part of the main `amdhip` CMake tree via
 `add_subdirectory(playback)` in `hrr/CMakeLists.txt`. No separate CMake tree is needed.
+Builds are Linux/Ninja (on Windows, build inside WSL — there is no native Windows build).
 
-### Capture DLL + Playback Tools (combined)
+### Capture runtime + playback tool (combined)
 ```bash
-cd C:/MIGraphX/amdhip
-cmake --build . --config Release -j 6 --target amdhip64
-cmake --build . --config Release --target hrr-playback
-# DLL: Release/amdhip64_7.dll
-# Tool: Release/hrr-playback.exe  (or playback/Release/hrr-playback.exe)
+# Configure once (Ninja, single-config). Point at the live ROCm install and the
+# matching HIP headers; CMAKE_BUILD_TYPE selects the config (no --config flag).
+cmake -S projects/clr -B build -GNinja \
+  -DHIP_COMMON_DIR=<path-to-HIP> \
+  -DROCM_PATH=$ROCM_PATH \
+  -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF -DHIP_PLATFORM=amd \
+  -DCMAKE_BUILD_TYPE=Release
+
+# Build both targets
+ninja -C build amdhip64 hrr-playback -j"$(nproc)"
+# Runtime: build/hipamd/lib/libamdhip64.so*
+# Tool:    build/.../hrr/playback/hrr-playback  (locate via: find build -name hrr-playback -type f)
 ```
 
 ### Deploy
 ```bash
-copy Release\amdhip64_7.dll C:\MIGraphX\test\build2\
+# Make the freshly built capture runtime win over any system ROCm copy at run time
+export LD_LIBRARY_PATH=$PWD/build/hipamd/lib:$LD_LIBRARY_PATH
+# or LD_PRELOAD the capture lib for a single app:
+LD_PRELOAD=$PWD/build/hipamd/lib/libamdhip64.so.7 HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app
 ```
 
 ### Validation Tool (separate test tree)
 ```bash
-cmake --build C:/MIGraphX/test/build2 --config Release --target hrr-validate
-# Produces: hrr-validate.exe
+cmake --build build_test --target hrr-validate    # or: ninja -C build_test hrr-validate
+# Produces: build_test/.../hrr-validate
 ```
-
-## Comparison with Out-of-Tree Proxy
-
-| Property                        | Out-of-tree proxy         | In-tree dispatch hook           |
-|---------------------------------|---------------------------|---------------------------------|
-| API coverage                    | Manual subset (~20 APIs)  | Every HIP API (~529 total)      |
-| Windows support                 | Separate proxy DLL        | Single code path                |
-| Linux support                   | Separate LD_PRELOAD       | Single code path                |
-| Stream handle capture           | No                        | Yes                             |
-| Event capture / ordering        | No                        | Yes                             |
-| `hipGraph*`                     | No                        | Yes (full capture + replay)     |
-| D2H data validation             | No                        | Yes (`hrr-playback` default)    |
-| Fat-binary launch path          | No                        | Yes (compiler table slot)       |
-| ROCm version coupling           | Breaks on ABI shift       | Owns the table, always in sync  |
-| Kernel arg type info            | ELF + msgpack parse       | `kernel->signature()` directly  |
-| Kernel arg pointer detection    | `value_kind` string match | `desc.type_ == T_POINTER`       |
-| Kernel name lookup              | `g.funcs[]` side table    | `kernel->name()`                |
-| Supporting code for args        | ~360 lines (hrr_code_object.c) | 0 lines                    |
-| Handle IDs                      | Sequential u32 per type   | Raw pointer cast to u64         |
 
 ## Known Limitations
 
@@ -538,9 +748,10 @@ These compiler-generated functions populate the runtime's internal host-symbol �
 device-symbol table used by `hipMemcpyToSymbol`, `hipMemcpyFromSymbol`,
 `hipGetSymbolAddress`, and `hipGetSymbolSize`.
 
-The capture shims record events for `__hipRegisterVar` and `__hipRegisterManagedVar`
-but write empty payloads — the variable name, host pointer, size, and flags are not
-captured. The playback shims are no-ops.
+The capture shims record events for `__hipRegisterVar` and `__hipRegisterManagedVar`,
+but the symbol name is stored only as a raw `uint64_t` host pointer (a capture-time
+address, useless at replay) rather than the name string, and the playback shims are
+no-ops. The host-symbol → device-symbol table is therefore never rebuilt.
 
 **Impact:** workloads that use `hipMemcpyToSymbol` / `hipMemcpyFromSymbol` will fail
 at replay because the symbol table is never populated. Kernel launches and all
@@ -550,30 +761,17 @@ pointer-based memcpy APIs are unaffected.
 host pointer, then at playback calling `hipModuleGetGlobal` on the loaded module to
 resolve the device address and rebuilding the symbol table entry.
 
-### `hipLaunchByPtr` — Kernel Args Not Captured
+### `co_hash` Kernel → Code-Object Binding
 
-The `<<<>>>` launch path (`__hipPushCallConfiguration` + `hipLaunchByPtr`) does not
-support kernel argument capture. Grid/block/shared/stream are saved in thread-local
-storage and recorded correctly. However `hipLaunchByPtr` receives only a function
-pointer — the kernarg buffer is assembled by the compiler-generated wrapper _after_
-`hipLaunchByPtr` returns, and is never accessible to the capture shim.
+Kernel launch events record a per-launch `co_hash_lo`/`co_hash_hi` (the hash of the
+owning code object). Playback resolves kernels by `(co_hash, name)`, falling back to a
+name-only scan when the hash is 0 (unknown) or does not resolve to a loaded module.
+This binds non-unique symbol names (e.g. Triton's generic `triton_` entry symbol,
+emitted from many distinct code objects) to the correct kernel.
 
-**Impact:** kernels launched via `<<<>>>` syntax are recorded with correct
-grid/block/stream but with zero arguments. At replay the kernel is launched with a
-zeroed kernarg buffer, which gives wrong results for any kernel that reads its
-arguments.
-
-**Workaround:** capture workloads that use `hipModuleLaunchKernel` /
-`hipExtModuleLaunchKernel` directly, or modify the workload to use the explicit API.
-
-### `co_hash` Always Zero in Kernel Launch Events
-
-At dispatch time there is no cheap way to determine which code object a kernel
-function belongs to. `co_hash_lo` and `co_hash_hi` are always written as 0 in kernel
-launch payload. The playback resolves kernels by name, scanning all loaded modules.
-
-**Impact:** if two loaded code objects define kernels with the same mangled name, the
-playback may call the wrong kernel.
+**Impact:** if `co_hash` is unavailable for a launch and two loaded code objects define
+kernels with the same mangled name, the name-only fallback may still pick the wrong
+kernel.
 
 ### Fat Binary Registration Race
 
@@ -627,26 +825,37 @@ at any point. D2H validation blobs cover only explicitly synchronised
 `hipMemcpy`-family calls; data accessed by the CPU directly through a managed pointer
 is never captured.
 
-### Single-Device Replay
+### Single-Device Replay (partial multi-GPU support)
 
-All captured device pointers are translated relative to device 0. Multi-GPU workloads
-that allocate memory on specific devices (via `hipSetDevice` + `hipMalloc`) or use
-peer-to-peer transfers are not supported at replay. `hipSetDevice` events with an
-out-of-range device ordinal are silently clamped to device 0.
+Device pointers are translated by recorded-VA → live-pointer lookup (not relative to
+device 0), and peer copies and the recorded `hipSetDevice` ordinal *are* honored, so
+multi-GPU workloads partially replay. The residual single-device assumptions are:
+`hipMemCreate` hardcodes `location.id = 0`, there is no per-device capture context, and
+allocations are not tagged with the device they were made on. Multi-GPU workloads that
+depend on specific device placement or peer-to-peer transfers may still replay
+incorrectly.
+
+`hipSetDevice` ordinal handling: the clamp lives only on the special-event replay path
+(`playback/hrr_playback.cpp`), not the generated handler (which is dead code for this
+event). It clamps an ordinal `>= hipGetDeviceCount()` down to 0 but does **not** guard
+negative ordinals.
 
 ### No Replay of `hipIpcMemHandle` / `hipExternalMemory`
 
 IPC memory handles, external memory imports (`hipImportExternalMemory`), and
-semaphore imports (`hipImportExternalSemaphore`) are recorded as raw events but the
-playback shims are no-ops. Workloads that communicate with other processes via IPC
-handles cannot be replayed in isolation.
+semaphore imports (`hipImportExternalSemaphore`) are recorded as raw events, but the
+opaque handle bytes and import descriptors are never captured. At replay the shims call
+the real APIs with zeroed/stale handles (they are no longer literal no-ops), so the
+imported memory/semaphore is never validly mapped. Workloads that communicate with
+other processes via IPC handles cannot be replayed in isolation.
 
 ### `hipStreamCaptureModeThreadLocal` Downgraded
 
 If the workload uses `hipStreamBeginCapture` with `hipStreamCaptureModeThreadLocal`,
-the playback falls back to `hipStreamCaptureModeGlobal` because thread-local capture
-mode interacts with the single-submission-thread replay model. The graphs are
-reconstructed correctly but the capture mode semantics differ.
+playback attempts `ThreadLocal` first and preserves it on success; it downgrades to
+`hipStreamCaptureModeGlobal` only if the runtime rejects the ThreadLocal call. When a
+downgrade occurs the graph is reconstructed correctly but the capture-mode semantics
+differ.
 
 ### Archive Size — No Incremental / Ring-Buffer Mode
 
@@ -689,9 +898,20 @@ in `alloc_map`:
 | `hipMallocHost` | no-op |
 | `hipMemAllocHost` | no-op |
 | `hipMalloc3DArray` | no-op |
+| `hipMallocArray` | no-op |
+| `hipMallocMipmappedArray` | no-op |
 
-These APIs allocate pinned host memory or 3D arrays. At replay, no memory is
+These APIs allocate pinned host memory or array storage. At replay, no memory is
 actually allocated and no pointer is added to `alloc_map`.
+
+**`hipExtMallocWithFlags` is now fully replayed (finding H4, fixed).** It is a device
+allocation, so it is no longer a no-op: it is a `MANUAL_PLAYBACK_APIS` handler that
+calls the real `hipExtMallocWithFlags` (preserving the recorded flags), applies the
+same padding and zero-init as `hipMalloc`, and records the buffer in `alloc_map`. H2D,
+D2H, and kernel-argument pointers derived from it now translate correctly. (Previously
+it was simultaneously a declared device allocation *and* in `NOOP_PLAYBACK_APIS`; the
+no-op won, so nothing was allocated or recorded and every derived pointer translated to
+`nullptr`.)
 
 **What still works:**
 
@@ -730,8 +950,6 @@ created at replay time.
 
 **What still works:**
 
-- H2D memcpy that populates the underlying device array (e.g. `hipMemcpyToArray`)
-  is fully replayed from its blob.
 - D2H memcpy that reads back from a plain device allocation using the texture
   workload's `hipMalloc` buffer replays and validates correctly.
 
@@ -740,10 +958,18 @@ created at replay time.
 - Kernels that read from a texture object handle: the handle translates to
   `nullptr` (no entry in the handle maps), so the kernel reads from address 0
   and produces wrong results.
+- The entire `hipArray` path. Array creation (`hipMallocArray`,
+  `hipMallocMipmappedArray`, `hipMalloc3DArray`) is a no-op at replay, so
+  `array_map` / `mipmapped_map` are never populated. Array-backed copies
+  (`hipMemcpyToArray`/`FromArray`, `hipMemcpy2D{To,From}Array`, `hipMemcpyHtoA` /
+  `AtoH` / `AtoD` / `DtoA` / `AtoA`) capture **no blob** and replay as no-ops, so
+  array contents are never populated or validated. (Earlier revisions of this
+  document incorrectly claimed `hipMemcpyToArray` was "fully replayed from its blob";
+  it is not.)
 
 **Impact:** workloads that only create and destroy texture objects, then operate on
-the underlying device memory via regular memcpy, replay correctly. Workloads where
-GPU kernels perform texture fetches (the primary purpose of texture objects) will
+the underlying device memory via regular (non-array) memcpy, replay correctly.
+Workloads that perform texture fetches, or that read/write `hipArray` storage, will
 produce incorrect output.
 
 **Workaround:** none currently. Implementing texture replay would require recording
@@ -762,6 +988,12 @@ Replaying such workloads would require coordinating replay across multiple proce
 instances, handling inter-process communication interfaces, and re-establishing IPC
 handle relationships at replay time. This adds substantial complexity and is not
 currently supported.
+
+Note that processes sharing one `HIP_HRR_CAPTURE_OUTPUT` (e.g. vLLM's spawned
+`EngineCore` child) are each captured into a separate, self-contained
+`pid-<pid>/` sub-archive rather than being merged — see Per-Process Archive
+Layout. `hrr-playback --info <base>` summarizes the processes; each sub-archive
+replays independently and there is no cross-process merge.
 
 ### Single-File Archive Format
 
@@ -811,16 +1043,140 @@ Certain HIP features interact poorly with a pure trace-and-replay model. In part
 CPU until a GPU event completes without issuing a blocking HIP synchronisation call.
 The capture records the successful `hipSuccess` return, but at replay the event may not
 yet be complete at the same point in execution (replay timing differs from original),
-causing the application logic that relied on polling to diverge.
+causing the application logic that relied on polling to diverge.  Playback therefore
+spins on `hipErrorNotReady` for `hipEventQuery`, `hipStreamQuery`, and
+`hipStreamQuery_spt` until `hipSuccess`, matching the captured return when only
+success was logged.
 
 Other HIP features with similar complications include device-side enqueue, cooperative
 groups with CPU-side barriers, and persistent kernels with CPU-side steering. These are
 not currently handled.
 
+### Explicit Graph Construction — Not Supported (fails loudly)
+
+Only the **stream-capture** graph chain is supported (`hipStreamBeginCapture` →
+`hipStreamEndCapture` → `hipGraphInstantiate` → `hipGraphLaunch`). Graphs built
+explicitly through the node API are not — and replay no longer silently produces an
+empty graph with skipped launches (finding H1). The failure is split into two levels:
+
+- **Hard fail-loud at instantiate.** `hipGraphInstantiate` / `hipGraphInstantiateWithFlags`
+  (manual handlers) return `hipErrorNotSupported` — which the dispatcher treats as
+  fatal — when the graph handle is absent from `graph_map`. A miss can only happen for
+  a node-API-built graph, since the stream-capture chain always records its graph via
+  `hipStreamEndCapture`. This is the point that actually matters: a non-replayable
+  graph can never be launched as an empty graph.
+- **Attributable warning at construction (non-fatal).** `hipGraphCreate` /
+  `hipGraphClone` / every `hipGraphAdd*Node` / `hipGraphInstantiateWithParams` are
+  `ERROR_STUB_PLAYBACK_APIS`: they log a loud, per-API "explicit (node-API) graph
+  construction is NOT supported" message and return `hipSuccess`. They are deliberately
+  non-fatal so a program that merely *creates/clones* a graph (or exercises these APIs
+  for coverage) without instantiating it in an unsupported way still replays; if such a
+  graph is later instantiated, the instantiate gate above fires.
+- Node-parameter struct pointers are still stored as raw `uint64_t` without
+  dereferencing (full node-API replay remains future work).
+
+The supported stream-capture path is unaffected: it never emits `hipGraphCreate` /
+`hipGraphAdd*Node` events, and its graph is in `graph_map` so instantiate succeeds.
+
+### Wire-Format Size Limits
+
+The event wire format (finding H5):
+
+- **`payload_length` is now a `uint32_t` (wire v4).** `hrr_event_header::payload_length`
+  was widened from `uint16_t` to `uint32_t` (the 32-byte header size is preserved by
+  shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
+  (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
+  normally instead of being dropped at 65535 bytes. `HRR_VERSION` was bumped to 4; the
+  writer's single-record buffer path now writes any oversized record straight through.
+- **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
+  a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch
+  is **dropped with an error-level log** and the whole archive is marked **incomplete**
+  via `hrr_cap::writer::mark_incomplete()` — the clean-shutdown trailer is omitted and
+  `manifest.complete=false`, so replay/validation cannot mistake a capture missing a GPU
+  launch for a faithful one. (Previously the size wrapped mod 65536, slipping past the
+  total-payload guard and writing a corrupt event.)
+- **Pointer-translation size precondition.** Whole-arg pointer translation requires the
+  recorded `arg_size >= 8`; a smaller pointer descriptor is copied through untranslated,
+  passing the stale capture-time VA to the kernel.
+
+### 2D/3D Memcpy and Memset — Blob Capture Status
+
+- `hipMemcpy2D` / `hipMemcpy2DAsync` are now blob-captured (finding H3), matching the 1D
+  and 3D families. They are `MANUAL_CAPTURE_APIS` / `MANUAL_PLAYBACK_APIS`: H2D snapshots
+  the pitched host `src` region (`spitch*(height-1)+width` bytes) as a blob, and at
+  replay the captured blob is substituted for the untranslatable capture-time host VA
+  and copied into the translated device `dst` with the recorded `dpitch`. D2H snapshots
+  the host `dst` after the copy and validates the device result against it at replay.
+  Row-padded image/tensor buffers are now handled.
+- `hipMemset3D` / `hipMemset3DAsync` drop the destination pitched pointer/extent at
+  capture (`pitchedDevPtr = 0`) and no-op at replay, so 3D-memset-initialized regions
+  are invisible to replay.
+
+### Multi-Thread Replay Ordering — Handle-Creating APIs
+
+`needs_ordering()` forces handle-lifecycle events into global capture order so a
+consumer never runs before its handle is created. The previously-missing
+handle-*creating* APIs — `hipHostRegister`, `hipHostGetDevicePointer`, `hipHostMalloc`,
+`hipMemAddressReserve`, `hipMemCreate` (plus `hipHostUnregister`) — are now ordered
+(finding H6), restoring symmetry with their already-ordered destroy/free counterparts.
+Under `--multi-thread`, a cross-thread consumer (e.g. `hipMemMap`) can no longer
+dispatch before the create populates the translation map and silently
+`return hipSuccess` while skipping the mapping.
+
+### Validation-Fidelity Caveats
+
+D2H validation can pass when replay actually diverged:
+
+- **Length clamp.** Comparison uses `min(copy_size, blob_size)`; a truncated or
+  crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and
+  still counts as PASS. A zero-length compare counts as pass.
+- **Float-dtype guessing.** Blobs carry no dtype. On a byte mismatch the validator
+  tries `{fp32, bf16, fp16, fp64}` and passes on the first encoding within tolerance,
+  so integer/index/pointer output buffers can silently false-pass; both-NaN counts as
+  equal.
+- **Zero-init masks OOB.** Replay zero-initialises each (possibly over-allocated)
+  device allocation, so an out-of-bounds-reading kernel reads deterministic zeros
+  instead of faulting and may still validate. It also diverges from non-zero original
+  memory.
+- **Padded-range overlap.** With `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR > 1`, a padded
+  `alloc_map` range can swallow the next allocation's base; a sub-pointer whose true
+  allocation is absent can resolve to the wrong neighbour at a plausible offset (no
+  fault, may pass tolerance).
+
+### Replay Robustness
+
+- **Query spin-loop has no escape.** The `hipEventQuery` / `hipStreamQuery` replay
+  loop spins on `hipErrorNotReady` with no `fatal_error` check and no watchdog (the
+  sync watchdog only bounds `hipDeviceSynchronize`). A never-completing producer hangs
+  the entire replay.
+- **Reader vs. playback divergence.** On a malformed kernel-arg stream the offline
+  reader rejects the whole launch (`return false`), while the live replayer `break`s
+  and launches with the partial arg list — so validation tooling cannot predict replay
+  behavior.
+- **H2D size clamp is silent.** On a destination-size mismatch, H2D copies a truncated
+  prefix, logs only to stderr, returns `hipSuccess`, and does not affect pass/fail
+  accounting or the exit code — masking allocation-size divergences.
+
+### `co_hash` Fallback — Wrong-Module Bind
+
+Beyond the documented "duplicate name + no hash" case: even with a valid recorded
+`co_hash`, if `hipModuleGetFunction` fails to find the symbol in the hashed module, the
+resolver scans **all** loaded modules and binds (and caches) the first same-named
+function from any code object, with no identity check — potentially binding the wrong
+kernel.
+
+### Host Callbacks and Struct-Pointer Inputs — Not Captured
+
+- `hipStreamAddCallback` / `hipLaunchHostFunc` record the callback pointer as 0; the
+  host-side work and any device-staging side effects it performs are never captured or
+  replayed. This is distinct from the app-thread CPU-sync limitation above.
+- By default the code generator stores an input struct-pointer parameter as a raw
+  `uint64_t` without serialising the pointed-to struct; only hand-written manual shims
+  copy struct bytes. A newly-captured, non-manual struct-input API therefore loses its
+  payload silently.
+
 ## Relationship to Original HRR Code
 
-- `hip_hrr.cpp` / `hip_hrr.h` — former in-tree recording hooks, superseded by this layer.
-  They are compiled but no longer called (wiring removed from `hip_context.cpp`).
 - `out_of_tree/hrr_proxy_win.c` — Windows proxy DLL; still useful for recording against
   a stock ROCm install where patching `amdhip64` is not possible.
 
