@@ -92,8 +92,7 @@ should_bypass_inline_intercept()
             !s_intercept_active.load(std::memory_order_acquire) ||
             registration::get_fini_status() != 0 ||
             // TODO: debug and enable queue interposition for attachment
-            registration::supports_attachment() ||
-            !has_active_inline_qi_consumers());
+            registration::supports_attachment() || !has_active_inline_qi_consumers());
 }
 
 auto*&
