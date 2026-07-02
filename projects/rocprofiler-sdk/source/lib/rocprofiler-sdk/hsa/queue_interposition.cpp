@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/common/container/pool.hpp"
 #include "lib/common/container/pool_object.hpp"
+#include "lib/common/container/static_vector.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
@@ -55,6 +56,7 @@
 #include <hsa/hsa_api_trace.h>
 #include <pthread.h>
 
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <string_view>
@@ -965,27 +967,50 @@ process_doorbell_impl(const queue_state_ptr_t& state,
         return;
     }
 
-    static thread_local auto snapshot_storage = std::vector<char>{};
-    const uint64_t           max_bytes        = (wptr_end - scan_pos) * state_ptr->pkt_size;
-    if(snapshot_storage.size() < max_bytes) snapshot_storage.resize(max_bytes);
-    char* const source_snapshot = snapshot_storage.data();
+    constexpr size_t kSnapshotMaxPkts = 16;
+    const uint64_t   max_pkts         = wptr_end - scan_pos;
+    const auto       pkt_size         = state_ptr->pkt_size;
+
+    // Fixed-capacity inline snapshot (16 packets). Avoids the persistent thread_local
+    // heap buffer implicated in ROCM-27116; rare large batches spill to a local vector.
+    using snapshot_pkt_t = std::array<char, 64>;
+    common::container::static_vector<snapshot_pkt_t, kSnapshotMaxPkts> snapshot;
+    std::vector<char> overflow_snapshot;
+    char*              source_snapshot = nullptr;
+
+    if(max_pkts > kSnapshotMaxPkts)
+    {
+        overflow_snapshot.resize(max_pkts * pkt_size);
+        source_snapshot = overflow_snapshot.data();
+    }
 
     uint64_t drained = 0;
     for(uint64_t pos = scan_pos; pos < wptr_end; ++pos)
     {
         const auto  ring_slot = pos & state_ptr->ring_mask;
         char* const slot_base =
-            static_cast<char*>(state_ptr->ring_buf) + (ring_slot * state_ptr->pkt_size);
+            static_cast<char*>(state_ptr->ring_buf) + (ring_slot * pkt_size);
         auto* const hdr_ptr = reinterpret_cast<volatile uint16_t*>(slot_base);
 
         if((__atomic_load_n(hdr_ptr, __ATOMIC_ACQUIRE) & 0xFFu) ==
            static_cast<unsigned>(HSA_PACKET_TYPE_INVALID))
             break;
 
-        ::memcpy(source_snapshot + (drained * state_ptr->pkt_size), slot_base, state_ptr->pkt_size);
+        char* dst = nullptr;
+        if(source_snapshot)
+        {
+            dst = source_snapshot + (drained * pkt_size);
+        }
+        else
+        {
+            dst = snapshot.emplace_back().data();
+        }
+        ::memcpy(dst, slot_base, pkt_size);
         __atomic_store_n(hdr_ptr, static_cast<uint16_t>(HSA_PACKET_TYPE_INVALID), __ATOMIC_RELEASE);
         ++drained;
     }
+
+    if(!source_snapshot) source_snapshot = reinterpret_cast<char*>(snapshot.data());
 
     if(drained == 0)
     {
