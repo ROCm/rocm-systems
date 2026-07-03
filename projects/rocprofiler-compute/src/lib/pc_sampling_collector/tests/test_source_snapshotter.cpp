@@ -131,8 +131,7 @@ TEST_F(test_source_snapshotter_t, ProvidedSingleComponentMirror_CreatesDestinati
 
     EXPECT_NO_THROW(m_snapshotter->snapshot({source_path}, destination_root));
 
-    EXPECT_EQ(m_filesystem->get_has_parent_path_calls(),
-              std::vector<std::filesystem::path>{destination});
+    EXPECT_EQ(m_filesystem->get_has_parent_path_calls(), std::vector<std::filesystem::path>{destination});
     EXPECT_EQ(m_filesystem->get_create_directories_calls(),
               std::vector<std::filesystem::path>{destination.parent_path()});
     ASSERT_EQ(m_filesystem->get_copy_file_calls().size(), 1);

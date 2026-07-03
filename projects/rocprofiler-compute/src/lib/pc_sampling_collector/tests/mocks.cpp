@@ -58,10 +58,9 @@ void mock_code_object_translator_t::add_instruction(const rocprofiler_compute_to
     m_instruction = instruction;
 }
 
-void mock_code_object_translator_t::set_instruction(
-    size_t                                             object_id,
-    uint64_t                                           virtual_address,
-    const rocprofiler_compute_tool::instruction_t& instruction)
+void mock_code_object_translator_t::set_instruction(size_t   object_id,
+                                                    uint64_t virtual_address,
+                                                    const rocprofiler_compute_tool::instruction_t& instruction)
 {
     m_instructions[{object_id, virtual_address}] = instruction;
 }
@@ -78,8 +77,7 @@ const std::vector<mock_code_object_translator_t::file_code_object_info_t>&
     return m_file_code_obj_info;
 }
 
-const std::vector<std::pair<size_t, uint64_t>>&
-    mock_code_object_translator_t::get_instruction_requests() const
+const std::vector<std::pair<size_t, uint64_t>>& mock_code_object_translator_t::get_instruction_requests() const
 {
     return m_instruction_requests;
 }
@@ -213,9 +211,8 @@ std::filesystem::path mock_filesystem_wrapper_t::parent_path(const std::filesyst
     return path.parent_path();
 }
 
-std::filesystem::path mock_filesystem_wrapper_t::weakly_canonical(
-    const std::filesystem::path& path,
-    std::error_code&             error)
+std::filesystem::path mock_filesystem_wrapper_t::weakly_canonical(const std::filesystem::path& path,
+                                                                  std::error_code& error)
 {
     m_weakly_canonical_calls.push_back(path);
     if (const auto item = m_weakly_canonical_responses.find(path);
@@ -263,7 +260,7 @@ void mock_filesystem_wrapper_t::set_weakly_canonical(const std::filesystem::path
 }
 
 void mock_filesystem_wrapper_t::set_weakly_canonical_error(const std::filesystem::path& path,
-                                                           std::error_code             error)
+                                                           std::error_code              error)
 {
     m_weakly_canonical_responses[path] = {std::filesystem::path{}, error};
 }

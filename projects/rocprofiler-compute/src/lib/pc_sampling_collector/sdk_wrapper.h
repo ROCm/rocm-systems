@@ -13,7 +13,7 @@ public:
     using ptr = std::shared_ptr<sdk_wrapper_t>;
     static ptr create();
 
-    virtual ~sdk_wrapper_t() = default;
+    virtual ~sdk_wrapper_t()                          = default;
     virtual std::string_view source_frame_separator() = 0;
 };
 

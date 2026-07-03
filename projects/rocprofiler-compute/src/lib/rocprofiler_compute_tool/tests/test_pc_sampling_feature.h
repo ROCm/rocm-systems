@@ -16,9 +16,9 @@ protected:
 
     rocprofiler_compute_tool::pc_sampling_feature_t create_feature();
 
-    std::shared_ptr<MockPcSamplingCollector>  m_collector;
-    std::shared_ptr<MockSourceSnapshotter>    m_snapshotter;
-    std::shared_ptr<MockCodeObjectWriter>     m_writer;
-    std::filesystem::path                     m_code_object_info_path;
-    std::filesystem::path                     m_source_snapshot_path;
+    std::shared_ptr<MockPcSamplingCollector> m_collector;
+    std::shared_ptr<MockSourceSnapshotter>   m_snapshotter;
+    std::shared_ptr<MockCodeObjectWriter>    m_writer;
+    std::filesystem::path                    m_code_object_info_path;
+    std::filesystem::path                    m_source_snapshot_path;
 };

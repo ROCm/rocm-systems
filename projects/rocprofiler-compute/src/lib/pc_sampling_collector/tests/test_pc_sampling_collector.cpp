@@ -114,7 +114,7 @@ TEST(test_pc_sampling_collector_source_paths_t, ProvidedEmptyComment_ReturnsNoPa
 
 TEST(test_pc_sampling_collector_source_paths_t, ProvidedSingleFileLine_ReturnsFilePath)
 {
-    const auto                            paths    = collect_source_paths_from_comment("kernel.cpp:42");
+    const auto paths = collect_source_paths_from_comment("kernel.cpp:42");
     const std::set<std::filesystem::path> expected = {"kernel.cpp"};
     EXPECT_EQ(paths, expected);
 }
@@ -128,14 +128,14 @@ TEST(test_pc_sampling_collector_source_paths_t, ProvidedMultipleFrames_ReturnsAl
 
 TEST(test_pc_sampling_collector_source_paths_t, ProvidedUnknownLineToken_ReturnsFilePath)
 {
-    const auto                            paths    = collect_source_paths_from_comment("kernel.cpp:?");
+    const auto                            paths = collect_source_paths_from_comment("kernel.cpp:?");
     const std::set<std::filesystem::path> expected = {"kernel.cpp"};
     EXPECT_EQ(paths, expected);
 }
 
 TEST(test_pc_sampling_collector_source_paths_t, ProvidedNoColonFrame_ReturnsWholeFrame)
 {
-    const auto                            paths    = collect_source_paths_from_comment("kernel.cpp");
+    const auto                            paths = collect_source_paths_from_comment("kernel.cpp");
     const std::set<std::filesystem::path> expected = {"kernel.cpp"};
     EXPECT_EQ(paths, expected);
 }
@@ -156,14 +156,14 @@ TEST(test_pc_sampling_collector_source_paths_t, ProvidedPathWithDirectories_Retu
 
 TEST(test_pc_sampling_collector_source_paths_t, ProvidedTrailingSeparator_IgnoresEmptyFrame)
 {
-    const auto                            paths    = collect_source_paths_from_comment("kernel.cpp:42 -> ");
+    const auto paths = collect_source_paths_from_comment("kernel.cpp:42 -> ");
     const std::set<std::filesystem::path> expected = {"kernel.cpp"};
     EXPECT_EQ(paths, expected);
 }
 
 TEST(test_pc_sampling_collector_source_paths_t, ProvidedNonNumericColonSuffix_ReturnsWholeFrame)
 {
-    const auto                            paths    = collect_source_paths_from_comment("kernel.cpp:label");
+    const auto paths = collect_source_paths_from_comment("kernel.cpp:label");
     const std::set<std::filesystem::path> expected = {"kernel.cpp:label"};
     EXPECT_EQ(paths, expected);
 }
@@ -175,19 +175,16 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolsAndInstructions_CollectsDedu
     m_translator->add_symbols(m_file_info.code_object_id,
                               {{"name0", 0x10, 0x1000, 2}, {"name1", 0x20, 0x2000, 1}});
     m_translator->add_symbols(m_mem_info.code_object_id, {{"name2", 0x30, 0x3000, 1}});
-    m_translator->set_instruction(
-        m_file_info.code_object_id,
-        0x1000,
-        {"inst0", "kernel.cpp:42 -> header.h:8", 0x1000, 0x10, 1});
+    m_translator->set_instruction(m_file_info.code_object_id,
+                                  0x1000,
+                                  {"inst0", "kernel.cpp:42 -> header.h:8", 0x1000, 0x10, 1});
     m_translator->set_instruction(m_file_info.code_object_id, 0x1001, {"inst1", "", 0x1001, 0x11, 1});
-    m_translator->set_instruction(
-        m_file_info.code_object_id,
-        0x2000,
-        {"inst2", "kernel.cpp:42", 0x2000, 0x20, 1});
-    m_translator->set_instruction(
-        m_mem_info.code_object_id,
-        0x3000,
-        {"inst3", "other.cpp:?", 0x3000, 0x30, 1});
+    m_translator->set_instruction(m_file_info.code_object_id,
+                                  0x2000,
+                                  {"inst2", "kernel.cpp:42", 0x2000, 0x20, 1});
+    m_translator->set_instruction(m_mem_info.code_object_id,
+                                  0x3000,
+                                  {"inst3", "other.cpp:?", 0x3000, 0x30, 1});
 
     m_pc_sampling_collector->finalize(*m_writer);
 

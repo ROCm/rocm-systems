@@ -19,8 +19,7 @@ std::filesystem::path source_snapshotter_impl_t::get_destination_path(
     std::error_code error;
     const auto canonical_source_path = m_filesystem->weakly_canonical(absolute_source_path, error);
     if (error)
-        throw std::runtime_error("Failed to get canonical source path: " +
-                                 absolute_source_path.string());
+        throw std::runtime_error("Failed to get canonical source path: " + absolute_source_path.string());
 
     return destination_root / m_filesystem->relative_path(canonical_source_path);
 }
@@ -98,7 +97,7 @@ bool source_snapshotter_impl_t::create_destination_parent_directory(const std::f
     if (!m_filesystem->has_parent_path(destination_path))
         return true;
 
-    const auto parent_path = m_filesystem->parent_path(destination_path);
+    const auto      parent_path = m_filesystem->parent_path(destination_path);
     std::error_code error;
     m_filesystem->create_directories(parent_path, error);
     if (error)

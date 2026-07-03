@@ -43,9 +43,8 @@ std::string_view pc_sampling_collector_impl_t::path_from_source_frame(std::strin
     return frame.substr(0, separator_position);
 }
 
-void pc_sampling_collector_impl_t::collect_source_paths_from_comment(
-    std::string_view                 comment,
-    std::set<std::filesystem::path>& source_paths)
+void pc_sampling_collector_impl_t::collect_source_paths_from_comment(std::string_view comment,
+                                                                     std::set<std::filesystem::path>& source_paths)
 {
     size_t     frame_start = 0;
     const auto separator   = source_frame_separator();

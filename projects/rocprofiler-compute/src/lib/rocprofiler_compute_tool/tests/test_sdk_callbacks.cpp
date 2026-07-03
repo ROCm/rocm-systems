@@ -167,8 +167,8 @@ TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFrom
 
 TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToCollector)
 {
-    auto collector   = std::make_shared<MockPcSamplingCollector>();
-    auto snapshotter = std::make_shared<MockSourceSnapshotter>();
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    auto snapshotter         = std::make_shared<MockSourceSnapshotter>();
     m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
                                                      "unused.json",
                                                      "unused_sources",

@@ -26,11 +26,11 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode        mode,
 {
 }
 
-pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode                mode,
-                                             std::filesystem::path         code_object_info_path,
-                                             std::filesystem::path         source_snapshot_path,
-                                             pc_sampling_collector_t::ptr  collector,
-                                             source_snapshotter_t::ptr     snapshotter)
+pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
+                                             std::filesystem::path        code_object_info_path,
+                                             std::filesystem::path        source_snapshot_path,
+                                             pc_sampling_collector_t::ptr collector,
+                                             source_snapshotter_t::ptr    snapshotter)
     : pc_sampling_feature_t(mode,
                             std::move(code_object_info_path),
                             std::move(source_snapshot_path),
@@ -40,12 +40,12 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode                mode,
 {
 }
 
-pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode                mode,
-                                             std::filesystem::path         code_object_info_path,
-                                             std::filesystem::path         source_snapshot_path,
-                                             pc_sampling_collector_t::ptr  collector,
-                                             source_snapshotter_t::ptr     snapshotter,
-                                             code_object_writer_t::ptr     writer)
+pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
+                                             std::filesystem::path        code_object_info_path,
+                                             std::filesystem::path        source_snapshot_path,
+                                             pc_sampling_collector_t::ptr collector,
+                                             source_snapshotter_t::ptr    snapshotter,
+                                             code_object_writer_t::ptr    writer)
     : m_enabled(true)
     , m_mode(mode)
     , m_code_object_info_path(std::move(code_object_info_path))

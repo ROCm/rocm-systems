@@ -19,17 +19,17 @@ public:
     pc_sampling_feature_t(PcSamplingMode        mode,
                           std::filesystem::path code_object_info_path,
                           std::filesystem::path source_snapshot_path);
-    pc_sampling_feature_t(PcSamplingMode                mode,
-                          std::filesystem::path         code_object_info_path,
-                          std::filesystem::path         source_snapshot_path,
-                          pc_sampling_collector_t::ptr  collector,
-                          source_snapshotter_t::ptr     snapshotter);
-    pc_sampling_feature_t(PcSamplingMode                mode,
-                          std::filesystem::path         code_object_info_path,
-                          std::filesystem::path         source_snapshot_path,
-                          pc_sampling_collector_t::ptr  collector,
-                          source_snapshotter_t::ptr     snapshotter,
-                          code_object_writer_t::ptr     writer);
+    pc_sampling_feature_t(PcSamplingMode               mode,
+                          std::filesystem::path        code_object_info_path,
+                          std::filesystem::path        source_snapshot_path,
+                          pc_sampling_collector_t::ptr collector,
+                          source_snapshotter_t::ptr    snapshotter);
+    pc_sampling_feature_t(PcSamplingMode               mode,
+                          std::filesystem::path        code_object_info_path,
+                          std::filesystem::path        source_snapshot_path,
+                          pc_sampling_collector_t::ptr collector,
+                          source_snapshotter_t::ptr    snapshotter,
+                          code_object_writer_t::ptr    writer);
 
     bool enabled() const { return m_enabled; }
 
@@ -43,12 +43,12 @@ public:
     void finalize();
 
 private:
-    bool                          m_enabled = false;
-    PcSamplingMode                m_mode    = PcSamplingMode::Disabled;
-    std::filesystem::path         m_code_object_info_path;
-    std::filesystem::path         m_source_snapshot_path;
-    pc_sampling_collector_t::ptr  m_collector;
-    source_snapshotter_t::ptr     m_snapshotter;
-    code_object_writer_t::ptr     m_writer;
+    bool                         m_enabled = false;
+    PcSamplingMode               m_mode    = PcSamplingMode::Disabled;
+    std::filesystem::path        m_code_object_info_path;
+    std::filesystem::path        m_source_snapshot_path;
+    pc_sampling_collector_t::ptr m_collector;
+    source_snapshotter_t::ptr    m_snapshotter;
+    code_object_writer_t::ptr    m_writer;
 };
 }  // namespace rocprofiler_compute_tool

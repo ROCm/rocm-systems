@@ -47,12 +47,12 @@ public:
 
     void add_symbols(size_t object_id, const std::vector<rocprofiler_compute_tool::symbol_t>& symbols);
     void add_instruction(const rocprofiler_compute_tool::instruction_t& instruction);
-    void set_instruction(size_t                                             object_id,
-                         uint64_t                                           virtual_address,
+    void set_instruction(size_t                                         object_id,
+                         uint64_t                                       virtual_address,
                          const rocprofiler_compute_tool::instruction_t& instruction);
 
-    const std::vector<mem_code_object_info_t>&  get_mem_code_object_info() const;
-    const std::vector<file_code_object_info_t>& get_file_code_object_info() const;
+    const std::vector<mem_code_object_info_t>&      get_mem_code_object_info() const;
+    const std::vector<file_code_object_info_t>&     get_file_code_object_info() const;
     const std::vector<std::pair<size_t, uint64_t>>& get_instruction_requests() const;
 
 private:
@@ -61,7 +61,7 @@ private:
     std::vector<size_t>                  m_code_object_ids;
     std::unordered_map<size_t, std::vector<rocprofiler_compute_tool::symbol_t>> m_symbols_per_obj;
     std::map<std::pair<size_t, uint64_t>, rocprofiler_compute_tool::instruction_t> m_instructions;
-    rocprofiler_compute_tool::instruction_t m_instruction = {"", "", 0, 0, 1};
+    rocprofiler_compute_tool::instruction_t          m_instruction = {"", "", 0, 0, 1};
     mutable std::vector<std::pair<size_t, uint64_t>> m_instruction_requests;
 };
 
@@ -138,8 +138,7 @@ public:
     void set_absolute_error(const std::filesystem::path& path, std::error_code error);
     void set_status(const std::filesystem::path& path, std::filesystem::file_status status);
     void set_status_error(const std::filesystem::path& path, std::error_code error);
-    void set_weakly_canonical(const std::filesystem::path& path,
-                              const std::filesystem::path& result);
+    void set_weakly_canonical(const std::filesystem::path& path, const std::filesystem::path& result);
     void set_weakly_canonical_error(const std::filesystem::path& path, std::error_code error);
     void set_create_directories_error(std::error_code error);
     void set_copy_file_error(std::error_code error);
