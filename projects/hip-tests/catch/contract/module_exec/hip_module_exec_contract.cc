@@ -1,0 +1,236 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip/hip_runtime_api.h>
+#include <hip/hiprtc.h>
+#include <hip_test_common.hh>
+
+#include <string>
+#include <vector>
+
+namespace {
+constexpr int kExpectedValue = 0x1234;
+
+// In-source device code compiled at runtime with HIPRTC. It exposes a tiny
+// kernel that publishes a value through a device pointer so the module
+// function-count, occupancy-query, and cooperative-launch contracts have a
+// portable symbol to resolve without any external per-arch code-object fixture.
+constexpr char const kModuleSource[] =
+    "extern \"C\" __global__ void write_value(int* out, int value) {\n"
+    "  if (threadIdx.x == 0 && blockIdx.x == 0) {\n"
+    "    out[0] = value;\n"
+    "  }\n"
+    "}\n";
+
+// Compiles kModuleSource with HIPRTC for the current device and returns the
+// resulting code object. This always returns true on success; a compile failure
+// is treated as a contract violation rather than an unsupported-capability skip,
+// so the HIPRTC log is emitted through INFO and the failure aborts through
+// HIPRTC_CHECK. The bool return is retained only so LoadContractModule keeps its
+// familiar `if (!Compile...())` shape; the false branch is unreachable because
+// any real failure aborts first.
+bool CompileModuleSource(std::vector<char>& code) {
+  hiprtcProgram program{};
+  HIPRTC_CHECK(hiprtcCreateProgram(&program, kModuleSource, "module_exec_contract.cu", 0, nullptr,
+                                   nullptr));
+
+#ifdef __HIP_PLATFORM_AMD__
+  hipDeviceProp_t properties{};
+  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
+  const char* options[] = {offload_arch.c_str()};
+  const int num_options = 1;
+#else
+  const std::string fmad = "--fmad=false";
+  const char* options[] = {fmad.c_str()};
+  const int num_options = 1;
+#endif
+
+  const hiprtcResult compile_result = hiprtcCompileProgram(program, num_options, options);
+  if (compile_result != HIPRTC_SUCCESS) {
+    // A compilation failure is a contract violation, not an unsupported path:
+    // surface the HIPRTC build log so compiler/source/option regressions are
+    // diagnosable, release the program, then fail through HIPRTC_CHECK.
+    size_t log_size = 0;
+    HIPRTC_CHECK(hiprtcGetProgramLogSize(program, &log_size));
+    std::string log(log_size, '\0');
+    if (log_size > 0) {
+      HIPRTC_CHECK(hiprtcGetProgramLog(program, log.data()));
+    }
+    INFO("HIPRTC compile log:\n" << log);
+    HIPRTC_CHECK(hiprtcDestroyProgram(&program));
+    HIPRTC_CHECK(compile_result);
+    return false;
+  }
+
+  size_t code_size = 0;
+  HIPRTC_CHECK(hiprtcGetCodeSize(program, &code_size));
+  code.assign(code_size, 0);
+  HIPRTC_CHECK(hiprtcGetCode(program, code.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&program));
+  return true;
+}
+
+// Compiles the module source or skips the test when HIPRTC is unavailable. On a
+// successful return the module is loaded and ready for the per-test contract.
+void LoadContractModule(hipModule_t& module) {
+  std::vector<char> code;
+  if (!CompileModuleSource(code)) {
+    HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
+  }
+  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  REQUIRE(module != nullptr);
+}
+
+// Resolves the write_value symbol from a loaded module into a non-null function
+// handle so the occupancy and cooperative-launch contracts share one lookup.
+void ResolveWriteValue(hipModule_t module, hipFunction_t& function) {
+  HIP_CHECK(hipModuleGetFunction(&function, module, "write_value"));
+  REQUIRE(function != nullptr);
+}
+
+// Reports whether the current device advertises cooperative launch support so
+// the cooperative-launch contracts can skip cleanly on paths that lack it.
+bool CooperativeLaunchSupported() {
+  int current_device = 0;
+  HIP_CHECK(hipGetDevice(&current_device));
+  int cooperative_launch = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&cooperative_launch, hipDeviceAttributeCooperativeLaunch,
+                                  current_device));
+  return cooperative_launch != 0;
+}
+}  // namespace
+
+HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_ReturnsPositiveCount) {
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+
+  // A module that defines at least one kernel must report a positive function
+  // count. The exact count is backend-specific (backends may expose helper
+  // symbols), so only the lower bound is part of the contract.
+  unsigned int count = 0;
+  HIP_CHECK(hipModuleGetFunctionCount(&count, module));
+  REQUIRE(count >= 1);
+
+  HIP_CHECK(hipModuleUnload(module));
+}
+
+HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_NullCount_IsRejected) {
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+
+  // Querying the function count into a null out pointer must not silently
+  // succeed. The exact error code is backend-specific, so only a non-success
+  // status is required.
+  const hipError_t status = hipModuleGetFunctionCount(nullptr, module);
+  REQUIRE(status != hipSuccess);
+
+  HIP_CHECK(hipModuleUnload(module));
+}
+
+HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxPotentialBlockSize_ReturnsUsableValues) {
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+
+  hipFunction_t function = nullptr;
+  ResolveWriteValue(module, function);
+
+  // The potential-block-size query for a launchable module function must return
+  // a positive block size and a non-negative minimum grid size. The exact
+  // values are device-specific and are not pinned.
+  int min_grid_size = 0;
+  int block_size = 0;
+  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, function, 0, 0));
+  REQUIRE(block_size > 0);
+  REQUIRE(min_grid_size >= 0);
+
+  HIP_CHECK(hipModuleUnload(module));
+}
+
+HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxActiveBlocks_ReturnsNonNegativeValue) {
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+
+  hipFunction_t function = nullptr;
+  ResolveWriteValue(module, function);
+
+  // The active-blocks-per-multiprocessor query for a module function must return
+  // a non-negative occupancy for a concrete block size.
+  int num_blocks = -1;
+  HIP_CHECK(
+      hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks, function, 64, 0));
+  REQUIRE(num_blocks >= 0);
+
+  HIP_CHECK(hipModuleUnload(module));
+}
+
+HIP_TEST_CASE(Contract_ModuleExec_OccupancyWithFlags_MatchesDefault) {
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+
+  hipFunction_t function = nullptr;
+  ResolveWriteValue(module, function);
+
+  // The default-flags occupancy query must agree with the non-flags query for
+  // the same function and block size. The runtime documents that only the
+  // default occupancy flag is supported, so the two entry points must be
+  // consistent.
+  int num_blocks_default = -1;
+  HIP_CHECK(
+      hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks_default, function, 64, 0));
+  REQUIRE(num_blocks_default >= 0);
+
+  int num_blocks_with_flags = -1;
+  HIP_CHECK(hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+      &num_blocks_with_flags, function, 64, 0, hipOccupancyDefault));
+  REQUIRE(num_blocks_with_flags >= 0);
+  REQUIRE(num_blocks_with_flags == num_blocks_default);
+
+  HIP_CHECK(hipModuleUnload(module));
+}
+
+HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue) {
+  if (!CooperativeLaunchSupported()) {
+    HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
+  }
+
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+
+  hipFunction_t function = nullptr;
+  ResolveWriteValue(module, function);
+
+  int* device_value = nullptr;
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+
+  // A cooperative launch of the resolved function with a single-thread grid must
+  // execute and publish the expected value deterministically.
+  int value = kExpectedValue;
+  void* kernel_args[] = {&device_value, &value};
+  HIP_CHECK(hipModuleLaunchCooperativeKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int result = 0;
+  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
+  REQUIRE(result == kExpectedValue);
+
+  HIP_CHECK(hipFree(device_value));
+  HIP_CHECK(hipModuleUnload(module));
+}
+
+HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_NullFunction_IsRejected) {
+  if (!CooperativeLaunchSupported()) {
+    HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
+  }
+
+  // Launching a cooperative kernel with a null function handle must not silently
+  // succeed. The exact error code is backend-specific, so only a non-success
+  // status is required.
+  const hipError_t status =
+      hipModuleLaunchCooperativeKernel(nullptr, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr);
+  REQUIRE(status != hipSuccess);
+}

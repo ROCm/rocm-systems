@@ -600,6 +600,27 @@ contract:
   Contract_ModuleLoadEx_LaunchWritesExpectedValue:
     <<: *level_0
     tags: [module_load_ex]
+  Contract_ModuleExec_GetFunctionCount_ReturnsPositiveCount:
+    <<: *level_0
+    tags: [module_exec]
+  Contract_ModuleExec_GetFunctionCount_NullCount_IsRejected:
+    <<: *level_0
+    tags: [module_exec]
+  Contract_ModuleExec_OccupancyMaxPotentialBlockSize_ReturnsUsableValues:
+    <<: *level_0
+    tags: [module_exec]
+  Contract_ModuleExec_OccupancyMaxActiveBlocks_ReturnsNonNegativeValue:
+    <<: *level_0
+    tags: [module_exec]
+  Contract_ModuleExec_OccupancyWithFlags_MatchesDefault:
+    <<: *level_0
+    tags: [module_exec]
+  Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue:
+    <<: *level_0
+    tags: [module_exec]
+  Contract_ModuleExec_LaunchCooperativeKernel_NullFunction_IsRejected:
+    <<: *level_0
+    tags: [module_exec]
   Contract_Library_LoadData_FromRtc_Succeeds:
     <<: *level_0
     tags: [library]
