@@ -37,10 +37,11 @@ struct KernelDescriptorTranslationOptions {
   /// virtual LDS backing buffer for the kernel body.
   ///
   /// @details This is an explicit per-descriptor mode because the runtime must
-  /// only select the virtualized copy when the dispatch's static plus dynamic
-  /// LDS demand cannot fit on the host GPU. The descriptor translator records
-  /// the static byte demand in KdTranslation; runtime dispatch adds the packet's
-  /// dynamic group-segment size when allocating the backing buffer.
+  /// only select the virtualized copy when the dispatch's total LDS demand
+  /// cannot fit on the host GPU. The descriptor translator records the source
+  /// static byte demand in KdTranslation; runtime dispatch compares it with the
+  /// AQL packet's total group-segment size and uses hardware LDS whenever that
+  /// request still fits.
   bool virtualize_lds = false;
   /// @brief Permit a normal descriptor to retain an LDS size above the host
   /// hardware limit.
@@ -48,8 +49,8 @@ struct KernelDescriptorTranslationOptions {
   /// @details This is only valid when the caller is also emitting a virtual-LDS
   /// sidecar descriptor for the same kernel. The normal descriptor is kept so
   /// launches that fit on the host can still use hardware LDS; runtime dispatch
-  /// rewriting must select the virtual descriptor whenever static plus dynamic
-  /// LDS exceeds the host limit.
+  /// rewriting must select the virtual descriptor only when the packet's total
+  /// LDS demand exceeds the host limit.
   bool allow_oversized_lds = false;
 };
 

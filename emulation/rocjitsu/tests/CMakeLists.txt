@@ -495,6 +495,7 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
         ${CMAKE_SOURCE_DIR}/lib/util/include
+        ${CMAKE_BINARY_DIR}/include
         ${GENERATED_DIR}
 )
 target_include_directories(
@@ -888,6 +889,8 @@ if(HSA_RUNTIME64)
             TritonBufferAsyncMatmulTranslates
             TritonFlashAttentionNoAsyncTranslates
             TritonFlashAttentionBufferAsyncTranslates
+            HipKittensBf16Matmul16x32TranslatesWithVirtualLdsMetadata
+            HipKittensBf16Matmul32x16TranslatesWithVirtualLdsMetadata
         )
         foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS)
             rj_add_test(
@@ -1157,6 +1160,12 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test(hip_ds_transpose_acc_test)
     rj_add_hip_test(hip_lds_copy_test)
     add_dependencies(hip_lds_copy_test_target rocjitsu_hooks)
+    rj_add_hip_test(hip_hipkittens_bf16_matmul_test)
+    add_dependencies(
+        hip_hipkittens_bf16_matmul_test_target
+        device_kernels
+        rocjitsu_hooks
+    )
     if(DEFINED HAS_CDNA3_GPU AND HAS_CDNA3_GPU)
         foreach(
             TC
@@ -1187,6 +1196,22 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
                 CONFIG ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx942.json
                 NAME "HipLdsCopyDbtTest.${TC}"
                 TIMEOUT 120
+            )
+        endforeach()
+        foreach(
+            TC
+            IN
+            ITEMS
+                With16x32DispatchesAndMatchesReference
+                With32x16DispatchesAndMatchesReference
+        )
+            rj_add_hip_test_case(
+                hip_hipkittens_bf16_matmul_test
+                "HipKittensBf16MatmulDbtTest.${TC}"
+                CONFIG ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx942.json
+                NAME "HipKittensBf16MatmulDbtTest.${TC}"
+                TIMEOUT 240
+                ENVIRONMENT "ROCJITSU_HIPKITTENS_KERNEL_DIR=${KERNEL_OUTPUT_DIR}"
             )
         endforeach()
     endif()

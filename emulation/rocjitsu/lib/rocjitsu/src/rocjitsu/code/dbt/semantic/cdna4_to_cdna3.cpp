@@ -48,6 +48,25 @@ build_cdna3_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, ui
   return {words[0], words[1]};
 }
 
+[[nodiscard]] std::pair<uint32_t, uint32_t>
+build_cdna3_vop3p(uint8_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t src2 = 0) {
+  cdna3::Vop3pMachineInst dst{};
+  dst.encoding = 0x1A7;
+  dst.op = op;
+  dst.vdst = vdst;
+  dst.src0 = src0 & 0x1FF;
+  dst.src1 = src1 & 0x1FF;
+  dst.src2 = src2 & 0x1FF;
+  // LLVM emits these selector bits for v_accvgpr_read/write. Preserve that
+  // assembler shape instead of relying on the all-zero generated test vector.
+  dst.op_sel_hi_2 = 1;
+  dst.op_sel_hi = 3;
+
+  uint32_t words[2]{};
+  std::memcpy(words, &dst, sizeof(dst));
+  return {words[0], words[1]};
+}
+
 /// @brief Build a CDNA3 VOP3P-MFMA instruction word pair.
 /// @details The wide-K lowering materializes A/B operands in ordinary VGPRs, so
 /// the emitted narrow MFMA clears the source ACC selector while preserving the
@@ -65,7 +84,7 @@ build_cdna3_vop3p_mfma(uint8_t op, const cdna4::Vop3pMfmaMachineInst &src, uint8
   dst.src0 = src0 & 0x1FF;
   dst.src1 = src1 & 0x1FF;
   dst.src2 = src2 & 0x1FF;
-  dst.acc = 0;
+  dst.acc = src.acc;
   dst.blgp = src.blgp;
 
   uint32_t words[2]{};
@@ -117,6 +136,9 @@ constexpr uint16_t kCdna3OpMbcntLoU32B32 = 652;
 constexpr uint16_t kCdna3OpMbcntHiU32B32 = 653;
 constexpr uint16_t kCdna3OpCvtF16F32 = 330;
 
+// CDNA3 VOP3P opcodes used to bridge ordinary VGPR temporaries and AccVGPRs.
+constexpr uint8_t kCdna3OpAccvgprWriteB32 = 89;
+
 // CDNA3 VOP3P-MFMA opcodes used by CDNA4 wide-K MFMA expansion.
 constexpr uint8_t kCdna3OpMfmaF32_32x32x8F16 = 76;
 constexpr uint8_t kCdna3OpMfmaF32_16x16x16F16 = 77;
@@ -130,11 +152,11 @@ constexpr uint8_t kCdna3DsOpWriteB32 = 13;
 constexpr uint8_t kCdna3DsOpWriteB96 = 222;
 constexpr uint8_t kCdna3DsOpWriteB128 = 223;
 
-constexpr uint8_t kCdna3Sop2OpAndB64 = 13;
 constexpr uint8_t kCdna3SoppOpWaitcnt = 12;
 constexpr uint16_t kCdnaWaitcntLgkmcnt0 = 0xC07F;
 constexpr uint16_t kCdnaWaitcntAll0 = 0x0000;
 constexpr uint32_t kCdna3MaxOrdinarySgprs = 102;
+constexpr uint32_t kCdna3SpecialSgprTailReserve = 8;
 constexpr uint8_t kCdna3FlatOpLoadDword = 20;
 constexpr uint8_t kCdna3FlatOpStoreDword = 28;
 constexpr uint32_t kScratchPositiveImm13Max = 4095;
@@ -195,6 +217,12 @@ void emit_cdna3_wait_all(std::vector<uint32_t> &words) {
 }
 
 [[nodiscard]] constexpr uint16_t vgpr_src(uint8_t reg) { return static_cast<uint16_t>(256 + reg); }
+
+void emit_cdna3_accvgpr_write_b32(std::vector<uint32_t> &words, uint8_t acc_dst, uint8_t src_vgpr) {
+  auto [w0, w1] = build_cdna3_vop3p(kCdna3OpAccvgprWriteB32, acc_dst, vgpr_src(src_vgpr));
+  words.push_back(w0);
+  words.push_back(w1);
+}
 
 void emit_cdna3_f32_to_bf16_rne(std::vector<uint32_t> &words, uint8_t dst_half, uint8_t bias_tmp,
                                 uint16_t src) {
@@ -390,21 +418,11 @@ void emit_s_mov_b64(std::vector<uint32_t> &words, uint8_t sdst, uint16_t ssrc0) 
   words.push_back(build_s_mov_b64(sdst, ssrc0));
 }
 
-void emit_s_and_b64(std::vector<uint32_t> &words, uint8_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
-  words.push_back(pack_sop2(kCdna3Sop2OpAndB64, sdst, ssrc0, ssrc1));
-}
-
 void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
   // TODO: Optimize the common all-lanes case by emitting one s_mov_b64 -1
   // instead of two literal s_mov_b32 instructions.
   emit_s_mov_b32_lit(words, kExecLo, static_cast<uint32_t>(mask));
   emit_s_mov_b32_lit(words, kExecLo + 1, static_cast<uint32_t>(mask >> 32));
-}
-
-void emit_cdna3_exec_mask_and_saved(std::vector<uint32_t> &words, uint64_t mask,
-                                    uint8_t saved_exec) {
-  emit_cdna3_exec_mask(words, mask);
-  emit_s_and_b64(words, kExecLo, kExecLo, saved_exec);
 }
 
 [[nodiscard]] std::optional<uint8_t>
@@ -440,6 +458,16 @@ choose_cdna3_exec_save_sgpr(const Instruction &inst, const LivenessAnalysis &liv
     search_start = static_cast<uint16_t>(*candidate + 2);
   }
   return std::nullopt;
+}
+
+void require_cdna3_exec_save_sgpr(TranslationContext &context, uint8_t saved_exec) {
+  // COMPUTE_PGM_RSRC1's SGPR count is the rounded wave allocation, not the
+  // highest ordinary scalar register available to DBT. VCC, flat scratch, XNACK,
+  // and granularity padding can live in the descriptor tail. When a semantic
+  // lowering introduces an ordinary SGPR pair for EXEC save/restore, grow the
+  // descriptor far enough that the architectural special-register tail moves
+  // above that generated pair.
+  context.require_sgprs(static_cast<uint32_t>(saved_exec) + 2u + kCdna3SpecialSgprTailReserve);
 }
 
 void emit_cdna3_mfma(std::vector<uint32_t> &words, uint8_t op,
@@ -835,8 +863,7 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
         {"Add SGPR spill-backed EXEC save/restore before lowering this instruction in "
          "descriptor-full kernels."});
 
-  if (static_cast<uint32_t>(*saved_exec) + 2 > context.num_sgprs)
-    context.require_sgprs(static_cast<uint32_t>(*saved_exec) + 2);
+  require_cdna3_exec_save_sgpr(context, *saved_exec);
   if (!scratch->spilled)
     context.require_vgprs(static_cast<uint32_t>(scratch->base) + scratch->count);
 
@@ -848,12 +875,15 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   //   SRC0 lanes 0..N-1 = old VDST lanes N..2N-1
   //   VDST lanes N..2N-1 = old SRC0 lanes 0..N-1
   //
-  // CDNA3 has no row-swap instruction.  Run the data-gather portion with EXEC
-  // forced to all lanes so mbcnt() produces physical lane IDs and ds_bpermute
-  // can read both source half-waves.  Only after both old values are captured do
-  // we narrow EXEC to the original EXEC mask intersected with the write lane
-  // groups. The CDNA4 per-instruction pseudocode is full-wave, but the general
-  // VALU rule still gates vector writes by EXEC.
+  // For the 16-lane form this operation applies to rows 0/1 and rows 2/3; for
+  // the 32-lane form it applies to the single 0/1 half-wave pair. CDNA3 has no
+  // row-swap instruction. Run the data-gather portion with EXEC forced to all
+  // lanes so mbcnt() produces physical lane IDs and ds_bpermute can read both
+  // source half-waves. Only after both old values are captured do we narrow EXEC
+  // to the exact write lane groups. Do not intersect those masks with the
+  // original EXEC: generated execution semantics mark V_PERMLANE*_SWAP_B32 as
+  // EXEC-ignoring, and later control flow may re-enable lanes that depend on
+  // these swapped values.
   emit_s_mov_b64(words, *saved_exec, kExecLo);
   emit_cdna3_exec_mask(words, UINT64_MAX);
   if (scratch->spilled) {
@@ -883,10 +913,10 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   for (uint8_t lane = 0; lane < 64; lane = static_cast<uint8_t>(lane + 2 * half_wave_lanes))
     low_mask |= group_mask << lane;
   const uint64_t high_mask = low_mask << half_wave_lanes;
-  emit_cdna3_exec_mask_and_saved(words, low_mask, *saved_exec);
+  emit_cdna3_exec_mask(words, low_mask);
   emit_cdna3_vop3(words, kCdna3OpMovB32, vsrc, vgpr_src(from_dst_high));
 
-  emit_cdna3_exec_mask_and_saved(words, high_mask, *saved_exec);
+  emit_cdna3_exec_mask(words, high_mask);
   emit_cdna3_vop3(words, kCdna3OpMovB32, vdst, vgpr_src(from_src_low));
 
   if (scratch->spilled) {
@@ -1274,17 +1304,23 @@ struct WideKMfmaLowering {
 
 [[nodiscard]] bool wide_mfma_needs_partial_accum_scratch(const cdna4::Vop3pMfmaMachineInst &mfma,
                                                          const WideKMfmaLowering &lowering) {
-  // acc_cd=1 writes the AccVGPR bank. Because this lowering currently rejects
-  // ACC-selected A/B sources, the original A/B operands are ordinary VGPRs and
-  // cannot be clobbered by an AccVGPR partial accumulator.
+  // acc_cd=1 writes the partial accumulator into the AccVGPR bank, so ordinary
+  // A/B VGPR windows cannot be clobbered. The two-bit `acc` source selector is
+  // independent: bit 0 moves source A into AccVGPRs, bit 1 moves source B into
+  // AccVGPRs. Only ordinary source windows can alias an ordinary partial
+  // accumulator destination.
   if (mfma.acc_cd != 0)
     return false;
 
   const uint16_t dst_base = static_cast<uint16_t>(mfma.vdst);
   const uint16_t src0_base = static_cast<uint16_t>(mfma.src0 - 256);
   const uint16_t src1_base = static_cast<uint16_t>(mfma.src1 - 256);
-  return ranges_overlap(dst_base, lowering.dst_regs, src0_base, lowering.wide_src_regs) ||
-         ranges_overlap(dst_base, lowering.dst_regs, src1_base, lowering.wide_src_regs);
+  const bool src0_is_acc = (mfma.acc & 0x1u) != 0;
+  const bool src1_is_acc = (mfma.acc & 0x2u) != 0;
+  return (!src0_is_acc &&
+          ranges_overlap(dst_base, lowering.dst_regs, src0_base, lowering.wide_src_regs)) ||
+         (!src1_is_acc &&
+          ranges_overlap(dst_base, lowering.dst_regs, src1_base, lowering.wide_src_regs));
 }
 
 ExpandResult lower_wide_k_mfma_cdna4_to_cdna3(const Instruction &inst,
@@ -1324,24 +1360,26 @@ ExpandResult lower_wide_k_mfma_cdna4_to_cdna3(const Instruction &inst,
   //
   // When D is an AccVGPR destination, `partial` is the final destination and the
   // second instruction reads it back through src2. CDNA3 resolves src2 encodings
-  // 256-511 to the AccVGPR bank when acc_cd=1. When D is an ordinary VGPR
-  // destination that overlaps either full A/B source window, the first MFMA must
-  // instead write a dead VGPR run; otherwise it could clobber source registers
-  // that the second MFMA has not read yet.
+  // 256-511 to the AccVGPR bank when acc_cd=1. Forward the A/B AccVGPR source
+  // selector (`acc`) to both narrow MFMAs: the split only changes each source
+  // window's base, not which register file supplies the window.
   //
-  // NYI: non-default cbsz/abid/blgp/acc modifiers need validation against the
+  // When D is an ordinary VGPR destination that overlaps either ordinary full
+  // A/B source window, the first MFMA must instead write a dead VGPR run;
+  // otherwise it could clobber source registers that the second MFMA has not
+  // read yet.
+  //
+  // NYI: non-default cbsz/abid/blgp modifiers need validation against the
   // two-instruction expansion before this can preserve them safely.
-  if (mfma.cbsz != 0 || mfma.abid != 0 || mfma.blgp != 0 || mfma.acc != 0)
+  if (mfma.cbsz != 0 || mfma.abid != 0 || mfma.blgp != 0)
     return failed_existing_expand_rule(
-        inst, "MFMA wide-K lowering only supports default cbsz/abid/blgp/acc modifiers",
+        inst, "MFMA wide-K lowering only supports default cbsz/abid/blgp modifiers",
         {"Validate and implement non-default MFMA modifiers before enabling this form."});
   // SRC0/SRC1 are OPR_SRC_VGPR_OR_ACCVGPR operands. The ISA defines the CDNA4
   // wide forms as 128-bit source windows and the CDNA3 narrow forms as 64-bit
   // source windows; the operand value is the base of that contiguous window, and
-  // 64-bit-or-wider VGPR/AccVGPR operands are even-aligned by the ISA. Since this
-  // rule rejects ACC-selected A/B sources above and assumes the original CDNA4
-  // instruction is well-formed, the split can use src and src + narrow_src_regs
-  // directly without a packing step.
+  // 64-bit-or-wider VGPR/AccVGPR operands are even-aligned by the ISA. The split
+  // can use src and src + narrow_src_regs directly without a packing step.
   // The original accumulator is only consumed by the first narrow MFMA; the
   // second consumes the partial accumulator produced by the first. Forward src2
   // unchanged and rely on the original CDNA4 instruction being well-formed.
@@ -1444,13 +1482,7 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
     return failed_existing_expand_rule(
         inst, "DS transpose lower reads from GDS, which is illegal on CDNA3",
         {"Ensure the source DS read uses ordinary LDS addressing before enabling this rule."});
-  if (src.acc != 0)
-    // DS ACC redirects VDST into the AccVGPR file. This lowering rebuilds the
-    // result with ordinary VALU writes, so AccVGPR destinations need a separate
-    // implementation before they can be translated safely.
-    return failed_existing_expand_rule(
-        inst, "DS transpose lowering does not support destination ACCVGPR results",
-        {"Define an AccVGPR destination path for transposed DS read lowering."});
+  const bool dst_is_acc = src.acc != 0;
   const uint32_t ds_offset = (static_cast<uint32_t>(src.offset1) << 8) | src.offset0;
   if (context.virtualize_lds) {
     if (context.virtual_lds_base_sgpr > 126 || (context.virtual_lds_base_sgpr % 2) != 0) {
@@ -1467,12 +1499,17 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
 
   constexpr uint16_t kScratchCount = 10;
   // The pack helper wants several even/odd register relationships to stay
-  // simple, so require an even-aligned window.  Do not spill through the output
-  // pair because restoring it would overwrite the architectural result, and do
-  // not use the LDS address operand as a destination in the opening DS read.
-  auto scratch = choose_vgpr_window_or_spill(
-      inst, liveness, context, kScratchCount, 2,
-      {{static_cast<uint16_t>(vdst), 2}, {static_cast<uint16_t>(addr), 1}});
+  // simple, so require an even-aligned window. Do not use the LDS address
+  // operand as a destination in the opening DS read. For ordinary-VGPR
+  // destinations, also keep the output pair out of the scratch window because
+  // a spill restore would otherwise overwrite the translated result. ACC
+  // destinations name the AccVGPR file, so the same numeric ordinary VGPRs can
+  // still be used when ordinary VGPR liveness permits it.
+  auto scratch = dst_is_acc ? choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
+                                                          {{static_cast<uint16_t>(addr), 1}})
+                            : choose_vgpr_window_or_spill(inst, liveness, context, kScratchCount, 2,
+                                                          {{static_cast<uint16_t>(vdst), 2},
+                                                           {static_cast<uint16_t>(addr), 1}});
   if (!scratch)
     return failed_existing_expand_rule(
         inst, "No even-aligned VGPR window found for transpose scratch",
@@ -1500,8 +1537,7 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
         inst, "No free descriptor-backed SGPR pair for EXEC save/restore",
         {"Add SGPR spill-backed EXEC save/restore before lowering this instruction in "
          "descriptor-full kernels."});
-  if (static_cast<uint32_t>(*saved_exec) + 2 > context.num_sgprs)
-    context.require_sgprs(static_cast<uint32_t>(*saved_exec) + 2);
+  require_cdna3_exec_save_sgpr(context, *saved_exec);
 
   std::vector<uint32_t> words;
 
@@ -1539,16 +1575,24 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   }
 
   if (context.virtualize_lds) {
-    uint8_t virtual_addr = addr;
+    // CDNA4 DS names a 32-bit LDS byte offset VGPR, but CDNA3 GLOBAL/FLAT
+    // encodes VADDR as an even-based 64-bit VGPR pair. The generic virtual-LDS
+    // DS lowering stages odd DS address registers before emitting GLOBAL. This
+    // handwritten transpose rule has to do the same because it bypasses that
+    // helper. Stage through `tmp:tmp+1`, which is even because the transpose
+    // scratch window is even-aligned, and which is not live until after the
+    // virtual load completes.
+    const uint8_t virtual_addr = tmp;
+    const uint8_t virtual_addr_high = static_cast<uint8_t>(tmp + 1);
     uint32_t virtual_offset = ds_offset;
-    if (ds_offset > kFlatGlobalPositiveImm13Max) {
-      // The transpose lowering already owns `tmp` until the lane-id calculation
-      // below. Reuse it as a one-instruction address temporary so large DS
-      // immediates do not require another spill or SGPR literal register.
-      emit_cdna3_vop2_literal(words, kCdna3Vop2OpAddU32, tmp, addr, ds_offset);
-      virtual_addr = tmp;
+    emit_cdna3_vop2_literal(words, kCdna3Vop2OpAddU32, virtual_addr, addr,
+                            ds_offset > kFlatGlobalPositiveImm13Max ? ds_offset : 0);
+    if (ds_offset > kFlatGlobalPositiveImm13Max)
       virtual_offset = 0;
-    }
+    // The virtual-LDS backing pointer lives in SADDR, so the VGPR address is a
+    // 32-bit byte offset. Clear the high half instead of letting an unrelated
+    // architectural VGPR participate in address calculation.
+    emit_cdna3_vop3(words, kCdna3OpMovB32, virtual_addr_high, kInlineConst0);
     emit_cdna3_flat_global_load(words, static_cast<uint8_t>(kCdna3FlatOpLoadDword + 1), raw_lo,
                                 virtual_addr, static_cast<uint8_t>(context.virtual_lds_base_sgpr),
                                 virtual_offset);
@@ -1595,8 +1639,18 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   emit_cdna3_b16_transpose_halfword(words, h3, gather_tmp, tmp, raw_lo, raw_hi, halfword_selector);
 
   emit_s_mov_b64(words, kExecLo, *saved_exec);
-  emit_cdna3_pack_low_b16_pair(words, vdst, h0, h1, tmp, gather_tmp);
-  emit_cdna3_pack_low_b16_pair(words, static_cast<uint8_t>(vdst + 1), h2, h3, tmp, gather_tmp);
+  if (dst_is_acc) {
+    // CDNA3 VALU instructions cannot write AccVGPR destinations directly. Pack
+    // into ordinary scratch after the raw LDS payload is no longer needed, then
+    // copy the completed 32-bit words into the architectural AccVGPR pair.
+    emit_cdna3_pack_low_b16_pair(words, raw_lo, h0, h1, tmp, gather_tmp);
+    emit_cdna3_pack_low_b16_pair(words, raw_hi, h2, h3, tmp, gather_tmp);
+    emit_cdna3_accvgpr_write_b32(words, vdst, raw_lo);
+    emit_cdna3_accvgpr_write_b32(words, static_cast<uint8_t>(vdst + 1), raw_hi);
+  } else {
+    emit_cdna3_pack_low_b16_pair(words, vdst, h0, h1, tmp, gather_tmp);
+    emit_cdna3_pack_low_b16_pair(words, static_cast<uint8_t>(vdst + 1), h2, h3, tmp, gather_tmp);
+  }
   if (scratch->spilled) {
     // The transpose gather uses all lanes to reconstruct the full source
     // footprint. Restore spill victims for all lanes after the architectural
@@ -1728,8 +1782,7 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
                                        "Unsupported MUBUF LDS load width in CDNA4->CDNA3 lowering",
                                        {"Unsupported MUBUF LDS load width."});
   }
-  if (static_cast<uint32_t>(*saved_exec) + 2 > context.num_sgprs)
-    context.require_sgprs(static_cast<uint32_t>(*saved_exec) + 2);
+  require_cdna3_exec_save_sgpr(context, *saved_exec);
   if (!scratch->spilled)
     context.require_vgprs(static_cast<uint32_t>(scratch->base) + scratch_count);
 
@@ -1908,6 +1961,14 @@ ExpandResult expand_buffer_load_dwordx3_lds_cdna4_to_cdna3(const Instruction &in
   return expand_mubuf_load_to_lds_cdna4_to_cdna3(inst, liveness, context, 3);
 }
 
+ExpandResult expand_buffer_load_dword_lds_cdna4_to_cdna3(const Instruction &inst, uint32_t,
+                                                         uint64_t, std::span<const uint8_t>,
+                                                         const LivenessAnalysis &liveness,
+                                                         TranslationContext &context,
+                                                         const LaneLayout *, const LaneLayout *) {
+  return expand_mubuf_load_to_lds_cdna4_to_cdna3(inst, liveness, context, 1);
+}
+
 ExpandResult expand_buffer_load_dwordx4_lds_cdna4_to_cdna3(const Instruction &inst, uint32_t,
                                                            uint64_t, std::span<const uint8_t>,
                                                            const LivenessAnalysis &liveness,
@@ -1932,6 +1993,7 @@ constexpr uint16_t kEncVop1Hi1 = 0xFD;
 constexpr uint16_t kEncVop1Hi2 = 0xFE;
 constexpr uint16_t kEncVop1Hi3 = 0xFF;
 constexpr uint16_t kEncDsReadB64TrB16 = 0x1B3;
+constexpr uint16_t kEncDsReadB64TrB16Acc = 0x1B7;
 constexpr uint16_t kEncMubuf = 0x1C0;
 
 constexpr uint16_t kCdna4Op_v_dot2_f32_bf16 = 26;
@@ -1947,6 +2009,7 @@ constexpr uint16_t kCdna4Op_v_cvt_f32_bf16 = 91;
 constexpr uint16_t kCdna4Op_v_cvt_pk_f16_f32 = 615;
 constexpr uint16_t kCdna4Op_v_cvt_pk_bf16_f32 = 616;
 constexpr uint16_t kCdna4Op_ds_read_b64_tr_b16 = 227;
+constexpr uint16_t kCdna4Op_buffer_load_dword = 20;
 constexpr uint16_t kCdna4Op_buffer_load_dwordx3 = 22;
 constexpr uint16_t kCdna4Op_buffer_load_dwordx4 = 23;
 
@@ -1996,6 +2059,10 @@ const TranslationRule kExpandRules_cdna4_to_cdna3[] = {
      expand_mfma_f32_32x32x16_f16_cdna4_to_cdna3, nullptr, nullptr},
     {kEncDsReadB64TrB16, kCdna4Op_ds_read_b64_tr_b16, RuleAction::Expand, 0, 0, nullptr,
      expand_ds_read_b64_tr_b16_cdna4_to_cdna3, nullptr, nullptr},
+    {kEncDsReadB64TrB16Acc, kCdna4Op_ds_read_b64_tr_b16, RuleAction::Expand, 0, 0, nullptr,
+     expand_ds_read_b64_tr_b16_cdna4_to_cdna3, nullptr, nullptr},
+    {kEncMubuf, kCdna4Op_buffer_load_dword, RuleAction::Expand, 0, 0, nullptr,
+     expand_buffer_load_dword_lds_cdna4_to_cdna3, nullptr, nullptr},
     {kEncMubuf, kCdna4Op_buffer_load_dwordx3, RuleAction::Expand, 0, 0, nullptr,
      expand_buffer_load_dwordx3_lds_cdna4_to_cdna3, nullptr, nullptr},
     {kEncMubuf, kCdna4Op_buffer_load_dwordx4, RuleAction::Expand, 0, 0, nullptr,

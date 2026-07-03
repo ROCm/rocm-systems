@@ -281,6 +281,13 @@ void apply_kernel_descriptor_resource_translation(KD &desc, const KdTranslation 
   desc.private_segment_fixed_size = translation.target_private_size;
   desc.group_segment_fixed_size = translation.target_lds_size;
   desc.kernarg_size = translation.target_kernarg_size;
+  // The AMDHSA descriptor must not carry a preprogrammed LDS_SIZE in RSRC2.
+  // CP derives COMPUTE_PGM_RSRC2.LDS_SIZE from the dispatch packet's group
+  // segment size, which already includes descriptor fixed LDS plus dispatch-time
+  // dynamic LDS. Leaving a guest value here is especially bad for virtual-LDS
+  // sidecars: their packet LDS is zero, but stale descriptor bits can still be
+  // ORed into hardware command streams on some runtime paths.
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 0);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
                   translation.target_user_sgpr_count);
   const uint32_t enable_private_segment = translation.target_private_size != 0 ? 1u : 0u;

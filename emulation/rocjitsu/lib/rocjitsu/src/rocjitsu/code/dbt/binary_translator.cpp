@@ -55,6 +55,7 @@ inline constexpr uint8_t kCdna3FlatOpLoadSbyte = 17;
 inline constexpr uint8_t kCdna3FlatOpLoadUshort = 18;
 inline constexpr uint8_t kCdna3FlatOpLoadDword = 20;
 inline constexpr uint8_t kCdna3FlatOpStoreByte = 24;
+inline constexpr uint8_t kCdna3FlatOpStoreByteD16Hi = 25;
 inline constexpr uint8_t kCdna3FlatOpStoreShort = 26;
 inline constexpr uint8_t kCdna3FlatOpStoreDword = 28;
 inline constexpr uint8_t kCdna3FlatOpLoadShortD16 = 36;
@@ -64,6 +65,8 @@ inline constexpr uint16_t kCdna3ScalarNull = 0x7F;
 inline constexpr uint8_t kCdna3Vop2OpAddU32 = 52;
 inline constexpr uint16_t kCdna3Vop3OpAddCoU32 = 281;
 inline constexpr uint16_t kCdna3Vop3OpAddcCoU32 = 284;
+inline constexpr uint8_t kCdna3Vop3pOpAccvgprReadB32 = 88;
+inline constexpr uint8_t kCdna3Vop3pOpAccvgprWriteB32 = 89;
 inline constexpr uint8_t kCdna3Vop1OpMovB32 = 1;
 inline constexpr uint8_t kCdna3Vop1OpReadfirstlaneB32 = 2;
 inline constexpr uint8_t kCdna3Sop2OpAddU32 = 0;
@@ -320,9 +323,12 @@ choose_virtual_lds_address_temp(TranslationContext &context,
 
 [[nodiscard]] std::optional<VirtualLdsTempRange>
 choose_virtual_lds_temp_range(TranslationContext &context,
-                              std::span<const VirtualLdsVgprRange> forbidden, uint16_t count) {
+                              std::span<const VirtualLdsVgprRange> forbidden, uint16_t count,
+                              uint16_t alignment = 1) {
   if (count == 0 || count > 4)
     return std::nullopt;
+  if (alignment == 0)
+    alignment = 1;
 
   // Wide FLAT/GLOBAL operations need their data/destination operands in a
   // contiguous VGPR run. Prefer growing the descriptor because those extra
@@ -330,6 +336,8 @@ choose_virtual_lds_temp_range(TranslationContext &context,
   const uint32_t first_extra_vgpr = context.num_vgprs;
   const uint32_t extra_limit = 256;
   for (uint32_t candidate = first_extra_vgpr; candidate + count <= extra_limit; ++candidate) {
+    if ((candidate % alignment) != 0)
+      continue;
     if (virtual_lds_vgpr_range_is_forbidden(static_cast<uint16_t>(candidate), count, forbidden))
       continue;
     context.require_vgprs(candidate + count);
@@ -348,6 +356,8 @@ choose_virtual_lds_temp_range(TranslationContext &context,
   if (initial_vgprs >= count) {
     for (uint32_t reg = initial_vgprs - count + 1; reg > 0; --reg) {
       const uint16_t candidate = static_cast<uint16_t>(reg - 1);
+      if ((candidate % alignment) != 0)
+        continue;
       if (virtual_lds_vgpr_range_is_forbidden(candidate, count, forbidden))
         continue;
       VirtualLdsTempRange range{};
@@ -520,6 +530,26 @@ void emit_cdna3_v_add_u32_literal(std::vector<uint32_t> &words, uint8_t vdst, ui
   return static_cast<uint16_t>(256u + vgpr);
 }
 
+[[nodiscard]] std::pair<uint32_t, uint32_t>
+build_cdna3_vop3p(uint8_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t src2 = 0) {
+  cdna3::Vop3pMachineInst dst{};
+  dst.encoding = 0x1A7;
+  dst.op = op;
+  dst.vdst = vdst;
+  dst.src0 = src0 & 0x1FF;
+  dst.src1 = src1 & 0x1FF;
+  dst.src2 = src2 & 0x1FF;
+  // Match LLVM's gfx942 encoding for v_accvgpr_read/write. These selector
+  // bits are not semantic operands for the copy, but hardware expects the
+  // assembler form rather than the all-zero generated opcode table entry.
+  dst.op_sel_hi_2 = 1;
+  dst.op_sel_hi = 3;
+
+  uint32_t words[2]{};
+  std::memcpy(words, &dst, sizeof(dst));
+  return {words[0], words[1]};
+}
+
 [[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_vop3_sdst(uint16_t op, uint8_t sdst,
                                                                   uint8_t vdst, uint16_t src0,
                                                                   uint16_t src1,
@@ -584,6 +614,18 @@ void emit_virtual_lds_full_vgpr_address(std::vector<uint32_t> &words,
   return build_cdna3_vop1(kCdna3Vop1OpMovB32, vdst, src0);
 }
 
+void emit_cdna3_accvgpr_read_b32(std::vector<uint32_t> &words, uint8_t dst_vgpr, uint8_t src_acc) {
+  auto [w0, w1] = build_cdna3_vop3p(kCdna3Vop3pOpAccvgprReadB32, dst_vgpr, vgpr_src(src_acc));
+  words.push_back(w0);
+  words.push_back(w1);
+}
+
+void emit_cdna3_accvgpr_write_b32(std::vector<uint32_t> &words, uint8_t dst_acc, uint8_t src_vgpr) {
+  auto [w0, w1] = build_cdna3_vop3p(kCdna3Vop3pOpAccvgprWriteB32, dst_acc, vgpr_src(src_vgpr));
+  words.push_back(w0);
+  words.push_back(w1);
+}
+
 [[nodiscard]] uint32_t build_cdna3_v_readfirstlane_b32(uint8_t sdst, uint8_t vsrc) {
   // VOP1 SRC0 uses the scalar-source operand namespace. Plain values 0..127
   // select SGPR/special scalar operands such as EXEC_LO/EXEC_HI; VGPR operands
@@ -601,12 +643,24 @@ void emit_virtual_lds_copy_to_temp_range(std::vector<uint32_t> &words,
   }
 }
 
+void emit_virtual_lds_copy_acc_to_temp_range(std::vector<uint32_t> &words,
+                                             const VirtualLdsTempRange &range, uint8_t src_base) {
+  for (uint8_t i = 0; i < range.count; ++i)
+    emit_cdna3_accvgpr_read_b32(words, range.temps[i].reg, static_cast<uint8_t>(src_base + i));
+}
+
 void emit_virtual_lds_copy_from_temp_range(std::vector<uint32_t> &words,
                                            const VirtualLdsTempRange &range, uint8_t dst_base) {
   for (uint8_t i = 0; i < range.count; ++i) {
     words.push_back(
         build_cdna3_v_mov_b32(static_cast<uint8_t>(dst_base + i), vgpr_src(range.temps[i].reg)));
   }
+}
+
+void emit_virtual_lds_copy_temp_to_acc_range(std::vector<uint32_t> &words,
+                                             const VirtualLdsTempRange &range, uint8_t dst_base) {
+  for (uint8_t i = 0; i < range.count; ++i)
+    emit_cdna3_accvgpr_write_b32(words, static_cast<uint8_t>(dst_base + i), range.temps[i].reg);
 }
 
 [[nodiscard]] uint32_t build_cdna3_s_cbranch_execz(uint16_t simm16) {
@@ -894,8 +948,9 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
   operands.addr = addr;
   operands.saddr = saddr;
   // Virtual LDS uses global memory as a workgroup-local backing store. On
-  // GFX940-class FLAT/GLOBAL instructions, SC[1:0] = 1 encodes device scope,
-  // which is the closest memory type to native LDS producer/consumer traffic.
+  // GFX940-class FLAT/GLOBAL instructions, SC[1:0] = 1 encodes group scope,
+  // matching the native LDS producer/consumer sharing domain for ordinary
+  // same-workgroup dispatches.
   operands.sc0 = true;
   operands.sc1 = false;
   return operands;
@@ -951,6 +1006,8 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
                           .flat_op = kCdna3FlatOpStoreDword + 1,
                           .vgpr_count = 2,
                           .two_addr_stride_bytes = 512};
+  case 84: // ds_write_b8_d16_hi
+    return VirtualLdsDsOp{.is_load = false, .flat_op = kCdna3FlatOpStoreByteD16Hi};
   case 85: // ds_write_b16_d16_hi
     return VirtualLdsDsOp{.is_load = false, .flat_op = kCdna3FlatOpStoreShortD16Hi};
   case 90: // ds_read_u16_d16
@@ -1042,11 +1099,7 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
                                     ": virtual LDS lowering does not support GDS",
                                 {"Keep virtual LDS lowering limited to ordinary LDS accesses."});
   }
-  if (src.acc != 0) {
-    return ExpandResult::failed(
-        std::string(inst.mnemonic()) + ": virtual LDS lowering does not support ACC operands",
-        {"Add AccVGPR-aware virtual LDS load/store lowering before enabling this form."});
-  }
+  const bool uses_acc = src.acc != 0;
   if (context.virtual_lds_base_sgpr > 126 || (context.virtual_lds_base_sgpr % 2) != 0) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) + ": virtual LDS backing-buffer SGPR pair is not encodable",
@@ -1067,20 +1120,22 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     if (count != 0)
       context.require_vgprs(base + count);
   };
-  // Native DS uses a 32-bit LDS byte offset in `addr`. The GLOBAL instructions
-  // used for virtual LDS consume a 64-bit VGPR address pair, so lowering
-  // introduces `addr + 1` even when the source descriptor did not allocate that
-  // register. Hand-written assembly can also name high DS data/destination
-  // registers without the descriptor reflecting them. Record those requirements
-  // before descriptor recomputation so the host launch allocates every VGPR the
-  // translated body actually reads or writes.
+  // Native DS uses a 32-bit LDS byte offset in `addr`. Virtual-LDS lowering
+  // materializes that offset as the low half of a 64-bit GLOBAL address tuple.
+  // Even source address registers can use `addr:addr+1` directly; odd address
+  // registers are copied into a private even tuple below.  Hand-written
+  // assembly can also name high DS data/destination registers without the
+  // descriptor reflecting them. Record those requirements before descriptor
+  // recomputation so the host launch allocates every VGPR the translated body
+  // actually reads or writes.
   require_source_vgprs(addr, 2);
 
   if (op->two_addr_stride_bytes != 0 && op->is_load) {
     const uint32_t byte_offset0 = static_cast<uint32_t>(src.offset0) * op->two_addr_stride_bytes;
     const uint32_t byte_offset1 = static_cast<uint32_t>(src.offset1) * op->two_addr_stride_bytes;
     const uint16_t total_dst_vgprs = static_cast<uint16_t>(op->read2_dst_delta + op->vgpr_count);
-    require_source_vgprs(src.vdst, total_dst_vgprs);
+    if (!uses_acc)
+      require_source_vgprs(src.vdst, total_dst_vgprs);
     struct Read2Access {
       uint8_t vdst = 0;
       uint32_t byte_offset = 0;
@@ -1091,25 +1146,30 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
         Read2Access{
             .vdst = static_cast<uint8_t>(src.vdst),
             .byte_offset = byte_offset0,
-            .clobbers_addr_low = virtual_lds_vgpr_ranges_overlap(
-                static_cast<uint16_t>(src.vdst), op->vgpr_count, static_cast<uint16_t>(addr), 1),
-            .clobbers_addr_high =
-                virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), op->vgpr_count,
-                                                static_cast<uint16_t>(addr_high), 1)},
+            .clobbers_addr_low = !uses_acc && virtual_lds_vgpr_ranges_overlap(
+                                                  static_cast<uint16_t>(src.vdst), op->vgpr_count,
+                                                  static_cast<uint16_t>(addr), 1),
+            .clobbers_addr_high = !uses_acc && virtual_lds_vgpr_ranges_overlap(
+                                                   static_cast<uint16_t>(src.vdst), op->vgpr_count,
+                                                   static_cast<uint16_t>(addr_high), 1)},
         Read2Access{.vdst = static_cast<uint8_t>(src.vdst + op->read2_dst_delta),
                     .byte_offset = byte_offset1,
-                    .clobbers_addr_low = virtual_lds_vgpr_ranges_overlap(
-                        static_cast<uint16_t>(src.vdst + op->read2_dst_delta), op->vgpr_count,
-                        static_cast<uint16_t>(addr), 1),
-                    .clobbers_addr_high = virtual_lds_vgpr_ranges_overlap(
-                        static_cast<uint16_t>(src.vdst + op->read2_dst_delta), op->vgpr_count,
-                        static_cast<uint16_t>(addr_high), 1)}};
+                    .clobbers_addr_low =
+                        !uses_acc && virtual_lds_vgpr_ranges_overlap(
+                                         static_cast<uint16_t>(src.vdst + op->read2_dst_delta),
+                                         op->vgpr_count, static_cast<uint16_t>(addr), 1),
+                    .clobbers_addr_high =
+                        !uses_acc && virtual_lds_vgpr_ranges_overlap(
+                                         static_cast<uint16_t>(src.vdst + op->read2_dst_delta),
+                                         op->vgpr_count, static_cast<uint16_t>(addr_high), 1)}};
     auto clobbers_addr_pair = [](const Read2Access &access) {
       return access.clobbers_addr_low || access.clobbers_addr_high;
     };
     const uint32_t address_clobber_count =
         (clobbers_addr_pair(accesses[0]) ? 1u : 0u) + (clobbers_addr_pair(accesses[1]) ? 1u : 0u);
-    const bool stage_read2_results = address_clobber_count > 1;
+    const bool needs_aligned_read2_results =
+        op->vgpr_count >= 2 && ((accesses[0].vdst % 2) != 0 || (accesses[1].vdst % 2) != 0);
+    const bool stage_read2_results = address_clobber_count > 1 || needs_aligned_read2_results;
     if (!stage_read2_results && clobbers_addr_pair(accesses[0]))
       std::swap(accesses[0], accesses[1]);
 
@@ -1119,12 +1179,12 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
                                       (!stage_read2_results && address_clobber_count != 0) ||
                                       use_full_vgpr_address;
     const bool result_clobbers_addr_low =
-        stage_read2_results
+        stage_read2_results && !uses_acc
             ? virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), total_dst_vgprs,
                                               static_cast<uint16_t>(addr), 1)
             : accesses[1].clobbers_addr_low;
     const bool result_clobbers_addr_high =
-        stage_read2_results
+        stage_read2_results && !uses_acc
             ? virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), total_dst_vgprs,
                                               static_cast<uint16_t>(addr_high), 1)
             : accesses[1].clobbers_addr_high;
@@ -1134,8 +1194,28 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
 
     std::vector<VirtualLdsVgprRange> forbidden = {
         {.base = static_cast<uint16_t>(addr), .count = 2},
-        {.base = static_cast<uint16_t>(src.vdst), .count = total_dst_vgprs},
     };
+    if (!uses_acc)
+      forbidden.push_back({.base = static_cast<uint16_t>(src.vdst), .count = total_dst_vgprs});
+    std::optional<VirtualLdsTempRange> address_pair_temp;
+    if ((addr % 2) != 0) {
+      // CDNA3 GLOBAL/FLAT instructions encode the 64-bit VGPR address operand
+      // with an even-base register class. CDNA4 DS only names a 32-bit LDS
+      // offset VGPR, so odd DS address registers must be copied into a private
+      // even pair before using them as GLOBAL VADDR.
+      address_pair_temp = choose_virtual_lds_temp_range(context, forbidden, 2, 2);
+      if (!address_pair_temp) {
+        return ExpandResult::failed(
+            std::string(inst.mnemonic()) +
+                ": virtual LDS read2 lowering cannot allocate an even GLOBAL address pair",
+            {"Add a more general spill path for kernels whose DS operands cover every ordinary "
+             "VGPR."});
+      }
+      forbidden.push_back({.base = address_pair_temp->base(), .count = address_pair_temp->count});
+    }
+    const uint8_t global_addr = address_pair_temp ? address_pair_temp->base() : addr;
+    const uint8_t global_addr_high =
+        address_pair_temp ? static_cast<uint8_t>(address_pair_temp->base() + 1) : addr_high;
     std::optional<VirtualLdsAddressTemp> base_temp;
     if (needs_preserved_addr) {
       base_temp = choose_virtual_lds_address_temp(context, forbidden);
@@ -1151,11 +1231,13 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
 
     std::optional<VirtualLdsTempRange> staged_read2_temp;
     if (stage_read2_results) {
-      // Both read2 destinations overlap the GLOBAL VADDR pair. Load into a
-      // private contiguous run first, then copy the completed results into the
-      // architectural destination range after the address pair is no longer
-      // needed.
-      staged_read2_temp = choose_virtual_lds_temp_range(context, forbidden, total_dst_vgprs);
+      // Either both read2 destinations overlap the GLOBAL VADDR pair, or at
+      // least one wide destination tuple has an odd base that CDNA3 GLOBAL
+      // cannot encode. Load into a private contiguous run first, then copy the
+      // completed results into the architectural destination range after the
+      // address pair is no longer needed.
+      staged_read2_temp = choose_virtual_lds_temp_range(context, forbidden, total_dst_vgprs,
+                                                        op->vgpr_count >= 2 ? 2 : 1);
       if (!staged_read2_temp) {
         return ExpandResult::failed(
             std::string(inst.mnemonic()) +
@@ -1170,12 +1252,17 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     if (context.virtual_lds_base_sgpr_spill_per_use) {
       std::vector<VirtualLdsVgprRange> base_spill_forbidden = {
           {.base = static_cast<uint16_t>(addr), .count = 1},
-          {.base = static_cast<uint16_t>(src.vdst), .count = total_dst_vgprs},
       };
+      if (!uses_acc)
+        base_spill_forbidden.push_back(
+            {.base = static_cast<uint16_t>(src.vdst), .count = total_dst_vgprs});
       if (use_full_vgpr_address || !restore_addr_high)
         base_spill_forbidden.push_back({.base = static_cast<uint16_t>(addr_high), .count = 1});
       if (base_temp)
         base_spill_forbidden.push_back({.base = base_temp->reg, .count = 1});
+      if (address_pair_temp)
+        base_spill_forbidden.push_back(
+            {.base = address_pair_temp->base(), .count = address_pair_temp->count});
       if (staged_read2_temp)
         base_spill_forbidden.push_back(
             {.base = staged_read2_temp->base(), .count = staged_read2_temp->count});
@@ -1193,6 +1280,10 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
         base_spill_temps && context.virtual_lds_base_pointer_spilled ? 2u : 0u;
     const uint32_t extra_spill_dwords = base_sgpr_spill_dwords + (restore_addr_high ? 1u : 0u);
     std::vector<VirtualLdsAddressTemp *> spill_temps;
+    if (address_pair_temp) {
+      for (uint8_t i = 0; i < address_pair_temp->count; ++i)
+        spill_temps.push_back(&address_pair_temp->temps[i]);
+    }
     if (base_temp)
       spill_temps.push_back(&*base_temp);
     if (staged_read2_temp) {
@@ -1222,32 +1313,37 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     const uint8_t preserved_base = base_temp ? base_temp->reg : addr;
     if (base_temp)
       emit_cdna3_v_add_u32_literal(words, preserved_base, addr, 0);
+    if (address_pair_temp)
+      emit_cdna3_v_add_u32_literal(words, global_addr, addr, 0);
 
     auto emit_read2_load = [&](const Read2Access &access) {
       uint16_t flat_offset = static_cast<uint16_t>(access.byte_offset);
       if (access.byte_offset > kFlatGlobalPositiveImm13Max) {
         flat_offset = 0;
-        emit_cdna3_v_add_u32_literal(words, addr, preserved_base, access.byte_offset);
+        emit_cdna3_v_add_u32_literal(words, global_addr, preserved_base, access.byte_offset);
       } else if (base_temp) {
-        emit_cdna3_v_add_u32_literal(words, addr, preserved_base, 0);
+        emit_cdna3_v_add_u32_literal(words, global_addr, preserved_base, 0);
       }
       if (use_full_vgpr_address) {
         assert(base_spill_temps && "spill-per-use virtual LDS should have base VGPR temps");
-        emit_virtual_lds_full_vgpr_address(words, context, addr, addr_high,
+        emit_virtual_lds_full_vgpr_address(words, context, global_addr, global_addr_high,
                                            (*base_spill_temps)[0].reg, (*base_spill_temps)[1].reg);
       } else {
-        words.push_back(build_cdna3_v_mov_b32(addr_high, scalar_positive_inline_u32(0)));
+        words.push_back(build_cdna3_v_mov_b32(global_addr_high, scalar_positive_inline_u32(0)));
       }
 
       const auto operands = make_virtual_lds_flat_global_operands(
-          flat_offset, addr,
+          flat_offset, global_addr,
           use_full_vgpr_address ? kCdna3ScalarNull
                                 : static_cast<uint8_t>(context.virtual_lds_base_sgpr));
+      auto flat_operands = operands;
+      flat_operands.acc = uses_acc && !staged_read2_temp;
       const uint8_t vdst =
           staged_read2_temp
               ? static_cast<uint8_t>(staged_read2_temp->base() + (access.vdst - src.vdst))
               : access.vdst;
-      auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_load(operands, op->flat_op, vdst);
+      auto [w0, w1] =
+          Cdna3MemoryInstructionBuilder::flat_global_load(flat_operands, op->flat_op, vdst);
       words.push_back(w0);
       words.push_back(w1);
     };
@@ -1265,9 +1361,14 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
       emit_cdna3_scratch_load_b32(words, addr_high, addr_high_spill_offset);
       words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
     }
-    if (staged_read2_temp)
-      emit_virtual_lds_copy_from_temp_range(words, *staged_read2_temp,
-                                            static_cast<uint8_t>(src.vdst));
+    if (staged_read2_temp) {
+      if (uses_acc)
+        emit_virtual_lds_copy_temp_to_acc_range(words, *staged_read2_temp,
+                                                static_cast<uint8_t>(src.vdst));
+      else
+        emit_virtual_lds_copy_from_temp_range(words, *staged_read2_temp,
+                                              static_cast<uint8_t>(src.vdst));
+    }
 
     std::vector<VirtualLdsAddressTemp *> restore_temps;
     if (base_spill_temps) {
@@ -1280,6 +1381,10 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     }
     if (base_temp)
       restore_temps.push_back(&*base_temp);
+    if (address_pair_temp) {
+      for (uint8_t i = address_pair_temp->count; i > 0; --i)
+        restore_temps.push_back(&address_pair_temp->temps[i - 1]);
+    }
     emit_virtual_lds_temp_spill_loads(words, restore_temps);
     if (!guard_virtual_lds_execz(words, context)) {
       return ExpandResult::failed(
@@ -1294,14 +1399,33 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     const uint32_t byte_offset1 = static_cast<uint32_t>(src.offset1) * op->two_addr_stride_bytes;
     const bool needs_materialized_offset =
         byte_offset0 > kFlatGlobalPositiveImm13Max || byte_offset1 > kFlatGlobalPositiveImm13Max;
-    require_source_vgprs(src.data0, op->vgpr_count);
-    require_source_vgprs(src.data1, op->vgpr_count);
+    if (!uses_acc) {
+      require_source_vgprs(src.data0, op->vgpr_count);
+      require_source_vgprs(src.data1, op->vgpr_count);
+    }
 
     std::vector<VirtualLdsVgprRange> forbidden = {
         {.base = static_cast<uint16_t>(addr), .count = 2},
-        {.base = static_cast<uint16_t>(src.data0), .count = op->vgpr_count},
-        {.base = static_cast<uint16_t>(src.data1), .count = op->vgpr_count},
     };
+    if (!uses_acc) {
+      forbidden.push_back({.base = static_cast<uint16_t>(src.data0), .count = op->vgpr_count});
+      forbidden.push_back({.base = static_cast<uint16_t>(src.data1), .count = op->vgpr_count});
+    }
+    std::optional<VirtualLdsTempRange> address_pair_temp;
+    if ((addr % 2) != 0) {
+      address_pair_temp = choose_virtual_lds_temp_range(context, forbidden, 2, 2);
+      if (!address_pair_temp) {
+        return ExpandResult::failed(
+            std::string(inst.mnemonic()) +
+                ": virtual LDS write2 lowering cannot allocate an even GLOBAL address pair",
+            {"Add a more general spill path for kernels whose DS operands cover every ordinary "
+             "VGPR."});
+      }
+      forbidden.push_back({.base = address_pair_temp->base(), .count = address_pair_temp->count});
+    }
+    const uint8_t global_addr = address_pair_temp ? address_pair_temp->base() : addr;
+    const uint8_t global_addr_high =
+        address_pair_temp ? static_cast<uint8_t>(address_pair_temp->base() + 1) : addr_high;
     std::optional<VirtualLdsAddressTemp> base_temp;
     if (needs_materialized_offset || use_full_vgpr_address) {
       base_temp = choose_virtual_lds_address_temp(context, forbidden);
@@ -1316,19 +1440,23 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     }
 
     auto data_needs_temp = [&](uint16_t data) {
-      const bool overlaps_high = virtual_lds_vgpr_ranges_overlap(
-          data, op->vgpr_count, static_cast<uint16_t>(addr_high), 1);
+      const bool needs_aligned_data = op->vgpr_count >= 2 && (data % 2) != 0;
+      const bool overlaps_high =
+          !uses_acc && virtual_lds_vgpr_ranges_overlap(data, op->vgpr_count,
+                                                       static_cast<uint16_t>(global_addr_high), 1);
       const bool overlaps_low_when_materialized =
-          (needs_materialized_offset || use_full_vgpr_address) &&
-          virtual_lds_vgpr_ranges_overlap(data, op->vgpr_count, static_cast<uint16_t>(addr), 1);
-      return overlaps_high || overlaps_low_when_materialized;
+          !uses_acc && (needs_materialized_offset || use_full_vgpr_address) &&
+          virtual_lds_vgpr_ranges_overlap(data, op->vgpr_count, static_cast<uint16_t>(global_addr),
+                                          1);
+      return needs_aligned_data || overlaps_high || overlaps_low_when_materialized;
     };
     std::optional<VirtualLdsTempRange> data0_temp;
     std::optional<VirtualLdsTempRange> data1_temp;
     auto choose_data_temp = [&](uint16_t data, std::optional<VirtualLdsTempRange> &temp) -> bool {
       if (!data_needs_temp(data))
         return true;
-      temp = choose_virtual_lds_temp_range(context, forbidden, op->vgpr_count);
+      temp = choose_virtual_lds_temp_range(context, forbidden, op->vgpr_count,
+                                           op->vgpr_count >= 2 ? 2 : 1);
       if (!temp)
         return false;
       forbidden.push_back({.base = temp->base(), .count = temp->count});
@@ -1352,14 +1480,17 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
         base_spill_forbidden.push_back({.base = static_cast<uint16_t>(addr_high), .count = 1});
       if (base_temp)
         base_spill_forbidden.push_back({.base = base_temp->reg, .count = 1});
+      if (address_pair_temp)
+        base_spill_forbidden.push_back(
+            {.base = address_pair_temp->base(), .count = address_pair_temp->count});
       if (data0_temp)
         base_spill_forbidden.push_back({.base = data0_temp->base(), .count = data0_temp->count});
-      else
+      else if (!uses_acc)
         base_spill_forbidden.push_back(
             {.base = static_cast<uint16_t>(src.data0), .count = op->vgpr_count});
       if (data1_temp)
         base_spill_forbidden.push_back({.base = data1_temp->base(), .count = data1_temp->count});
-      else
+      else if (!uses_acc)
         base_spill_forbidden.push_back(
             {.base = static_cast<uint16_t>(src.data1), .count = op->vgpr_count});
       base_spill_temps = choose_virtual_lds_base_spill_temps(context, base_spill_forbidden);
@@ -1375,6 +1506,10 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     const uint32_t base_sgpr_spill_dwords =
         base_spill_temps && context.virtual_lds_base_pointer_spilled ? 2u : 0u;
     std::vector<VirtualLdsAddressTemp *> spill_temps;
+    if (address_pair_temp) {
+      for (uint8_t i = 0; i < address_pair_temp->count; ++i)
+        spill_temps.push_back(&address_pair_temp->temps[i]);
+    }
     if (base_temp)
       spill_temps.push_back(&*base_temp);
     if (data0_temp) {
@@ -1400,43 +1535,58 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     if (base_spill_temps)
       emit_virtual_lds_base_spill_setup(words, context, *base_spill_temps, base_sgpr_save_offset);
 
-    if (data0_temp)
-      emit_virtual_lds_copy_to_temp_range(words, *data0_temp, static_cast<uint8_t>(src.data0));
-    if (data1_temp)
-      emit_virtual_lds_copy_to_temp_range(words, *data1_temp, static_cast<uint8_t>(src.data1));
+    if (data0_temp) {
+      if (uses_acc)
+        emit_virtual_lds_copy_acc_to_temp_range(words, *data0_temp,
+                                                static_cast<uint8_t>(src.data0));
+      else
+        emit_virtual_lds_copy_to_temp_range(words, *data0_temp, static_cast<uint8_t>(src.data0));
+    }
+    if (data1_temp) {
+      if (uses_acc)
+        emit_virtual_lds_copy_acc_to_temp_range(words, *data1_temp,
+                                                static_cast<uint8_t>(src.data1));
+      else
+        emit_virtual_lds_copy_to_temp_range(words, *data1_temp, static_cast<uint8_t>(src.data1));
+    }
     const uint8_t preserved_base = base_temp ? base_temp->reg : addr;
     if (base_temp)
       emit_cdna3_v_add_u32_literal(words, preserved_base, addr, 0);
+    if (address_pair_temp)
+      emit_cdna3_v_add_u32_literal(words, global_addr, addr, 0);
 
-    auto emit_write2_store = [&](uint8_t data, uint32_t byte_offset) {
+    auto emit_write2_store = [&](uint8_t data, uint32_t byte_offset, bool data_is_acc) {
       uint16_t flat_offset = static_cast<uint16_t>(byte_offset);
       if (byte_offset > kFlatGlobalPositiveImm13Max) {
         flat_offset = 0;
-        emit_cdna3_v_add_u32_literal(words, addr, preserved_base, byte_offset);
+        emit_cdna3_v_add_u32_literal(words, global_addr, preserved_base, byte_offset);
       } else if (base_temp) {
-        emit_cdna3_v_add_u32_literal(words, addr, preserved_base, 0);
+        emit_cdna3_v_add_u32_literal(words, global_addr, preserved_base, 0);
       }
       if (use_full_vgpr_address) {
         assert(base_spill_temps && "spill-per-use virtual LDS should have base VGPR temps");
-        emit_virtual_lds_full_vgpr_address(words, context, addr, addr_high,
+        emit_virtual_lds_full_vgpr_address(words, context, global_addr, global_addr_high,
                                            (*base_spill_temps)[0].reg, (*base_spill_temps)[1].reg);
       } else {
-        words.push_back(build_cdna3_v_mov_b32(addr_high, scalar_positive_inline_u32(0)));
+        words.push_back(build_cdna3_v_mov_b32(global_addr_high, scalar_positive_inline_u32(0)));
       }
 
       const auto operands = make_virtual_lds_flat_global_operands(
-          flat_offset, addr,
+          flat_offset, global_addr,
           use_full_vgpr_address ? kCdna3ScalarNull
                                 : static_cast<uint8_t>(context.virtual_lds_base_sgpr));
-      auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_store(operands, op->flat_op, data);
+      auto flat_operands = operands;
+      flat_operands.acc = data_is_acc;
+      auto [w0, w1] =
+          Cdna3MemoryInstructionBuilder::flat_global_store(flat_operands, op->flat_op, data);
       words.push_back(w0);
       words.push_back(w1);
     };
 
     emit_write2_store(data0_temp ? data0_temp->base() : static_cast<uint8_t>(src.data0),
-                      byte_offset0);
+                      byte_offset0, uses_acc && !data0_temp);
     emit_write2_store(data1_temp ? data1_temp->base() : static_cast<uint8_t>(src.data1),
-                      byte_offset1);
+                      byte_offset1, uses_acc && !data1_temp);
     words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
     if (base_temp)
       emit_cdna3_v_add_u32_literal(words, addr, preserved_base, 0);
@@ -1459,6 +1609,10 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     }
     if (base_temp)
       restore_temps.push_back(&*base_temp);
+    if (address_pair_temp) {
+      for (uint8_t i = address_pair_temp->count; i > 0; --i)
+        restore_temps.push_back(&address_pair_temp->temps[i - 1]);
+    }
     emit_virtual_lds_temp_spill_loads(words, restore_temps);
     if (!guard_virtual_lds_execz(words, context)) {
       return ExpandResult::failed(
@@ -1471,22 +1625,42 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
   const uint32_t ds_offset = (static_cast<uint32_t>(src.offset1) << 8) | src.offset0;
   uint16_t flat_offset = static_cast<uint16_t>(ds_offset);
   const bool needs_materialized_offset = ds_offset > kFlatGlobalPositiveImm13Max;
-  require_source_vgprs(op->is_load ? src.vdst : src.data0, op->vgpr_count);
+  if (!uses_acc)
+    require_source_vgprs(op->is_load ? src.vdst : src.data0, op->vgpr_count);
   const bool load_clobbers_addr_low =
-      op->is_load &&
+      !uses_acc && op->is_load &&
       virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), op->vgpr_count,
                                       static_cast<uint16_t>(addr), 1);
   const bool load_clobbers_addr_high =
-      op->is_load &&
+      !uses_acc && op->is_load &&
       virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), op->vgpr_count,
                                       static_cast<uint16_t>(addr_high), 1);
   std::optional<VirtualLdsAddressTemp> base_temp;
   std::optional<VirtualLdsTempRange> store_data_temp;
+  std::optional<VirtualLdsTempRange> load_result_temp;
   std::vector<VirtualLdsVgprRange> forbidden = {
       {.base = static_cast<uint16_t>(addr), .count = 2},
-      {.base = op->is_load ? static_cast<uint16_t>(src.vdst) : static_cast<uint16_t>(src.data0),
-       .count = op->vgpr_count},
   };
+  if (!uses_acc) {
+    forbidden.push_back(
+        {.base = op->is_load ? static_cast<uint16_t>(src.vdst) : static_cast<uint16_t>(src.data0),
+         .count = op->vgpr_count});
+  }
+  std::optional<VirtualLdsTempRange> address_pair_temp;
+  if ((addr % 2) != 0) {
+    address_pair_temp = choose_virtual_lds_temp_range(context, forbidden, 2, 2);
+    if (!address_pair_temp) {
+      return ExpandResult::failed(
+          std::string(inst.mnemonic()) +
+              ": virtual LDS lowering cannot allocate an even GLOBAL address pair",
+          {"Add a more general spill path for kernels whose DS operands cover every ordinary "
+           "VGPR."});
+    }
+    forbidden.push_back({.base = address_pair_temp->base(), .count = address_pair_temp->count});
+  }
+  const uint8_t global_addr = address_pair_temp ? address_pair_temp->base() : addr;
+  const uint8_t global_addr_high =
+      address_pair_temp ? static_cast<uint8_t>(address_pair_temp->base() + 1) : addr_high;
   if (needs_materialized_offset ||
       (use_full_vgpr_address && (!op->is_load || !load_clobbers_addr_low))) {
     base_temp = choose_virtual_lds_address_temp(context, forbidden);
@@ -1502,13 +1676,16 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
 
   const bool data_needs_temp =
       !op->is_load &&
-      (virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.data0), op->vgpr_count,
-                                       static_cast<uint16_t>(addr_high), 1) ||
-       ((needs_materialized_offset || use_full_vgpr_address) &&
+      ((op->vgpr_count >= 2 && (src.data0 % 2) != 0) ||
+       (!uses_acc &&
         virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.data0), op->vgpr_count,
-                                        static_cast<uint16_t>(addr), 1)));
+                                        static_cast<uint16_t>(global_addr_high), 1)) ||
+       (!uses_acc && (needs_materialized_offset || use_full_vgpr_address) &&
+        virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.data0), op->vgpr_count,
+                                        static_cast<uint16_t>(global_addr), 1)));
   if (data_needs_temp) {
-    store_data_temp = choose_virtual_lds_temp_range(context, forbidden, op->vgpr_count);
+    store_data_temp = choose_virtual_lds_temp_range(context, forbidden, op->vgpr_count,
+                                                    op->vgpr_count >= 2 ? 2 : 1);
     if (!store_data_temp) {
       return ExpandResult::failed(
           std::string(inst.mnemonic()) +
@@ -1517,6 +1694,17 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
            "VGPR."});
     }
     forbidden.push_back({.base = store_data_temp->base(), .count = store_data_temp->count});
+  }
+  if (op->is_load && op->vgpr_count >= 2 && (src.vdst % 2) != 0) {
+    load_result_temp = choose_virtual_lds_temp_range(context, forbidden, op->vgpr_count, 2);
+    if (!load_result_temp) {
+      return ExpandResult::failed(
+          std::string(inst.mnemonic()) +
+              ": virtual LDS load lowering cannot allocate an aligned result tuple",
+          {"Add a more general spill path for kernels whose DS operands cover every ordinary "
+           "VGPR."});
+    }
+    forbidden.push_back({.base = load_result_temp->base(), .count = load_result_temp->count});
   }
 
   const bool restore_addr_high = !load_clobbers_addr_high;
@@ -1529,13 +1717,20 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
       base_spill_forbidden.push_back({.base = static_cast<uint16_t>(addr_high), .count = 1});
     if (base_temp)
       base_spill_forbidden.push_back({.base = base_temp->reg, .count = 1});
-    if (op->is_load) {
+    if (address_pair_temp)
       base_spill_forbidden.push_back(
-          {.base = static_cast<uint16_t>(src.vdst), .count = op->vgpr_count});
+          {.base = address_pair_temp->base(), .count = address_pair_temp->count});
+    if (op->is_load) {
+      if (!uses_acc)
+        base_spill_forbidden.push_back(
+            {.base = static_cast<uint16_t>(src.vdst), .count = op->vgpr_count});
+      if (load_result_temp)
+        base_spill_forbidden.push_back(
+            {.base = load_result_temp->base(), .count = load_result_temp->count});
     } else if (store_data_temp) {
       base_spill_forbidden.push_back(
           {.base = store_data_temp->base(), .count = store_data_temp->count});
-    } else {
+    } else if (!uses_acc) {
       base_spill_forbidden.push_back(
           {.base = static_cast<uint16_t>(src.data0), .count = op->vgpr_count});
     }
@@ -1553,11 +1748,19 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
       base_spill_temps && context.virtual_lds_base_pointer_spilled ? 2u : 0u;
   const uint32_t extra_spill_dwords = base_sgpr_spill_dwords + (restore_addr_high ? 1u : 0u);
   std::vector<VirtualLdsAddressTemp *> spill_temps;
+  if (address_pair_temp) {
+    for (uint8_t i = 0; i < address_pair_temp->count; ++i)
+      spill_temps.push_back(&address_pair_temp->temps[i]);
+  }
   if (base_temp)
     spill_temps.push_back(&*base_temp);
   if (store_data_temp) {
     for (uint8_t i = 0; i < store_data_temp->count; ++i)
       spill_temps.push_back(&store_data_temp->temps[i]);
+  }
+  if (load_result_temp) {
+    for (uint8_t i = 0; i < load_result_temp->count; ++i)
+      spill_temps.push_back(&load_result_temp->temps[i]);
   }
   if (base_spill_temps) {
     spill_temps.push_back(&(*base_spill_temps)[0]);
@@ -1578,43 +1781,58 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
   if (base_spill_temps)
     emit_virtual_lds_base_spill_setup(words, context, *base_spill_temps, base_sgpr_save_offset);
 
-  if (store_data_temp)
-    emit_virtual_lds_copy_to_temp_range(words, *store_data_temp, static_cast<uint8_t>(src.data0));
+  if (store_data_temp) {
+    if (uses_acc)
+      emit_virtual_lds_copy_acc_to_temp_range(words, *store_data_temp,
+                                              static_cast<uint8_t>(src.data0));
+    else
+      emit_virtual_lds_copy_to_temp_range(words, *store_data_temp, static_cast<uint8_t>(src.data0));
+  }
   const uint8_t preserved_base = base_temp ? base_temp->reg : addr;
   if (base_temp)
     emit_cdna3_v_add_u32_literal(words, preserved_base, addr, 0);
+  if (address_pair_temp)
+    emit_cdna3_v_add_u32_literal(words, global_addr, addr, 0);
   if (needs_materialized_offset) {
-    emit_cdna3_v_add_u32_literal(words, addr, preserved_base, ds_offset);
+    emit_cdna3_v_add_u32_literal(words, global_addr, preserved_base, ds_offset);
     flat_offset = 0;
   }
 
-  // Use the original source address pair as the GLOBAL VADDR pair. The low half
-  // may be temporarily materialized for large DS immediates; the high half must
-  // be zero for every GLOBAL access unless the load itself overwrites it.
+  // Use an encodable GLOBAL VADDR pair. The low half may be temporarily
+  // materialized for large DS immediates; the high half must be zero for every
+  // GLOBAL access unless spill-per-use virtual LDS folds the backing pointer
+  // into the VGPR pair.
   const bool restore_addr_low =
       (needs_materialized_offset || use_full_vgpr_address) && !load_clobbers_addr_low;
   if (use_full_vgpr_address) {
     assert(base_spill_temps && "spill-per-use virtual LDS should have base VGPR temps");
-    emit_virtual_lds_full_vgpr_address(words, context, addr, addr_high, (*base_spill_temps)[0].reg,
-                                       (*base_spill_temps)[1].reg);
+    emit_virtual_lds_full_vgpr_address(words, context, global_addr, global_addr_high,
+                                       (*base_spill_temps)[0].reg, (*base_spill_temps)[1].reg);
   } else {
-    words.push_back(build_cdna3_v_mov_b32(addr_high, scalar_positive_inline_u32(0)));
+    words.push_back(build_cdna3_v_mov_b32(global_addr_high, scalar_positive_inline_u32(0)));
   }
 
   const auto operands = make_virtual_lds_flat_global_operands(
-      flat_offset, addr,
+      flat_offset, global_addr,
       use_full_vgpr_address ? kCdna3ScalarNull
                             : static_cast<uint8_t>(context.virtual_lds_base_sgpr));
 
   if (op->is_load) {
-    auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_load(operands, op->flat_op,
-                                                                    static_cast<uint8_t>(src.vdst));
+    const uint8_t vdst =
+        load_result_temp ? load_result_temp->base() : static_cast<uint8_t>(src.vdst);
+    auto flat_operands = operands;
+    flat_operands.acc = uses_acc && !load_result_temp;
+    auto [w0, w1] =
+        Cdna3MemoryInstructionBuilder::flat_global_load(flat_operands, op->flat_op, vdst);
     words.push_back(w0);
     words.push_back(w1);
   } else {
     const uint8_t data =
         store_data_temp ? store_data_temp->base() : static_cast<uint8_t>(src.data0);
-    auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_store(operands, op->flat_op, data);
+    auto flat_operands = operands;
+    flat_operands.acc = uses_acc && !store_data_temp;
+    auto [w0, w1] =
+        Cdna3MemoryInstructionBuilder::flat_global_store(flat_operands, op->flat_op, data);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -1630,6 +1848,14 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     emit_cdna3_scratch_load_b32(words, addr_high, addr_high_spill_offset);
     words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
   }
+  if (load_result_temp) {
+    if (uses_acc)
+      emit_virtual_lds_copy_temp_to_acc_range(words, *load_result_temp,
+                                              static_cast<uint8_t>(src.vdst));
+    else
+      emit_virtual_lds_copy_from_temp_range(words, *load_result_temp,
+                                            static_cast<uint8_t>(src.vdst));
+  }
   std::vector<VirtualLdsAddressTemp *> restore_temps;
   if (base_spill_temps) {
     restore_temps.push_back(&(*base_spill_temps)[1]);
@@ -1639,8 +1865,16 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     for (uint8_t i = store_data_temp->count; i > 0; --i)
       restore_temps.push_back(&store_data_temp->temps[i - 1]);
   }
+  if (load_result_temp) {
+    for (uint8_t i = load_result_temp->count; i > 0; --i)
+      restore_temps.push_back(&load_result_temp->temps[i - 1]);
+  }
   if (base_temp)
     restore_temps.push_back(&*base_temp);
+  if (address_pair_temp) {
+    for (uint8_t i = address_pair_temp->count; i > 0; --i)
+      restore_temps.push_back(&address_pair_temp->temps[i - 1]);
+  }
   emit_virtual_lds_temp_spill_loads(words, restore_temps);
   if (!guard_virtual_lds_execz(words, context)) {
     return ExpandResult::failed(

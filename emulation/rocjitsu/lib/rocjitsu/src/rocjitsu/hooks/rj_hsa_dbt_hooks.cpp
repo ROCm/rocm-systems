@@ -834,7 +834,8 @@ parse_virtual_lds_metadata_section(std::span<const uint8_t> image) {
 /// runtime only learns the loaded kernel-object address when the application
 /// queries `HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT`. This registry bridges
 /// those two phases. Later dispatch translation can consult the resolved normal
-/// and virtual kernel-object addresses without touching msgpack metadata.
+/// descriptor and switch to the virtual descriptor only when AQL packet
+/// rewriting proves the dispatch cannot fit in host hardware LDS.
 class VirtualLdsRuntimeRegistry {
 public:
   struct ResolvedKernel {
@@ -923,79 +924,20 @@ public:
                 resolved.metadata.static_lds_bytes, resolved.metadata.virtual_lds_base_sgpr);
   }
 
-  /// @brief Return the virtual descriptor object when the normal descriptor cannot run on host.
-  ///
-  /// @details Static LDS larger than the host hardware limit is never a valid
-  /// normal dispatch on gfx942. Exposing the virtual sidecar at symbol-query time
-  /// avoids a race with ROCR/direct-doorbell packet construction: the runtime
-  /// builds the AQL packet from the already-virtual descriptor and reports zero
-  /// static group segment size for the same symbol.
-  [[nodiscard]] std::optional<uint64_t>
-  static_oversized_virtual_kernel_object(hsa_executable_symbol_t symbol) {
-    if (symbol.handle == 0)
-      return std::nullopt;
-    std::lock_guard lock(mutex_);
-    auto it = symbols_.find(symbol.handle);
-    if (it == symbols_.end())
-      return std::nullopt;
-    const ResolvedKernel &resolved = it->second;
-    if (resolved.metadata.static_lds_bytes <= kCdna3HardwareLdsBytes ||
-        resolved.virtual_kernel_object == 0 ||
-        resolved.virtual_kernel_object == resolved.normal_kernel_object) {
-      return std::nullopt;
-    }
-    return resolved.virtual_kernel_object;
-  }
-
-  /// @brief Return the private segment size belonging to the virtual descriptor.
-  ///
-  /// @details When rocjitsu exposes the virtual descriptor from the kernel-object
-  /// symbol query, every descriptor-derived symbol attribute that ROCR may use to
-  /// build an AQL packet must describe the same virtual kernel. In particular,
-  /// private scratch is descriptor-specific after DBT rewrites that spill values.
-  [[nodiscard]] std::optional<uint32_t>
-  static_oversized_virtual_private_segment_size(hsa_executable_symbol_t symbol) {
-    const auto virtual_kernel_object = static_oversized_virtual_kernel_object(symbol);
-    if (!virtual_kernel_object)
-      return std::nullopt;
-
-    rocr::llvm::amdhsa::kernel_descriptor_t virtual_descriptor{};
-    std::memcpy(&virtual_descriptor, reinterpret_cast<const void *>(*virtual_kernel_object),
-                sizeof(virtual_descriptor));
-    return virtual_descriptor.private_segment_fixed_size;
-  }
-
-  /// @brief Return true when static LDS should be hidden from ROCR for this symbol.
-  [[nodiscard]] bool uses_static_oversized_virtual_descriptor(hsa_executable_symbol_t symbol) {
-    if (symbol.handle == 0)
-      return false;
-    std::lock_guard lock(mutex_);
-    auto it = symbols_.find(symbol.handle);
-    if (it == symbols_.end())
-      return false;
-    const ResolvedKernel &resolved = it->second;
-    return resolved.metadata.static_lds_bytes > kCdna3HardwareLdsBytes &&
-           resolved.metadata.virtual_descriptor_vaddr != 0 &&
-           resolved.metadata.virtual_descriptor_vaddr != resolved.metadata.normal_descriptor_vaddr;
-  }
-
   /// @brief Find virtual-LDS metadata for a descriptor object in an AQL packet.
   ///
   /// @details Dispatch packets carry the loaded kernel-object address, not an
   /// HSA symbol handle. Symbol resolution records both addresses after ROCR
-  /// reports the normal descriptor object. Static-oversized kernels may already
-  /// have the virtual descriptor in the packet because rocjitsu exposes it from
-  /// `hsa_executable_symbol_get_info`, so both addresses must resolve to the
-  /// same rewrite plan.
+  /// reports the normal descriptor object. The sidecar descriptor is strictly an
+  /// output of packet rewriting; accepting it as an input key would make virtual
+  /// LDS the default path instead of a fallback.
   [[nodiscard]] std::optional<ResolvedKernel> find_by_kernel_object(uint64_t kernel_object) {
     if (kernel_object == 0)
       return std::nullopt;
     std::lock_guard lock(mutex_);
     for (const auto &[symbol_handle, resolved] : symbols_) {
       (void)symbol_handle;
-      if ((resolved.normal_kernel_object == kernel_object ||
-           resolved.virtual_kernel_object == kernel_object) &&
-          resolved.virtual_kernel_object != 0)
+      if (resolved.normal_kernel_object == kernel_object && resolved.virtual_kernel_object != 0)
         return resolved;
     }
     return std::nullopt;
@@ -1255,6 +1197,10 @@ void clear_virtual_lds_dispatch_queues();
   X(isa_get_info_alt, core_, true, hsa_isa_get_info_alt_fn, decltype(hsa_isa_get_info_alt) *)      \
   X(queue_load_write_index_relaxed, core_, true, hsa_queue_load_write_index_relaxed_fn,            \
     decltype(hsa_queue_load_write_index_relaxed) *)                                                \
+  X(signal_create, core_, true, hsa_signal_create_fn, decltype(hsa_signal_create) *)               \
+  X(signal_destroy, core_, true, hsa_signal_destroy_fn, decltype(hsa_signal_destroy) *)            \
+  X(signal_load_scacquire, core_, true, hsa_signal_load_scacquire_fn,                              \
+    decltype(hsa_signal_load_scacquire) *)                                                         \
   X(amd_queue_intercept_register, amd_ext_,                                                        \
     amd_ext_ != nullptr && RJ_AMD_EXT_HAS_FIELD(amd_ext_, hsa_amd_queue_intercept_register_fn),    \
     hsa_amd_queue_intercept_register_fn, hsa_amd_queue_intercept_register_fn_t)
@@ -2116,7 +2062,15 @@ struct VirtualLdsDispatchBuffers {
   void *backing = nullptr;
   void *state = nullptr;
   uint64_t virtual_kernel_object = 0;
+  hsa_signal_t completion_signal{};
+  bool completion_signal_was_pending = false;
+  bool owns_completion_signal = false;
 };
+
+/// @brief Return true when no virtual-LDS allocation is attached.
+[[nodiscard]] bool empty_virtual_lds_buffers(const VirtualLdsDispatchBuffers &buffers) {
+  return buffers.kernarg == nullptr && buffers.backing == nullptr && buffers.state == nullptr;
+}
 
 /// @brief Free one runtime allocation through the original AMD extension entry.
 void free_virtual_lds_allocation(void *ptr) {
@@ -2133,7 +2087,65 @@ void release_virtual_lds_buffers(VirtualLdsDispatchBuffers &buffers) {
   free_virtual_lds_allocation(buffers.kernarg);
   free_virtual_lds_allocation(buffers.backing);
   free_virtual_lds_allocation(buffers.state);
+  if (buffers.owns_completion_signal && buffers.completion_signal.handle != 0) {
+    auto *destroy = layer().signal_destroy();
+    if (destroy != nullptr)
+      (void)destroy(buffers.completion_signal);
+  }
   buffers = {};
+}
+
+/// @brief Remember the dispatch completion signal that makes a buffer safe to reclaim.
+void record_virtual_lds_completion_signal(VirtualLdsDispatchBuffers &buffers,
+                                          hsa_kernel_dispatch_packet_t &packet) {
+  if (packet.completion_signal.handle == 0) {
+    auto *create = layer().signal_create();
+    if (create == nullptr)
+      return;
+
+    hsa_signal_t signal{};
+    const hsa_status_t status = create(1, 0, nullptr, &signal);
+    if (status != HSA_STATUS_SUCCESS || signal.handle == 0) {
+      trace_virtual_lds_dispatch(
+          "virtual-LDS private completion signal create failed status=%d signal=%llu",
+          static_cast<int>(status), static_cast<unsigned long long>(signal.handle));
+      return;
+    }
+
+    // Most framework dispatches are fire-and-forget and carry no completion
+    // signal. A private signal is invisible to the application but gives
+    // rocjitsu an exact fence for releasing the per-dispatch backing store.
+    packet.completion_signal = signal;
+    buffers.completion_signal = signal;
+    buffers.completion_signal_was_pending = true;
+    buffers.owns_completion_signal = true;
+    return;
+  }
+
+  buffers.completion_signal = packet.completion_signal;
+  buffers.completion_signal_was_pending = false;
+
+  auto *load = layer().signal_load_scacquire();
+  if (load == nullptr)
+    return;
+
+  // AQL completion signals are decremented by CP when dispatch retires. Only
+  // use the signal as a lifetime fence when it was positive at enqueue time; a
+  // zero-valued signal would otherwise look complete before the packet runs.
+  buffers.completion_signal_was_pending = load(packet.completion_signal) > 0;
+}
+
+/// @brief Return true when a retained virtual-LDS dispatch has completed.
+[[nodiscard]] bool completed_virtual_lds_dispatch(const VirtualLdsDispatchBuffers &buffers) {
+  if (empty_virtual_lds_buffers(buffers))
+    return true;
+  if (buffers.completion_signal.handle == 0 || !buffers.completion_signal_was_pending)
+    return false;
+
+  auto *load = layer().signal_load_scacquire();
+  if (load == nullptr)
+    return false;
+  return load(buffers.completion_signal) <= 0;
 }
 
 /// @brief Internal allocator for virtual-LDS backing storage and optional extended kernargs.
@@ -2537,6 +2549,10 @@ public:
       }
 
       QueueState &state = queue_it->second;
+      trace_virtual_lds_dispatch("intercept batch queue=%p begin=%llu count=%llu",
+                                 static_cast<void *>(queue),
+                                 static_cast<unsigned long long>(user_pkt_index),
+                                 static_cast<unsigned long long>(pkt_count));
       for (uint64_t index = 0; index < pkt_count; ++index) {
         hsa_kernel_dispatch_packet_t &packet = packets[static_cast<size_t>(index)];
         const uint16_t header = packet.header;
@@ -2550,6 +2566,7 @@ public:
               static_cast<unsigned long long>(packet.kernel_object), packet.group_segment_size,
               packet.kernarg_address);
         }
+        ensure_intercept_packet_private_size(packet, user_pkt_index + index);
 
         auto plan = rewrite_plan_for_packet(packet);
         if (!plan) {
@@ -2563,14 +2580,26 @@ public:
           continue;
         }
 
-        // AQL's group_segment_size is the total per-workgroup group memory
-        // request. It must already cover the descriptor's fixed group segment
-        // plus any dynamic group segment variables, so do not add the fixed
-        // size again when sizing the virtual backing allocation.
+        // AQL packets carry the total group-segment allocation that CP should
+        // request for the dispatch, not just the dynamic LDS tail. Rocjitsu
+        // still keeps the source static size in metadata because the virtual
+        // sidecar descriptor advertises zero hardware LDS once selected. Use
+        // the larger value: adding them double-counts static LDS and can force
+        // fallback even when the hardware allocation would still fit.
         const uint64_t requested_lds =
             std::max<uint64_t>(plan->static_lds_bytes, packet.group_segment_size);
-        if (requested_lds <= kCdna3HardwareLdsBytes)
+        // The virtual sidecar exists only for dispatches whose total LDS
+        // footprint cannot fit in host hardware. Keep sub-limit launches on the
+        // normal descriptor so CDNA3 hardware LDS backs ordinary DS operations.
+        if (requested_lds <= kCdna3HardwareLdsBytes) {
+          trace_virtual_lds_dispatch(
+              "virtual-LDS intercept below threshold packet=%llu kernel=%s static=%u "
+              "packet_group=%u requested=%llu",
+              static_cast<unsigned long long>(user_pkt_index + index), plan->kernel_name.c_str(),
+              plan->static_lds_bytes, packet.group_segment_size,
+              static_cast<unsigned long long>(requested_lds));
           continue;
+        }
 
         const bool packet_pointer = plan->backing_pointer_in_dispatch_packet;
         const uint64_t pointer_offset = plan->backing_pointer_kernarg_offset;
@@ -2621,6 +2650,7 @@ public:
                            : static_cast<size_t>(pointer_offset + sizeof(VirtualLdsDispatchState));
         const size_t state_bytes = packet_pointer ? sizeof(VirtualLdsDispatchState) : 0;
         const size_t backing_bytes = geometry->backing_bytes;
+        release_completed_retired_buffers(state);
         VirtualLdsDispatchBuffers buffers;
         if (!VirtualLdsDispatchAllocator::instance().allocate(
                 state.host_agent, backing_bytes, kernarg_bytes, state_bytes, buffers)) {
@@ -2677,6 +2707,7 @@ public:
         // uses the AQL packet field when handling dispatch-time scratch events.
         packet.private_segment_size = plan->virtual_private_segment_size;
         buffers.virtual_kernel_object = plan->virtual_kernel_object;
+        record_virtual_lds_completion_signal(buffers, packet);
         state.retired_buffers.push_back(buffers);
         trace_virtual_lds_dispatch(
             "rewrote intercept_packet=%llu kernel=%s original_object=0x%llx "
@@ -2741,20 +2772,74 @@ private:
     state.retired_buffers.clear();
   }
 
+  static void release_completed_retired_buffers(QueueState &state) {
+    auto out = state.retired_buffers.begin();
+    for (auto it = state.retired_buffers.begin(); it != state.retired_buffers.end(); ++it) {
+      if (completed_virtual_lds_dispatch(*it)) {
+        release_virtual_lds_buffers(*it);
+        continue;
+      }
+      if (out != it)
+        *out = *it;
+      ++out;
+    }
+    state.retired_buffers.erase(out, state.retired_buffers.end());
+  }
+
   static void retire_slot_buffers(QueueState &state, uint32_t slot) {
     VirtualLdsDispatchBuffers &slot_buffers = state.slots[slot];
-    if (slot_buffers.kernarg == nullptr && slot_buffers.backing == nullptr &&
-        slot_buffers.state == nullptr)
+    if (empty_virtual_lds_buffers(slot_buffers))
       return;
     // AQL queue slots may be reused before the previously dispatched kernel has
-    // retired. Keep old virtual-LDS backing allocations alive until the queue is
-    // destroyed rather than freeing them on slot reuse.
+    // retired. Move old virtual-LDS backing allocations to the retired list and
+    // let completion-signal cleanup release them once CP has finished the
+    // dispatch. Signal-less packets remain live until queue destruction.
     state.retired_buffers.push_back(slot_buffers);
     slot_buffers = {};
   }
 
   static void publish_packet_header(hsa_kernel_dispatch_packet_t &packet, uint16_t header) {
     std::atomic_ref<uint16_t>(packet.header).store(header, std::memory_order_release);
+  }
+
+  [[nodiscard]] static uint32_t descriptor_private_segment_size(uint64_t kernel_object) {
+    if (kernel_object == 0)
+      return 0;
+
+    rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
+    std::memcpy(&descriptor, reinterpret_cast<const void *>(kernel_object), sizeof(descriptor));
+    return descriptor.private_segment_fixed_size;
+  }
+
+  static void ensure_intercept_packet_private_size(hsa_kernel_dispatch_packet_t &packet,
+                                                   uint64_t packet_id) {
+    const uint32_t descriptor_private = descriptor_private_segment_size(packet.kernel_object);
+    if (descriptor_private <= packet.private_segment_size)
+      return;
+
+    const uint32_t original_private = packet.private_segment_size;
+    packet.private_segment_size = descriptor_private;
+    trace_virtual_lds_dispatch("patched intercept private packet=%llu object=0x%llx private=%u->%u",
+                               static_cast<unsigned long long>(packet_id),
+                               static_cast<unsigned long long>(packet.kernel_object),
+                               original_private, descriptor_private);
+  }
+
+  static void ensure_queue_packet_private_size(hsa_kernel_dispatch_packet_t &packet,
+                                               uint64_t packet_id, uint32_t slot, uint16_t header) {
+    const uint32_t descriptor_private = descriptor_private_segment_size(packet.kernel_object);
+    if (descriptor_private <= packet.private_segment_size)
+      return;
+
+    const uint32_t original_private = packet.private_segment_size;
+    publish_packet_header(packet, 0);
+    packet.private_segment_size = descriptor_private;
+    publish_packet_header(packet, header);
+    trace_virtual_lds_dispatch(
+        "patched packet private packet=%llu slot=%u object=0x%llx private=%u->%u",
+        static_cast<unsigned long long>(packet_id), slot,
+        static_cast<unsigned long long>(packet.kernel_object), original_private,
+        descriptor_private);
   }
 
   static void note_packet_ready(QueueState &state, uint64_t packet_id, bool ready) {
@@ -2953,6 +3038,7 @@ private:
     }
 
     retire_slot_buffers(state, slot);
+    ensure_queue_packet_private_size(packet, packet_id, slot, header);
     auto plan = rewrite_plan_for_packet(packet);
     if (!plan) {
       if (packet.group_segment_size > kCdna3HardwareLdsBytes) {
@@ -2965,12 +3051,17 @@ private:
       return true;
     }
 
-    // AQL's group_segment_size is the total per-workgroup group memory request.
-    // It must already cover the descriptor's fixed group segment plus any
-    // dynamic group segment variables, so do not add the fixed size again when
-    // sizing the virtual backing allocation.
+    // AQL packets carry the total group-segment allocation that CP should
+    // request for the dispatch, not just the dynamic LDS tail. Rocjitsu still
+    // keeps the source static size in metadata because the virtual sidecar
+    // descriptor advertises zero hardware LDS once selected. Use the larger
+    // value: adding them double-counts static LDS and can force fallback even
+    // when the hardware allocation would still fit.
     const uint64_t requested_lds =
         std::max<uint64_t>(plan->static_lds_bytes, packet.group_segment_size);
+    // The sidecar path is selected only when dispatch-time total LDS exceeds
+    // the host hardware allocation limit. The normal descriptor remains the
+    // correct path for LDS-using kernels whose launch fits on CDNA3.
     if (requested_lds <= kCdna3HardwareLdsBytes) {
       if (packet.group_segment_size > kCdna3HardwareLdsBytes) {
         trace_virtual_lds_dispatch(
@@ -3022,6 +3113,7 @@ private:
         packet_pointer ? 0 : static_cast<size_t>(pointer_offset + sizeof(VirtualLdsDispatchState));
     const size_t state_bytes = packet_pointer ? sizeof(VirtualLdsDispatchState) : 0;
     const size_t backing_bytes = geometry->backing_bytes;
+    release_completed_retired_buffers(state);
     VirtualLdsDispatchBuffers buffers;
     if (!VirtualLdsDispatchAllocator::instance().allocate(state.host_agent, backing_bytes,
                                                           kernarg_bytes, state_bytes, buffers)) {
@@ -3062,6 +3154,7 @@ private:
     // the AQL packet field when handling dispatch-time scratch events.
     packet.private_segment_size = plan->virtual_private_segment_size;
     buffers.virtual_kernel_object = plan->virtual_kernel_object;
+    record_virtual_lds_completion_signal(buffers, packet);
     slot_buffers = buffers;
     publish_packet_header(packet, header);
 
@@ -3427,36 +3520,6 @@ hsa_status_t HSA_API rj_executable_symbol_get_info(hsa_executable_symbol_t execu
     uint64_t kernel_object = 0;
     std::memcpy(&kernel_object, value, sizeof(kernel_object));
     VirtualLdsRuntimeRegistry::instance().note_kernel_object(executable_symbol, kernel_object);
-    if (auto virtual_kernel_object =
-            VirtualLdsRuntimeRegistry::instance().static_oversized_virtual_kernel_object(
-                executable_symbol)) {
-      std::memcpy(value, &*virtual_kernel_object, sizeof(*virtual_kernel_object));
-      trace_virtual_lds_dispatch("symbol kernel_object uses virtual descriptor symbol=%llu "
-                                 "normal=0x%llx virtual=0x%llx",
-                                 static_cast<unsigned long long>(executable_symbol.handle),
-                                 static_cast<unsigned long long>(kernel_object),
-                                 static_cast<unsigned long long>(*virtual_kernel_object));
-    }
-  } else if (status == HSA_STATUS_SUCCESS &&
-             attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE &&
-             value != nullptr &&
-             VirtualLdsRuntimeRegistry::instance().uses_static_oversized_virtual_descriptor(
-                 executable_symbol)) {
-    const uint32_t virtual_group_segment_size = 0;
-    std::memcpy(value, &virtual_group_segment_size, sizeof(virtual_group_segment_size));
-    trace_virtual_lds_dispatch("symbol group segment size uses virtual descriptor symbol=%llu",
-                               static_cast<unsigned long long>(executable_symbol.handle));
-  } else if (status == HSA_STATUS_SUCCESS &&
-             attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE &&
-             value != nullptr) {
-    if (auto virtual_private_segment_size =
-            VirtualLdsRuntimeRegistry::instance().static_oversized_virtual_private_segment_size(
-                executable_symbol)) {
-      std::memcpy(value, &*virtual_private_segment_size, sizeof(*virtual_private_segment_size));
-      trace_virtual_lds_dispatch(
-          "symbol private segment size uses virtual descriptor symbol=%llu private=%u",
-          static_cast<unsigned long long>(executable_symbol.handle), *virtual_private_segment_size);
-    }
   }
   return status;
 }
