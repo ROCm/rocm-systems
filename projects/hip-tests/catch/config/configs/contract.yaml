@@ -321,6 +321,15 @@ contract:
   Contract_GraphNodeEnabled_DisabledNode_ActsAsEmpty:
     <<: *level_0
     tags: [graph_node_enabled]
+  Contract_GraphNodeAttributes_Cooperative_RoundTrips:
+    <<: *level_0
+    tags: [graph_node_attributes]
+  Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips:
+    <<: *level_0
+    tags: [graph_node_attributes]
+  Contract_GraphNodeAttributes_SetAttribute_RejectsInvalidInputs:
+    <<: *level_0
+    tags: [graph_node_attributes]
   Contract_HostMemory_HostMalloc_ReturnsUsablePointer:
     <<: *level_0
     tags: [host_memory]
