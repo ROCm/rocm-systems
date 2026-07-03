@@ -15,29 +15,25 @@ TEST(to_bool_test, numeric_nonzero_true)
 
 TEST(to_bool_test, numeric_zero_false) { EXPECT_FALSE(to_bool("0")); }
 
-TEST(to_bool_test, double_zero_false)
-{
-    // parsed numerically via from_chars: "00" -> 0 -> false
-    // (documented divergence from tim::get_bool, which treated "00" as true)
-    EXPECT_FALSE(to_bool("00"));
-}
+TEST(to_bool_test, double_zero_false) { EXPECT_FALSE(to_bool("00")); }
 
 TEST(to_bool_test, overflowing_digits_true)
 {
-    // an all-digit value that overflows uint64 is still truthy
     EXPECT_TRUE(to_bool("9999999999999999999999999"));
 }
 
 TEST(to_bool_test, false_tokens)
 {
-    for(const auto* _v : { "off", "false", "no", "n", "f" })
-        EXPECT_FALSE(to_bool(_v)) << "value: " << _v;
+    for(const auto* false_token : { "off", "false", "no", "n", "f" })
+    {
+        EXPECT_FALSE(to_bool(false_token)) << "value: " << false_token;
+    }
 }
 
 TEST(to_bool_test, true_tokens)
 {
-    for(const auto* _v : { "on", "true", "yes", "y", "t", "garbage" })
-        EXPECT_TRUE(to_bool(_v)) << "value: " << _v;
+    for(const auto* true_token : { "on", "true", "yes", "y", "t", "garbage" })
+        EXPECT_TRUE(to_bool(true_token)) << "value: " << true_token;
 }
 
 TEST(to_bool_test, case_insensitive)

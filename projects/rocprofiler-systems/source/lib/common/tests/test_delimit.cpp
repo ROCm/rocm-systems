@@ -18,8 +18,7 @@ TEST(delimit_test, basic_split)
 
 TEST(delimit_test, default_delimiters)
 {
-    // default set is "\"',;: " (space, comma, semicolon, colon, quotes)
-    EXPECT_EQ(delimit("a b,c"), (strvec{ "a", "b", "c" }));
+    EXPECT_EQ(delimit(R"(a"b'c,d;e:f g)"), (strvec{ "a", "b", "c", "d", "e", "f", "g" }));
 }
 
 TEST(delimit_test, empty_tokens_dropped)
@@ -34,7 +33,6 @@ TEST(delimit_test, leading_trailing_delimiters)
 
 TEST(delimit_test, multi_char_delimiter_set)
 {
-    // every character in the delimiter set is an independent separator
     EXPECT_EQ(delimit("a,b;c d", ",; "), (strvec{ "a", "b", "c", "d" }));
 }
 
