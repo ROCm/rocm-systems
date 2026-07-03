@@ -246,6 +246,24 @@ contract:
   Contract_GraphUpdate_ExecMemcpyNodeSetParams1D_UpdatesCopyDestination:
     <<: *level_0
     tags: [graph_update]
+  Contract_GraphUpdate_ExecUpdate_AppliesChangedMemsetValue:
+    <<: *level_0
+    tags: [graph_update]
+  Contract_GraphUpdate_ExecUpdate_ReportsTopologyChanged:
+    <<: *level_0
+    tags: [graph_update]
+  Contract_GraphUpdate_ExecHostNodeSetParams_UpdatesCallbackUserData:
+    <<: *level_0
+    tags: [graph_update]
+  Contract_GraphUpdate_ExecChildGraphNodeSetParams_UpdatesEmbeddedMemset:
+    <<: *level_0
+    tags: [graph_update]
+  Contract_GraphUpdate_ExecEventRecordNodeSetEvent_UpdatesRecordedEvent:
+    <<: *level_0
+    tags: [graph_update]
+  Contract_GraphUpdate_ExecEventWaitNodeSetEvent_AcceptsSwappedEvent:
+    <<: *level_0
+    tags: [graph_update]
   Contract_GraphNodeTypes_GetType_EmptyNodeReportsEmpty:
     <<: *level_0
     tags: [graph_node_types]
