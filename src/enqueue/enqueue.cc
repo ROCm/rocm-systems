@@ -428,6 +428,8 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
       t->count = bcastTask->count;
       t->root = bcastTask->root;
       t->datatype = bcastTask->datatype;
+      // Carry the profiler tag onto the converted coll task so its coll event reports it.
+      t->profilerTag = bcastTask->profilerTag;
       t->trafficBytes = t->count * ncclFuncTrafficPerByte(t->func, comm->nRanks);
       t->chunkSteps = BROADCAST_CHUNKSTEPS;
       t->sliceSteps = BROADCAST_SLICESTEPS;
@@ -2628,6 +2630,7 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   p2p->eActivationMask = ncclProfilerApiState.eActivationMask;
   p2p->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
   p2p->p2pApiEventHandle = ncclProfilerApiState.p2pApiEventHandle;
+  p2p->profilerTag = info->collConfig.userProfilerTag;
   ncclIntruQueueEnqueue(isSendNotRecv ? &planner->peers[peer].sendQueue : &planner->peers[peer].recvQueue, p2p);
   planner->nTasksP2p += 1;
   if (isSendNotRecv) planner->nTasksP2pSend += 1;
@@ -2672,6 +2675,18 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   return ncclSuccess;
 }
 
+// True when a user config sets only the observational userProfilerTag (nothing scheduling-
+// significant): no resource cap or algorithm selection (ncclCollConfigNeedAggIsolate), no CGA
+// cluster size, and no per-call CTAPolicy override. CTAPolicy is resolved in place before this
+// runs, so it is compared against the comm default (commCTAPolicy).
+static bool collConfigIsProfilerTagOnly(const ncclCollConfig_t* config, int commCTAPolicy) {
+  if (config->size == 0) return false; // no user config at all (not profiler-tag-only)
+  if (ncclCollConfigNeedAggIsolate(config)) return false;
+  if (config->cgaClusterSize != NCCL_CONFIG_UNDEF_INT) return false;
+  if (config->CTAPolicy != commCTAPolicy) return false;
+  return true;
+}
+
 static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info, struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner* planner = &comm->planner;
 
@@ -2685,8 +2700,13 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
+  // Plain broadcasts (no user config) use the batched-broadcast (AllGatherV) optimization. A config
+  // that sets only the observational profiler tag is schedule-neutral, so admit it too and carry the
+  // profiler tag through; a config with any resource/algorithm/CTA override still falls to the
+  // regular path.
   if (info->coll == ncclFuncBroadcast && ncclParamAllgathervEnable() && !comm->ccEnable &&
-      info->collConfig.size == 0) { // collConfig.size == 0 means no user config passed
+      (info->collConfig.size == 0 /* no user config passed */ ||
+       collConfigIsProfilerTagOnly(&info->collConfig, comm->config.CTAPolicy))) {
     // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
     struct ncclTaskBcast* t =
       ncclMemoryPoolAlloc<struct ncclTaskBcast>(&comm->memPool_ncclTaskBcast, &comm->memPermanent);
@@ -2696,6 +2716,8 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     t->count = info->count * ncclTypeSize(info->datatype);
     t->datatype = ncclInt8;
     t->root = info->root;
+    // 0 for a plain broadcast; the user value for a profiler-tag-only ncclBroadcastConfig.
+    t->profilerTag = info->collConfig.userProfilerTag;
 
     // update bcast min/max peer
     planner->bcast_info.minBcastPeer = std::min(planner->bcast_info.minBcastPeer, info->root);
@@ -2748,6 +2770,7 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &t->algMask));
     t->CTAPolicy = info->collConfig.CTAPolicy;
     t->forceAlgSelection = info->collConfig.forceAlgSelection;
+    t->profilerTag = info->collConfig.userProfilerTag;
     t->eActivationMask = ncclProfilerApiState.eActivationMask;
     t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
     t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
@@ -2839,6 +2862,7 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
   t->opDev = opDev; // C++ struct assignment
   t->chunkSteps = info->chunkSteps;
   t->sliceSteps = info->sliceSteps;
+  t->profilerTag = info->collConfig.userProfilerTag;
   t->eActivationMask = COMPILER_ATOMIC_LOAD(&ncclProfilerEventMask, std::memory_order_relaxed);
   t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
   t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;

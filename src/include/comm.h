@@ -253,6 +253,9 @@ struct ncclTaskColl {
   uint64_t algMask;    // set bit == algorithm allowed by the filter; 0 == automatic (no filter)
   int forceAlgSelection; // 1 (default) == error on unsatisfiable selection; 0 == fall back to automatic
   int CTAPolicy;  // resolved effective CTAPolicy for this task
+  // Per-call profiler annotation (0 == untagged), resolved at task-append time and
+  // delivered verbatim to profiler plugins.
+  uint64_t profilerTag;
 };
 
 struct ncclTaskBcast {
@@ -274,6 +277,7 @@ struct ncclTaskBcast {
   void* collApiEventHandle;
   void* eventHandle;
   uint8_t nChannels;
+  uint64_t profilerTag; // Per-call profiler annotation (0 == untagged)
 };
 
 struct ncclTaskP2p {
@@ -293,6 +297,7 @@ struct ncclTaskP2p {
   void* p2pApiEventHandle;
   void* eventHandle;
   uint8_t nChannels;
+  uint64_t profilerTag; // Per-call profiler annotation (0 == untagged)
   // Per-direction channels used by this task; read by the profiler to emit and
   // advertise KernelCh per direction (StartTaskEvents / PostPlanWork).
   uint64_t channelMask;
