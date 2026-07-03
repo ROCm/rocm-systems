@@ -180,6 +180,30 @@ contract:
   Contract_Kernel_InvalidConfiguration_RecordsReturnedError:
     <<: *level_0
     tags: [kernel]
+  Contract_FuncAttributes_GetAttributes_ReturnsSaneStruct:
+    <<: *level_0
+    tags: [func_attributes]
+  Contract_FuncAttributes_GetAttributes_NullAttr_IsRejected:
+    <<: *level_0
+    tags: [func_attributes]
+  Contract_FuncAttributes_GetAttributes_MatchesScalarGetAttribute:
+    <<: *level_0
+    tags: [func_attributes]
+  Contract_FuncAttributes_GetFuncBySymbol_ResolvesInSourceKernel:
+    <<: *level_0
+    tags: [func_attributes]
+  Contract_FuncAttributes_SetAttribute_MaxDynamicSharedMemory_IsAccepted:
+    <<: *level_0
+    tags: [func_attributes]
+  Contract_FuncAttributes_SetAttribute_PreferredCarveout_IsAccepted:
+    <<: *level_0
+    tags: [func_attributes]
+  Contract_FuncAttributes_SetCacheConfig_PreferNone_Succeeds:
+    <<: *level_0
+    tags: [func_attributes]
+  Contract_FuncAttributes_SetSharedMemConfig_Default_Succeeds:
+    <<: *level_0
+    tags: [func_attributes]
   Contract_Graph_CreateDestroy_Succeeds:
     <<: *level_0
     tags: [graph]

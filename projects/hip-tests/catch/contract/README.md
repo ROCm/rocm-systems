@@ -16,6 +16,7 @@ The first domains are:
 - `memset`: byte, word, dword, and async memset contracts
 - `error_api`: error name and string API contracts without backend-specific text assumptions
 - `kernel`: tiny in-source kernel launch contracts
+- `func_attributes`: runtime function attribute query, symbol, and configuration contracts
 - `graph`: graph lifecycle plus simple memcpy and memset node contracts
 - `occupancy`: portable occupancy query contracts for a tiny in-source kernel
 - `occupancy_ext`: occupancy with-flags and cluster query contracts
