@@ -175,8 +175,11 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_SetAttribute_RejectsInvalidInputs) {
                                          &attr_value) == hipErrorInvalidValue);
 
   // An attribute id outside the supported set must be rejected with an
-  // invalid-value error.
-  REQUIRE(hipGraphKernelNodeSetAttribute(kernel_node, hipLaunchAttributeMax,
+  // invalid-value error. A large sentinel value is used instead of a named
+  // upper-bound enumerator so this contract compiles portably on backends that
+  // do not define such an enumerator.
+  const auto invalid_attr = static_cast<hipKernelNodeAttrID>(0x7fffffff);
+  REQUIRE(hipGraphKernelNodeSetAttribute(kernel_node, invalid_attr,
                                          &attr_value) == hipErrorInvalidValue);
 
   HIP_CHECK(hipGraphDestroy(graph));
