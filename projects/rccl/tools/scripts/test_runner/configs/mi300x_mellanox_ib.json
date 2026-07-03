@@ -302,7 +302,7 @@
     "net_ib_coverage_env": {
       "extends": "net_ib_base",
       "timeout": 300,
-      "_comment": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
+      "description": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
       "env_variables": {
         "NCCL_IB_GID_INDEX": "-1",
         "NCCL_IB_PCI_RELAXED_ORDERING": "0",
@@ -338,7 +338,7 @@
     "net_ib_merge_disabled": {
       "extends": "net_ib_base",
       "timeout": 60,
-      "_comment": "Exercises the makeVDevice merge-disabled guard, which only runs with NCCL_IB_MERGE_NICS=0 (the rest of the suite uses 1). Without this entry MakeVirtualDeviceMergeDisabled always GTEST_SKIPs in CI.",
+      "description": "Exercises the makeVDevice merge-disabled guard, which only runs with NCCL_IB_MERGE_NICS=0 (the rest of the suite uses 1). Without this entry MakeVirtualDeviceMergeDisabled always GTEST_SKIPs in CI.",
       "env_variables": {
         "NCCL_IB_MERGE_NICS": "0"
       },
@@ -353,7 +353,7 @@
     "net_ib_vnic_validation": {
       "extends": "net_ib_base",
       "timeout": 120,
-      "_comment": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
+      "description": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
       "env_variables": {
         "NCCL_IB_WARN_RAIL_LOCAL": "1"
       },
@@ -1132,6 +1132,22 @@
           "name": "FaultInj_Cast_OpsApiInvalidArgs",
           "description": "CAST ops-overload: API guard branches - NULL comm returns ncclInvalidArgument; arm/clear on a registered context succeeds",
           "test_filter": "NetIbMPITest.FaultInjCastOpsApiInvalidArgs"
+        }
+      ]
+    },
+
+    "fault_inject_ops_unit": {
+      "extends": "net_ib_base",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "description": "Pure-unit coverage of the ops-overload fault mechanism: a fake ibv_context drives the inner ncclIbOpsFault* guards and shim error paths directly. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware).",
+      "tests": [
+        {
+          "name": "FaultInj_OpsUnit_All",
+          "description": "Fake-ibv_context unit tests for net_ib_ops_fault.cc: install/remove lifecycle, NULL/unregistered guards, post_send/post_recv errno shims, poll_cq rewrite/synthesize, lost-real-op defensive guard",
+          "test_filter": "OpsFaultUnit.*"
         }
       ]
     },
@@ -3086,6 +3102,12 @@
       "name": "NET IB - Fault Injection (CAST path, QPS=4, splitData=1)",
       "description": "Per-QP fault injection on CAST multi-QP path: error propagation, RTT rebalancing, data integrity under delay",
       "config": "fault_inject_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Ops Unit (fake ibv_context)",
+      "description": "Pure-unit coverage of the ops-overload mechanism via a fabricated ibv_context: inner guard branches and shim error paths. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware)",
+      "config": "fault_inject_ops_unit",
       "enabled": true
     },
     {

@@ -12,7 +12,6 @@ vop3_modifiers helpers.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
     vop3_dst_mod,
@@ -27,7 +26,6 @@ def gen_vector_unary(
     dtype: str | None,
     is_vop3: bool = False,
     has_abs: bool = False,
-    arch_name: str = '',
 ) -> str:
     """Generate vector unary operation body."""
     L = []
@@ -189,32 +187,36 @@ def gen_vector_unary(
         )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
     elif op == 'cvt_f32_fp8':
-        conv = fp8_helper_name(arch_name, 'util::fp8_e4m3_to_f32')
         L.append(
-            f'    float r = {conv}(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
+            f'    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
         )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
     elif op == 'cvt_f32_bf8':
-        conv = fp8_helper_name(arch_name, 'util::bf8_e5m2_to_f32')
         L.append(
-            f'    float r = {conv}(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
+            f'    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
         )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
     elif op == 'cvt_pk_f32_fp8':
         # Unpack two FP8 values into two F32s in dst[0] and dst[0]+1
-        conv = fp8_helper_name(arch_name, 'util::fp8_e4m3_to_f32')
         L.append(f'    uint32_t raw = {src[0]}.read_lane(wf, lane);')
-        L.append(f'    float lo = {conv}(static_cast<uint8_t>(raw & 0xFF));')
-        L.append(f'    float hi = {conv}(static_cast<uint8_t>((raw >> 8) & 0xFF));')
+        L.append(
+            f'    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFF));'
+        )
+        L.append(
+            f'    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(lo));')
         L.append(
             f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
         )
     elif op == 'cvt_pk_f32_bf8':
-        conv = fp8_helper_name(arch_name, 'util::bf8_e5m2_to_f32')
         L.append(f'    uint32_t raw = {src[0]}.read_lane(wf, lane);')
-        L.append(f'    float lo = {conv}(static_cast<uint8_t>(raw & 0xFF));')
-        L.append(f'    float hi = {conv}(static_cast<uint8_t>((raw >> 8) & 0xFF));')
+        L.append(
+            f'    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFF));'
+        )
+        L.append(
+            f'    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(lo));')
         L.append(
             f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
