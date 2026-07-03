@@ -11,7 +11,6 @@
 #include "log.hpp"
 #include "module_function.hpp"
 
-#include "common/join.hpp"
 #include <spdlog/fmt/ranges.h>
 #include <timemory/utility/filepath.hpp>
 
