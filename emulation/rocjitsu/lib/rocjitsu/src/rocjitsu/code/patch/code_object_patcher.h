@@ -60,7 +60,8 @@ public:
                                            uint64_t old_entry_text_offset,
                                            uint64_t new_entry_text_offset);
 
-  std::vector<uint8_t> emit() const;
+  std::vector<uint8_t> emit() const &;
+  std::vector<uint8_t> emit() &&;
 
 private:
   std::vector<uint8_t> image_;

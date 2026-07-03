@@ -23,6 +23,7 @@ RJ_DIAGNOSTIC_POP
 // Standard library
 #include <span>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -675,6 +676,8 @@ bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
   return true;
 }
 
-std::vector<uint8_t> CodeObjectPatcher::emit() const { return image_; }
+std::vector<uint8_t> CodeObjectPatcher::emit() const & { return image_; }
+
+std::vector<uint8_t> CodeObjectPatcher::emit() && { return std::move(image_); }
 
 } // namespace rocjitsu

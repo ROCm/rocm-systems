@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -172,6 +173,7 @@ struct KernelTranslationScope {
 /// offset. Keeping this compact sorted index avoids rebuilding that lookup while
 /// preserving BasicBlock ownership in the vector returned by BasicBlock::build().
 using BlockOffsetIndex = std::vector<std::pair<uint64_t, BasicBlock *>>;
+using BlockPositionIndex = std::unordered_map<const BasicBlock *, size_t>;
 
 [[nodiscard]] BlockOffsetIndex
 build_block_offset_index(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
@@ -182,6 +184,17 @@ build_block_offset_index(const std::vector<std::unique_ptr<BasicBlock>> &blocks)
       index.emplace_back(block->start_offset(), block.get());
   }
   std::ranges::sort(index, {}, &std::pair<uint64_t, BasicBlock *>::first);
+  return index;
+}
+
+[[nodiscard]] BlockPositionIndex
+build_block_position_index(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  BlockPositionIndex index;
+  index.reserve(blocks.size());
+  for (size_t i = 0; i < blocks.size(); ++i) {
+    if (blocks[i] != nullptr)
+      index.emplace(blocks[i].get(), i);
+  }
   return index;
 }
 
@@ -200,33 +213,44 @@ build_block_offset_index(const std::vector<std::unique_ptr<BasicBlock>> &blocks)
 
 [[nodiscard]] std::vector<BasicBlock *>
 reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                        const BlockOffsetIndex &block_index, BasicBlock &entry,
+                        const BlockOffsetIndex &block_index,
+                        const BlockPositionIndex &block_positions, BasicBlock &entry,
                         const std::unordered_set<uint64_t> &kernel_entries,
                         const std::unordered_set<uint64_t> &own_entries) {
-  std::unordered_set<const BasicBlock *> reachable;
-  std::vector<BasicBlock *> stack{&entry};
+  std::vector<uint8_t> reachable(blocks.size(), 0);
+  std::vector<size_t> reached_indices;
+  std::vector<size_t> stack;
+  auto push_block = [&](BasicBlock *block) {
+    auto it = block_positions.find(block);
+    if (it != block_positions.end())
+      stack.push_back(it->second);
+  };
+  push_block(&entry);
   for (const uint64_t own_entry : own_entries) {
     if (own_entry == entry.start_offset())
       continue;
     if (BasicBlock *extra_entry = block_for_offset(block_index, own_entry);
         extra_entry != nullptr && extra_entry != &entry) {
-      stack.push_back(extra_entry);
+      push_block(extra_entry);
     }
   }
 
   while (!stack.empty()) {
-    BasicBlock *block = stack.back();
+    const size_t block_idx = stack.back();
     stack.pop_back();
-    assert(block != nullptr && "reachable walk stack should contain only decoded blocks");
-    if (!reachable.insert(block).second)
+    if (block_idx >= blocks.size() || reachable[block_idx])
       continue;
+    reachable[block_idx] = 1;
+    reached_indices.push_back(block_idx);
+    BasicBlock *block = blocks[block_idx].get();
+    assert(block != nullptr && "reachable walk stack should contain only decoded blocks");
 
     for (BasicBlock *succ : block->successors()) {
       assert(succ != nullptr && "BasicBlock successors should never be null");
       if (!own_entries.contains(succ->start_offset()) &&
           kernel_entries.contains(succ->start_offset()))
         continue;
-      stack.push_back(succ);
+      push_block(succ);
     }
     // Ordinary CFG successors describe control that always follows from the
     // current program counter: fallthroughs, conditional targets, direct branch
@@ -242,15 +266,16 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
       if (!own_entries.contains(callee->start_offset()) &&
           kernel_entries.contains(callee->start_offset()))
         continue;
-      stack.push_back(callee);
+      push_block(callee);
     }
   }
 
+  std::ranges::sort(reached_indices);
   std::vector<BasicBlock *> ordered;
-  ordered.reserve(reachable.size());
-  for (const auto &block : blocks) {
-    if (block && reachable.contains(block.get()))
-      ordered.push_back(block.get());
+  ordered.reserve(reached_indices.size());
+  for (size_t block_idx : reached_indices) {
+    if (blocks[block_idx])
+      ordered.push_back(blocks[block_idx].get());
   }
   return ordered;
 }
@@ -263,6 +288,7 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
   if (entries.empty())
     return scopes;
 
+  const BlockPositionIndex block_positions = build_block_position_index(blocks);
   const auto hardware_entries = kernel_hardware_entry_offsets(kernels);
   std::unordered_set<uint64_t> entry_set(hardware_entries.begin(), hardware_entries.end());
   std::vector<KdTranslation *> ordered_kernels;
@@ -289,9 +315,9 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
       own_entries.insert(kernel->kernarg_preload_entry_text_offset);
     }
 
-    scopes.push_back(
-        {kernel, entry,
-         reachable_kernel_blocks(blocks, block_index, *entry, entry_set, own_entries)});
+    scopes.push_back({kernel, entry,
+                      reachable_kernel_blocks(blocks, block_index, block_positions, *entry,
+                                              entry_set, own_entries)});
   }
   return scopes;
 }
@@ -469,17 +495,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   //    followed directly; call_edges() are followed only to include the callee
   //    body in the current kernel-local scope.
   // 4. Emit each kernel's reachable blocks into a compact, source-ordered body.
-  // 5. Translate instructions in that relocated body and append oversized
-  //    expansions or descriptor ABI prologues into the kernel-local cave.
+  // 5. Translate instructions with a forward cursor; oversized replacements grow
+  //    the current block and recovered indirect transfers reserve patch windows.
   // 6. Patch direct PC-relative branches through the kernel-local placement map.
-  // 7. Rewrite recovered indirect-branch address builders in place. Static PC
-  //    recovery identifies the original getpc-relative instructions that built
-  //    the branch target and records only ranges large enough for the canonical
-  //    relocated PC-delta builder. BasicBlock models setpc-style targets as
-  //    ordinary CFG successors and validated swappc calls as call_edges(), so
-  //    DBT can add return continuations only inside the kernel scope that owns
-  //    the call site. After relocation, DBT overwrites the old builder range
-  //    with the canonical sequence and pads any leftover words with s_nop.
+  // 7. Patch recovered indirect branches/calls either at their reserved transfer
+  //    windows or, for multi-target consumers, by rewriting the recovered
+  //    source-side PC builders once per distinct builder range. BasicBlock
+  //    models setpc-style targets as ordinary CFG successors and validated
+  //    swappc calls as call_edges(), so DBT can add return continuations only
+  //    inside the kernel scope that owns the call site.
   // 8. Replace the ELF .text payload and redirect descriptors to their new entries.
   auto decoder = Decoder::create(guest_arch_);
   if (!decoder) {
@@ -532,35 +556,75 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
 
   std::vector<uint8_t> translated_text;
+  translated_text.reserve(text.size());
   const bool continue_after_failure = options_.debug_continue_after_failure;
 
-  auto copy_original_instruction = [&](const Instruction &inst, uint64_t offset,
-                                       uint64_t target_offset) {
-    const uint32_t inst_size = inst.size();
-    std::memcpy(translated_text.data() + target_offset, text.data() + offset, inst_size);
+  struct PendingTrace {
+    uint64_t source_offset = 0;
+    uint32_t source_size = 0;
+    std::vector<uint32_t> source_words;
+    const InstructionLegalization *legalization = nullptr;
+    bool copied_original = false;
+    bool semantic_lowering = false;
+    bool changed = false;
+    uint64_t target_offset = 0;
+    std::vector<uint32_t> target_words;
+  };
+
+  auto queue_trace = [&](std::vector<PendingTrace> &pending, const Instruction &inst,
+                         uint64_t offset, const InstructionLegalization *leg, bool copied_original,
+                         bool semantic_lowering, bool changed, uint64_t target_offset,
+                         std::vector<uint32_t> target_words) {
     if (!trace_callback_)
       return;
+    pending.push_back({.source_offset = offset,
+                       .source_size = static_cast<uint32_t>(inst.size()),
+                       .source_words = raw_words_for_inst(inst),
+                       .legalization = leg,
+                       .copied_original = copied_original,
+                       .semantic_lowering = semantic_lowering,
+                       .changed = changed,
+                       .target_offset = target_offset,
+                       .target_words = std::move(target_words)});
+  };
 
+  auto flush_traces = [&](std::vector<PendingTrace> &pending, uint64_t target_delta) {
+    if (!trace_callback_)
+      return;
+    for (PendingTrace &trace : pending) {
+      trace_callback_({.source_offset = trace.source_offset,
+                       .source_size = trace.source_size,
+                       .source_words = trace.source_words,
+                       .legalization = trace.legalization,
+                       .copied_original = trace.copied_original,
+                       .semantic_lowering = trace.semantic_lowering,
+                       .changed = trace.changed,
+                       .emitted_in_cave = false,
+                       .target_offset = trace.target_offset + target_delta,
+                       .target_words = trace.target_words});
+    }
+  };
+
+  auto copy_original_instruction = [&](const Instruction &inst, uint64_t offset,
+                                       std::vector<uint8_t> &kernel_text,
+                                       std::vector<PendingTrace> &pending_traces) {
+    const uint32_t inst_size = inst.size();
+    const uint64_t target_offset = kernel_text.size();
+    const auto *words = reinterpret_cast<const uint32_t *>(text.data() + offset);
+    std::vector<uint32_t> copied_words(words, words + inst_size / sizeof(uint32_t));
+    append_words(kernel_text, copied_words);
     // Continued-failure mode is diagnostic-only. Emit an explicit copy event so
     // diff reports make it clear which failed source instruction was preserved.
-    const auto source_words = raw_words_for_inst(inst);
-    trace_callback_({.source_offset = offset,
-                     .source_size = inst_size,
-                     .source_words = source_words,
-                     .legalization = nullptr,
-                     .copied_original = true,
-                     .semantic_lowering = false,
-                     .changed = false,
-                     .emitted_in_cave = false,
-                     .target_offset = target_offset,
-                     .target_words = source_words});
+    queue_trace(pending_traces, inst, offset, nullptr, true, false, false, target_offset,
+                std::move(copied_words));
   };
 
   auto continue_after_instruction_error = [&](const Instruction &inst, uint64_t offset,
-                                              uint64_t target_offset) {
+                                              std::vector<uint8_t> &kernel_text,
+                                              std::vector<PendingTrace> &pending_traces) {
     if (!continue_after_failure)
       return false;
-    copy_original_instruction(inst, offset, target_offset);
+    copy_original_instruction(inst, offset, kernel_text, pending_traces);
     return true;
   };
 
@@ -584,14 +648,25 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     write_words_at(translated_text, cursor, std::span<const uint32_t>(&branch, 1));
   };
 
+  auto relocation_diagnostic_kind = [](const TextRelocationResult &relocation) {
+    if (relocation.message.find("range") != std::string::npos ||
+        relocation.message.find("exceeds") != std::string::npos ||
+        relocation.message.find("cannot encode") != std::string::npos ||
+        relocation.message.find("outside translated") != std::string::npos) {
+      return DiagnosticKind::ResourceLimit;
+    }
+    return DiagnosticKind::Legalization;
+  };
+
   for (const KernelTranslationScope &scope : scopes) {
     if (scope.blocks.empty())
       continue;
 
-    // Phase 3: assign compact target offsets for this kernel before translating
-    // instructions. The layout is per-kernel, so source blocks shared by multiple
-    // kernels are deliberately duplicated with distinct target offsets. Local
-    // cave writes may append bytes, so body placement must be fixed first.
+    // Phase 3: translate this kernel into a temporary, source-ordered body. The
+    // body starts at offset zero while it is being built; after final padding and
+    // any launch window are chosen, every recorded target offset is rebased into
+    // the output .text. This lets instruction expansions change block sizes
+    // without precomputing speculative side-region offsets.
     KernelTextLayout layout;
     layout.translation = scope.translation;
     layout.source_entry = scope.translation->entry_text_offset;
@@ -607,139 +682,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       return leave_unchanged();
     }
 
-    // The entry block is not necessarily the first reachable source block. The
-    // relocated body is compact, so compute the entry delta from emitted block
-    // sizes rather than from original .text spacing. This keeps the launch
-    // address aligned without preserving unrelated padding or helper gaps.
-    uint64_t entry_delta = 0;
-    bool found_entry_delta = false;
-    for (BasicBlock *block : scope.blocks) {
-      if (layout.source_entry >= block->start_offset() &&
-          layout.source_entry < block->end_offset()) {
-        entry_delta += layout.source_entry - block->start_offset();
-        found_entry_delta = true;
-        break;
-      }
-      entry_delta += block->size();
-    }
-    if (!found_entry_delta) {
-      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                   "kernel descriptor entry offset is not present in the reachable body",
-                   layout.source_entry);
-      return leave_unchanged();
-    }
-
-    if (has_kernarg_preload) {
-      // Kernarg-preload kernels have two hardware-visible entries:
-      //
-      //   compat_firmware_entry:
-      //     <compatibility preload words>
-      //     s_branch common_entry
-      //     ... // firmware_entry is 256 bytes after compat_firmware_entry
-      //   firmware_entry:
-      //     <preloaded-kernarg path words>
-      //     s_branch common_entry
-      //   common_entry:
-      //     ...
-      //
-      // Compatible CP firmware enters at descriptor entry + 256 when
-      // kernarg_preload_spec_length is non-zero. Older/incompatible firmware
-      // enters at the descriptor entry. DBT relocates the original source
-      // blocks normally, then synthesizes a fresh launch window:
-      //
-      //   new_compat_firmware_entry:
-      //     <descriptor ABI prologue words>
-      //     s_branch compat_firmware_entry_translated
-      //     ... // new_firmware_entry is exactly 256 bytes later
-      //   new_firmware_entry:
-      //     <descriptor ABI prologue words>
-      //     s_branch firmware_entry_translated
-      //
-      // The descriptor is redirected to new_compat_firmware_entry. Compatible
-      // firmware still adds 256 and lands on new_firmware_entry; older firmware
-      // executes the compatibility stub. The original 256-byte source window is
-      // no longer preserved as layout padding, because the ABI requirement is
-      // the pair of legal entries, not the original physical bytes.
-      const uint64_t launch_padding =
-          padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
-      append_nop_padding(translated_text, launch_padding, host_arch_);
-      layout.target_entry = translated_text.size();
-      const uint64_t launch_end =
-          layout.target_entry + kKernargPreloadSkipBytes + launch_stub_bytes;
-      append_nop_padding(translated_text, launch_end - translated_text.size(), host_arch_);
-    } else {
-      const uint64_t body_padding =
-          padding_for_residue(translated_text.size() + entry_delta, layout.source_entry % 256, 256);
-      append_nop_padding(translated_text, body_padding, host_arch_);
-    }
-
-    layout.body_begin = translated_text.size();
-    uint64_t cursor = layout.body_begin;
-    layout.blocks.reserve(scope.blocks.size());
-    for (BasicBlock *block : scope.blocks) {
-      layout.blocks.push_back({.block = block,
-                               .source_start = block->start_offset(),
-                               .source_end = block->end_offset(),
-                               .target_start = cursor,
-                               .target_end = cursor + block->size()});
-      cursor += block->size();
-    }
-    layout.body_end = cursor;
-    layout.cave_begin = layout.body_end;
-    layout.cave_end = layout.body_end;
-
-    // Reserve the compact source-ordered body before instruction translation.
-    // Expansion helpers can then append local cave bytes without invalidating
-    // any precomputed body placements.
-    append_nop_padding(translated_text, layout.body_end - translated_text.size(), host_arch_);
-    auto body_entry = target_for_source_offset(layout, layout.source_entry);
-    if (!body_entry) {
-      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                   "kernel descriptor entry offset is not present in the relocated body",
-                   layout.source_entry);
-      return leave_unchanged();
-    }
-    layout.target_body_entry = *body_entry;
-
-    if (has_kernarg_preload) {
-      auto preload_body_entry = target_for_source_offset(layout, source_preload_entry);
-      if (!preload_body_entry) {
-        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                     "kernarg preload firmware entry offset is not present in the relocated body",
-                     source_preload_entry);
-        return leave_unchanged();
-      }
-      write_launch_stub(layout, layout.target_entry, layout.target_body_entry);
-      write_launch_stub(layout, layout.target_entry + kKernargPreloadSkipBytes,
-                        *preload_body_entry);
-    } else if (!scope.translation->prologue_words.empty()) {
-      // Descriptor prologues are hardware entry points. Align the cave prologue
-      // to the original entry residue, then branch into the relocated body.
-      const uint64_t prologue_padding =
-          padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
-      append_nop_padding(translated_text, prologue_padding, host_arch_);
-      layout.target_entry = translated_text.size();
-      append_words(translated_text, scope.translation->prologue_words);
-
-      const uint64_t branch_pc = translated_text.size();
-      const auto branch_dwords = compute_sopp_branch_simm16(branch_pc, layout.target_body_entry);
-      if (!branch_dwords) {
-        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
-                     "kernel descriptor prologue branch range exceeds s_branch simm16; leaving "
-                     "code object unchanged",
-                     layout.source_entry);
-        return leave_unchanged();
-      }
-      const uint32_t branch = build_s_branch(*branch_dwords, host_arch_);
-      append_words(translated_text, std::span<const uint32_t>(&branch, 1));
-      layout.cave_end = translated_text.size();
-    } else {
-      layout.target_entry = layout.target_body_entry;
-    }
-
-    scope.translation->target_entry_text_offset = layout.target_entry;
-    scope.translation->target_body_entry_text_offset = layout.target_body_entry;
-
     TranslationContext kernel_context(
         scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
         scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count);
@@ -749,40 +691,95 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
     LivenessAnalysis liveness(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
 
-    // Phase 4: translate each relocated body instruction. Oversized semantic
-    // expansions branch into this kernel's private cave immediately after the body.
-    //
+    // Phase 4: translate each relocated body instruction at the current cursor.
     // Return-like s_setpc_b64 instructions are accepted only when they are the
     // terminator of a block reached from a validated call edge in this
-    // kernel-local scope.
+    // kernel-local scope. Recovered indirect setpc/swappc consumers reserve a
+    // fixed maximum-size window when recovery proves one effective target. When
+    // one dynamic consumer has multiple recovered targets, no single direct
+    // window can preserve semantics; DBT keeps the original indirect consumer
+    // and asks the patch layer to rewrite each source-side PC builder once.
     const std::unordered_set<uint64_t> valid_call_return_offsets =
         scoped_call_return_offsets(KernelBlockScope(scope.blocks), text);
-    std::unordered_set<uint64_t> recovered_indirect_call_offsets;
-    for (const BlockPlacement &placement : layout.blocks) {
-      BasicBlock *block = placement.block;
+    struct RecoveredConsumer {
+      std::vector<IndirectCallFixup> fixups;
+      bool use_transfer_window = false;
+      IndirectCallFixup window_fixup;
+    };
+    std::unordered_map<uint64_t, RecoveredConsumer> recovered_indirect_by_call;
+    for (BasicBlock *block : scope.blocks) {
       for (const IndirectCallFixup &source_fixup : block->static_indirect_call_fixups()) {
-        IndirectCallFixup fixup = source_fixup;
-        auto getpc_target = target_for_source_offset(layout, fixup.source_getpc_offset);
-        auto recovery_begin_target =
-            target_for_source_offset(layout, fixup.source_recovery_begin_offset);
-        auto recovery_end_target =
-            target_for_source_offset(layout, fixup.source_recovery_end_offset);
-        if (getpc_target && recovery_begin_target && recovery_end_target) {
-          fixup.target_getpc_offset = *getpc_target;
-          fixup.target_recovery_begin_offset = *recovery_begin_target;
-          fixup.target_recovery_end_offset = *recovery_end_target;
-          layout.indirect_call_fixups.push_back(fixup);
-          recovered_indirect_call_offsets.insert(fixup.source_call_offset);
+        recovered_indirect_by_call[source_fixup.source_call_offset].fixups.push_back(source_fixup);
+      }
+    }
+
+    std::vector<IndirectCallFixup> pending_builder_fixups;
+    for (auto &[source_call_offset, consumer] : recovered_indirect_by_call) {
+      if (consumer.fixups.empty())
+        continue;
+
+      const IndirectCallFixup &first = consumer.fixups.front();
+      bool single_effective_target = true;
+      for (const IndirectCallFixup &fixup : consumer.fixups) {
+        if (fixup.source_call_sreg != first.source_call_sreg ||
+            fixup.source_is_call != first.source_is_call ||
+            fixup.source_return_sreg != first.source_return_sreg) {
+          append_error(result.diagnostics, DiagnosticKind::Legalization,
+                       "recovered indirect branch has inconsistent consumer metadata",
+                       source_call_offset, "indirect branch");
+          return leave_unchanged();
         }
+        if (fixup.source_target_offset != first.source_target_offset)
+          single_effective_target = false;
       }
 
-      uint64_t offset = block->start_offset();
-      uint64_t target_offset = placement.target_start;
+      if (single_effective_target) {
+        consumer.use_transfer_window = true;
+        consumer.window_fixup = first;
+      } else {
+        pending_builder_fixups.insert(pending_builder_fixups.end(), consumer.fixups.begin(),
+                                      consumer.fixups.end());
+      }
+    }
+
+    std::vector<uint8_t> kernel_text;
+    std::vector<PendingTrace> pending_traces;
+    uint64_t source_body_size = 0;
+    for (BasicBlock *block : scope.blocks)
+      source_body_size += block->size();
+    const uint64_t recovered_window_growth =
+        recovered_indirect_by_call.size() * kMaxRecoveredIndirectTransferWords * sizeof(uint32_t);
+    kernel_text.reserve(static_cast<size_t>(std::min<uint64_t>(
+        source_body_size + recovered_window_growth, std::numeric_limits<size_t>::max())));
+
+    std::unordered_set<uint64_t> needed_builder_source_offsets;
+    needed_builder_source_offsets.reserve(pending_builder_fixups.size() * 3);
+    for (const IndirectCallFixup &fixup : pending_builder_fixups) {
+      needed_builder_source_offsets.insert(fixup.source_getpc_offset);
+      needed_builder_source_offsets.insert(fixup.source_recovery_begin_offset);
+      needed_builder_source_offsets.insert(fixup.source_recovery_end_offset);
+    }
+    std::unordered_map<uint64_t, uint64_t> target_offset_by_source_offset;
+    target_offset_by_source_offset.reserve(needed_builder_source_offsets.size());
+    layout.body_begin = 0;
+    layout.blocks.reserve(scope.blocks.size());
+    for (BasicBlock *block : scope.blocks) {
+      BlockPlacement placement{.block = block,
+                               .source_start = block->start_offset(),
+                               .source_end = block->end_offset(),
+                               .target_start = kernel_text.size(),
+                               .target_end = kernel_text.size()};
+
       for (auto it = block->instructions().begin(); it != block->instructions().end(); ++it) {
         const auto &inst = *it;
+        const uint64_t offset = inst.src_loc();
+        const uint64_t target_offset = kernel_text.size();
         const uint32_t inst_size = inst.size();
+        if (needed_builder_source_offsets.contains(offset))
+          target_offset_by_source_offset.emplace(offset, target_offset);
 
-        const bool has_recovered_indirect_call = recovered_indirect_call_offsets.contains(offset);
+        const auto recovered_it = recovered_indirect_by_call.find(offset);
+        const bool has_recovered_indirect_call = recovered_it != recovered_indirect_by_call.end();
         const bool recovered_indirect_return = valid_call_return_offsets.contains(offset);
         const auto direct_branch_delta = inst.branch_offset_bytes();
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
@@ -791,9 +788,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                        "indirect branch or call target recovery is not implemented for relocated "
                        "kernel text",
                        offset, std::string(inst.mnemonic()));
-          if (continue_after_instruction_error(inst, offset, target_offset)) {
-            offset += inst_size;
-            target_offset += inst_size;
+          if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
             continue;
           }
           return leave_unchanged();
@@ -809,9 +804,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             append_error(result.diagnostics, DiagnosticKind::Legalization,
                          "direct branch target is outside the source .text range", offset,
                          std::string(inst.mnemonic()));
-            if (continue_after_instruction_error(inst, offset, target_offset)) {
-              offset += inst_size;
-              target_offset += inst_size;
+            if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
               continue;
             }
             return leave_unchanged();
@@ -823,23 +816,23 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                .target_inst_offset = target_offset});
         }
 
+        if (has_recovered_indirect_call && recovered_it->second.use_transfer_window) {
+          const IndirectCallFixup &source_fixup = recovered_it->second.window_fixup;
+          layout.recovered_indirect_fixups.push_back(
+              {.source_call_offset = source_fixup.source_call_offset,
+               .source_target_offset = source_fixup.source_target_offset,
+               .target_window_offset = target_offset,
+               .target_sreg = source_fixup.source_call_sreg,
+               .return_sreg = source_fixup.source_return_sreg,
+               .is_call = source_fixup.source_is_call});
+          append_nop_padding(kernel_text, kMaxRecoveredIndirectTransferWords * sizeof(uint32_t),
+                             host_arch_);
+          continue;
+        }
+
         const uint32_t *raw = inst.raw_encoding();
         if (!raw) {
-          std::memcpy(translated_text.data() + target_offset, text.data() + offset, inst_size);
-          if (trace_callback_) {
-            trace_callback_({.source_offset = offset,
-                             .source_size = inst_size,
-                             .source_words = {},
-                             .legalization = nullptr,
-                             .copied_original = true,
-                             .semantic_lowering = false,
-                             .changed = false,
-                             .emitted_in_cave = false,
-                             .target_offset = target_offset,
-                             .target_words = {}});
-          }
-          offset += inst_size;
-          target_offset += inst_size;
+          copy_original_instruction(inst, offset, kernel_text, pending_traces);
           continue;
         }
 
@@ -862,42 +855,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                              ? "semantic EXPAND rule matched, but could not safely lower"
                              : expansion.message,
                          offset, std::string(inst.mnemonic()), std::move(expansion.required_work));
-            if (continue_after_instruction_error(inst, offset, target_offset)) {
-              offset += inst_size;
-              target_offset += inst_size;
+            if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
               continue;
             }
             return leave_unchanged();
           }
 
           if (expansion.status == ExpandStatus::Success) {
-            const bool emitted_in_cave = expansion.words.size() * sizeof(uint32_t) > inst_size;
-            const uint64_t event_target_offset = emitted_in_cave ? layout.cave_end : target_offset;
-            SemanticReplacement repl{target_offset, target_offset + inst_size,
-                                     std::move(expansion.words)};
-            if (!apply_semantic(repl, translated_text, layout, text, offset + inst_size)) {
-              if (continue_after_instruction_error(inst, offset, target_offset)) {
-                offset += inst_size;
-                target_offset += inst_size;
-                continue;
-              }
-              return leave_unchanged();
-            }
-            if (trace_callback_) {
-              const auto source_words = raw_words_for_inst(inst);
-              trace_callback_({.source_offset = offset,
-                               .source_size = inst_size,
-                               .source_words = source_words,
-                               .legalization = leg,
-                               .copied_original = false,
-                               .semantic_lowering = true,
-                               .changed = true,
-                               .emitted_in_cave = emitted_in_cave,
-                               .target_offset = event_target_offset,
-                               .target_words = repl.target_words});
-            }
-            offset += inst_size;
-            target_offset += inst_size;
+            std::vector<uint32_t> target_words = std::move(expansion.words);
+            append_words(kernel_text, target_words);
+            queue_trace(pending_traces, inst, offset, leg, false, true, true, target_offset,
+                        std::move(target_words));
             continue;
           }
         }
@@ -907,125 +875,152 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                        "legalization requires EXPAND, but no expansion rule is implemented", offset,
                        std::string(inst.mnemonic()),
                        {"Add a semantic expansion rule for this mnemonic."});
-          if (continue_after_instruction_error(inst, offset, target_offset)) {
-            offset += inst_size;
-            target_offset += inst_size;
+          if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
             continue;
           }
           return leave_unchanged();
         }
 
-        if (!handle_encoding(inst, offset, target_offset, translated_text, dst_opcode, layout, text,
-                             leg)) {
-          if (continue_after_instruction_error(inst, offset, target_offset)) {
-            offset += inst_size;
-            target_offset += inst_size;
+        bool copied_original = false;
+        bool changed = false;
+        std::vector<uint32_t> target_words;
+        if (!handle_encoding(inst, offset, kernel_text, dst_opcode, text,
+                             trace_callback_ != nullptr, copied_original, changed, target_words)) {
+          if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
             continue;
           }
           return leave_unchanged();
         }
-        offset += inst_size;
-        target_offset += inst_size;
+        queue_trace(pending_traces, inst, offset, leg, copied_original, false, changed,
+                    target_offset, std::move(target_words));
       }
+      placement.target_end = kernel_text.size();
+      layout.blocks.push_back(placement);
+      if (needed_builder_source_offsets.contains(block->end_offset()))
+        target_offset_by_source_offset.emplace(block->end_offset(), kernel_text.size());
     }
+    layout.body_end = kernel_text.size();
 
     if (continue_after_failure && has_error_diagnostic(result.diagnostics))
       continue;
 
-    // Phase 5: now that the local body and cave have final offsets, rewrite only
-    // the direct branch immediate bits using the kernel-local source placement.
-    for (const BranchFixup &fixup : layout.branch_fixups) {
-      auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
-      if (!target_target) {
+    for (IndirectCallFixup fixup : pending_builder_fixups) {
+      const auto getpc_it = target_offset_by_source_offset.find(fixup.source_getpc_offset);
+      const auto begin_it = target_offset_by_source_offset.find(fixup.source_recovery_begin_offset);
+      const auto end_it = target_offset_by_source_offset.find(fixup.source_recovery_end_offset);
+      if (getpc_it == target_offset_by_source_offset.end() ||
+          begin_it == target_offset_by_source_offset.end() ||
+          end_it == target_offset_by_source_offset.end()) {
         append_error(result.diagnostics, DiagnosticKind::Legalization,
-                     "direct branch target is not present in the kernel-local relocated body",
-                     fixup.source_inst_offset,
-                     fixup.inst ? std::string(fixup.inst->mnemonic()) : std::string{});
+                     "recovered indirect branch builder is not fully present in the relocated body",
+                     fixup.source_call_offset, "indirect branch");
         return leave_unchanged();
       }
 
-      // The source decoder reports branch deltas from the source instruction's
-      // next PC. Recompute that same next-PC-relative delta in relocated .text
-      // coordinates and patch only the immediate bits of the translated branch.
-      const int64_t new_delta = static_cast<int64_t>(*target_target) -
-                                static_cast<int64_t>(fixup.target_inst_offset + fixup.inst->size());
-      std::vector<uint32_t> words(fixup.inst->size() / sizeof(uint32_t));
-      std::memcpy(words.data(), translated_text.data() + fixup.target_inst_offset,
-                  fixup.inst->size());
-      if (!patch_pcrel_branch_offset(*fixup.inst, words, new_delta, host_arch_)) {
-        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
-                     "direct branch relocation exceeds encoded branch range",
-                     fixup.source_inst_offset, std::string(fixup.inst->mnemonic()));
-        return leave_unchanged();
-      }
-      std::memcpy(translated_text.data() + fixup.target_inst_offset, words.data(),
-                  fixup.inst->size());
+      fixup.target_getpc_offset = getpc_it->second;
+      fixup.target_recovery_begin_offset = begin_it->second;
+      fixup.target_recovery_end_offset = end_it->second;
+      layout.recovered_builder_fixups.push_back(fixup);
     }
 
-    std::unordered_map<uint64_t, std::pair<uint64_t, uint64_t>> rewritten_indirect_recovery_regions;
-    for (const IndirectCallFixup &fixup : layout.indirect_call_fixups) {
-      auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
-      if (!target_target) {
-        append_error(result.diagnostics, DiagnosticKind::Legalization,
-                     "recovered indirect call target is not present in the kernel-local relocated "
-                     "body",
-                     fixup.source_call_offset, "indirect branch");
+    auto body_entry = target_for_source_offset(layout, layout.source_entry);
+    if (!body_entry) {
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "kernel descriptor entry offset is not present in the relocated body",
+                   layout.source_entry);
+      return leave_unchanged();
+    }
+    layout.target_body_entry = *body_entry;
+
+    std::optional<uint64_t> preload_body_entry;
+    if (has_kernarg_preload) {
+      preload_body_entry = target_for_source_offset(layout, source_preload_entry);
+      if (!preload_body_entry) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "kernarg preload firmware entry offset is not present in the relocated body",
+                     source_preload_entry);
         return leave_unchanged();
-      }
-
-      // One recovered getpc/address-recovery region may feed multiple later
-      // s_setpc/s_swappc consumers. All consumers are marked as recovered, but
-      // the original builder must only be rewritten once. A duplicate begin
-      // offset is valid only when it describes the same rewritten byte range
-      // and the same relocated target. Anything else means two consumers are
-      // trying to use one source builder for different addresses, which cannot
-      // be fixed by silently keeping the first rewrite.
-      const auto rewrite_key =
-          std::pair{fixup.target_recovery_end_offset, static_cast<uint64_t>(*target_target)};
-      auto [rewrite_it, inserted] = rewritten_indirect_recovery_regions.emplace(
-          fixup.target_recovery_begin_offset, rewrite_key);
-      if (!inserted) {
-        if (rewrite_it->second != rewrite_key) {
-          append_error(result.diagnostics, DiagnosticKind::Legalization,
-                       "recovered indirect branch builder is reused for incompatible targets",
-                       fixup.source_call_offset, "indirect branch");
-          return leave_unchanged();
-        }
-        continue;
-      }
-
-      const int64_t base = static_cast<int64_t>(fixup.target_getpc_offset + sizeof(uint32_t));
-      const int64_t delta = static_cast<int64_t>(*target_target) - base;
-
-      std::vector<uint32_t> replacement_words;
-      if (!append_pc_delta_builder(replacement_words, host_arch_, fixup.source_call_sreg, delta)) {
-        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
-                     "target ISA cannot encode canonical recovered indirect branch builder",
-                     fixup.source_call_offset, "indirect branch");
-        return leave_unchanged();
-      }
-
-      [[maybe_unused]] const uint64_t recovery_size =
-          fixup.target_recovery_end_offset - fixup.target_recovery_begin_offset;
-      [[maybe_unused]] const uint64_t replacement_size =
-          replacement_words.size() * sizeof(uint32_t);
-      if (replacement_size > recovery_size) {
-        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
-                     "recovered indirect branch builder does not fit in its source range",
-                     fixup.source_call_offset, "indirect branch");
-        return leave_unchanged();
-      }
-      assert(replacement_size <= recovery_size &&
-             "static PC recovery must only record in-place replaceable builder ranges");
-
-      std::memcpy(translated_text.data() + fixup.target_recovery_begin_offset,
-                  replacement_words.data(), replacement_size);
-      for (uint64_t off = fixup.target_recovery_begin_offset + replacement_size;
-           off < fixup.target_recovery_end_offset; off += sizeof(uint32_t)) {
-        const uint32_t nop = build_s_nop(0, host_arch_);
-        std::memcpy(translated_text.data() + off, &nop, sizeof(nop));
       }
     }
+
+    uint64_t target_delta = 0;
+    if (has_kernarg_preload) {
+      // Kernarg-preload kernels have two hardware-visible entries separated by
+      // exactly 256 bytes. Reserve that launch window before appending the body;
+      // the stubs are written after the body offsets have been rebased.
+      const uint64_t launch_padding =
+          padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
+      append_nop_padding(translated_text, launch_padding, host_arch_);
+      layout.target_entry = translated_text.size();
+      const uint64_t launch_end =
+          layout.target_entry + kKernargPreloadSkipBytes + launch_stub_bytes;
+      append_nop_padding(translated_text, launch_end - translated_text.size(), host_arch_);
+      target_delta = translated_text.size();
+    } else {
+      const uint64_t body_padding = padding_for_residue(
+          translated_text.size() + layout.target_body_entry, layout.source_entry % 256, 256);
+      append_nop_padding(translated_text, body_padding, host_arch_);
+      target_delta = translated_text.size();
+    }
+
+    rebase_kernel_text_layout(layout, target_delta);
+    translated_text.insert(translated_text.end(), kernel_text.begin(), kernel_text.end());
+
+    if (has_kernarg_preload) {
+      assert(preload_body_entry && "preload body entry was checked before rebase");
+      write_launch_stub(layout, layout.target_entry, layout.target_body_entry);
+      write_launch_stub(layout, layout.target_entry + kKernargPreloadSkipBytes,
+                        *preload_body_entry + target_delta);
+    } else if (!scope.translation->prologue_words.empty()) {
+      // Descriptor prologues are hardware entry points. Align the prologue to the
+      // original entry residue, then branch into the relocated body. The prologue
+      // lives in .text but is not part of the source block placement map.
+      const uint64_t prologue_padding =
+          padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
+      append_nop_padding(translated_text, prologue_padding, host_arch_);
+      layout.target_entry = translated_text.size();
+      append_words(translated_text, scope.translation->prologue_words);
+
+      const uint64_t branch_pc = translated_text.size();
+      const auto branch_dwords = compute_sopp_branch_simm16(branch_pc, layout.target_body_entry);
+      if (!branch_dwords) {
+        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                     "kernel descriptor prologue branch range exceeds s_branch simm16; leaving "
+                     "code object unchanged",
+                     layout.source_entry);
+        return leave_unchanged();
+      }
+      const uint32_t branch = build_s_branch(*branch_dwords, host_arch_);
+      append_words(translated_text, std::span<const uint32_t>(&branch, 1));
+    } else {
+      layout.target_entry = layout.target_body_entry;
+    }
+
+    // Phase 5: now that every emitted source block has a final target offset,
+    // patch explicit direct branches, recovered source-side builders, and
+    // recovered indirect transfer windows.
+    if (auto patched = patch_direct_branch_fixups(translated_text, layout, host_arch_);
+        !patched.ok) {
+      append_error(result.diagnostics, relocation_diagnostic_kind(patched), patched.message,
+                   patched.source_offset);
+      return leave_unchanged();
+    }
+
+    if (auto patched = patch_recovered_builder_fixups(translated_text, layout, host_arch_);
+        !patched.ok) {
+      append_error(result.diagnostics, relocation_diagnostic_kind(patched), patched.message,
+                   patched.source_offset, "indirect branch");
+      return leave_unchanged();
+    }
+
+    if (auto patched = patch_recovered_indirect_fixups(translated_text, layout, host_arch_);
+        !patched.ok) {
+      append_error(result.diagnostics, relocation_diagnostic_kind(patched), patched.message,
+                   patched.source_offset, "indirect branch");
+      return leave_unchanged();
+    }
+
+    flush_traces(pending_traces, target_delta);
 
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
       scope.translation->target_vgpr_count = kernel_context.required_vgpr_count;
@@ -1103,10 +1098,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
   // Phase 6: write the relocated .text and descriptor entry offsets into the ELF.
   // Reachability-driven emission intentionally drops source padding and other
-  // unreachable bytes. Keep the first implementation's ELF mutation one-sided
-  // by padding the relocated .text back to at least the original size; local
-  // caves have already been placed next to their kernels, so this tail padding
-  // does not reintroduce the old global-cave branch-distance problem.
+  // unreachable bytes. Keep ELF mutation one-sided by padding the relocated
+  // .text back to at least the original size.
   if (translated_text.size() < text.size())
     append_nop_padding(translated_text, text.size() - translated_text.size(), host_arch_);
 
@@ -1132,97 +1125,28 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     patcher.update_elf_flags(target_mach_);
 
   diagnostics_ = nullptr;
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   return result;
 }
 
-bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vector<uint8_t> &text,
-                                      KernelTextLayout &layout, std::span<const uint8_t> orig_text,
-                                      uint64_t source_return_offset) {
-  assert(repl.matched() && "apply_semantic called with unmatched replacement");
-  assert(repl.start_offset < repl.end_offset && "invalid replacement range");
-  assert(repl.end_offset <= text.size() && "replacement exceeds text bounds");
-
-  const uint32_t source_size = repl.end_offset - repl.start_offset;
-  const uint32_t target_size = repl.target_words.size() * 4;
-
-  if (target_size <= source_size) {
-    std::memcpy(text.data() + repl.start_offset, repl.target_words.data(), target_size);
-    if (target_size < source_size)
-      std::memset(text.data() + repl.start_offset + target_size, 0, source_size - target_size);
-    return true;
-  }
-
-  const uint64_t cave_byte_offset = layout.cave_end;
-  const uint64_t stub_next =
-      target_for_source_fallthrough(layout, orig_text, source_return_offset, guest_arch_)
-          .value_or(repl.start_offset + source_size);
-  const uint64_t branch_pc = repl.start_offset;
-
-  // s_branch simm16 targets (PC + 4 + simm16*4).
-  const auto fwd_dwords = compute_sopp_branch_simm16(branch_pc, cave_byte_offset);
-  if (!fwd_dwords) {
-    if (diagnostics_)
-      append_error(*diagnostics_, DiagnosticKind::ResourceLimit,
-                   "code cave branch range exceeds s_branch simm16; leaving code object unchanged",
-                   repl.start_offset);
-    return false;
-  }
-
-  const uint32_t stub = build_s_branch(*fwd_dwords, host_arch_);
-  std::memcpy(text.data() + repl.start_offset, &stub, 4);
-  for (uint64_t off = repl.start_offset + 4; off < repl.end_offset; off += 4) {
-    const uint32_t nop = build_s_nop(0, host_arch_);
-    std::memcpy(text.data() + off, &nop, 4);
-  }
-
-  auto cave_words = repl.target_words;
-  const uint64_t return_branch_pc = cave_byte_offset + cave_words.size() * sizeof(uint32_t);
-  const auto ret_dwords = compute_sopp_branch_simm16(return_branch_pc, stub_next);
-  if (!ret_dwords) {
-    if (diagnostics_)
-      append_error(*diagnostics_, DiagnosticKind::ResourceLimit,
-                   "code cave return branch range exceeds s_branch simm16; leaving code object "
-                   "unchanged",
-                   repl.start_offset);
-    return false;
-  }
-  cave_words.push_back(build_s_branch(*ret_dwords, host_arch_));
-
-  append_words(text, cave_words);
-  layout.cave_end = text.size();
-  return true;
-}
-
 bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
-                                       uint64_t target_offset, std::vector<uint8_t> &text,
-                                       uint16_t dst_opcode, KernelTextLayout &layout,
-                                       std::span<const uint8_t> orig_text,
-                                       const InstructionLegalization *leg) {
+                                       std::vector<uint8_t> &text, uint16_t dst_opcode,
+                                       std::span<const uint8_t> orig_text, bool collect_trace_words,
+                                       bool &copied_original, bool &changed,
+                                       std::vector<uint32_t> &target_words) {
   const uint32_t *raw = inst.raw_encoding();
   assert(raw && "handle_encoding called without raw encoding");
-  const bool tracing = static_cast<bool>(trace_callback_);
-  const auto source_words = tracing ? raw_words_for_inst(inst) : std::vector<uint32_t>{};
-
-  auto emit_trace = [&](bool copied_original, bool changed, bool emitted_in_cave,
-                        uint64_t target_offset, std::span<const uint32_t> target_words) {
-    if (!trace_callback_)
-      return;
-    trace_callback_({.source_offset = offset,
-                     .source_size = static_cast<uint32_t>(inst.size()),
-                     .source_words = source_words,
-                     .legalization = leg,
-                     .copied_original = copied_original,
-                     .semantic_lowering = false,
-                     .changed = changed,
-                     .emitted_in_cave = emitted_in_cave,
-                     .target_offset = target_offset,
-                     .target_words = target_words});
-  };
+  copied_original = false;
+  changed = false;
+  if (collect_trace_words)
+    target_words.clear();
 
   if (!encoding_translate_) {
-    std::memcpy(text.data() + target_offset, raw, inst.size());
-    emit_trace(true, false, false, target_offset, source_words);
+    copied_original = true;
+    const size_t word_count = inst.size() / sizeof(uint32_t);
+    if (collect_trace_words)
+      target_words.assign(raw, raw + word_count);
+    append_words(text, std::span<const uint32_t>(raw, word_count));
     return true;
   }
 
@@ -1233,8 +1157,11 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   auto tr = encoding_translate_(inst.encoding_id(), w0, w1, w2, dst_opcode);
 
   if (tr.word_count == 0) {
-    std::memcpy(text.data() + target_offset, raw, inst.size());
-    emit_trace(true, false, false, target_offset, source_words);
+    copied_original = true;
+    const size_t word_count = inst.size() / sizeof(uint32_t);
+    if (collect_trace_words)
+      target_words.assign(raw, raw + word_count);
+    append_words(text, std::span<const uint32_t>(raw, word_count));
     return true;
   }
 
@@ -1253,21 +1180,11 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
     tr.words[tr.word_count++] = lit_word;
   }
 
-  const uint32_t target_size = tr.word_count * 4u;
-  const auto target_words = std::span<const uint32_t>(tr.words, tr.word_count);
-  const bool emitted_in_cave = target_size > orig_bytes;
-  const uint64_t event_target_offset = emitted_in_cave ? layout.cave_end : target_offset;
-  const bool changed = tracing && words_changed(source_words, target_words);
-
-  if (target_size <= orig_bytes) {
-    std::memcpy(text.data() + target_offset, tr.words, target_size);
-  } else {
-    SemanticReplacement repl{
-        target_offset, target_offset + inst.size(), {tr.words, tr.words + tr.word_count}};
-    if (!apply_semantic(repl, text, layout, orig_text, offset + orig_bytes))
-      return false;
+  append_words(text, std::span<const uint32_t>(tr.words, tr.word_count));
+  if (collect_trace_words) {
+    target_words.assign(tr.words, tr.words + tr.word_count);
+    changed = words_changed(raw_words_for_inst(inst), target_words);
   }
-  emit_trace(false, changed, emitted_in_cave, event_target_offset, target_words);
   return true;
 }
 

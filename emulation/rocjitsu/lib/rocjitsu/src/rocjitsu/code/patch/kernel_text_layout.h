@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
@@ -33,7 +34,7 @@ struct BlockPlacement {
 /// @brief Pending direct PC-relative branch fixup in one relocated kernel.
 ///
 /// @details Source offsets are resolved through the kernel-local placement map
-/// after all reachable blocks and local cave bytes have final target offsets.
+/// after all reachable blocks have final target offsets.
 struct BranchFixup {
   const Instruction *inst = nullptr; ///< Decoded source branch instruction.
   uint64_t source_inst_offset = 0;   ///< Original .text offset of the branch.
@@ -41,12 +42,35 @@ struct BranchFixup {
   uint64_t target_inst_offset = 0;   ///< New .text offset of the branch instruction.
 };
 
+/// @brief Pending recovered indirect branch/call window in one relocated kernel.
+///
+/// @details Static recovery gives DBT one concrete source target for an indirect
+/// `s_setpc_b64` or `s_swappc_b64` consumer. The translated block reserves a fixed
+/// worst-case window at the consumer site; after all blocks have final target
+/// offsets, the patch layer rewrites that window to either a direct control
+/// transfer or a canonical long getpc/add/setpc-or-swappc sequence.
+struct RecoveredIndirectFixup {
+  uint64_t source_call_offset = 0;   ///< Original .text offset of setpc/swappc.
+  uint64_t source_target_offset = 0; ///< Recovered original .text target offset.
+  uint64_t target_window_offset = 0; ///< New .text offset of the reserved window.
+  uint16_t target_sreg = 0;          ///< Low SGPR pair used for the rebuilt target PC.
+  uint16_t return_sreg = 0;          ///< Low SGPR pair receiving return PC for calls.
+  bool is_call = false;              ///< True for swappc-like calls, false for setpc jumps.
+};
+
+/// @brief Result of applying a relocation fixup.
+struct TextRelocationResult {
+  bool ok = true;
+  uint64_t source_offset = 0;
+  std::string message;
+};
+
 /// @brief Physical output layout for one translated kernel.
 ///
 /// @details Blocks are emitted in original .text order. This is intentional: it
 /// preserves every CFG fallthrough edge as physical adjacency, so DBT only
-/// patches explicit PC-relative branch immediates. Expansion bodies are appended
-/// after the emitted body as a local cave.
+/// patches explicit PC-relative branch immediates and reserved recovered-indirect
+/// windows after all translated block starts are known.
 struct KernelTextLayout {
   KdTranslation *translation = nullptr;   ///< Descriptor plan for this kernel.
   uint64_t source_entry = 0;              ///< Original descriptor entry offset.
@@ -54,11 +78,13 @@ struct KernelTextLayout {
   uint64_t target_body_entry = 0;         ///< Relocated original entry offset.
   uint64_t body_begin = 0;                ///< First emitted body byte.
   uint64_t body_end = 0;                  ///< One-past-end of emitted body.
-  uint64_t cave_begin = 0;                ///< First local cave byte.
-  uint64_t cave_end = 0;                  ///< One-past-end of local cave.
   std::vector<BlockPlacement> blocks;     ///< Kernel-local block placements.
   std::vector<BranchFixup> branch_fixups; ///< Explicit branch patches.
-  std::vector<IndirectCallFixup> indirect_call_fixups;
+  std::vector<RecoveredIndirectFixup> recovered_indirect_fixups;
+  /// Source-side builders that must be rewritten because one indirect consumer
+  /// has multiple recovered targets and therefore cannot be replaced by one
+  /// direct transfer window.
+  std::vector<IndirectCallFixup> recovered_builder_fixups;
 };
 
 void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words);
@@ -71,9 +97,26 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
 [[nodiscard]] std::optional<uint64_t> target_for_source_offset(const KernelTextLayout &layout,
                                                                uint64_t source_offset);
 
-[[nodiscard]] std::optional<uint64_t> target_for_source_fallthrough(const KernelTextLayout &layout,
-                                                                    std::span<const uint8_t> text,
-                                                                    uint64_t source_offset,
-                                                                    rj_code_arch_t arch);
+/// @brief Add @p delta to body-relative target offsets in @p layout.
+///
+/// @details Descriptor-visible entry stubs are not source-block placements, so
+/// target_entry is deliberately left untouched and set by the caller after the
+/// final hardware entry location is known.
+void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta);
+
+/// @brief Patch all direct PC-relative branches recorded in @p layout.
+[[nodiscard]] TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
+                                                              const KernelTextLayout &layout,
+                                                              rj_code_arch_t arch);
+
+/// @brief Patch all recovered indirect branch/call windows recorded in @p layout.
+[[nodiscard]] TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
+                                                                   const KernelTextLayout &layout,
+                                                                   rj_code_arch_t arch);
+
+/// @brief Patch recovered source-side PC builders for multi-target consumers.
+[[nodiscard]] TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
+                                                                  const KernelTextLayout &layout,
+                                                                  rj_code_arch_t arch);
 
 } // namespace rocjitsu
