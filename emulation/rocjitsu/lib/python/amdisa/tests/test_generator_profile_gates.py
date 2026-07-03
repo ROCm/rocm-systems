@@ -179,6 +179,27 @@ def test_rdna4_s_waitcnt_compat_uses_gfx11_layout():
     assert 'uint8_t vm = (imm >> 10) & 0x3F;' in body
 
 
+def test_s_trap_execute_is_unimplemented():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    inst = Instruction(
+        'S_TRAP',
+        'ENC_SOPP',
+        18,
+        [Operand('simm16', 16, 'OPR_SIMM16', True, False, False, True, 1)],
+    )
+    sem = InstructionSemantics('S_TRAP', 'trap')
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_SOPP')
+
+    assert 'throw util::UnimplementedInst(mnemonic());' in body
+
+
 def test_rdna4_s_waitcnt_compat_formats_with_gfx11_layout():
     decode = Rdna4Profile().waitcnt_decode
 

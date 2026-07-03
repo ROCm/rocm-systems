@@ -15,6 +15,7 @@
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
+#include <chrono>
 
 #include "hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 
@@ -22,10 +23,23 @@
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
 
+// How an alloc_map entry's live_ptr was obtained — determines which API must
+// release it at teardown. Mixing them up (e.g. hipFree on a host pointer)
+// returns errors and can corrupt allocator bookkeeping.
+enum class AllocKind : uint8_t {
+    Device,        // hipMalloc / hipMallocManaged / hipMallocPitch -> hipFree
+    HostMalloc,    // hipHostMalloc / hipMallocHost                 -> hipHostFree
+    HostRegister,  // hipHostRegister backing buffer  -> hipHostUnregister + free
+                   //   (released via host_reg_bufs; skipped in the alloc_map loop)
+    DevicePtrAlias // hipHostGetDevicePointer result  -> not separately freed
+                   //   (alias into an already-tracked pinned host allocation)
+};
+
 struct AllocEntry {
-    uint64_t rec_base;  // recorded GPU base address
-    void*    live_ptr;  // live replay GPU base address
-    size_t   size;
+    uint64_t  rec_base;  // recorded GPU base address
+    void*     live_ptr;  // live replay GPU base address
+    size_t    size;
+    AllocKind kind = AllocKind::Device;
 };
 
 struct PlaybackContext {
@@ -62,9 +76,40 @@ struct PlaybackContext {
     bool skip_device_sync  = false;
     bool sync_after_launch = false;  // hipDeviceSynchronize after every kernel launch
     bool sync_after_event  = false;  // hipDeviceSynchronize after EVERY dispatched event
+    // Sync watchdog: max wall-clock ms to wait for a device synchronize before
+    // declaring the GPU wedged (0 = disabled / wait forever). Surfaces hung
+    // kernels (e.g. a StreamK producer/consumer flag spin-wait) as a diagnostic
+    // + hard exit instead of an indefinite hang. See hrr_watchdog_device_sync.
+    unsigned sync_watchdog_ms = 0;
+    // When non-zero, dump each pointer argument's recorded->translated(live)
+    // value for the kernel launch with this 1-based ordinal. Used to diff the
+    // captured vs replay pointer contract (e.g. a StreamK synchronizer base).
+    size_t dump_ptrs_ordinal = 0;
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
     std::string kernel_filter;
+
+    // Lightweight replay tracing. These are intentionally separate from
+    // verbose mode, which dumps every event and every kernel argument.
+    bool trace_kernels         = false;  // one compact line before every kernel launch
+    bool trace_sync            = false;  // mark sync begin/done around each launched kernel
+    size_t progress_kernel_interval = 0; // print progress every N launched kernels
+    double progress_seconds_interval = 0.0; // also print progress at most every N seconds
+    std::chrono::steady_clock::time_point progress_start_time{};
+    std::chrono::steady_clock::time_point progress_last_time{};
+    std::mutex progress_mutex;
+
+    // ---- Kernel replacement (playback-time override) ----
+    // Parsed "NAME=path" pairs from --replace-kernel. The recorded kernel whose
+    // name is exactly NAME launches from the replacement code object at `path`
+    // instead of the recorded one, while grid/block/shared/args/pointers still
+    // come from the recording. NAME must be the full recorded symbol. The archive
+    // is never modified. Empty => feature disabled (no overhead on the hot path).
+    std::vector<std::pair<std::string, std::string>> kernel_replacements;
+    // Resolved replacement functions, keyed by the recorded kernel name.
+    // Guarded by map_mutex. Modules backing them are owned in replacement_modules.
+    std::unordered_map<std::string, hipFunction_t> replacement_funcs;
+    std::vector<hipModule_t> replacement_modules;  // unloaded at teardown
 
     // Set true between hipStreamBeginCapture and hipStreamEndCapture.
     // HIP event timing must be skipped during graph capture: recording an
@@ -92,12 +137,29 @@ struct PlaybackContext {
     double              total_kernel_ms  = 0.0;  // guarded by map_mutex when ctx.timing
     double              total_graph_ms   = 0.0;  // guarded by map_mutex when ctx.timing
     std::atomic<size_t> d2h_pass{0};
+    // Subset of d2h_pass that were NOT byte-exact but matched within numeric
+    // tolerance (benign floating-point nondeterminism from non-associative GPU
+    // reductions). Tracked separately so the summary can distinguish exact
+    // replay fidelity from "numerically equivalent".
+    std::atomic<size_t> d2h_pass_tol{0};
     std::atomic<size_t> d2h_fail{0};
     // Incremented for every D2H event that had a captured blob hash (i.e., validation
     // was expected). Includes pass + fail + skipped (missing ptr / missing blob).
     // If d2h_attempted > 0 but d2h_pass == 0 && d2h_fail == 0, every check was
     // skipped — pointer translation or blob loading failed for all D2H events.
     std::atomic<size_t> d2h_attempted{0};
+
+    // Set true by note_d2h_fail when the running D2H-failure fraction crosses the
+    // configured divergence-abort threshold. Distinguishes a clean "replay
+    // diverged" stop (replay-fidelity limit) from a genuine HIP error abort.
+    std::atomic<bool> diverged{false};
+
+    // Records one D2H validation failure (replaces a bare d2h_fail++). When the
+    // running failure fraction exceeds HIP_HRR_REPLAY_DIVERGENCE_ABORT (after a
+    // minimum sample count), sets `diverged` + `fatal_error` so the replay stops
+    // cleanly before a downstream GPU fault instead of dying unrecoverably.
+    // `seq` is the recorded event sequence id (hrr_dispatch_seq) for diagnostics.
+    void note_d2h_fail(uint64_t seq);
 
     // Timing events — one pair per replay thread, created on first kernel launch
     // and reused for every subsequent launch on that thread. Registered here so
@@ -140,19 +202,36 @@ struct PlaybackContext {
         std::shared_lock lk(map_mutex);
         auto it = alloc_map.find(rec);
         if (it != alloc_map.end()) return it->second.live_ptr;
-        // Range search for sub-allocations
-        for (auto& [base, entry] : alloc_map) {
-            if (rec >= base && rec < base + entry.size)
-                return static_cast<char*>(entry.live_ptr) +
-                       static_cast<ptrdiff_t>(rec - base);
+        // Range search for sub-allocations. Allocations are recorded with padded
+        // sizes, so synthetic ranges can overlap; iteration order over an
+        // unordered_map is unspecified. Pick the *tightest* enclosing entry
+        // (largest base <= rec) so the result is deterministic and points at
+        // the true home allocation rather than a neighbour's over-extended pad.
+        {
+            const AllocEntry* best = nullptr;
+            for (auto& [base, entry] : alloc_map) {
+                if (rec >= base && rec < base + entry.size &&
+                    (!best || base > best->rec_base))
+                    best = &entry;
+            }
+            if (best)
+                return static_cast<char*>(best->live_ptr) +
+                       static_cast<ptrdiff_t>(rec - best->rec_base);
         }
-        // Fall back to VMM reserved-VA map (exact + range)
+        // Fall back to VMM reserved-VA map (exact + tightest-enclosing range)
         auto vit = vmm_va_map.find(rec);
         if (vit != vmm_va_map.end()) return vit->second.live;
-        for (auto& [base, va] : vmm_va_map) {
-            if (rec >= base && rec < base + va.size)
-                return static_cast<char*>(va.live) +
-                       static_cast<ptrdiff_t>(rec - base);
+        {
+            uint64_t best_base = 0; const VmmVA* best = nullptr;
+            for (auto& [base, va] : vmm_va_map) {
+                if (rec >= base && rec < base + va.size &&
+                    (!best || base > best_base)) {
+                    best = &va; best_base = base;
+                }
+            }
+            if (best)
+                return static_cast<char*>(best->live) +
+                       static_cast<ptrdiff_t>(rec - best_base);
         }
         return nullptr;
     }
@@ -227,9 +306,10 @@ struct PlaybackContext {
     }
 
     // ---- Allocation registration (exclusive lock) ----
-    void record_alloc(uint64_t rec, void* live, size_t sz) {
+    void record_alloc(uint64_t rec, void* live, size_t sz,
+                      AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
-        alloc_map[rec] = {rec, live, sz};
+        alloc_map[rec] = {rec, live, sz, kind};
     }
     void remove_alloc(uint64_t rec) {
         std::unique_lock lk(map_mutex);
@@ -273,6 +353,13 @@ struct PlaybackContext {
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
 
+    // Resolve a playback-time replacement function for a recorded kernel name.
+    // Returns a hipFunction_t loaded from a user-supplied .hsaco if `kernel_name`
+    // matches a --replace-kernel pattern, or nullptr if no replacement applies
+    // (or the replacement failed to load — caller then falls back to the recorded
+    // kernel). Lazily loads + caches the replacement module on first match.
+    hipFunction_t resolve_replacement(const std::string& kernel_name);
+
 private:
     mutable std::unordered_map<std::string, std::vector<uint8_t>> blob_cache_;
 };
@@ -281,6 +368,14 @@ private:
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
 extern thread_local uint64_t hrr_dispatch_seq;
+
+// Device synchronize with an optional watchdog. When ctx.sync_watchdog_ms == 0
+// this is a plain hipDeviceSynchronize(). Otherwise the (potentially blocking)
+// sync runs on a helper thread and is bounded by the timeout; on timeout it
+// prints a hung-kernel diagnostic (using `what` as context) and hard-exits so a
+// deadlocked kernel surfaces instead of hanging the replay forever. Normal
+// completion — including a genuine GPU fault — is returned to the caller.
+hipError_t hrr_watchdog_device_sync(PlaybackContext& ctx, const char* what);
 
 // ---------------------------------------------------------------------------
 // Playback function signature and dispatch table

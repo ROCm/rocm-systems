@@ -3024,9 +3024,9 @@ VirtualGPU* Device::xferQueue() const {
     }
     if (xferQueue_->gpu_queue() == nullptr) {
       void* md_rb = nullptr;
-      xferQueue_->SetGpuQueue(
-          thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal,
-                                         nullptr, nullptr, &md_rb), md_rb);
+      auto* queue = thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal,
+                                                   nullptr, nullptr, &md_rb);
+      xferQueue_->SetGpuQueue(queue, md_rb);
     }
   }
   xferQueue_->enableSyncBlit();

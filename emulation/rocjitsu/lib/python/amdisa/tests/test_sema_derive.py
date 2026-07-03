@@ -2057,6 +2057,11 @@ class TestDeriveControlFlow:
         block = derive_sema_block(sem)
         assert block is not None
 
+    def test_trap_is_classified_as_control_flow_terminator(self):
+        sem = derive_semantics('S_TRAP', 'ENC_SOPP')
+        assert sem is not None
+        assert sem.semantic_class == 'trap'
+
     def test_nop(self):
         sem = _FakeSem('S_NOP', 'nop')
         block = derive_sema_block(sem)

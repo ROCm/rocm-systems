@@ -33,6 +33,30 @@ hrr:
   Unit_HRR_Format_UnknownEventType:
     <<: *level_2
     tags: [format, cpu]
+  Unit_HRR_TranslatePtr_TightestEnclosing:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_AllocKind_FreeDispatch:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_Recovery_CompleteArchive:
+    <<: *level_2
+    tags: [format, recovery, cpu]
+  Unit_HRR_Recovery_TornHeader:
+    <<: *level_2
+    tags: [format, recovery, cpu]
+  Unit_HRR_Recovery_TornPayload:
+    <<: *level_2
+    tags: [format, recovery, cpu]
+  Unit_HRR_Recovery_NoTrailer:
+    <<: *level_2
+    tags: [format, recovery, cpu]
+  Unit_HRR_Recovery_RepairWritesProcessManifest:
+    <<: *level_2
+    tags: [format, recovery, repair, cpu]
+  Unit_HRR_Recovery_MultiProcessRootInfo:
+    <<: *level_2
+    tags: [format, recovery, multiprocess, cpu]
   Unit_HRR_AllApisRoundtrip:
     <<: *level_2
     tags: [capture, allapis, playback, roundtrip]
@@ -111,9 +135,36 @@ hrr:
   Unit_HRR_ChevronLaunchRoundtrip:
     <<: *level_2
     tags: [capture, launch, playback, roundtrip]
+  Unit_HRR_EmbeddedPtrRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, repro]
+  Unit_HRR_ZeroInitRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, repro]
+  Unit_HRR_DivergenceAbortRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, repro]
+  Unit_HRR_FirstMallocRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, repro]
+  Unit_HRR_NullOptionalPtrRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, repro]
   Unit_HRR_MultiThreadRoundtrip:
     <<: *level_2
     tags: [capture, multithread, playback, roundtrip]
+  Unit_HRR_ReplaceKernelRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, replacekernel]
+    disabled: [amd_windows]
+  Unit_HRR_ReplaceKernelMissingCO:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, replacekernel]
+    disabled: [amd_windows]
+  Unit_HRR_ReplaceKernelBadSpec:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, replacekernel]
+    disabled: [amd_windows]
   Unit_HRR_AllApis_Direct:
     <<: *level_2
     tags: [direct, allapis]
@@ -192,3 +243,18 @@ hrr:
   Unit_HRR_VMM_Direct:
     <<: *level_2
     tags: [direct, vmm]
+  Unit_HRR_FirstMalloc_Direct:
+    <<: *level_2
+    tags: [direct, repro]
+  Unit_HRR_EmbeddedPtrStruct_Direct:
+    <<: *level_2
+    tags: [direct, repro]
+  Unit_HRR_UncapturedHostWrite_Direct:
+    <<: *level_2
+    tags: [direct, repro]
+  Unit_HRR_NullOptionalPtr_Direct:
+    <<: *level_2
+    tags: [direct, repro]
+  Unit_HRR_ZeroInitRead_Direct:
+    <<: *level_2
+    tags: [direct, repro]
