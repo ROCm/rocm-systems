@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 232
+- Contract tests: 236
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 193
-- Approximate declared API-name coverage: 39.0%
+- Declared HIP runtime APIs directly exercised by contract tests: 196
+- Approximate declared API-name coverage: 39.6%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -31,6 +31,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `kernel` | 4 |
 | `graph` | 5 |
 | `occupancy` | 3 |
+| `occupancy_ext` | 4 |
 | `graph_capture` | 4 |
 | `graph_kernel` | 3 |
 | `graph_event` | 3 |
@@ -69,7 +70,7 @@ The percentages below are approximate API-name coverage against declarations par
 |---|---:|---:|---:|
 | Error handling | 3 | 3 | 100.0% |
 | Event | 8 | 8 | 100.0% |
-| Occupancy | 7 | 10 | 70.0% |
+| Occupancy | 10 | 13 | 76.9% |
 | Graph / capture | 53 | 96 | 55.2% |
 | Stream | 11 | 23 | 47.8% |
 | Runtime / device | 28 | 45 | 62.2% |
@@ -316,8 +317,11 @@ hipGraphKernelNodeGetAttribute
 
 ```text
 hipOccupancyMaxActiveBlocksPerMultiprocessor
+hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
 hipOccupancyMaxPotentialBlockSize
 hipOccupancyAvailableDynamicSMemPerBlock
+hipOccupancyMaxActiveClusters
+hipOccupancyMaxPotentialClusterSize
 hipModuleOccupancyMaxPotentialBlockSize
 hipModuleOccupancyMaxPotentialBlockSizeWithFlags
 hipModuleOccupancyMaxActiveBlocksPerMultiprocessor
@@ -352,7 +356,7 @@ hipIpcOpenEventHandle
 5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection, and executable-graph update paths (whole-graph `hipGraphExecUpdate` with topology-change reporting plus per-node exec setters for host, child-graph, event-record, and event-wait nodes) are now covered; remaining node attribute variants and debug dot export remain.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch and CU-mask stream variants, logging controls, and link-type queries remain.
-8. Occupancy APIs beyond current basics: max-active-blocks-per-multiprocessor (with the module variants and their with-flags forms), max-potential-block-size, and available-dynamic-shared-memory-per-block are now covered; the non-module with-flags variant (`hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags`) and the cluster occupancy helpers (`hipOccupancyMaxActiveClusters`, `hipOccupancyMaxPotentialClusterSize`) remain.
+8. Occupancy APIs beyond current basics: max-active-blocks-per-multiprocessor (with the module variants and their with-flags forms), the non-module with-flags variant (`hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags`), max-potential-block-size, available-dynamic-shared-memory-per-block, and the cluster occupancy helpers (`hipOccupancyMaxActiveClusters`, `hipOccupancyMaxPotentialClusterSize`) are now covered; the variable-shared-memory potential-block-size helpers (`hipOccupancyMaxPotentialBlockSizeVariableSMem`, `hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags`) and the non-module with-flags potential-block-size variant (`hipOccupancyMaxPotentialBlockSizeWithFlags`) remain.
 9. Stream and event APIs beyond current basics: stream creation with flags and priority, flag/priority/device/id property round-trips, and event timing (`hipEventElapsedTime`, `hipEventRecordWithFlags`) are now covered, bringing the event API family to full name coverage; stream attribute get/set/copy (`hipStreamGetAttribute`, `hipStreamSetAttribute`, `hipStreamCopyAttributes`), callbacks (`hipStreamAddCallback`), memory-attach (`hipStreamAttachMemAsync`), wait/write-value and batch memory ops (`hipStreamWaitValue32`/`64`, `hipStreamWriteValue32`/`64`, `hipStreamBatchMemOp`), device-resource queries (`hipStreamGetDevResource`), and the capture-to-graph/update-dependencies variants remain.
 
 ## Update procedure
