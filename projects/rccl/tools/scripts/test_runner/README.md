@@ -464,6 +464,8 @@ Optional:
   --emit-results            Emit structured results (JSON/JSONL + tarball) for the dashboard
   --results-dir DIR         Directory for emitted results + tarballs (default: <workspace>/results)
   --run-label LABEL         Optional label stored with the emitted run (e.g. 'nightly', a PR number)
+  --tag TAG                 Tag to attach to the emitted run for dashboard filtering (repeatable)
+  --tags A,B,C              Comma-separated tags to attach to the emitted run (merged with --tag)
   --db-push                 Also push results to PostgreSQL (DSN from RCCL_RESULTS_DSN); implies --emit-results
   --db-timeout SECONDS      PostgreSQL connect + statement timeout for --db-push (default: 10)
   -h, --help                Show help message and exit
@@ -531,7 +533,7 @@ python test_runner.py -c configs/rccl_perf_tests.json --db-push
 
 Per invocation, under `--results-dir` (default `<workspace>/results`):
 
-- `run.json` - run manifest: RCCL SHA, host/telemetry metadata, config, env, summary.
+- `run.json` - run manifest: RCCL SHA, host/telemetry metadata, config, env, summary, tags.
 - `tests.jsonl` - one line per test (status PASSED/FAILED/SKIPPED/TIMEOUT, exec mode, dtype, duration).
 - `perf.jsonl` - one line per (size, place) perf row (latency, algbw, busbw).
 - `coverage.json` - llvm-cov totals (only when `--coverage-report` produced a report).
@@ -539,6 +541,18 @@ Per invocation, under `--results-dir` (default `<workspace>/results`):
 
 Coverage is emitted only where the host has an instrumented build plus
 `llvm-profdata`/`llvm-cov`; perf and per-test results do not require them.
+
+### Tagging runs
+
+Attach tags at emit time for later filtering in the dashboard:
+
+```bash
+python test_runner.py -c <config> --emit-results --tag nightly --tag mi300x
+# or: --tags nightly,mi300x
+```
+
+Tags set here are the run's initial tags. Once a run is ingested, its tags are
+mutable only by dashboard admins.
 
 See [`db/README.md`](db/README.md) for the database schema and the full
 emission and scrape/sweep contract.

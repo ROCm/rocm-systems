@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS runs (
     config_description TEXT,
     runner_version   TEXT,
     label            TEXT,               -- optional --run-label
+    tags             TEXT[],             -- --tag/--tags at emit time; mutable only by dashboard admins afterwards
     env              JSONB,              -- global env fingerprint
     metadata         JSONB,              -- rich host/telemetry snapshot (versions, GPU BDFs/CUs, firmware, UALink station mask, ...)
     summary          JSONB,              -- {total,passed,failed,timeout,skipped,duration_s}
@@ -111,6 +112,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_created_at        ON runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_runs_sha               ON runs(rccl_sha);
 CREATE INDEX IF NOT EXISTS idx_runs_host              ON runs(host);
 CREATE INDEX IF NOT EXISTS idx_runs_gpu_arch          ON runs(gpu_arch);
+CREATE INDEX IF NOT EXISTS idx_runs_tags              ON runs USING GIN (tags);
 
 -- Immutable, monotonic run number: DB-assigned on first insert (writers never
 -- set it), preserved across idempotent upserts, and protected from any change.

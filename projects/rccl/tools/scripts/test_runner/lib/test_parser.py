@@ -155,6 +155,20 @@ Examples:
             help="Optional label/tag stored with the emitted run (e.g. 'nightly', a PR number)."
         )
         self.parser.add_argument(
+            '--tag',
+            action='append',
+            default=[],
+            metavar='TAG',
+            help="Tag to attach to the emitted run for filtering in the dashboard "
+                 "(repeatable, e.g. --tag nightly --tag mi300x). Merged with --tags."
+        )
+        self.parser.add_argument(
+            '--tags',
+            type=str,
+            default='',
+            help="Comma-separated tags to attach to the emitted run (merged with --tag)."
+        )
+        self.parser.add_argument(
             '--db-push',
             action='store_true',
             default=False,

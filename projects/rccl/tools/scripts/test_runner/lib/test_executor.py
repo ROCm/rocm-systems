@@ -2252,6 +2252,13 @@ class TestExecutor:
             sensitive = re.compile(r"(?i)(pass|secret|token|api[_-]?key|access[_-]?key|credential|dsn)")
             return {k: ("***redacted***" if sensitive.search(k) else v) for k, v in env.items()}
 
+        # Run tags (from --tag / --tags), de-duplicated in order.
+        run_tags = list(getattr(self.args, "tag", []) or [])
+        for _t in (getattr(self.args, "tags", "") or "").split(","):
+            _t = _t.strip()
+            if _t and _t not in run_tags:
+                run_tags.append(_t)
+
         manifest = {
             "run_id": run_id,
             "created_at": stamp.isoformat(),
@@ -2268,6 +2275,7 @@ class TestExecutor:
             "config_name": sys_cfg.get("name"),
             "config_description": sys_cfg.get("description"),
             "label": getattr(self.args, "run_label", "") or None,
+            "tags": run_tags or None,
             "env": _redact_sensitive_env(self.global_env),
         }
 

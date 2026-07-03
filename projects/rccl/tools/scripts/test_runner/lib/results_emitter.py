@@ -416,16 +416,18 @@ class ResultsEmitter:
             INSERT INTO runs (run_id, schema_version, created_at, started_at,
                 finished_at, rccl_sha, rccl_branch, rocm_version, host, hosts,
                 gpu_arch, node_names, num_nodes, gpus_per_node, config_name,
-                config_description, runner_version, label, env, summary, metadata)
+                config_description, runner_version, label, tags, env, summary, metadata)
             VALUES (%(run_id)s, %(schema_version)s, %(created_at)s, %(started_at)s,
                 %(finished_at)s, %(rccl_sha)s, %(rccl_branch)s, %(rocm_version)s,
                 %(host)s, %(hosts)s, %(gpu_arch)s, %(node_names)s, %(num_nodes)s,
                 %(gpus_per_node)s, %(config_name)s, %(config_description)s,
-                %(runner_version)s, %(label)s, %(env)s, %(summary)s, %(metadata)s)
+                %(runner_version)s, %(label)s, %(tags)s, %(env)s, %(summary)s, %(metadata)s)
             ON CONFLICT (run_id) DO UPDATE SET
                 finished_at = EXCLUDED.finished_at,
                 summary     = EXCLUDED.summary,
                 ingested_at = now()
+                -- NOTE: tags intentionally NOT updated on conflict; once a run is
+                -- in the DB, tags are mutable only via the admin dashboard.
             """,
             {
                 "run_id": m["run_id"],
@@ -446,6 +448,7 @@ class ResultsEmitter:
                 "config_description": m.get("config_description"),
                 "runner_version": m.get("emitter_version"),
                 "label": m.get("label"),
+                "tags": m.get("tags"),  # list -> TEXT[]; None -> NULL
                 "env": json.dumps(m.get("env")) if m.get("env") is not None else None,
                 "summary": json.dumps(m.get("summary")) if m.get("summary") is not None else None,
                 "metadata": json.dumps(m.get("metadata")) if m.get("metadata") is not None else None,

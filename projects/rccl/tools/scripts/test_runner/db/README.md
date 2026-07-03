@@ -13,6 +13,10 @@ Both paths write the same schema (`schema.sql`) and are idempotent on
 
 `run_id` is generated once per invocation as `YYYYMMDDThhmmssZ-<8hex>`.
 
+Runs may carry **tags** (`--tag`/`--tags`) for dashboard filtering. Tags are set
+at emit time; on re-ingest they are left untouched, so once a run is in the DB
+its tags are mutable only via the dashboard (admin-gated).
+
 ## Enabling emission
 
 ```bash
@@ -37,7 +41,7 @@ python3 test_runner.py -c configs/rccl_perf_tests.json --db-push
 ```
 results/
   <run_id>/
-    run.json         # run manifest (sha, host, config, env, summary, coverage)
+    run.json         # run manifest (sha, host, config, env, summary, coverage, tags)
     tests.jsonl      # one line per test result
     perf.jsonl       # one line per (size, place) perf row, with collective/avg
     coverage.json    # llvm-cov TOTAL percentages (if --coverage-report)
