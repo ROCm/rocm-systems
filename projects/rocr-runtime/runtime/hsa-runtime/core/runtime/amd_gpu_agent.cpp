@@ -855,6 +855,26 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   return sdma;
 }
 
+uint32_t GpuAgent::NumSdmaEnginesTotal() const {
+  return static_cast<uint32_t>(properties_.NumSdmaEngines) +
+         static_cast<uint32_t>(properties_.NumSdmaXgmiEngines);
+}
+
+bool GpuAgent::SupportsSdmaQueueByEngineId() const {
+  // Targeting a specific SDMA engine at queue creation
+  // (HSA_QUEUE_SDMA_BY_ENG_ID) requires kernel interface >= 1.17.
+  const auto kfd_version = core::Runtime::runtime_singleton_->KfdVersion().version;
+  return kfd_version.KernelInterfaceMajorVersion > 1 ||
+         (kfd_version.KernelInterfaceMajorVersion == 1 &&
+          kfd_version.KernelInterfaceMinorVersion >= 17);
+}
+
+uint32_t GpuAgent::NextSdmaUserQueueEngineId() {
+  const uint32_t num_engines = NumSdmaEnginesTotal();
+  assert(num_engines != 0 && "No SDMA engines available for round-robin selection.");
+  return sdma_user_queue_rr_index_.fetch_add(1, std::memory_order_relaxed) % num_engines;
+}
+
 core::Blit* GpuAgent::CreateBlitKernel(core::Queue* queue) {
   AMD::BlitKernel* kernl = new AMD::BlitKernel(queue);
 
@@ -1267,13 +1287,21 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     bool use_p2p_engines = is_p2p && dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
                          num_p2p_engines_;
 
+    // On platforms with dedicated xGMI SDMA engines, a P2P copy MUST target one of
+    // those engines: a host-facing SDMA engine physically cannot drive the xGMI link,
+    // so targeting an H2D/D2H engine for P2P is a hardware error. On platforms without
+    // dedicated xGMI engines (e.g. gfx1250) every SDMA engine is equivalent and
+    // P2P-capable, so the H2D/D2H-vs-P2P split is only a load-balancing preference
+    // (steered via DmaPreferredEngine) and must not be enforced as a hard rejection.
+    bool p2p_engine_is_mandatory = use_p2p_engines && properties_.NumSdmaXgmiEngines;
+
     // Due to a RAS issue, GFX90a can only support H2D copies on SDMA0
     bool is_h2d_blit = (src_agent.device_type() == core::Agent::kAmdCpuDevice &&
       dst_agent.device_type() == core::Agent::kAmdGpuDevice);
     bool limit_h2d_blit = supported_isas()[0]->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Ensure engine selection is within proper range based on transfer type
-    if ((use_p2p_engines && !rec_sdma_eng_override_ && engine_offset <= num_h2d_d2h_engines_) ||
+    if ((p2p_engine_is_mandatory && !rec_sdma_eng_override_ && engine_offset <= num_h2d_d2h_engines_) ||
           (!is_h2d_blit && !is_same_gpu && limit_h2d_blit &&
             engine_offset == BlitHostToDev)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1292,16 +1320,14 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
   }
 
-  // gfx1250 fast path: fuse poll+copy+signal into a single WaitSignal packet.
-  if (core::Runtime::runtime_singleton_->flag().enable_sdma_fastpath_debug() && !profiling_enabled() && blit->isSDMA()) {
+  // gfx1250 fast path: fuse GCR invalidate, poll+copy+signal and the GCR
+  // writeback + mailbox notify into one ring submission (single reserve/release).
+  // The packet builder chunks large copies internally, so any size is eligible.
+  if (!profiling_enabled() && blit->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
     if (sdma_blit->IsGfx1250()) {
-      hsa_status_t stat = sdma_blit->SubmitNotifyPrologue();
-      if (stat != HSA_STATUS_SUCCESS) return stat;
-      stat = sdma_blit->SubmitLinearCopyBodyWaitSignal(
+      return sdma_blit->SubmitLinearCopyBodyWaitSignal(
           dst, src, size, dep_signals, out_signal);
-      if (stat != HSA_STATUS_SUCCESS) return stat;
-      return sdma_blit->SubmitNotifyEpilogue(out_signal);
     }
   }
 
@@ -1316,7 +1342,9 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 bool GpuAgent::DmaEngineIsFree(uint32_t engine_offset) {
   SetCopyStatusCheckRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyStatusCheckRefCount(false); });
-  bool is_free = !!!(sdma_blit_used_mask_ & (1 << engine_offset)) ||
+  // Atomic load to pair with atomic write in GetBlitObject
+  uint32_t mask = sdma_blit_used_mask_.load(std::memory_order_relaxed);
+  bool is_free = !!!(mask & (1 << engine_offset)) ||
                     (blits_[engine_offset]->isSDMA() &&
                      !!!blits_[engine_offset]->PendingBytes());
   return is_free;
@@ -1334,7 +1362,11 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
                      dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
                        num_p2p_engines_ > 0) {
     //Find a free p2p SDMA engine
-    if (rec_sdma_eng_override_) {
+    // Without dedicated xGMI engines (e.g. gfx1250) every SDMA engine is P2P-capable,
+    // so advertise all free engines rather than only the preferred P2P band. The
+    // preference toward the P2P engines is still expressed via DmaPreferredEngine;
+    // here we report the full set of engines a P2P copy may legally run on.
+    if (rec_sdma_eng_override_ || !properties_.NumSdmaXgmiEngines) {
       for (int i = 0; i < (num_h2d_d2h_engines_ + num_p2p_engines_); i++) {
         if (DmaEngineIsFree(BlitHostToDev + i)) {
           *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_0 << i);
@@ -1475,6 +1507,22 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   if (is_indirect && !coordinator->IndirectCopySupported())
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  // Only indirect copies cannot chunk a large entry: the indirect packet has no
+  // offset field into the resolved buffer, so a single >max entry must fall back
+  // (and is ultimately rejected, since the indirect body rejects size > max).
+  // Linear copy and swap fused WaitSignal builders chunk internally via
+  // num_copy_command, so large entries stay on the fused path.
+  bool requires_multi_packet = false;
+  if (is_indirect) {
+    const size_t max_single_copy = coordinator->MaxSingleLinearCopySize();
+    for (uint32_t d = 0; d < num_entries; ++d) {
+      if (size_list[d] > max_single_copy) {
+        requires_multi_packet = true;
+        break;
+      }
+    }
+  }
+
   struct EngineSlot { BlitSdmaBase* blit; uint32_t idx; };
   std::vector<EngineSlot> engines(num_entries, {coordinator, coord_idx});
 
@@ -1539,9 +1587,11 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       is_indirect ? "Indirect" : "Copy";
 
   // GFX1250+ fast path: use wait/signal packets so bodies directly wait on
-  // dep_signals and signal out_signal. No prologue or epilogue needed when
-  // profiling is off (no timestamps to collect).
-  if ((coordinator->IsGfx1250()) && !profiling_enabled()) {
+  // dep_signals and signal out_signal, avoiding per-body prologue/epilogue
+  // timestamp collection. GCR/mailbox synchronization is still issued via the
+  // coordinator's SubmitNotifyPrologue/Epilogue below; only the profiling
+  // timestamp path is skipped.
+  if ((coordinator->IsGfx1250()) && !profiling_enabled() && !requires_multi_packet) {
     // N bodies each do a 64b-sub of 1 on out_signal. Initial value is 1,
     // so bump by (N-1) so the final value after all decrements is 0.
     out_signal.AddRelaxed(num_entries - 1);
@@ -1609,7 +1659,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       default:
         stat = engines[d].blit->SubmitLinearCopyBodyWaitSignal(
             dst_list[d], src_list[d], size_list[d],
-            *body_deps_ptr, out_signal);
+            *body_deps_ptr, out_signal, /*fused_notify=*/false);
         break;
       }
       if (stat != HSA_STATUS_SUCCESS) return stat;
@@ -1637,9 +1687,11 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   bool use_body_signals = !coordinator->PlatformAtomicSupport();
 
   // On gfx1250 with shared out_signal, use WaitSignal body to fuse
-  // poll+copy+signal into a single packet per body.
+  // poll+copy+signal per body; the builder chunks large entries internally.
+  // Only indirect bodies can't chunk (requires_multi_packet), so they fall back
+  // to the classic path here and are rejected just below.
   const bool waitsignal_body =
-      coordinator->IsGfx1250() && !use_body_signals;
+      coordinator->IsGfx1250() && !use_body_signals && !requires_multi_packet;
 
   // Indirect bodies only implement fused packets
   if (is_indirect && !waitsignal_body) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1741,7 +1793,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       stat = waitsignal_body
           ? engines[d].blit->SubmitLinearCopyBodyWaitSignal(
                 dst_list[d], src_list[d], size_list[d],
-                body_deps, out_signal)
+                body_deps, out_signal, /*fused_notify=*/false)
           : engines[d].blit->SubmitLinearCopyBody(
                 dst_list[d], src_list[d], size_list[d],
                 *prologue_raw, body_sig);
@@ -1761,6 +1813,23 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   return coordinator->SubmitEpilogue(out_signal, kWaitValue, body_raw);
 }
 
+// Formats a destination pointer list for SDMA debug logging. Only called from
+// within LogPrint (guarded by the log flag), so it costs nothing when SDMA
+// logging is disabled. Caps the output so a large fan-out cannot flood the log.
+static std::string FormatDstList(void* const* dsts, uint32_t num) {
+  constexpr uint32_t kMaxShown = 16;
+  std::string out = "[";
+  const uint32_t shown = std::min(num, kMaxShown);
+  char buf[32];
+  for (uint32_t i = 0; i < shown; ++i) {
+    snprintf(buf, sizeof(buf), "%s%p", i ? ", " : "", dsts[i]);
+    out += buf;
+  }
+  if (num > kMaxShown) out += ", ...";
+  out += "]";
+  return out;
+}
+
 hsa_status_t GpuAgent::DmaCopyBroadcast(
     const hsa_amd_memory_copy_op_t& op,
     std::vector<core::Signal*>& dep_signals) {
@@ -1769,9 +1838,20 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
   core::Signal& out_signal = *out_signal_obj;
 
   const uint16_t num_entries = op.num_entries;
-  constexpr size_t kBroadcastMaxSize = 256 * 1024;
 
-  // Try HW broadcast/multicast.
+  // Size thresholds for multi-destination copy path selection.
+  // kMulticastMaxSize: gfx1250 multicast/fan-out crossover (8 MB).
+  //   Below this the single-engine multicast packet wins; above it fan-out
+  //   across multiple SDMA engines delivers higher aggregate bandwidth.
+  // kB2BMinSize/kB2BMaxSize: per-copy size window for linearB2B on non-gfx1250.
+  //   Below kB2BMinSize the broadcast packet (2-dst) is used instead; above
+  //   kB2BMaxSize fan-out parallelises across engines. Kept consistent with
+  //   DmaCopyMulti and independent of the gfx1250 multicast threshold.
+  constexpr size_t kMulticastMaxSize = 8 * 1024 * 1024;
+  constexpr size_t kB2BMinSize = 16 * 1024;
+  constexpr size_t kB2BMaxSize = 256 * 1024;
+
+  // Try HW broadcast/multicast or linearB2B on one engine.
   {
     SetCopyRequestRefCount(true);
     MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -1780,46 +1860,71 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
     if (blit->isSDMA()) {
       BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
 
-      // linearB2BCopy for per-copy sizes in [16KB, 256KB].
-      // Above 256KB the fan-out path parallelises across engines.
-      // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto threshold.
-      constexpr size_t kLinearB2BMinSize = 16 * 1024;
-      const auto b2b_flag = core::Runtime::runtime_singleton_->flag().sdma_linear_b2b();
-      const bool use_linear_b2b = (b2b_flag == Flag::SDMA_ENABLE) ||
-          (b2b_flag == Flag::SDMA_DEFAULT && op.size >= kLinearB2BMinSize &&
-           op.size <= kBroadcastMaxSize);
+      // Common to every submission path below.
+      if (profiling_enabled())
+        out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
-      if (use_linear_b2b && !sdma_blit->IsGfx1250()) {
-        if (profiling_enabled())
-          out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+      if (sdma_blit->IsGfx1250()) {
+        // gfx1250: multicast for copies <= 8 MB. Below this threshold the
+        // single-engine multicast packet matches or beats fan-out (saves
+        // per-destination signal overhead). Above 8 MB, fan-out across
+        // multiple SDMA engines delivers ~15% higher aggregate bandwidth.
+        // HSA_SDMA_MULTICAST: 1=force on, 0=force off, unset=auto (threshold).
+        const auto mc_flag = core::Runtime::runtime_singleton_->flag().sdma_multicast();
+        const bool use_multicast = (mc_flag == Flag::SDMA_ENABLE) ||
+            (mc_flag == Flag::SDMA_DEFAULT && op.size <= kMulticastMaxSize);
+        if (use_multicast) {
+          // SubmitLinearCopyMulticastCommand picks the fused wait/signal packet
+          // when profiling is off and the timestamp-capable plain packet when on.
+          std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+          LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+                   "SDMA Multicast engine %02u, src=%p, num_entries=%u, size=%zu, "
+                   "dsts=%s, dep_signal=0x%zx, completion_signal=0x%zx",
+                   BlitHostToDev, op.src, num_entries, op.size,
+                   FormatDstList(op.dst_list, num_entries).c_str(),
+                   dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+                   core::Signal::Convert(out_signal_obj).handle);
+          return sdma_blit->SubmitLinearCopyMulticastCommand(
+              dsts, op.src, op.size, dep_signals, out_signal, profiling_enabled());
+        }
+        // Larger than the multicast limit: fall through to fan-out below.
+      } else {
+        // Non-gfx1250: linearB2B for [16KB, 256KB], broadcast for < 16KB,
+        // else fall through to fan-out which parallelises across engines.
+        // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto
+        // (kept consistent with DmaCopyMulti, which honors the same override).
+        const auto b2b_flag = core::Runtime::runtime_singleton_->flag().sdma_linear_b2b();
+        const bool use_linear_b2b = (b2b_flag == Flag::SDMA_ENABLE) ||
+            (b2b_flag == Flag::SDMA_DEFAULT && op.size >= kB2BMinSize &&
+             op.size <= kB2BMaxSize);
 
-        LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-                 "SDMA linearB2BCopy using engine %02u, src=%p, num_entries=%u, size=%zu, "
-                 "dep_signal=0x%zx, completion_signal=0x%zx",
-                 BlitHostToDev, op.src, num_entries, op.size,
-                 dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
-                 out_signal_obj->signal_);
-        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
-        std::vector<const void*> srcs(num_entries, op.src);
-        std::vector<size_t> sizes(num_entries, op.size);
-        return sdma_blit->SubmitLinearCopyB2BCommand(
-            dsts, srcs, sizes, dep_signals, out_signal);
-      }
+        if (use_linear_b2b) {
+          LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+                   "SDMA linearB2B engine %02u, src=%p, num_entries=%u, size=%zu, "
+                   "dsts=%s, dep_signal=0x%zx, completion_signal=0x%zx",
+                   BlitHostToDev, op.src, num_entries, op.size,
+                   FormatDstList(op.dst_list, num_entries).c_str(),
+                   dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+                   core::Signal::Convert(out_signal_obj).handle);
+          std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+          std::vector<const void*> srcs(num_entries, op.src);
+          std::vector<size_t> sizes(num_entries, op.size);
+          return sdma_blit->SubmitLinearCopyB2BCommand(
+              dsts, srcs, sizes, dep_signals, out_signal);
+        }
 
-      if (sdma_blit->BroadcastSupported() && op.size < kLinearB2BMinSize) {
-        if (profiling_enabled())
-          out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
-
-        LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-                 "SDMA %s using engine %02u, src=%p, num_entries=%u, size=%zu, "
-                 "dep_signal=0x%zx, completion_signal=0x%zx",
-                 (sdma_blit->IsGfx1250()) ? "Multicast" : "Broadcast",
-                 BlitHostToDev, op.src, num_entries, op.size,
-                 dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
-                 out_signal_obj->signal_);
-        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
-        return sdma_blit->SubmitLinearCopyBroadcastCommand(
-            dsts, op.src, op.size, dep_signals, out_signal);
+        if (sdma_blit->BroadcastSupported() && op.size < kB2BMinSize) {
+          LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+                   "SDMA Broadcast engine %02u, src=%p, num_entries=%u, size=%zu, "
+                   "dsts=%s, dep_signal=0x%zx, completion_signal=0x%zx",
+                   BlitHostToDev, op.src, num_entries, op.size,
+                   FormatDstList(op.dst_list, num_entries).c_str(),
+                   dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+                   core::Signal::Convert(out_signal_obj).handle);
+          std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+          return sdma_blit->SubmitLinearCopyBroadcastCommand(
+              dsts, op.src, op.size, dep_signals, out_signal);
+        }
       }
     }
   }
@@ -1841,14 +1946,13 @@ hsa_status_t GpuAgent::DmaCopyMulti(
   core::Signal& out_signal = *out_signal_obj;
 
   const uint16_t num_entries = op.num_entries;
-  constexpr size_t kLinearB2BMaxSize = 256 * 1024;
-  constexpr size_t kLinearB2BMinSize = 16 * 1024;
+  constexpr size_t kB2BMaxSize = 256 * 1024;
+  constexpr size_t kB2BMinSize = 16 * 1024;
 
-  // Try linearB2B: pack all entries as back-to-back SDMA linear copy packets in
-  // one ring submission to avoid fan-out signal overhead.  Use the same size
-  // thresholds as DmaCopyBroadcast: per-entry size in [16KB, 1MB) unless the
-  // flag forces B2B on.  For large entries the fan-out path parallelises across
-  // engines and is faster.
+  // LinearB2B: pack all entries as back-to-back SDMA linear copy packets in
+  // one ring submission to avoid fan-out signal overhead.  Per-entry size must
+  // be in [kB2BMinSize, kB2BMaxSize] unless the flag forces B2B on.
+  // For large entries the fan-out path parallelises across engines.
   {
     SetCopyRequestRefCount(true);
     MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -1856,18 +1960,14 @@ hsa_status_t GpuAgent::DmaCopyMulti(
     lazy_ptr<core::Blit>& blit = GetBlitObject(BlitHostToDev);
     if (blit->isSDMA()) {
       BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
-
       const auto b2b_flag = core::Runtime::runtime_singleton_->flag().sdma_linear_b2b();
 
-      // Check that every entry qualifies for B2B.
       bool all_qualify = true;
       for (uint16_t i = 0; i < num_entries; i++) {
         const size_t sz = op.size_list[i];
-        const bool qualifies =
-            (b2b_flag == Flag::SDMA_ENABLE) ||
-            (b2b_flag == Flag::SDMA_DEFAULT && sz >= kLinearB2BMinSize &&
-             sz <= kLinearB2BMaxSize);
-        if (!qualifies) {
+        if (b2b_flag != Flag::SDMA_ENABLE &&
+            !(b2b_flag == Flag::SDMA_DEFAULT &&
+              sz >= kB2BMinSize && sz <= kB2BMaxSize)) {
           all_qualify = false;
           break;
         }
@@ -1876,17 +1976,15 @@ hsa_status_t GpuAgent::DmaCopyMulti(
       if (all_qualify) {
         if (profiling_enabled())
           out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
-
-        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
-        std::vector<const void*> srcs(op.src_list, op.src_list + num_entries);
-        std::vector<size_t> sizes(op.size_list, op.size_list + num_entries);
-
         LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-                 "SDMA multiB2BCopy using engine %02u, num_entries=%u, "
+                 "SDMA linearB2B engine %02u, num_entries=%u, "
                  "dep_signal=0x%zx, completion_signal=0x%zx",
                  BlitHostToDev, num_entries,
                  dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
                  out_signal_obj->signal_);
+        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+        std::vector<const void*> srcs(op.src_list, op.src_list + num_entries);
+        std::vector<size_t> sizes(op.size_list, op.size_list + num_entries);
         return sdma_blit->SubmitLinearCopyB2BCommand(dsts, srcs, sizes,
                                                      dep_signals, out_signal);
       }
@@ -2501,6 +2599,10 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         *((uint32_t*)value) = 0;
       }
       break;
+    case HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED:                                                                                                                                        
+      // GPU agents can participate in host memory DMA-BUF export if the system supports virtual memory APIs                                                                                                                                         
+      *static_cast<bool*>(value) = core::Runtime::runtime_singleton_->VirtualMemApiSupported();                                                                                           
+      break; 
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -3257,7 +3359,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
 }
 
 lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(uint32_t engine_offset) {
-  sdma_blit_used_mask_ |= 1 << engine_offset;
+  sdma_blit_used_mask_.fetch_or(1 << engine_offset, std::memory_order_relaxed);
   return blits_[engine_offset];
 }
 

@@ -8,6 +8,7 @@
 #include <span>
 #include <vector>
 
+#include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
@@ -19,9 +20,8 @@ struct KdTranslation;
 /// @brief Relocated placement of one source CFG block in one emitted kernel.
 ///
 /// @details A source block can be emitted more than once when multiple kernel
-/// entries reach shared code. The first relocation implementation rejects shared
-/// blocks, but this struct is still kernel-local so later duplication can reuse
-/// the same fixup model.
+/// entries reach shared code. Each KernelTextLayout is kernel-local, so the same
+/// source range can have a different target range in another kernel's layout.
 struct BlockPlacement {
   BasicBlock *block = nullptr; ///< Source CFG block.
   uint64_t source_start = 0;   ///< Original .text-relative block start.
@@ -58,6 +58,7 @@ struct KernelTextLayout {
   uint64_t cave_end = 0;                  ///< One-past-end of local cave.
   std::vector<BlockPlacement> blocks;     ///< Kernel-local block placements.
   std::vector<BranchFixup> branch_fixups; ///< Explicit branch patches.
+  std::vector<IndirectCallFixup> indirect_call_fixups;
 };
 
 void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words);
@@ -66,9 +67,6 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
 
 [[nodiscard]] uint64_t padding_for_residue(uint64_t current_offset, uint64_t target_residue,
                                            uint64_t alignment);
-
-[[nodiscard]] uint64_t preserve_entry_skip_window_offset(const KernelTextLayout &layout,
-                                                         const BasicBlock &block, uint64_t cursor);
 
 [[nodiscard]] std::optional<uint64_t> target_for_source_offset(const KernelTextLayout &layout,
                                                                uint64_t source_offset);

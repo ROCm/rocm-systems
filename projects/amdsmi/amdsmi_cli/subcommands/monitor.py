@@ -400,6 +400,11 @@ class MonitorCommands:
         if args.temperature:
             try:
                 temperature = gpu_metrics_info["temperature_hotspot"]
+                # Fallback to APU GFX temperature if hotspot is N/A
+                if temperature == "N/A":
+                    temperature = gpu_metrics_info.get("apu_metrics.temperature_gfx", "N/A")
+                    if temperature != "N/A":
+                        temperature = round(temperature)
                 monitor_values["hotspot_temperature"] = temperature
             except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values["hotspot_temperature"] = "N/A"
@@ -481,6 +486,11 @@ class MonitorCommands:
         if args.gfx:
             try:
                 gfx_clk = gpu_metrics_info["current_gfxclk"]
+                # Fallback to APU current GFX clock, then average
+                if gfx_clk == "N/A":
+                    gfx_clk = gpu_metrics_info.get("apu_metrics.current_gfxclk", "N/A")
+                if gfx_clk == "N/A":
+                    gfx_clk = gpu_metrics_info.get("apu_metrics.average_gfxclk_frequency", "N/A")
                 monitor_values["gfx_clk"] = gfx_clk
                 freq_unit = "MHz"
                 if gfx_clk != "N/A":
@@ -533,6 +543,13 @@ class MonitorCommands:
             if not args.default_output:
                 try:
                     mem_clock = gpu_metrics_info["current_uclk"]
+                    # Fallback to APU current UCLK, then average
+                    if mem_clock == "N/A":
+                        mem_clock = gpu_metrics_info.get("apu_metrics.current_uclk", "N/A")
+                    if mem_clock == "N/A":
+                        mem_clock = gpu_metrics_info.get(
+                            "apu_metrics.average_uclk_frequency", "N/A"
+                        )
                     monitor_values["mem_clock"] = mem_clock
                     freq_unit = "MHz"
                     if mem_clock != "N/A":
@@ -622,6 +639,9 @@ class MonitorCommands:
         if (args.encoder or args.decoder) and not args.default_output:
             try:
                 vclock = gpu_metrics_info["current_vclk0"]
+                # Fallback to APU average VCLK if current is N/A
+                if vclock == "N/A":
+                    vclock = gpu_metrics_info.get("apu_metrics.average_vclk_frequency", "N/A")
                 monitor_values["vclock"] = vclock
 
                 freq_unit = "MHz"

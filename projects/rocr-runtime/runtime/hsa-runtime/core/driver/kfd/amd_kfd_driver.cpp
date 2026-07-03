@@ -239,11 +239,6 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     kmt_alloc_flags.ui32.NonPaged = 1;
   }
 
-  if (!m_region.IsLocalMemory() &&
-      (alloc_flags & core::MemoryRegion::AllocateMemoryOnly)) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   // Allocating a memory handle for virtual memory
   kmt_alloc_flags.ui32.NoAddress =
       !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);
@@ -379,10 +374,10 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
-    const bool is_dxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
+    const bool is_windxg =
+        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
     const bool require_pinning =
-        !is_dxg &&
+        !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
          m_region.IsScratch());
 
@@ -540,7 +535,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
   switch (type) {
   case core::ShareType::DMABUF_FD: {
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
-    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
 
     HsaHandleImportDesc desc = {};
     desc.device_handle = gpu_agent.libThunkDev();
@@ -564,7 +559,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     return HSA_STATUS_ERROR;
 #endif
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
-    const auto fabric_handle = *static_cast<const hsa_fabric_handle_t*>(import_handle);
+    const auto fabric_handle = static_cast<const core::DriverMemoryHandle*>(import_handle)->fabric_handle;
 
     HsaHandleImportDesc desc = {};
     desc.device_handle = gpu_agent.libThunkDev();
@@ -587,27 +582,24 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
   }
 }
 
-hsa_status_t KfdDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Calls DestroyMemoryHandle, as an amdgpu_bo_handle object is created during import.
-  return DestroyMemoryHandle(handle);
-}
-
 hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
-                            hsa_access_permission_t perms) {
+                            hsa_access_permission_t perms, uint32_t node_id) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, static_cast<HSAuint64>(offset),
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle,
+                                     static_cast<HSAuint64>(offset),
                                      static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
-                                     mem_perm(perms)));
+                                     mem_perm(perms), node_id));
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
-                              size_t offset, size_t size) {
+                              size_t offset, size_t size, uint32_t node_id) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, static_cast<HSAuint64>(offset),
-                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem)));
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle,
+                                     static_cast<HSAuint64>(offset),
+                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem), node_id));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
@@ -624,8 +616,9 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 
   /*
    * On Linux, export via KFD first (EXPORT_MEMORY_FLAGS_KFD_DMABUF) so the KFD section of the
-   * AMDGPU driver has a BO entry, then import into DRM. Re-export from DRM for the shareable fd.
-   * On Windows, KFD export and DRM export are equivalent.
+   * AMDGPU driver has a BO entry, then import into DRM. The shareable dmabuf_fd itself is created
+   * lazily when access is set (see Runtime::VMemorySetAccessPerHandle), so it is not re-exported
+   * here. On Windows, KFD export and DRM export are equivalent.
    */
 
   core::DriverMemoryHandle kfd_alloc = {};
@@ -637,9 +630,12 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return HSA_STATUS_ERROR;
   }
 
+  core::DriverMemoryHandle source_handle = {};
+  source_handle.dmabuf_fd = source_fd;
+
   core::DriverMemoryHandle targetHandle = {};
   hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareType::DMABUF_FD,
-                                        &source_fd, mem);
+                                        &source_handle, mem);
 #if defined(__linux__)
   rocr::os::DmaBufClose(source_fd);
 #endif
@@ -647,22 +643,13 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return ret;
   assert(targetHandle.size == size);
 
-  int shareable_fd = source_fd;
 #if defined(__linux__)
-  // Re-export from DRM; the KFD fd was transient and is already closed.
-  ret = ExportMemoryHandle(agent, targetHandle, core::ShareType::DMABUF_FD, 0,
-                           &shareable_fd);
-  if (ret != HSA_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    return ret;
-  }
   /*
    * We converted mem into a driver handle. The driver handle will keep the reference count
    * inside the KMD so we can free the original KFD allocation.
    */
   if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
     DestroyMemoryHandle(&targetHandle);
-    rocr::os::DmaBufClose(shareable_fd);
     return HSA_STATUS_ERROR;
   }
 #endif
@@ -671,12 +658,15 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
   if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
     DestroyMemoryHandle(&targetHandle);
-    rocr::os::DmaBufClose(shareable_fd);
     return HSA_STATUS_ERROR;
   }
 
   handle->handle = targetHandle.handle;
-  handle->dmabuf_fd = shareable_fd;
+  /*
+   * Do not hold a shareable dmabuf_fd open for the lifetime of the handle. It is created lazily
+   * (and closed again) when access is set in Runtime::VMemorySetAccessPerHandle.
+   */
+  handle->dmabuf_fd = -1;
   handle->size = size;
   return HSA_STATUS_SUCCESS;
 }
@@ -684,6 +674,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   if (handle->dmabuf_fd >= 0) {
     hsa_status_t status = rocr::os::DmaBufClose(handle->dmabuf_fd);
+    handle->dmabuf_fd = -1;
     if (status != HSA_STATUS_SUCCESS) return status;
   }
 
@@ -736,8 +727,15 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
       static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(type);
 
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
+  // Require both thunks up front: importing without destroy would leak the
+  // handle. Missing either -> NOT_SUPPORTED, not a null call.
+  auto* thunk_loader = core::Runtime::runtime_singleton_->thunkLoader();
+  const bool loaded =
+      thunk_loader->HSAKMT_PFN(hsaKmtImportExternalSemaphore) != nullptr &&
+      thunk_loader->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) != nullptr;
   HSAKMT_STATUS s =
-      HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle));
+      loaded ? HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle))
+             : HSAKMT_STATUS_NOT_SUPPORTED;
 
   // libhsakmt distinguishes invalid input (null handle, unknown type)
   // from "no node for this agent" and from generic KMD failures.
@@ -747,8 +745,9 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
     case HSAKMT_STATUS_SUCCESS:
       break;
     case HSAKMT_STATUS_INVALID_PARAMETER:  // e.g. null nt_handle
-    case HSAKMT_STATUS_NOT_SUPPORTED:      // unsupported handle type (incl. Linux stub)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:      // missing thunk / unsupported type / Linux stub
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
     case HSAKMT_STATUS_INVALID_NODE_UNIT:  // no WDDM device for node
       return HSA_STATUS_ERROR_INVALID_AGENT;
     default:
@@ -761,10 +760,56 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
 
 hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // No export -> not this driver's handle. INVALID_AGENT (base-class
+  // contract) lets handle_close keep polling other drivers.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
   if (HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
+
+namespace {
+// Preserve the libhsakmt distinctions a caller can act on (bad handle vs.
+// wrong node vs. generic failure) instead of folding everything into ERROR.
+hsa_status_t MapQueueExtSemStatus(HSAKMT_STATUS s) {
+  switch (s) {
+    case HSAKMT_STATUS_SUCCESS:
+      return HSA_STATUS_SUCCESS;
+    case HSAKMT_STATUS_INVALID_HANDLE:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:  // missing thunk / platform stub
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+    default:
+      return HSA_STATUS_ERROR;
+  }
+}
+}  // namespace
+
+hsa_status_t KfdDriver::SignalExternalSemaphore(uint64_t queue_id,
+                                                hsa_amd_external_semaphore_t sem,
+                                                uint64_t value) const {
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) == nullptr)
+    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
+  return MapQueueExtSemStatus(
+      HSAKMT_CALL(hsaKmtQueueSignalExternalSemaphore(queue_id, kmt_handle, value)));
+}
+
+hsa_status_t KfdDriver::WaitExternalSemaphore(uint64_t queue_id,
+                                              hsa_amd_external_semaphore_t sem,
+                                              uint64_t value) const {
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) == nullptr)
+    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
+  return MapQueueExtSemStatus(
+      HSAKMT_CALL(hsaKmtQueueWaitExternalSemaphore(queue_id, kmt_handle, value)));
+}
+
 bool KfdDriver::BindXnackMode() {
   // Get users' preference for Xnack mode of ROCm platform.
   HSAint32 mode = core::Runtime::runtime_singleton_->flag().xnack();

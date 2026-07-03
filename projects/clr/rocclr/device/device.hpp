@@ -8,6 +8,7 @@
 #define DEVICE_HPP_
 
 #include "top.hpp"
+#include <atomic>
 #include "thread/thread.hpp"
 #include "thread/monitor.hpp"
 #include "platform/context.hpp"
@@ -52,6 +53,8 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchWriteMemoryCommand;
+class BatchReadMemoryCommand;
 class MapMemoryCommand;
 class UnmapMemoryCommand;
 class MigrateMemObjectsCommand;
@@ -1308,6 +1311,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
   virtual void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) = 0;
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
@@ -1376,7 +1381,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
                                           bool attach_signal = false,
                                           const std::vector<const std::string*>* kernelNames = nullptr,
                                           bool pre_patched = false,
-                                          bool blocking = false) {
+                                          bool blocking = false,
+                                          const std::vector<uint8_t>* flatMetadataData = nullptr) {
     return false;
   }
 
@@ -1469,6 +1475,8 @@ class MemObjMap : public AllStatic {
 
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
+  //!< Find any registered mem object whose range overlaps [ptr, ptr + size).
+  static amd::Memory* FindOverlap(const void* ptr, size_t size);
   //!< Batched version: find multiple mem objects in one lock acquisition
   static void FindMemObjBatch(const void* const* ptrs, size_t count,
                               std::vector<amd::Memory*>& memories,
@@ -1751,7 +1759,7 @@ class Device : public RuntimeObject {
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
   size_t maxStackSize_ = kMaxStackSize9X;
-  static cl_int gpu_error_;  //!< Store the GPU error cause during kernel launch
+  static std::atomic<cl_int> gpu_error_;  //!< Store the GPU error cause during kernel launch
 
   typedef std::list<CommandQueue*> CommandQueues;
 
@@ -2398,8 +2406,8 @@ class Device : public RuntimeObject {
 #endif
 #endif
 
-  static bool IsGPUInError() { return (gpu_error_ != CL_SUCCESS); }
-  static cl_int GetGPUError() { return gpu_error_; }
+  static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
+  static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
 

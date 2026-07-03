@@ -164,7 +164,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
   size_t allocSize = qSize + max_command_buffers * (cmdSize + fSize);
   VirtualGPU::Queue* queue = amd::AllocWithTrailing<VirtualGPU::Queue>(
       allocSize, gpu, palDev, residency_limit, max_command_buffers);
-  
+
   if (queue != nullptr) {
     address addrQ = nullptr;
     if (((qCreateInfo.engineType == Pal::EngineTypeCompute) ||
@@ -562,7 +562,7 @@ bool VirtualGPU::Queue::isDone(uint id) {
     // Flush the current command buffer
     if (!flush()) {
       // If flush failed, then exit earlier...
-      gpu_.dev().gpu_error_ = CL_INVALID_OPERATION;
+      gpu_.dev().gpu_error_.store(CL_INVALID_OPERATION, std::memory_order_relaxed);
       return false;
     }
   }
@@ -2122,6 +2122,59 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   profilingEnd(cmd);
 }
 
+void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  const std::vector<amd::BatchWriteMemoryOp>& write_ops = cmd.WriteOps();
+
+  if (!amd::IS_HIP) {
+    device::Memory::SyncFlags sync_flags;
+    sync_flags.skipEntire_ = false;
+
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      dev().getGpuMemory(op.dst_memory)->syncCacheFromHost(*this, sync_flags);
+    }
+  }
+
+  if (!blitMgr().WriteBufferBatch(write_ops)) {
+    LogError("SubmitBatchWriteMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    if (!amd::IS_HIP) {
+      for (const amd::BatchWriteMemoryOp& op : write_ops) {
+        op.dst_memory->signalWrite(&dev());
+      }
+    }
+  }
+
+  profilingEnd(cmd);
+}
+
+void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  const std::vector<amd::BatchReadMemoryOp>& read_ops = cmd.ReadOps();
+
+  if (!amd::IS_HIP) {
+    for (const amd::BatchReadMemoryOp& op : read_ops) {
+      dev().getGpuMemory(op.src_memory)->syncCacheFromHost(*this);
+    }
+  }
+
+  if (!blitMgr().ReadBufferBatch(read_ops)) {
+    LogError("SubmitBatchReadMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  }
+
+  profilingEnd(cmd);
+}
+
 void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
@@ -2517,8 +2570,10 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& 
                                   VirtualGPU** gpuDefQueue, uint64_t* vmDefQueue) {
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
   if (nullptr == defQueue) {
-    LogError("Default device queue wasn't allocated");
-    return false;
+    // O0 may conservatively emit hidden device-enqueue ABI arguments even when the
+    // parent kernel does not enqueue children. Without a default device queue there
+    // is no scheduler work to set up, so allow the parent dispatch to proceed.
+    return true;
   } else {
     if (dev().settings().useDeviceQueue_) {
       *gpuDefQueue = static_cast<VirtualGPU*>(defQueue->vDev());
@@ -2834,7 +2889,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   AqlPacketUpdateTs(aql_index, gpuEvent);
 
   // Execute scheduler for device enqueue
-  if (hsaKernel.dynamicParallelism()) {
+  if (hsaKernel.dynamicParallelism() && gpuDefQueue != nullptr) {
     PostDeviceEnqueue(kernel, hsaKernel, gpuDefQueue, vmDefQueue, vmParentWrap, &gpuEvent);
   }
 

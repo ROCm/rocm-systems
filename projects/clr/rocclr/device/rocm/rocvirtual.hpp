@@ -21,12 +21,16 @@
 #include <stack>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace amd::roc {
 class Device;
 class Memory;
 struct ProfilingSignal;
 class Timestamp;
+
+//! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
+bool InAsyncSignalHandler();
 
 // Initial HSA signal value
 constexpr static hsa_signal_value_t kInitSignalValueOne = 1;
@@ -298,13 +302,6 @@ class VirtualGPU : public device::VirtualDevice {
     //! Adds a raw signal for dependency tracking
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
 
-    //! Get/Set SDMA profiling
-    bool GetSDMAProfiling() { return sdma_profiling_; }
-    void SetSDMAProfiling(bool profile) {
-      sdma_profiling_ = profile;
-      Hsa::profiling_async_copy_enable(profile);
-    }
-
    private:
     //! Creates HSA signal with the specified scope
     bool CreateSignal(ProfilingSignal* signal, bool interrupt = false) const;
@@ -320,7 +317,6 @@ class VirtualGPU : public device::VirtualDevice {
     std::stack<ProfilingSignal*> signal_pool_;       //!< The pool of free signals without interrupt
     std::vector<ProfilingSignal*> signal_list_;      //!< The pool of all signals for processing
     size_t current_id_ = 0;                          //!< Last submitted signal
-    bool sdma_profiling_ = false;                    //!< If TRUE, then SDMA profiling is enabled
     const VirtualGPU& gpu_;                          //!< VirtualGPU, associated with this tracker
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue
     std::vector<hsa_signal_t> dynamic_queue_waits_;   //!< Extra raw signals for a wait in this queue
@@ -392,6 +388,35 @@ class VirtualGPU : public device::VirtualDevice {
         dyn_data_prefetch_enabled_ = false;
       }
 
+      //! Whether the preloader has a metadata queue attached
+      bool HasMetadataQueue() const { return IsAttached(); }
+
+      //! Returns the metadata ring buffer base (nullptr if not attached)
+      void* GetQueueBase() const { return queue_base_; }
+
+      //! Capture a metadata packet into a host buffer (for graph capture).
+      //! Fills the 256-byte buffer with the same content that Set() would write
+      //! to the queue metadata ring, but targets an arbitrary host pointer instead.
+      template <class AqlPacket>
+      void CaptureMetadata(AqlPacket* packet, uint16_t header, uint8_t* host_metadata) {
+        if (host_metadata == nullptr || !IsAttached()) {
+          return;
+        }
+        if constexpr (std::is_same_v<AqlPacket, hsa_kernel_dispatch_packet_t>) {
+          if (pending_descriptor_ == nullptr) {
+            return;
+          }
+          auto* metadata = reinterpret_cast<hsa_amd_metadata_kernel_dispatch_packet_t*>(
+              host_metadata);
+          SetPacket(packet, header, metadata);
+        } else if constexpr (std::is_same_v<AqlPacket, hsa_barrier_and_packet_t> ||
+                             std::is_same_v<AqlPacket, hsa_amd_barrier_value_packet_t>) {
+          auto* metadata = reinterpret_cast<hsa_amd_metadata_barrier_packet_t*>(
+              host_metadata);
+          SetPacket(packet, header, metadata);
+        }
+      }
+
     private:
       //! Return whether the loader is attached to a gpu queue
       bool IsAttached() const { return queue_base_ != nullptr; }
@@ -457,6 +482,8 @@ class VirtualGPU : public device::VirtualDevice {
   void submitCopyMemory(amd::CopyMemoryCommand& cmd);
   void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd);
   void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd);
+  void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd);
+  void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd);
   void submitMapMemory(amd::MapMemoryCommand& cmd);
   void submitUnmapMemory(amd::UnmapMemoryCommand& cmd);
   void submitKernel(amd::NDRangeKernelCommand& cmd);
@@ -497,7 +524,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) {}
   void submitThreadTrace(amd::ThreadTraceCommand& vcmd) {}
 
-  virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {}
+  virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) override;
 
   virtual address allocKernelArguments(size_t size, size_t alignment) final;
   virtual void ReleaseSdmaEngines() final;  //!< Release SDMA engine assignments
@@ -620,6 +647,9 @@ class VirtualGPU : public device::VirtualDevice {
   void* getOrCreateHostcallBuffer();
 
  private:
+  //! Release pinned memory after previously submitted work on the queue has completed.
+  void SchedulePinnedMemoryRelease(amd::HostQueue& queue, std::vector<amd::Memory*> pinned_memory);
+
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet);
 
@@ -636,7 +666,8 @@ class VirtualGPU : public device::VirtualDevice {
                                   bool attach_signal = false,
                                   const std::vector<const std::string*>* kernelNames = nullptr,
                                   bool pre_patched = false,
-                                  bool blocking = false) override;
+                                  bool blocking = false,
+                                  const std::vector<uint8_t>* flatMetadataData = nullptr) override;
 
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
@@ -785,6 +816,7 @@ class VirtualGPU : public device::VirtualDevice {
   };
 
   Timestamp* timestamp_;
+  bool sdma_profiling_for_cmd_ = false;  //!< SDMA profiling enabled for current command
   amd::Command* command_;   //!< Current command
   //! Monotonic client coalesce id of the last barrier from submitMarker, used to
   //! coalesce consecutive records. Execution() lock only. 0 = no window open.
