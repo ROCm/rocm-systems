@@ -1,13 +1,13 @@
 # --------------------------------------------------------------------------------
 #
-# This yaml file tracks MI gpu spec in a tree structure.
+# This yaml file tracks GPU spec in a tree structure.
 #
-# *It is important to note that this file only tracks the common specs for MI GPU series.*
+# *It is important to note that this file only tracks the common specs for GPU series.*
 # *For example, the CU #s are based on information retrieved from other tools.*
-# **
 #
-# MI GPUs
-#   |-- series: the specific MI series; mi50, mi100, mi200, mi300
+#
+# GPUs
+#   |-- series: the specific series; mi50, mi100, mi200, mi300
 #       |-- architecture: currently, only mi300 gpus hold different architectures
 #           |-- perfmon_config, copy from ROCm/aqlprofile from gfxip/gfx9/gfx9_block_info.h
 #           |-- gpu model
@@ -23,7 +23,6 @@
 #           |-- design:
 #               | -- physical_aid # Number of physical AIDs (CDNA)
 #               | -- logical_partitions_per_die # Logical AID partitions per physical AID (CDNA)
-#               | -- memory_die # Number of memory dies / MCDs (RDNA/navi3)
 #               | -- memory_levels # Cache and memory levels supported by the arch
 #
 # --------------------------------------------------------------------------------
@@ -353,6 +352,7 @@ mi_gpu_spec:
             chip_ids:
               physical: 30112
               virtual: 30128
+
           - gpu_model: mi355
             partition_mode:
               compute_partition_mode:
@@ -378,6 +378,7 @@ mi_gpu_spec:
             chip_ids:
               physical: 30115
               virtual: 30131
+
           - gpu_model: mi358
             partition_mode:
               compute_partition_mode:
@@ -401,6 +402,7 @@ mi_gpu_spec:
             chip_ids:
               physical: 30114
               virtual: 30130
+
           - gpu_model: mi350p
             partition_mode:
               compute_partition_mode:
@@ -423,68 +425,66 @@ mi_gpu_spec:
               virtual: 30136
 
   #########################################################
-  #Note: in the future, we might set a seperate file for NAVI
-  - gpu_series: navi3
-    # for memory_die, APU does not have separate MCDs like dGPU,
-    # mark it as unified memory
+  # RDNA 3.5 family (gfx115x)
+  - gpu_series: rdna3.5
+    # gfx115x parts use unified memory (no separate MCDs like a dGPU)
     gpu_archs:
       - gpu_arch: gfx1150
         perfmon_config:
-            SQ: 8
-            TA: 2
-            GRBM: 2
-            CPC:  2
-            GCEA: 2
-            TCP:  4
-            SPI:  6
-            GL1A: 4
-            GL1C: 4
-            GL2A: 4
-            GL2C: 4
+          SQ: 8
+          TA: 2
+          GRBM: 2
+          CPC: 2
+          GCEA: 2
+          TCP: 4
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
         models:
           - gpu_model: rdna35_point_1
             design:
-              memory_die: 1
               memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
               physical: 5390
+
       - gpu_arch: gfx1151
         perfmon_config:
-            SQ: 8
-            TA: 2
-            GRBM: 2
-            CPC:  2
-            GCEA: 2
-            TCP:  4
-            SPI:  6
-            GL1A: 4
-            GL1C: 4
-            GL2A: 4
-            GL2C: 4
+          SQ: 8
+          TA: 2
+          GRBM: 2
+          CPC: 2
+          GCEA: 2
+          TCP: 4
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
         models:
           - gpu_model: rdna35_halo
             design:
-              memory_die: 1
               memory_levels: ["LDS", "L0", "L1", "L2", "MALL"]
             chip_ids:
-              physical: 5510
+              physical: 5510 # 0x1586
+
       - gpu_arch: gfx1152
         perfmon_config:
-            SQ: 8
-            TA: 2
-            GRBM: 2
-            CPC:  2
-            GCEA: 2
-            TCP:  4
-            SPI:  6
-            GL1A: 4
-            GL1C: 4
-            GL2A: 4
-            GL2C: 4
+          SQ: 8
+          TA: 2
+          GRBM: 2
+          CPC: 2
+          GCEA: 2
+          TCP: 4
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
         models:
           - gpu_model: rdna35_point_2
             design:
-              memory_die: 1
               memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
               physical: 4372

@@ -30,6 +30,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Profile mode now errors when the target workload directory is non-empty unless `--overwrite` is passed. `--bench-only` likewise requires `--overwrite` before replacing an existing `roofline.csv`.
 
+* Renamed `num_hbm_channels` to `num_memory_channels` in machine specifications to unify memory channel reporting across GPU families.
+
 ### Removed
 
 * Removed the multi-node analysis options ``--nodes``, ``--list-nodes`` (analyze mode) and the experimental ``--spatial-multiplexing`` option (profile and analyze modes). These features did not work as expected and will be redesigned in a future release.
@@ -45,6 +47,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 ### Known issues
+
+* Workloads profiled with earlier versions must be re-profiled before analysis. The sysinfo schema changed and older workload directories are not compatible.
 
 * CLI mode block 4 Roofline plot's legend will not appear if there are too many kernels to list, in relation to the user's terminal size. Same per-kernel roofline rate metrics and AI plot point details can be read in block 4's preceding tables.
 
