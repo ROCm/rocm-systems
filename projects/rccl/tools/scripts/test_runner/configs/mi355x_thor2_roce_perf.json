@@ -626,63 +626,63 @@
       },
       "tests": [
         {
-          "name": "AllToAll_int8",
-          "description": "AllToAll perf, datatype int8",
+          "name": "AlltoAll_int8",
+          "description": "AlltoAll perf, datatype int8",
           "command_args": "-d int8"
         },
         {
-          "name": "AllToAll_uint8",
-          "description": "AllToAll perf, datatype uint8",
+          "name": "AlltoAll_uint8",
+          "description": "AlltoAll perf, datatype uint8",
           "command_args": "-d uint8"
         },
         {
-          "name": "AllToAll_int32",
-          "description": "AllToAll perf, datatype int32",
+          "name": "AlltoAll_int32",
+          "description": "AlltoAll perf, datatype int32",
           "command_args": "-d int32"
         },
         {
-          "name": "AllToAll_uint32",
-          "description": "AllToAll perf, datatype uint32",
+          "name": "AlltoAll_uint32",
+          "description": "AlltoAll perf, datatype uint32",
           "command_args": "-d uint32"
         },
         {
-          "name": "AllToAll_int64",
-          "description": "AllToAll perf, datatype int64",
+          "name": "AlltoAll_int64",
+          "description": "AlltoAll perf, datatype int64",
           "command_args": "-d int64"
         },
         {
-          "name": "AllToAll_uint64",
-          "description": "AllToAll perf, datatype uint64",
+          "name": "AlltoAll_uint64",
+          "description": "AlltoAll perf, datatype uint64",
           "command_args": "-d uint64"
         },
         {
-          "name": "AllToAll_half",
-          "description": "AllToAll perf, datatype half",
+          "name": "AlltoAll_half",
+          "description": "AlltoAll perf, datatype half",
           "command_args": "-d half"
         },
         {
-          "name": "AllToAll_float",
-          "description": "AllToAll perf, datatype float",
+          "name": "AlltoAll_float",
+          "description": "AlltoAll perf, datatype float",
           "command_args": "-d float"
         },
         {
-          "name": "AllToAll_double",
-          "description": "AllToAll perf, datatype double",
+          "name": "AlltoAll_double",
+          "description": "AlltoAll perf, datatype double",
           "command_args": "-d double"
         },
         {
-          "name": "AllToAll_bfloat16",
-          "description": "AllToAll perf, datatype bfloat16",
+          "name": "AlltoAll_bfloat16",
+          "description": "AlltoAll perf, datatype bfloat16",
           "command_args": "-d bfloat16"
         },
         {
-          "name": "AllToAll_fp8_e4m3",
-          "description": "AllToAll perf, datatype fp8_e4m3",
+          "name": "AlltoAll_fp8_e4m3",
+          "description": "AlltoAll perf, datatype fp8_e4m3",
           "command_args": "-d fp8_e4m3"
         },
         {
-          "name": "AllToAll_fp8_e5m2",
-          "description": "AllToAll perf, datatype fp8_e5m2",
+          "name": "AlltoAll_fp8_e5m2",
+          "description": "AlltoAll perf, datatype fp8_e5m2",
           "command_args": "-d fp8_e5m2"
         }
       ]
@@ -695,63 +695,63 @@
       },
       "tests": [
         {
-          "name": "AllToAllv_int8",
-          "description": "AllToAllv perf, datatype int8",
+          "name": "AlltoAllv_int8",
+          "description": "AlltoAllv perf, datatype int8",
           "command_args": "-d int8"
         },
         {
-          "name": "AllToAllv_uint8",
-          "description": "AllToAllv perf, datatype uint8",
+          "name": "AlltoAllv_uint8",
+          "description": "AlltoAllv perf, datatype uint8",
           "command_args": "-d uint8"
         },
         {
-          "name": "AllToAllv_int32",
-          "description": "AllToAllv perf, datatype int32",
+          "name": "AlltoAllv_int32",
+          "description": "AlltoAllv perf, datatype int32",
           "command_args": "-d int32"
         },
         {
-          "name": "AllToAllv_uint32",
-          "description": "AllToAllv perf, datatype uint32",
+          "name": "AlltoAllv_uint32",
+          "description": "AlltoAllv perf, datatype uint32",
           "command_args": "-d uint32"
         },
         {
-          "name": "AllToAllv_int64",
-          "description": "AllToAllv perf, datatype int64",
+          "name": "AlltoAllv_int64",
+          "description": "AlltoAllv perf, datatype int64",
           "command_args": "-d int64"
         },
         {
-          "name": "AllToAllv_uint64",
-          "description": "AllToAllv perf, datatype uint64",
+          "name": "AlltoAllv_uint64",
+          "description": "AlltoAllv perf, datatype uint64",
           "command_args": "-d uint64"
         },
         {
-          "name": "AllToAllv_half",
-          "description": "AllToAllv perf, datatype half",
+          "name": "AlltoAllv_half",
+          "description": "AlltoAllv perf, datatype half",
           "command_args": "-d half"
         },
         {
-          "name": "AllToAllv_float",
-          "description": "AllToAllv perf, datatype float",
+          "name": "AlltoAllv_float",
+          "description": "AlltoAllv perf, datatype float",
           "command_args": "-d float"
         },
         {
-          "name": "AllToAllv_double",
-          "description": "AllToAllv perf, datatype double",
+          "name": "AlltoAllv_double",
+          "description": "AlltoAllv perf, datatype double",
           "command_args": "-d double"
         },
         {
-          "name": "AllToAllv_bfloat16",
-          "description": "AllToAllv perf, datatype bfloat16",
+          "name": "AlltoAllv_bfloat16",
+          "description": "AlltoAllv perf, datatype bfloat16",
           "command_args": "-d bfloat16"
         },
         {
-          "name": "AllToAllv_fp8_e4m3",
-          "description": "AllToAllv perf, datatype fp8_e4m3",
+          "name": "AlltoAllv_fp8_e4m3",
+          "description": "AlltoAllv perf, datatype fp8_e4m3",
           "command_args": "-d fp8_e4m3"
         },
         {
-          "name": "AllToAllv_fp8_e5m2",
-          "description": "AllToAllv perf, datatype fp8_e5m2",
+          "name": "AlltoAllv_fp8_e5m2",
+          "description": "AlltoAllv perf, datatype fp8_e5m2",
           "command_args": "-d fp8_e5m2"
         }
       ]
@@ -876,14 +876,14 @@
       "enabled": true
     },
     {
-      "name": "Perf - AllToAll (datatype sweep)",
-      "description": "rccl-tests AllToAll perf sweep across 12 datatypes (1B-4G)",
+      "name": "Perf - AlltoAll (datatype sweep)",
+      "description": "rccl-tests AlltoAll perf sweep across 12 datatypes (1B-4G)",
       "config": "alltoall_perf",
       "enabled": true
     },
     {
-      "name": "Perf - AllToAllv (datatype sweep)",
-      "description": "rccl-tests AllToAllv perf sweep across 12 datatypes (1B-4G)",
+      "name": "Perf - AlltoAllv (datatype sweep)",
+      "description": "rccl-tests AlltoAllv perf sweep across 12 datatypes (1B-4G)",
       "config": "alltoallv_perf",
       "enabled": true
     },

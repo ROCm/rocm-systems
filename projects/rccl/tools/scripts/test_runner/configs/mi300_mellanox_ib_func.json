@@ -826,9 +826,9 @@
           "test_filter": "NetIbMPITest.FanOutStress"
         },
         {
-          "name": "NetIB_Stress_AllToAll",
+          "name": "NetIB_Stress_AlltoAll",
           "description": "Full mesh, 50 iterations",
-          "test_filter": "NetIbMPITest.AllToAllStress"
+          "test_filter": "NetIbMPITest.AlltoAllStress"
         },
         {
           "name": "NetIB_Stress_BidirectionalMultiRank",
@@ -1873,9 +1873,9 @@
           "test_filter": "UBR_Broadcast.NonZeroRoot_MultiNode"
         },
         {
-          "name": "UBR_AllToAll_OutOfPlace_MultiNode",
-          "description": "AllToAll out-of-place with UBR on multi-node",
-          "test_filter": "UBR_AllToAll.OutOfPlace_MultiNode"
+          "name": "UBR_AlltoAll_OutOfPlace_MultiNode",
+          "description": "AlltoAll out-of-place with UBR on multi-node",
+          "test_filter": "UBR_AlltoAll.OutOfPlace_MultiNode"
         },
         {
           "name": "UBR_SendRecv_RingPattern_MultiNode",
@@ -1883,21 +1883,21 @@
           "test_filter": "UBR_SendRecv.RingPattern_MultiNode"
         },
         {
-          "name": "UBR_AllToAllStress_InterleavedMultiSize",
-          "description": "Stress test with interleaved AllToAll/AllToAllv across small/medium/large sizes",
-          "test_filter": "UBR_AllToAllStress.InterleavedMultiSize_MultiNode",
+          "name": "UBR_AlltoAllStress_InterleavedMultiSize",
+          "description": "Stress test with interleaved AlltoAll/AlltoAllv across small/medium/large sizes",
+          "test_filter": "UBR_AlltoAllStress.InterleavedMultiSize_MultiNode",
           "timeout": 300
         },
         {
-          "name": "UBR_AllToAllStress_SplitComm",
-          "description": "Stress test with interleaved AllToAll/AllToAllv using split communicators",
-          "test_filter": "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode",
+          "name": "UBR_AlltoAllStress_SplitComm",
+          "description": "Stress test with interleaved AlltoAll/AlltoAllv using split communicators",
+          "test_filter": "UBR_AlltoAllStress.InterleavedWithSplitComm_MultiNode",
           "timeout": 300
         },
         {
-          "name": "UBR_AllToAllStress_ConcurrentMultiComm",
-          "description": "Concurrent AllToAll on multiple communicators with separate streams",
-          "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
+          "name": "UBR_AlltoAllStress_ConcurrentMultiComm",
+          "description": "Concurrent AlltoAll on multiple communicators with separate streams",
+          "test_filter": "UBR_AlltoAllStress.ConcurrentMultiComm_MultiNode",
           "timeout": 300
         },
         {
@@ -1906,14 +1906,14 @@
           "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
         },
         {
-          "name": "UBR_ConcurrentRegHang_AllToAll_Contiguous",
-          "description": "ncclAllToAll with contiguous registered buffers (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
+          "name": "UBR_ConcurrentRegHang_AlltoAll_Contiguous",
+          "description": "ncclAlltoAll with contiguous registered buffers (should pass)",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
-          "name": "UBR_ConcurrentRegHang_AllToAll_Stress",
-          "description": "Stress test: 50 iterations of ncclAllToAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "name": "UBR_ConcurrentRegHang_AlltoAll_Stress",
+          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -1957,14 +1957,14 @@
           "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
         },
         {
-          "name": "UBR_AllToAll_Contiguous_Success",
-          "description": "ncclAllToAll with contiguous registered buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
+          "name": "UBR_AlltoAll_Contiguous_Success",
+          "description": "ncclAlltoAll with contiguous registered buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
-          "name": "UBR_AllToAll_Stress_Success",
-          "description": "Stress test: 50 iterations of ncclAllToAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "name": "UBR_AlltoAll_Stress_Success",
+          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -2003,9 +2003,9 @@
       },
       "tests": [
         {
-          "name": "GraphCapture_AllToAll_MultiNode",
-          "description": "AllToAll graph capture with IPC registration on multi-node",
-          "test_filter": "GraphCapture_AllToAll.MultiNode"
+          "name": "GraphCapture_AlltoAll_MultiNode",
+          "description": "AlltoAll graph capture with IPC registration on multi-node",
+          "test_filter": "GraphCapture_AlltoAll.MultiNode"
         },
         {
           "name": "GraphCapture_AllReduce_MultiNode",
