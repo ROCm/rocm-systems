@@ -3172,171 +3172,14 @@ void Runtime::InternalQueueCreateNotify(const hsa_queue_t* queue, hsa_agent_t ag
 hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
                                    hsa_amd_svm_attribute_pair_t* attribute_list,
                                    size_t attribute_count) {
-  uint32_t set_attribs = 0;
-  std::vector<bool> agent_seen(max_node_id() + 1, false);
-
-  std::vector<HSA_SVM_ATTRIBUTE> attribs;
-  attribs.reserve(attribute_count);
-  uint32_t set_flags = 0;
-  uint32_t clear_flags = 0;
-
-  auto Convert = [&](uint64_t value) -> Agent* {
-    hsa_agent_t handle = {value};
-    Agent* agent = Agent::Convert(handle);
-    if ((agent == nullptr) || !agent->IsValid())
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
-                               "Invalid agent handle in Runtime::SetSvmAttrib.");
-    return agent;
-  };
-
-  auto ConvertAllowNull = [&](uint64_t value) -> Agent* {
-    hsa_agent_t handle = {value};
-    Agent* agent = Agent::Convert(handle);
-    if ((agent != nullptr) && (!agent->IsValid()))
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
-                               "Invalid agent handle in Runtime::SetSvmAttrib.");
-    return agent;
-  };
-
-  auto ConfirmNew = [&](Agent* agent) {
-    if (agent_seen[agent->node_id()])
-      throw AMD::hsa_exception(
-          HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS,
-          "Multiple attributes given for the same agent in Runtime::SetSvmAttrib.");
-    agent_seen[agent->node_id()] = true;
-  };
-
-  auto Check = [&](uint64_t attrib) {
-    if (set_attribs & (1 << attrib))
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS,
-                               "Attribute given multiple times in Runtime::SetSvmAttrib.");
-    set_attribs |= (1 << attrib);
-  };
-
-  auto kmtPair = [](uint32_t attrib, uint32_t value) {
-    HSA_SVM_ATTRIBUTE pair = {attrib, value};
-    return pair;
-  };
-
-  for (uint32_t i = 0; i < attribute_count; i++) {
-    auto attrib = attribute_list[i].attribute;
-    auto value = attribute_list[i].value;
-
-    switch (attrib) {
-      case HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG: {
-        Check(attrib);
-        switch (value) {
-          case HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED:
-            set_flags |= HSA_SVM_FLAG_COHERENT;
-            break;
-          case HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED:
-            clear_flags |= HSA_SVM_FLAG_COHERENT;
-            break;
-          default:
-            throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
-                                     "Invalid HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG value.");
-        }
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_READ_ONLY: {
-        Check(attrib);
-        if (value)
-          set_flags |= HSA_SVM_FLAG_GPU_RO;
-        else
-          clear_flags |= HSA_SVM_FLAG_GPU_RO;
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_HIVE_LOCAL: {
-        Check(attrib);
-        if (value)
-          set_flags |= HSA_SVM_FLAG_HIVE_LOCAL;
-        else
-          clear_flags |= HSA_SVM_FLAG_HIVE_LOCAL;
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY: {
-        Check(attrib);
-        // Max migration size is 1GB.
-        if (value > 18) value = 18;
-        attribs.push_back(kmtPair(HSA_SVM_ATTR_GRANULARITY, value));
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION: {
-        Check(attrib);
-        Agent* agent = ConvertAllowNull(value);
-        if (agent == nullptr)
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_PREFERRED_LOC, INVALID_NODEID));
-        else
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_PREFERRED_LOC, agent->node_id()));
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_READ_MOSTLY: {
-        Check(attrib);
-        if (value)
-          set_flags |= HSA_SVM_FLAG_GPU_READ_MOSTLY;
-        else
-          clear_flags |= HSA_SVM_FLAG_GPU_READ_MOSTLY;
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_GPU_EXEC: {
-        Check(attrib);
-        if (value)
-          set_flags |= HSA_SVM_FLAG_GPU_EXEC;
-        else
-          clear_flags |= HSA_SVM_FLAG_GPU_EXEC;
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE: {
-        Agent* agent = Convert(value);
-        ConfirmNew(agent);
-        if (agent->device_type() == Agent::kAmdCpuDevice) {
-          set_flags |= HSA_SVM_FLAG_HOST_ACCESS;
-        } else {
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS, agent->node_id()));
-        }
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE: {
-        Agent* agent = Convert(value);
-        ConfirmNew(agent);
-        if (agent->device_type() == Agent::kAmdCpuDevice) {
-          set_flags |= HSA_SVM_FLAG_HOST_ACCESS;
-        } else {
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS_IN_PLACE, agent->node_id()));
-        }
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS: {
-        Agent* agent = Convert(value);
-        ConfirmNew(agent);
-        if (agent->device_type() == Agent::kAmdCpuDevice) {
-          clear_flags |= HSA_SVM_FLAG_HOST_ACCESS;
-        } else {
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_NO_ACCESS, agent->node_id()));
-        }
-        break;
-      }
-      default:
-        throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
-                                 "Illegal or invalid attribute in Runtime::SetSvmAttrib");
-    }
-  }
-
-  // Merge CPU access properties - grant access if any CPU needs access.
-  // Probably wrong.
-  if (set_flags & HSA_SVM_FLAG_HOST_ACCESS) clear_flags &= ~HSA_SVM_FLAG_HOST_ACCESS;
-
-  // Add flag updates
-  if (clear_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, clear_flags));
-  if (set_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, set_flags));
-
   const size_t pageSize = os::PageSize();
   uint8_t* base = AlignDown((uint8_t*)ptr, pageSize);
   uint8_t* end = AlignUp((uint8_t*)ptr + size, pageSize);
   size_t len = end - base;
-  HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(base, len, attribs.size(), &attribs[0]));
-  if (error != HSAKMT_STATUS_SUCCESS)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
+
+  hsa_status_t error = AgentDriver().SvmSetAttr(base, len, attribute_list, attribute_count);
+  if (error != HSA_STATUS_SUCCESS)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR, "SVM set attributes failed.");
 
   return HSA_STATUS_SUCCESS;
 }
@@ -3344,158 +3187,69 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
 hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
                                    hsa_amd_svm_attribute_pair_t* attribute_list,
                                    size_t attribute_count) {
-  std::vector<HSA_SVM_ATTRIBUTE> attribs;
-  attribs.reserve(attribute_count);
-
-  std::vector<int> kmtIndices(attribute_count);
-
-  bool getFlags = false;
-
-  auto Convert = [&](uint64_t value) -> Agent* {
-    hsa_agent_t handle = {value};
-    Agent* agent = Agent::Convert(handle);
-    if ((agent == nullptr) || !agent->IsValid())
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
-                               "Invalid agent handle in Runtime::GetSvmAttrib.");
-    return agent;
-  };
-
-  auto kmtPair = [](uint32_t attrib, uint32_t value) {
-    HSA_SVM_ATTRIBUTE pair = {attrib, value};
-    return pair;
-  };
-
-  for (uint32_t i = 0; i < attribute_count; i++) {
-    auto& attrib = attribute_list[i].attribute;
-    auto& value = attribute_list[i].value;
-
-    switch (attrib) {
-      case HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG:
-      case HSA_AMD_SVM_ATTRIB_READ_ONLY:
-      case HSA_AMD_SVM_ATTRIB_HIVE_LOCAL:
-      case HSA_AMD_SVM_ATTRIB_READ_MOSTLY: {
-        getFlags = true;
-        kmtIndices[i] = -1;
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY: {
-        kmtIndices[i] = attribs.size();
-        attribs.push_back(kmtPair(HSA_SVM_ATTR_GRANULARITY, 0));
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION: {
-        kmtIndices[i] = attribs.size();
-        attribs.push_back(kmtPair(HSA_SVM_ATTR_PREFERRED_LOC, 0));
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION: {
-        value = Agent::Convert(GetSVMPrefetchAgent(ptr, size)).handle;
-        kmtIndices[i] = -1;
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_ACCESS_QUERY: {
-        Agent* agent = Convert(value);
-        if (agent->device_type() == Agent::kAmdCpuDevice) {
-          getFlags = true;
-          kmtIndices[i] = -1;
-        } else {
-          kmtIndices[i] = attribs.size();
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS, agent->node_id()));
-        }
-        break;
-      }
-      default:
-        throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
-                                 "Illegal or invalid attribute in Runtime::SetSvmAttrib");
-    }
-  }
-
-  if (getFlags) {
-    // Order is important to later code.
-    attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, 0));
-    attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, 0));
-  }
-
   const size_t pageSize = os::PageSize();
   uint8_t* base = AlignDown((uint8_t*)ptr, pageSize);
   uint8_t* end = AlignUp((uint8_t*)ptr + size, pageSize);
   size_t len = end - base;
-  if (attribs.size() != 0) {
-    HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, attribs.size(), &attribs[0]));
-    if (error != HSAKMT_STATUS_SUCCESS)
-      throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMGetAttr failed.");
+
+  // The prefetch location is tracked by the runtime (prefetch_map_), which
+  // reflects pending async prefetches not yet visible to the backend. Resolve
+  // it here and do NOT forward PREFETCH_LOCATION to the backend: the backend
+  // would perform its own prefetch query whose result is immediately discarded.
+  bool has_prefetch = false;
+  for (uint32_t i = 0; i < attribute_count; i++) {
+    if (attribute_list[i].attribute == HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION) {
+      has_prefetch = true;
+      break;
+    }
   }
 
-  for (uint32_t i = 0; i < attribute_count; i++) {
-    auto& attrib = attribute_list[i].attribute;
-    auto& value = attribute_list[i].value;
+  // Common case: no PREFETCH_LOCATION requested, forward the caller's list as-is.
+  if (!has_prefetch) {
+    hsa_status_t error = AgentDriver().SvmGetAttr(base, len, attribute_list, attribute_count);
+    if (error != HSA_STATUS_SUCCESS)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR, "SVM get attributes failed.");
+    return HSA_STATUS_SUCCESS;
+  }
 
-    switch (attrib) {
-      case HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG: {
-        if (attribs[attribs.size() - 1].value & HSA_SVM_FLAG_COHERENT) {
-          value = HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED;
-          break;
-        }
-        if (attribs[attribs.size() - 2].value & HSA_SVM_FLAG_COHERENT)
-          value = HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED;
-        else
-          value = HSA_AMD_SVM_GLOBAL_FLAG_INDETERMINATE;
-        break;
+  // Otherwise resolve prefetch entries locally and forward only the rest.
+  if (has_prefetch && attribute_count == 1) {
+    // Special case: only PREFETCH_LOCATION requested
+    attribute_list[0].value = Agent::Convert(GetSVMPrefetchAgent(ptr, size)).handle;
+    return HSA_STATUS_SUCCESS;
+  }
+
+  std::vector<hsa_amd_svm_attribute_pair_t> forwarded;
+  std::vector<size_t> forwarded_index;
+  forwarded.reserve(attribute_count);
+  forwarded_index.reserve(attribute_count);
+
+  bool prefetch_resolved = false;
+  uint64_t prefetch_value = 0;
+
+  for (uint32_t i = 0; i < attribute_count; i++) {
+    if (attribute_list[i].attribute == HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION) {
+      if (!prefetch_resolved) {
+        prefetch_value = Agent::Convert(GetSVMPrefetchAgent(ptr, size)).handle;
+        prefetch_resolved = true;
       }
-      case HSA_AMD_SVM_ATTRIB_READ_ONLY: {
-        value = (attribs[attribs.size() - 1].value & HSA_SVM_FLAG_GPU_RO);
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_HIVE_LOCAL: {
-        value = (attribs[attribs.size() - 1].value & HSA_SVM_FLAG_HIVE_LOCAL);
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY: {
-        value = attribs[kmtIndices[i]].value;
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION: {
-        uint64_t node = attribs[kmtIndices[i]].value;
-        Agent* agent = nullptr;
-        if (node != INVALID_NODEID) agent = agents_by_node_[node][0];
-        value = Agent::Convert(agent).handle;
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION: {
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_READ_MOSTLY: {
-        value = (attribs[attribs.size() - 1].value & HSA_SVM_FLAG_GPU_READ_MOSTLY);
-        break;
-      }
-      case HSA_AMD_SVM_ATTRIB_ACCESS_QUERY: {
-        if (kmtIndices[i] == -1) {
-          // CPU agent access is stored as a flag, not as an attribute
-          if (attribs[attribs.size() - 1].value & HSA_SVM_FLAG_HOST_ACCESS)
-            attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE;
-          else
-            attrib = HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS;
-        } else {
-          switch (attribs[kmtIndices[i]].type) {
-            case HSA_SVM_ATTR_ACCESS:
-              attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE;
-              break;
-            case HSA_SVM_ATTR_ACCESS_IN_PLACE:
-              attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE;
-              break;
-            case HSA_SVM_ATTR_NO_ACCESS:
-              attrib = HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS;
-              break;
-            default:
-              assert(false && "Bad agent accessibility from KFD.");
-          }
-        }
-        break;
-      }
-      default:
-        throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
-                                 "Illegal or invalid attribute in Runtime::GetSvmAttrib");
+      attribute_list[i].value = prefetch_value;
+    } else {
+      forwarded.push_back(attribute_list[i]);
+      forwarded_index.push_back(i);
     }
+  }
+
+  if (!forwarded.empty()) {
+    hsa_status_t error =
+        AgentDriver().SvmGetAttr(base, len, forwarded.data(), forwarded.size());
+    if (error != HSA_STATUS_SUCCESS)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR, "SVM get attributes failed.");
+
+    // Write results back to their original slots. This also propagates the
+    // attribute-field rewrite that ACCESS_QUERY performs in place.
+    for (size_t j = 0; j < forwarded.size(); j++)
+      attribute_list[forwarded_index[j]] = forwarded[j];
   }
 
   return HSA_STATUS_SUCCESS;
@@ -3513,7 +3267,7 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
   MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
 
   Agent* dest = Agent::Convert(agent);
-  op->node_id = dest->node_id();
+  op->dst_agent = dest;
 
   op->base = reinterpret_cast<void*>(base);
   op->size = len;
@@ -3601,6 +3355,7 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
   // Prefetch Signal handler for synchronization.
   static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
     PrefetchOp* op = reinterpret_cast<PrefetchOp*>(arg);
+    core::Agent* agent = op->dst_agent;
 
     if (op->remaining_deps > 0) {
       op->remaining_deps--;
@@ -3609,11 +3364,8 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
       return false;
     }
 
-    HSA_SVM_ATTRIBUTE attrib;
-    attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
-    attrib.value = op->node_id;
-    HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(op->base, op->size, 1, &attrib));
-    assert(error == HSAKMT_STATUS_SUCCESS && "KFD Prefetch failed.");
+    hsa_status_t error = agent->driver().SvmPrefetch(*agent, op->base, op->size);
+    assert(error == HSA_STATUS_SUCCESS && "KFD Prefetch failed.");
     (void)error;
 
     removePrefetchRanges(op);
@@ -3653,10 +3405,12 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   if (start != prefetch_map_.begin()) start--;
   auto stop = prefetch_map_.lower_bound(end);
 
-  // KFD returns -1 for no or mixed destinations.
-  uint32_t prefetch_node = -2;
+  // The single prefetch destination shared by the whole query, or nullptr
+  // until the first overlapping range establishes it. A null/mixed destination
+  // triggers an early return, so it is never stored here.
+  Agent* prefetch_agent = nullptr;
   if (start != stop) {
-    prefetch_node = start->second.op->node_id;
+    prefetch_agent = start->second.op->dst_agent;
   }
 
   while (start != stop) {
@@ -3668,7 +3422,7 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
     // Check for intersection with the query
     if (ibase < iend) {
       // If prefetch locations are different then we report null agent.
-      if (prefetch_node != start->second.op->node_id) return nullptr;
+      if (prefetch_agent != start->second.op->dst_agent) return nullptr;
 
       // Push leading gap to an array for checking KFD.
       if (base < ibase) holes.push_back(std::make_pair(base, ibase - base));
@@ -3680,22 +3434,25 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   }
   if (base < end) holes.push_back(std::make_pair(base, end - base));
 
-  HSA_SVM_ATTRIBUTE attrib;
-  attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
+  hsa_amd_svm_attribute_pair_t attrib;
+  attrib.attribute = HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION;
   for (auto& range : holes) {
-    HSAKMT_STATUS error =
-        HSAKMT_CALL(hsaKmtSVMGetAttr(reinterpret_cast<void*>(range.first), range.second, 1, &attrib));
-    assert(error == HSAKMT_STATUS_SUCCESS && "KFD prefetch query failed.");
+    attrib.value = 0;
+    hsa_status_t error =
+        AgentDriver().SvmGetAttr(reinterpret_cast<void*>(range.first), range.second, &attrib, 1);
+    assert(error == HSA_STATUS_SUCCESS && "SVM prefetch query failed.");
     (void)error;
 
-    if (attrib.value == -1) return nullptr;
-    if (prefetch_node == -2) prefetch_node = attrib.value;
-    if (prefetch_node != attrib.value) return nullptr;
+    // The backend reports the prefetch location as an agent handle; a null
+    // handle means no or mixed destination for this range.
+    Agent* range_agent = Agent::Convert(hsa_agent_t{attrib.value});
+    if (range_agent == nullptr) return nullptr;
+    if (prefetch_agent == nullptr) prefetch_agent = range_agent;
+    if (prefetch_agent != range_agent) return nullptr;
   }
 
-  assert(prefetch_node != -2 && "prefetch_node was not updated.");
-  assert(prefetch_node != -1 && "Should have already returned.");
-  return agents_by_node_[prefetch_node][0];
+  assert(prefetch_agent != nullptr && "prefetch_agent was not updated.");
+  return prefetch_agent;
 }
 
 hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
@@ -3728,7 +3485,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
 
   // Discard operation context
   struct DiscardOp {
-    std::vector<uint32_t> target_cpus;
+    std::vector<core::Agent*> target_cpus;
     std::vector<std::pair<void*, size_t>> regions;
     std::atomic<uint32_t> remaining_deps;
     hsa_signal_t completion;
@@ -3750,20 +3507,20 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     op->regions.emplace_back(std::make_pair(reinterpret_cast<void*>(base), len));
 
     // Query the nearest cpu agent for the region
-    HSA_SVM_ATTRIBUTE attr;
-    attr.type = HSA_SVM_ATTR_PREFERRED_LOC;
+    hsa_amd_svm_attribute_pair_t attr;
+    attr.attribute = HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION;
     attr.value = 0;
 
     Agent* cpu_agent = nullptr;
-    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, 1, &attr));
+    hsa_status_t status = AgentDriver().SvmGetAttr(base, len, &attr, 1);
 
-    if (status == HSAKMT_STATUS_SUCCESS &&
-        (attr.value != 0xFFFFFFFF && attr.value != INVALID_NODEID)) {
-      core::Agent* agent = agents_by_node_[attr.value][0];
-
+    // The backend reports the preferred location as an agent handle.
+    core::Agent* agent =
+        (status == HSA_STATUS_SUCCESS) ? Agent::Convert(hsa_agent_t{attr.value}) : nullptr;
+    if (agent != nullptr) {
       if (agent->device_type() == core::Agent::kAmdCpuDevice) {
         // Already on a CPU agent; skip prefetch for this region
-        op->target_cpus.push_back(UINT32_MAX);
+        op->target_cpus.push_back(nullptr);
         continue;
       } else {
         cpu_agent = agent->GetNearestCpuAgent();
@@ -3774,7 +3531,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
       // Fallback to use first available CPU agent when nearest fails
       cpu_agent = cpu_agents_[0];
     }
-    op->target_cpus.push_back(cpu_agent->node_id());
+    op->target_cpus.push_back(cpu_agent);
   }
 
   // Dependancy signals already at 0 need not be monitored.
@@ -3792,15 +3549,11 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     for (size_t i = 0; i < op->regions.size(); i++) {
       void* base = op->regions[i].first;
       size_t size = op->regions[i].second;
-      uint32_t target_cpu = op->target_cpus[i];
+      core::Agent* target_cpu = op->target_cpus[i];
 
-      if (target_cpu != UINT32_MAX) {
-        HSA_SVM_ATTRIBUTE attr;
-        attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
-        attr.value = target_cpu;
-
-        HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &attr));
-        if (err != HSAKMT_STATUS_SUCCESS) {
+      if (target_cpu != nullptr) {
+        hsa_status_t err = target_cpu->driver().SvmPrefetch(*target_cpu, base, size);
+        if (err != HSA_STATUS_SUCCESS) {
           debug_warning(false && "hsaKmtSVMSetAttr prefetch failed in SvmBatchDiscard");
         }
       }
