@@ -49,6 +49,7 @@ namespace {
 inline constexpr uint64_t kKernargPreloadSkipBytes = 256;
 inline constexpr uint16_t kCdna4DsEncodingFamily = 0x1B0;
 inline constexpr uint16_t kCdna4EncodingFamilyMask = 0x1F8;
+inline constexpr uint16_t kCdna4MubufEncoding = 0x1C0;
 inline constexpr uint8_t kCdna3FlatOpLoadUbyte = 16;
 inline constexpr uint8_t kCdna3FlatOpLoadSbyte = 17;
 inline constexpr uint8_t kCdna3FlatOpLoadUshort = 18;
@@ -59,7 +60,10 @@ inline constexpr uint8_t kCdna3FlatOpStoreDword = 28;
 inline constexpr uint8_t kCdna3FlatOpLoadShortD16 = 36;
 inline constexpr uint8_t kCdna3FlatOpLoadShortD16Hi = 37;
 inline constexpr uint8_t kCdna3FlatOpStoreShortD16Hi = 27;
+inline constexpr uint16_t kCdna3ScalarNull = 0x7F;
 inline constexpr uint8_t kCdna3Vop2OpAddU32 = 52;
+inline constexpr uint16_t kCdna3Vop3OpAddCoU32 = 281;
+inline constexpr uint16_t kCdna3Vop3OpAddcCoU32 = 284;
 inline constexpr uint8_t kCdna3Vop1OpMovB32 = 1;
 inline constexpr uint8_t kCdna3Vop1OpReadfirstlaneB32 = 2;
 inline constexpr uint8_t kCdna3Sop2OpAddU32 = 0;
@@ -70,6 +74,7 @@ inline constexpr uint8_t kCdna3SoppOpCbranchExecz = 8;
 inline constexpr uint16_t kCdnaWaitcntAll0 = 0x0000;
 inline constexpr uint32_t kFlatGlobalPositiveImm13Max = 4095;
 inline constexpr uint32_t kCdnaOrdinarySgprLimit = 102;
+inline constexpr uint32_t kCdnaSpecialSgprTailReserve = 8;
 inline constexpr uint32_t kCdnaSmemImmediateByteOffsetMax = 0x1FFFFF;
 inline constexpr uint32_t kVirtualLdsStateBackingBaseOffset = 0;
 inline constexpr uint32_t kVirtualLdsStateStrideXOffset = 8;
@@ -79,6 +84,21 @@ inline constexpr uint32_t kVirtualLdsRuntimeStateBytes = 24;
 inline constexpr uint32_t kCdna3MaxHardwareLdsBytes = 64 * 1024;
 inline constexpr uint64_t kDirectBranchIslandSpacingBytes = 64 * 1024;
 inline constexpr uint16_t kDirectBranchIslandPoolSlots = 16;
+/// @brief Source-distance cutoff for reserving a long direct-branch window.
+///
+/// @details Most scalar branches target a neighboring block and still fit after
+/// semantic expansion. Reserving the 7-dword long-branch sequence for every
+/// branch bloats translated kernels with NOPs and makes control-flow review
+/// painful. Use a conservative source-distance estimate: branches farther than
+/// this get a long window up front; closer branches keep their compact encoding
+/// and relocation fails later if expansion unexpectedly pushed them out of
+/// range.
+///
+/// Keep the cutoff below the hardware SOPP range. A branch that is already near
+/// the 64 KiB limit in source can be pushed out of range by unrelated translated
+/// expansion between the branch and its target; those near-limit branches need
+/// the long form even when the source branch itself was still encodable.
+inline constexpr uint64_t kLongDirectBranchSourceDistanceThresholdBytes = 32 * 1024;
 
 struct VirtualLdsVgprRange {
   uint16_t base = 0;
@@ -89,6 +109,13 @@ struct VirtualLdsAddressTemp {
   uint8_t reg = 0;
   bool spilled = false;
   uint32_t spill_offset = 0;
+};
+
+struct VirtualLdsTempRange {
+  std::array<VirtualLdsAddressTemp, 4> temps{};
+  uint8_t count = 0;
+
+  [[nodiscard]] uint8_t base() const { return temps[0].reg; }
 };
 
 struct VirtualLdsBaseSgprReservation {
@@ -205,6 +232,12 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
          inst.mnemonic() == "s_cbranch_execz" || inst.mnemonic() == "s_cbranch_execnz";
 }
 
+[[nodiscard]] uint64_t absolute_branch_distance(uint64_t source_inst_offset,
+                                                uint64_t source_target_offset) {
+  return source_inst_offset < source_target_offset ? source_target_offset - source_inst_offset
+                                                   : source_inst_offset - source_target_offset;
+}
+
 void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelTextLayout &layout,
                                       rj_code_arch_t arch) {
   const uint64_t skip_offset = kernel_text.size();
@@ -236,14 +269,41 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
   });
 }
 
+[[nodiscard]] bool
+virtual_lds_vgpr_range_is_forbidden(uint16_t reg, uint16_t count,
+                                    std::span<const VirtualLdsVgprRange> forbidden) {
+  return std::ranges::any_of(forbidden, [reg, count](const VirtualLdsVgprRange &range) {
+    return virtual_lds_vgpr_ranges_overlap(reg, count, range.base, range.count);
+  });
+}
+
 [[nodiscard]] std::optional<VirtualLdsAddressTemp>
 choose_virtual_lds_address_temp(TranslationContext &context,
                                 std::span<const VirtualLdsVgprRange> forbidden) {
-  // Do not ask liveness for a "free" register here. Generic virtual-LDS lowering
-  // runs after semantic lowering and must be correct even when the kernel's VGPRs
-  // are all live across the memory operation. Pick an ordinary VGPR that the DS
-  // instruction itself is not reading/writing, spill it to the per-lane private
-  // segment, and restore it before the replacement sequence finishes.
+  // Prefer a descriptor-backed temporary before falling back to flat scratch.
+  // Virtual-LDS lowering often runs in hand-written assembly kernels that did
+  // not request flat-scratch initialization SGPRs because the source kernel did
+  // not use scratch. Growing the ordinary VGPR count is cheaper and avoids
+  // introducing a new flat-scratch ABI dependency. The chosen register is
+  // reusable across independent DS replacements; `forbidden` prevents reusing it
+  // twice inside one replacement sequence.
+  const uint32_t first_extra_vgpr = context.num_vgprs;
+  // Descriptor recomputation can move the AccVGPR base upward when semantic
+  // lowering requests more ordinary VGPRs. Do not cap scratch growth at the
+  // source ACCUM_OFFSET here; doing so makes tiny kernels whose descriptor
+  // decodes as v0..v3 + a0..a3 fail before the recompute has a chance to move
+  // the accumulator window.
+  const uint32_t extra_limit = 256;
+  for (uint32_t candidate = first_extra_vgpr; candidate < extra_limit; ++candidate) {
+    if (virtual_lds_vgpr_is_forbidden(static_cast<uint16_t>(candidate), forbidden))
+      continue;
+    context.require_vgprs(candidate + 1);
+    return VirtualLdsAddressTemp{.reg = static_cast<uint8_t>(candidate)};
+  }
+
+  // If the descriptor cannot grow without colliding with the AccVGPR window or
+  // the architectural VGPR limit, preserve an existing ordinary VGPR around the
+  // replacement sequence with per-lane scratch.
   const uint32_t initial_vgprs = std::min<uint32_t>(context.num_vgprs, 256);
   for (uint32_t reg = initial_vgprs; reg > 0; --reg) {
     const uint16_t candidate = static_cast<uint16_t>(reg - 1);
@@ -255,21 +315,56 @@ choose_virtual_lds_address_temp(TranslationContext &context,
     };
   }
 
-  // Extremely small test kernels can name every allocated VGPR in the DS
-  // instruction. In that case grow the descriptor by one scratch VGPR instead of
-  // failing; this path is not expected for real fp16 kernels, but it keeps the
-  // lowering well-defined for minimal fixtures.
-  const uint32_t next_vgpr = std::max(context.num_vgprs, context.required_vgpr_count);
-  if (next_vgpr < 256) {
-    context.require_vgprs(next_vgpr + 1);
-    return VirtualLdsAddressTemp{.reg = static_cast<uint8_t>(next_vgpr)};
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<VirtualLdsTempRange>
+choose_virtual_lds_temp_range(TranslationContext &context,
+                              std::span<const VirtualLdsVgprRange> forbidden, uint16_t count) {
+  if (count == 0 || count > 4)
+    return std::nullopt;
+
+  // Wide FLAT/GLOBAL operations need their data/destination operands in a
+  // contiguous VGPR run. Prefer growing the descriptor because those extra
+  // VGPRs require no flat-scratch save/restore around the replacement.
+  const uint32_t first_extra_vgpr = context.num_vgprs;
+  const uint32_t extra_limit = 256;
+  for (uint32_t candidate = first_extra_vgpr; candidate + count <= extra_limit; ++candidate) {
+    if (virtual_lds_vgpr_range_is_forbidden(static_cast<uint16_t>(candidate), count, forbidden))
+      continue;
+    context.require_vgprs(candidate + count);
+    VirtualLdsTempRange range{};
+    range.count = static_cast<uint8_t>(count);
+    for (uint16_t i = 0; i < count; ++i)
+      range.temps[i].reg = static_cast<uint8_t>(candidate + i);
+    return range;
+  }
+
+  // Descriptor-full kernels can still borrow an existing contiguous run by
+  // saving it in private scratch. This is slower, but keeps virtual LDS real
+  // instead of skipping kernels whose data operands alias the temporary address
+  // pair.
+  const uint32_t initial_vgprs = std::min<uint32_t>(context.num_vgprs, 256);
+  if (initial_vgprs >= count) {
+    for (uint32_t reg = initial_vgprs - count + 1; reg > 0; --reg) {
+      const uint16_t candidate = static_cast<uint16_t>(reg - 1);
+      if (virtual_lds_vgpr_range_is_forbidden(candidate, count, forbidden))
+        continue;
+      VirtualLdsTempRange range{};
+      range.count = static_cast<uint8_t>(count);
+      for (uint16_t i = 0; i < count; ++i) {
+        range.temps[i].reg = static_cast<uint8_t>(candidate + i);
+        range.temps[i].spilled = true;
+      }
+      return range;
+    }
   }
 
   return std::nullopt;
 }
 
 uint32_t assign_virtual_lds_spill_offsets(TranslationContext &context,
-                                          std::initializer_list<VirtualLdsAddressTemp *> temps,
+                                          const std::vector<VirtualLdsAddressTemp *> &temps,
                                           uint32_t extra_dwords = 0) {
   uint32_t spilled_count = 0;
   for (const VirtualLdsAddressTemp *temp : temps) {
@@ -280,9 +375,6 @@ uint32_t assign_virtual_lds_spill_offsets(TranslationContext &context,
   if (total_dwords == 0)
     return 0;
 
-  // Spill slots are reusable across lowering sites, but simultaneous temps in a
-  // single replacement sequence must occupy distinct dwords. Reserve one window
-  // for this sequence and assign each spilled VGPR a unique offset inside it.
   const uint32_t base_offset = context.reserve_semantic_spill_dwords(total_dwords);
   uint32_t index = 0;
   for (VirtualLdsAddressTemp *temp : temps) {
@@ -298,6 +390,11 @@ void emit_cdna3_scratch_store_b32(std::vector<uint32_t> &words, uint8_t data, ui
 void emit_cdna3_scratch_load_b32(std::vector<uint32_t> &words, uint8_t dst, uint32_t byte_offset);
 [[nodiscard]] uint32_t build_cdna3_v_mov_b32(uint8_t vdst, uint16_t src0);
 [[nodiscard]] uint32_t build_cdna3_v_readfirstlane_b32(uint8_t sdst, uint8_t vsrc);
+[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_v_add_co_u32(uint8_t sdst, uint8_t vdst,
+                                                                     uint16_t src0, uint16_t src1);
+[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_v_addc_co_u32(uint8_t sdst, uint8_t vdst,
+                                                                      uint16_t src0, uint16_t src1,
+                                                                      uint8_t carry_sgpr);
 [[nodiscard]] uint32_t build_cdna3_s_cbranch_execz(uint16_t simm16);
 [[nodiscard]] uint32_t build_cdna3_s_add_u32(uint8_t sdst, uint16_t ssrc0, uint16_t ssrc1);
 [[nodiscard]] uint32_t build_cdna3_s_addc_u32(uint8_t sdst, uint16_t ssrc0, uint16_t ssrc1);
@@ -318,7 +415,7 @@ choose_virtual_lds_base_spill_temps(TranslationContext &context,
 }
 
 void emit_virtual_lds_temp_spill_stores(std::vector<uint32_t> &words,
-                                        std::initializer_list<VirtualLdsAddressTemp *> temps) {
+                                        const std::vector<VirtualLdsAddressTemp *> &temps) {
   bool emitted = false;
   for (VirtualLdsAddressTemp *temp : temps) {
     if (temp == nullptr || !temp->spilled)
@@ -331,7 +428,7 @@ void emit_virtual_lds_temp_spill_stores(std::vector<uint32_t> &words,
 }
 
 void emit_virtual_lds_temp_spill_loads(std::vector<uint32_t> &words,
-                                       std::initializer_list<VirtualLdsAddressTemp *> temps) {
+                                       const std::vector<VirtualLdsAddressTemp *> &temps) {
   bool emitted = false;
   for (VirtualLdsAddressTemp *temp : temps) {
     if (temp == nullptr || !temp->spilled)
@@ -419,6 +516,59 @@ void emit_cdna3_v_add_u32_literal(std::vector<uint32_t> &words, uint8_t vdst, ui
   words.push_back(w1);
 }
 
+[[nodiscard]] constexpr uint16_t vgpr_src(uint8_t vgpr) {
+  return static_cast<uint16_t>(256u + vgpr);
+}
+
+[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_vop3_sdst(uint16_t op, uint8_t sdst,
+                                                                  uint8_t vdst, uint16_t src0,
+                                                                  uint16_t src1,
+                                                                  uint16_t src2 = 0) {
+  cdna3::Vop3SdstEncMachineInst dst{};
+  dst.encoding = 0x34;
+  dst.op = op;
+  dst.vdst = vdst;
+  dst.sdst = sdst;
+  dst.src0 = src0;
+  dst.src1 = src1;
+  dst.src2 = src2;
+
+  uint32_t words[2]{};
+  std::memcpy(words, &dst, sizeof(dst));
+  return {words[0], words[1]};
+}
+
+[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_v_add_co_u32(uint8_t sdst, uint8_t vdst,
+                                                                     uint16_t src0, uint16_t src1) {
+  return build_cdna3_vop3_sdst(kCdna3Vop3OpAddCoU32, sdst, vdst, src0, src1);
+}
+
+[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_v_addc_co_u32(uint8_t sdst, uint8_t vdst,
+                                                                      uint16_t src0, uint16_t src1,
+                                                                      uint8_t carry_sgpr) {
+  return build_cdna3_vop3_sdst(kCdna3Vop3OpAddcCoU32, sdst, vdst, src0, src1, carry_sgpr);
+}
+
+void emit_virtual_lds_full_vgpr_address(std::vector<uint32_t> &words,
+                                        const TranslationContext &context, uint8_t addr_low,
+                                        uint8_t addr_high, uint8_t base_low, uint8_t base_high) {
+  // Descriptor-full kernels cannot keep a dedicated virtual-LDS base SGPR
+  // live. In spill-per-use mode the borrowed SGPR pair is already saved and
+  // restored around this sequence, so use it only as the temporary carry mask
+  // for a correct 64-bit VGPR address calculation. The memory instruction
+  // itself is encoded with SADDR=null and therefore does not depend on a
+  // borrowed scalar base during VMEM issue.
+  const auto carry_sgpr = static_cast<uint8_t>(context.virtual_lds_base_sgpr);
+  auto [add_lo0, add_lo1] =
+      build_cdna3_v_add_co_u32(carry_sgpr, addr_low, vgpr_src(addr_low), vgpr_src(base_low));
+  words.push_back(add_lo0);
+  words.push_back(add_lo1);
+  auto [add_hi0, add_hi1] = build_cdna3_v_addc_co_u32(
+      carry_sgpr, addr_high, scalar_positive_inline_u32(0), vgpr_src(base_high), carry_sgpr);
+  words.push_back(add_hi0);
+  words.push_back(add_hi1);
+}
+
 [[nodiscard]] uint32_t build_cdna3_vop1(uint8_t op, uint8_t vdst, uint16_t src0) {
   cdna3::Vop1MachineInst dst{};
   dst.encoding = 0x3F;
@@ -441,6 +591,22 @@ void emit_cdna3_v_add_u32_literal(std::vector<uint32_t> &words, uint8_t vdst, ui
   // temp, not one of those scalar operands, because virtual-LDS spill restore
   // uses it to rebuild the borrowed backing-pointer SGPR pair.
   return build_cdna3_vop1(kCdna3Vop1OpReadfirstlaneB32, sdst, static_cast<uint16_t>(256u + vsrc));
+}
+
+void emit_virtual_lds_copy_to_temp_range(std::vector<uint32_t> &words,
+                                         const VirtualLdsTempRange &range, uint8_t src_base) {
+  for (uint8_t i = 0; i < range.count; ++i) {
+    words.push_back(
+        build_cdna3_v_mov_b32(range.temps[i].reg, vgpr_src(static_cast<uint8_t>(src_base + i))));
+  }
+}
+
+void emit_virtual_lds_copy_from_temp_range(std::vector<uint32_t> &words,
+                                           const VirtualLdsTempRange &range, uint8_t dst_base) {
+  for (uint8_t i = 0; i < range.count; ++i) {
+    words.push_back(
+        build_cdna3_v_mov_b32(static_cast<uint8_t>(dst_base + i), vgpr_src(range.temps[i].reg)));
+  }
 }
 
 [[nodiscard]] uint32_t build_cdna3_s_cbranch_execz(uint16_t simm16) {
@@ -484,34 +650,83 @@ void emit_cdna3_v_add_u32_literal(std::vector<uint32_t> &words, uint8_t vdst, ui
 
 [[nodiscard]] std::optional<VirtualLdsBaseSgprReservation>
 reserve_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope blocks,
-                                   rj_code_arch_t arch) {
+                                   const KdTranslation &translation, rj_code_arch_t arch) {
   if (!is_cdna_arch(arch))
     return std::nullopt;
 
+  auto note_sgpr_ref = [](uint32_t &count, RegisterRef ref) {
+    if (ref.cls != RegClass::SGPR)
+      return;
+    // Implicit operands include architectural special registers such as EXEC
+    // and VCC. Those live in the descriptor tail and must not make virtual-LDS
+    // scratch selection think every ordinary SGPR is already occupied.
+    if (ref.index >= kCdnaOrdinarySgprLimit)
+      return;
+    count = std::max<uint32_t>(count, static_cast<uint32_t>(ref.index) + ref.width);
+  };
+
+  uint32_t ordinary_floor = 0;
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      for (int i = 0; i < inst.num_src_operands(); ++i) {
+        if (const Operand *operand = inst.src_operand(i)) {
+          if (auto ref = operand->to_register_ref())
+            note_sgpr_ref(ordinary_floor, *ref);
+        }
+      }
+      for (int i = 0; i < inst.num_dst_operands(); ++i) {
+        if (const Operand *operand = inst.dst_operand(i)) {
+          if (auto ref = operand->to_register_ref())
+            note_sgpr_ref(ordinary_floor, *ref);
+        }
+      }
+
+      // Do not fold implicit uses/defs into the ordinary SGPR floor. They can
+      // describe architectural state such as EXEC/VCC/SCC rather than guest
+      // ordinary scalar registers, and counting them here forces small kernels
+      // into descriptor-full virtual-LDS spill mode. Explicit operands plus the
+      // descriptor ABI SGPR fields below are the values that matter for choosing
+      // a non-conflicting backing-pointer pair.
+    }
+  }
+
+  ordinary_floor = std::max<uint32_t>(ordinary_floor, translation.target_user_sgpr_count);
+  auto include_sgpr = [&](int16_t sgpr, uint32_t width) {
+    if (sgpr >= 0)
+      ordinary_floor = std::max<uint32_t>(ordinary_floor, static_cast<uint32_t>(sgpr) + width);
+  };
+  include_sgpr(translation.has_kernarg_segment_ptr ? translation.kernarg_segment_ptr_sgpr : -1, 2);
+  include_sgpr(translation.has_dispatch_ptr ? translation.dispatch_ptr_sgpr : -1, 2);
+  include_sgpr(translation.workgroup_id_sgpr_x, 1);
+  include_sgpr(translation.workgroup_id_sgpr_y, 1);
+  include_sgpr(translation.workgroup_id_sgpr_z, 1);
+
   // Virtual LDS flat/global operations need an ordinary 64-bit SGPR base, and
   // the entry prologue needs one scalar scratch register to compute the
-  // per-workgroup byte offset. The descriptor can encode a 112-SGPR allocation
-  // on CDNA because special registers such as VCC live above the ordinary
-  // s0..s101 range, but generated DBT code must not allocate those special
-  // registers as scratch. Prefer fresh ordinary SGPRs; when only high guest
-  // ordinary registers are available, borrow them at entry before guest code has
-  // defined them, and preserve the base pair around each lowered LDS use.
-  const uint32_t current = std::max(context.num_sgprs, context.required_sgpr_count);
+  // per-workgroup byte offset. COMPUTE_PGM_RSRC1's SGPR count is an allocation
+  // total, not the highest ordinary `sN` named by the kernel: VCC, flat scratch,
+  // XNACK, and granularity padding can live in the tail. Starting new scratch
+  // at the descriptor total can therefore put DBT temporaries in special SGPR
+  // territory. Derive the ordinary floor from decoded operands and reserve a
+  // conservative CDNA special-SGPR tail when asking the descriptor to grow.
+  const uint32_t current = std::max(ordinary_floor, context.required_sgpr_count);
   const uint32_t base = (current + 1u) & ~1u;
   if (base + 4 <= kCdnaOrdinarySgprLimit) {
-    context.require_sgprs(base + 4);
+    context.require_sgprs(base + 4 + kCdnaSpecialSgprTailReserve);
     return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(base),
                                          .prologue_temp = static_cast<uint16_t>(base + 2)};
   }
 
-  const uint32_t allocated_ordinary = std::min<uint32_t>(context.num_sgprs, kCdnaOrdinarySgprLimit);
+  const uint32_t allocated_ordinary = std::min<uint32_t>(ordinary_floor, kCdnaOrdinarySgprLimit);
   if (allocated_ordinary < 2)
     return std::nullopt;
   (void)blocks;
 
   const uint32_t borrowed_temp = (allocated_ordinary - 2u) & ~1u;
   if (base + 2 <= kCdnaOrdinarySgprLimit) {
-    context.require_sgprs(base + 2);
+    context.require_sgprs(base + 2 + kCdnaSpecialSgprTailReserve);
     return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(base),
                                          .prologue_temp = static_cast<uint16_t>(borrowed_temp)};
   }
@@ -528,6 +743,12 @@ reserve_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope
   const uint32_t temp_base = (spill_base >= 2) ? ((spill_base - 2u) & ~1u) : 0;
   if (temp_base == spill_base)
     return std::nullopt;
+  // `ordinary_floor` comes from decoded source operands, not necessarily from
+  // the descriptor's encoded SGPR allocation. Some code objects name high
+  // scalar registers while advertising a small granulated SGPR count. Borrowed
+  // virtual-LDS SADDR pairs must still be inside the target wave allocation or
+  // vector memory observes an out-of-range scalar source.
+  context.require_sgprs(allocated_ordinary);
   return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(spill_base),
                                        .prologue_temp = static_cast<uint16_t>(temp_base),
                                        .spill_per_use = true};
@@ -673,8 +894,8 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
   operands.addr = addr;
   operands.saddr = saddr;
   // Virtual LDS uses global memory as a workgroup-local backing store. On
-  // GFX940-class FLAT/GLOBAL instructions, SC[1:0] = 1 encodes group scope,
-  // which is the closest memory scope to native LDS producer/consumer traffic.
+  // GFX940-class FLAT/GLOBAL instructions, SC[1:0] = 1 encodes device scope,
+  // which is the closest memory type to native LDS producer/consumer traffic.
   operands.sc0 = true;
   operands.sc1 = false;
   return operands;
@@ -770,9 +991,24 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
   return (inst.encoding_id() & kCdna4EncodingFamilyMask) == kCdna4DsEncodingFamily;
 }
 
+[[nodiscard]] bool is_cdna4_mubuf_lds_instruction(const Instruction &inst) {
+  if (inst.encoding_id() != kCdna4MubufEncoding)
+    return false;
+
+  const uint32_t *raw = inst.raw_encoding();
+  if (raw == nullptr || static_cast<size_t>(inst.size()) < sizeof(cdna4::MubufMachineInst))
+    return false;
+
+  cdna4::MubufMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  return src.lds != 0;
+}
+
 [[nodiscard]] bool source_instruction_uses_virtualizable_lds(const Instruction &inst) {
   const std::string_view mnemonic = inst.mnemonic();
   if (mnemonic.find("_lds") != std::string_view::npos)
+    return true;
+  if (is_cdna4_mubuf_lds_instruction(inst))
     return true;
   if (mnemonic == "ds_read_b64_tr_b16")
     return true;
@@ -816,50 +1052,134 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
         std::string(inst.mnemonic()) + ": virtual LDS backing-buffer SGPR pair is not encodable",
         {"Reserve an even SGPR pair that CDNA3 flat/global instructions can encode as saddr."});
   }
+  if (src.addr == std::numeric_limits<uint8_t>::max()) {
+    return ExpandResult::failed(
+        std::string(inst.mnemonic()) + ": virtual LDS source address has no high VGPR",
+        {"Add a spill-based lowering for DS address v255 before using it as a CDNA3 GLOBAL "
+         "64-bit VADDR pair."});
+  }
 
   std::vector<uint32_t> words;
+  const uint8_t addr = static_cast<uint8_t>(src.addr);
+  const uint8_t addr_high = static_cast<uint8_t>(addr + 1);
+  const bool use_full_vgpr_address = context.virtual_lds_base_sgpr_spill_per_use;
+  auto require_source_vgprs = [&](uint32_t base, uint32_t count) {
+    if (count != 0)
+      context.require_vgprs(base + count);
+  };
+  // Native DS uses a 32-bit LDS byte offset in `addr`. The GLOBAL instructions
+  // used for virtual LDS consume a 64-bit VGPR address pair, so lowering
+  // introduces `addr + 1` even when the source descriptor did not allocate that
+  // register. Hand-written assembly can also name high DS data/destination
+  // registers without the descriptor reflecting them. Record those requirements
+  // before descriptor recomputation so the host launch allocates every VGPR the
+  // translated body actually reads or writes.
+  require_source_vgprs(addr, 2);
+
   if (op->two_addr_stride_bytes != 0 && op->is_load) {
     const uint32_t byte_offset0 = static_cast<uint32_t>(src.offset0) * op->two_addr_stride_bytes;
     const uint32_t byte_offset1 = static_cast<uint32_t>(src.offset1) * op->two_addr_stride_bytes;
     const uint16_t total_dst_vgprs = static_cast<uint16_t>(op->read2_dst_delta + op->vgpr_count);
-    const bool first_load_clobbers_addr = virtual_lds_vgpr_ranges_overlap(
-        static_cast<uint16_t>(src.vdst), op->vgpr_count, static_cast<uint16_t>(src.addr), 1);
+    require_source_vgprs(src.vdst, total_dst_vgprs);
+    struct Read2Access {
+      uint8_t vdst = 0;
+      uint32_t byte_offset = 0;
+      bool clobbers_addr_low = false;
+      bool clobbers_addr_high = false;
+    };
+    std::array<Read2Access, 2> accesses = {
+        Read2Access{
+            .vdst = static_cast<uint8_t>(src.vdst),
+            .byte_offset = byte_offset0,
+            .clobbers_addr_low = virtual_lds_vgpr_ranges_overlap(
+                static_cast<uint16_t>(src.vdst), op->vgpr_count, static_cast<uint16_t>(addr), 1),
+            .clobbers_addr_high =
+                virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), op->vgpr_count,
+                                                static_cast<uint16_t>(addr_high), 1)},
+        Read2Access{.vdst = static_cast<uint8_t>(src.vdst + op->read2_dst_delta),
+                    .byte_offset = byte_offset1,
+                    .clobbers_addr_low = virtual_lds_vgpr_ranges_overlap(
+                        static_cast<uint16_t>(src.vdst + op->read2_dst_delta), op->vgpr_count,
+                        static_cast<uint16_t>(addr), 1),
+                    .clobbers_addr_high = virtual_lds_vgpr_ranges_overlap(
+                        static_cast<uint16_t>(src.vdst + op->read2_dst_delta), op->vgpr_count,
+                        static_cast<uint16_t>(addr_high), 1)}};
+    auto clobbers_addr_pair = [](const Read2Access &access) {
+      return access.clobbers_addr_low || access.clobbers_addr_high;
+    };
+    const uint32_t address_clobber_count =
+        (clobbers_addr_pair(accesses[0]) ? 1u : 0u) + (clobbers_addr_pair(accesses[1]) ? 1u : 0u);
+    const bool stage_read2_results = address_clobber_count > 1;
+    if (!stage_read2_results && clobbers_addr_pair(accesses[0]))
+      std::swap(accesses[0], accesses[1]);
+
     const bool needs_materialized_offset =
         byte_offset0 > kFlatGlobalPositiveImm13Max || byte_offset1 > kFlatGlobalPositiveImm13Max;
+    const bool needs_preserved_addr = needs_materialized_offset ||
+                                      (!stage_read2_results && address_clobber_count != 0) ||
+                                      use_full_vgpr_address;
+    const bool result_clobbers_addr_low =
+        stage_read2_results
+            ? virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), total_dst_vgprs,
+                                              static_cast<uint16_t>(addr), 1)
+            : accesses[1].clobbers_addr_low;
+    const bool result_clobbers_addr_high =
+        stage_read2_results
+            ? virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), total_dst_vgprs,
+                                              static_cast<uint16_t>(addr_high), 1)
+            : accesses[1].clobbers_addr_high;
+    const bool restore_addr_low =
+        (needs_materialized_offset || use_full_vgpr_address) && !result_clobbers_addr_low;
+    const bool restore_addr_high = !result_clobbers_addr_high;
 
     std::vector<VirtualLdsVgprRange> forbidden = {
-        {.base = static_cast<uint16_t>(src.addr), .count = 1},
+        {.base = static_cast<uint16_t>(addr), .count = 2},
         {.base = static_cast<uint16_t>(src.vdst), .count = total_dst_vgprs},
     };
     std::optional<VirtualLdsAddressTemp> base_temp;
-    if (first_load_clobbers_addr) {
+    if (needs_preserved_addr) {
       base_temp = choose_virtual_lds_address_temp(context, forbidden);
       if (!base_temp) {
         return ExpandResult::failed(
             std::string(inst.mnemonic()) +
-                ": virtual LDS read2 lowering cannot preserve an overlapping address VGPR",
-            {"Add a more general spill path for read2 forms whose first destination clobbers the "
-             "address operand."});
+                ": virtual LDS read2 lowering cannot preserve the source address VGPR",
+            {"Add a more general spill path for kernels whose DS operands cover every ordinary "
+             "VGPR."});
       }
       forbidden.push_back({.base = base_temp->reg, .count = 1});
     }
 
-    std::optional<VirtualLdsAddressTemp> offset_temp;
-    if (needs_materialized_offset) {
-      offset_temp = choose_virtual_lds_address_temp(context, forbidden);
-      if (!offset_temp) {
+    std::optional<VirtualLdsTempRange> staged_read2_temp;
+    if (stage_read2_results) {
+      // Both read2 destinations overlap the GLOBAL VADDR pair. Load into a
+      // private contiguous run first, then copy the completed results into the
+      // architectural destination range after the address pair is no longer
+      // needed.
+      staged_read2_temp = choose_virtual_lds_temp_range(context, forbidden, total_dst_vgprs);
+      if (!staged_read2_temp) {
         return ExpandResult::failed(
             std::string(inst.mnemonic()) +
-                ": virtual LDS read2 lowering cannot find a VGPR for offset materialization",
-            {"Add a more general spill path for read2 forms whose operands cover every ordinary "
+                ": virtual LDS read2 lowering cannot stage overlapping results",
+            {"Add a more general spill path for kernels whose DS operands cover every ordinary "
              "VGPR."});
       }
-      forbidden.push_back({.base = offset_temp->reg, .count = 1});
+      forbidden.push_back({.base = staged_read2_temp->base(), .count = staged_read2_temp->count});
     }
 
     std::optional<std::array<VirtualLdsAddressTemp, 2>> base_spill_temps;
     if (context.virtual_lds_base_sgpr_spill_per_use) {
-      base_spill_temps = choose_virtual_lds_base_spill_temps(context, forbidden);
+      std::vector<VirtualLdsVgprRange> base_spill_forbidden = {
+          {.base = static_cast<uint16_t>(addr), .count = 1},
+          {.base = static_cast<uint16_t>(src.vdst), .count = total_dst_vgprs},
+      };
+      if (use_full_vgpr_address || !restore_addr_high)
+        base_spill_forbidden.push_back({.base = static_cast<uint16_t>(addr_high), .count = 1});
+      if (base_temp)
+        base_spill_forbidden.push_back({.base = base_temp->reg, .count = 1});
+      if (staged_read2_temp)
+        base_spill_forbidden.push_back(
+            {.base = staged_read2_temp->base(), .count = staged_read2_temp->count});
+      base_spill_temps = choose_virtual_lds_base_spill_temps(context, base_spill_forbidden);
       if (!base_spill_temps) {
         return ExpandResult::failed(
             std::string(inst.mnemonic()) +
@@ -869,53 +1189,98 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
       }
     }
 
-    const uint32_t base_sgpr_save_offset = assign_virtual_lds_spill_offsets(
-        context,
-        {base_temp ? &*base_temp : nullptr, offset_temp ? &*offset_temp : nullptr,
-         base_spill_temps ? &(*base_spill_temps)[0] : nullptr,
-         base_spill_temps ? &(*base_spill_temps)[1] : nullptr},
-        base_spill_temps && context.virtual_lds_base_pointer_spilled ? 2u : 0u);
-    emit_virtual_lds_temp_spill_stores(
-        words, {base_temp ? &*base_temp : nullptr, offset_temp ? &*offset_temp : nullptr,
-                base_spill_temps ? &(*base_spill_temps)[0] : nullptr,
-                base_spill_temps ? &(*base_spill_temps)[1] : nullptr});
+    const uint32_t base_sgpr_spill_dwords =
+        base_spill_temps && context.virtual_lds_base_pointer_spilled ? 2u : 0u;
+    const uint32_t extra_spill_dwords = base_sgpr_spill_dwords + (restore_addr_high ? 1u : 0u);
+    std::vector<VirtualLdsAddressTemp *> spill_temps;
+    if (base_temp)
+      spill_temps.push_back(&*base_temp);
+    if (staged_read2_temp) {
+      for (uint8_t i = 0; i < staged_read2_temp->count; ++i)
+        spill_temps.push_back(&staged_read2_temp->temps[i]);
+    }
+    if (base_spill_temps) {
+      spill_temps.push_back(&(*base_spill_temps)[0]);
+      spill_temps.push_back(&(*base_spill_temps)[1]);
+    }
+    const uint32_t extra_spill_base_offset =
+        assign_virtual_lds_spill_offsets(context, spill_temps, extra_spill_dwords);
+    const uint32_t base_sgpr_save_offset = extra_spill_base_offset;
+    uint32_t addr_high_spill_offset = 0;
+    if (restore_addr_high) {
+      addr_high_spill_offset = extra_spill_base_offset + base_sgpr_spill_dwords * sizeof(uint32_t);
+      emit_cdna3_scratch_store_b32(words, addr_high, addr_high_spill_offset);
+      words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+    }
+    emit_virtual_lds_temp_spill_stores(words, spill_temps);
     if (base_spill_temps)
       emit_virtual_lds_base_spill_setup(words, context, *base_spill_temps, base_sgpr_save_offset);
 
     // Native ds_read2 issues two LDS reads from the same original address VGPR.
-    // If the first destination aliases that address VGPR, keep a private copy so
-    // the second flat/global load still observes the pre-instruction address.
-    const uint8_t preserved_base = base_temp ? base_temp->reg : static_cast<uint8_t>(src.addr);
+    // If either destination aliases the source address pair, perform that load
+    // last and keep a private low-half copy for preparing the GLOBAL VADDR.
+    const uint8_t preserved_base = base_temp ? base_temp->reg : addr;
     if (base_temp)
-      emit_cdna3_v_add_u32_literal(words, preserved_base, static_cast<uint8_t>(src.addr), 0);
+      emit_cdna3_v_add_u32_literal(words, preserved_base, addr, 0);
 
-    auto emit_read2_load = [&](uint8_t vdst, uint32_t byte_offset) {
-      uint8_t addr = preserved_base;
-      uint16_t flat_offset = static_cast<uint16_t>(byte_offset);
-      if (byte_offset > kFlatGlobalPositiveImm13Max) {
-        addr = offset_temp->reg;
+    auto emit_read2_load = [&](const Read2Access &access) {
+      uint16_t flat_offset = static_cast<uint16_t>(access.byte_offset);
+      if (access.byte_offset > kFlatGlobalPositiveImm13Max) {
         flat_offset = 0;
-        emit_cdna3_v_add_u32_literal(words, addr, preserved_base, byte_offset);
+        emit_cdna3_v_add_u32_literal(words, addr, preserved_base, access.byte_offset);
+      } else if (base_temp) {
+        emit_cdna3_v_add_u32_literal(words, addr, preserved_base, 0);
+      }
+      if (use_full_vgpr_address) {
+        assert(base_spill_temps && "spill-per-use virtual LDS should have base VGPR temps");
+        emit_virtual_lds_full_vgpr_address(words, context, addr, addr_high,
+                                           (*base_spill_temps)[0].reg, (*base_spill_temps)[1].reg);
+      } else {
+        words.push_back(build_cdna3_v_mov_b32(addr_high, scalar_positive_inline_u32(0)));
       }
 
       const auto operands = make_virtual_lds_flat_global_operands(
-          flat_offset, addr, static_cast<uint8_t>(context.virtual_lds_base_sgpr));
+          flat_offset, addr,
+          use_full_vgpr_address ? kCdna3ScalarNull
+                                : static_cast<uint8_t>(context.virtual_lds_base_sgpr));
+      const uint8_t vdst =
+          staged_read2_temp
+              ? static_cast<uint8_t>(staged_read2_temp->base() + (access.vdst - src.vdst))
+              : access.vdst;
       auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_load(operands, op->flat_op, vdst);
       words.push_back(w0);
       words.push_back(w1);
     };
 
-    emit_read2_load(static_cast<uint8_t>(src.vdst), byte_offset0);
-    emit_read2_load(static_cast<uint8_t>(src.vdst + op->read2_dst_delta), byte_offset1);
+    emit_read2_load(accesses[0]);
+    emit_read2_load(accesses[1]);
     // Native DS participates in lgkmcnt. Complete the replacement VMEM before
     // exposing control to instructions that were scheduled around LDS waits.
     words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+    if (restore_addr_low)
+      emit_cdna3_v_add_u32_literal(words, addr, preserved_base, 0);
     if (base_spill_temps)
       emit_virtual_lds_base_spill_restore(words, context, *base_spill_temps, base_sgpr_save_offset);
-    emit_virtual_lds_temp_spill_loads(words, {base_spill_temps ? &(*base_spill_temps)[1] : nullptr,
-                                              base_spill_temps ? &(*base_spill_temps)[0] : nullptr,
-                                              offset_temp ? &*offset_temp : nullptr,
-                                              base_temp ? &*base_temp : nullptr});
+    if (restore_addr_high) {
+      emit_cdna3_scratch_load_b32(words, addr_high, addr_high_spill_offset);
+      words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+    }
+    if (staged_read2_temp)
+      emit_virtual_lds_copy_from_temp_range(words, *staged_read2_temp,
+                                            static_cast<uint8_t>(src.vdst));
+
+    std::vector<VirtualLdsAddressTemp *> restore_temps;
+    if (base_spill_temps) {
+      restore_temps.push_back(&(*base_spill_temps)[1]);
+      restore_temps.push_back(&(*base_spill_temps)[0]);
+    }
+    if (staged_read2_temp) {
+      for (uint8_t i = staged_read2_temp->count; i > 0; --i)
+        restore_temps.push_back(&staged_read2_temp->temps[i - 1]);
+    }
+    if (base_temp)
+      restore_temps.push_back(&*base_temp);
+    emit_virtual_lds_temp_spill_loads(words, restore_temps);
     if (!guard_virtual_lds_execz(words, context)) {
       return ExpandResult::failed(
           std::string(inst.mnemonic()) + ": virtual LDS SGPR spill guard branch is out of range",
@@ -929,31 +1294,75 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     const uint32_t byte_offset1 = static_cast<uint32_t>(src.offset1) * op->two_addr_stride_bytes;
     const bool needs_materialized_offset =
         byte_offset0 > kFlatGlobalPositiveImm13Max || byte_offset1 > kFlatGlobalPositiveImm13Max;
+    require_source_vgprs(src.data0, op->vgpr_count);
+    require_source_vgprs(src.data1, op->vgpr_count);
 
-    std::optional<VirtualLdsAddressTemp> offset_temp;
     std::vector<VirtualLdsVgprRange> forbidden = {
-        {.base = static_cast<uint16_t>(src.addr), .count = 1},
+        {.base = static_cast<uint16_t>(addr), .count = 2},
         {.base = static_cast<uint16_t>(src.data0), .count = op->vgpr_count},
         {.base = static_cast<uint16_t>(src.data1), .count = op->vgpr_count},
     };
-    if (needs_materialized_offset) {
-      // Store forms do not clobber their VGPR sources, but the temporary used
-      // to materialize a large byte offset must not overlap the address or
-      // either data window before the flat/global store consumes them.
-      offset_temp = choose_virtual_lds_address_temp(context, forbidden);
-      if (!offset_temp) {
+    std::optional<VirtualLdsAddressTemp> base_temp;
+    if (needs_materialized_offset || use_full_vgpr_address) {
+      base_temp = choose_virtual_lds_address_temp(context, forbidden);
+      if (!base_temp) {
         return ExpandResult::failed(
             std::string(inst.mnemonic()) +
-                ": virtual LDS write2 lowering cannot find a VGPR for offset materialization",
-            {"Add a more general spill path for write2 forms whose operands cover every ordinary "
+                ": virtual LDS write2 lowering cannot preserve the source address VGPR",
+            {"Add a more general spill path for kernels whose DS operands cover every ordinary "
              "VGPR."});
       }
-      forbidden.push_back({.base = offset_temp->reg, .count = 1});
+      forbidden.push_back({.base = base_temp->reg, .count = 1});
+    }
+
+    auto data_needs_temp = [&](uint16_t data) {
+      const bool overlaps_high = virtual_lds_vgpr_ranges_overlap(
+          data, op->vgpr_count, static_cast<uint16_t>(addr_high), 1);
+      const bool overlaps_low_when_materialized =
+          (needs_materialized_offset || use_full_vgpr_address) &&
+          virtual_lds_vgpr_ranges_overlap(data, op->vgpr_count, static_cast<uint16_t>(addr), 1);
+      return overlaps_high || overlaps_low_when_materialized;
+    };
+    std::optional<VirtualLdsTempRange> data0_temp;
+    std::optional<VirtualLdsTempRange> data1_temp;
+    auto choose_data_temp = [&](uint16_t data, std::optional<VirtualLdsTempRange> &temp) -> bool {
+      if (!data_needs_temp(data))
+        return true;
+      temp = choose_virtual_lds_temp_range(context, forbidden, op->vgpr_count);
+      if (!temp)
+        return false;
+      forbidden.push_back({.base = temp->base(), .count = temp->count});
+      return true;
+    };
+    if (!choose_data_temp(static_cast<uint16_t>(src.data0), data0_temp) ||
+        !choose_data_temp(static_cast<uint16_t>(src.data1), data1_temp)) {
+      return ExpandResult::failed(
+          std::string(inst.mnemonic()) +
+              ": virtual LDS write2 store data overlaps the address VGPR pair",
+          {"Add contiguous data temporary support for wide stores whose data operands overlap the "
+           "GLOBAL address pair."});
     }
 
     std::optional<std::array<VirtualLdsAddressTemp, 2>> base_spill_temps;
     if (context.virtual_lds_base_sgpr_spill_per_use) {
-      base_spill_temps = choose_virtual_lds_base_spill_temps(context, forbidden);
+      std::vector<VirtualLdsVgprRange> base_spill_forbidden = {
+          {.base = static_cast<uint16_t>(addr), .count = 1},
+      };
+      if (use_full_vgpr_address)
+        base_spill_forbidden.push_back({.base = static_cast<uint16_t>(addr_high), .count = 1});
+      if (base_temp)
+        base_spill_forbidden.push_back({.base = base_temp->reg, .count = 1});
+      if (data0_temp)
+        base_spill_forbidden.push_back({.base = data0_temp->base(), .count = data0_temp->count});
+      else
+        base_spill_forbidden.push_back(
+            {.base = static_cast<uint16_t>(src.data0), .count = op->vgpr_count});
+      if (data1_temp)
+        base_spill_forbidden.push_back({.base = data1_temp->base(), .count = data1_temp->count});
+      else
+        base_spill_forbidden.push_back(
+            {.base = static_cast<uint16_t>(src.data1), .count = op->vgpr_count});
+      base_spill_temps = choose_virtual_lds_base_spill_temps(context, base_spill_forbidden);
       if (!base_spill_temps) {
         return ExpandResult::failed(
             std::string(inst.mnemonic()) +
@@ -963,43 +1372,94 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
       }
     }
 
-    const uint32_t base_sgpr_save_offset = assign_virtual_lds_spill_offsets(
-        context,
-        {offset_temp ? &*offset_temp : nullptr,
-         base_spill_temps ? &(*base_spill_temps)[0] : nullptr,
-         base_spill_temps ? &(*base_spill_temps)[1] : nullptr},
-        base_spill_temps && context.virtual_lds_base_pointer_spilled ? 2u : 0u);
-    emit_virtual_lds_temp_spill_stores(words,
-                                       {offset_temp ? &*offset_temp : nullptr,
-                                        base_spill_temps ? &(*base_spill_temps)[0] : nullptr,
-                                        base_spill_temps ? &(*base_spill_temps)[1] : nullptr});
+    const uint32_t base_sgpr_spill_dwords =
+        base_spill_temps && context.virtual_lds_base_pointer_spilled ? 2u : 0u;
+    std::vector<VirtualLdsAddressTemp *> spill_temps;
+    if (base_temp)
+      spill_temps.push_back(&*base_temp);
+    if (data0_temp) {
+      for (uint8_t i = 0; i < data0_temp->count; ++i)
+        spill_temps.push_back(&data0_temp->temps[i]);
+    }
+    if (data1_temp) {
+      for (uint8_t i = 0; i < data1_temp->count; ++i)
+        spill_temps.push_back(&data1_temp->temps[i]);
+    }
+    if (base_spill_temps) {
+      spill_temps.push_back(&(*base_spill_temps)[0]);
+      spill_temps.push_back(&(*base_spill_temps)[1]);
+    }
+    const uint32_t extra_spill_base_offset =
+        assign_virtual_lds_spill_offsets(context, spill_temps, base_sgpr_spill_dwords + 1u);
+    const uint32_t base_sgpr_save_offset = extra_spill_base_offset;
+    const uint32_t addr_high_spill_offset =
+        extra_spill_base_offset + base_sgpr_spill_dwords * sizeof(uint32_t);
+    emit_cdna3_scratch_store_b32(words, addr_high, addr_high_spill_offset);
+    words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+    emit_virtual_lds_temp_spill_stores(words, spill_temps);
     if (base_spill_temps)
       emit_virtual_lds_base_spill_setup(words, context, *base_spill_temps, base_sgpr_save_offset);
 
+    if (data0_temp)
+      emit_virtual_lds_copy_to_temp_range(words, *data0_temp, static_cast<uint8_t>(src.data0));
+    if (data1_temp)
+      emit_virtual_lds_copy_to_temp_range(words, *data1_temp, static_cast<uint8_t>(src.data1));
+    const uint8_t preserved_base = base_temp ? base_temp->reg : addr;
+    if (base_temp)
+      emit_cdna3_v_add_u32_literal(words, preserved_base, addr, 0);
+
     auto emit_write2_store = [&](uint8_t data, uint32_t byte_offset) {
-      uint8_t addr = static_cast<uint8_t>(src.addr);
       uint16_t flat_offset = static_cast<uint16_t>(byte_offset);
       if (byte_offset > kFlatGlobalPositiveImm13Max) {
-        addr = offset_temp->reg;
         flat_offset = 0;
-        emit_cdna3_v_add_u32_literal(words, addr, static_cast<uint8_t>(src.addr), byte_offset);
+        emit_cdna3_v_add_u32_literal(words, addr, preserved_base, byte_offset);
+      } else if (base_temp) {
+        emit_cdna3_v_add_u32_literal(words, addr, preserved_base, 0);
+      }
+      if (use_full_vgpr_address) {
+        assert(base_spill_temps && "spill-per-use virtual LDS should have base VGPR temps");
+        emit_virtual_lds_full_vgpr_address(words, context, addr, addr_high,
+                                           (*base_spill_temps)[0].reg, (*base_spill_temps)[1].reg);
+      } else {
+        words.push_back(build_cdna3_v_mov_b32(addr_high, scalar_positive_inline_u32(0)));
       }
 
       const auto operands = make_virtual_lds_flat_global_operands(
-          flat_offset, addr, static_cast<uint8_t>(context.virtual_lds_base_sgpr));
+          flat_offset, addr,
+          use_full_vgpr_address ? kCdna3ScalarNull
+                                : static_cast<uint8_t>(context.virtual_lds_base_sgpr));
       auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_store(operands, op->flat_op, data);
       words.push_back(w0);
       words.push_back(w1);
     };
 
-    emit_write2_store(static_cast<uint8_t>(src.data0), byte_offset0);
-    emit_write2_store(static_cast<uint8_t>(src.data1), byte_offset1);
+    emit_write2_store(data0_temp ? data0_temp->base() : static_cast<uint8_t>(src.data0),
+                      byte_offset0);
+    emit_write2_store(data1_temp ? data1_temp->base() : static_cast<uint8_t>(src.data1),
+                      byte_offset1);
     words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+    if (base_temp)
+      emit_cdna3_v_add_u32_literal(words, addr, preserved_base, 0);
     if (base_spill_temps)
       emit_virtual_lds_base_spill_restore(words, context, *base_spill_temps, base_sgpr_save_offset);
-    emit_virtual_lds_temp_spill_loads(words, {base_spill_temps ? &(*base_spill_temps)[1] : nullptr,
-                                              base_spill_temps ? &(*base_spill_temps)[0] : nullptr,
-                                              offset_temp ? &*offset_temp : nullptr});
+    emit_cdna3_scratch_load_b32(words, addr_high, addr_high_spill_offset);
+    words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+    std::vector<VirtualLdsAddressTemp *> restore_temps;
+    if (base_spill_temps) {
+      restore_temps.push_back(&(*base_spill_temps)[1]);
+      restore_temps.push_back(&(*base_spill_temps)[0]);
+    }
+    if (data1_temp) {
+      for (uint8_t i = data1_temp->count; i > 0; --i)
+        restore_temps.push_back(&data1_temp->temps[i - 1]);
+    }
+    if (data0_temp) {
+      for (uint8_t i = data0_temp->count; i > 0; --i)
+        restore_temps.push_back(&data0_temp->temps[i - 1]);
+    }
+    if (base_temp)
+      restore_temps.push_back(&*base_temp);
+    emit_virtual_lds_temp_spill_loads(words, restore_temps);
     if (!guard_virtual_lds_execz(words, context)) {
       return ExpandResult::failed(
           std::string(inst.mnemonic()) + ": virtual LDS SGPR spill guard branch is out of range",
@@ -1009,30 +1469,77 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
   }
 
   const uint32_t ds_offset = (static_cast<uint32_t>(src.offset1) << 8) | src.offset0;
-
-  uint8_t addr = static_cast<uint8_t>(src.addr);
   uint16_t flat_offset = static_cast<uint16_t>(ds_offset);
-  std::optional<VirtualLdsAddressTemp> address_temp;
+  const bool needs_materialized_offset = ds_offset > kFlatGlobalPositiveImm13Max;
+  require_source_vgprs(op->is_load ? src.vdst : src.data0, op->vgpr_count);
+  const bool load_clobbers_addr_low =
+      op->is_load &&
+      virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), op->vgpr_count,
+                                      static_cast<uint16_t>(addr), 1);
+  const bool load_clobbers_addr_high =
+      op->is_load &&
+      virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.vdst), op->vgpr_count,
+                                      static_cast<uint16_t>(addr_high), 1);
+  std::optional<VirtualLdsAddressTemp> base_temp;
+  std::optional<VirtualLdsTempRange> store_data_temp;
   std::vector<VirtualLdsVgprRange> forbidden = {
-      {.base = static_cast<uint16_t>(src.addr), .count = 1},
+      {.base = static_cast<uint16_t>(addr), .count = 2},
       {.base = op->is_load ? static_cast<uint16_t>(src.vdst) : static_cast<uint16_t>(src.data0),
        .count = op->vgpr_count},
   };
-  if (ds_offset > kFlatGlobalPositiveImm13Max) {
-    address_temp = choose_virtual_lds_address_temp(context, forbidden);
-    if (!address_temp) {
+  if (needs_materialized_offset ||
+      (use_full_vgpr_address && (!op->is_load || !load_clobbers_addr_low))) {
+    base_temp = choose_virtual_lds_address_temp(context, forbidden);
+    if (!base_temp) {
       return ExpandResult::failed(
           std::string(inst.mnemonic()) +
-              ": virtual LDS lowering cannot find a VGPR for large DS offset materialization",
+              ": virtual LDS lowering cannot preserve the source address VGPR",
           {"Add a more general spill path for kernels whose DS operands cover every ordinary "
            "VGPR."});
     }
-    forbidden.push_back({.base = address_temp->reg, .count = 1});
+    forbidden.push_back({.base = base_temp->reg, .count = 1});
   }
 
+  const bool data_needs_temp =
+      !op->is_load &&
+      (virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.data0), op->vgpr_count,
+                                       static_cast<uint16_t>(addr_high), 1) ||
+       ((needs_materialized_offset || use_full_vgpr_address) &&
+        virtual_lds_vgpr_ranges_overlap(static_cast<uint16_t>(src.data0), op->vgpr_count,
+                                        static_cast<uint16_t>(addr), 1)));
+  if (data_needs_temp) {
+    store_data_temp = choose_virtual_lds_temp_range(context, forbidden, op->vgpr_count);
+    if (!store_data_temp) {
+      return ExpandResult::failed(
+          std::string(inst.mnemonic()) +
+              ": virtual LDS store lowering cannot preserve overlapping store data",
+          {"Add a more general spill path for kernels whose DS operands cover every ordinary "
+           "VGPR."});
+    }
+    forbidden.push_back({.base = store_data_temp->base(), .count = store_data_temp->count});
+  }
+
+  const bool restore_addr_high = !load_clobbers_addr_high;
   std::optional<std::array<VirtualLdsAddressTemp, 2>> base_spill_temps;
   if (context.virtual_lds_base_sgpr_spill_per_use) {
-    base_spill_temps = choose_virtual_lds_base_spill_temps(context, forbidden);
+    std::vector<VirtualLdsVgprRange> base_spill_forbidden = {
+        {.base = static_cast<uint16_t>(addr), .count = 1},
+    };
+    if (use_full_vgpr_address || !restore_addr_high)
+      base_spill_forbidden.push_back({.base = static_cast<uint16_t>(addr_high), .count = 1});
+    if (base_temp)
+      base_spill_forbidden.push_back({.base = base_temp->reg, .count = 1});
+    if (op->is_load) {
+      base_spill_forbidden.push_back(
+          {.base = static_cast<uint16_t>(src.vdst), .count = op->vgpr_count});
+    } else if (store_data_temp) {
+      base_spill_forbidden.push_back(
+          {.base = store_data_temp->base(), .count = store_data_temp->count});
+    } else {
+      base_spill_forbidden.push_back(
+          {.base = static_cast<uint16_t>(src.data0), .count = op->vgpr_count});
+    }
+    base_spill_temps = choose_virtual_lds_base_spill_temps(context, base_spill_forbidden);
     if (!base_spill_temps) {
       return ExpandResult::failed(
           std::string(inst.mnemonic()) +
@@ -1042,27 +1549,62 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     }
   }
 
-  const uint32_t base_sgpr_save_offset = assign_virtual_lds_spill_offsets(
-      context,
-      {address_temp ? &*address_temp : nullptr,
-       base_spill_temps ? &(*base_spill_temps)[0] : nullptr,
-       base_spill_temps ? &(*base_spill_temps)[1] : nullptr},
-      base_spill_temps && context.virtual_lds_base_pointer_spilled ? 2u : 0u);
-  emit_virtual_lds_temp_spill_stores(words, {address_temp ? &*address_temp : nullptr,
-                                             base_spill_temps ? &(*base_spill_temps)[0] : nullptr,
-                                             base_spill_temps ? &(*base_spill_temps)[1] : nullptr});
+  const uint32_t base_sgpr_spill_dwords =
+      base_spill_temps && context.virtual_lds_base_pointer_spilled ? 2u : 0u;
+  const uint32_t extra_spill_dwords = base_sgpr_spill_dwords + (restore_addr_high ? 1u : 0u);
+  std::vector<VirtualLdsAddressTemp *> spill_temps;
+  if (base_temp)
+    spill_temps.push_back(&*base_temp);
+  if (store_data_temp) {
+    for (uint8_t i = 0; i < store_data_temp->count; ++i)
+      spill_temps.push_back(&store_data_temp->temps[i]);
+  }
+  if (base_spill_temps) {
+    spill_temps.push_back(&(*base_spill_temps)[0]);
+    spill_temps.push_back(&(*base_spill_temps)[1]);
+  }
+  const uint32_t extra_spill_base_offset =
+      assign_virtual_lds_spill_offsets(context, spill_temps, extra_spill_dwords);
+  const uint32_t base_sgpr_save_offset = extra_spill_base_offset;
+  // Save the source high half before any spill-per-use SGPR setup can borrow it
+  // as a temporary. It is restored only after the borrowed SGPR pair is restored.
+  uint32_t addr_high_spill_offset = 0;
+  if (restore_addr_high) {
+    addr_high_spill_offset = extra_spill_base_offset + base_sgpr_spill_dwords * sizeof(uint32_t);
+    emit_cdna3_scratch_store_b32(words, addr_high, addr_high_spill_offset);
+    words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+  }
+  emit_virtual_lds_temp_spill_stores(words, spill_temps);
   if (base_spill_temps)
     emit_virtual_lds_base_spill_setup(words, context, *base_spill_temps, base_sgpr_save_offset);
 
-  if (address_temp) {
-    emit_cdna3_v_add_u32_literal(words, address_temp->reg, static_cast<uint8_t>(src.addr),
-                                 ds_offset);
-    addr = address_temp->reg;
+  if (store_data_temp)
+    emit_virtual_lds_copy_to_temp_range(words, *store_data_temp, static_cast<uint8_t>(src.data0));
+  const uint8_t preserved_base = base_temp ? base_temp->reg : addr;
+  if (base_temp)
+    emit_cdna3_v_add_u32_literal(words, preserved_base, addr, 0);
+  if (needs_materialized_offset) {
+    emit_cdna3_v_add_u32_literal(words, addr, preserved_base, ds_offset);
     flat_offset = 0;
   }
 
+  // Use the original source address pair as the GLOBAL VADDR pair. The low half
+  // may be temporarily materialized for large DS immediates; the high half must
+  // be zero for every GLOBAL access unless the load itself overwrites it.
+  const bool restore_addr_low =
+      (needs_materialized_offset || use_full_vgpr_address) && !load_clobbers_addr_low;
+  if (use_full_vgpr_address) {
+    assert(base_spill_temps && "spill-per-use virtual LDS should have base VGPR temps");
+    emit_virtual_lds_full_vgpr_address(words, context, addr, addr_high, (*base_spill_temps)[0].reg,
+                                       (*base_spill_temps)[1].reg);
+  } else {
+    words.push_back(build_cdna3_v_mov_b32(addr_high, scalar_positive_inline_u32(0)));
+  }
+
   const auto operands = make_virtual_lds_flat_global_operands(
-      flat_offset, addr, static_cast<uint8_t>(context.virtual_lds_base_sgpr));
+      flat_offset, addr,
+      use_full_vgpr_address ? kCdna3ScalarNull
+                            : static_cast<uint8_t>(context.virtual_lds_base_sgpr));
 
   if (op->is_load) {
     auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_load(operands, op->flat_op,
@@ -1070,8 +1612,9 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
     words.push_back(w0);
     words.push_back(w1);
   } else {
-    auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_store(
-        operands, op->flat_op, static_cast<uint8_t>(src.data0));
+    const uint8_t data =
+        store_data_temp ? store_data_temp->base() : static_cast<uint8_t>(src.data0);
+    auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_store(operands, op->flat_op, data);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -1079,11 +1622,26 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
   // in VMEM counters instead, so a conservative all-counter wait preserves the
   // local completion point for code scheduled around LDS memory operations.
   words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+  if (restore_addr_low)
+    emit_cdna3_v_add_u32_literal(words, addr, preserved_base, 0);
   if (base_spill_temps)
     emit_virtual_lds_base_spill_restore(words, context, *base_spill_temps, base_sgpr_save_offset);
-  emit_virtual_lds_temp_spill_loads(words, {base_spill_temps ? &(*base_spill_temps)[1] : nullptr,
-                                            base_spill_temps ? &(*base_spill_temps)[0] : nullptr,
-                                            address_temp ? &*address_temp : nullptr});
+  if (restore_addr_high) {
+    emit_cdna3_scratch_load_b32(words, addr_high, addr_high_spill_offset);
+    words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+  }
+  std::vector<VirtualLdsAddressTemp *> restore_temps;
+  if (base_spill_temps) {
+    restore_temps.push_back(&(*base_spill_temps)[1]);
+    restore_temps.push_back(&(*base_spill_temps)[0]);
+  }
+  if (store_data_temp) {
+    for (uint8_t i = store_data_temp->count; i > 0; --i)
+      restore_temps.push_back(&store_data_temp->temps[i - 1]);
+  }
+  if (base_temp)
+    restore_temps.push_back(&*base_temp);
+  emit_virtual_lds_temp_spill_loads(words, restore_temps);
   if (!guard_virtual_lds_execz(words, context)) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) + ": virtual LDS SGPR spill guard branch is out of range",
@@ -1176,6 +1734,268 @@ struct KernelTranslationScope {
     }
   }
   return false;
+}
+
+struct KernargPointerState {
+  bool known = true;
+  uint32_t bias = 0;
+};
+
+[[nodiscard]] bool is_cdna4_smem_kernarg_load(std::string_view mnemonic) {
+  return mnemonic == "s_load_dword" || mnemonic == "s_load_dwordx2" ||
+         mnemonic == "s_load_dwordx4" || mnemonic == "s_load_dwordx8" ||
+         mnemonic == "s_load_dwordx16";
+}
+
+[[nodiscard]] uint32_t smem_load_bytes(std::string_view mnemonic) {
+  if (mnemonic == "s_load_dwordx16")
+    return 16 * sizeof(uint32_t);
+  if (mnemonic == "s_load_dwordx8")
+    return 8 * sizeof(uint32_t);
+  if (mnemonic == "s_load_dwordx4")
+    return 4 * sizeof(uint32_t);
+  if (mnemonic == "s_load_dwordx2")
+    return 2 * sizeof(uint32_t);
+  return sizeof(uint32_t);
+}
+
+[[nodiscard]] std::optional<uint32_t> cdna4_smem_immediate_offset(const Instruction &inst) {
+  if (inst.size() != 2 * sizeof(uint32_t))
+    return std::nullopt;
+  const uint32_t *raw = inst.raw_encoding();
+  if (raw == nullptr)
+    return std::nullopt;
+
+  cdna4::SmemMachineInst enc{};
+  std::memcpy(&enc, raw, sizeof(enc));
+  if (enc.soffset_en)
+    return std::nullopt;
+  if (!enc.imm)
+    return 0u;
+
+  // SMEM immediates are signed 21-bit byte offsets. Kernarg preservation only
+  // needs positive static ranges; negative offsets or dynamic SOFFSET forms are
+  // left to the descriptor/preload byte count rather than guessed.
+  const int32_t signed_offset = static_cast<int32_t>(enc.offset << 11) >> 11;
+  if (signed_offset < 0)
+    return std::nullopt;
+  return static_cast<uint32_t>(signed_offset);
+}
+
+[[nodiscard]] std::optional<int32_t> scalar_small_immediate(const Operand &operand) {
+  const int value = operand.encoding_value();
+  if (value >= 128 && value <= 192)
+    return value - 128;
+  if (value >= 193 && value <= 208)
+    return -(value - 193 + 1);
+
+  // Literal SOP2 operands are decoded as OPR_SIMM32 with the literal in
+  // encoding_value(). Keep the accepted range small because this analysis is
+  // tracking byte displacements inside a kernarg block, not arbitrary pointer
+  // arithmetic.
+  if (!operand.to_register_ref() && operand.name() != "literal" &&
+      value >= -static_cast<int>(kCdnaSmemImmediateByteOffsetMax) &&
+      value <= static_cast<int>(kCdnaSmemImmediateByteOffsetMax)) {
+    return value;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool register_ref_overlaps_sgpr(RegisterRef ref, uint16_t sgpr, uint16_t width) {
+  if (ref.cls != RegClass::SGPR)
+    return false;
+  return ref.index < sgpr + width && sgpr < ref.index + ref.width;
+}
+
+[[nodiscard]] bool operand_overlaps_sgpr_pair(const Operand *operand, uint16_t sgpr_pair) {
+  if (operand == nullptr)
+    return false;
+  const auto ref = operand->to_register_ref();
+  return ref && register_ref_overlaps_sgpr(*ref, sgpr_pair, 2);
+}
+
+[[nodiscard]] bool instruction_defines_sgpr_pair(const Instruction &inst, uint16_t sgpr_pair) {
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    if (operand_overlaps_sgpr_pair(inst.dst_operand(i), sgpr_pair))
+      return true;
+  }
+  return false;
+}
+
+[[nodiscard]] bool update_kernarg_bias_from_add(const Instruction &inst, uint16_t sgpr_pair,
+                                                KernargPointerState &state) {
+  if (!state.known || inst.num_dst_operands() == 0 || inst.num_src_operands() < 2)
+    return false;
+  const Operand *dst = inst.dst_operand(0);
+  const Operand *src0 = inst.src_operand(0);
+  const Operand *src1 = inst.src_operand(1);
+  const auto dst_ref = dst ? dst->to_register_ref() : std::nullopt;
+  const auto src0_ref = src0 ? src0->to_register_ref() : std::nullopt;
+  if (!dst_ref || !src0_ref || dst_ref->cls != RegClass::SGPR || src0_ref->cls != RegClass::SGPR)
+    return false;
+
+  if (inst.mnemonic() == "s_add_u32" && dst_ref->index == sgpr_pair &&
+      src0_ref->index == sgpr_pair) {
+    const auto imm = scalar_small_immediate(*src1);
+    if (!imm || *imm < 0)
+      return false;
+    const uint32_t addend = static_cast<uint32_t>(*imm);
+    if (state.bias > std::numeric_limits<uint32_t>::max() - addend)
+      return false;
+    state.bias += addend;
+    return true;
+  }
+
+  if (inst.mnemonic() == "s_addc_u32" && dst_ref->index == sgpr_pair + 1 &&
+      src0_ref->index == sgpr_pair + 1) {
+    const auto imm = scalar_small_immediate(*src1);
+    return imm && *imm == 0;
+  }
+
+  return false;
+}
+
+[[nodiscard]] bool merge_kernarg_state(std::unordered_map<BasicBlock *, KernargPointerState> &map,
+                                       BasicBlock *block, KernargPointerState state) {
+  if (block == nullptr)
+    return false;
+  auto [it, inserted] = map.emplace(block, state);
+  if (inserted)
+    return true;
+
+  KernargPointerState &old = it->second;
+  if (!old.known)
+    return false;
+  if (!state.known || old.bias != state.bias) {
+    old.known = false;
+    old.bias = 0;
+    return true;
+  }
+  return false;
+}
+
+void note_static_kernarg_load_range(const Instruction &inst, uint16_t kernarg_sgpr, uint32_t bias,
+                                    uint32_t &preserve_size) {
+  if (!is_cdna4_smem_kernarg_load(inst.mnemonic()) ||
+      !operand_overlaps_sgpr_pair(inst.src_operand(0), kernarg_sgpr))
+    return;
+
+  const auto offset = cdna4_smem_immediate_offset(inst);
+  if (!offset)
+    return;
+
+  const uint64_t end = static_cast<uint64_t>(bias) + *offset + smem_load_bytes(inst.mnemonic());
+  if (end <= std::numeric_limits<uint32_t>::max())
+    preserve_size = std::max(preserve_size, static_cast<uint32_t>(end));
+}
+
+[[nodiscard]] uint32_t kernarg_preserve_size_from_scope(const KernelTranslationScope &scope) {
+  const KdTranslation *translation = scope.translation;
+  if (translation == nullptr || !translation->has_kernarg_segment_ptr)
+    return 0;
+
+  const uint16_t kernarg_sgpr = translation->kernarg_segment_ptr_sgpr;
+  std::unordered_set<BasicBlock *> allowed_blocks(scope.blocks.begin(), scope.blocks.end());
+  std::unordered_map<BasicBlock *, KernargPointerState> in_states;
+  std::vector<BasicBlock *> worklist;
+
+  auto seed = [&](BasicBlock *block) {
+    if (block != nullptr && allowed_blocks.contains(block) &&
+        merge_kernarg_state(in_states, block, KernargPointerState{})) {
+      worklist.push_back(block);
+    }
+  };
+  seed(scope.entry);
+  if (translation->has_kernarg_preload) {
+    for (BasicBlock *block : scope.blocks) {
+      if (block != nullptr &&
+          block->start_offset() == translation->kernarg_preload_entry_text_offset)
+        seed(block);
+    }
+  }
+
+  uint32_t preserve_size = 0;
+  while (!worklist.empty()) {
+    BasicBlock *block = worklist.back();
+    worklist.pop_back();
+    KernargPointerState state = in_states[block];
+
+    for (const Instruction &inst : block->instructions()) {
+      if (state.known)
+        note_static_kernarg_load_range(inst, kernarg_sgpr, state.bias, preserve_size);
+
+      if (instruction_defines_sgpr_pair(inst, kernarg_sgpr) &&
+          !update_kernarg_bias_from_add(inst, kernarg_sgpr, state)) {
+        state.known = false;
+        state.bias = 0;
+      }
+    }
+
+    auto propagate = [&](BasicBlock *next) {
+      if (!allowed_blocks.contains(next))
+        return;
+      if (merge_kernarg_state(in_states, next, state))
+        worklist.push_back(next);
+    };
+    for (BasicBlock *succ : block->successors())
+      propagate(succ);
+    for (const BasicBlock::CallEdge &call : block->call_edges())
+      propagate(call.callee);
+  }
+
+  return preserve_size;
+}
+
+[[nodiscard]] uint32_t kernarg_direct_preserve_size_from_index(
+    const std::unordered_map<uint16_t, uint32_t> &direct_preserve_by_sgpr,
+    const KdTranslation *translation) {
+  if (translation == nullptr || !translation->has_kernarg_segment_ptr)
+    return 0;
+
+  const auto it = direct_preserve_by_sgpr.find(translation->kernarg_segment_ptr_sgpr);
+  return it == direct_preserve_by_sgpr.end() ? 0 : it->second;
+}
+
+[[nodiscard]] std::unordered_map<uint16_t, uint32_t>
+build_direct_kernarg_preserve_index(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  std::unordered_map<uint16_t, uint32_t> direct_preserve_by_sgpr;
+  for (const auto &block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      if (!is_cdna4_smem_kernarg_load(inst.mnemonic()))
+        continue;
+
+      const Operand *base = inst.src_operand(0);
+      const auto ref = base ? base->to_register_ref() : std::nullopt;
+      if (!ref || ref->cls != RegClass::SGPR)
+        continue;
+
+      uint32_t preserve_size = 0;
+      note_static_kernarg_load_range(inst, static_cast<uint16_t>(ref->index), 0, preserve_size);
+      if (preserve_size == 0)
+        continue;
+
+      uint32_t &indexed = direct_preserve_by_sgpr[static_cast<uint16_t>(ref->index)];
+      indexed = std::max(indexed, preserve_size);
+    }
+  }
+  return direct_preserve_by_sgpr;
+}
+
+[[nodiscard]] uint32_t kernarg_preserve_size_for_scope(
+    const KernelTranslationScope &scope,
+    const std::unordered_map<uint16_t, uint32_t> &direct_preserve_by_sgpr) {
+  // The CFG-aware walk handles ordinary code and simple in-kernel pointer
+  // biasing. Tensile libraries also contain shared helper blocks reached by
+  // indirect control flow that is not always attributable to one descriptor
+  // root. A virtual-LDS kernarg tail must not overwrite any decoded direct
+  // SMEM load from the same ABI kernarg SGPR pair, so add a conservative
+  // image-wide direct-load floor. This remains a structural SMEM analysis; it
+  // does not rely on msgpack metadata or kernel-name matching.
+  return std::max(
+      kernarg_preserve_size_from_scope(scope),
+      kernarg_direct_preserve_size_from_index(direct_preserve_by_sgpr, scope.translation));
 }
 
 /// @brief Sorted index from source .text byte offsets to decoded blocks.
@@ -1569,6 +2389,40 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   auto scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations);
+  const auto direct_kernarg_preserve_by_sgpr = build_direct_kernarg_preserve_index(blocks);
+
+  for (KernelTranslationScope &scope : scopes) {
+    if (scope.translation == nullptr || !scope.translation->needs_lds_overflow_buf)
+      continue;
+    const uint32_t kernarg_floor =
+        kernarg_preserve_size_for_scope(scope, direct_kernarg_preserve_by_sgpr);
+    if (kernarg_floor <= scope.translation->kernarg_size)
+      continue;
+
+    KernelDescriptorTranslationOptions descriptor_options = initial_descriptor_options;
+    descriptor_options.minimum_kernarg_preserve_size = kernarg_floor;
+    auto updated = descriptor_translator.translate_descriptor(
+        patcher.image_bytes(), scope.translation->descriptor_file_offset,
+        scope.translation->entry_text_offset, descriptor_options);
+    if (!updated) {
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "virtual LDS descriptor could not be recomputed with statically proven "
+                   "kernarg preservation size; leaving code object unchanged",
+                   scope.translation->entry_text_offset);
+      return leave_unchanged();
+    }
+    updated->kernel_name = scope.translation->kernel_name;
+    updated->virtual_lds_variant = scope.translation->virtual_lds_variant;
+    if (!updated->supported && !skip_failed_kernels) {
+      append_diagnostics(result.diagnostics, updated->diagnostics);
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "virtual LDS descriptor recompute requires unsupported resource or ABI "
+                   "virtualization; leaving code object unchanged",
+                   scope.translation->entry_text_offset);
+      return leave_unchanged();
+    }
+    *scope.translation = std::move(*updated);
+  }
 
   if (can_emit_virtual_lds_variants) {
     std::vector<KdTranslation> virtual_variants;
@@ -1577,13 +2431,23 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         continue;
       const bool static_lds_exceeds_host =
           scope.translation->target_lds_size > kCdna3MaxHardwareLdsBytes;
+      // Dynamic LDS is only known at dispatch time, so every LDS-using kernel
+      // needs a virtual sidecar when rocjitsu has a safe way to pass the runtime
+      // state. Most kernels use the kernarg-segment tail ABI, but zero-kernarg
+      // assembly kernels can use the dispatch-packet pointer and AQL reserved2
+      // instead. Do not require a kernarg SGPR for that packet-state ABI.
+      const bool has_virtual_lds_state_transport =
+          scope.translation->has_kernarg_segment_ptr ||
+          (scope.translation->kernarg_size == 0 && scope.translation->has_dispatch_ptr);
       if (!static_lds_exceeds_host &&
-          (!scope.translation->has_kernarg_segment_ptr || !scope_uses_virtualizable_lds(scope))) {
+          (!has_virtual_lds_state_transport || !scope_uses_virtualizable_lds(scope))) {
         continue;
       }
 
       KernelDescriptorTranslationOptions virtual_descriptor_options;
       virtual_descriptor_options.virtualize_lds = true;
+      virtual_descriptor_options.minimum_kernarg_preserve_size =
+          kernarg_preserve_size_for_scope(scope, direct_kernarg_preserve_by_sgpr);
       auto virtual_translation = descriptor_translator.translate_descriptor(
           patcher.image_bytes(), scope.translation->descriptor_file_offset,
           scope.translation->entry_text_offset, virtual_descriptor_options);
@@ -1903,7 +2767,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         scope.translation->target_private_size);
     if (scope.translation->needs_lds_overflow_buf) {
       auto virtual_lds_base = reserve_virtual_lds_base_sgpr_pair(
-          kernel_context, KernelBlockScope(scope.blocks), host_arch_);
+          kernel_context, KernelBlockScope(scope.blocks), *scope.translation, host_arch_);
       if (!virtual_lds_base) {
         auto failure = make_kernel_failure(
             DiagnosticKind::ResourceLimit,
@@ -1959,6 +2823,24 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     LivenessAnalysisOptions liveness_options;
     if (options_.debug_min_free_vgpr)
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
+    std::vector<const Instruction *> live_before_instructions;
+    if (semantic_translator_ && semantic_translator_->has_rules()) {
+      // Semantic expansion rules are the only DBT users of instruction-level
+      // live-before data. The block dataflow still covers the full kernel, but
+      // filtering the stored snapshots avoids retaining one RegisterSet per
+      // decoded instruction in very large ML kernels.
+      for (BasicBlock *block : scope.blocks) {
+        if (block == nullptr)
+          continue;
+        for (const Instruction &inst : block->instructions()) {
+          if (semantic_translator_->has_expand_rule(inst.encoding_id(), inst.opcode()))
+            live_before_instructions.push_back(&inst);
+        }
+      }
+      liveness_options.restrict_live_before_to_instructions = true;
+      liveness_options.live_before_instructions = std::span<const Instruction *const>(
+          live_before_instructions.data(), live_before_instructions.size());
+    }
     const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
     LivenessAnalysis liveness(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
 
@@ -2044,6 +2926,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     layout.body_begin = 0;
     layout.blocks.reserve(scope.blocks.size());
     uint64_t next_branch_island_pool_offset = kDirectBranchIslandSpacingBytes;
+    size_t next_semantic_expand_instruction = 0;
     for (BasicBlock *block : scope.blocks) {
       BlockPlacement placement{.block = block,
                                .source_start = block->start_offset(),
@@ -2056,6 +2939,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         const uint64_t offset = inst.src_loc();
         const uint64_t target_offset = kernel_text.size();
         const uint32_t inst_size = inst.size();
+        const bool has_semantic_expand_rule =
+            next_semantic_expand_instruction < live_before_instructions.size() &&
+            live_before_instructions[next_semantic_expand_instruction] == &inst;
+        if (has_semantic_expand_rule)
+          ++next_semantic_expand_instruction;
         if (needed_builder_source_offsets.contains(offset))
           target_offset_by_source_offset.emplace(offset, target_offset);
 
@@ -2113,7 +3001,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             return leave_unchanged();
           }
           uint64_t branch_window_bytes = inst.size();
-          if (can_use_long_direct_branches) {
+          const bool speculate_long_branch =
+              absolute_branch_distance(offset, static_cast<uint64_t>(source_target)) >
+              kLongDirectBranchSourceDistanceThresholdBytes;
+          if (can_use_long_direct_branches && speculate_long_branch) {
             branch_window_bytes = kMaxDirectBranchTransferWords * sizeof(uint32_t);
           } else if ((inst.flags() & COND_BRANCH) != 0 &&
                      supports_direct_branch_island_window(inst)) {
@@ -2188,9 +3079,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // semantic rule that cannot safely emit code is a translation error:
         // falling through would silently preserve guest semantics on the wrong
         // host ISA.
-        {
+        if (has_semantic_expand_rule) {
           auto expansion =
-              semantic_translator_->try_lower_expand(inst, offset, liveness, kernel_context);
+              semantic_translator_->try_lower_expand(inst, offset, text, liveness, kernel_context);
           if (expansion.status == ExpandStatus::Failed) {
             auto failure = make_kernel_failure(
                 DiagnosticKind::ExpandFailed,
@@ -2471,6 +3362,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       descriptor_options.virtualize_lds = scope.translation->needs_lds_overflow_buf;
       descriptor_options.allow_oversized_lds =
           can_emit_virtual_lds_variants && !scope.translation->needs_lds_overflow_buf;
+      if (descriptor_options.virtualize_lds)
+        descriptor_options.minimum_kernarg_preserve_size =
+            kernarg_preserve_size_for_scope(scope, direct_kernarg_preserve_by_sgpr);
 
       // Descriptor growth is intentionally done after instruction lowering so
       // each kernel is translated once. Only descriptors that enter this code

@@ -23,6 +23,16 @@ struct KernelDescriptorTranslationOptions {
   uint32_t minimum_sgprs = 0;
   uint32_t private_segment_fixed_size_addend = 0;
   uint32_t group_segment_fixed_size_addend = 0;
+  /// @brief Minimum source kernarg byte range that must be preserved.
+  ///
+  /// @details Some kernels, notably Tensile UserArgs kernels, advertise the
+  /// ABI-visible fixed kernarg header in the descriptor while scalar prologue
+  /// code also reads inline argument records beyond that byte count. When DBT
+  /// appends virtual-LDS state, the runtime redirects the dispatch packet to a
+  /// copied kernarg buffer. The copy size must therefore cover every statically
+  /// proven kernarg read, otherwise the appended state can overlap live inline
+  /// arguments and change kernel control flow.
+  uint32_t minimum_kernarg_preserve_size = 0;
   /// @brief Encode the target descriptor with zero hardware LDS and require a
   /// virtual LDS backing buffer for the kernel body.
   ///

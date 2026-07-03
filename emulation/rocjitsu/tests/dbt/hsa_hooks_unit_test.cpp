@@ -61,6 +61,10 @@ int g_fake_signal_store_relaxed_calls = 0;
 int g_fake_signal_store_screlease_calls = 0;
 hsa_signal_t g_last_signal_store_signal{};
 hsa_signal_value_t g_last_signal_store_value = 0;
+hsa_queue_t *g_last_intercept_registered_queue = nullptr;
+hsa_amd_queue_intercept_handler_t g_fake_intercept_handler = nullptr;
+void *g_fake_intercept_user_data = nullptr;
+std::vector<hsa_kernel_dispatch_packet_t> g_last_intercept_written_packets;
 
 const char *isa_name(hsa_isa_t isa) {
   if (isa.handle == kGuestIsa.handle)
@@ -161,6 +165,32 @@ hsa_status_t HSA_API fake_queue_create(hsa_agent_t agent, uint32_t size, hsa_que
 hsa_status_t HSA_API fake_queue_destroy(hsa_queue_t *queue) {
   g_last_destroyed_queue = queue;
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_amd_queue_intercept_create(
+    hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue) {
+  return fake_queue_create(agent, size, type, callback, data, private_segment_size,
+                           group_segment_size, queue);
+}
+
+hsa_status_t HSA_API fake_amd_queue_intercept_register(hsa_queue_t *queue,
+                                                       hsa_amd_queue_intercept_handler_t callback,
+                                                       void *user_data) {
+  g_last_intercept_registered_queue = queue;
+  g_fake_intercept_handler = callback;
+  g_fake_intercept_user_data = user_data;
+  return HSA_STATUS_SUCCESS;
+}
+
+void fake_intercept_packet_writer(const void *pkts, uint64_t pkt_count) {
+  g_last_intercept_written_packets.clear();
+  if (pkts == nullptr || pkt_count == 0)
+    return;
+
+  const auto *packets = static_cast<const hsa_kernel_dispatch_packet_t *>(pkts);
+  g_last_intercept_written_packets.assign(packets, packets + pkt_count);
 }
 
 void HSA_API fake_signal_store_relaxed(hsa_signal_t signal, hsa_signal_value_t value) {
@@ -352,6 +382,10 @@ void reset_queue_fakes() {
   g_fake_signal_store_screlease_calls = 0;
   g_last_signal_store_signal = {};
   g_last_signal_store_value = 0;
+  g_last_intercept_registered_queue = nullptr;
+  g_fake_intercept_handler = nullptr;
+  g_fake_intercept_user_data = nullptr;
+  g_last_intercept_written_packets.clear();
 }
 
 TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenGuestAppearsFirst) {
@@ -517,7 +551,9 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteAllocatesPerWorkgroupBackingState) {
 
   api.core.hsa_signal_store_relaxed_fn(queue->doorbell_signal, 0);
 
-  constexpr uint32_t kRequestedLds = 70000;
+  constexpr uint32_t kStaticLds = 70000;
+  constexpr uint32_t kDynamicLds = 1024;
+  constexpr uint32_t kRequestedLds = kStaticLds + kDynamicLds;
   constexpr uint32_t kGroupsX = 4;
   ASSERT_EQ(g_fake_allocation_sizes.size(), 2u);
   EXPECT_EQ(g_fake_allocation_pools[0].handle, kHostPool.handle);
@@ -530,6 +566,101 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteAllocatesPerWorkgroupBackingState) {
   EXPECT_EQ(packet.private_segment_size, 96u);
   ASSERT_NE(packet.reserved2, 0u);
   EXPECT_EQ(packet.reserved2, reinterpret_cast<uintptr_t>(g_fake_allocations[1].data()));
+
+  struct RuntimeState {
+    uint64_t backing_base = 0;
+    uint32_t stride_x = 0;
+    uint32_t stride_y = 0;
+    uint32_t stride_z = 0;
+    uint32_t reserved = 0;
+  } state{};
+  static_assert(sizeof(RuntimeState) == 24);
+  std::memcpy(&state, g_fake_allocations[1].data(), sizeof(state));
+  EXPECT_EQ(state.backing_base, reinterpret_cast<uintptr_t>(g_fake_allocations[0].data()));
+  EXPECT_EQ(state.stride_x, kRequestedLds);
+  EXPECT_EQ(state.stride_y, 0u);
+  EXPECT_EQ(state.stride_z, 0u);
+  EXPECT_EQ(state.reserved, 0u);
+
+  EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, VirtualLdsInterceptRewriteMirrorsDispatchPacketStateToQueueSlot) {
+  using rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  reset_pool_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+  api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(api.core.hsa_queue_create_fn(kGuestAgent, 4, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0,
+                                         0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(queue, nullptr);
+  EXPECT_EQ(g_last_queue_create_agent.handle, kHostAgent.handle);
+  EXPECT_EQ(g_last_intercept_registered_queue, queue);
+  ASSERT_NE(g_fake_intercept_handler, nullptr);
+  EXPECT_EQ(g_fake_intercept_user_data, queue);
+
+  kernel_descriptor_t normal_descriptor{};
+  kernel_descriptor_t virtual_descriptor{};
+  normal_descriptor.group_segment_fixed_size = 70000;
+  virtual_descriptor.private_segment_fixed_size = 96;
+  struct DescriptorDispatchRecord {
+    int64_t virtual_descriptor_delta = 0;
+    uint32_t kernarg_size = 0;
+    uint32_t offset_and_flags = 0;
+  } dispatch_record{};
+  dispatch_record.virtual_descriptor_delta = reinterpret_cast<intptr_t>(&virtual_descriptor) -
+                                             reinterpret_cast<intptr_t>(&normal_descriptor);
+  dispatch_record.offset_and_flags =
+      offsetof(hsa_kernel_dispatch_packet_t, reserved2) |
+      (static_cast<uint32_t>(rocjitsu::kVirtualLdsFlagRuntimeStateBlock |
+                             rocjitsu::kVirtualLdsFlagBackingPointerInDispatchPacket |
+                             rocjitsu::kVirtualLdsFlagWorkgroupIdX)
+       << 24);
+  std::memcpy(normal_descriptor.reserved0, "RJLD", 4);
+  std::memcpy(normal_descriptor.reserved1, &dispatch_record, sizeof(dispatch_record));
+
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  packet.kernel_object = reinterpret_cast<uintptr_t>(&normal_descriptor);
+  packet.private_segment_size = 12;
+  packet.group_segment_size = 1024;
+  packet.workgroup_size_x = 64;
+  packet.workgroup_size_y = 1;
+  packet.workgroup_size_z = 1;
+  packet.grid_size_x = 256;
+  packet.grid_size_y = 1;
+  packet.grid_size_z = 1;
+
+  constexpr uint64_t kPacketIndex = 2;
+  g_fake_queue_packets[kPacketIndex] = packet;
+  g_fake_intercept_handler(&packet, 1, kPacketIndex, g_fake_intercept_user_data,
+                           fake_intercept_packet_writer);
+
+  constexpr uint32_t kStaticLds = 70000;
+  constexpr uint32_t kDynamicLds = 1024;
+  constexpr uint32_t kRequestedLds = kStaticLds + kDynamicLds;
+  constexpr uint32_t kGroupsX = 4;
+  ASSERT_EQ(g_fake_allocation_sizes.size(), 2u);
+  EXPECT_EQ(g_fake_allocation_pools[0].handle, kHostPool.handle);
+  EXPECT_EQ(g_fake_allocation_sizes[0], static_cast<size_t>(kRequestedLds * kGroupsX));
+  EXPECT_EQ(g_fake_allocation_pools[1].handle, kHostKernargPool.handle);
+  EXPECT_EQ(g_fake_allocation_sizes[1], 24u);
+
+  ASSERT_EQ(g_last_intercept_written_packets.size(), 1u);
+  const hsa_kernel_dispatch_packet_t &written = g_last_intercept_written_packets[0];
+  EXPECT_EQ(written.kernel_object, reinterpret_cast<uintptr_t>(&virtual_descriptor));
+  EXPECT_EQ(written.group_segment_size, 0u);
+  EXPECT_EQ(written.private_segment_size, 96u);
+  ASSERT_NE(written.reserved2, 0u);
+  EXPECT_EQ(written.reserved2, reinterpret_cast<uintptr_t>(g_fake_allocations[1].data()));
+  EXPECT_EQ(g_fake_queue_packets[kPacketIndex].reserved2, written.reserved2);
 
   struct RuntimeState {
     uint64_t backing_base = 0;

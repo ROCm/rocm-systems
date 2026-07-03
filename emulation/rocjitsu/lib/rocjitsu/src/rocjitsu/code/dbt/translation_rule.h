@@ -342,11 +342,14 @@ struct LaneLayout;
 /// @param inst          The decoded guest instruction to expand.
 /// @param arch          Target ISA architecture.
 /// @param offset        Byte offset of the instruction in .text.
+/// @param source_text   Full source .text bytes, used when trailing modifier/literal words are
+///                      not retained by the decoded Instruction object.
 /// @param liveness      Kernel-scoped live-before data for safe scratch register allocation.
 /// @param guest_layout  Source matrix lane layout (nullptr if not a matrix op).
 /// @param host_layout   Target matrix lane layout (nullptr if not a matrix op).
 /// @returns Structured expansion status and replacement words.
 using ExpandFn = ExpandResult (*)(const Instruction &inst, uint32_t arch, uint64_t offset,
+                                  std::span<const uint8_t> source_text,
                                   const LivenessAnalysis &liveness, TranslationContext &context,
                                   const LaneLayout *guest_layout, const LaneLayout *host_layout);
 

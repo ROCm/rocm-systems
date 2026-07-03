@@ -660,7 +660,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.kernarg_preload_entry_text_offset =
       result.has_kernarg_preload ? entry_text_offset + kKernargPreloadSkipBytes : entry_text_offset;
   const auto preserved_kernarg_bytes = kernarg_bytes_to_preserve(src);
-  result.kernarg_size = preserved_kernarg_bytes.value_or(src.kernarg_size);
+  result.kernarg_size = std::max(preserved_kernarg_bytes.value_or(src.kernarg_size),
+                                 options.minimum_kernarg_preserve_size);
   result.target_kernarg_size = src.kernarg_size;
   result.has_kernarg_segment_ptr = has_kernarg_segment_ptr(src);
   if (auto kernarg_sgpr = kernarg_segment_ptr_sgpr(src))

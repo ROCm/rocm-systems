@@ -53,6 +53,7 @@ rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
 rj_add_device_kernel(dynamic_copy_loop gfx950)
+rj_add_device_kernel(cvt_pk_bf16_f32 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part0 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part1 gfx950)
@@ -134,6 +135,7 @@ add_custom_target(
         kernel_vector_add
         kernel_vector_add_gfx90a
         kernel_dynamic_copy_loop
+        kernel_cvt_pk_bf16_f32
         kernel_multikernel_indirect_branch
         kernel_multikernel_indirect_branch_part0
         kernel_multikernel_indirect_branch_part1

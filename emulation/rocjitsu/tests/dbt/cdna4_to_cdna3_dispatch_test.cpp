@@ -7,13 +7,16 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
 #include "../test_paths.h"
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/dbt/virtual_lds_metadata.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -21,11 +24,13 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -44,6 +49,101 @@ std::vector<uint8_t> load_kernel_hsaco_bytes(const char *name) {
     return {};
   return std::vector<uint8_t>(std::istreambuf_iterator<char>(file),
                               std::istreambuf_iterator<char>());
+}
+
+using TestKernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
+
+template <typename T>
+T read_elf_struct_for_test(const std::vector<uint8_t> &image, uint64_t offset) {
+  T value{};
+  EXPECT_LE(offset, image.size());
+  EXPECT_LE(sizeof(T), image.size() - offset);
+  std::memcpy(&value, image.data() + offset, sizeof(value));
+  return value;
+}
+
+template <typename T>
+std::vector<T> read_elf_array_for_test(const std::vector<uint8_t> &image, uint64_t offset,
+                                       size_t count) {
+  std::vector<T> values(count);
+  EXPECT_LE(offset, image.size());
+  EXPECT_LE(count, (image.size() - offset) / sizeof(T));
+  std::memcpy(values.data(), image.data() + offset, count * sizeof(T));
+  return values;
+}
+
+const Section *find_section(const CodeObject &co, std::string_view name) {
+  for (const auto &section : co.all_sections()) {
+    if (section->name() == name)
+      return section.get();
+  }
+  return nullptr;
+}
+
+std::optional<uint64_t> loaded_vaddr_to_file_offset(const std::vector<uint8_t> &image,
+                                                    uint64_t vaddr) {
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  if (ehdr.e_phoff == 0 || ehdr.e_phnum == 0)
+    return std::nullopt;
+
+  const auto phdrs = read_elf_array_for_test<Elf64_Phdr>(image, ehdr.e_phoff, ehdr.e_phnum);
+  for (const Elf64_Phdr &phdr : phdrs) {
+    if (phdr.p_type != PT_LOAD)
+      continue;
+    if (vaddr < phdr.p_vaddr || vaddr - phdr.p_vaddr >= phdr.p_filesz)
+      continue;
+    return phdr.p_offset + (vaddr - phdr.p_vaddr);
+  }
+  return std::nullopt;
+}
+
+void expect_hipkittens_virtual_lds_metadata(const std::vector<uint8_t> &elf_bytes,
+                                            const char *kernel_name, uint32_t source_kernarg_size) {
+  AmdGpuCodeObject translated(elf_bytes.data(), elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+
+  const auto *metadata_section = find_section(translated, kVirtualLdsMetadataSectionName);
+  ASSERT_NE(metadata_section, nullptr);
+  const auto parsed = parse_virtual_lds_metadata(
+      {reinterpret_cast<const uint8_t *>(metadata_section->data()), metadata_section->size()});
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+
+  const auto &record = parsed->front();
+  EXPECT_EQ(record.kernel_name, kernel_name);
+  EXPECT_EQ(record.normal_descriptor_vaddr, translated.kernel_descriptor_offset(kernel_name));
+  EXPECT_NE(record.virtual_descriptor_vaddr, record.normal_descriptor_vaddr);
+  EXPECT_EQ(record.static_lds_bytes, 0u);
+  EXPECT_EQ(record.kernarg_size, source_kernarg_size);
+  EXPECT_EQ(record.backing_pointer_kernarg_offset, source_kernarg_size);
+  EXPECT_NE(record.virtual_lds_base_sgpr, 0u);
+  EXPECT_NE(record.flags & kVirtualLdsFlagRuntimeStateBlock, 0u);
+
+  const auto *translated_rodata = find_section(translated, ".rodata");
+  ASSERT_NE(translated_rodata, nullptr);
+  ASSERT_GE(translated_rodata->size(), sizeof(TestKernelDescriptor));
+  const auto normal_kd =
+      read_elf_struct_for_test<TestKernelDescriptor>(elf_bytes, translated_rodata->sectionOffset());
+  EXPECT_EQ(normal_kd.group_segment_fixed_size, 0u);
+  EXPECT_EQ(normal_kd.kernarg_size, source_kernarg_size);
+
+  const auto virtual_descriptor_offset =
+      loaded_vaddr_to_file_offset(elf_bytes, record.virtual_descriptor_vaddr);
+  ASSERT_TRUE(virtual_descriptor_offset.has_value());
+  const auto virtual_kd =
+      read_elf_struct_for_test<TestKernelDescriptor>(elf_bytes, *virtual_descriptor_offset);
+  EXPECT_EQ(virtual_kd.group_segment_fixed_size, 0u);
+  EXPECT_GT(virtual_kd.kernarg_size, source_kernarg_size);
+
+  const auto dispatch_metadata = read_virtual_lds_descriptor_dispatch_metadata(normal_kd);
+  ASSERT_TRUE(dispatch_metadata.has_value());
+  EXPECT_EQ(dispatch_metadata->virtual_descriptor_delta,
+            static_cast<int64_t>(record.virtual_descriptor_vaddr) -
+                static_cast<int64_t>(record.normal_descriptor_vaddr));
+  EXPECT_EQ(dispatch_metadata->kernarg_size, record.kernarg_size);
+  EXPECT_EQ(dispatch_metadata->backing_pointer_kernarg_offset,
+            record.backing_pointer_kernarg_offset);
+  EXPECT_NE(dispatch_metadata->flags & kVirtualLdsFlagRuntimeStateBlock, 0u);
 }
 
 struct TritonMatmulCase {
@@ -79,6 +179,24 @@ void fill_seeded_half_inputs(std::vector<uint16_t> &values, uint32_t seed) {
     const uint16_t sign = static_cast<uint16_t>(sign_dist(rng) << 15);
     value = static_cast<uint16_t>(sign | magnitude_dist(rng));
   }
+}
+
+uint16_t f32_bits_to_bf16_rne_for_test(uint32_t bits) {
+  // The CDNA4 packed conversion should round each FP32 lane to BF16 using
+  // round-to-nearest-even:
+  //
+  //   BF16 result = (bits + 0x7fff + ((bits >> 16) & 1)) >> 16
+  //
+  // These tests use finite FP32 patterns only, so there is no NaN payload
+  // canonicalization to model here.
+  const uint32_t lsb = (bits >> 16) & 1u;
+  return static_cast<uint16_t>((bits + 0x7fffu + lsb) >> 16);
+}
+
+uint32_t pack_bf16_rne_for_test(uint32_t lo_bits, uint32_t hi_bits) {
+  const uint32_t lo = f32_bits_to_bf16_rne_for_test(lo_bits);
+  const uint32_t hi = f32_bits_to_bf16_rne_for_test(hi_bits);
+  return lo | (hi << 16);
 }
 
 hsa_agent_t find_cpu_agent() {
@@ -354,6 +472,172 @@ void translate_triton_fixture(const char *name, uint32_t mach, std::vector<uint8
 
 void translate_dynamic_triton_matmul(uint32_t mach, std::vector<uint8_t> &elf_bytes) {
   translate_triton_fixture("triton_cdna4_matmul_dynamic_32x32x64", mach, elf_bytes);
+}
+
+void translate_hip_fixture(const char *name, uint32_t mach, std::vector<uint8_t> &elf_bytes) {
+  Executable exec(kernel_path(name));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, mach);
+  auto translated = translator.translate(*co);
+  ASSERT_FALSE(translated.elf_bytes.empty());
+  ASSERT_TRUE(translated.ok()) << "Translation diagnostic: "
+                               << translated.diagnostics.front().message;
+  elf_bytes = std::move(translated.elf_bytes);
+}
+
+void run_cvt_pk_bf16_f32(const std::vector<uint8_t> &elf_bytes, const Cdna3Target &target) {
+  hsa_agent_t cpu = find_cpu_agent();
+  ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
+
+  hsa_code_object_reader_t reader{};
+  auto st = hsa_code_object_reader_create_from_memory(elf_bytes.data(), elf_bytes.size(), &reader);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  hsa_executable_t executable{};
+  st = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
+                                 &executable);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  st = hsa_executable_load_agent_code_object(executable, target.agent, reader, nullptr, nullptr);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  st = hsa_executable_freeze(executable, nullptr);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  hsa_executable_symbol_t symbol{};
+  st = hsa_executable_get_symbol_by_name(executable, "cvt_pk_bf16_f32_kernel.kd", &target.agent,
+                                         &symbol);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  uint64_t kernel_object = 0;
+  hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
+  ASSERT_NE(kernel_object, 0u);
+
+  constexpr uint32_t kLanes = 64;
+  constexpr uint32_t kInputs = kLanes * 2;
+  constexpr uint32_t kSentinel = 0xDEADBEEFu;
+  const size_t kInputBytes = kInputs * sizeof(uint32_t);
+  const size_t kOutputBytes = kLanes * sizeof(uint32_t);
+
+  const std::array<uint32_t, 16> patterns = {{
+      0x00000000u, // +0
+      0x80000000u, // -0
+      0x3f800000u, // 1.0, exactly representable in BF16
+      0xbf800000u, // -1.0
+      0x3f807fffu, // just below a BF16 half-way point
+      0x3f808000u, // half-way with even retained BF16 LSB
+      0x3f808001u, // just above a half-way point
+      0x3f818000u, // half-way with odd retained BF16 LSB
+      0xbf807fffu, 0xbf808000u, 0xbf808001u, 0xbf818000u,
+      0x00800000u, // smallest normal FP32
+      0x007fffffu, // largest subnormal FP32
+      0x7f7fffffu, // largest finite FP32
+      0xff7fffffu, // largest finite negative FP32
+  }};
+
+  std::vector<uint32_t> input_bits(kInputs);
+  std::vector<uint32_t> expected(kLanes);
+  for (uint32_t i = 0; i < kInputs; ++i)
+    input_bits[i] = patterns[(i * 5 + i / 3) % patterns.size()];
+  for (uint32_t lane = 0; lane < kLanes; ++lane)
+    expected[lane] = pack_bf16_rne_for_test(input_bits[lane * 2], input_bits[lane * 2 + 1]);
+
+  auto gpu_pool = find_pool(target.agent, HSA_AMD_SEGMENT_GLOBAL);
+  ASSERT_NE(gpu_pool.handle, 0u);
+  uint32_t *input_dev = nullptr;
+  uint32_t *output_dev = nullptr;
+  ASSERT_EQ(
+      hsa_amd_memory_pool_allocate(gpu_pool, kInputBytes, 0, reinterpret_cast<void **>(&input_dev)),
+      HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kOutputBytes, 0,
+                                         reinterpret_cast<void **>(&output_dev)),
+            HSA_STATUS_SUCCESS);
+
+  hsa_agent_t both[] = {cpu, target.agent};
+  ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, input_dev), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, output_dev), HSA_STATUS_SUCCESS);
+
+  auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
+  ASSERT_NE(kernarg_pool.handle, 0u);
+  void *kernarg = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, &kernarg), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, kernarg), HSA_STATUS_SUCCESS);
+  std::memset(kernarg, 0, 64);
+
+  struct __attribute__((packed)) KernArgs {
+    const float *input;
+    uint32_t *output;
+  };
+  auto *args = static_cast<KernArgs *>(kernarg);
+  args->input = reinterpret_cast<const float *>(input_dev);
+  args->output = output_dev;
+
+  std::vector<uint32_t> output_init(kLanes, kSentinel);
+  std::vector<uint32_t> output_host(kLanes);
+  ASSERT_EQ(hsa_memory_copy(input_dev, input_bits.data(), kInputBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(output_dev, output_init.data(), kOutputBytes), HSA_STATUS_SUCCESS);
+
+  hsa_queue_t *queue = nullptr;
+  uint32_t queue_size = 0;
+  hsa_agent_get_info(target.agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
+  st = hsa_queue_create(target.agent, queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr,
+                        UINT32_MAX, UINT32_MAX, &queue);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  hsa_signal_store_relaxed(signal, 1);
+
+  const uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
+  auto *aql = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) +
+              (write_idx & (queue->size - 1));
+  std::memset(aql, 0, sizeof(*aql));
+  aql->setup = 1;
+  aql->workgroup_size_x = kLanes;
+  aql->workgroup_size_y = 1;
+  aql->workgroup_size_z = 1;
+  aql->grid_size_x = kLanes;
+  aql->grid_size_y = 1;
+  aql->grid_size_z = 1;
+  aql->kernel_object = kernel_object;
+  aql->kernarg_address = kernarg;
+  aql->completion_signal = signal;
+
+  uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  header |= 1 << HSA_PACKET_HEADER_BARRIER;
+  header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+  header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+  __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
+  hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
+
+  const hsa_signal_value_t val = hsa_signal_wait_scacquire(
+      signal, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+  ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
+
+  ASSERT_EQ(hsa_memory_copy(output_host.data(), output_dev, kOutputBytes), HSA_STATUS_SUCCESS);
+
+  uint32_t mismatches = 0;
+  for (uint32_t lane = 0; lane < kLanes; ++lane) {
+    if (output_host[lane] == expected[lane])
+      continue;
+    if (mismatches < 8) {
+      ADD_FAILURE() << "lane=" << lane << " got=0x" << std::hex << output_host[lane]
+                    << " expected=0x" << expected[lane] << " lo_bits=0x" << input_bits[lane * 2]
+                    << " hi_bits=0x" << input_bits[lane * 2 + 1] << std::dec;
+    }
+    ++mismatches;
+  }
+  EXPECT_EQ(mismatches, 0u) << mismatches << " packed BF16 conversion mismatches";
+
+  hsa_signal_destroy(signal);
+  hsa_queue_destroy(queue);
+  hsa_amd_memory_pool_free(kernarg);
+  hsa_amd_memory_pool_free(input_dev);
+  hsa_amd_memory_pool_free(output_dev);
+  hsa_executable_destroy(executable);
+  hsa_code_object_reader_destroy(reader);
 }
 
 void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target &target,
@@ -831,6 +1115,12 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopTranslates) {
                                << translated.diagnostics.front().message;
 }
 
+TEST(Cdna4ToCdna3DispatchTest, VCvtPkBf16F32Translates) {
+  std::vector<uint8_t> translated;
+  ASSERT_NO_FATAL_FAILURE(
+      translate_hip_fixture("cvt_pk_bf16_f32", EF_AMDGPU_MACH_AMDGCN_GFX942, translated));
+}
+
 TEST(Cdna4ToCdna3DispatchTest, TritonDynamicMatmulTranslates) {
   std::vector<uint8_t> translated;
   ASSERT_NO_FATAL_FAILURE(
@@ -853,6 +1143,22 @@ TEST(Cdna4ToCdna3DispatchTest, TritonFlashAttentionBufferAsyncTranslates) {
   std::vector<uint8_t> translated;
   ASSERT_NO_FATAL_FAILURE(translate_triton_fixture("triton_cdna4_flash_attention_buffer_async_1024",
                                                    EF_AMDGPU_MACH_AMDGCN_GFX942, translated));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, HipKittensBf16Matmul16x32TranslatesWithVirtualLdsMetadata) {
+  std::vector<uint8_t> translated;
+  ASSERT_NO_FATAL_FAILURE(translate_triton_fixture("hipkittens_bf16fp32_256_256_64_32_with16x32",
+                                                   EF_AMDGPU_MACH_AMDGCN_GFX942, translated));
+  ASSERT_NO_FATAL_FAILURE(
+      expect_hipkittens_virtual_lds_metadata(translated, "_Z8micro_tk13micro_globalsiii", 440u));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, HipKittensBf16Matmul32x16TranslatesWithVirtualLdsMetadata) {
+  std::vector<uint8_t> translated;
+  ASSERT_NO_FATAL_FAILURE(translate_triton_fixture("hipkittens_bf16fp32_256_256_64_32_with32x16",
+                                                   EF_AMDGPU_MACH_AMDGCN_GFX942, translated));
+  ASSERT_NO_FATAL_FAILURE(
+      expect_hipkittens_virtual_lds_metadata(translated, "_Z8micro_tk13micro_globals", 408u));
 }
 
 TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopDispatchAndRun) {
@@ -880,6 +1186,23 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopDispatchAndRun) {
                                << translated.diagnostics.front().message;
 
   ASSERT_NO_FATAL_FAILURE(run_dynamic_copy_loop(translated.elf_bytes, target));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, VCvtPkBf16F32DispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  if (init_status != HSA_STATUS_SUCCESS)
+    GTEST_SKIP() << "hsa_init failed with status " << init_status
+                 << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
+  const HsaShutdownGuard shutdown;
+
+  Cdna3Target target = find_cdna3_target();
+  if (target.agent.handle == 0)
+    GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
+                 << join_seen_isas(target.seen_gpu_isas);
+
+  std::vector<uint8_t> translated;
+  ASSERT_NO_FATAL_FAILURE(translate_hip_fixture("cvt_pk_bf16_f32", target.mach, translated));
+  ASSERT_NO_FATAL_FAILURE(run_cvt_pk_bf16_f32(translated, target));
 }
 
 TEST(Cdna4ToCdna3DispatchTest, TritonDynamicMatmulDispatchAndRun) {

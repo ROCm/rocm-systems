@@ -78,10 +78,11 @@ public:
 
   /// @brief Common addressing fields for CDNA3 FLAT instructions in GLOBAL segment mode.
   ///
-  /// @details GLOBAL segment mode addresses memory as:
-  /// `saddr[63:0] + sign_extend(vgpr_addr[31:0]) + signed_offset13`.
-  /// Virtual LDS lowering uses this form with `saddr` holding the backing-buffer
-  /// base and `addr` holding the per-lane LDS byte offset.
+  /// @details GLOBAL segment mode consumes a 64-bit VGPR address pair starting at
+  /// `addr`, plus the 64-bit scalar `saddr` base and the signed immediate offset.
+  /// Virtual LDS lowering uses either a scalar backing-buffer base with a
+  /// zero-extended VGPR LDS offset, or `saddr=null` with the full 64-bit backing
+  /// address already materialized in VGPRs when no scalar base can remain live.
   struct FlatGlobalOperands {
     uint16_t signed_offset13 = 0;
     bool sc0 = false;

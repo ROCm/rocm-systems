@@ -883,6 +883,7 @@ if(HSA_RUNTIME64)
 
         set(RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS
             DynamicCopyLoopTranslates
+            VCvtPkBf16F32Translates
             TritonDynamicMatmulTranslates
             TritonBufferAsyncMatmulTranslates
             TritonFlashAttentionNoAsyncTranslates
@@ -905,6 +906,7 @@ if(HSA_RUNTIME64)
         if(HAS_CDNA3_GPU)
             set(RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS
                 DynamicCopyLoopDispatchAndRun
+                VCvtPkBf16F32DispatchAndRun
                 TritonDynamicMatmulDispatchAndRun
                 TritonBufferAsyncMatmulDispatchAndRun
                 TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
@@ -1162,12 +1164,22 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             ITEMS
                 LargeStaticLdsCopyLowOffset
                 LargeStaticLdsCopyHighOffset
+                LargeStaticLdsCopyHighOffsetWithBorrowedHighSgpr
                 LargeStaticLdsReverseHighOffset
                 LargeStaticLdsMultiBlockHighOffset
                 LargeStaticLdsCrossWaveExchangeHighOffset
                 LargeStaticLdsB128ReverseHighOffset
                 LargeStaticLdsB128ReverseImmediateOffset
                 LargeStaticLdsReadB64TrB16
+                LargeStaticLdsZeroKernargDispatchPacketState
+                Static64Dynamic64ZeroKernargDispatchPacketState
+                Static64Dynamic64ZeroKernargDispatchPacketStateWithBorrowedHighSgpr
+                MiopenC220ZeroKernargDispatchPacketState
+                MiopenC220ZeroKernargDispatchPacketStateWithBorrowedHighSgpr
+                MiopenC220V116ZeroKernargDispatchPacketState
+                MiopenC220V116ZeroKernargDispatchPacketStateWithBorrowedHighSgpr
+                Static64Dynamic64DispatchPacketState
+                Static64Dynamic64DispatchPacketStateWithBorrowedHighSgpr
         )
             rj_add_hip_test_case(
                 hip_lds_copy_test

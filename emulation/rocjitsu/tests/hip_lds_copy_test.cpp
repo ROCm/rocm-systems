@@ -15,11 +15,16 @@ namespace {
 constexpr int kBlockSize = 256;
 constexpr int kTrB16BlockSize = 128;
 constexpr int kBlocks = 64;
+constexpr int kMioShapeBlockSize = 512;
+constexpr int kMioShapeBlocks = 256;
 constexpr int kSharedWords = 17024;
+constexpr int kExactStaticWords = 16 * 1024;
+constexpr int kExactStaticBytes = kExactStaticWords * static_cast<int>(sizeof(uint32_t));
 constexpr int kHighBase = kSharedWords - kBlockSize;
 constexpr int kHighVectorBase = kSharedWords - kBlockSize * 4;
 constexpr int kLargeDsByteOffset = 0x1400;
 static_assert(kSharedWords * static_cast<int>(sizeof(uint32_t)) > 64 * 1024);
+static_assert(kExactStaticBytes == 64 * 1024);
 
 #define HIP_ASSERT(call)                                                                           \
   do {                                                                                             \
@@ -99,6 +104,32 @@ __global__ void lds_copy_high_kernel(const uint32_t *__restrict__ in, uint32_t *
   // Keep the first high-offset virtual-LDS check intentionally boring: each
   // lane reads back the word it wrote. Reverse and cross-wave tests below then
   // isolate producer/consumer ordering once this baseline is known-good.
+  asm volatile("ds_write_b32 %0, %1\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               :
+               : "v"(addr), "v"(value)
+               : "memory");
+  __syncthreads();
+  asm volatile("ds_read_b32 %0, %1\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(value)
+               : "v"(addr)
+               : "memory");
+  out[tid] = value;
+}
+
+__global__ void lds_copy_high_touch_s100_kernel(const uint32_t *__restrict__ in,
+                                                uint32_t *__restrict__ out) {
+  __shared__ volatile uint32_t lds[kSharedWords];
+  const int tid = threadIdx.x;
+  const uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(lds)) +
+                        (kHighBase + tid) * sizeof(uint32_t);
+  uint32_t value = in[tid];
+
+  // Force the translated source body to name a high ordinary SGPR. Virtual-LDS
+  // lowering must then use its spill-per-use path and issue VMEM with a high
+  // borrowed SADDR pair, matching the shape of the reduced MIOpen fault.
+  asm volatile("s_mov_b32 s100, 0\n" ::: "memory");
   asm volatile("ds_write_b32 %0, %1\n"
                "s_waitcnt lgkmcnt(0)\n"
                :
@@ -262,6 +293,266 @@ __global__ void lds_read_b64_tr_b16_kernel(uint32_t *__restrict__ out) {
   out[tid * 2 + 1] = value[1];
 }
 
+__global__ void lds_zero_kernarg_dispatch_ptr_kernel() {
+  __shared__ volatile uint32_t lds[kSharedWords];
+  const int tid = threadIdx.x;
+  const uint32_t addr =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(lds)) + tid * sizeof(uint32_t);
+  const uintptr_t dispatch_ptr = reinterpret_cast<uintptr_t>(__builtin_amdgcn_dispatch_ptr());
+  const uint32_t dispatch_ptr_lo = static_cast<uint32_t>(dispatch_ptr);
+  uint32_t value = 0x7a5a0000u ^ static_cast<uint32_t>(tid * 0x101u);
+
+  // This kernel intentionally has no kernargs but consumes the dispatch-packet
+  // pointer. Virtual LDS must therefore pass its runtime state through
+  // hsa_kernel_dispatch_packet_t::reserved2 instead of appending a kernarg tail.
+  asm volatile("; keep dispatch ptr live for descriptor selection: %0"
+               :
+               : "s"(dispatch_ptr_lo)
+               : "memory");
+  if (dispatch_ptr == 0)
+    value ^= 0xdead0000u;
+  asm volatile("ds_write_b32 %0, %1\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               :
+               : "v"(addr), "v"(value)
+               : "memory");
+  __syncthreads();
+  asm volatile("ds_read_b32 %0, %1\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(value)
+               : "v"(addr)
+               : "memory");
+  asm volatile("; keep virtual LDS read live: %0" : : "v"(value) : "memory");
+}
+
+template <bool TouchHighSgpr> __global__ void lds_static64_dynamic64_zero_kernarg_kernel() {
+  __shared__ volatile uint32_t static_lds[kExactStaticWords];
+  extern __shared__ uint32_t dynamic_lds[];
+  const int tid = threadIdx.x;
+  const uintptr_t dispatch_ptr = reinterpret_cast<uintptr_t>(__builtin_amdgcn_dispatch_ptr());
+  const uint32_t dispatch_ptr_lo = static_cast<uint32_t>(dispatch_ptr);
+  const uint32_t static_addr =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(static_lds)) + tid * sizeof(uint32_t);
+  const uint32_t dynamic_addr =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dynamic_lds)) + tid * sizeof(uint32_t);
+  const uint32_t static_imm_addr = static_addr + 0x4000u;
+  const uint32_t dynamic_imm_addr = dynamic_addr + 0x4000u;
+  uint32_t cold_static_read = 0;
+  uint32_t cold_dynamic_read = 0;
+  uint32_t static_imm_read = 0;
+  uint32_t dynamic_imm_read = 0;
+
+  // MIOpen's reduced stride2 convolution uses a zero-formal-kernarg descriptor
+  // with the dispatch-packet pointer enabled, 64 KiB fixed LDS, and packet LDS.
+  // Keep this fixture output-free so HIP emits the same packet-state transport
+  // shape while still executing the virtualized cold-read + immediate-offset DS
+  // accesses that fault in the real kernel.
+  asm volatile("; keep dispatch ptr live for descriptor selection: %0"
+               :
+               : "s"(dispatch_ptr_lo)
+               : "memory");
+  if constexpr (TouchHighSgpr) {
+    asm volatile("s_mov_b32 s100, 0\n" ::: "memory");
+  }
+  asm volatile("ds_read_b32 %0, %2\n"
+               "ds_read_b32 %1, %3\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(cold_static_read), "=v"(cold_dynamic_read)
+               : "v"(static_addr), "v"(dynamic_addr)
+               : "memory");
+  asm volatile("ds_write_b32 %0, %1 offset:256\n"
+               "ds_write_b32 %2, %3 offset:256\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               :
+               : "v"(static_imm_addr), "v"(cold_static_read), "v"(dynamic_imm_addr),
+                 "v"(cold_dynamic_read)
+               : "memory");
+  __syncthreads();
+  asm volatile("ds_read_b32 %0, %2 offset:256\n"
+               "ds_read_b32 %1, %3 offset:256\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(static_imm_read), "=v"(dynamic_imm_read)
+               : "v"(static_imm_addr), "v"(dynamic_imm_addr)
+               : "memory");
+  asm volatile("; keep zero-kernarg static+dynamic virtual LDS reads live: %0 %1"
+               :
+               : "v"(static_imm_read), "v"(dynamic_imm_read)
+               : "memory");
+}
+
+template <bool TouchHighSgpr> __global__ void lds_miopen_c220_zero_kernarg_kernel() {
+  __shared__ volatile uint32_t static_lds[kExactStaticWords];
+  extern __shared__ uint32_t dynamic_lds[];
+  const uintptr_t dispatch_ptr = reinterpret_cast<uintptr_t>(__builtin_amdgcn_dispatch_ptr());
+  const uint32_t dispatch_ptr_lo = static_cast<uint32_t>(dispatch_ptr);
+  const uint32_t static_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(static_lds));
+  const uint32_t dynamic_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dynamic_lds));
+  const uint32_t lane_addr = 0xc220u + (static_cast<uint32_t>(threadIdx.x) & 3u) * 4u;
+  const uint32_t value = static_cast<uint32_t>(blockIdx.x) ^ lane_addr;
+  uint32_t read = 0;
+
+  // This mirrors the reduced MIOpen faulting virtual-LDS access as closely as a
+  // small HIP fixture can: the real kernel reaches
+  //   ds_read_b32 v116, v62 offset:256
+  // with v62 cycling through 0xc220, 0xc224, 0xc228, and 0xc22c under the
+  // zero-kernarg dispatch-packet-pointer ABI.
+  asm volatile("; keep dispatch ptr live for descriptor selection: %0"
+               :
+               : "s"(dispatch_ptr_lo)
+               : "memory");
+  asm volatile("; keep static LDS allocation live for descriptor sizing: %0"
+               :
+               : "v"(static_addr)
+               : "memory");
+  asm volatile("; keep dynamic LDS live for packet LDS sizing: %0"
+               :
+               : "v"(dynamic_addr)
+               : "memory");
+  if constexpr (TouchHighSgpr) {
+    asm volatile("s_mov_b32 s100, 0\n" ::: "memory");
+  }
+  asm volatile("ds_write_b32 %0, %1 offset:256\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               :
+               : "v"(lane_addr), "v"(value)
+               : "memory");
+  __syncthreads();
+  asm volatile("ds_read_b32 %0, %1 offset:256\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(read)
+               : "v"(lane_addr)
+               : "memory");
+  asm volatile("; keep MIOpen-shaped c220 LDS read live: %0" : : "v"(read) : "memory");
+}
+
+template <bool TouchHighSgpr> __global__ void lds_miopen_c220_v116_zero_kernarg_kernel() {
+  __shared__ volatile uint32_t static_lds[kExactStaticWords];
+  extern __shared__ uint32_t dynamic_lds[];
+  const uintptr_t dispatch_ptr = reinterpret_cast<uintptr_t>(__builtin_amdgcn_dispatch_ptr());
+  const uint32_t dispatch_ptr_lo = static_cast<uint32_t>(dispatch_ptr);
+  const uint32_t static_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(static_lds));
+  const uint32_t dynamic_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dynamic_lds));
+  const uint32_t lane_addr = 0xc220u + (static_cast<uint32_t>(threadIdx.x) & 3u) * 4u;
+  const uint32_t value = static_cast<uint32_t>(blockIdx.x) ^ lane_addr;
+
+  // Match the exact fixed destination register from the reduced MIOpen fault:
+  //   ds_read_b32 v116, v62 offset:256
+  // The fixed-register operands keep the source descriptor and the virtual-LDS
+  // lowering honest about high VGPR use without depending on compiler register
+  // allocation choices in this small fixture.
+  asm volatile("; keep dispatch ptr live for descriptor selection: %0"
+               :
+               : "s"(dispatch_ptr_lo)
+               : "memory");
+  asm volatile("; keep static LDS allocation live for descriptor sizing: %0"
+               :
+               : "v"(static_addr)
+               : "memory");
+  asm volatile("; keep dynamic LDS live for packet LDS sizing: %0"
+               :
+               : "v"(dynamic_addr)
+               : "memory");
+  if constexpr (TouchHighSgpr) {
+    asm volatile("s_mov_b32 s100, 0\n" ::: "memory");
+  }
+  asm volatile("v_mov_b32 v62, %0\n"
+               "ds_write_b32 v62, %1 offset:256\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               "s_barrier\n"
+               "ds_read_b32 v116, v62 offset:256\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               :
+               : "v"(lane_addr), "v"(value)
+               : "memory");
+}
+
+template <bool TouchHighSgpr>
+__global__ void lds_static64_dynamic64_dispatch_ptr_kernel(uint32_t *__restrict__ status_out) {
+  __shared__ volatile uint32_t static_lds[kExactStaticWords];
+  extern __shared__ uint32_t dynamic_lds[];
+  const int tid = threadIdx.x;
+  const int index = blockIdx.x * blockDim.x + tid;
+  const uintptr_t dispatch_ptr = reinterpret_cast<uintptr_t>(__builtin_amdgcn_dispatch_ptr());
+  const uint32_t dispatch_ptr_lo = static_cast<uint32_t>(dispatch_ptr);
+  const uint32_t static_addr =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(static_lds)) + tid * sizeof(uint32_t);
+  const uint32_t dynamic_addr =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dynamic_lds)) + tid * sizeof(uint32_t);
+  const uint32_t static_imm_addr = static_addr + 0x4000u;
+  const uint32_t dynamic_imm_addr = dynamic_addr + 0x4000u;
+  const uint32_t static_value = 0x51000000u ^ static_cast<uint32_t>(index * 0x101u);
+  const uint32_t dynamic_value = 0xa6000000u ^ static_cast<uint32_t>(index * 0x181u);
+  const uint32_t static_imm_value = 0x72000000u ^ static_cast<uint32_t>(index * 0x105u);
+  const uint32_t dynamic_imm_value = 0xc8000000u ^ static_cast<uint32_t>(index * 0x185u);
+  uint32_t cold_static_read = 0;
+  uint32_t cold_dynamic_read = 0;
+  uint32_t static_read = 0;
+  uint32_t dynamic_read = 0;
+  uint32_t static_imm_read = 0;
+  uint32_t dynamic_imm_read = 0;
+
+  // Match the reduced MIOpen LDS resource shape: the descriptor contributes
+  // exactly 64 KiB of fixed LDS and the AQL packet contributes additional LDS
+  // at dispatch time.
+  asm volatile("; keep dispatch ptr live for descriptor selection: %0"
+               :
+               : "s"(dispatch_ptr_lo)
+               : "memory");
+  if constexpr (TouchHighSgpr) {
+    // Keep this variant close to the reduced MIOpen fault. Naming s100 forces
+    // the descriptor near the ordinary SGPR limit, so virtual-LDS lowering must
+    // borrow a high SADDR pair and spill/reload the virtual base around each
+    // rewritten DS operation.
+    asm volatile("s_mov_b32 s100, 0\n" ::: "memory");
+  }
+  // LDS reads before a same-address write are undefined but legal. MIOpen uses
+  // this shape on the reduced fp16 conv path, so virtual LDS must not rely on a
+  // backing location having been written before the first lowered global load.
+  asm volatile("ds_read_b32 %0, %2\n"
+               "ds_read_b32 %1, %3\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(cold_static_read), "=v"(cold_dynamic_read)
+               : "v"(static_addr), "v"(dynamic_addr)
+               : "memory");
+  asm volatile("; keep cold virtual-LDS reads live: %0 %1"
+               :
+               : "v"(cold_static_read), "v"(cold_dynamic_read)
+               : "memory");
+  asm volatile("ds_write_b32 %0, %1\n"
+               "ds_write_b32 %2, %3\n"
+               "ds_write_b32 %4, %5 offset:256\n"
+               "ds_write_b32 %6, %7 offset:256\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               :
+               : "v"(static_addr), "v"(static_value), "v"(dynamic_addr), "v"(dynamic_value),
+                 "v"(static_imm_addr), "v"(static_imm_value), "v"(dynamic_imm_addr),
+                 "v"(dynamic_imm_value)
+               : "memory");
+  __syncthreads();
+  asm volatile("ds_read_b32 %0, %4\n"
+               "ds_read_b32 %1, %5\n"
+               "ds_read_b32 %2, %6 offset:256\n"
+               "ds_read_b32 %3, %7 offset:256\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(static_read), "=v"(dynamic_read), "=v"(static_imm_read),
+                 "=v"(dynamic_imm_read)
+               : "v"(static_addr), "v"(dynamic_addr), "v"(static_imm_addr), "v"(dynamic_imm_addr)
+               : "memory");
+
+  uint32_t status = 0;
+  if (dispatch_ptr == 0)
+    status |= 1u;
+  if (static_read != static_value)
+    status |= 2u;
+  if (dynamic_read != dynamic_value)
+    status |= 4u;
+  if (static_imm_read != static_imm_value)
+    status |= 8u;
+  if (dynamic_imm_read != dynamic_imm_value)
+    status |= 16u;
+  status_out[index] = status;
+}
+
 std::vector<uint32_t> make_input(size_t count, uint32_t salt) {
   std::vector<uint32_t> values(count);
   for (size_t i = 0; i < values.size(); ++i)
@@ -333,6 +624,60 @@ void run_output_kernel(void (*kernel)(uint32_t *), const std::vector<uint32_t> &
   EXPECT_EQ(mismatches, 0u) << mismatches << " mismatches";
 }
 
+void run_zero_kernarg_kernel() {
+  lds_zero_kernarg_dispatch_ptr_kernel<<<kBlocks, kBlockSize>>>();
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+}
+
+template <bool TouchHighSgpr> void run_static_dynamic_zero_kernarg_kernel() {
+  lds_static64_dynamic64_zero_kernarg_kernel<TouchHighSgpr>
+      <<<kMioShapeBlocks, kMioShapeBlockSize, kExactStaticBytes>>>();
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+}
+
+template <bool TouchHighSgpr> void run_miopen_c220_zero_kernarg_kernel() {
+  lds_miopen_c220_zero_kernarg_kernel<TouchHighSgpr>
+      <<<kMioShapeBlocks, kMioShapeBlockSize, kExactStaticBytes>>>();
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+}
+
+template <bool TouchHighSgpr> void run_miopen_c220_v116_zero_kernarg_kernel() {
+  lds_miopen_c220_v116_zero_kernarg_kernel<TouchHighSgpr>
+      <<<kMioShapeBlocks, kMioShapeBlockSize, kExactStaticBytes>>>();
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+}
+
+template <bool TouchHighSgpr> void run_static_dynamic_dispatch_ptr_kernel() {
+  constexpr size_t kStatusWords = static_cast<size_t>(kMioShapeBlocks) * kMioShapeBlockSize;
+  constexpr size_t kStatusBytes = kStatusWords * sizeof(uint32_t);
+  uint32_t *status_device = nullptr;
+  HIP_ASSERT(hipMalloc(&status_device, kStatusBytes));
+  HIP_ASSERT(hipMemset(status_device, 0x5a, kStatusBytes));
+
+  lds_static64_dynamic64_dispatch_ptr_kernel<TouchHighSgpr>
+      <<<kMioShapeBlocks, kMioShapeBlockSize, kExactStaticBytes>>>(status_device);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::vector<uint32_t> status(kStatusWords);
+  HIP_ASSERT(hipMemcpy(status.data(), status_device, kStatusBytes, hipMemcpyDeviceToHost));
+
+  uint32_t failures = 0;
+  for (size_t i = 0; i < status.size(); ++i) {
+    if (status[i] == 0)
+      continue;
+    if (failures < 8)
+      ADD_FAILURE() << "status failure at i=" << i << ": 0x" << std::hex << status[i] << std::dec;
+    ++failures;
+  }
+  EXPECT_EQ(failures, 0u) << failures << " static+dynamic LDS status failures";
+  (void)hipFree(status_device);
+}
+
 } // namespace
 
 TEST(HipLdsCopyDbtTest, LargeStaticLdsCopyLowOffset) {
@@ -349,6 +694,11 @@ TEST(HipLdsCopyDbtTest, LargeStaticLdsReverseHighOffset) {
 TEST(HipLdsCopyDbtTest, LargeStaticLdsCopyHighOffset) {
   const std::vector<uint32_t> input = make_input(kBlockSize, 0x707u);
   run_unary_kernel(lds_copy_high_kernel, input, input);
+}
+
+TEST(HipLdsCopyDbtTest, LargeStaticLdsCopyHighOffsetWithBorrowedHighSgpr) {
+  const std::vector<uint32_t> input = make_input(kBlockSize, 0x808u);
+  run_unary_kernel(lds_copy_high_touch_s100_kernel, input, input);
 }
 
 TEST(HipLdsCopyDbtTest, LargeStaticLdsMultiBlockHighOffset) {
@@ -403,6 +753,40 @@ TEST(HipLdsCopyDbtTest, LargeStaticLdsReadB64TrB16) {
     expected[tid * 2 + 1] = pack_u16_pair(h2, h3);
   }
   run_output_kernel(lds_read_b64_tr_b16_kernel, expected, kTrB16BlockSize);
+}
+
+TEST(HipLdsCopyDbtTest, LargeStaticLdsZeroKernargDispatchPacketState) { run_zero_kernarg_kernel(); }
+
+TEST(HipLdsCopyDbtTest, Static64Dynamic64ZeroKernargDispatchPacketState) {
+  run_static_dynamic_zero_kernarg_kernel<false>();
+}
+
+TEST(HipLdsCopyDbtTest, Static64Dynamic64ZeroKernargDispatchPacketStateWithBorrowedHighSgpr) {
+  run_static_dynamic_zero_kernarg_kernel<true>();
+}
+
+TEST(HipLdsCopyDbtTest, MiopenC220ZeroKernargDispatchPacketState) {
+  run_miopen_c220_zero_kernarg_kernel<false>();
+}
+
+TEST(HipLdsCopyDbtTest, MiopenC220ZeroKernargDispatchPacketStateWithBorrowedHighSgpr) {
+  run_miopen_c220_zero_kernarg_kernel<true>();
+}
+
+TEST(HipLdsCopyDbtTest, MiopenC220V116ZeroKernargDispatchPacketState) {
+  run_miopen_c220_v116_zero_kernarg_kernel<false>();
+}
+
+TEST(HipLdsCopyDbtTest, MiopenC220V116ZeroKernargDispatchPacketStateWithBorrowedHighSgpr) {
+  run_miopen_c220_v116_zero_kernarg_kernel<true>();
+}
+
+TEST(HipLdsCopyDbtTest, Static64Dynamic64DispatchPacketState) {
+  run_static_dynamic_dispatch_ptr_kernel<false>();
+}
+
+TEST(HipLdsCopyDbtTest, Static64Dynamic64DispatchPacketStateWithBorrowedHighSgpr) {
+  run_static_dynamic_dispatch_ptr_kernel<true>();
 }
 
 int main(int argc, char **argv) {
