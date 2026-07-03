@@ -67,7 +67,10 @@ print("\nrunrocDecodeTests V"+__version__+"\n")
 # rocDecode Application
 scriptPath = os.path.dirname(os.path.realpath(__file__))
 if videoDecodeEXE == '':
-    rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
+    if platform.system() == 'Windows':
+        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/Release/videodecode.exe'
+    else:
+        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
 else:
     rocDecode_exe = videoDecodeEXE
 if resultsDir == '':
@@ -76,7 +79,7 @@ else:
     resultsPath = resultsDir+'/rocDecode_videoDecode_results'
 
 run_rocDecode_app = os.path.abspath(rocDecode_exe)
-os.system('(mkdir -p ' +  resultsPath + ')')
+os.makedirs(resultsPath, exist_ok=True)
 if(os.path.isfile(run_rocDecode_app)):
     print("STATUS: rocDecode path - "+run_rocDecode_app+"\n")
 else:
@@ -116,7 +119,17 @@ if streamListSize != md5ListSize:
 for i in range(streamListSize):
     streamFilePath = streamFileDir + streamFileList[i]
     md5FilePath = md5FileDir + md5FileList[i]
-    os.system(run_rocDecode_app +' -i ' + streamFilePath + ' ' + bsReaderOption + ' -md5_check ' + md5FilePath + ' -d ' + str(gpuDeviceID) + ' | tee -a ' + resultsPath + '/rocDecode_output.log')
+    cmd = run_rocDecode_app +' -i ' + streamFilePath + ' ' + bsReaderOption + ' -md5_check ' + md5FilePath + ' -d ' + str(gpuDeviceID)
+    logFilePath = resultsPath + '/rocDecode_output.log'
+    process = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, text=True)
+    stdout, stderr = process.communicate()
+    print(stdout)
+    if stderr:
+        print(stderr, file=sys.stderr)
+    with open(logFilePath, 'a') as logf:
+        logf.write(stdout)
+        if stderr:
+            logf.write(stderr)
     print("======================================================================================\n")
 
 fileString = 'Input file'
