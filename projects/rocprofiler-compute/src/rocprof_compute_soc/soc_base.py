@@ -160,7 +160,7 @@ class OmniSoC_Base:
         return self.__compatible_profilers
 
     def populate_mspec(self) -> None:
-        from utils.specs import search, total_sqc
+        from utils.specs import search_pattern, total_sqc
 
         if (
             not hasattr(self._mspec, "rocminfo_lines")
@@ -173,52 +173,58 @@ class OmniSoC_Base:
         self._mspec.gpu_l2 = ""
 
         for linetext in self._mspec.rocminfo_lines:
-            key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.gpu_l1 = key
                 continue
 
-            key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.gpu_l2 = key
                 continue
 
-            key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
+            key = search_pattern(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
             if key is not None:
                 self._mspec.max_sclk = key
                 continue
 
-            key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.cu_per_gpu = key
                 continue
 
-            key = search(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.simd_per_cu = key
                 continue
 
-            key = search(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.se_per_gpu = key
                 continue
 
-            key = search(r"^\s*Shader Arrs. per Eng.:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(
+                r"^\s*Shader Arrs. per Eng.:\s+ ([a-zA-Z0-9]+)\s*", linetext
+            )
             if key is not None:
                 self._mspec.sa_per_se = key
                 continue
 
-            key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.wave_size = key
                 continue
 
-            key = search(r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(
+                r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext
+            )
             if key is not None:
                 self._mspec.workgroup_max_size = key
                 continue
 
-            key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(
+                r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext
+            )
             if key is not None:
                 self._mspec.max_waves_per_cu = key
                 break
@@ -247,14 +253,6 @@ class OmniSoC_Base:
 
         if not self._mspec.gpu_model:
             self._mspec.gpu_model = self.detect_gpu_model(self._mspec.gpu_arch)
-
-        self._mspec.num_xcd = str(
-            mi_gpu_specs.get_num_xcds(
-                self._mspec.gpu_arch,
-                self._mspec.gpu_model,
-                self._mspec.compute_partition,
-            )
-        )
 
     @demarcate
     def detect_gpu_model(self, gpu_arch: str) -> Optional[str]:
@@ -514,7 +512,8 @@ class OmniSoC_Base:
         counters, matching perfmon allocation.
         """
         out = set(counters)
-        num_xcd = int(self._mspec.num_xcd)
+        # num_xcd is absent on single-die gfx115x; default to 1.
+        num_xcd = int(getattr(self._mspec, "num_xcd", 1) or 1)
         l2_banks = int(self._mspec.l2_banks)
         for counter_name in counters.copy():
             if counter_name.startswith("TCC") and counter_name.endswith("["):
