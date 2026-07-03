@@ -184,6 +184,11 @@ typedef struct ncclCollConfig_v23100 {
   const char* algSelection;   /* selection string; NULL/UNDEF/"" == automatic */
   int forceAlgSelection;      /* default 1 (true): unsatisfiable selection is an error */
   int CTAPolicy;              /* NCCL_CTA_POLICY_* bitmask; UNDEF == inherit comm-level CTAPolicy */
+  /* user-provided profiler tag: an opaque value delivered verbatim to profiler plugins with this
+   * call's profiler events. Default to 0 as untagged. It does not affect execution. NCCL reserves
+   * profiler-tag values with the most-significant bit set (>= 0x8000000000000000) for possible future
+   * predefined tags; applications should use values with the MSB clear. */
+  uint64_t userProfilerTag;
 } ncclCollConfig_t;
 
 /* NCCL_COLLCONFIG_INITIALIZER must be used to initialize a ncclCollConfig_t when it is
@@ -200,6 +205,7 @@ typedef struct ncclCollConfig_v23100 {
   NCCL_CONFIG_UNDEF_PTR,                    /* algSelection */        \
   1,                                        /* forceAlgSelection */   \
   NCCL_CONFIG_UNDEF_INT,                    /* CTAPolicy */           \
+  0,                                        /* userProfilerTag */     \
 }
 
 /* This struct will be used by ncclGroupSimulateEnd() API to query information about simulation. */
