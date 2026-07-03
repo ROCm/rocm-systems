@@ -13,6 +13,7 @@
 #include "utils/debug.hpp"
 #include <algorithm>
 #include <map>
+#include <tuple>
 
 namespace amd::roc {
 DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
@@ -736,6 +737,202 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
   return rocrCopyBufferBatch(hsaCopyOps, externalWaitEvents, outBatchSignals);
 }
 
+namespace {
+
+// Owns list backing storage for HSA copy descriptors until the batch submission returns.
+struct CopyListStorage {
+  hsa_agent_t src_agent{};
+  std::vector<void*> srcs;
+  std::vector<void*> dsts;
+  std::vector<hsa_agent_t> dst_agents;
+  std::vector<size_t> sizes;
+};
+
+void AddCopyListEntry(const hsa_amd_memory_copy_op_t& operation, size_t size,
+                      CopyListStorage& copy_list_storage) {
+  if (copy_list_storage.srcs.empty()) {
+    copy_list_storage.src_agent = operation.src_agent;
+  }
+  copy_list_storage.srcs.push_back(const_cast<void*>(operation.src));
+  copy_list_storage.dsts.push_back(operation.dst);
+  copy_list_storage.dst_agents.push_back(operation.dst_agent);
+  copy_list_storage.sizes.push_back(size);
+}
+
+void PushLinearOperation(CopyListStorage pending,
+                         std::vector<hsa_amd_memory_copy_op_t>& final_operations,
+                         std::vector<CopyListStorage>& copy_list_storage) {
+  if (pending.srcs.empty()) {
+    return;
+  }
+
+  hsa_amd_memory_copy_op_t operation = {};
+  operation.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+  operation.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+  operation.src_agent = pending.src_agent;
+
+  if (pending.srcs.size() == 1) {
+    operation.src = pending.srcs[0];
+    operation.dst = pending.dsts[0];
+    operation.dst_agent = pending.dst_agents[0];
+    operation.size = pending.sizes[0];
+    final_operations.push_back(operation);
+  } else {
+    operation.src_list = pending.srcs.data();
+    operation.dst_list = pending.dsts.data();
+    operation.dst_agent_list = pending.dst_agents.data();
+    operation.size_list = pending.sizes.data();
+    operation.num_entries = static_cast<uint16_t>(pending.srcs.size());
+    copy_list_storage.push_back(std::move(pending));
+    final_operations.push_back(operation);
+  }
+}
+
+void PushSwapOperations(const std::vector<const hsa_amd_memory_copy_op_t*>& swap_operations,
+                        std::vector<hsa_amd_memory_copy_op_t>& final_operations,
+                        std::vector<CopyListStorage>& copy_list_storage) {
+  if (swap_operations.empty()) {
+    return;
+  }
+
+  CopyListStorage pending;
+  for (const hsa_amd_memory_copy_op_t* operation : swap_operations) {
+    assert(operation->src_size == operation->dst_size && "Asymmetric swap not yet supported");
+    AddCopyListEntry(*operation, operation->src_size, pending);
+  }
+
+  hsa_amd_memory_copy_op_t swap = {};
+  swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+  swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+  swap.src_agent = pending.src_agent;
+  swap.src_list = pending.srcs.data();
+  swap.dst_list = pending.dsts.data();
+  swap.dst_agent_list = pending.dst_agents.data();
+  swap.size_list = pending.sizes.data();
+  swap.num_entries = static_cast<uint16_t>(pending.srcs.size());
+  copy_list_storage.push_back(std::move(pending));
+  final_operations.push_back(swap);
+}
+
+void PushLinearOperations(const std::vector<const hsa_amd_memory_copy_op_t*>& linear_operations,
+                          HwQueueEngine engine,
+                          std::vector<hsa_amd_memory_copy_op_t>& final_operations,
+                          std::vector<CopyListStorage>& copy_list_storage) {
+  if (linear_operations.empty()) {
+    return;
+  }
+
+  if (engine != HwQueueEngine::SdmaD2D) {
+    auto has_one_source_agent = [&]() {
+      const uint64_t src_agent_handle = linear_operations.front()->src_agent.handle;
+      for (const hsa_amd_memory_copy_op_t* operation : linear_operations) {
+        if (operation->src_agent.handle != src_agent_handle) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    if (engine == HwQueueEngine::SdmaH2D || has_one_source_agent()) {
+      CopyListStorage pending;
+      for (const hsa_amd_memory_copy_op_t* operation : linear_operations) {
+        AddCopyListEntry(*operation, operation->size, pending);
+      }
+      PushLinearOperation(std::move(pending), final_operations, copy_list_storage);
+      return;
+    }
+
+    std::map<uint64_t, CopyListStorage> pending_by_src_agent;
+    for (const hsa_amd_memory_copy_op_t* operation : linear_operations) {
+      AddCopyListEntry(*operation, operation->size,
+                       pending_by_src_agent[operation->src_agent.handle]);
+    }
+
+    for (auto& pending_entry : pending_by_src_agent) {
+      PushLinearOperation(std::move(pending_entry.second), final_operations, copy_list_storage);
+    }
+    return;
+  }
+
+  struct BroadcastEntry {
+    hsa_amd_memory_copy_op_t first_operation;
+    std::vector<void*> dsts;
+    std::vector<hsa_agent_t> dst_agents;
+  };
+
+  std::map<uint64_t, std::map<std::tuple<const void*, size_t>, BroadcastEntry>> broadcast_groups;
+  for (const hsa_amd_memory_copy_op_t* operation : linear_operations) {
+    const uint64_t src_agent_handle = operation->src_agent.handle;
+    auto& broadcast_entry =
+        broadcast_groups[src_agent_handle][std::make_tuple(operation->src, operation->size)];
+    if (broadcast_entry.dsts.empty()) {
+      broadcast_entry.first_operation = *operation;
+    }
+    broadcast_entry.dsts.push_back(operation->dst);
+    broadcast_entry.dst_agents.push_back(operation->dst_agent);
+  }
+
+  for (auto& source_group : broadcast_groups) {
+    CopyListStorage pending;
+
+    for (auto& broadcast_group : source_group.second) {
+      BroadcastEntry& broadcast_entry = broadcast_group.second;
+      if (broadcast_entry.dsts.size() > 1) {
+        CopyListStorage broadcast_storage;
+        broadcast_storage.dsts = std::move(broadcast_entry.dsts);
+        broadcast_storage.dst_agents = std::move(broadcast_entry.dst_agents);
+
+        hsa_amd_memory_copy_op_t broadcast = {};
+        broadcast.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+        broadcast.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
+        broadcast.src = broadcast_entry.first_operation.src;
+        broadcast.src_agent = broadcast_entry.first_operation.src_agent;
+        broadcast.dst_list = broadcast_storage.dsts.data();
+        broadcast.dst_agent_list = broadcast_storage.dst_agents.data();
+        broadcast.num_entries = static_cast<uint16_t>(broadcast_storage.dsts.size());
+        broadcast.size = broadcast_entry.first_operation.size;
+        copy_list_storage.push_back(std::move(broadcast_storage));
+        final_operations.push_back(broadcast);
+        continue;
+      }
+
+      AddCopyListEntry(broadcast_entry.first_operation, broadcast_entry.first_operation.size,
+                       pending);
+    }
+
+    PushLinearOperation(std::move(pending), final_operations, copy_list_storage);
+  }
+}
+
+void PushIndirectOperations(const std::vector<const hsa_amd_memory_copy_op_t*>& indirect_operations,
+                            std::vector<hsa_amd_memory_copy_op_t>& final_operations,
+                            std::vector<CopyListStorage>& copy_list_storage) {
+  std::map<hsa_amd_memory_copy_op_type_t, CopyListStorage> pending_by_type;
+  for (const hsa_amd_memory_copy_op_t* operation : indirect_operations) {
+    const auto operation_type = static_cast<hsa_amd_memory_copy_op_type_t>(operation->type);
+    AddCopyListEntry(*operation, operation->size, pending_by_type[operation_type]);
+  }
+
+  for (auto& pending_entry : pending_by_type) {
+    const hsa_amd_memory_copy_op_type_t operation_type = pending_entry.first;
+    CopyListStorage pending = std::move(pending_entry.second);
+
+    hsa_amd_memory_copy_op_t indirect = {};
+    indirect.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+    indirect.type = operation_type;
+    indirect.src_agent = pending.src_agent;
+    indirect.src_list = pending.srcs.data();
+    indirect.dst_list = pending.dsts.data();
+    indirect.dst_agent_list = pending.dst_agents.data();
+    indirect.size_list = pending.sizes.data();
+    indirect.num_entries = static_cast<uint16_t>(pending.srcs.size());
+    copy_list_storage.push_back(std::move(pending));
+    final_operations.push_back(indirect);
+  }
+}
+
+}  // namespace
+
 // ================================================================================================
 bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
                                          const std::vector<hsa_signal_t>* externalWaitEvents,
@@ -772,13 +969,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
     wait_events = gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
   }
 
-  // Submit each non-empty engine group as a separate batch with its own signal.
-  // Within each group, ops are grouped by type (SWAP and each INDIRECT mode
-  // each become one multi-entry op; see the bucket declarations below).
-  // LINEAR ops are further grouped by src_agent:
-  //  - Same (src, size) with multiple dsts (SdmaD2D) → BROADCAST
-  //  - Multiple remaining ops from same src_agent    → MULTI
-  //  - Single remaining op                           → LINEAR
+  // Submit each non-empty engine group as a separate batch with its own signal. Each group is
+  // classified by copy kind, then emitted through type-specific finalOps helpers.
   hsa_status_t status = HSA_STATUS_SUCCESS;
   std::vector<ProfilingSignal*> groupSignals;
 
@@ -788,197 +980,48 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     HwQueueEngine engine = static_cast<HwQueueEngine>(e);
 
-    // Two-level grouping: first by src_agent, then by (src, size) for broadcast.
-    struct BcastKey {
-      const void* src;
-      size_t size;
-      bool operator<(const BcastKey& o) const {
-        if (src != o.src) return src < o.src;
-        return size < o.size;
-      }
-    };
-    struct BcastEntry {
-      hsa_amd_memory_copy_op_t tmpl;
-      std::vector<void*> dsts;
-      std::vector<hsa_agent_t> dst_agents;
-    };
-    struct AgentGroup {
-      hsa_agent_t src_agent;
-      std::map<BcastKey, BcastEntry> sub_groups;
-    };
-    std::map<uint64_t, AgentGroup> agent_groups;
-
-    struct MultiArrays {
-      std::vector<void*> srcs;
-      std::vector<void*> dsts;
-      std::vector<hsa_agent_t> dst_agents;
-      std::vector<size_t> sizes;
-    };
-
-    MultiArrays swapPending;
-    hsa_agent_t swapSrcAgent = {};
-
-    // Indirect ops are bucketed by their indirect mode (SRC / DST / SRCDST)
-    // into multi-entry HSA ops, one bucket per mode.  All entries in one
-    // bucket share the same op.type because the indirect mode is encoded in
-    // op.type; src_agent is captured from the first op in each bucket.
-    struct IndirectBucket {
-      MultiArrays pending;
-      hsa_agent_t src_agent = {};
-    };
-    std::map<hsa_amd_memory_copy_op_type_t, IndirectBucket> indirectPending;
-
-    auto isIndirectType = [](hsa_amd_memory_copy_op_type_t type) -> bool {
-      switch (type) {
-        case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
-        case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
-        case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
-          return true;
-        default:
-          return false;
-      }
-    };
-
-    for (const auto& op : ops) {
-      if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
-        assert(op.src_size == op.dst_size && "Asymmetric swap not yet supported");
-        if (swapPending.srcs.empty()) swapSrcAgent = op.src_agent;
-        swapPending.srcs.push_back(op.src);
-        swapPending.dsts.push_back(op.dst);
-        swapPending.dst_agents.push_back(op.dst_agent);
-        swapPending.sizes.push_back(op.src_size);
-        continue;
-      }
-      const auto opType = static_cast<hsa_amd_memory_copy_op_type_t>(op.type);
-      if (isIndirectType(opType)) {
-        auto& bucket = indirectPending[opType];
-        if (bucket.pending.srcs.empty()) bucket.src_agent = op.src_agent;
-        bucket.pending.srcs.push_back(op.src);
-        bucket.pending.dsts.push_back(op.dst);
-        bucket.pending.dst_agents.push_back(op.dst_agent);
-        bucket.pending.sizes.push_back(op.size);
-        continue;
-      }
-      auto& ag = agent_groups[op.src_agent.handle];
-      ag.src_agent = op.src_agent;
-      BcastKey bkey{op.src, op.size};
-      auto& be = ag.sub_groups[bkey];
-      if (be.dsts.empty()) {
-        be.tmpl = op;
-      }
-      be.dsts.push_back(op.dst);
-      be.dst_agents.push_back(op.dst_agent);
-    }
-
     gpu().Barriers().SetActiveEngine(engine);
+    std::vector<const hsa_amd_memory_copy_op_t*> swap_operations;
+    std::vector<const hsa_amd_memory_copy_op_t*> linear_operations;
+    std::vector<const hsa_amd_memory_copy_op_t*> indirect_operations;
+    swap_operations.reserve(ops.size());
+    linear_operations.reserve(ops.size());
+    indirect_operations.reserve(ops.size());
 
-    std::vector<MultiArrays> multiStore;
-    // Upper-bound entries that land in multiStore: one swap bucket + one
-    // multi bucket per src_agent group + one per populated indirect-mode
-    // bucket.
-    multiStore.reserve(1 + agent_groups.size() + indirectPending.size());
-
-    std::vector<hsa_amd_memory_copy_op_t> finalOps;
-
-    // --- Emit SWAP batch ---
-    if (!swapPending.srcs.empty()) {
-      multiStore.push_back(std::move(swapPending));
-      auto& stored = multiStore.back();
-
-      hsa_amd_memory_copy_op_t swap = {};
-      swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-      swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
-      swap.src_agent = swapSrcAgent;
-      swap.src_list = stored.srcs.data();
-      swap.dst_list = stored.dsts.data();
-      swap.dst_agent_list = stored.dst_agents.data();
-      swap.size_list = stored.sizes.data();
-      swap.num_entries = static_cast<uint16_t>(stored.srcs.size());
-      finalOps.push_back(swap);
-    }
-
-    // --- Emit LINEAR / BROADCAST batches (one group per src_agent) ---
-    for (auto& [agent_handle, ag] : agent_groups) {
-      MultiArrays pending;
-
-      for (auto& [bkey, be] : ag.sub_groups) {
-        if (be.dsts.size() > 1 && engine == HwQueueEngine::SdmaD2D) {
-          hsa_amd_memory_copy_op_t bcast = {};
-          bcast.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-          bcast.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
-          bcast.src = be.tmpl.src;
-          bcast.src_agent = ag.src_agent;
-          bcast.dst_list = be.dsts.data();
-          bcast.dst_agent_list = be.dst_agents.data();
-          bcast.num_entries = static_cast<uint16_t>(be.dsts.size());
-          bcast.size = be.tmpl.size;
-          finalOps.push_back(bcast);
-        } else {
-          for (size_t i = 0; i < be.dsts.size(); ++i) {
-            pending.srcs.push_back(const_cast<void*>(be.tmpl.src));
-            pending.dsts.push_back(be.dsts[i]);
-            pending.dst_agents.push_back(be.dst_agents[i]);
-            pending.sizes.push_back(be.tmpl.size);
-          }
-        }
+    for (const auto& operation : ops) {
+      if (operation.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
+        swap_operations.push_back(&operation);
+        continue;
       }
 
-      if (pending.srcs.size() > 1) {
-        multiStore.push_back(std::move(pending));
-        auto& stored = multiStore.back();
-
-        hsa_amd_memory_copy_op_t multi = {};
-        multi.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-        multi.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-        multi.src_list = stored.srcs.data();
-        multi.src_agent = ag.src_agent;
-        multi.dst_list = stored.dsts.data();
-        multi.dst_agent_list = stored.dst_agents.data();
-        multi.size_list = stored.sizes.data();
-        multi.num_entries = static_cast<uint16_t>(stored.srcs.size());
-        finalOps.push_back(multi);
-      } else if (pending.srcs.size() == 1) {
-        hsa_amd_memory_copy_op_t linear = {};
-        linear.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-        linear.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-        linear.src = pending.srcs[0];
-        linear.src_agent = ag.src_agent;
-        linear.dst = pending.dsts[0];
-        linear.dst_agent = pending.dst_agents[0];
-        linear.size = pending.sizes[0];
-        finalOps.push_back(linear);
+      if (operation.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC ||
+          operation.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST ||
+          operation.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
+        indirect_operations.push_back(&operation);
+        continue;
       }
+
+      linear_operations.push_back(&operation);
     }
 
-    // --- Emit INDIRECT batches ---
-    // The runtime accepts both the multi-entry form (num_entries > 0, with
-    // *_list arrays) and the scalar form (num_entries == 0, with the scalar
-    // src/dst/size fields) for indirect dispatch. We always emit the
-    // multi-entry form here for consistency with the rest of the batch path.
-    for (auto& [type, bucket] : indirectPending) {
-      multiStore.push_back(std::move(bucket.pending));
-      auto& stored = multiStore.back();
+    std::vector<hsa_amd_memory_copy_op_t> final_operations;
+    std::vector<CopyListStorage> copy_list_storage;
+    final_operations.reserve(ops.size());
+    copy_list_storage.reserve((swap_operations.empty() ? 0 : 1) + linear_operations.size() +
+                              indirect_operations.size());
 
-      hsa_amd_memory_copy_op_t indirect = {};
-      indirect.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-      indirect.type = type;
-      indirect.src_agent = bucket.src_agent;
-      indirect.src_list = stored.srcs.data();
-      indirect.dst_list = stored.dsts.data();
-      indirect.dst_agent_list = stored.dst_agents.data();
-      indirect.size_list = stored.sizes.data();
-      indirect.num_entries = static_cast<uint16_t>(stored.srcs.size());
-      finalOps.push_back(indirect);
-    }
+    PushSwapOperations(swap_operations, final_operations, copy_list_storage);
+    PushLinearOperations(linear_operations, engine, final_operations, copy_list_storage);
+    PushIndirectOperations(indirect_operations, final_operations, copy_list_storage);
 
     // Assign one completion signal per op in a single place.
-    for (auto& op : finalOps) {
+    for (auto& op : final_operations) {
       op.completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
       groupSignals.push_back(gpu().Barriers().GetLastSignal());
     }
 
-    for (size_t i = 0; i < finalOps.size(); ++i) {
-      const auto& op = finalOps[i];
+    for (size_t i = 0; i < final_operations.size(); ++i) {
+      const auto& op = final_operations[i];
       if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
         for (uint32_t d = 0; d < op.num_entries; ++d) {
           ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
@@ -1027,16 +1070,15 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
         ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                 "HSA BatchCopy Linear [%zu/%zu] engineOp=%s, dst=%p, src=%p, size=%zu, "
                 "src_agent=0x%zx, dst_agent=0x%zx, wait_event=0x%zx, completion_signal=0x%zx",
-                i, finalOps.size(), EngineOpName(engine), op.dst, op.src, op.size,
+                i, final_operations.size(), EngineOpName(engine), op.dst, op.src, op.size,
                 op.src_agent.handle, op.dst_agent.handle,
-                (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                op.completion_signal.handle);
+                (wait_events.size() != 0) ? wait_events[0].handle : 0, op.completion_signal.handle);
       }
     }
 
-    status = Hsa::memory_async_batch_copy(
-        finalOps.data(), static_cast<uint32_t>(finalOps.size()),
-        wait_events.size(), wait_events.data());
+    status = Hsa::memory_async_batch_copy(final_operations.data(),
+                                          static_cast<uint32_t>(final_operations.size()),
+                                          wait_events.size(), wait_events.data());
 
     if (status != HSA_STATUS_SUCCESS) {
       gpu().Barriers().ResetCurrentSignal();
