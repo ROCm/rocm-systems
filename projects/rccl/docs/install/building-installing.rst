@@ -39,7 +39,7 @@ Quick start RCCL build
 RCCL directly depends on the HIP runtime plus the HIP-Clang compiler, which are part of the ROCm software stack.
 For ROCm installation instructions, see the :doc:`rocm:install/rocm`.
 
-Use the `install.sh helper script <https://github.com/ROCm/rccl/blob/develop/install.sh>`_,
+Use the `install.sh helper script <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/install.sh>`_,
 located in the root directory of the RCCL repository,
 to build and install RCCL with a single command. It uses hard-coded configurations that can be specified directly
 when using cmake. However, it's a great way to get started quickly and provides an
