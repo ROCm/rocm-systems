@@ -6,6 +6,8 @@
 #include "common/delimit.hpp"
 #include "logger/debug.hpp"
 
+#include <cstdint>
+
 namespace rocprofsys
 {
 namespace utility
