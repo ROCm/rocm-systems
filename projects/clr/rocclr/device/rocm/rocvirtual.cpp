@@ -1145,7 +1145,7 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
   // not dereference a stale completion-signal handle.
   last_write_index_ = kInvalidQueueIndex;
   last_packet_with_signal_index_ = kInvalidQueueIndex;
-  last_completion_signal_.handle = 0;
+  SetLastCompletionSignal(nullptr);
   metadata_preloader_.SetQueueBase(metadata_ring_buffer,
                                    roc_device_.MetadataVersionHeader());
 }
@@ -1916,6 +1916,59 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 }
 
 // ================================================================================================
+void VirtualGPU::SetLastCompletionSignal(ProfilingSignal* signal) {
+  if (last_completion_psignal_ == signal) {
+    return;
+  }
+  if (signal != nullptr) {
+    signal->retain();
+  }
+  if (last_completion_psignal_ != nullptr) {
+    last_completion_psignal_->release();
+  }
+  last_completion_psignal_ = signal;
+}
+
+// ================================================================================================
+void VirtualGPU::TrackQueueProgress(hsa_signal_t completion_signal, uint64_t index,
+                                    bool skip_signal) {
+  last_write_index_ = index;
+  if (skip_signal) {
+    SetLastCompletionSignal(nullptr);
+  } else if (completion_signal.handle != 0) {
+    // Only adopt the signal for idle tracking when it is owned by this queue's signal tracker
+    ProfilingSignal* owner = Barriers().GetLastSignal();
+    if ((owner != nullptr) && (owner->signal_.handle == completion_signal.handle)) {
+      last_packet_with_signal_index_ = index;
+      SetLastCompletionSignal(owner);
+    } else {
+      SetLastCompletionSignal(nullptr);
+    }
+  }
+}
+
+// ================================================================================================
+bool VirtualGPU::IsQueueIdle() const {
+  if (gpu_queue_ == nullptr) {
+    return true;
+  }
+
+  // Make sure the last packet contained a completion signal
+  if (last_packet_with_signal_index_ == last_write_index_) {
+    if (last_completion_psignal_ == nullptr) {
+      // No tracked completion signal is outstanding. A fresh queue (no writes) is idle; otherwise
+      // the last packet carried no owned signal, so idleness cannot be proven.
+      return (last_write_index_ == kInvalidQueueIndex);
+    }
+    // The retained reference keeps the owning ProfilingSignal (and its HSA signal) alive, so this
+    // load can never dereference a recycled/destroyed handle.
+    return (Hsa::signal_load_relaxed(last_completion_psignal_->signal_) == 0);
+  }
+
+  return false;
+}
+
+// ================================================================================================
 void VirtualGPU::ResetQueueStates() {
   // Release all memory dependencies
   memoryDependency().clear();
@@ -2058,6 +2111,9 @@ VirtualGPU::~VirtualGPU() {
     std::scoped_lock l(execution());
     SetCoalesceWindow(0, nullptr);
   }
+  // Drop the retained reference on the last tracked completion signal (if any) so its owning
+  // ProfilingSignal can be reclaimed when the signal tracker is torn down below.
+  SetLastCompletionSignal(nullptr);
 
   if (timestamp_ != nullptr) {
     timestamp_->release();

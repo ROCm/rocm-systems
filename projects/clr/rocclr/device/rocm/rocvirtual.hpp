@@ -719,40 +719,27 @@ class VirtualGPU : public device::VirtualDevice {
   //! Resets the current queue state. Note: should be called after AQL queue becomes idle
   void ResetQueueStates();
 
+  //! Replaces the completion signal tracked for queue-idle detection. A retained reference is
+  //! held on the owning ProfilingSignal so that neither the ProfilingSignal nor its underlying
+  //! HSA signal can be recycled/destroyed while IsQueueIdle() may still read it.
+  void SetLastCompletionSignal(ProfilingSignal* signal);
+
   //! Track the progress of the queue based on the last write index and completion signal.
   //! When skip_signal is true, only the write index is advanced and the completion signal
   //! is cleared. Used for graph pre-patched dispatches whose signals are externally
   //! managed and freed after graph completion.
+  void TrackQueueProgress(hsa_signal_t completion_signal, uint64_t index,
+                          bool skip_signal = false);
+
   template <typename AqlPacket>
   inline void TrackQueueProgress(const AqlPacket& packet, uint64_t index,
                                  bool skip_signal = false) {
-    last_write_index_ = index;
-    if (skip_signal) {
-      last_completion_signal_.handle = 0;
-    } else if (packet.completion_signal.handle != 0) {
-      last_packet_with_signal_index_ = index;
-      last_completion_signal_ = packet.completion_signal;
-    }
+    TrackQueueProgress(packet.completion_signal, index, skip_signal);
   }
 
   //! Returns true if the queue is considered as idle. That means all submitted packets are
   //! complete. Note: it doesn't track the state of caches
-  bool IsQueueIdle() const {
-    if (gpu_queue_ == nullptr) {
-      return true;
-    }
-
-    // Make sure the last packet contained a completion signal
-    if (last_packet_with_signal_index_ == last_write_index_) {
-      if ((last_write_index_ == kInvalidQueueIndex) && (last_completion_signal_.handle == 0)) {
-        return true;
-      } else {
-        return (Hsa::signal_load_relaxed(last_completion_signal_) == 0);
-      }
-    }
-
-    return false;
-  }
+  bool IsQueueIdle() const;
 
   //! True if this marker records the same event as the preceding barrier with no
   //! intervening dispatch or sync. Caller must hold the execution() lock.
@@ -888,8 +875,8 @@ class VirtualGPU : public device::VirtualDevice {
   uint64_t last_write_index_ = kInvalidQueueIndex; //!< The last HW queue write index for any packet
   uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet
                                               //!< with a completion signal
-  hsa_signal_t last_completion_signal_{};     //!< The last completion signal
-
+  ProfilingSignal* last_completion_psignal_ = nullptr; //!< Owning (retained) ProfilingSignal whose HSA
+                                              //!< signal is used for queue-idle detection.
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
 
