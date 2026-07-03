@@ -12,13 +12,13 @@
 class test_source_snapshotter_t : public ::testing::Test
 {
 protected:
-    test_source_snapshotter_t();
+    void SetUp() override;
 
-    std::filesystem::path destination_for(const std::filesystem::path& source_path) const;
-    void set_regular_source(const std::filesystem::path& source_path);
-    void expect_no_copy() const;
+    std::filesystem::path destination_path(const std::filesystem::path& source_path) const;
+    void                  set_regular_source(const std::filesystem::path& source_path);
+    void                  expect_no_copy() const;
 
-    std::shared_ptr<mock_filesystem_wrapper_t>        m_filesystem;
-    rocprofiler_compute_tool::source_snapshotter_impl_t m_snapshotter;
-    const std::filesystem::path                         m_destination_root = "/snapshot";
+    std::shared_ptr<mock_filesystem_wrapper_t>                           m_filesystem;
+    std::shared_ptr<rocprofiler_compute_tool::source_snapshotter_impl_t> m_snapshotter;
+    const std::filesystem::path m_destination_root = "/snapshot";
 };

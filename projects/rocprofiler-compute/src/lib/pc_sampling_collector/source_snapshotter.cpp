@@ -13,13 +13,14 @@ source_snapshotter_t::ptr source_snapshotter_t::create()
 }
 
 std::filesystem::path source_snapshotter_impl_t::get_destination_path(
-    const std::filesystem::path& source_path,
+    const std::filesystem::path& absolute_source_path,
     const std::filesystem::path& destination_root) const
 {
     std::error_code error;
-    const auto canonical_source_path = m_filesystem->weakly_canonical(source_path, error);
+    const auto canonical_source_path = m_filesystem->weakly_canonical(absolute_source_path, error);
     if (error)
-        throw std::runtime_error("Failed to get canonical source path: " + source_path.string());
+        throw std::runtime_error("Failed to get canonical source path: " +
+                                 absolute_source_path.string());
 
     return destination_root / m_filesystem->relative_path(canonical_source_path);
 }
@@ -39,15 +40,17 @@ void source_snapshotter_impl_t::snapshot(const std::set<std::filesystem::path>& 
 {
     for (const auto& source_path : source_paths)
     {
-        if (!is_copyable(source_path))
+        std::filesystem::path absolute_source_path;
+        if (!is_copyable(source_path, absolute_source_path))
             continue;
 
-        const auto destination_path = get_destination_path(source_path, destination_root);
+        const auto destination_path = get_destination_path(absolute_source_path, destination_root);
         copy_source(source_path, destination_path);
     }
 }
 
-bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_path)
+bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_path,
+                                            std::filesystem::path&       absolute_source_path)
 {
     if (source_path.empty())
     {
@@ -57,7 +60,7 @@ bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_
     }
 
     std::error_code error;
-    const auto absolute_source_path = m_filesystem->absolute(source_path, error);
+    absolute_source_path = m_filesystem->absolute(source_path, error);
     if (error)
     {
         std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping file: " << source_path
@@ -92,10 +95,10 @@ bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_
 
 bool source_snapshotter_impl_t::create_destination_parent_directory(const std::filesystem::path& destination_path)
 {
-    const auto parent_path = destination_path.parent_path();
-    if (!m_filesystem->has_parent_path(parent_path))
+    if (!m_filesystem->has_parent_path(destination_path))
         return true;
 
+    const auto parent_path = m_filesystem->parent_path(destination_path);
     std::error_code error;
     m_filesystem->create_directories(parent_path, error);
     if (error)

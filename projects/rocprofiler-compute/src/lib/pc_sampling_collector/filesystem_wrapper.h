@@ -27,6 +27,7 @@ public:
     virtual bool exists(const std::filesystem::file_status& status)             = 0;
     virtual bool is_regular_file(const std::filesystem::file_status& status)    = 0;
     virtual bool has_parent_path(const std::filesystem::path& path)                            = 0;
+    virtual std::filesystem::path parent_path(const std::filesystem::path& path)         = 0;
     virtual std::filesystem::path weakly_canonical(const std::filesystem::path& path,
                                                    std::error_code&             error)         = 0;
     virtual std::filesystem::path relative_path(const std::filesystem::path& path)         = 0;
@@ -45,6 +46,7 @@ public:
     bool exists(const std::filesystem::file_status& status) override;
     bool is_regular_file(const std::filesystem::file_status& status) override;
     bool has_parent_path(const std::filesystem::path& path) override;
+    std::filesystem::path parent_path(const std::filesystem::path& path) override;
     std::filesystem::path weakly_canonical(const std::filesystem::path& path, std::error_code& error) override;
     std::filesystem::path relative_path(const std::filesystem::path& path) override;
 };
