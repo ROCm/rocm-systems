@@ -5,8 +5,8 @@ matrix-ubuntu-nightly:
   - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
   - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
   # MI325
-  - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-core42-ossci-rocm' }
-  - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-core42-ossci-rocm' }
+  - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }
+  - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }
   # MI200
   - { os-release: '22.04', gpu: 'mi200', arch: 'gfx90a', runner: 'linux-gfx90a-gpu-rocm' }
   - { os-release: '24.04', gpu: 'mi200', arch: 'gfx90a', runner: 'linux-gfx90a-gpu-rocm' }
