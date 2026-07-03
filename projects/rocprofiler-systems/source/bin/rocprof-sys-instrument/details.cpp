@@ -9,7 +9,6 @@
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 
-#include "common/join.hpp"
 #include "core/demangler.hpp"
 
 #include <spdlog/fmt/ranges.h>
@@ -1157,27 +1156,15 @@ to_string(error_level_t _level)
 {
     switch(_level)
     {
-        case BPatchFatal:
-        {
-            return rocprofsys::join("", tim::log::color::fatal(), "FatalError");
-        }
+        case BPatchFatal: return fmt::format("{}FatalError", tim::log::color::fatal());
         case BPatchSerious:
-        {
-            return rocprofsys::join("", tim::log::color::fatal(), "SeriousError");
-        }
-        case BPatchWarning:
-        {
-            return rocprofsys::join("", tim::log::color::warning(), "Warning");
-        }
-        case BPatchInfo:
-        {
-            return rocprofsys::join("", tim::log::color::info(), "Info");
-        }
-        default: break;
+            return fmt::format("{}SeriousError", tim::log::color::fatal());
+        case BPatchWarning: return fmt::format("{}Warning", tim::log::color::warning());
+        case BPatchInfo: return fmt::format("{}Info", tim::log::color::info());
+        default:
+            return fmt::format("{}UnknownErrorLevel{}", tim::log::color::warning(),
+                               static_cast<int>(_level));
     }
-
-    return rocprofsys::join("", tim::log::color::warning(), "UnknownErrorLevel",
-                            static_cast<int>(_level));
 }
 
 namespace
