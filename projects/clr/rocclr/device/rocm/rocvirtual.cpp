@@ -1160,8 +1160,7 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
   // indices refer to a different queue. Reset to the "empty queue" sentinel so IsQueueIdle() does
   // not dereference a stale completion-signal handle.
   last_write_index_ = kInvalidQueueIndex;
-  last_packet_with_signal_index_ = kInvalidQueueIndex;
-  last_completion_signal_.handle = 0;
+  MarkQueueIdle();
   metadata_preloader_.SetQueueBase(metadata_ring_buffer,
                                    roc_device_.MetadataVersionHeader());
 }
@@ -1432,6 +1431,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
                      packet->completion_signal.handle);
       return false;
     }
+    MarkQueueIdle();
   }
 
   return true;
@@ -1766,6 +1766,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
       profilingEnd();
       return false;
     }
+    MarkQueueIdle();
   }
 
   profilingEnd();
@@ -1956,6 +1957,7 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
   // Check if runtime could skip CPU wait
   if (!skip_cpu_wait) {
     Barriers().WaitCurrent();
+    MarkQueueIdle();
 
     ResetQueueStates();
   }
@@ -3977,6 +3979,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   } else {
     dispatchBarrierPacket(kBarrierPacketHeader, false);
     Barriers().WaitCurrent();
+    MarkQueueIdle();
 
     amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
     assert(vaddr_sub_obj != nullptr);
