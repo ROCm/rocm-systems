@@ -30,7 +30,7 @@ constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
-  return ncclSymkMaxThreads*ncclSymkLLMaxEltSize/eltSize;
+  return ncclSymkMaxThreads * ncclSymkLLMaxEltSize / eltSize;
 }
 
 enum ncclSymkKernelId {
@@ -83,7 +83,7 @@ struct ncclSymkChannelWorkRange {
 struct alignas(16) ncclSymkDevWork {
   uint64_t redOpArg; // must be collectively uniform
   size_t nElts;
-  struct ncclWindow_vidmem* inputWin, *outputWin;
+  struct ncclWindow_vidmem *inputWin, *outputWin;
   size_t inputOff, outputOff; // these = origUserOffset + cbdPartOffset
   int rootRank;
   uint64_t sChannelId:16, nChannels:16, padding:32;
@@ -98,13 +98,15 @@ struct alignas(16) ncclSymkDevWorkArgs {
   // ncclSymDevWork[nWorks];
   // aux functions
   __host__ static constexpr size_t calcArgsSize(int nChannels, int nWorks) {
-    return alignUp(sizeof(struct ncclSymkDevWorkArgs), 16) + alignUp(nChannels * sizeof(struct ncclSymkChannelWorkRange), 16) + nWorks * sizeof(struct ncclSymkDevWork);
+    return alignUp(sizeof(struct ncclSymkDevWorkArgs), 16) +
+           alignUp(nChannels * sizeof(struct ncclSymkChannelWorkRange), 16) + nWorks * sizeof(struct ncclSymkDevWork);
   }
   __host__ __device__ struct ncclSymkChannelWorkRange* getWorkRange() const {
     return (struct ncclSymkChannelWorkRange*)((uint8_t*)this + alignUp(sizeof(struct ncclSymkDevWorkArgs), 16));
   }
   __host__ __device__ struct ncclSymkDevWork* getWorks(int nChannels) const {
-    return (struct ncclSymkDevWork*)((uint8_t*)this->getWorkRange() + alignUp(nChannels * sizeof(struct ncclSymkChannelWorkRange), 16));
+    return (struct ncclSymkDevWork*)((uint8_t*)this->getWorkRange() +
+                                     alignUp(nChannels * sizeof(struct ncclSymkChannelWorkRange), 16));
   }
 };
 
@@ -125,9 +127,9 @@ typedef enum {
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm);
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm);
 
-bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red,
-                       ncclDataType_t ty, size_t nElts);
-ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                       size_t nElts);
+ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                                 size_t nEltsTotal, size_t nEltsMax, int nWorks, ncclSymRegType_t winRegType,
                                 float* estTimeUs, ncclSymkKernelId* kernelId, int* nBlocks, int* nWarps, bool* forced);
 
@@ -138,13 +140,14 @@ extern int const ncclSymkKernelCount;
 extern void* ncclSymkKernelList[/*ncclSymkKernelCount*/];
 extern int ncclSymkKernelRequirements[/*ncclSymkKernelCount*/];
 extern int ncclSymkKernelMaxDynamicSmem[/*ncclSymkKernelCount*/]; // initialized by ncclInitKernelsForDevice()
-int ncclSymkGetKernelIndex(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
+int ncclSymkGetKernelIndex(ncclSymkKernelId kernelId, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 const char* ncclSymkKernelIdToString(int kernelId);
-ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin, ncclSymRegType_t* winRegType);
+ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
+                               ncclSymRegType_t* winRegType);
 bool rcclSymkKernelIdIsLL(int kernelId);
 
 int ncclSymkLLKernelMask();
 int ncclSymkDynamicSmemKernelMask();
 
-constexpr int ncclSymkAllGather_RailRing_ChunkSize = 1<<20;
+constexpr int ncclSymkAllGather_RailRing_ChunkSize = 1 << 20;
 #endif
