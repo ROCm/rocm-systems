@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <span>
 #include <string>
 #include <vector>
 

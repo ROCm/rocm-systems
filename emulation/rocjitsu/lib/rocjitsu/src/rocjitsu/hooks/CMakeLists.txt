@@ -7,7 +7,11 @@ set_target_properties(rocjitsu_hooks PROPERTIES OUTPUT_NAME rocjitsu_hooks)
 
 target_include_directories(
     rocjitsu_hooks
-    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
+    PRIVATE
+        ${ROCJITSU_INCLUDE_DIR}
+        ${ROCJITSU_SRC_DIR}
+        ${GENERATED_DIR}
+        ${RJ_VERSION_INCLUDE_DIR}
 )
 
 target_include_directories(rocjitsu_hooks SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
@@ -35,6 +39,7 @@ target_link_libraries(
         flatbuffers
         simdojo
         Threads::Threads
+        ${CMAKE_DL_LIBS}
 )
 
 if(MSVC)

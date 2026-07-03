@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cstring>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -249,8 +250,9 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
   return ExpandResult::success(std::move(words));
 }
 
-ExpandResult expand_waitcnt(const Instruction &inst, uint32_t, uint64_t, const LivenessAnalysis &,
-                            TranslationContext &, const LaneLayout *, const LaneLayout *) {
+ExpandResult expand_waitcnt(const Instruction &inst, uint32_t, uint64_t, std::span<const uint8_t>,
+                            const LivenessAnalysis &, TranslationContext &, const LaneLayout *,
+                            const LaneLayout *) {
   if (!inst.raw_encoding())
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " matched the waitcnt expansion rule without raw encoding");
@@ -263,19 +265,21 @@ ExpandResult expand_waitcnt(const Instruction &inst, uint32_t, uint64_t, const L
 }
 
 ExpandResult expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
-                                 const LivenessAnalysis &, TranslationContext &, const LaneLayout *,
-                                 const LaneLayout *) {
+                                 std::span<const uint8_t>, const LivenessAnalysis &,
+                                 TranslationContext &, const LaneLayout *, const LaneLayout *) {
   return lower_accvgpr_read(inst);
 }
 
-ExpandResult expand_accvgpr_write(const Instruction &, uint32_t, uint64_t, const LivenessAnalysis &,
-                                  TranslationContext &, const LaneLayout *, const LaneLayout *) {
+ExpandResult expand_accvgpr_write(const Instruction &, uint32_t, uint64_t, std::span<const uint8_t>,
+                                  const LivenessAnalysis &, TranslationContext &,
+                                  const LaneLayout *, const LaneLayout *) {
   // AccVGPR writes are already represented by the unified VGPR mapping that
   // descriptor translation reserves for RDNA targets.
   return ExpandResult::success({build_s_nop()});
 }
 
 ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uint64_t,
+                                          std::span<const uint8_t>,
                                           const LivenessAnalysis &liveness,
                                           TranslationContext &context, const LaneLayout *,
                                           const LaneLayout *) {
