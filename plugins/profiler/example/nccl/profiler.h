@@ -84,7 +84,9 @@ typedef ncclProfilerEventState_t ncclProfilerEventState_v3_t;
 typedef ncclProfilerEventState_t ncclProfilerEventState_v4_t;
 typedef ncclProfilerEventState_t ncclProfilerEventState_v5_t;
 typedef ncclProfilerEventState_t ncclProfilerEventState_v6_t;
+typedef ncclProfilerEventState_t ncclProfilerEventState_v7_t;
 
+#include "profiler_v7.h"
 #include "profiler_v6.h"
 #include "profiler_v5.h"
 #include "profiler_v4.h"

@@ -1,5 +1,5 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * See LICENSE.txt for more license information
@@ -10,12 +10,12 @@
 
 #include "profiler_v6.h"
 
+// Extend v6 descriptors with a per-call user profiler tag
 typedef struct {
   uint64_t type;                // event type descriptor
   void* parentObj;              // pointer to the profiler parent object
   int rank;                     // originating rank
   union {
-    // All v6 descriptors
     struct {
       bool graphCaptured;
       int groupDepth;
@@ -74,7 +74,7 @@ typedef struct {
     } p2p;
 
     struct {
-      ncclPid_t pid;
+      pid_t pid;
       uint8_t channelId;
       int peer;
       int nSteps;
@@ -96,7 +96,6 @@ typedef struct {
       void* data;
     } netPlugin;
 
-    // v6 CE-specific descriptors
     struct {
       uint64_t seqNumber;
       const char* func;
@@ -135,40 +134,25 @@ typedef struct {
   };
 } ncclProfilerEventDescr_v7_t;
 
-typedef union {
-  struct {
-    size_t transSize;
-  } proxyStep;
-
-  struct {
-    int appendedProxyOps;
-  } proxyCtrl;
-
-  struct {
-    void* data;
-  } netPlugin;
-
-  // Shared by ncclProfileKernelCh and the v7 ncclProfileKernelPhase sub-event: both
-  // record a single stop timestamp (GPU globaltimer) of identical shape, so the phase
-  // stop reuses this member rather than a dedicated one.
-  struct {
-    uint64_t pTimer;
-  } kernelCh;
-} ncclProfilerEventStateArgs_v7_t;
+// v7 uses the same state args as v6/v5
+typedef ncclProfilerEventStateArgs_v6_t ncclProfilerEventStateArgs_v7_t;
 
 typedef struct {
   const char* name;
 
-  ncclResult_t (*init)(void** context, uint64_t commId, int* eActivationMask, const char* commName, int nNodes,
-                       int nranks, int rank, ncclDebugLogger_t logfn);
+  // init - initialize the profiler plugin
+  ncclResult_t (*init)(void** context, uint64_t commId, int* eActivationMask, const char* commName, int nNodes, int nranks, int rank, ncclDebugLogger_t logfn);
 
+  // startEvent - initialize and start a new event
   ncclResult_t (*startEvent)(void* context, void** eHandle, ncclProfilerEventDescr_v7_t* eDescr);
 
+  // stopEvent - stop/finalize an event
   ncclResult_t (*stopEvent)(void* eHandle);
 
-  ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v7_t eState,
-                                   ncclProfilerEventStateArgs_v7_t* eStateArgs);
+  // recordEventState - record event state transitions and updates
+  ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v7_t eState, ncclProfilerEventStateArgs_v7_t* eStateArgs);
 
+  // finalize - finalize the profiler plugin
   ncclResult_t (*finalize)(void* context);
 } ncclProfiler_v7_t;
 

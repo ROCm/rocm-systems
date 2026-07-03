@@ -1706,6 +1706,7 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
   plan->ceCollArgs->sendWin = task->sendWin;
   plan->ceCollArgs->recvWin = task->recvWin;
   plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
+  plan->ceCollArgs->userTag = task->profilerTag;
 
   if (comm->rank == 0) {
     if (!ncclDevrIsOneLsaTeam(comm)) {

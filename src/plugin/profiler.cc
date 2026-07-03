@@ -427,6 +427,7 @@ ncclResult_t ncclProfilerStartP2pApiEvent(struct ncclInfo* info, bool isGraphCap
   eDescr.p2pApi.datatype = ncclDatatypeToString(info->datatype);
   eDescr.p2pApi.stream = (void*)info->stream;
   eDescr.p2pApi.graphCaptured = isGraphCaptured;
+  eDescr.p2pApi.userTag = info->collConfig.userProfilerTag;
   int p2pApiMask = ncclProfileP2pApi | ncclProfileP2p | ncclProfileProxyOp | ncclProfileProxyStep |
                    ncclProfileKernelCh | ncclProfileNetPlugin;
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0) && (ncclProfilerApiState.eActivationMask & p2pApiMask)) {
@@ -459,6 +460,7 @@ ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo* info, bool isGraphCa
   eDescr.collApi.stream = (void*)info->stream;
   eDescr.collApi.root = info->root;
   eDescr.collApi.graphCaptured = isGraphCaptured;
+  eDescr.collApi.userTag = info->collConfig.userProfilerTag;
   int collApiMask = ncclProfileCollApi | ncclProfileColl | ncclProfileProxyOp | ncclProfileProxyStep |
                     ncclProfileKernelCh | ncclProfileNetPlugin | ncclProfileCeColl | ncclProfileCeSync |
                     ncclProfileCeBatch;
@@ -615,6 +617,7 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
           eDescr.coll.proto = ncclProtoToString(ct->protocol);
           eDescr.coll.kernelVariant = nullptr;
         }
+        eDescr.coll.userTag = ct->profilerTag;
         ncclProfiler->startEvent(plan->comm->profilerContext, &ct->eventHandle, &eDescr);
       }
     }
@@ -652,6 +655,7 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
         eDescr.p2p.datatype = ncclDatatypeToString(pt->datatype);
         eDescr.p2p.peer = pt->root;
         eDescr.p2p.nChannels = profNChannels;
+        eDescr.p2p.userTag = pt->profilerTag;
         ncclProfiler->startEvent(plan->comm->profilerContext, &pt->eventHandle, &eDescr);
       }
       pt = pt->next;
@@ -1415,6 +1419,7 @@ ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCo
       eDescr.ceColl.numBatches = 0;
       eDescr.ceColl.ceSeqNum = comm->ceColl.ceSeqNum;
       eDescr.ceColl.stream = (void*)stream;
+      eDescr.ceColl.userTag = args->userTag;
 
       ncclProfiler->startEvent(comm->profilerContext, &args->ceCollProfHandle, &eDescr);
     }

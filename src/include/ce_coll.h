@@ -54,6 +54,7 @@ struct alignas(16) ncclCeCollArgs {
   struct ncclDevrWindow* recvWin;
   void* collApiEventHandle;  // Parent API event handle for profiler hierarchy
   void* ceCollProfHandle;     // CE collective profiler event handle
+  uint64_t userTag;           // Per-call profiler annotation (0 == untagged)
 };
 
 struct ncclCeBatchOpsParams {
