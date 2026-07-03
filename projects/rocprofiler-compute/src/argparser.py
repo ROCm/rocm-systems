@@ -7,11 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from utils.logger import console_warning
-from utils.utils_common import (
-    METRIC_ID_RE,
-    get_common_panel_aliases,
-    resolve_rocm_library_path,
-)
+from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 
 class ExperimentalAction(argparse.Action):
@@ -106,16 +102,6 @@ def block_token_or_alias(s: str) -> str:
         if not s:
             raise argparse.ArgumentTypeError("empty token for --block")
         return s
-
-
-def block_alias_examples(count: int = 3, sep: str = ", ") -> str:
-    """Return up to ``count`` real --block aliases joined by ``sep``.
-
-    Aliases are read from the config templates at runtime to never name a
-    stale alias. Use sep=" " for command-line examples, ", " for prose.
-    """
-    aliases = get_common_panel_aliases()
-    return sep.join(aliases[:count]) if aliases else "see --list-blocks"
 
 
 def non_negative_int(value: str) -> int:
@@ -234,19 +220,17 @@ def omniarg_parser(
 
     ## Profile Command Line Options
     ## ----------------------------
-    # Build the --block example from real aliases so it never goes stale.
-    block_example = block_alias_examples(2, sep=" ")
     profile_parser = subparsers.add_parser(
         "profile",
         help="Profile the target application",
-        usage=f"""
+        usage="""
 
 `rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <workload_cmd>`
 
 ---------------------------------------------------------------------------------
 Examples:
 \trocprof-compute profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n vcopy_blocks -b {block_example} -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
@@ -435,10 +419,9 @@ Examples:
             "(e.g. 12, 12.1, 12.1.1).\n"
             "\t\t\tAlternatively, specify block id(s) for filtering "
             "(e.g. 12, 13, 14).\n"
-            "\t\t\tAlternatively, specify block alias(es) for filtering "
-            f"(e.g. {block_alias_examples()}).\n"
-            "\t\t\tAliases are arch-specific; run --list-blocks <arch> for "
-            "the full list.\n"
+            "\t\t\tAlternatively, specify block alias(es) for filtering.\n"
+            "\t\t\tAliases are arch-specific; run --list-blocks <arch> to see\n"
+            "\t\t\tall valid block ids and aliases.\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
         ),

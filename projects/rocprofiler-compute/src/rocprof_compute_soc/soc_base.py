@@ -26,10 +26,10 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    INVALID_BLOCK_HINT,
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     canonical_config_arch,
-    console_error_invalid_block,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
     get_arch_alias_to_panel_id,
@@ -305,7 +305,7 @@ class OmniSoC_Base:
             arch = self._mspec.gpu_arch
             panel_alias_dict = get_arch_alias_to_panel_id(arch)
             if alias not in panel_alias_dict:
-                console_error_invalid_block(alias, arch, panel_alias_dict)
+                console_error(f"Invalid --block value {alias!r}.{INVALID_BLOCK_HINT}")
             block_id = str(panel_alias_dict[alias])
             console_log(f"alias: {alias}, block id: {block_id}")
 

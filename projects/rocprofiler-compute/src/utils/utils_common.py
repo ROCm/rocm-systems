@@ -37,6 +37,12 @@ from vendored import yaml
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 
+# Hint appended to the invalid --block error in both the profile and analyze
+# paths so the message stays identical. --list-blocks lists all valid ids/aliases.
+INVALID_BLOCK_HINT = (
+    "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
+)
+
 
 def is_gfx115x(gpu_arch: Optional[str]) -> bool:
     """Return True if gpu_arch is a gfx115x (RDNA 3.5 APU) architecture."""
@@ -884,20 +890,6 @@ def format_scientific_notation_if_needed(
     return formatted
 
 
-def console_error_invalid_block(
-    token: str, arch: Optional[str], alias_map: dict[str, str]
-) -> None:
-    """Report an invalid --block token and exit. Lists the arch's valid
-    aliases when available so alias typos are easy to correct."""
-    detail = ""
-    if arch and alias_map:
-        detail = f"\n\tValid aliases for {arch}: {', '.join(sorted(alias_map))}."
-    console_error(
-        f"Invalid --block value {token!r}.{detail}"
-        "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
-    )
-
-
 def convert_filter_blocks_to_panel_ids(
     filter_blocks: list[str], arch: Optional[str] = None
 ) -> set[int]:
@@ -916,7 +908,7 @@ def convert_filter_blocks_to_panel_ids(
         token = str(bid)
         if not METRIC_ID_RE.match(token):
             if token not in alias_map:
-                console_error_invalid_block(token, arch, alias_map)
+                console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
             token = alias_map[token]
         resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
     return resolved
@@ -1010,23 +1002,6 @@ def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
     return {
         alias: pid for pid, alias in get_arch_panel_id_to_alias(arch).items() if alias
     }
-
-
-def get_common_panel_aliases() -> list[str]:
-    """Return panel aliases declared by every *_config_template.yaml, sorted.
-
-    These aliases are valid on any arch thus safe examples for help
-    message.
-    Returns [] when no templates exist.
-    """
-    per_template = [
-        {p["panel_alias"] for p in panels if p.get("panel_alias")}
-        for _name, panels in _load_panel_templates()
-    ]
-    per_template = [aliases for aliases in per_template if aliases]
-    if not per_template:
-        return []
-    return sorted(set.intersection(*per_template))
 
 
 def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:

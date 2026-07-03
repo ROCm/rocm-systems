@@ -4107,35 +4107,6 @@ def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, a
             )
 
 
-def test_get_common_panel_aliases_resolve_for_every_arch():
-    """Every alias from get_common_panel_aliases must resolve via every
-    supported arch's alias map, so it is a safe example before the GPU is
-    known."""
-    result = utils_common.get_common_panel_aliases()
-
-    assert result, "common aliases feed help examples and must be non-empty"
-    assert result == sorted(result)
-    for arch in list_blocks_supported_archs():
-        alias_map = utils_common.get_arch_alias_to_panel_id(arch)
-        if alias_map:  # skip archs without a config template
-            assert set(result) <= set(alias_map), (
-                f"common alias not resolvable for {arch}"
-            )
-
-
-def test_block_help_examples_are_common_aliases():
-    """Regression: the aliases shown in `profile -b` help are drawn from the
-    common-alias set, so they can never be stale names like SQ/TCC/l1i (which
-    once leaked into the help and crashed `-b <alias>` with a KeyError)."""
-    import argparser
-
-    common = utils_common.get_common_panel_aliases()
-    examples = [tok.strip() for tok in argparser.block_alias_examples().split(",")]
-
-    assert examples
-    assert set(examples) <= set(common)
-
-
 # =============================================================================
 # TESTS FOR AMDSMI INTERFACE
 # =============================================================================
