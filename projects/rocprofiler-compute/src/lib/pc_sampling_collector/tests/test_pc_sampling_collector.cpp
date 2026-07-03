@@ -83,14 +83,32 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectSymbols_WritesThem)
 TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructions_WritesThem)
 {
     m_pc_sampling_collector->on_code_object_load(m_file_info);
-    m_pc_sampling_collector->on_code_object_load(m_mem_info);
-    const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 2}};
+    const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 4}};
     m_translator->add_symbols(m_file_info.code_object_id, symbols);
-    m_translator->add_symbols(m_mem_info.code_object_id, symbols);
-    const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 1};
-    m_translator->add_instruction(instruction);
+    m_translator->set_instruction(m_file_info.code_object_id,
+                                  0x1000,
+                                  {"inst0", "comment0", 0x1000, 0x10, 1});
+    m_translator->set_instruction(m_file_info.code_object_id,
+                                  0x1001,
+                                  {"inst1", "comment1", 0x1001, 0x11, 2});
+    m_translator->set_instruction(m_file_info.code_object_id,
+                                  0x1003,
+                                  {"inst2", "comment2", 0x1003, 0x13, 1});
+
     m_pc_sampling_collector->finalize(*m_writer);
-    EXPECT_EQ(m_writer->get_instruction_descriptions().size(), symbols[0].size * 2);
+
+    const std::vector<std::pair<size_t, uint64_t>> expected_requests = {
+        {m_file_info.code_object_id, 0x1000},
+        {m_file_info.code_object_id, 0x1001},
+        {m_file_info.code_object_id, 0x1003},
+    };
+    EXPECT_EQ(m_translator->get_instruction_requests(), expected_requests);
+
+    const auto& instructions = m_writer->get_instruction_descriptions();
+    ASSERT_EQ(instructions.size(), 3);
+    EXPECT_EQ(instructions[0].name, "inst0");
+    EXPECT_EQ(instructions[1].name, "inst1");
+    EXPECT_EQ(instructions[2].name, "inst2");
 }
 
 TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructionSizeZero_Throws)
