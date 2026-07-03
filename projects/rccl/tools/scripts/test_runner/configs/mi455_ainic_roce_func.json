@@ -10,7 +10,7 @@
   },
   "env_variables": {
     "NCCL_DEBUG": "INFO",
-    "NCCL_MNNVL_ENABLE": "0",
+    "NCCL_MNNVL_ENABLE": "1",
     "RCCL_USE_AMD_SMI_LIB": "0",
     "NCCL_CUMEM_ENABLE": "1"
   },

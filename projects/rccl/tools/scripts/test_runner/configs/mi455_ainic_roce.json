@@ -11,7 +11,7 @@
   },
   "env_variables": {
     "NCCL_DEBUG": "INFO",
-    "NCCL_MNNVL_ENABLE": "0",
+    "NCCL_MNNVL_ENABLE": "1",
     "RCCL_USE_AMD_SMI_LIB": "0",
     "NCCL_CUMEM_ENABLE": "1"
   },
@@ -19,7 +19,8 @@
     "--mca pml ob1",
     "--mca btl ^openib",
     "--mca rmaps_base_oversubscribe 1",
-    "--bind-to none"
+    "--bind-to none",
+    "--mca accelerator ^rocm"
   ],
   "build_configuration": {
     "install_flags": [
@@ -28,8 +29,7 @@
       "-l",
       "--log-trace",
       "--enable-code-coverage",
-      "--enable-mpi-tests",
-      "--no_clean"
+      "--enable-mpi-tests"
     ],
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx1250",
     "parallel_jobs": 64
