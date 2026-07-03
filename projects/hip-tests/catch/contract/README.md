@@ -47,6 +47,7 @@ The first domains are:
 - `extension`: proc-address resolution and AMD extension API contracts (`hipGetProcAddress`, `hipApiName`, `hipGetStreamDeviceId`, `hipExtGetLastError`)
 - `ipc`: capability-gated same-process IPC memory and event handle contracts
 - `module`: HIPRTC-backed module load, function, global, launch, and function-attribute contracts
+- `module_load_ex`: HIPRTC-backed module load-data-with-options contracts
 - `library`: AMD-gated HIPRTC-backed library load, kernel, global, and kernel-object contracts
 
 Some domains are capability-gated. For example, `array_memory` skips on devices without image/array support, and `pitched_memory` skips on runtime paths where `hipMallocPitch` reports out of memory for tiny allocations. The AMD-specific extension contracts in `extension` are compiled only on the AMD backend, while the portable `hipGetProcAddress` contracts run on both backends. The `library` domain is likewise compiled only on the AMD backend, since the `hipLibrary*`/`hipKernel*` object APIs are AMD-side in this tree. These gates indicate an unsupported local capability, not a contract failure.

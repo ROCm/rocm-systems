@@ -588,6 +588,18 @@ contract:
   Contract_Module_FuncGetAttribute_ReturnsSaneValues:
     <<: *level_0
     tags: [module]
+  Contract_ModuleLoadEx_ZeroOptions_LoadsAndUnloads:
+    <<: *level_0
+    tags: [module_load_ex]
+  Contract_ModuleLoadEx_WithJitOptions_ResolvesSymbol:
+    <<: *level_0
+    tags: [module_load_ex]
+  Contract_ModuleLoadEx_NullImage_IsRejected:
+    <<: *level_0
+    tags: [module_load_ex]
+  Contract_ModuleLoadEx_LaunchWritesExpectedValue:
+    <<: *level_0
+    tags: [module_load_ex]
   Contract_Library_LoadData_FromRtc_Succeeds:
     <<: *level_0
     tags: [library]
