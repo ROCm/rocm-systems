@@ -725,23 +725,24 @@ class VirtualGPU : public device::VirtualDevice {
   //! Resets the current queue state. Note: should be called after AQL queue becomes idle
   void ResetQueueStates();
 
-  //! Marks queue progress when a packet is submitted. The queue is considered busy until an
-  //! explicit synchronization path observes completion and marks it idle again.
+  //! Track the progress of the queue based on the last write index and whether the last packet
+  //! carried a queue-owned completion signal. When skip_signal is true, the last packet's signal
+  //! is externally managed (graph pre-patched dispatches), so it is not usable for idle detection.
+  //! No HSA signal handle is cached here: idleness is derived at check time from the tracker-owned
+  //! signal, whose lifetime matches the queue's signal tracker.
   template <typename AqlPacket>
   inline void TrackQueueProgress(const AqlPacket& packet, uint64_t index,
                                  bool skip_signal = false) {
-    (void)packet;
-    (void)skip_signal;
     last_write_index_ = index;
-    queue_idle_ = false;
+    if (!skip_signal && packet.completion_signal.handle != 0) {
+      last_packet_with_signal_index_ = index;
+    }
   }
 
-  //! Marks the current queue as synchronized. Call only after submitted packets are known complete.
-  void MarkQueueIdle() { queue_idle_ = true; }
-
   //! Returns true if the queue is considered as idle. That means all submitted packets are
-  //! complete. Note: it doesn't track the state of caches
-  bool IsQueueIdle() const { return (gpu_queue_ == nullptr) || queue_idle_; }
+  //! complete. Note: it doesn't track the state of caches. Defined out-of-line because it reads
+  //! ProfilingSignal, which is incomplete in this header.
+  bool IsQueueIdle() const;
 
   //! True if this marker records the same event as the preceding barrier with no
   //! intervening dispatch or sync. Caller must hold the execution() lock.
@@ -875,7 +876,8 @@ class VirtualGPU : public device::VirtualDevice {
                                           //!< fence after hidden heap init.
 
   uint64_t last_write_index_ = kInvalidQueueIndex; //!< The last HW queue write index for any packet
-  bool queue_idle_ = true;                         //!< True when submitted packets are known complete
+  uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet
+                                              //!< with a completion signal
 
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations

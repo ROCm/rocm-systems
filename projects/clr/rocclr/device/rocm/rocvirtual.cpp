@@ -1156,11 +1156,10 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
   cached_read_dispatch_id_ = 0;
   // The cached queue-progress state belongs to the previously assigned HW queue. When the HW
   // queue changes (released back to / reacquired from the shared dynamic-queue pool), that state
-  // is stale: the recorded completion signal may have been recycled/destroyed and the write
-  // indices refer to a different queue. Reset to the "empty queue" sentinel so IsQueueIdle() does
-  // not dereference a stale completion-signal handle.
+  // is stale: the write indices refer to a different queue. Reset to the "empty queue" sentinel
+  // so IsQueueIdle() reports idle for the freshly assigned queue.
   last_write_index_ = kInvalidQueueIndex;
-  MarkQueueIdle();
+  last_packet_with_signal_index_ = kInvalidQueueIndex;
   metadata_preloader_.SetQueueBase(metadata_ring_buffer,
                                    roc_device_.MetadataVersionHeader());
 }
@@ -1431,7 +1430,6 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
                      packet->completion_signal.handle);
       return false;
     }
-    MarkQueueIdle();
   }
 
   return true;
@@ -1766,7 +1764,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
       profilingEnd();
       return false;
     }
-    MarkQueueIdle();
   }
 
   profilingEnd();
@@ -1933,6 +1930,30 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 }
 
 // ================================================================================================
+bool VirtualGPU::IsQueueIdle() const {
+  if (gpu_queue_ == nullptr) {
+    return true;
+  }
+
+  // Nothing has been submitted to this HW queue yet.
+  if (last_write_index_ == kInvalidQueueIndex) {
+    return true;
+  }
+
+  // The last packet must have carried a queue-owned completion signal; otherwise idleness
+  // cannot be proven.
+  if (last_packet_with_signal_index_ != last_write_index_) {
+    return false;
+  }
+
+  // Read the tracker-owned completion signal instead of a cached handle. The tracker owns this
+  // signal for the lifetime of the HW queue, so this never dereferences a recycled/destroyed
+  // signal (unlike a copied hsa_signal_t handle, which was the source of the teardown segfault).
+  const ProfilingSignal* signal = barriers_.GetLastSignal();
+  return (signal == nullptr) || (Hsa::signal_load_relaxed(signal->signal_) == 0);
+}
+
+// ================================================================================================
 void VirtualGPU::ResetQueueStates() {
   // Release all memory dependencies
   memoryDependency().clear();
@@ -1957,7 +1978,6 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
   // Check if runtime could skip CPU wait
   if (!skip_cpu_wait) {
     Barriers().WaitCurrent();
-    MarkQueueIdle();
 
     ResetQueueStates();
   }
@@ -3979,7 +3999,6 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   } else {
     dispatchBarrierPacket(kBarrierPacketHeader, false);
     Barriers().WaitCurrent();
-    MarkQueueIdle();
 
     amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
     assert(vaddr_sub_obj != nullptr);
