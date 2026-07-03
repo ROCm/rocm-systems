@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 set(TEST_SRC
-    hip_vmm_contract.cc
+    test_hip_vmm_contract.cc
 )
 
 hip_add_exe_to_target(NAME ContractVmmTest

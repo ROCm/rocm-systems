@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 set(TEST_SRC
-    hip_host_memory_contract.cc
+    test_hip_host_memory_contract.cc
 )
 
 hip_add_exe_to_target(NAME ContractHostMemoryTest
