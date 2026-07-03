@@ -73,6 +73,7 @@
 #include "suites/negative/queue_validation.h"
 #include "suites/stress/memory_concurrent_tests.h"
 #include "suites/stress/queue_write_index_concurrent_tests.h"
+#include "suites/stress/sdma_preemption_stress.h"
 #include "suites/test_common/test_case_template.h"
 #include "suites/functional/test_fault_example.h"
 #include "suites/test_common/main.h"
@@ -800,6 +801,27 @@ TEST(rocrtstStress, Queue_LoadStore_Write_Index_ConcurrentTest) {
     if (!RunCustomTestProlog(&Qw)) return;
     Qw.QueueLoadStoreWriteIndexAtomic();
     RunCustomTestEpilog(&Qw);
+}
+
+TEST(rocrtstStress, SDMA_Basic_Packet_Test) {
+  SdmaPreemptionStressTest sdma;
+  if (!RunCustomTestProlog(&sdma)) return;
+  sdma.BasicSdmaPacketTest();
+  RunCustomTestEpilog(&sdma);
+}
+
+TEST(rocrtstStress, SDMA_Doorbell_Stress_Test) {
+  SdmaPreemptionStressTest sdma;
+  if (!RunCustomTestProlog(&sdma)) return;
+  sdma.SdmaDoorbellStressTest();
+  RunCustomTestEpilog(&sdma);
+}
+
+TEST(rocrtstStress, SDMA_Preemption_Stress_Test) {
+  SdmaPreemptionStressTest sdma;
+  if (!RunCustomTestProlog(&sdma)) return;
+  sdma.SdmaPreemptionStressTest_();
+  RunCustomTestEpilog(&sdma);
 }
 
 TEST(rocrtstPerf, Memory_Async_Copy) {
