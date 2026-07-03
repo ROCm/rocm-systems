@@ -2581,7 +2581,15 @@ class CodeGenerator:
                     if is_vop3 and len(src_ops) >= 3:
                         lctx.vcc_read = f'{src_ops[2]}.read_scalar64(wf)'
                     lctx.vcc_dst = dst_ops[1] if len(dst_ops) > 1 else '__vcc__'
-                return lower_sema_block(sema_block, lctx)
+                body = lower_sema_block(sema_block, lctx)
+                if (
+                    cls == 'scalar_unary'
+                    and op is not None
+                    and op.startswith('cvt_')
+                    and scc == 'none'
+                ):
+                    body = '  // SOP1 scalar conversions preserve SCC.\n' + body
+                return body
 
         # Try the registry (covers all extracted gen_ functions).
         from amdisa.codegen.execute import ExecuteContext, DISPATCH
