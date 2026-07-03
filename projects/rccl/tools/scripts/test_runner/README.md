@@ -459,9 +459,15 @@ Optional:
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
+  --system NAME             Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')
+  --mpi-args "ARGS"         Extra mpirun arguments appended after the config's base/suite/test mpi_args (MPI tests only). Also reads RCCL_TEST_MPI_ARGS env var.
+  --mpich                   Use MPICH syntax (-env) instead of OpenMPI (-x) for passing env vars to mpirun
   --overwrite               Overwrite previous workspace directories
   --report-suffix SUFFIX    Suffix for report directory (default: blank)
   -h, --help                Show help message and exit
+
+Environment variables:
+  RCCL_TEST_MPI_ARGS        Extra mpirun arguments appended after --mpi-args (same effect as --mpi-args)
 ```
 
 ## Code Coverage Reports
@@ -759,11 +765,25 @@ There are two categories of `mpi_args`:
    `--system`:
    - Test-suite-level `mpi_args`
    - Individual test-level `mpi_args`
+   - The `--mpi-args` CLI flag (applies to every MPI test in the run)
+   - The `RCCL_TEST_MPI_ARGS` environment variable (same effect as `--mpi-args`)
 
 Final command arguments are:
 
 ```
-<base args>  <suite mpi_args>  <test mpi_args>
+<base args>  <suite mpi_args>  <test mpi_args>  <--mpi-args>  <RCCL_TEST_MPI_ARGS>
+```
+
+The `--mpi-args` flag and `RCCL_TEST_MPI_ARGS` env var let you inject extra
+`mpirun`/MCA arguments without editing the config (both accept a single string;
+the CLI flag is appended before the env var). Example:
+
+```bash
+# via CLI flag
+./run_tests.py -c config.json --mpi-args "--mca btl_tcp_if_include eth0 --oversubscribe"
+
+# via environment variable
+RCCL_TEST_MPI_ARGS="--oversubscribe" ./run_tests.py -c config.json
 ```
 
 > **Note:** Because base arguments *replace* the defaults, a top-level
