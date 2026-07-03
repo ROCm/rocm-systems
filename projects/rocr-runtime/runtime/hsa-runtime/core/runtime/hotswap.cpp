@@ -98,8 +98,9 @@ bool IsHotswapDisabledByEnv() { return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE"); 
 
 bool IsGfx12_5RewriteRequested() {
   constexpr char kEnvName[] = "AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES";
-  // Default-on policy owned by ROCR: only literal "0" opts out.
-  return !os::IsEnvVarSet(kEnvName) || os::GetEnvVar(kEnvName) != "0";
+  // Entry-trampoline rewrites are opt-in. The legacy B0-to-A0 HotSwap
+  // translation path remains enabled by default for supported agents.
+  return os::IsEnvVarSet(kEnvName) && os::GetEnvVar(kEnvName) == "1";
 }
 
 bool IsVerboseLoggingEnabled() {
