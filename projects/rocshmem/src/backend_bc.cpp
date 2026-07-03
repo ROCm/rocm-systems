@@ -194,7 +194,7 @@ void Backend::dump_stats() {
     if (val) { append("  %-30s %llu\n", name, static_cast<unsigned long long>(val)); ++n_printed; }
   };
 
-  static_assert(NUM_STATS == 68,
+  static_assert(NUM_STATS == 69,
     "rocshmem_stats enum changed; update dump_stats device section");
   const auto& device_stats{globalStats};
   uint64_t device_total = 0;
