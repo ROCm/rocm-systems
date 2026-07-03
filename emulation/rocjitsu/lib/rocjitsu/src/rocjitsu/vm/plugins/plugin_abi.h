@@ -40,6 +40,10 @@
 
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
+#include "util/log.h"
+
+#include <exception>
+
 namespace rocjitsu {
 
 /// @brief ABI version. Bump on any incompatible change to the plugin
@@ -129,7 +133,15 @@ inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
   }                                                                                                \
   extern "C" ROCJITSU_PLUGIN_EXPORT ::rocjitsu::PluginHandle rocjitsu_plugin_create(               \
       const char *config_json) {                                                                   \
-    return static_cast<::rocjitsu::ExecutionPlugin *>(new PluginClass(config_json));               \
+    try {                                                                                          \
+      return static_cast<::rocjitsu::ExecutionPlugin *>(new PluginClass(config_json));             \
+    } catch (const std::exception &e) {                                                            \
+      ::util::Logger::warn("plugin '", NAME, "': create failed: ", e.what());                      \
+      return nullptr;                                                                              \
+    } catch (...) {                                                                                \
+      ::util::Logger::warn("plugin '", NAME, "': create failed with unknown exception");           \
+      return nullptr;                                                                              \
+    }                                                                                              \
   }                                                                                                \
   extern "C" ROCJITSU_PLUGIN_EXPORT void rocjitsu_plugin_destroy(                                  \
       ::rocjitsu::PluginHandle handle) {                                                           \

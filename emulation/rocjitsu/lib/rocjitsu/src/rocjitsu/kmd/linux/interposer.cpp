@@ -386,7 +386,7 @@ public:
     if (fd < 0)
       return {};
     std::string out;
-    char buf[4096];
+    char buf[4096] = {};
     for (;;) {
       ssize_t n = real.read(fd, buf, sizeof(buf));
       if (n < 0) {

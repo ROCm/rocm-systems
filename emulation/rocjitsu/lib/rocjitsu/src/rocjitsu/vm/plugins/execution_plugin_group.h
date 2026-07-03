@@ -29,24 +29,24 @@ namespace rocjitsu {
 
 /// @brief Deleter for owned plugin instances.
 ///
-/// For host/in-tree plugins created with `new`/`make_unique`, @c destroy is
-/// null and the instance is freed with `delete`. For plugins loaded across the
-/// C ABI, @c destroy points at the plugin library's `rocjitsu_plugin_destroy`
-/// export so allocation and deallocation stay on the same side of the boundary.
+/// Every plugin instance is freed through a destroy function, so allocation and
+/// deallocation always stay on the same side of the plugin ABI boundary. For
+/// plugins loaded across the C ABI, @c destroyFn is the plugin library's
+/// `rocjitsu_plugin_destroy` export. For in-tree plugins created with `new`, it
+/// is a small host trampoline that `delete`s the instance (see
+/// delete_execution_plugin()). The pointer is only ever handed back to the
+/// deleter that created it, and `std::unique_ptr` never invokes the deleter on
+/// a null instance, so no null check is needed here.
 struct PluginDeleter {
-  void (*destroy)(void *) = nullptr;
-  void operator()(ExecutionPlugin *p) const {
-    if (!p)
-      return;
-    if (destroy)
-      destroy(static_cast<void *>(p));
-    else
-      delete p;
-  }
+  void (*destroyFn)(void *) = nullptr;
+  void operator()(ExecutionPlugin *p) const { destroyFn(static_cast<void *>(p)); }
 };
 
 /// @brief Owning pointer to a plugin instance with a boundary-aware deleter.
 using OwnedPlugin = std::unique_ptr<ExecutionPlugin, PluginDeleter>;
+
+/// @brief Host destroy trampoline for in-tree plugins created with `new`.
+inline void delete_execution_plugin(void *p) { delete static_cast<ExecutionPlugin *>(p); }
 
 class ExecutionPluginGroup {
 public:
@@ -79,7 +79,7 @@ public:
 
   /// Add an in-tree plugin freed with `delete` (host/test convenience).
   bool add(std::unique_ptr<ExecutionPlugin> p) {
-    return add(OwnedPlugin(p.release(), PluginDeleter{}));
+    return add(OwnedPlugin(p.release(), PluginDeleter{&delete_execution_plugin}));
   }
 
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }

@@ -21,6 +21,7 @@ namespace rocjitsu {
 namespace {
 
 using plugin_detail::flexbuffer_from_json;
+using plugin_detail::is_valid_plugin_name;
 using plugin_detail::resolve_config;
 
 /// Library handles are kept for the lifetime of the process: plugin objects
@@ -30,34 +31,21 @@ std::vector<util::LibraryHandle> &open_handles() {
   return handles;
 }
 
-/// Plugin names are interpolated into `librocjitsu_plugin_<name>.so`. Restrict
-/// them to a safe character set so a config key can never turn into a path
-/// (e.g. `../evil`), which the dynamic linker would treat as a pathname and
-/// load directly, bypassing the normal library-name lookup.
-bool is_valid_plugin_name(const std::string &name) {
-  if (name.empty())
-    return false;
-  for (char c : name) {
-    bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-              c == '_' || c == '-';
-    if (!ok)
-      return false;
-  }
-  return true;
-}
-
 bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
-              ExecutionPluginGroup &group) {
+              ExecutionPluginGroup &group, const std::string &plugin_dir) {
   if (!is_valid_plugin_name(name)) {
     util::Logger::warn("plugin '", name,
                        "': invalid name (allowed: letters, digits, '_', '-'), skipping");
     return false;
   }
 
+  // `name` is validated above, so it cannot contain a path separator; joining a
+  // trusted `plugin_dir` in front of it stays inside that directory.
   std::string soname = "librocjitsu_plugin_" + name + ".so";
-  util::LibraryHandle handle = util::open_library(soname.c_str());
+  std::string libpath = plugin_dir.empty() ? soname : plugin_dir + "/" + soname;
+  util::LibraryHandle handle = util::open_library(libpath.c_str());
   if (!handle) {
-    util::Logger::warn("plugin '", name, "': cannot load ", soname, ": ",
+    util::Logger::warn("plugin '", name, "': cannot load ", libpath, ": ",
                        util::last_library_error());
     return false;
   }
@@ -97,9 +85,16 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   }
 
   // Own the instance through the plugin's own destroy export so allocation and
-  // deallocation stay on the same side of the ABI boundary.
-  OwnedPlugin owned(plugin, PluginDeleter{destroy_fn});
-  if (!group.add(std::move(owned))) {
+  // deallocation stay on the same side of the ABI boundary. Keep `handle` open
+  // for the whole lifetime of `owned`: on the rejection path the instance is
+  // destroyed via its PluginDeleter (the plugin's destroy_fn), which lives in
+  // this library, so the library must still be loaded when that happens.
+  bool added = false;
+  {
+    OwnedPlugin owned(plugin, PluginDeleter{destroy_fn});
+    added = group.add(std::move(owned));
+  }
+  if (!added) {
     util::Logger::warn("plugin '", name, "': already loaded, skipping duplicate");
     util::close_library(handle);
     return false;
@@ -142,14 +137,19 @@ void configure_sinks(const flexbuffers::Reference &root, ExecutionPluginGroup &g
       group.add_sink(&StderrSink::instance());
     else if (token == "stdout")
       group.add_sink(&StdoutSink::instance());
-    else if (token == "file" && !dir.empty())
-      group.set_sink_dir(dir);
+    else if (token == "file") {
+      if (!dir.empty())
+        group.set_sink_dir(dir);
+      else
+        util::Logger::warn("sink type 'file' requested but no 'dir' set");
+    }
   }
 }
 
 } // namespace
 
-int PluginLoader::load_from_config(const std::string &config_json, ExecutionPluginGroup &group) {
+int PluginLoader::load_from_config(const std::string &config_json, ExecutionPluginGroup &group,
+                                   const std::string &plugin_dir) {
   flexbuffers::Builder root_fbb;
   if (!flexbuffer_from_json(config_json, root_fbb))
     return 0;
@@ -168,14 +168,15 @@ int PluginLoader::load_from_config(const std::string &config_json, ExecutionPlug
   int added = 0;
   for (size_t i = 0; i < keys.size(); ++i) {
     std::string name = keys[i].AsKey();
-    if (load_one(name, vals[i], group))
+    if (load_one(name, vals[i], group, plugin_dir))
       ++added;
   }
   return added;
 }
 
 std::shared_ptr<ExecutionPluginGroup>
-PluginLoader::configure_plugin_group(const std::string &config_json) {
+PluginLoader::configure_plugin_group(const std::string &config_json,
+                                     const std::string &plugin_dir) {
   flexbuffers::Builder root_fbb;
   bool parsed = flexbuffer_from_json(config_json, root_fbb);
   auto root = parsed ? flexbuffers::GetRoot(root_fbb.GetBuffer()) : flexbuffers::Reference();
@@ -188,7 +189,7 @@ PluginLoader::configure_plugin_group(const std::string &config_json) {
                : std::make_shared<ExecutionPluginGroup>();
 
   configure_sinks(root, *group);
-  load_from_config(config_json, *group);
+  load_from_config(config_json, *group, plugin_dir);
   return group;
 }
 

@@ -17,6 +17,7 @@
 namespace {
 
 using rocjitsu::plugin_detail::flexbuffer_from_json;
+using rocjitsu::plugin_detail::is_valid_plugin_name;
 using rocjitsu::plugin_detail::resolve_config_json;
 using rocjitsu::plugin_detail::type_matches;
 
@@ -118,6 +119,28 @@ TEST(PluginConfigResolver, TypeMatchesValidatesAgainstValueKinds) {
 
   // Unknown schema type names never match.
   EXPECT_FALSE(type_matches("widget", root["s"]));
+}
+
+// is_valid_plugin_name guards the config key before it is interpolated into a
+// `librocjitsu_plugin_<name>.so` filename and handed to dlopen. A name that
+// contains a path separator or other unexpected character could be turned into
+// a pathname (e.g. `../evil`), so only letters, digits, `_`, and `-` are
+// allowed.
+TEST(PluginName, RejectsPathLikeAndEmptyNames) {
+  EXPECT_FALSE(is_valid_plugin_name(""));
+  EXPECT_FALSE(is_valid_plugin_name("../evil"));
+  EXPECT_FALSE(is_valid_plugin_name("/abs/path"));
+  EXPECT_FALSE(is_valid_plugin_name("a/b"));
+  EXPECT_FALSE(is_valid_plugin_name("a.b"));
+  EXPECT_FALSE(is_valid_plugin_name("has space"));
+  EXPECT_FALSE(is_valid_plugin_name("bad$char"));
+}
+
+TEST(PluginName, AcceptsSafeNames) {
+  EXPECT_TRUE(is_valid_plugin_name("race"));
+  EXPECT_TRUE(is_valid_plugin_name("logging"));
+  EXPECT_TRUE(is_valid_plugin_name("my-plugin_2"));
+  EXPECT_TRUE(is_valid_plugin_name("ABC123"));
 }
 
 } // namespace

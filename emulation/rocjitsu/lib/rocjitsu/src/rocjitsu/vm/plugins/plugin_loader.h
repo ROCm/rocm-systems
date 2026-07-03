@@ -43,12 +43,21 @@ public:
   /// Parse @p config_json (the full config-file contents), find the top-level
   /// `plugins` object, and load each listed plugin into @p group.
   ///
+  /// @p plugin_dir, when non-empty, is a trusted directory that plugin shared
+  /// objects are loaded from by explicit path (`<plugin_dir>/librocjitsu_plugin_<name>.so`).
+  /// It is required in daemon mode, where the process is not re-`exec`'d and so
+  /// cannot rely on a launcher-populated `LD_LIBRARY_PATH`. When empty, plugins
+  /// are resolved by bare soname through the standard dynamic-linker search path
+  /// (the interposer/local path, where the launcher sets `LD_LIBRARY_PATH`
+  /// before `execvp`).
+  ///
   /// Loaded shared objects are kept open for the lifetime of the process.
   /// Failures (missing library, ABI mismatch, bad config) are reported to the
   /// plugin log and skip that plugin without aborting the others.
   ///
   /// @returns The number of plugins successfully added to @p group.
-  static int load_from_config(const std::string &config_json, ExecutionPluginGroup &group);
+  static int load_from_config(const std::string &config_json, ExecutionPluginGroup &group,
+                              const std::string &plugin_dir = {});
 
   /// Build a fully configured plugin group from @p config_json: selects the
   /// plain or profiled group (`"profiled"` flag), wires output sinks
@@ -56,9 +65,11 @@ public:
   /// the local (interposer) and daemon launch paths so a given config behaves
   /// identically regardless of how the VM is brought up.
   ///
+  /// @p plugin_dir has the same meaning as in load_from_config().
+  ///
   /// @returns A non-null group (empty if the config declares no plugins).
   static std::shared_ptr<ExecutionPluginGroup>
-  configure_plugin_group(const std::string &config_json);
+  configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {});
 };
 
 } // namespace rocjitsu

@@ -33,6 +33,18 @@ std::string trimmed(const std::string &s) {
 
 } // namespace
 
+bool is_valid_plugin_name(const std::string &name) {
+  if (name.empty())
+    return false;
+  for (char c : name) {
+    bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '_' || c == '-';
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
 bool flexbuffer_from_json(const std::string &json, flexbuffers::Builder &out) {
   flatbuffers::Parser parser;
   return parser.ParseFlexBuffer(json.c_str(), nullptr, &out);

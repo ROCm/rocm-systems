@@ -17,6 +17,15 @@
 
 namespace rocjitsu::plugin_detail {
 
+/// @brief Validate a plugin name before it is interpolated into a shared-object
+/// filename (`librocjitsu_plugin_<name>.so`).
+///
+/// This is a security guard, not just input hygiene: an unrestricted name could
+/// turn a config key into a pathname (e.g. `../evil`, `/abs/path`, `a/b`) that
+/// `dlopen` would load directly, bypassing the normal library-name lookup.
+/// Only non-empty strings of ASCII letters, digits, `_`, and `-` are accepted.
+bool is_valid_plugin_name(const std::string &name);
+
 /// @brief Parse arbitrary JSON into a FlexBuffer. Returns false on parse error.
 bool flexbuffer_from_json(const std::string &json, flexbuffers::Builder &out);
 

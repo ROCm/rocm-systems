@@ -203,6 +203,8 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
 
 static volatile sig_atomic_t g_listen_fd = -1;
 
+static std::string find_interposer_lib();
+
 static int run_daemon_server(const char *config_path) {
   rj_vm_t *vm = nullptr;
   if (rj_vm_create(config_path, RJ_VM_MODE_DAEMON, &vm) != ROCJITSU_STATUS_SUCCESS) {
@@ -212,11 +214,25 @@ static int run_daemon_server(const char *config_path) {
 
   // Configure plugins/sinks from the same config the interposer would use, so
   // a config that enables plugins behaves identically in daemon mode.
+  //
+  // Unlike the interposer path, the daemon process is not re-exec'd, so it
+  // cannot rely on a launcher-populated LD_LIBRARY_PATH to find the plugin
+  // shared objects (glibc caches the dlopen search path at startup). Resolve
+  // them by explicit path from the directory the interposer library lives in,
+  // where the build and install layouts co-locate librocjitsu_plugin_<name>.so.
+  //
+  // NOTE: rocjitsu_bin still statically links the simulator object libraries
+  // while plugin DSOs link against librocjitsu.so, so a plugin loaded here pulls
+  // in a second simulator image. Making rocjitsu_bin link librocjitsu.so to
+  // share a single runtime image is left as follow-up.
   if (vm->soc) {
     std::ifstream cfg(config_path, std::ios::binary);
     std::string config_json((std::istreambuf_iterator<char>(cfg)),
                             std::istreambuf_iterator<char>());
-    vm->soc->set_plugin_group(PluginLoader::configure_plugin_group(config_json));
+    std::string plugin_dir;
+    if (auto lib = find_interposer_lib(); !lib.empty())
+      plugin_dir = std::filesystem::path(lib).parent_path().string();
+    vm->soc->set_plugin_group(PluginLoader::configure_plugin_group(config_json, plugin_dir));
   }
 
   std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });
