@@ -277,11 +277,9 @@ class Database:
         try:
             # Writing to disk is slow, so we built the database in memory.
             # Now copy the finished database to disk in one step.
-            with (
-                closing(cls._engine.raw_connection()) as memory_conn,
-                closing(sqlite3.connect(cls._db_name)) as disk_conn,
-            ):
-                memory_conn.backup(disk_conn)
+            with closing(cls._engine.raw_connection()) as memory_conn:
+                with closing(sqlite3.connect(cls._db_name)) as disk_conn:
+                    memory_conn.backup(disk_conn)
             console_debug("Completed writing database")
             console_warning(f"Created file: {cls._db_name}")
         except Exception as e:

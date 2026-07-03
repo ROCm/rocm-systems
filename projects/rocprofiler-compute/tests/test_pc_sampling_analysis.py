@@ -1237,19 +1237,17 @@ def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
     args = argparse.Namespace(debug=False)
     workload = schema.Workload()
     workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx942"}])
-    with (
-        patch("utils.parser.load_non_mertrics_table") as mock_load_non_metrics,
-        patch("utils.parser.eval_metric"),
-        patch("utils.parser.apply_filters"),
-    ):
-        load_table_data(
-            workload=workload,
-            dir_path="dir",
-            is_gui=False,
-            args=args,
-            dfs_expressions={},
-            pc_sampling_tool_data=sentinel,
-        )
+    with patch("utils.parser.load_non_mertrics_table") as mock_load_non_metrics:
+        with patch("utils.parser.eval_metric"):
+            with patch("utils.parser.apply_filters"):
+                load_table_data(
+                    workload=workload,
+                    dir_path="dir",
+                    is_gui=False,
+                    args=args,
+                    dfs_expressions={},
+                    pc_sampling_tool_data=sentinel,
+                )
     mock_load_non_metrics.assert_called_once()
     assert mock_load_non_metrics.call_args.args[3] is sentinel
 
