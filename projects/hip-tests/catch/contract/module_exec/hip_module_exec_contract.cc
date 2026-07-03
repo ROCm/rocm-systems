@@ -192,6 +192,42 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyWithFlags_MatchesDefault) {
   HIP_CHECK(hipModuleUnload(module));
 }
 
+HIP_TEST_CASE(Contract_ModuleExec_OccupancyPotentialBlockSizeWithFlags_MatchesDefault) {
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+
+  hipFunction_t function = nullptr;
+  ResolveWriteValue(module, function);
+
+  // The default-flags potential-block-size query must agree with the non-flags
+  // query for the same function. The runtime documents that only the default
+  // occupancy flag is supported, so the two entry points must produce identical
+  // grid/block suggestions.
+  int grid_default = -1;
+  int block_default = 0;
+  HIP_CHECK(
+      hipModuleOccupancyMaxPotentialBlockSize(&grid_default, &block_default, function, 0, 0));
+  REQUIRE(block_default > 0);
+  REQUIRE(grid_default >= 0);
+
+#ifdef hipOccupancyDefault
+  const unsigned int default_flags = hipOccupancyDefault;
+#else
+  const unsigned int default_flags = 0u;
+#endif
+
+  int grid_flags = -1;
+  int block_flags = 0;
+  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSizeWithFlags(&grid_flags, &block_flags, function, 0,
+                                                             0, default_flags));
+  REQUIRE(block_flags > 0);
+  REQUIRE(grid_flags >= 0);
+  REQUIRE(block_flags == block_default);
+  REQUIRE(grid_flags == grid_default);
+
+  HIP_CHECK(hipModuleUnload(module));
+}
+
 HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");

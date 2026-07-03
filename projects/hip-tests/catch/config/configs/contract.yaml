@@ -615,6 +615,9 @@ contract:
   Contract_ModuleExec_OccupancyWithFlags_MatchesDefault:
     <<: *level_0
     tags: [module_exec]
+  Contract_ModuleExec_OccupancyPotentialBlockSizeWithFlags_MatchesDefault:
+    <<: *level_0
+    tags: [module_exec]
   Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue:
     <<: *level_0
     tags: [module_exec]
