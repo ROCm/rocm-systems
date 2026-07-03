@@ -11,6 +11,7 @@ The first domains are:
 - `runtime`: runtime initialization, device visibility, version, and error-state contracts
 - `device`: portable current-device property contracts
 - `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts
+- `stream_props`: stream creation flag, priority, identity, device, and event timing contracts
 - `async_transfer`: async copy visibility and invalid-kind consistency contracts
 - `memset`: byte, word, dword, and async memset contracts
 - `error_api`: error name and string API contracts without backend-specific text assumptions

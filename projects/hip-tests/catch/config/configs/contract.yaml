@@ -99,6 +99,27 @@ contract:
   Contract_Stream_WaitEvent_OrdersDependentWork:
     <<: *level_0
     tags: [stream, event]
+  Contract_StreamProps_CreateWithDefaultFlags_ReportsDefaultFlags:
+    <<: *level_0
+    tags: [stream_props]
+  Contract_StreamProps_CreateWithNonBlockingFlags_RoundTripsFlags:
+    <<: *level_0
+    tags: [stream_props]
+  Contract_StreamProps_CreateWithPriority_ClampsWithinRange:
+    <<: *level_0
+    tags: [stream_props]
+  Contract_StreamProps_GetDevice_MatchesCurrentDevice:
+    <<: *level_0
+    tags: [stream_props]
+  Contract_StreamProps_GetId_DistinctStreamsDifferOrNullStreamZero:
+    <<: *level_0
+    tags: [stream_props]
+  Contract_StreamProps_EventElapsedTime_NonNegativeForOrderedEvents:
+    <<: *level_0
+    tags: [stream_props]
+  Contract_StreamProps_EventRecordWithFlags_RecordsAndTimes:
+    <<: *level_0
+    tags: [stream_props]
   Contract_AsyncTransfer_HostToDeviceToHost_RoundTripsAfterStreamSynchronize:
     <<: *level_0
     tags: [async_transfer]
