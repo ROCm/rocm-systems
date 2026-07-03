@@ -1,8 +1,9 @@
 name: TheRock CI Nightly
 
 on:
-  schedule:
-    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
+  # Disabled: Multi-Arch CI Nightly (therock-multi-arch-ci-nightly.yml) handles nightly runs
+  # schedule:
+  #   - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   workflow_dispatch:
     inputs:
       projects:

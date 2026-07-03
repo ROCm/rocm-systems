@@ -277,6 +277,9 @@ release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
         "Enable metadata prefetch for some Aql packets")                      \
 release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
         "Set to a directory path to enable HRR capture; archive written there") \
+release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
+        "Enable HRR capture argument-provenance tracing (per-arg dumps and "  \
+        "H2D destination logging) at LOG_INFO level")                         \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \

@@ -2077,6 +2077,11 @@ __global__ void fill_kernel_u(int* d, int val, int n) {
 }
 
 TEST_CASE("Unit_HRR_MiscAPIs_Direct", "[.][hrr][direct]") {
+  // Warm-up: the capture shims install during hip::init(), which is triggered by
+  // the FIRST HIP call — so that first call is not recorded. Make it a harmless
+  // hipSetDevice rather than the hipMalloc below, otherwise `d`'s allocation is
+  // dropped and replay cannot map it.
+  HIP_CHECK(hipSetDevice(0));
   float* d = nullptr;
   HIP_CHECK(hipMalloc(&d, SZ));
   hipStream_t s;
@@ -2122,6 +2127,8 @@ TEST_CASE("Unit_HRR_MiscAPIs_Direct", "[.][hrr][direct]") {
 // Workload V — Driver-style 3D/2D memcpy variants
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_DrvMemcpy3D_Direct", "[.][hrr][direct]") {
+  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  HIP_CHECK(hipSetDevice(0));
   float* d = nullptr;
   HIP_CHECK(hipMalloc(&d, SZ));
   hipStream_t s;
@@ -2284,6 +2291,8 @@ TEST_CASE("Unit_HRR_Texture_Direct", "[.][hrr][direct]") {
 // Workload X — Graph explicit APIs (clone, debug print, node queries, etc.)
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
+  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  HIP_CHECK(hipSetDevice(0));
   float* d = nullptr;
   HIP_CHECK(hipMalloc(&d, SZ));
   hipStream_t s;
@@ -2381,6 +2390,8 @@ __global__ void hrr_fill(int* out, int val, int n) {
 }
 
 TEST_CASE("Unit_HRR_HostRegLaunch_Direct", "[.][hrr][direct]") {
+  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  HIP_CHECK(hipSetDevice(0));
   float* d = nullptr;
   HIP_CHECK(hipMalloc(&d, SZ));
   hipStream_t s;
@@ -2447,6 +2458,8 @@ extern "C" __global__ void rtc_fill(int* out, int val, int n) {
 )";
 
 TEST_CASE("Unit_HRR_ModuleAPI_Direct", "[.][hrr][direct]") {
+  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  HIP_CHECK(hipSetDevice(0));
   float* d = nullptr;
   HIP_CHECK(hipMalloc(&d, SZ));
   hipStream_t s;
@@ -2624,6 +2637,8 @@ TEST_CASE("Unit_HRR_VMM_Direct", "[.][hrr][direct]") {
 // D2H blob value = 42.
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_ChevronLaunch_Direct", "[.][hrr][direct]") {
+  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  HIP_CHECK(hipSetDevice(0));
   int* d = nullptr;
   HIP_CHECK(hipMalloc(&d, SZ));
   hipStream_t s;
