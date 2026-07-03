@@ -109,7 +109,7 @@ HIP_TEST_CASE(Contract_StreamProps_GetDevice_MatchesCurrentDevice) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-HIP_TEST_CASE(Contract_StreamProps_GetId_DistinctStreamsDifferOrNullStreamZero) {
+HIP_TEST_CASE(Contract_StreamProps_GetId_DistinctStreamsDifferAndNullStreamQueryable) {
   RequireDevice();
 
   hipStream_t first_stream = nullptr;

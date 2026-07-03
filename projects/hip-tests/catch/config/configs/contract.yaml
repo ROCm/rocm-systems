@@ -111,7 +111,7 @@ contract:
   Contract_StreamProps_GetDevice_MatchesCurrentDevice:
     <<: *level_0
     tags: [stream_props]
-  Contract_StreamProps_GetId_DistinctStreamsDifferOrNullStreamZero:
+  Contract_StreamProps_GetId_DistinctStreamsDifferAndNullStreamQueryable:
     <<: *level_0
     tags: [stream_props]
   Contract_StreamProps_EventElapsedTime_NonNegativeForOrderedEvents:
