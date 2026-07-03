@@ -24,6 +24,12 @@ public:
                            const std::filesystem::path&  destination,
                            std::filesystem::copy_options options,
                            std::error_code&              error)                                = 0;
+    virtual bool exists(const std::filesystem::file_status& status)             = 0;
+    virtual bool is_regular_file(const std::filesystem::file_status& status)    = 0;
+    virtual bool has_parent_path(const std::filesystem::path& path)                            = 0;
+    virtual std::filesystem::path weakly_canonical(const std::filesystem::path& path,
+                                                   std::error_code&             error)         = 0;
+    virtual std::filesystem::path relative_path(const std::filesystem::path& path)         = 0;
 };
 
 class filesystem_wrapper_impl_t : public filesystem_wrapper_t
@@ -36,5 +42,10 @@ public:
                    const std::filesystem::path&  destination,
                    std::filesystem::copy_options options,
                    std::error_code&              error) override;
+    bool exists(const std::filesystem::file_status& status) override;
+    bool is_regular_file(const std::filesystem::file_status& status) override;
+    bool has_parent_path(const std::filesystem::path& path) override;
+    std::filesystem::path weakly_canonical(const std::filesystem::path& path, std::error_code& error) override;
+    std::filesystem::path relative_path(const std::filesystem::path& path) override;
 };
 }  // namespace rocprofiler_compute_tool

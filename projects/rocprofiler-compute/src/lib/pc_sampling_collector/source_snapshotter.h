@@ -31,8 +31,8 @@ public:
                   const std::filesystem::path&           destination_root) override;
 
 private:
-    static std::filesystem::path get_destination_path(const std::filesystem::path& source_path,
-                                                      const std::filesystem::path& destination_root);
+    std::filesystem::path get_destination_path(const std::filesystem::path& source_path,
+                                               const std::filesystem::path& destination_root) const;
 
     bool is_copyable(const std::filesystem::path& source_path);
     bool create_destination_parent_directory(const std::filesystem::path& destination_path);

@@ -14,9 +14,14 @@ source_snapshotter_t::ptr source_snapshotter_t::create()
 
 std::filesystem::path source_snapshotter_impl_t::get_destination_path(
     const std::filesystem::path& source_path,
-    const std::filesystem::path& destination_root)
+    const std::filesystem::path& destination_root) const
 {
-    return destination_root / source_path.relative_path().lexically_normal();
+    std::error_code error;
+    const auto canonical_source_path = m_filesystem->weakly_canonical(source_path, error);
+    if (error)
+        throw std::runtime_error("Failed to get canonical source path: " + source_path.string());
+
+    return destination_root / m_filesystem->relative_path(canonical_source_path);
 }
 
 source_snapshotter_impl_t::source_snapshotter_impl_t()
@@ -68,14 +73,14 @@ bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_
         return false;
     }
 
-    if (!std::filesystem::exists(source_status))
+    if (!m_filesystem->exists(source_status))
     {
         std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping missing file: "
                   << absolute_source_path << '\n';
         return false;
     }
 
-    if (!std::filesystem::is_regular_file(source_status))
+    if (!m_filesystem->is_regular_file(source_status))
     {
         std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping non-regular file: "
                   << absolute_source_path << '\n';
@@ -87,15 +92,16 @@ bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_
 
 bool source_snapshotter_impl_t::create_destination_parent_directory(const std::filesystem::path& destination_path)
 {
-    if (!destination_path.has_parent_path())
+    const auto parent_path = destination_path.parent_path();
+    if (!m_filesystem->has_parent_path(parent_path))
         return true;
 
     std::error_code error;
-    m_filesystem->create_directories(destination_path.parent_path(), error);
+    m_filesystem->create_directories(parent_path, error);
     if (error)
     {
         std::clog << "[rocprofiler-compute] [source_snapshotter] Failed to create destination "
-                  << "directory " << destination_path.parent_path() << ": " << error.message() << '\n';
+                  << "directory " << parent_path << ": " << error.message() << '\n';
         return false;
     }
 

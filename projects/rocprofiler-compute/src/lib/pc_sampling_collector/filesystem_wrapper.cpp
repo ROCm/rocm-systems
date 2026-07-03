@@ -34,3 +34,28 @@ bool filesystem_wrapper_impl_t::copy_file(const std::filesystem::path&  source,
 {
     return std::filesystem::copy_file(source, destination, options, error);
 }
+
+bool filesystem_wrapper_impl_t::exists(const std::filesystem::file_status& status)
+{
+    return std::filesystem::exists(status);
+}
+
+bool filesystem_wrapper_impl_t::is_regular_file(const std::filesystem::file_status& status)
+{
+    return std::filesystem::is_regular_file(status);
+}
+
+bool filesystem_wrapper_impl_t::has_parent_path(const std::filesystem::path& path)
+{
+    return path.has_parent_path();
+}
+
+std::filesystem::path filesystem_wrapper_impl_t::weakly_canonical(const std::filesystem::path& path, std::error_code& error)
+{
+    return std::filesystem::weakly_canonical(path, error);
+}
+
+std::filesystem::path filesystem_wrapper_impl_t::relative_path(const std::filesystem::path& path)
+{
+    return path.relative_path();
+}
