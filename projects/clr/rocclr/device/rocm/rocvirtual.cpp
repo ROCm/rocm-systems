@@ -1821,7 +1821,11 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   setFenceDirty(true);
   auto cache_state = extractAqlBits(packetHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
-  if (!skipSignal && (signal.handle == 0)) {
+  // Tracker-owned only when the signal comes from Barriers().ActiveSignal() below; an externally
+  // provided signal (managed-buffer pool, IPC) is a different object, so it is not usable for idle
+  // detection and must be treated like skip_signal.
+  const bool external_signal = skipSignal || (signal.handle != 0);
+  if (!external_signal) {
     // Get active signal for current dispatch if profiling is necessary
     barrier_packet_.completion_signal = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
   } else {
@@ -1829,7 +1833,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
     barrier_packet_.completion_signal = signal;
   }
 
-  TrackQueueProgress(barrier_packet_, index);
+  TrackQueueProgress(barrier_packet_, index, external_signal);
 
   // Reset fence_dirty_ flag if we submit a barrier with system scopes
   if (cache_state == amd::Device::kCacheStateSystem) {
@@ -1895,7 +1899,11 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   auto cache_state = extractAqlBits(packetHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
 
-  if (completionSignal.handle == 0) {
+  // Tracker-owned only when the signal comes from Barriers().ActiveSignal() below; an externally
+  // provided completion signal is a different object, so it is not usable for idle detection and
+  // must be treated like skip_signal.
+  const bool external_signal = (completionSignal.handle != 0);
+  if (!external_signal) {
     // Get active signal for current dispatch if profiling is necessary
     barrier_value_packet_.completion_signal =
         Barriers().ActiveSignal(kInitSignalValueOne, skipTs ? nullptr : timestamp_);
@@ -1911,7 +1919,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
 
-  TrackQueueProgress(barrier_value_packet_, index);
+  TrackQueueProgress(barrier_value_packet_, index, external_signal);
 
   WaitForQueueSlot(index, queueMask);
   hsa_amd_barrier_value_packet_t* aql_loc = &(reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
@@ -1940,7 +1948,7 @@ bool VirtualGPU::IsQueueIdle() const {
     return true;
   }
 
-  // The last packet must have carried a queue-owned completion signal; otherwise idleness
+  // The last packet must have carried the queue-owned completion signal; otherwise idleness
   // cannot be proven.
   if (last_packet_with_signal_index_ != last_write_index_) {
     return false;

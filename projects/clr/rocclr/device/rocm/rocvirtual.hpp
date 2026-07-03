@@ -725,11 +725,9 @@ class VirtualGPU : public device::VirtualDevice {
   //! Resets the current queue state. Note: should be called after AQL queue becomes idle
   void ResetQueueStates();
 
-  //! Track the progress of the queue based on the last write index and whether the last packet
-  //! carried a queue-owned completion signal. When skip_signal is true, the last packet's signal
-  //! is externally managed (graph pre-patched dispatches), so it is not usable for idle detection.
-  //! No HSA signal handle is cached here: idleness is derived at check time from the tracker-owned
-  //! signal, whose lifetime matches the queue's signal tracker.
+  //! Record the last write index and whether the last packet is idle-trackable. Only tracker-owned
+  //! signals (from Barriers().ActiveSignal()) qualify; set skip_signal for externally-provided or
+  //! absent completion signals. IsQueueIdle() reads the tracker-owned signal at check time.
   template <typename AqlPacket>
   inline void TrackQueueProgress(const AqlPacket& packet, uint64_t index,
                                  bool skip_signal = false) {
@@ -739,9 +737,8 @@ class VirtualGPU : public device::VirtualDevice {
     }
   }
 
-  //! Returns true if the queue is considered as idle. That means all submitted packets are
-  //! complete. Note: it doesn't track the state of caches. Defined out-of-line because it reads
-  //! ProfilingSignal, which is incomplete in this header.
+  //! Returns true if the queue is considered as idle, i.e. all submitted packets are complete.
+  //! Note: it doesn't track the state of caches.
   bool IsQueueIdle() const;
 
   //! True if this marker records the same event as the preceding barrier with no
