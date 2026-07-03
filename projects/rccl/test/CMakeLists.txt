@@ -178,8 +178,10 @@ if(BUILD_TESTS)
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
+    VersionGateTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    DdaIpcTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
@@ -220,6 +222,7 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      IommuPassthrough_test.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
@@ -231,6 +234,7 @@ if(BUILD_TESTS)
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
       common/TestChecks.cpp
+      ../src/misc/kernel_config.cc
     )
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
@@ -336,6 +340,7 @@ if(BUILD_TESTS)
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
+      SymmetricKernelMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
@@ -356,7 +361,7 @@ if(BUILD_TESTS)
       if(DEFINED ASAN_RUNTIME_DIR)
         target_link_options(${test_executable} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
       endif()
-    endif()                                                                                                                                                                     
+    endif()
 
     # Add MPI-specific configuration if MPI tests are enabled
     if(ENABLE_MPI_TESTS)

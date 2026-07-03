@@ -20,18 +20,20 @@ namespace rocprofsys::pmc::collectors::gpu
 template <typename Backend>
 concept gpu_backend_contract = requires(const Backend backend) {
     { backend.get_gpu_asic_info() } -> std::same_as<asic_info>;
-    { backend.get_gpu_metrics() } -> std::same_as<metrics>;
+    { backend.get_metrics() } -> std::same_as<metrics>;
     { backend.get_memory_usage() } -> std::same_as<std::uint64_t>;
     { backend.get_hotspot_temperature() } -> std::same_as<std::int64_t>;
     { backend.get_edge_temperature() } -> std::same_as<std::int64_t>;
     { backend.get_raw_sdma_usage() } -> std::same_as<std::uint64_t>;
-    { backend.is_sdma_supported() } -> std::same_as<bool>;
+    { backend.probe_sdma_gpu_support() } -> std::same_as<bool>;
 };
 
 template <gpu_backend_contract Backend>
 class device
 {
 public:
+    using backend_type = Backend;
+
     device(std::shared_ptr<Backend> backend, size_t logical_index)
     : m_backend{ std::move(backend) }
     , m_index{ logical_index }
@@ -61,15 +63,14 @@ public:
         return m_vendor_name;
     }
 
-    [[nodiscard]] metrics get_gpu_metrics(
-        [[maybe_unused]] const enabled_metrics& enabled_cfg,
-        [[maybe_unused]] std::uint64_t          timestamp)
+    [[nodiscard]] metrics get_metrics([[maybe_unused]] const enabled_metrics& enabled_cfg,
+                                      [[maybe_unused]] std::uint64_t          timestamp)
     {
         metrics gpu_metrics{};
 
         try
         {
-            auto raw = m_backend->get_gpu_metrics();
+            auto raw = m_backend->get_metrics();
 
             if(m_supported_metrics.bits.current_socket_power)
             {
@@ -247,7 +248,7 @@ private:
         metrics raw{};
         try
         {
-            raw = m_backend->get_gpu_metrics();
+            raw = m_backend->get_metrics();
         } catch(const std::runtime_error&)
         {
             return m_supported_metrics.value != 0;
@@ -308,17 +309,12 @@ private:
         m_supported_metrics.bits.mem_clock =
             is_metric_supported(raw.mem_clock_mhz, METRIC_VALUE_NOT_SUPPORTED_16);
 
-        initialize_sdma_support();
+        m_supported_metrics.bits.sdma_usage = m_backend->probe_sdma_gpu_support() ? 1 : 0;
 
         LOG_DEBUG("Device [{}] supported metrics: {}", m_index,
                   format_supported_metrics(m_supported_metrics));
 
         return m_supported_metrics.value != 0;
-    }
-
-    void initialize_sdma_support()
-    {
-        m_supported_metrics.bits.sdma_usage = m_backend->is_sdma_supported() ? 1 : 0;
     }
 
     void collect_sdma_metrics([[maybe_unused]] const enabled_metrics& enabled_cfg,

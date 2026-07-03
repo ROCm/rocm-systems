@@ -786,6 +786,7 @@ set(HOTSWAP_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/hotswap")
 # runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
 set(HOTSWAP_BUILD_RPATH "")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(HOTSWAP_COMGR_WITHOUT_OPTIONS "")
   set(HOTSWAP_SYMBOL_TOOL "${CMAKE_NM}")
   if(NOT HOTSWAP_SYMBOL_TOOL)
     find_program(HOTSWAP_SYMBOL_TOOL NAMES llvm-nm nm HINTS ${LLVM_TOOLS_BINARY_DIR})
@@ -802,15 +803,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             OUTPUT_VARIABLE _comgr_symbols
             ERROR_QUIET)
           if(_comgr_symbol_result EQUAL 0 AND
-             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
+             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite_with_options")
             list(APPEND HOTSWAP_BUILD_RPATH "${_prefix}/${_libdir}")
             break()
+          elseif(_comgr_symbol_result EQUAL 0 AND
+                 _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
+            list(APPEND HOTSWAP_COMGR_WITHOUT_OPTIONS "${_comgr_library}")
           endif()
         endif()
       endforeach()
     endforeach()
   endforeach()
   list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
+  list(REMOVE_DUPLICATES HOTSWAP_COMGR_WITHOUT_OPTIONS)
+  if(NOT HOTSWAP_BUILD_RPATH AND HOTSWAP_COMGR_WITHOUT_OPTIONS)
+    message(WARNING
+      "Found COMGR without amd_comgr_hotswap_rewrite_with_options: "
+      "${HOTSWAP_COMGR_WITHOUT_OPTIONS}. hotswap_rewrite requires a "
+      "ROCm/llvm-project#3008-capable COMGR for local test RPATH setup.")
+  endif()
 endif()
 
 set(HOTSWAP_GFX1250_ASM "${HOTSWAP_TEST_ROOT}/fixtures/gfx1250_min.s")

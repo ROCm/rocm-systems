@@ -164,6 +164,7 @@ set(TEST_host_wait_until_some_vector 145)
 set(TEST_host_wait_until_all_status 146)
 set(TEST_host_wait_until_any_status 147)
 set(TEST_host_wait_until_some_status 148)
+set(TEST_teamreducescatter 149)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -227,6 +228,10 @@ function(write_install_test_definition TEST_NAME TEST_COMMAND TEST_LABELS TEST_T
             # Executable is at: <install>/share/rocshmem/rocshmem_functional_tests
             # Relative from working dir: ../../../../share/rocshmem/rocshmem_functional_tests
             list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/rocshmem_functional_tests")
+        elseif("${part}" STREQUAL "${CMAKE_COMMAND}")
+            # Replace build-host cmake path with portable system env
+            # This prevents build-host absolute paths from leaking into install files
+            list(APPEND INSTALL_CMD_PARTS "env")
         elseif("${part}" STREQUAL "${MPIEXEC_EXECUTABLE}")
             # Use the MPI executable found at configure time (absolute path)
             list(APPEND INSTALL_CMD_PARTS "${MPIEXEC_EXECUTABLE}")
@@ -298,8 +303,11 @@ set(ALL_TEST_VARIANT_NAMES default_stream)
 function(generate_variant_combinations global_variants test_variants output_var)
     set(ALL_COMBINATIONS "")
 
-    # Always include base variant (no global variants, no test variants)
-    list(APPEND ALL_COMBINATIONS "base")
+    # When using SLR launcher, skip base variant (no difference from uuid variant in SLR mode)
+    # Only include base variant for MPI mode
+    if(NOT USE_SLR_LAUNCHER)
+        list(APPEND ALL_COMBINATIONS "base")
+    endif()
 
     # Add global-only variants
     foreach(global_var ${global_variants})
@@ -624,8 +632,9 @@ function(_add_single_rocshmem_test)
     # Build test command - choose launcher based on MPI availability
     if(USE_SLR_LAUNCHER)
         # SLR mode: Direct execution with ROCSHMEM_SLR_NP environment variable
+        # Use system env instead of cmake -E env for portability (build-host cmake path doesn't leak into install)
         set(TEST_COMMAND
-            ${CMAKE_COMMAND} -E env "ROCSHMEM_SLR_NP=${TEST_RANKS}"
+            env "ROCSHMEM_SLR_NP=${TEST_RANKS}"
             "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
             "ROCSHMEM_HEAP_SIZE=6442450944"
         )
@@ -990,6 +999,8 @@ function(add_coll_tests)
 
     begin_test_group(CATEGORY "COLLECTIVE;SYNC" TIER standard BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME syncall RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME syncall RANKS 3 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME syncall RANKS 5 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME wavesyncall RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME wgsyncall RANKS 2 WORKGROUPS 1 THREADS 1)
 
@@ -997,6 +1008,8 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 16 THREADS 64)
         add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 32 THREADS 256)
         add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 39 THREADS 1024)
+        add_rocshmem_functional_test(NAME teamsync RANKS 3 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teamsync RANKS 5 WORKGROUPS 16 THREADS 64)
 
         add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 16 THREADS 64)
@@ -1011,6 +1024,8 @@ function(add_coll_tests)
 
     begin_test_group(CATEGORY "COLLECTIVE;BARRIER" TIER standard BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME barrierall RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME barrierall RANKS 3 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME barrierall RANKS 5 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME wavebarrierall RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME wgbarrierall RANKS 2 WORKGROUPS 1 THREADS 1)
 
@@ -1018,6 +1033,8 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 16 THREADS 64)
         add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 32 THREADS 256)
         add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 39 THREADS 1024)
+        add_rocshmem_functional_test(NAME teambarrier RANKS 3 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teambarrier RANKS 5 WORKGROUPS 16 THREADS 64)
 
         add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 16 THREADS 64)
@@ -1032,9 +1049,16 @@ function(add_coll_tests)
 
     begin_test_group(CATEGORY "COLLECTIVE" TIER standard BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME alltoall RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME alltoall RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME alltoall RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
         add_rocshmem_functional_test(NAME teambroadcast RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teambroadcast RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teambroadcast RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME fcollect RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME fcollect RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME fcollect RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME teamreduction RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teamreducescatter RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
     end_test_group()
 
     # Team split 2D test - requires exactly 4 PEs

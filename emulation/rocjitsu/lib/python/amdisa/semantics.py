@@ -296,6 +296,12 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'branch', branch_condition='always')
     if name.startswith('S_ENDPGM'):
         return InstructionSemantics(name, 'endpgm')
+    if name == 'S_TRAP':
+        # S_TRAP enters the trap handler instead of continuing with the next
+        # instruction. The simulator currently treats the instruction body as a
+        # stub, but DBT/CFG construction still needs the semantic class so the
+        # generated instruction metadata can mark it as a program terminator.
+        return InstructionSemantics(name, 'trap')
     if name == 'S_WAITCNT':
         return InstructionSemantics(name, 'waitcnt')
     if name == 'S_SET_VGPR_MSB':
@@ -317,8 +323,12 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     }
     if name in _SPLIT_WAIT:
         return InstructionSemantics(name, 'wait_counter', operation=name[2:].lower())
-    # S_BARRIER: workgroup synchronization. Set WfState::BARRIER.
-    if name == 'S_BARRIER':
+    # S_BARRIER_WAIT uses the existing whole-workgroup barrier model for the
+    # common split form where S_BARRIER_SIGNAL is immediately followed by
+    # S_BARRIER_WAIT. Arrival accounting and named-barrier ids are not modeled
+    # yet: signal stays a no-op, wait parks the wavefront, and CU release logic
+    # keys only on all non-halted sibling waves in the same workgroup.
+    if name in ('S_BARRIER', 'S_BARRIER_WAIT'):
         return InstructionSemantics(name, 'barrier')
 
     if name == 'S_SET_GPR_IDX_OFF':

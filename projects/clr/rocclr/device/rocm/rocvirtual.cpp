@@ -29,6 +29,7 @@
 #include <vector>
 #include <atomic>
 #include <cinttypes>
+#include <mutex>
 
 #if defined(__AVX__)
 #if defined(__MINGW64__)
@@ -100,6 +101,22 @@ static constexpr hsa_barrier_and_packet_t kBarrierAcquirePacket = {
 
 static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
     kBarrierPacketReleaseHeader, 0, 0, {{0}}, 0, {0}};
+
+namespace {
+
+void CL_CALLBACK ReleasePinnedMemoryCallback(cl_event event, int32_t command_exec_status,
+                                             void* user_data) {
+  (void)event;
+  (void)command_exec_status;
+  std::vector<amd::Memory*>* pinned_memories =
+      reinterpret_cast<std::vector<amd::Memory*>*>(user_data);
+  for (amd::Memory* pinned_memory : *pinned_memories) {
+    pinned_memory->release();
+  }
+  delete pinned_memories;
+}
+
+}  // namespace
 
 double Timestamp::ticksToTime_ = 0;
 
@@ -1154,7 +1171,8 @@ void VirtualGPU::AcquireQueueWithPreference() {
   std::scoped_lock lock(execution());
   if (!dedicated_queue_ && gpu_queue_ == nullptr && last_hwq_ != nullptr) {
     void* md_rb = nullptr;
-    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, last_hwq_, nullptr, &md_rb), md_rb);
+    auto* queue = roc_device_.AcquireActiveQueue(priority_, last_hwq_, nullptr, &md_rb);
+    SetGpuQueue(queue, md_rb);
     last_hwq_ = nullptr;
   }
 }
@@ -1171,7 +1189,8 @@ bool VirtualGPU::ReacquireQueueExcluding(const std::unordered_set<uint64_t>& exc
     gpu_queue_ = nullptr;
   }
   void* md_rb = nullptr;
-  SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, &excluded_ids, &md_rb), md_rb);
+  auto* queue = roc_device_.AcquireActiveQueue(priority_, nullptr, &excluded_ids, &md_rb);
+  SetGpuQueue(queue, md_rb);
   return gpu_queue_ != nullptr;
 }
 
@@ -1181,7 +1200,8 @@ uint64_t VirtualGPU::getQueueID() {
   // Dedicated queues keep their HW queue, never acquire from pool
   if (!dedicated_queue_ && gpu_queue_ == nullptr) {
     void* md_rb = nullptr;
-    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
+    auto* queue = roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb);
+    SetGpuQueue(queue, md_rb);
   }
   return gpu_queue_->id;
 }
@@ -1546,11 +1566,18 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
   const size_t kPeriod = DEBUG_HIP_GRAPH_BATCH_SIZE;
+  // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
+  // copying only kLead packets instead of a full kPeriod. The GPU starts
+  // executing the lead while the CPU keeps copying the remaining
+  // packet+metadata payload, overlapping the bulk copy with GPU execution and
+  // cutting the one-time startup idle that grew with the 256B/packet metadata.
+  constexpr size_t kLead = 8;
   auto* first_loc = reinterpret_cast<uint32_t*>(
       queueBase + (startIndex & queueMask) * kPacketSize);
 
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
-    const size_t chunkEnd  = std::min(chunkStart + kPeriod, numPackets);
+    const size_t period = (chunkStart == 0) ? kLead : kPeriod;
+    const size_t chunkEnd  = std::min(chunkStart + period, numPackets);
     const size_t thisChunk = chunkEnd - chunkStart;
     const bool isFirstChunk = (chunkStart == 0);
     const bool isLastChunk  = (chunkEnd == numPackets);
@@ -1570,18 +1597,34 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
              (thisChunk - firstCount) * kPacketSize);
     }
 
-    // Copy this chunk's metadata packets to the metadata ring buffer.
+    // Copy this chunk's metadata packets to the metadata ring buffer, following the
+    // same publish protocol as the live single-dispatch path (MetaDataPreloader::Set):
+    // write each packet body first with the headers held at HSA_PACKET_TYPE_INVALID,
+    // then arm the four packet headers last. This guarantees the CP prefetch engine
+    // never observes an armed header over a partially-written body. The captured
+    // buffer already carries the armed header value for real slots and INVALID for
+    // slots without metadata (barriers), so re-arming from it preserves both cases.
     if (flatMetadataData != nullptr && metadata_preloader_.HasMetadataQueue()) {
       static constexpr size_t kMetaSize = 256;
+      // Header dword offsets within a 256B AqlMetadataPrefetchPacket.
+      static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
+      static constexpr uint32_t kInvalidMetaHeader = HSA_PACKET_TYPE_INVALID;
       auto* metaBase = static_cast<uint8_t*>(metadata_preloader_.GetQueueBase());
-      const uint8_t* metaSrc = flatMetadataData->data() + chunkStart * kMetaSize;
-      if (chunkSlot + thisChunk <= queueSize) {
-        memcpy(metaBase + chunkSlot * kMetaSize, metaSrc, thisChunk * kMetaSize);
-      } else {
-        const size_t firstCount = queueSize - chunkSlot;
-        memcpy(metaBase + chunkSlot * kMetaSize, metaSrc, firstCount * kMetaSize);
-        memcpy(metaBase, metaSrc + firstCount * kMetaSize,
-               (thisChunk - firstCount) * kMetaSize);
+      for (size_t j = 0; j < thisChunk; ++j) {
+        const uint64_t slot = (startIndex + chunkStart + j) & queueMask;
+        uint8_t* dst = metaBase + slot * kMetaSize;
+        const uint8_t* src = flatMetadataData->data() + (chunkStart + j) * kMetaSize;
+        for (size_t h = 0; h < 4; ++h) {
+          // Hold the header INVALID while the body region after it is copied.
+          std::memcpy(dst + kHdrOff[h], &kInvalidMetaHeader, sizeof(kInvalidMetaHeader));
+          const size_t bodyStart = kHdrOff[h] + sizeof(uint32_t);
+          const size_t bodyEnd = (h + 1 < 4) ? kHdrOff[h + 1] : kMetaSize;
+          std::memcpy(dst + bodyStart, src + bodyStart, bodyEnd - bodyStart);
+        }
+        // Arm the headers last, in reverse order (header3 -> header0)
+        for (size_t h = 4; h-- > 0;) {
+          std::memcpy(dst + kHdrOff[h], src + kHdrOff[h], sizeof(uint32_t));
+        }
       }
     }
 
@@ -1634,14 +1677,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         }
         if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
              IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
-            kernelNames != nullptr && i < kernelNames->size() &&
-            (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH || pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC)) {
+            kernelNames != nullptr && i < kernelNames->size() && isKernelDispatch) {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
                   (*kernelNames)[i] != nullptr ? (*kernelNames)[i]->c_str() : "<null>",
                   dev().index());
-          // Select the layout per-packet: ext kernel-dispatch packets can be
-          // emitted opportunistically regardless of the global ext_dispatch_packet_
-          // setting, so the base helper would misread their fields.
           if (isBaseKernelDispatch) {
             logAqlDispatchPacket(roc_device_, gpu_queue_, hdr, slot, slotIdx, priority_);
           } else {
@@ -1650,6 +1689,16 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
                 reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(slot), slotIdx,
                 priority_);
           }
+        } else if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+                    IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
+                   pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                   amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE) {
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2,
+                  "Graph ShaderName : [Graph vendor barrier value], device id : %u",
+                  dev().index());
+          logAqlBarrierValuePacket(
+              roc_device_, gpu_queue_, hdr,
+              reinterpret_cast<const hsa_amd_barrier_value_packet_t*>(slot), slotIdx, priority_);
         } else if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
                     IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
                    (pktType == HSA_PACKET_TYPE_BARRIER_AND ||
@@ -2008,7 +2057,8 @@ VirtualGPU::~VirtualGPU() {
     // Dedicated queues keep their HW queue, never acquire from pool
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
       void* md_rb = nullptr;
-      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
+      auto* queue = roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb);
+      SetGpuQueue(queue, md_rb);
     }
     // Windows requires an interrupt in more cases than Linux for OS fence updates
     force_irq_ = IS_WINDOWS;
@@ -2077,8 +2127,9 @@ bool VirtualGPU::create() {
   // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   void* md_rb = nullptr;
-  SetGpuQueue(roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
-                                       dedicated_queue_, nullptr, nullptr, &md_rb), md_rb);
+  auto* queue = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
+                                         dedicated_queue_, nullptr, nullptr, &md_rb);
+  SetGpuQueue(queue, md_rb);
   if (!gpu_queue_) return false;
 
   if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() >= 5) {
@@ -2298,6 +2349,35 @@ void VirtualGPU::ReleaseHwQueue() {
 }
 
 // ================================================================================================
+// hsa_amd_profiling_async_copy_enable() is a process-global toggle shared by
+// every agent/queue, so it cannot be scoped per-stream. Multiple VirtualGPUs
+// (one per stream, potentially on different host threads) may want SDMA
+// profiling enabled for their in-flight command at the same time. Guard the
+// global with a process-wide refcount under a lock: enable on the 0->1
+// transition, disable on the 1->0 transition, so it stays on exactly while at
+// least one profiled command is outstanding and is never toggled off from
+// under a concurrent profiled command on another stream.
+namespace {
+std::mutex g_sdmaProfilingLock;
+uint32_t g_sdmaProfilingRefCount = 0;
+
+void acquireSdmaProfiling() {
+  std::lock_guard<std::mutex> lock(g_sdmaProfilingLock);
+  if (g_sdmaProfilingRefCount++ == 0) {
+    Hsa::profiling_async_copy_enable(true);
+  }
+}
+
+void releaseSdmaProfiling() {
+  std::lock_guard<std::mutex> lock(g_sdmaProfilingLock);
+  assert(g_sdmaProfilingRefCount > 0 && "unbalanced SDMA profiling release");
+  if (--g_sdmaProfilingRefCount == 0) {
+    Hsa::profiling_async_copy_enable(false);
+  }
+}
+}  // namespace
+
+// ================================================================================================
 /* profilingBegin, when profiling is enabled, creates a timestamp to save in
  * virtualgpu's timestamp_, saves the pointer timestamp_ to the command's data
  * and then calls start() to get the current host timestamp.
@@ -2306,7 +2386,8 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
   // Dedicated queues keep their HW queue, never acquire from pool
   if (!dedicated_queue_ && gpu_queue_ == nullptr) {
     void* md_rb = nullptr;
-    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
+    auto* queue = roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb);
+    SetGpuQueue(queue, md_rb);
   }
   // Track the current command
   command_ = &command;
@@ -2330,10 +2411,14 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
     timestamp_ = new Timestamp(this, command);
     command.data().emplace_back(timestamp_);
     timestamp_->start();
-    // Enable SDMA profiling on the first access if profiling is set
-    // Its not per command basis
-    if (sdmaProfiling && !Barriers().GetSDMAProfiling()) {
-      Barriers().SetSDMAProfiling(true);
+    // Enable SDMA profiling for this command only; disabled in profilingEnd().
+    // The underlying HSA async-copy profiling flag is process-global, so use a
+    // refcounted, locked acquire instead of a per-stream bool (which races
+    // across concurrent streams and could disable profiling out from under
+    // another stream's in-flight profiled copy).
+    if (sdmaProfiling) {
+      acquireSdmaProfiling();
+      sdma_profiling_for_cmd_ = true;
     }
   }
 
@@ -2384,6 +2469,11 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
       }
       timestamp_ = nullptr;
     }
+  }
+
+  if (sdma_profiling_for_cmd_) {
+    releaseSdmaProfiling();
+    sdma_profiling_for_cmd_ = false;
   }
 
   // Certain commands like map/unmap memory may not need hw_events as its not a
@@ -3284,6 +3374,103 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::SchedulePinnedMemoryRelease(amd::HostQueue& queue,
+                                             std::vector<amd::Memory*> pinned_memory) {
+  if (pinned_memory.empty()) {
+    return;
+  }
+
+  std::unique_ptr<std::vector<amd::Memory*>> pinned_memory_ptr =
+      std::make_unique<std::vector<amd::Memory*>>(std::move(pinned_memory));
+
+  amd::Command* marker = new amd::Marker(queue, false);
+  if (marker == nullptr) {
+    releaseGpuMemoryFence();
+    for (amd::Memory* pinned : *pinned_memory_ptr) {
+      pinned->release();
+    }
+    return;
+  }
+
+  marker->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+  constexpr bool kNonBlockingCallback = false;
+  if (!marker->setCallback(CL_COMPLETE, ReleasePinnedMemoryCallback, pinned_memory_ptr.get(),
+                           kNonBlockingCallback)) {
+    marker->release();
+    releaseGpuMemoryFence();
+    for (amd::Memory* pinned : *pinned_memory_ptr) {
+      pinned->release();
+    }
+    return;
+  }
+
+  marker->enqueue();
+  marker->release();
+  pinned_memory_ptr.release();
+}
+
+// ================================================================================================
+void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  const std::vector<amd::BatchWriteMemoryOp>& write_ops = cmd.WriteOps();
+
+  if (!amd::IS_HIP) {
+    device::Memory::SyncFlags sync_flags;
+    sync_flags.skipEntire_ = false;
+
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      dev().getRocMemory(op.dst_memory)->syncCacheFromHost(*this, sync_flags);
+    }
+  }
+
+  if (!blitMgr().WriteBufferBatch(write_ops)) {
+    LogError("SubmitBatchWriteMemory: Batch write failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd();
+    return;
+  }
+
+  if (!amd::IS_HIP) {
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      op.dst_memory->signalWrite(&dev());
+    }
+  }
+
+  profilingEnd();
+  SchedulePinnedMemoryRelease(*cmd.queue(), cmd.TakePinnedMemory());
+}
+
+// ================================================================================================
+void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  const std::vector<amd::BatchReadMemoryOp>& read_ops = cmd.ReadOps();
+
+  if (!amd::IS_HIP) {
+    for (const amd::BatchReadMemoryOp& op : read_ops) {
+      dev().getRocMemory(op.src_memory)->syncCacheFromHost(*this);
+    }
+  }
+
+  if (!blitMgr().ReadBufferBatch(read_ops)) {
+    LogError("SubmitBatchReadMemory: Batch read failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd();
+    return;
+  }
+
+  profilingEnd();
+  SchedulePinnedMemoryRelease(*cmd.queue(), cmd.TakePinnedMemory());
+}
+
+// ================================================================================================
 void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
@@ -4174,7 +4361,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
   ClPrint(amd::LOG_INFO, amd::LOG_KERN2, "ShaderName : %s", gpuKernel.getDemangledName().c_str());
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-          "argSize = %u, KernargSegmentByteSize = %u, KernargSegmentAlignment = %u",
+          "argSize = %zu, KernargSegmentByteSize = %zu, KernargSegmentAlignment = %zu",
           std::min(gpuKernel.KernargSegmentByteSize(), signature.paramsSize()),
           gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment());
 
@@ -4680,7 +4867,8 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     // HSA signal callback
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
       void* md_rb = nullptr;
-      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
+      auto* queue = roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb);
+      SetGpuQueue(queue, md_rb);
     }
     flush(vcmd.GetBatchHead());
     SetCoalesceWindow(0, nullptr);
@@ -5056,41 +5244,38 @@ void VirtualGPU::MetaDataPreloader::SetPacket(
   if (preload_length > 0) {
     const uint8_t* kernargs = reinterpret_cast<const uint8_t*>(aql->kernarg_address);
     assert(kernargs);
-    // Kernarg preload offset is in DWORDs
     const uint8_t* src = kernargs + pending_preload_offset_ * sizeof(uint32_t);
     uint16_t remain = preload_length;
 
-    // Copy kernarg_preload 0-14
-    uint16_t n = std::min<uint16_t>(
-        remain, sizeof(metadata->kernarg_preload_0_14) / sizeof(uint32_t));
-    if (n < (sizeof(metadata->kernarg_preload_0_14) / sizeof(uint32_t))) {
-      std::memset(metadata->kernarg_preload_0_14, 0, sizeof(metadata->kernarg_preload_0_14));
-    }
+    constexpr uint16_t kSec0 = sizeof(metadata->kernarg_preload_0_14) / sizeof(uint32_t);
+    constexpr uint16_t kSec1 = sizeof(metadata->kernarg_preload_15_29) / sizeof(uint32_t);
+    constexpr uint16_t kSec2 = sizeof(metadata->kernarg_preload_30_31) / sizeof(uint32_t);
+
+    // Copy data first, zero only the tail — avoids double-writing the prefix
+    // that the old memset+memcpy pattern caused.
+    uint16_t n = std::min<uint16_t>(remain, kSec0);
     std::memcpy(metadata->kernarg_preload_0_14, src, n * sizeof(uint32_t));
+    if (n < kSec0) {
+      std::memset(&metadata->kernarg_preload_0_14[n], 0, (kSec0 - n) * sizeof(uint32_t));
+    }
     remain -= n;
 
-    // Copy kernarg_preload 15-29
     if (remain > 0) {
       src += n * sizeof(uint32_t);
-      n = std::min<uint16_t>(
-          remain, sizeof(metadata->kernarg_preload_15_29) / sizeof(uint32_t));
-      if (n < (sizeof(metadata->kernarg_preload_15_29) / sizeof(uint32_t))) {
-        std::memset(metadata->kernarg_preload_15_29, 0,
-                    sizeof(metadata->kernarg_preload_15_29));
-      }
+      n = std::min<uint16_t>(remain, kSec1);
       std::memcpy(metadata->kernarg_preload_15_29, src, n * sizeof(uint32_t));
+      if (n < kSec1) {
+        std::memset(&metadata->kernarg_preload_15_29[n], 0, (kSec1 - n) * sizeof(uint32_t));
+      }
       remain -= n;
 
-      // Copy kernarg_preload 30-31
       if (remain > 0) {
         src += n * sizeof(uint32_t);
-        n = std::min<uint16_t>(
-            remain, sizeof(metadata->kernarg_preload_30_31) / sizeof(uint32_t));
-        if (n < (sizeof(metadata->kernarg_preload_30_31) / sizeof(uint32_t))) {
-          std::memset(metadata->kernarg_preload_30_31, 0,
-                      sizeof(metadata->kernarg_preload_30_31));
-        }
+        n = std::min<uint16_t>(remain, kSec2);
         std::memcpy(metadata->kernarg_preload_30_31, src, n * sizeof(uint32_t));
+        if (n < kSec2) {
+          std::memset(&metadata->kernarg_preload_30_31[n], 0, (kSec2 - n) * sizeof(uint32_t));
+        }
       }
     }
   }
@@ -5099,6 +5284,7 @@ void VirtualGPU::MetaDataPreloader::SetPacket(
   // Plain stores are sufficient here: the subsequent packet_store_release on the main
   // AQL dispatch header provides a release fence that orders all metadata writes (body
   // and headers) before the CP sees the valid dispatch packet.
+
   uint32_t metadata_header = GetType(header) | metadata_version_header_;
   metadata->header3 = metadata_header;
   metadata->header2 = metadata_header;
