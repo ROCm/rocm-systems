@@ -471,9 +471,9 @@ namespace hip {
     /// destroyed. Behavior:
     ///   - Subsequent work-submit / sync APIs on this stream must return
     ///     hipErrorStreamDetached (enforced by CHECK_STREAM_DETACHED).
-    ///   - If a stream capture is active on this stream, the capture is
-    ///     invalidated (status -> hipStreamCaptureStatusInvalidated) and every
-    ///     forked parallel branch is marked invalidated as well.
+    ///   - If a stream capture is active or already invalidated on this stream,
+    ///     Detach() performs the invalidated EndCapture cleanup that API calls
+    ///     can no longer reach.
     ///   - hipStreamDestroy continues to succeed on a detached stream.
     void Detach();
     /// Returns true once Detach() has been called.
