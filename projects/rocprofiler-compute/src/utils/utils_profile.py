@@ -679,12 +679,17 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
     Joins native counter data with kernel trace data and writes
     counter_collection CSVs for further processing to pmc_perf.csv.
     """
-    groupby_columns = ("dispatch_id", "counter_name")
+    groupby_columns = ["dispatch_id", "counter_name"]
 
     for native_path in (Path(workload_dir) / "out/pmc_1").glob(
         "*_native_counter_collection.csv"
     ):
-        aggregated_counters = _aggregate_counter_csv(native_path, groupby_columns)
+        # Sum counter_value across rows sharing a (dispatch_id, counter_name)
+        aggregated_counters = csv_ops.groupby_aggregate(
+            csv_ops.iter_csv_dicts(str(native_path)),
+            groupby_columns,
+            {"counter_value": "sum"},
+        )
 
         pid = native_path.stem.split("_")[0]
         kernel_data_filename = str(
@@ -692,8 +697,8 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
         )
         kernel_data, _ = csv_ops.read_csv_as_dicts(kernel_data_filename)
 
-        merged_rows = csv_ops.iter_merge_rows(
-            aggregated_counters.values(),
+        merged_rows = csv_ops.merge_rows(
+            aggregated_counters,
             kernel_data,
             left_on="dispatch_id",
             right_on="Dispatch_Id",
@@ -704,28 +709,6 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
             kernel_data_filename.replace("kernel_trace", "counter_collection"),
             rocprofv3_counter_data,
         )
-
-
-def _aggregate_counter_csv(
-    csv_path: Path,
-    groupby_columns: tuple[str, ...],
-) -> dict[tuple[str, ...], dict]:
-    """Group CSV rows by key columns, summing counter_value."""
-    aggregated: dict[tuple[str, ...], dict] = {}
-    for row in csv_ops.iter_csv_dicts(str(csv_path)):
-        key = tuple(row.get(col, "") for col in groupby_columns)
-        if key not in aggregated:
-            try:
-                row["counter_value"] = float(row.get("counter_value", 0))
-            except (ValueError, TypeError):
-                row["counter_value"] = 0.0
-            aggregated[key] = row
-            continue
-        try:
-            aggregated[key]["counter_value"] += float(row.get("counter_value", 0))
-        except (ValueError, TypeError):
-            pass
-    return aggregated
 
 
 def _build_rocprofv3_counter_row(merged: dict) -> dict:

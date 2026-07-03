@@ -175,12 +175,15 @@ def assign_group_ids(
 
 
 def groupby_aggregate(
-    rows: list[dict], group_by_columns: list[str], agg_dict: dict[str, str]
+    rows: Iterable[dict], group_by_columns: list[str], agg_dict: dict[str, str]
 ) -> list[dict]:
     """
     Group rows by columns and aggregate using specified functions.
 
     Equivalent to: df.groupby(group_by_columns).agg(agg_dict)
+
+    Accepts any iterable of rows, so a streaming source (e.g.
+    iter_csv_dicts) can be passed without materializing the whole file.
 
     Example:
         rows = [
@@ -315,7 +318,7 @@ def pivot_table(
     return result
 
 
-def iter_merge_rows(
+def merge_rows(
     left_rows: Iterable[dict],
     right_rows: Iterable[dict],
     left_on: str,
@@ -323,13 +326,13 @@ def iter_merge_rows(
     how: str = "inner",
 ) -> Iterator[dict]:
     """
-    Lazy merge of two row sources based on key columns.
+    Lazily merge two row sources based on key columns.
 
     Equivalent to: pd.merge(left_df, right_df, left_on=left_on,
                             right_on=right_on, how=how)
 
-    Right side is materialized into a lookup dict; left side and
-    output are streamed.
+    Right side is materialized into a lookup dict; left side and output
+    are streamed. Wrap in list() when the result must be re-iterated.
     """
     if how not in ("inner", "left", "right", "outer"):
         raise ValueError(f"Unsupported join type: {how}")
@@ -356,20 +359,3 @@ def iter_merge_rows(
             if key not in matched_left_keys:
                 for right_row in right_row_list:
                     yield right_row.copy()
-
-
-def merge_rows(
-    left_rows: list[dict],
-    right_rows: list[dict],
-    left_on: str,
-    right_on: str,
-    how: str = "inner",
-) -> list[dict]:
-    """
-    Merge two lists of rows based on key columns.
-
-    Equivalent to: pd.merge(left_df, right_df, left_on=left_on,
-                            right_on=right_on, how=how)
-
-    """
-    return list(iter_merge_rows(left_rows, right_rows, left_on, right_on, how))
