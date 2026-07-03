@@ -7,9 +7,9 @@ The percentages below are approximate API-name coverage against declarations par
 ## Snapshot
 
 - Contract tests: 232
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 498
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
 - Declared HIP runtime APIs directly exercised by contract tests: 193
-- Approximate declared API-name coverage: 38.8%
+- Approximate declared API-name coverage: 39.0%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
