@@ -9,9 +9,7 @@
 #include <cctype>
 #include <filesystem>
 #include <set>
-#include <string>
 #include <string_view>
-#include <vector>
 
 using namespace rocprofiler_compute_tool;
 
@@ -45,12 +43,12 @@ std::string_view pc_sampling_collector_impl_t::path_from_source_frame(std::strin
     return frame.substr(0, separator_position);
 }
 
-std::vector<std::filesystem::path> pc_sampling_collector_impl_t::source_paths_from_comment(
-    std::string_view comment)
+void pc_sampling_collector_impl_t::collect_source_paths_from_comment(
+    std::string_view                 comment,
+    std::set<std::filesystem::path>& source_paths)
 {
-    std::vector<std::filesystem::path> source_paths;
-    size_t                             frame_start = 0;
-    const auto                         separator   = source_frame_separator();
+    size_t     frame_start = 0;
+    const auto separator   = source_frame_separator();
 
     while (frame_start <= comment.size())
     {
@@ -61,7 +59,7 @@ std::vector<std::filesystem::path> pc_sampling_collector_impl_t::source_paths_fr
         const auto path      = path_from_source_frame(frame);
         if (!path.empty())
         {
-            source_paths.emplace_back(std::string{path});
+            source_paths.emplace(path.begin(), path.end());
         }
 
         if (separator_position == std::string_view::npos)
@@ -69,8 +67,6 @@ std::vector<std::filesystem::path> pc_sampling_collector_impl_t::source_paths_fr
 
         frame_start = separator_position + separator.size();
     }
-
-    return source_paths;
 }
 
 pc_sampling_collector_t::ptr pc_sampling_collector_t::create()
@@ -116,8 +112,7 @@ void pc_sampling_collector_impl_t::finalize(code_object_writer_t& writer)
                 const auto& inst = m_translator->get_instruction(id, pc);
                 Expects(inst.size);
                 writer.write_instruction(inst);
-                const auto paths = source_paths_from_comment(inst.comment);
-                m_source_paths.insert(paths.cbegin(), paths.cend());
+                collect_source_paths_from_comment(inst.comment, m_source_paths);
                 pc += inst.size;
             }
             writer.end_symbol();

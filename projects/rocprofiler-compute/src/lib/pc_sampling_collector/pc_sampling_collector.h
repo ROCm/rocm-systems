@@ -10,7 +10,6 @@
 #include <memory>
 #include <set>
 #include <string_view>
-#include <vector>
 
 namespace rocprofiler_compute_tool
 {
@@ -46,8 +45,9 @@ private:
     static std::string_view source_frame_separator();
     static bool is_source_line_token(std::string_view token);
     static std::string_view path_from_source_frame(std::string_view frame);
-    static std::vector<std::filesystem::path> source_paths_from_comment(
-        std::string_view comment);
+    static void collect_source_paths_from_comment(
+        std::string_view                 comment,
+        std::set<std::filesystem::path>& source_paths);
 
     code_object_translator_t::ptr m_translator;
     std::set<std::filesystem::path> m_source_paths;
