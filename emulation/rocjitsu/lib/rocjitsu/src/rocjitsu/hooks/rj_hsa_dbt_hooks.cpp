@@ -24,6 +24,7 @@
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/dbt/virtual_lds_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/version.h"
 #include "util/arena_alloc.h"
 #include "util/intrusive_list.h"
 #include "util/log.h"
@@ -39,8 +40,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <exception>
 #include <execinfo.h>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -51,6 +54,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
@@ -346,6 +350,16 @@ void trace_virtual_lds_dispatch(const char *format, ...) {
   std::fprintf(stderr, "\n");
 }
 
+/// @brief Return true when symbol-object tracing is explicitly enabled.
+///
+/// @details The dispatch trace needs the symbol map so packet lines can name
+/// descriptors, but printing every resolved rocBLAS symbol is too noisy for
+/// reduced repros. Keep that high-volume trace behind its own flag.
+[[nodiscard]] bool trace_kernel_symbol_resolution_enabled() {
+  static const bool enabled = env_flag_enabled("ROCJITSU_TRACE_KERNEL_SYMBOLS");
+  return enabled;
+}
+
 [[nodiscard]] bool trace_virtual_lds_kernarg_enabled() {
   static const bool enabled = env_flag_enabled("ROCJITSU_TRACE_VIRTUAL_LDS_KERNARG");
   return enabled;
@@ -569,6 +583,181 @@ struct DetectedElfTarget {
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   uint32_t mach = 0;
 };
+
+/// @brief Translation cache format version.
+///
+/// @details The translated ELF is stored directly as the cache file payload.
+/// This version is part of the filename so changing the key policy or payload
+/// interpretation naturally invalidates old files without scanning the cache.
+constexpr std::string_view kDbtCacheFormatVersion = "1";
+
+/// @brief Cheap 128-bit content digest used to name DBT cache entries.
+struct DbtCacheDigest {
+  uint64_t lo = 0;
+  uint64_t hi = 0;
+};
+
+/// @brief Compute a stable process-independent digest for source ELF bytes.
+///
+/// @details This is not used for adversarial authentication; it only avoids
+/// retranslating identical code objects. Two differently seeded FNV-1a streams
+/// make accidental filename collisions very unlikely for framework code-object
+/// caches while keeping the hook dependency-free.
+[[nodiscard]] DbtCacheDigest digest_bytes(std::span<const uint8_t> bytes) {
+  DbtCacheDigest digest{.lo = 1469598103934665603ull, .hi = 1099511628211ull};
+  for (uint8_t byte : bytes) {
+    digest.lo ^= byte;
+    digest.lo *= 1099511628211ull;
+    digest.hi ^=
+        static_cast<uint64_t>(byte) + 0x9e3779b97f4a7c15ull + (digest.hi << 6) + (digest.hi >> 2);
+    digest.hi *= 14029467366897019727ull;
+  }
+  return digest;
+}
+
+/// @brief Return a short hex representation for cache-key components.
+[[nodiscard]] std::string hex64(uint64_t value) {
+  char buffer[17] = {};
+  std::snprintf(buffer, sizeof(buffer), "%016llx", static_cast<unsigned long long>(value));
+  return std::string(buffer);
+}
+
+/// @brief Fingerprint the loaded hook shared object for cache invalidation.
+///
+/// @details A source rebuild may keep the same project version, so the cache key
+/// also includes the loaded `rocjitsu_hooks` file's size, inode, and mtime. A
+/// rebuilt or replaced hook will therefore miss old cache files even when the
+/// source ELF bytes are unchanged.
+[[nodiscard]] std::string hook_binary_fingerprint() {
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void *>(&hook_binary_fingerprint), &info) == 0 ||
+      info.dli_fname == nullptr) {
+    return "unknown-hook";
+  }
+
+  struct stat statbuf {};
+  if (stat(info.dli_fname, &statbuf) != 0)
+    return std::string("unstat-") + hex64(std::hash<std::string_view>{}(info.dli_fname));
+
+  uint64_t mtime_nsec = 0;
+#if defined(__linux__)
+  mtime_nsec = static_cast<uint64_t>(statbuf.st_mtim.tv_sec) * 1000000000ull +
+               static_cast<uint64_t>(statbuf.st_mtim.tv_nsec);
+#else
+  mtime_nsec = static_cast<uint64_t>(statbuf.st_mtime);
+#endif
+  return hex64(static_cast<uint64_t>(statbuf.st_dev)) + "-" +
+         hex64(static_cast<uint64_t>(statbuf.st_ino)) + "-" +
+         hex64(static_cast<uint64_t>(statbuf.st_size)) + "-" + hex64(mtime_nsec);
+}
+
+/// @brief Resolve the persistent DBT cache directory.
+///
+/// @details `ROCJITSU_DBT_CACHE_DIR` is useful for isolated experiments. The
+/// default follows the normal user cache location and returns nullopt when no
+/// writable user cache root can be inferred.
+[[nodiscard]] std::optional<std::filesystem::path> dbt_cache_directory() {
+  if (env_flag_enabled("ROCJITSU_DBT_DISABLE_CACHE"))
+    return std::nullopt;
+
+  if (const char *override_dir = std::getenv("ROCJITSU_DBT_CACHE_DIR");
+      override_dir != nullptr && override_dir[0] != '\0') {
+    return std::filesystem::path(override_dir);
+  }
+
+  if (const char *xdg_cache = std::getenv("XDG_CACHE_HOME");
+      xdg_cache != nullptr && xdg_cache[0] != '\0') {
+    return std::filesystem::path(xdg_cache) / "rocjitsu" / "dbt";
+  }
+
+  const char *home = std::getenv("HOME");
+  if (home == nullptr || home[0] == '\0')
+    return std::nullopt;
+  return std::filesystem::path(home) / ".cache" / "rocjitsu" / "dbt";
+}
+
+/// @brief Build the cache filename for one source->target translation.
+[[nodiscard]] std::optional<std::filesystem::path>
+dbt_cache_path(std::span<const uint8_t> source, const DetectedElfTarget &source_target,
+               const TargetInfo &target, const BinaryTranslatorOptions &options) {
+  auto dir = dbt_cache_directory();
+  if (!dir)
+    return std::nullopt;
+
+  const DbtCacheDigest digest = digest_bytes(source);
+  const std::string filename =
+      "co-v" + std::string(kDbtCacheFormatVersion) + "-rj" + ROCJITSU_VERSION + "-hook" +
+      hook_binary_fingerprint() + "-srca" + std::to_string(source_target.arch) + "-srcm" +
+      hex64(source_target.mach) + "-tgta" + std::to_string(target.arch) + "-tgtm" +
+      hex64(target.mach) + "-skip" + (options.skip_failed_kernels ? "1" : "0") + "-sz" +
+      hex64(source.size()) + "-" + hex64(digest.lo) + hex64(digest.hi) + ".hsaco";
+  return *dir / filename;
+}
+
+/// @brief Read a translated ELF from @p path if it exists and is non-empty.
+[[nodiscard]] std::optional<std::vector<uint8_t>>
+read_dbt_cache_file(const std::filesystem::path &path) {
+  FILE *file = std::fopen(path.c_str(), "rb");
+  if (file == nullptr)
+    return std::nullopt;
+
+  if (std::fseek(file, 0, SEEK_END) != 0) {
+    std::fclose(file);
+    return std::nullopt;
+  }
+  const long end = std::ftell(file);
+  if (end <= 0) {
+    std::fclose(file);
+    return std::nullopt;
+  }
+  rewind(file);
+
+  std::vector<uint8_t> bytes(static_cast<size_t>(end));
+  const size_t read = std::fread(bytes.data(), 1, bytes.size(), file);
+  const int close_status = std::fclose(file);
+  if (read != bytes.size() || close_status != 0)
+    return std::nullopt;
+  return bytes;
+}
+
+/// @brief Persist a translated ELF under an atomic cache filename.
+void write_dbt_cache_file(const std::filesystem::path &path, std::span<const uint8_t> bytes) {
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  if (ec) {
+    log_message(kLogInfo, "failed to create DBT cache directory %s: %s", path.parent_path().c_str(),
+                ec.message().c_str());
+    return;
+  }
+
+  const std::filesystem::path tmp =
+      path.string() + ".tmp." + std::to_string(static_cast<unsigned long long>(getpid()));
+  FILE *file = std::fopen(tmp.c_str(), "wb");
+  if (file == nullptr) {
+    log_message(kLogInfo, "failed to open DBT cache file %s: errno=%d", tmp.c_str(), errno);
+    return;
+  }
+  const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), file);
+  const int close_status = std::fclose(file);
+  if (written != bytes.size() || close_status != 0) {
+    log_message(kLogInfo, "failed to write DBT cache file %s: wrote=%zu size=%zu close=%d errno=%d",
+                tmp.c_str(), written, bytes.size(), close_status, errno);
+    std::filesystem::remove(tmp, ec);
+    return;
+  }
+
+  std::filesystem::rename(tmp, path, ec);
+  if (ec) {
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(tmp, path, ec);
+  }
+  if (ec) {
+    log_message(kLogInfo, "failed to publish DBT cache file %s: %s", path.c_str(),
+                ec.message().c_str());
+    std::filesystem::remove(tmp, ec);
+  }
+}
 
 /// @brief Detect the rocjitsu ISA family and exact ELF MACH from an AMDGPU ELF header.
 ///
@@ -873,6 +1062,13 @@ public:
       return;
     const std::string kernel_name = normalize_kernel_symbol_name(symbol_name);
     std::lock_guard lock(mutex_);
+    // Keep a generic symbol-name map for diagnostics even when the kernel does
+    // not need a virtual-LDS sidecar. Dispatch packets carry only the loaded
+    // descriptor address, so this is the cheapest way to explain a hanging
+    // packet without consulting msgpack metadata.
+    SymbolRecord &known_symbol = known_symbols_[symbol.handle];
+    known_symbol.executable = executable.handle;
+    known_symbol.kernel_name = kernel_name;
     for (size_t load_index = loads_.size(); load_index > 0; --load_index) {
       LoadEntry &load = loads_[load_index - 1];
       if (load.executable != executable.handle)
@@ -902,6 +1098,17 @@ public:
     if (symbol.handle == 0 || kernel_object == 0)
       return;
     std::lock_guard lock(mutex_);
+    auto known_it = known_symbols_.find(symbol.handle);
+    if (known_it != known_symbols_.end()) {
+      known_it->second.kernel_object = kernel_object;
+      if (trace_kernel_symbol_resolution_enabled()) {
+        trace_virtual_lds_dispatch("symbol kernel_object symbol=%llu kernel=%s object=0x%llx",
+                                   static_cast<unsigned long long>(symbol.handle),
+                                   known_it->second.kernel_name.c_str(),
+                                   static_cast<unsigned long long>(kernel_object));
+      }
+    }
+
     auto it = symbols_.find(symbol.handle);
     if (it == symbols_.end())
       return;
@@ -943,6 +1150,23 @@ public:
     return std::nullopt;
   }
 
+  /// @brief Return the best-known symbol name for a loaded kernel descriptor.
+  ///
+  /// @details This is diagnostic-only state populated from normal HSA symbol
+  /// queries. It deliberately covers all queried kernels, not just kernels with
+  /// virtual-LDS metadata, so packet traces can name non-rewritten dispatches.
+  [[nodiscard]] std::optional<std::string> kernel_name_for_object(uint64_t kernel_object) {
+    if (kernel_object == 0)
+      return std::nullopt;
+    std::lock_guard lock(mutex_);
+    for (const auto &[symbol_handle, known_symbol] : known_symbols_) {
+      (void)symbol_handle;
+      if (known_symbol.kernel_object == kernel_object)
+        return known_symbol.kernel_name;
+    }
+    return std::nullopt;
+  }
+
   void erase_executable(hsa_executable_t executable) {
     std::lock_guard lock(mutex_);
     for (auto it = loads_.begin(); it != loads_.end();) {
@@ -957,15 +1181,28 @@ public:
       else
         ++it;
     }
+    for (auto it = known_symbols_.begin(); it != known_symbols_.end();) {
+      if (it->second.executable == executable.handle)
+        it = known_symbols_.erase(it);
+      else
+        ++it;
+    }
   }
 
   void clear() {
     std::lock_guard lock(mutex_);
     loads_.clear();
     symbols_.clear();
+    known_symbols_.clear();
   }
 
 private:
+  struct SymbolRecord {
+    uint64_t executable = 0;
+    std::string kernel_name;
+    uint64_t kernel_object = 0;
+  };
+
   struct LoadEntry {
     uint64_t executable = 0;
     uint64_t guest_agent = 0;
@@ -977,6 +1214,7 @@ private:
   std::mutex mutex_;
   std::vector<LoadEntry> loads_;
   std::unordered_map<uint64_t, ResolvedKernel> symbols_;
+  std::unordered_map<uint64_t, SymbolRecord> known_symbols_;
 };
 
 /// @brief Record memory-backed HSA code-object bytes for later DBT translation.
@@ -1954,12 +2192,35 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
 
   const hsa_status_t status = original(file, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr) {
-    // File-backed readers do not expose stable ELF bytes through the later
-    // load-agent callback. Hook the create path anyway so users get a direct
-    // warning instead of an unexplained INVALID_ISA pass-through failure.
+    // `hsa_executable_load_agent_code_object` only receives the opaque reader,
+    // not the original file descriptor. Copy the file bytes while we still have
+    // the descriptor so HIP extension modules that use file-backed readers take
+    // the same DBT path as memory-backed framework code objects.
+    struct stat statbuf {};
+    if (file >= 0 && fstat(file, &statbuf) == 0 && statbuf.st_size > 0) {
+      auto *owned = new (std::nothrow) std::vector<uint8_t>(static_cast<size_t>(statbuf.st_size));
+      if (owned != nullptr) {
+        size_t done = 0;
+        while (done < owned->size()) {
+          const ssize_t read =
+              pread(file, owned->data() + done, owned->size() - done, static_cast<off_t>(done));
+          if (read <= 0)
+            break;
+          done += static_cast<size_t>(read);
+        }
+        if (done == owned->size() &&
+            CodeObjectReaderRegistry::instance().store(*code_object_reader, owned->data(),
+                                                       owned->size(), owned)) {
+          log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
+                      static_cast<unsigned long long>(code_object_reader->handle), owned->size());
+          return status;
+        }
+        delete owned;
+      }
+    }
     std::fprintf(stderr,
-                 "[rocjitsu-hooks] file-backed code-object reader=%llu is not translated; use "
-                 "hsa_code_object_reader_create_from_memory for DBT hook translation\n",
+                 "[rocjitsu-hooks] file-backed code-object reader=%llu could not be copied for "
+                 "DBT translation\n",
                  static_cast<unsigned long long>(code_object_reader->handle));
   }
   return status;
@@ -2569,6 +2830,20 @@ public:
         ensure_intercept_packet_private_size(packet, user_pkt_index + index);
 
         auto plan = rewrite_plan_for_packet(packet);
+        std::optional<std::string> packet_kernel_name;
+        if (trace_virtual_lds_dispatch_enabled()) {
+          packet_kernel_name =
+              VirtualLdsRuntimeRegistry::instance().kernel_name_for_object(packet.kernel_object);
+        }
+        trace_virtual_lds_dispatch(
+            "intercept kernel packet=%llu header=0x%x object=0x%llx packet_group=%u "
+            "private=%u grid=%u,%u,%u workgroup=%u,%u,%u kernarg=%p symbol=%s plan=%s",
+            static_cast<unsigned long long>(user_pkt_index + index), header,
+            static_cast<unsigned long long>(packet.kernel_object), packet.group_segment_size,
+            packet.private_segment_size, packet.grid_size_x, packet.grid_size_y, packet.grid_size_z,
+            packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z,
+            packet.kernarg_address, packet_kernel_name ? packet_kernel_name->c_str() : "<unknown>",
+            plan ? plan->kernel_name.c_str() : "<none>");
         if (!plan) {
           if (packet.group_segment_size > kCdna3HardwareLdsBytes) {
             trace_virtual_lds_dispatch(
@@ -2698,9 +2973,9 @@ public:
         const uint32_t original_group_segment_size = packet.group_segment_size;
         const uint32_t original_private_segment_size = packet.private_segment_size;
         packet.kernel_object = plan->virtual_kernel_object;
-        // The virtual descriptor has zero fixed LDS, and the backing buffer covers
-        // both static and dynamic group segment bytes. Leaving dynamic LDS in the
-        // packet would still ask hardware to allocate LDS and defeat the switch.
+        // Once the sidecar is selected, the backing buffer is the only
+        // representable LDS allocation. Leaving dynamic LDS in the packet would
+        // still ask hardware to allocate the oversized scratchpad.
         packet.group_segment_size = 0;
         // Keep packet scratch metadata aligned with the virtual descriptor. The
         // DBT sidecar may introduce private spills, and ROCR's scratch accounting
@@ -2712,7 +2987,7 @@ public:
         trace_virtual_lds_dispatch(
             "rewrote intercept_packet=%llu kernel=%s original_object=0x%llx "
             "virtual_object=0x%llx static=%u packet_group=%u private=%u->%u requested=%llu "
-            "groups=%u,%u,%u strides=%u,%u,%u backing_bytes=%zu kernarg=%p backing=%p "
+            "hw_group=%u groups=%u,%u,%u strides=%u,%u,%u backing_bytes=%zu kernarg=%p backing=%p "
             "state=0x%llx "
             "packet_pointer=%d",
             static_cast<unsigned long long>(user_pkt_index + index), plan->kernel_name.c_str(),
@@ -2720,9 +2995,10 @@ public:
             static_cast<unsigned long long>(plan->virtual_kernel_object), plan->static_lds_bytes,
             original_group_segment_size, original_private_segment_size,
             plan->virtual_private_segment_size, static_cast<unsigned long long>(requested_lds),
-            geometry->groups_x, geometry->groups_y, geometry->groups_z, geometry->stride_x,
-            geometry->stride_y, geometry->stride_z, backing_bytes, packet.kernarg_address,
-            buffers.backing, static_cast<unsigned long long>(state_address), packet_pointer);
+            packet.group_segment_size, geometry->groups_x, geometry->groups_y, geometry->groups_z,
+            geometry->stride_x, geometry->stride_y, geometry->stride_z, backing_bytes,
+            packet.kernarg_address, buffers.backing, static_cast<unsigned long long>(state_address),
+            packet_pointer);
       }
     }
 
@@ -3063,14 +3339,12 @@ private:
     // the host hardware allocation limit. The normal descriptor remains the
     // correct path for LDS-using kernels whose launch fits on CDNA3.
     if (requested_lds <= kCdna3HardwareLdsBytes) {
-      if (packet.group_segment_size > kCdna3HardwareLdsBytes) {
-        trace_virtual_lds_dispatch(
-            "virtual-LDS plan below threshold packet=%llu slot=%u kernel=%s static=%u "
-            "packet_group=%u requested=%llu",
-            static_cast<unsigned long long>(packet_id), slot, plan->kernel_name.c_str(),
-            plan->static_lds_bytes, packet.group_segment_size,
-            static_cast<unsigned long long>(requested_lds));
-      }
+      trace_virtual_lds_dispatch(
+          "virtual-LDS plan below threshold packet=%llu slot=%u kernel=%s static=%u "
+          "packet_group=%u requested=%llu",
+          static_cast<unsigned long long>(packet_id), slot, plan->kernel_name.c_str(),
+          plan->static_lds_bytes, packet.group_segment_size,
+          static_cast<unsigned long long>(requested_lds));
       return true;
     }
 
@@ -3145,9 +3419,8 @@ private:
                   sizeof(dispatch_state));
       packet.kernarg_address = buffers.kernarg;
     }
-    // The virtual descriptor has zero fixed LDS, and the backing buffer covers
-    // both static and dynamic group segment bytes. Leaving dynamic LDS in the
-    // packet would still ask hardware to allocate LDS and defeat the switch.
+    // The sidecar represents an oversized LDS allocation in global memory, so
+    // the hardware LDS request must be zero for the rewritten packet.
     packet.group_segment_size = 0;
     // Keep packet scratch metadata aligned with the virtual descriptor. The DBT
     // sidecar may introduce private spills, and ROCR's scratch accounting uses
@@ -3168,16 +3441,17 @@ private:
     trace_virtual_lds_dispatch(
         "rewrote packet=%llu slot=%u kernel=%s original_object=0x%llx virtual_object=0x%llx "
         "static=%u packet_group=%u private=%u->%u requested=%llu groups=%u,%u,%u "
-        "strides=%u,%u,%u backing_bytes=%zu kernarg=%p backing=%p state=0x%llx "
-        "packet_pointer=%d",
+        "hw_group=%u strides=%u,%u,%u backing_bytes=%zu kernarg=%p backing=%p "
+        "state=0x%llx packet_pointer=%d",
         static_cast<unsigned long long>(packet_id), slot, plan->kernel_name.c_str(),
         static_cast<unsigned long long>(original_kernel_object),
         static_cast<unsigned long long>(plan->virtual_kernel_object), plan->static_lds_bytes,
         original_group_segment_size, original_private_segment_size,
         plan->virtual_private_segment_size, static_cast<unsigned long long>(requested_lds),
-        geometry->groups_x, geometry->groups_y, geometry->groups_z, geometry->stride_x,
-        geometry->stride_y, geometry->stride_z, backing_bytes, packet.kernarg_address,
-        buffers.backing, static_cast<unsigned long long>(state_address), packet_pointer);
+        geometry->groups_x, geometry->groups_y, geometry->groups_z, packet.group_segment_size,
+        geometry->stride_x, geometry->stride_y, geometry->stride_z, backing_bytes,
+        packet.kernarg_address, buffers.backing, static_cast<unsigned long long>(state_address),
+        packet_pointer);
     return true;
   }
 
@@ -4028,41 +4302,76 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return status;
   }
 
-  log_message(kLogInfo, "translating reader=%llu %s/%s -> %s/%s mach=0x%x",
-              static_cast<unsigned long long>(code_object_reader.handle),
-              elf_mach_name(source_target.mach), arch_name(source_target.arch),
-              config->target.name.data(), arch_name(config->target.arch), config->target.mach);
-
-  AmdGpuCodeObject source_object(bytes, size);
-  if (!source_object.is_valid()) {
-    std::fprintf(stderr, "[rocjitsu-hooks] source bytes are not a valid AMDGPU code object\n");
-    return HSA_STATUS_ERROR;
-  }
-
-  rocjitsu::TranslatedCodeObject translated;
   BinaryTranslatorOptions translator_options;
   // Runtime DBT loads large framework code objects where some kernel symbols may
   // never be dispatched in the current process. Keep the code object loadable if
   // an independent kernel fails translation; the skipped-kernel diagnostic names
   // the symbol that is redirected to a target no-op stub.
   translator_options.skip_failed_kernels = true;
-  BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
-                              translator_options);
-  translated = translator.translate(source_object);
 
-  dump_code_object_if_requested("source", code_object_reader, std::span<const uint8_t>(bytes, size),
-                                translated.skipped_kernel_symbols);
-  dump_code_object_if_requested("translated", code_object_reader, translated.elf_bytes,
-                                translated.skipped_kernel_symbols);
+  std::vector<uint8_t> translated_elf;
+  std::vector<std::string> skipped_kernel_symbols;
+  const auto cache_path = dbt_cache_path(std::span<const uint8_t>(bytes, size), source_target,
+                                         config->target, translator_options);
+  if (cache_path) {
+    if (auto cached = read_dbt_cache_file(*cache_path)) {
+      auto cached_metadata = parse_virtual_lds_metadata_section(
+          std::span<const uint8_t>(cached->data(), cached->size()));
+      if (cached_metadata) {
+        translated_elf = std::move(*cached);
+        log_message(kLogInfo, "DBT cache hit reader=%llu path=%s",
+                    static_cast<unsigned long long>(code_object_reader.handle),
+                    cache_path->c_str());
+      } else {
+        log_message(kLogInfo, "DBT cache entry has malformed virtual-LDS metadata; ignoring %s",
+                    cache_path->c_str());
+      }
+    }
+  }
 
-  print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
-  if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
-    std::fprintf(stderr, "[rocjitsu-hooks] translation failed; refusing original code object\n");
-    return HSA_STATUS_ERROR;
+  if (translated_elf.empty()) {
+    log_message(kLogInfo, "translating reader=%llu %s/%s -> %s/%s mach=0x%x",
+                static_cast<unsigned long long>(code_object_reader.handle),
+                elf_mach_name(source_target.mach), arch_name(source_target.arch),
+                config->target.name.data(), arch_name(config->target.arch), config->target.mach);
+
+    AmdGpuCodeObject source_object(bytes, size);
+    if (!source_object.is_valid()) {
+      std::fprintf(stderr, "[rocjitsu-hooks] source bytes are not a valid AMDGPU code object\n");
+      return HSA_STATUS_ERROR;
+    }
+
+    BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
+                                translator_options);
+    rocjitsu::TranslatedCodeObject translated = translator.translate(source_object);
+
+    skipped_kernel_symbols = translated.skipped_kernel_symbols;
+    dump_code_object_if_requested("source", code_object_reader,
+                                  std::span<const uint8_t>(bytes, size), skipped_kernel_symbols);
+    dump_code_object_if_requested("translated", code_object_reader, translated.elf_bytes,
+                                  skipped_kernel_symbols);
+
+    print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
+    if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
+      std::fprintf(stderr, "[rocjitsu-hooks] translation failed; refusing original code object\n");
+      return HSA_STATUS_ERROR;
+    }
+
+    translated_elf = std::move(translated.elf_bytes);
+    if (cache_path) {
+      write_dbt_cache_file(*cache_path, translated_elf);
+      log_message(kLogInfo, "DBT cache stored reader=%llu path=%s",
+                  static_cast<unsigned long long>(code_object_reader.handle), cache_path->c_str());
+    }
+  } else {
+    dump_code_object_if_requested("source", code_object_reader,
+                                  std::span<const uint8_t>(bytes, size), skipped_kernel_symbols);
+    dump_code_object_if_requested("translated", code_object_reader, translated_elf,
+                                  skipped_kernel_symbols);
   }
 
   auto virtual_lds_metadata = parse_virtual_lds_metadata_section(
-      std::span<const uint8_t>(translated.elf_bytes.data(), translated.elf_bytes.size()));
+      std::span<const uint8_t>(translated_elf.data(), translated_elf.size()));
   if (!virtual_lds_metadata) {
     std::fprintf(stderr,
                  "[rocjitsu-hooks] translated code object has malformed virtual-LDS metadata\n");
@@ -4070,8 +4379,7 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   }
 
   hsa_code_object_reader_t translated_reader{};
-  hsa_status_t status =
-      create_translated_reader(std::move(translated.elf_bytes), &translated_reader);
+  hsa_status_t status = create_translated_reader(std::move(translated_elf), &translated_reader);
   if (status != HSA_STATUS_SUCCESS) {
     std::fprintf(stderr, "[rocjitsu-hooks] failed to create translated code-object reader: %d\n",
                  static_cast<int>(status));
