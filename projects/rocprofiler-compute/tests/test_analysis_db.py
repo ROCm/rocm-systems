@@ -228,19 +228,19 @@ def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
     ]
 
     for expr in cases:
-        with (
-            patch(
-                "rocprof_compute_analyze.analysis_db.console_warning"
-            ) as mock_warning,
-            patch("rocprof_compute_analyze.analysis_db.console_debug") as mock_debug,
-        ):
-            result = db_analysis.evaluate(
-                "test_metric",
-                expr,
-                pmc_df,
-                sys_info,
-                parse=False,
-            )
+        with patch(
+            "rocprof_compute_analyze.analysis_db.console_warning"
+        ) as mock_warning:
+            with patch(
+                "rocprof_compute_analyze.analysis_db.console_debug"
+            ) as mock_debug:
+                result = db_analysis.evaluate(
+                    "test_metric",
+                    expr,
+                    pmc_df,
+                    sys_info,
+                    parse=False,
+                )
 
         assert result is None, f"Expected None for '{expr}', got {result}"
 
@@ -275,23 +275,21 @@ def test_calc_builtin_vars_processes_per_xcd_first():
         "DERIVED_VAR": "$PER_XCD_VAR + 5",  # Depends on PER_XCD_VAR -> 25
     }
 
-    with (
-        patch(
-            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-            return_value="MI300",
-        ),
-        patch(
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ):
+        with patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
-        ),
-        patch(
-            "utils.utils_counter_defs.get_build_in_vars",
-            return_value=mock_builtin_vars,
-        ),
-    ):
-        db_analysis.calc_builtin_vars(
-            pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
-        )
+        ):
+            with patch(
+                "utils.utils_counter_defs.get_build_in_vars",
+                return_value=mock_builtin_vars,
+            ):
+                db_analysis.calc_builtin_vars(
+                    pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
+                )
 
     # Verify PER_XCD var was computed
     assert sys_info["PER_XCD_VAR"] == 20
@@ -313,23 +311,21 @@ def test_calc_builtin_vars_with_dataframe_expressions():
         "SCALED_TOTAL": "$TOTAL_COUNT * $multiplier",  # 120
     }
 
-    with (
-        patch(
-            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-            return_value="MI300",
-        ),
-        patch(
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ):
+        with patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
-        ),
-        patch(
-            "utils.utils_counter_defs.get_build_in_vars",
-            return_value=mock_builtin_vars,
-        ),
-    ):
-        db_analysis.calc_builtin_vars(
-            pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
-        )
+        ):
+            with patch(
+                "utils.utils_counter_defs.get_build_in_vars",
+                return_value=mock_builtin_vars,
+            ):
+                db_analysis.calc_builtin_vars(
+                    pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
+                )
 
     assert sys_info["TOTAL_COUNT"] == 60
     assert sys_info["SCALED_TOTAL"] == 120
@@ -387,21 +383,21 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         ],
     })
 
-    with (
-        patch(
-            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-            return_value="MI300",
-        ),
-        patch(
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ):
+        with patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
-        ),
-        patch(
-            "utils.utils_counter_defs.get_build_in_vars",
-            return_value=mock_builtin_vars,
-        ),
-    ):
-        result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
+        ):
+            with patch(
+                "utils.utils_counter_defs.get_build_in_vars",
+                return_value=mock_builtin_vars,
+            ):
+                result = db_analysis.calc_dataframe_expressions(
+                    pmc_df, sys_info, expression_df
+                )
 
     assert result.iloc[0] == 51
     # None from evaluate becomes NaN in pandas Series
@@ -569,17 +565,17 @@ def test_calc_expressions_noise_clamp():
 
     # calc_expressions per-workload bracket.
     clear_noise_clamp_warnings()
-    with (
-        patch("rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}),
-        patch(
-            "rocprof_compute_analyze.analysis_db.console_warning"
-        ) as console_warning_mock,
-        patch(
-            "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
-        ) as print_noise_clamp_summary_mock,
-        patch.object(db_analysis, "validate_dual_issue_metrics"),
+    with patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
     ):
-        analyzer.calc_expressions()
+        with patch(
+            "rocprof_compute_analyze.analysis_db.console_warning"
+        ) as console_warning_mock:
+            with patch(
+                "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
+            ) as print_noise_clamp_summary_mock:
+                with patch.object(db_analysis, "validate_dual_issue_metrics"):
+                    analyzer.calc_expressions()
 
     variance_warning_calls = [
         warning_call
