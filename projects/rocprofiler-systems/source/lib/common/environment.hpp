@@ -73,9 +73,6 @@ to_bool(std::string_view value, bool fallback = false)
 
     if(value.find_first_not_of("0123456789") == std::string_view::npos)
     {
-        // Parse with from_chars so a very large all-digit value cannot throw
-        // (std::stoi would throw std::out_of_range). Any non-zero digit string,
-        // including one that overflows, is truthy.
         std::uint64_t numeric{};
         const auto*   last   = value.data() + value.size();
         const auto [ptr, ec] = std::from_chars(value.data(), last, numeric);

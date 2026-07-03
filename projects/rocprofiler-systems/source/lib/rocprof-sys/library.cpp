@@ -8,6 +8,7 @@
 //
 #include "api.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"

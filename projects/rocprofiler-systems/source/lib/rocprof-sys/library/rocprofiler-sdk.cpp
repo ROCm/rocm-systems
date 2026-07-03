@@ -4,6 +4,7 @@
 #include "core/rocprofiler-sdk.hpp"
 #include "api.hpp"
 #include "binary/analysis.hpp"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"

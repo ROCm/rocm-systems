@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/delimit.hpp"
 #include "core/demangler.hpp"
 #include "core/timemory.hpp"
 #include <cstdint>

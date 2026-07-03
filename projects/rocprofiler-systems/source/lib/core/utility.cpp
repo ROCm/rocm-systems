@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "utility.hpp"
-#include <cstdint>
 
+#include "common/delimit.hpp"
 #include "logger/debug.hpp"
 
 namespace rocprofsys

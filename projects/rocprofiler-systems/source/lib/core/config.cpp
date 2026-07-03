@@ -4,6 +4,7 @@
 #include "config.hpp"
 #include "amd_smi.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/static_object.hpp"
@@ -16,7 +17,6 @@
 #include "rocprofiler-sdk.hpp"
 #include "utility.hpp"
 
-#include "common/delimit.hpp"
 #include <timemory/backends/capability.hpp>
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>

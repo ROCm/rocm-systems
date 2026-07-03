@@ -3,15 +3,14 @@
 
 #include "log.hpp"
 #include "fwd.hpp"
-#include <cstdint>
+
 #include <spdlog/fmt/fmt.h>
 
 #include <cmath>
+#include <cstdint>
 #include <iomanip>
 #include <regex>
 #include <vector>
-
-namespace color = tim::log::color;
 
 namespace
 {

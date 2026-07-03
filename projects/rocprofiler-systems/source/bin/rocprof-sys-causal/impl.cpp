@@ -4,13 +4,13 @@
 #include "rocprof-sys-causal.hpp"
 
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
 
-#include "common/delimit.hpp"
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/utility/argparse.hpp>
@@ -188,10 +188,9 @@ prepare_command_for_run(char* _exe, std::vector<char*>& _argv)
 
         if(!_injected)
         {
-            throw std::runtime_error(
-                fmt::format("rocprof-sys-causal was unable to match \"{}\" to any "
-                            "arguments on the command line: \"{}\"",
-                            launcher, fmt::join(_argv, " ")));
+            throw std::runtime_error(fmt::format(
+                R"(rocprof-sys-causal was unable to match "{}" to any arguments on the command line: "{}")",
+                launcher, fmt::join(_argv, " ")));
         }
 
         std::swap(_argv, _new_argv);
