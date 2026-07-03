@@ -204,6 +204,18 @@ contract:
   Contract_Occupancy_AvailableDynamicSmem_IsWithinDeviceLimit:
     <<: *level_0
     tags: [occupancy]
+  Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_DefaultMatchesPlain:
+    <<: *level_0
+    tags: [occupancy_ext]
+  Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_DisableCachingOverrideSucceeds:
+    <<: *level_0
+    tags: [occupancy_ext]
+  Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_RejectsInvalidInputs:
+    <<: *level_0
+    tags: [occupancy_ext]
+  Contract_OccupancyExt_ClusterQueries_CapabilityGatedRange:
+    <<: *level_0
+    tags: [occupancy_ext]
   Contract_GraphCapture_BeginEndEmptyStream_ProducesGraph:
     <<: *level_0
     tags: [graph_capture]

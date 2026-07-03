@@ -18,6 +18,7 @@ The first domains are:
 - `kernel`: tiny in-source kernel launch contracts
 - `graph`: graph lifecycle plus simple memcpy and memset node contracts
 - `occupancy`: portable occupancy query contracts for a tiny in-source kernel
+- `occupancy_ext`: occupancy with-flags and cluster query contracts
 - `graph_capture`: stream capture lifecycle and captured memcpy graph contracts
 - `graph_kernel`: graph kernel node contracts with tiny in-source kernels
 - `graph_event`: graph event record and wait node contracts
