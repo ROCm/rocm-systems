@@ -5,8 +5,8 @@
 
 #include "common/defines.h"
 #include "common/env_vars.hpp"
-#include <spdlog/fmt/fmt.h>
 #include "logger/debug.hpp"
+#include <spdlog/fmt/fmt.h>
 
 #include <timemory/utility/filepath.hpp>
 
@@ -672,9 +672,10 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
         {
             if(first->find(_env_val_str) != std::string::npos) return;
             auto _val = first->substr(_key.size());
-            *first    = (_mode == update_mode::PREPEND)
-                            ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
-                            : fmt::format("{}={}{}{}", _env_var, _val, _join_delim, _env_val_str);
+            *first =
+                (_mode == update_mode::PREPEND)
+                    ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
+                    : fmt::format("{}={}{}{}", _env_var, _val, _join_delim, _env_val_str);
             return;
         }
 
