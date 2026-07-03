@@ -37,8 +37,7 @@ from vendored import yaml
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 
-# Hint appended to the invalid --block error in both the profile and analyze
-# paths so the message stays identical. --list-blocks lists all valid ids/aliases.
+# Shared suffix for the invalid --block error in the profile and analyze paths.
 INVALID_BLOCK_HINT = (
     "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
 )
