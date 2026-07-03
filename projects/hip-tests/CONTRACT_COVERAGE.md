@@ -68,7 +68,7 @@ The percentages below are approximate API-name coverage against declarations par
 |---|---:|---:|---:|
 | Error handling | 3 | 3 | 100.0% |
 | Event | 6 | 8 | 75.0% |
-| Occupancy | 7 | 7 | 100.0% |
+| Occupancy | 7 | 10 | 70.0% |
 | Graph / capture | 53 | 96 | 55.2% |
 | Stream | 5 | 23 | 21.7% |
 | Runtime / device | 28 | 45 | 62.2% |
@@ -343,6 +343,7 @@ hipIpcOpenEventHandle
 5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection, and executable-graph update paths (whole-graph `hipGraphExecUpdate` with topology-change reporting plus per-node exec setters for host, child-graph, event-record, and event-wait nodes) are now covered; remaining node attribute variants and debug dot export remain.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch and CU-mask stream variants, logging controls, and link-type queries remain.
+8. Occupancy APIs beyond current basics: max-active-blocks-per-multiprocessor (with the module variants and their with-flags forms), max-potential-block-size, and available-dynamic-shared-memory-per-block are now covered; the non-module with-flags variant (`hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags`) and the cluster occupancy helpers (`hipOccupancyMaxActiveClusters`, `hipOccupancyMaxPotentialClusterSize`) remain.
 
 ## Update procedure
 
