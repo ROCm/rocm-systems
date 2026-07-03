@@ -3,14 +3,15 @@
 
 #pragma once
 
-#include "common/join.hpp"
 #include <cstdint>
+#include <spdlog/fmt/fmt.h>
 
 #include <timemory/log/color.hpp>
 #include <timemory/utility/backtrace.hpp>
 
 #include <iosfwd>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <tuple>
 
@@ -60,12 +61,17 @@ private:
                                   bool);
 };
 
+template <typename... Args>
+inline std::string
+log_join(Args&&... args)
+{
+    std::ostringstream oss;
+    const char*        sep = "";
+    ((oss << sep << args, sep = " "), ...);
+    return oss.str();
+}
+
 #define ROCPROFSYS_ADD_LOG_ENTRY(...)                                                    \
     log_entry::add_log_entry(                                                            \
         { log_entry::source_location{ __FUNCTION__, __FILE__, __LINE__ },                \
-          ::rocprofsys::join(' ', __VA_ARGS__) })
-
-#define ROCPROFSYS_ADD_DETAILED_LOG_ENTRY(DELIM, ...)                                    \
-    log_entry::add_log_entry(                                                            \
-        { log_entry::source_location{ __FUNCTION__, __FILE__, __LINE__ },                \
-          ::rocprofsys::join(DELIM, __VA_ARGS__) })
+          log_join(__VA_ARGS__) })

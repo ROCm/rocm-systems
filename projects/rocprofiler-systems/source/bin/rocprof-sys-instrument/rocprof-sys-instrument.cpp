@@ -1255,9 +1255,9 @@ main(int argc, char** argv)
     {
         //  Helper function for adding regex expressions
         auto add_regex = [](auto& regex_array, const string_t& regex_expr) {
-            ROCPROFSYS_ADD_DETAILED_LOG_ENTRY("", "Adding regular expression \"",
-                                              regex_expr, "\" to regex_array@",
-                                              &regex_array);
+            ROCPROFSYS_ADD_LOG_ENTRY(
+                fmt::format(R"(Adding regular expression "{}" to regex_array@{})",
+                            regex_expr, fmt::ptr(&regex_array)));
             if(!regex_expr.empty())
                 regex_array.emplace_back(std::regex(regex_expr, regex_opts));
         };
