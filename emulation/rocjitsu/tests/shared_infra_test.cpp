@@ -931,6 +931,113 @@ TEST(L1VectorCacheTest, UcWriteInvalidatesResidentLine) {
   EXPECT_EQ(value, kNewValue);
 }
 
+TEST(L1VectorCacheTest, NonTemporalReadInvalidatesResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x8100;
+  constexpr uint32_t kOldValue = 0x11111111;
+  constexpr uint32_t kNewValue = 0x22222222;
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(uint32_t)> bytes{};
+
+  mem.write32(kAddr, kOldValue);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kOldValue);
+
+  l2.write(kAddr, reinterpret_cast<const uint8_t *>(&kNewValue), sizeof(kNewValue),
+           amdgpu::Mtype::RW);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/true, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kNewValue);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  EXPECT_EQ(value, kNewValue);
+}
+
+TEST(L1VectorCacheTest, L1BypassReadInvalidatesResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x8200;
+  constexpr uint32_t kOldValue = 0x11111111;
+  constexpr uint32_t kNewValue = 0x22222222;
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(uint32_t)> bytes{};
+
+  mem.write32(kAddr, kOldValue);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kOldValue);
+
+  l2.write(kAddr, reinterpret_cast<const uint8_t *>(&kNewValue), sizeof(kNewValue),
+           amdgpu::Mtype::RW);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/true);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kNewValue);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  EXPECT_EQ(value, kNewValue);
+}
+
+TEST(L1VectorCacheTest, NonTemporalWriteInvalidatesResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x8300;
+  constexpr uint32_t kOldValue = 0x11111111;
+  constexpr uint32_t kNewValue = 0x22222222;
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(uint32_t)> bytes{};
+
+  mem.write32(kAddr, kOldValue);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kOldValue);
+
+  std::array<uint8_t, 64 * sizeof(uint32_t)> store_bytes{};
+  std::memcpy(store_bytes.data(), &kNewValue, sizeof(kNewValue));
+  l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, store_bytes.data(),
+           amdgpu::Mtype::RW, /*non_temporal=*/true);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  EXPECT_EQ(value, kNewValue);
+}
+
 // ---------------------------------------------------------------------------
 // CU factory tests — verify all 9 ISAs can be instantiated
 // ---------------------------------------------------------------------------
