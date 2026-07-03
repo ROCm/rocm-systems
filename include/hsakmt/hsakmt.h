@@ -1384,9 +1384,7 @@ hsaKmtGetAmdGPUDeviceFd(
 
 /**
   Imports an external semaphore (e.g. from Vulkan) into ROCr's KMD
-  context, returning an opaque handle. The HSA-layer queue signal/wait
-  API that consumes the resulting handle has not landed yet; for now
-  the handle round-trips through hsaKmtDestroyExternalSemaphore only.
+  context, returning an opaque handle.
 */
 
 HSAKMT_STATUS
@@ -1407,6 +1405,31 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtDestroyExternalSemaphore(
     HSA_EXTERNAL_SEMAPHORE_HANDLE Handle   //IN
+    );
+
+/**
+  Enqueues a GPU-side signal of an imported external semaphore on
+  QueueId, ordered behind prior submissions.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueSignalExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
+    );
+
+/**
+  Posts a GPU-side wait on an imported external semaphore.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueWaitExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
     );
 
 #ifdef __cplusplus
