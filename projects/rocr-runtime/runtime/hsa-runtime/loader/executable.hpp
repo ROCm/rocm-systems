@@ -623,6 +623,10 @@ private:
   Segment* SymbolSegment(hsa_agent_t agent, amd::hsa::code::Symbol* sym);
   Segment* SectionSegment(hsa_agent_t agent, amd::hsa::code::Section* sec);
 
+  // gfx125x: allocate a separate executable region and emit, per kernel, a stub
+  // that jumps to the real entry, then redirect the kernel descriptor to it.
+  hsa_status_t InstallTrampolinesGfx125x(hsa_agent_t agent);
+
   amd::hsa::common::ReaderWriterLock rw_lock_;
   hsa_profile_t profile_;
   Context *context_;
@@ -637,6 +641,19 @@ private:
   std::vector<std::shared_ptr<ExecutableObject>> objects;
   std::shared_ptr<Segment> program_allocation_segment;
   std::vector<std::shared_ptr<LoadedCodeObjectImpl>> loaded_code_objects;
+
+  // Kernel-entry trampolines (gfx125x).
+  // kd_fixups_ is collected per-LoadCodeObject; trampoline_segments_ persists for
+  // the lifetime of the executable so it can be frozen and destroyed normally.
+  struct KdFixup {
+    Segment* code_seg;
+    uint64_t kd_vaddr;
+    int64_t entry_off;
+    uint32_t inst_pref;
+  };
+  bool trampoline_enabled_gfx125x_ = false;
+  std::vector<KdFixup> kd_fixups_;
+  std::vector<std::shared_ptr<Segment>> trampoline_segments_;
 };
 
 class AmdHsaCodeLoader : public Loader {
