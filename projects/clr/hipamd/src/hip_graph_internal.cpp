@@ -1641,13 +1641,16 @@ void GraphExec::PacketBatch::rebuildFilteredLists(
       enabledKernelNames.push_back(dispatchKernelNames[i]);
       appendPacketToFlatBuffer(dispatchPackets[i], filteredFlatPacketData,
                                filteredValidPacketFullHeaders);
-      // Append corresponding metadata slot (zero-filled for barriers)
+      // Append corresponding metadata slot. Slots without captured metadata are
+      // published as HSA_PACKET_TYPE_INVALID so the CP prefetch engine skips them.
       if (hasMetadata) {
         size_t metaOff = filteredFlatMetadataData.size();
         filteredFlatMetadataData.resize(metaOff + kMetadataPktSize, 0);
+        uint8_t* slot = filteredFlatMetadataData.data() + metaOff;
         if (i < dispatchMetadataPackets.size() && dispatchMetadataPackets[i] != nullptr) {
-          std::memcpy(filteredFlatMetadataData.data() + metaOff,
-                      dispatchMetadataPackets[i], kMetadataPktSize);
+          std::memcpy(slot, dispatchMetadataPackets[i], kMetadataPktSize);
+        } else {
+          invalidateMetadataSlot(slot);
         }
       }
       packetToFilteredIndex[dispatchPackets[i]] = filteredIdx;
@@ -2073,6 +2076,18 @@ void GraphExec::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pkt_raw,
 }
 
 // ================================================================================================
+// Publish an empty metadata slot as HSA_PACKET_TYPE_INVALID. The four metadata packet headers
+// live at offsets {0, 64, 128, 192} within the 256-byte AqlMetadataPrefetchPacket layout, and
+// the low byte of each is the packet type.
+void GraphExec::PacketBatch::invalidateMetadataSlot(uint8_t* slot) {
+  static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
+  static constexpr uint32_t kInvalidMetadataHeader = 1;  // HSA_PACKET_TYPE_INVALID
+  for (size_t h = 0; h < 4; ++h) {
+    std::memcpy(slot + kHdrOff[h], &kInvalidMetadataHeader, sizeof(kInvalidMetadataHeader));
+  }
+}
+
+// ================================================================================================
 // Rebuild the flat packet buffer from the current dispatchPackets contents.
 void GraphExec::PacketBatch::rebuildFlatBuffer() {
   const size_t n = dispatchPackets.size();
@@ -2086,13 +2101,16 @@ void GraphExec::PacketBatch::rebuildFlatBuffer() {
     appendPacketToFlatBuffer(pkt_raw, flatPacketData, validPacketFullHeaders);
   }
   // Build flat metadata buffer (kMetadataPktSize per slot).
-  // Entries without metadata (barriers) are zero-filled.
+  // Slots without captured metadata (barriers, uncaptured dispatches) are published as
+  // HSA_PACKET_TYPE_INVALID so the CP prefetch engine skips them.
   if (!dispatchMetadataPackets.empty()) {
     flatMetadataData.resize(n * kMetadataPktSize, 0);
-    for (size_t i = 0; i < n && i < dispatchMetadataPackets.size(); ++i) {
-      if (dispatchMetadataPackets[i] != nullptr) {
-        std::memcpy(flatMetadataData.data() + i * kMetadataPktSize,
-                    dispatchMetadataPackets[i], kMetadataPktSize);
+    for (size_t i = 0; i < n; ++i) {
+      uint8_t* slot = flatMetadataData.data() + i * kMetadataPktSize;
+      if (i < dispatchMetadataPackets.size() && dispatchMetadataPackets[i] != nullptr) {
+        std::memcpy(slot, dispatchMetadataPackets[i], kMetadataPktSize);
+      } else {
+        invalidateMetadataSlot(slot);
       }
     }
   }

@@ -301,13 +301,6 @@ class VirtualGPU : public device::VirtualDevice {
     //! Adds a raw signal for dependency tracking
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
 
-    //! Get/Set SDMA profiling
-    bool GetSDMAProfiling() { return sdma_profiling_; }
-    void SetSDMAProfiling(bool profile) {
-      sdma_profiling_ = profile;
-      Hsa::profiling_async_copy_enable(profile);
-    }
-
    private:
     //! Creates HSA signal with the specified scope
     bool CreateSignal(ProfilingSignal* signal, bool interrupt = false) const;
@@ -323,7 +316,6 @@ class VirtualGPU : public device::VirtualDevice {
     std::stack<ProfilingSignal*> signal_pool_;       //!< The pool of free signals without interrupt
     std::vector<ProfilingSignal*> signal_list_;      //!< The pool of all signals for processing
     size_t current_id_ = 0;                          //!< Last submitted signal
-    bool sdma_profiling_ = false;                    //!< If TRUE, then SDMA profiling is enabled
     const VirtualGPU& gpu_;                          //!< VirtualGPU, associated with this tracker
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue
     std::vector<hsa_signal_t> dynamic_queue_waits_;   //!< Extra raw signals for a wait in this queue
@@ -818,6 +810,7 @@ class VirtualGPU : public device::VirtualDevice {
   };
 
   Timestamp* timestamp_;
+  bool sdma_profiling_for_cmd_ = false;  //!< SDMA profiling enabled for current command
   amd::Command* command_;   //!< Current command
   //! Monotonic client coalesce id of the last barrier from submitMarker, used to
   //! coalesce consecutive records. Execution() lock only. 0 = no window open.
