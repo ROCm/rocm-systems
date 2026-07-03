@@ -193,6 +193,13 @@ public:
   static uint32_t MapHsaPriorityToHqd(
       HSA_QUEUE_PRIORITY hsa_priority);
 
+  /// @brief DRM ("one svm one gpu") SVM backend overrides.
+  hsa_status_t SvmSetAttr(void* base, size_t size,
+                          const hsa_amd_svm_attribute_pair_t* attribs, size_t count) override;
+  hsa_status_t SvmGetAttr(void* base, size_t size,
+                          hsa_amd_svm_attribute_pair_t* attribs, size_t count) override;
+  hsa_status_t SvmPrefetch(const core::Agent& dstAgent, void* base, size_t size) override;
+
   private:
   /// @brief Allocate (if needed) doorbell memory
   ///

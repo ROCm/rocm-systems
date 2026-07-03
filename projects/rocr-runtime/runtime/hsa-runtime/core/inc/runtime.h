@@ -492,6 +492,40 @@ class Runtime {
 
   Agent* agent_by_gpuid(uint32_t gpuid) { return agents_by_gpuid_[gpuid]; }
 
+  Agent* agent_by_nodeid(uint32_t node_id) {
+    auto it = agents_by_node_.find(node_id);
+    return (it != agents_by_node_.end() && !it->second.empty()) ? it->second[0] : nullptr;
+  }
+
+  /// @brief Select the driver bound to a representative GPU agent.
+  ///
+  /// Returns the driver managing the GPU node @p node_id, or, when no id is
+  /// given (or the id is not a GPU node), the driver of the first GPU agent.
+  Driver& AgentDriver(uint32_t node_id = INVALID_NODEID) {
+    if (node_id != INVALID_NODEID) {
+      Agent* agent = agent_by_nodeid(node_id);
+      if (agent && agent->device_type() == Agent::kAmdGpuDevice)
+        return agent->driver();
+    }
+
+    if (gpu_agents_.empty())
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
+                               "No GPU agent available.");
+
+    // The no-hint path returns a representative GPU's driver. This assumes
+    // every GPU shares the same kernel backend (all KFD or all DRM); a
+    // heterogeneous KFD/DRM mix is not supported because each backend only
+    // manages its own GPUs.
+    ifdebug {
+      const DriverType backend = gpu_agents_[0]->driver().kernel_driver_type_;
+      for (const Agent* agent : gpu_agents_)
+        assert(agent->driver().kernel_driver_type_ == backend &&
+               "Heterogeneous KFD/DRM GPU backends are not supported.");
+    }
+
+    return gpu_agents_[0]->driver();
+  }
+
   Agent* region_gpu() { return region_gpu_; }
 
   const std::vector<std::shared_ptr<const MemoryRegion>>& system_regions_fine() const {
@@ -796,7 +830,7 @@ class Runtime {
   struct PrefetchOp {
     void* base;
     size_t size;
-    uint32_t node_id;
+    core::Agent* dst_agent;
     int remaining_deps;
     hsa_signal_t completion;
     std::vector<hsa_signal_t> dep_signals;

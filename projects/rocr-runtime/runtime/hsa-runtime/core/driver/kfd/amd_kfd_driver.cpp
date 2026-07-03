@@ -51,10 +51,13 @@
     #include <amdgpu_drm.h>
 #endif
 
+#include <unordered_set>
+
 #include "hsakmt/hsakmt.h"
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
+#include "core/inc/exceptions.h"
 #include "core/inc/runtime.h"
 #include "core/util/os.h"
 
@@ -919,6 +922,319 @@ hsa_status_t KfdDriver::GetDeviceFd(uint32_t node_id, int *fd) const {
     return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
+}
+
+core::Agent* KfdDriver::SvmAttrParser::Convert(uint64_t value) const {
+  hsa_agent_t handle = {value};
+  core::Agent* agent = core::Agent::Convert(handle);
+  if ((agent == nullptr) || !agent->IsValid())
+    throw hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
+                        (std::string("Invalid agent handle in ") + context_ + ".").c_str());
+  return agent;
+}
+
+core::Agent* KfdDriver::SvmAttrParser::ConvertAllowNull(uint64_t value) const {
+  hsa_agent_t handle = {value};
+  core::Agent* agent = core::Agent::Convert(handle);
+  if ((agent != nullptr) && (!agent->IsValid()))
+    throw hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
+                        (std::string("Invalid agent handle in ") + context_ + ".").c_str());
+  return agent;
+}
+
+void KfdDriver::SvmAttrParser::ConfirmNew(core::Agent* agent) {
+  if (!agent_seen_.insert(agent->node_id()).second)
+    throw hsa_exception(
+        HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS,
+        (std::string("Multiple attributes given for the same agent in ") + context_ + ".").c_str());
+}
+
+void KfdDriver::SvmAttrParser::CheckOnce(uint64_t attrib) {
+  if (set_attribs_ & (1 << attrib))
+    throw hsa_exception(HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS,
+                        (std::string("Attribute given multiple times in ") + context_ + ".").c_str());
+  set_attribs_ |= (1 << attrib);
+}
+
+hsa_status_t KfdDriver::SvmSetAttr(void* base, size_t size,
+                                   const hsa_amd_svm_attribute_pair_t* attribs, size_t count) {
+  SvmAttrParser parser("KfdDriver::SvmSetAttr");
+  std::vector<HSA_SVM_ATTRIBUTE> kmt_attribs;
+  kmt_attribs.reserve(count);
+  uint32_t set_flags = 0;
+  uint32_t clear_flags = 0;
+
+  auto kmtPair = [](uint32_t attrib, uint32_t value) {
+    HSA_SVM_ATTRIBUTE pair = {attrib, value};
+    return pair;
+  };
+
+  for (uint32_t i = 0; i < count; i++) {
+    auto attrib = attribs[i].attribute;
+    auto value = attribs[i].value;
+
+    switch (attrib) {
+      case HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG: {
+        parser.CheckOnce(attrib);
+        switch (value) {
+          case HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED:
+            set_flags |= HSA_SVM_FLAG_COHERENT;
+            break;
+          case HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED:
+            clear_flags |= HSA_SVM_FLAG_COHERENT;
+            break;
+          default:
+            throw hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
+                                "Invalid HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG value.");
+        }
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_READ_ONLY: {
+        parser.CheckOnce(attrib);
+        (value ? set_flags : clear_flags) |= HSA_SVM_FLAG_GPU_RO;
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_HIVE_LOCAL: {
+        parser.CheckOnce(attrib);
+        (value ? set_flags : clear_flags) |= HSA_SVM_FLAG_HIVE_LOCAL;
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY: {
+        parser.CheckOnce(attrib);
+        // Max migration size is 1GB.
+        if (value > 18) value = 18;
+        kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_GRANULARITY, value));
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION: {
+        parser.CheckOnce(attrib);
+        core::Agent* agent = parser.ConvertAllowNull(value);
+        uint32_t node_id = (agent == nullptr) ? INVALID_NODEID : agent->node_id();
+        kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_PREFERRED_LOC, node_id));
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_READ_MOSTLY: {
+        parser.CheckOnce(attrib);
+        (value ? set_flags : clear_flags) |= HSA_SVM_FLAG_GPU_READ_MOSTLY;
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_GPU_EXEC: {
+        parser.CheckOnce(attrib);
+        (value ? set_flags : clear_flags) |= HSA_SVM_FLAG_GPU_EXEC;
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE: {
+        core::Agent* agent = parser.Convert(value);
+        parser.ConfirmNew(agent);
+        if (agent->device_type() == core::Agent::kAmdCpuDevice) {
+          set_flags |= HSA_SVM_FLAG_HOST_ACCESS;
+        } else {
+          kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS, agent->node_id()));
+        }
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE: {
+        core::Agent* agent = parser.Convert(value);
+        parser.ConfirmNew(agent);
+        if (agent->device_type() == core::Agent::kAmdCpuDevice) {
+          set_flags |= HSA_SVM_FLAG_HOST_ACCESS;
+        } else {
+          kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS_IN_PLACE, agent->node_id()));
+        }
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS: {
+        core::Agent* agent = parser.Convert(value);
+        parser.ConfirmNew(agent);
+        if (agent->device_type() == core::Agent::kAmdCpuDevice) {
+          clear_flags |= HSA_SVM_FLAG_HOST_ACCESS;
+        } else {
+          kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_NO_ACCESS, agent->node_id()));
+        }
+        break;
+      }
+      default:
+        throw hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
+                            "Illegal or invalid attribute in KfdDriver::SvmSetAttr");
+    }
+  }
+
+  // Merge CPU access properties - grant access if any CPU needs access.
+  // Probably wrong.
+  if (set_flags & HSA_SVM_FLAG_HOST_ACCESS) clear_flags &= ~HSA_SVM_FLAG_HOST_ACCESS;
+
+  // Add flag updates
+  if (clear_flags) kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, clear_flags));
+  if (set_flags) kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, set_flags));
+
+  HSAKMT_STATUS error = HSAKMT_CALL(
+      hsaKmtSVMSetAttr(base, size, kmt_attribs.size(), &kmt_attribs[0]));
+
+  return error == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::SvmGetAttr(void* base, size_t size,
+                                   hsa_amd_svm_attribute_pair_t* attribs, size_t count) {
+  SvmAttrParser parser("KfdDriver::SvmGetAttr");
+  std::vector<HSA_SVM_ATTRIBUTE> kmt_attribs;
+  kmt_attribs.reserve(count);
+
+  std::vector<int> kmtIndices(count);
+
+  bool getFlags = false;
+
+  auto kmtPair = [](uint32_t attrib, uint32_t value) {
+    HSA_SVM_ATTRIBUTE pair = {attrib, value};
+    return pair;
+  };
+
+  for (uint32_t i = 0; i < count; i++) {
+    auto& attrib = attribs[i].attribute;
+    auto& value = attribs[i].value;
+
+    switch (attrib) {
+      case HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG:
+      case HSA_AMD_SVM_ATTRIB_READ_ONLY:
+      case HSA_AMD_SVM_ATTRIB_HIVE_LOCAL:
+      case HSA_AMD_SVM_ATTRIB_READ_MOSTLY: {
+        getFlags = true;
+        kmtIndices[i] = -1;
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY: {
+        kmtIndices[i] = kmt_attribs.size();
+        kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_GRANULARITY, 0));
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION: {
+        kmtIndices[i] = kmt_attribs.size();
+        kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_PREFERRED_LOC, 0));
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION: {
+        kmtIndices[i] = kmt_attribs.size();
+        kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_PREFETCH_LOC, 0));
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_ACCESS_QUERY: {
+        core::Agent* agent = parser.Convert(value);
+        if (agent->device_type() == core::Agent::kAmdCpuDevice) {
+          getFlags = true;
+          kmtIndices[i] = -1;
+        } else {
+          kmtIndices[i] = kmt_attribs.size();
+          kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS, agent->node_id()));
+        }
+        break;
+      }
+      default:
+        throw hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
+                            "Illegal or invalid attribute in KfdDriver::SvmGetAttr.");
+    }
+  }
+
+  if (getFlags) {
+    // Order is important to later code.
+    kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, 0));
+    kmt_attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, 0));
+  }
+
+  if (kmt_attribs.size() != 0) {
+    HSAKMT_STATUS error = HSAKMT_CALL(
+        hsaKmtSVMGetAttr(base, size, kmt_attribs.size(), &kmt_attribs[0]));
+    if (error != HSAKMT_STATUS_SUCCESS)
+      return HSA_STATUS_ERROR;
+  }
+
+  for (uint32_t i = 0; i < count; i++) {
+    auto& attrib = attribs[i].attribute;
+    auto& value = attribs[i].value;
+
+    switch (attrib) {
+      case HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG: {
+        if (kmt_attribs[kmt_attribs.size() - 1].value & HSA_SVM_FLAG_COHERENT) {
+          value = HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED;
+          break;
+        }
+        if (kmt_attribs[kmt_attribs.size() - 2].value & HSA_SVM_FLAG_COHERENT)
+          value = HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED;
+        else
+          value = HSA_AMD_SVM_GLOBAL_FLAG_INDETERMINATE;
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_READ_ONLY: {
+        value = (kmt_attribs[kmt_attribs.size() - 1].value & HSA_SVM_FLAG_GPU_RO);
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_HIVE_LOCAL: {
+        value = (kmt_attribs[kmt_attribs.size() - 1].value & HSA_SVM_FLAG_HIVE_LOCAL);
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY: {
+        value = kmt_attribs[kmtIndices[i]].value;
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION: {
+        uint64_t node = kmt_attribs[kmtIndices[i]].value;
+        core::Agent* agent = nullptr;
+        if (node != INVALID_NODEID)
+          agent = core::Runtime::runtime_singleton_->agent_by_nodeid(node);
+        value = core::Agent::Convert(agent).handle;
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION: {
+        uint64_t node = kmt_attribs[kmtIndices[i]].value;
+        core::Agent* agent = nullptr;
+        if (node != INVALID_NODEID)
+          agent = core::Runtime::runtime_singleton_->agent_by_nodeid(node);
+        value = core::Agent::Convert(agent).handle;
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_READ_MOSTLY: {
+        value = (kmt_attribs[kmt_attribs.size() - 1].value & HSA_SVM_FLAG_GPU_READ_MOSTLY);
+        break;
+      }
+      case HSA_AMD_SVM_ATTRIB_ACCESS_QUERY: {
+        if (kmtIndices[i] == -1) {
+          // CPU agent access is stored as a flag, not as an attribute
+          if (kmt_attribs[kmt_attribs.size() - 1].value & HSA_SVM_FLAG_HOST_ACCESS)
+            attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE;
+          else
+            attrib = HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS;
+        } else {
+          switch (kmt_attribs[kmtIndices[i]].type) {
+            case HSA_SVM_ATTR_ACCESS:
+              attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE;
+              break;
+            case HSA_SVM_ATTR_ACCESS_IN_PLACE:
+              attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE;
+              break;
+            case HSA_SVM_ATTR_NO_ACCESS:
+              attrib = HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS;
+              break;
+            default:
+              assert(false && "Bad agent accessibility from KFD.");
+          }
+        }
+        break;
+      }
+      default:
+        throw hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
+                            "Illegal or invalid attribute in KfdDriver::SvmGetAttr.");
+    }
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::SvmPrefetch(const core::Agent& dstAgent, void* base, size_t size) {
+  HSA_SVM_ATTRIBUTE attrib;
+
+  attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
+  attrib.value = dstAgent.node_id();
+  HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &attrib));
+
+  return error == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const {

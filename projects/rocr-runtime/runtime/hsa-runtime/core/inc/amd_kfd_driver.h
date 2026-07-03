@@ -45,6 +45,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 
 #include "hsakmt/hsakmt.h"
 
@@ -55,6 +56,7 @@ namespace rocr {
 
 namespace core {
 
+class Agent;
 class Queue;
 
 }
@@ -128,6 +130,11 @@ public:
   hsa_status_t SetSigbusDelay(uint32_t node_id, uint32_t delay_ms) const override;
   hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const override;
   hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const override;
+  hsa_status_t SvmSetAttr(void* base, size_t size,
+                          const hsa_amd_svm_attribute_pair_t* attribs, size_t count) override;
+  hsa_status_t SvmGetAttr(void* base, size_t size,
+                          hsa_amd_svm_attribute_pair_t* attribs, size_t count) override;
+  hsa_status_t SvmPrefetch(const core::Agent& dstAgent, void* base, size_t size) override;
   hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const override;
   hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const override;
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const override;
@@ -162,6 +169,37 @@ public:
   /// @brief Constructor for subclasses (e.g. DrmDriver) to register under a
   /// specific DriverType while reusing the KFD driver implementation.
   KfdDriver(core::DriverType type, std::string devnode_name);
+
+  /// @brief Shared validation/deduplication logic for SvmSetAttr.
+  ///
+  /// @details Both KfdDriver::SvmSetAttr and DrmDriver::SvmSetAttr must convert
+  /// agent handles, reject duplicate agents, and reject attributes given more
+  /// than once. This helper encapsulates that common logic together with the
+  /// per-call bookkeeping state so the two backends do not duplicate it. The
+  /// @p context string is embedded in thrown hsa_exception messages so the
+  /// originating backend/function remains identifiable.
+  class SvmAttrParser {
+   public:
+    explicit SvmAttrParser(const char* context) : context_(context) {}
+
+    /// @brief Convert an agent handle, requiring a valid, non-null agent.
+    core::Agent* Convert(uint64_t value) const;
+
+    /// @brief Convert an agent handle, allowing null but rejecting an invalid
+    /// (non-null) handle.
+    core::Agent* ConvertAllowNull(uint64_t value) const;
+
+    /// @brief Throw if @p agent was already given an attribute in this call.
+    void ConfirmNew(core::Agent* agent);
+
+    /// @brief Throw if @p attrib was already specified in this call.
+    void CheckOnce(uint64_t attrib);
+
+   private:
+    const char* context_;
+    std::unordered_set<uint32_t> agent_seen_;
+    uint32_t set_attribs_ = 0;
+  };
 
  private:
   /// @brief Flags for @ref ExportMemoryHandleImpl.
