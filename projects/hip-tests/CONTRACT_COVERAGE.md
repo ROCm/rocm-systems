@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 207
+- Contract tests: 213
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 173
-- Approximate declared API-name coverage: 34.9%
+- Declared HIP runtime APIs directly exercised by contract tests: 178
+- Approximate declared API-name coverage: 36.0%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -35,7 +35,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `graph_event` | 3 |
 | `graph_topology` | 5 |
 | `graph_clone` | 3 |
-| `graph_update` | 3 |
+| `graph_update` | 9 |
 | `graph_node_types` | 5 |
 | `graph_child` | 3 |
 | `graph_host` | 3 |
@@ -67,7 +67,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Error handling | 3 | 3 | 100.0% |
 | Event | 6 | 8 | 75.0% |
 | Occupancy | 3 | 7 | 42.9% |
-| Graph / capture | 48 | 96 | 50.0% |
+| Graph / capture | 53 | 96 | 55.2% |
 | Stream | 5 | 23 | 21.7% |
 | Runtime / device | 28 | 45 | 62.2% |
 | Kernel launch / function attrs | 2 | 13 | 15.4% |
@@ -264,6 +264,11 @@ hipGraphRemoveDependencies
 hipGraphExecMemcpyNodeSetParams1D
 hipGraphExecMemsetNodeSetParams
 hipGraphExecKernelNodeSetParams
+hipGraphExecHostNodeSetParams
+hipGraphExecChildGraphNodeSetParams
+hipGraphExecEventRecordNodeSetEvent
+hipGraphExecEventWaitNodeSetEvent
+hipGraphExecUpdate
 hipGraphKernelNodeGetParams
 hipGraphGetNodes
 hipGraphGetRootNodes
@@ -326,7 +331,7 @@ hipIpcOpenEventHandle
 2. Texture and surface APIs beyond current basics: texture/surface object create/destroy with resource and texture descriptor round-trips and channel-descriptor queries are now covered; texture reference APIs, mipmapped arrays, and bound/linear texture variants remain.
 3. Module, library, and code-loading APIs: HIPRTC-backed module load-from-data, unload, function and global lookup, and module kernel launch (with `hipFuncGetAttribute`) are now covered; the HIPRTC-backed library-loading family is now covered too (library load-from-data, unload, kernel lookup, kernel count, kernel enumeration, global lookup, and the `hipKernel*` accessors for function/library/name). Module load from file/fat-binary, `hipModuleLoadDataEx`, tex-ref and function-count queries, cooperative module launches, and module occupancy helpers remain.
 4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; context create/destroy, push/pop/set-current, shared-memory config setter, and context peer access remain.
-5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), and kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection are now covered; graph update, remaining node attribute variants, and debug dot export remain.
+5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection, and executable-graph update paths (whole-graph `hipGraphExecUpdate` with topology-change reporting plus per-node exec setters for host, child-graph, event-record, and event-wait nodes) are now covered; remaining node attribute variants and debug dot export remain.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch and CU-mask stream variants, logging controls, and link-type queries remain.
 
