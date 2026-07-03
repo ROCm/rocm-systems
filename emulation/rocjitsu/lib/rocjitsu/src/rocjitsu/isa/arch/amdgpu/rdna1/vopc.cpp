@@ -32,7 +32,8 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -54,7 +55,7 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
 
 void VCmpFF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -127,7 +128,8 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -149,7 +151,7 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
 
 void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -222,7 +224,8 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -244,7 +247,7 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
 
 void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -317,7 +320,8 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -339,7 +343,7 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
 
 void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -412,7 +416,8 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -434,7 +439,7 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
 
 void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -507,7 +512,8 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -529,7 +535,7 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
 
 void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -602,7 +608,8 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -624,7 +631,7 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
 
 void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -697,7 +704,8 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -719,7 +727,7 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
 
 void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -792,7 +800,8 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -814,7 +823,7 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
 
 void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -887,7 +896,8 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -909,7 +919,7 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
 
 void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -982,7 +992,8 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1004,7 +1015,7 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
 
 void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1077,7 +1088,8 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1099,7 +1111,7 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
 
 void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1172,7 +1184,8 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1194,7 +1207,7 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
 
 void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1267,7 +1280,8 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1289,7 +1303,7 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
 
 void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1362,7 +1376,8 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1384,7 +1399,7 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
 
 void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1457,7 +1472,8 @@ VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1479,7 +1495,7 @@ VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
 
 void VCmpTruF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1552,7 +1568,8 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1574,7 +1591,7 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
 
 void VCmpxFF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1654,7 +1671,8 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1676,7 +1694,7 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
 
 void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1759,7 +1777,8 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1781,7 +1800,7 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
 
 void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1864,7 +1883,8 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1886,7 +1906,7 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
 
 void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -1969,7 +1989,8 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -1991,7 +2012,7 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
 
 void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -2074,7 +2095,8 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -2096,7 +2118,7 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
 
 void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -2179,7 +2201,8 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -2201,7 +2224,7 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
 
 void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -2284,7 +2307,8 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -2306,7 +2330,7 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
 
 void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -2389,7 +2413,8 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -2411,7 +2436,7 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
 
 void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -2494,7 +2519,8 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -2516,7 +2542,7 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
 
 void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -2599,7 +2625,8 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -2621,7 +2648,7 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
 
 void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -2704,7 +2731,8 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -2726,7 +2754,7 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
 
 void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -2809,7 +2837,8 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -2831,7 +2860,7 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
 
 void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -2914,7 +2943,8 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -2936,7 +2966,7 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
 
 void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3019,7 +3049,8 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3041,7 +3072,7 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
 
 void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3124,7 +3155,8 @@ VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3146,7 +3178,7 @@ VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
 
 void VCmpxTruF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3226,7 +3258,8 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3248,7 +3281,7 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
 
 void VCmpFF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3321,7 +3354,8 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3343,7 +3377,7 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
 
 void VCmpLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3416,7 +3450,8 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3438,7 +3473,7 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
 
 void VCmpEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3511,7 +3546,8 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3533,7 +3569,7 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
 
 void VCmpLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3606,7 +3642,8 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3628,7 +3665,7 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
 
 void VCmpGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3701,7 +3738,8 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3723,7 +3761,7 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
 
 void VCmpLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3796,7 +3834,8 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3818,7 +3857,7 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
 
 void VCmpGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3891,7 +3930,8 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -3913,7 +3953,7 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
 
 void VCmpOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -3986,7 +4026,8 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4008,7 +4049,7 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
 
 void VCmpUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4081,7 +4122,8 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4103,7 +4145,7 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
 
 void VCmpNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4176,7 +4218,8 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4198,7 +4241,7 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
 
 void VCmpNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4271,7 +4314,8 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4293,7 +4337,7 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
 
 void VCmpNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4366,7 +4410,8 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4388,7 +4433,7 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
 
 void VCmpNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4461,7 +4506,8 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4483,7 +4529,7 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
 
 void VCmpNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4556,7 +4602,8 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4578,7 +4625,7 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
 
 void VCmpNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4651,7 +4698,8 @@ VCmpTruF64Vopc::VCmpTruF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4673,7 +4721,7 @@ VCmpTruF64Vopc::VCmpTruF64Vopc(const MachineInst *inst)
 
 void VCmpTruF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4746,7 +4794,8 @@ VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4768,7 +4817,7 @@ VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
 
 void VCmpxFF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4848,7 +4897,8 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4870,7 +4920,7 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
 
 void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -4953,7 +5003,8 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -4975,7 +5026,7 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
 
 void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -5058,7 +5109,8 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -5080,7 +5132,7 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
 
 void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -5163,7 +5215,8 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -5185,7 +5238,7 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
 
 void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -5268,7 +5321,8 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -5290,7 +5344,7 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
 
 void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -5373,7 +5427,8 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -5395,7 +5450,7 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
 
 void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -5478,7 +5533,8 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -5500,7 +5556,7 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
 
 void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -5583,7 +5639,8 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -5605,7 +5662,7 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
 
 void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -5688,7 +5745,8 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -5710,7 +5768,7 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
 
 void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -5793,7 +5851,8 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -5815,7 +5874,7 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
 
 void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -5898,7 +5957,8 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -5920,7 +5980,7 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
 
 void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6003,7 +6063,8 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6025,7 +6086,7 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
 
 void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6108,7 +6169,8 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6130,7 +6192,7 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
 
 void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6213,7 +6275,8 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6235,7 +6298,7 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
 
 void VCmpxNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6318,7 +6381,8 @@ VCmpxTruF64Vopc::VCmpxTruF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6340,7 +6404,7 @@ VCmpxTruF64Vopc::VCmpxTruF64Vopc(const MachineInst *inst)
 
 void VCmpxTruF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6420,7 +6484,8 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6442,7 +6507,7 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
 
 void VCmpFI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6515,7 +6580,8 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6537,7 +6603,7 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
 
 void VCmpLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6610,7 +6676,8 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6632,7 +6699,7 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
 
 void VCmpEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6705,7 +6772,8 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6727,7 +6795,7 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
 
 void VCmpLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6800,7 +6868,8 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6822,7 +6891,7 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
 
 void VCmpGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6895,7 +6964,8 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -6917,7 +6987,7 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
 
 void VCmpNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -6990,7 +7060,8 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7012,7 +7083,7 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
 
 void VCmpGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7085,7 +7156,8 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7107,7 +7179,7 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
 
 void VCmpTI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7180,7 +7252,8 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7202,7 +7275,7 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
 
 void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7275,7 +7348,8 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7297,7 +7371,7 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
 
 void VCmpLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7370,7 +7444,8 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7392,7 +7467,7 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
 
 void VCmpEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7465,7 +7540,8 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7487,7 +7563,7 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
 
 void VCmpLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7560,7 +7636,8 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7582,7 +7659,7 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
 
 void VCmpGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7655,7 +7732,8 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7677,7 +7755,7 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
 
 void VCmpNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7750,7 +7828,8 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7772,7 +7851,7 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
 
 void VCmpGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7845,7 +7924,8 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7867,7 +7947,7 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
 
 void VCmpClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -7940,7 +8020,8 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -7962,7 +8043,7 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
 
 void VCmpxFI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -8042,7 +8123,8 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -8064,7 +8146,7 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
 
 void VCmpxLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -8147,7 +8229,8 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -8169,7 +8252,7 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
 
 void VCmpxEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -8252,7 +8335,8 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -8274,7 +8358,7 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
 
 void VCmpxLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -8357,7 +8441,8 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -8379,7 +8464,7 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
 
 void VCmpxGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -8462,7 +8547,8 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -8484,7 +8570,7 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
 
 void VCmpxNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -8567,7 +8653,8 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -8589,7 +8676,7 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
 
 void VCmpxGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -8672,7 +8759,8 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -8694,7 +8782,7 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
 
 void VCmpxTI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -8774,7 +8862,8 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -8796,7 +8885,7 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
 
 void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -8902,7 +8991,8 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -8924,7 +9014,7 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
 
 void VCmpxLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9007,7 +9097,8 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9029,7 +9120,7 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
 
 void VCmpxEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9112,7 +9203,8 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9134,7 +9226,7 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
 
 void VCmpxLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9217,7 +9309,8 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9239,7 +9332,7 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
 
 void VCmpxGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9322,7 +9415,8 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9344,7 +9438,7 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
 
 void VCmpxNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9427,7 +9521,8 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9449,7 +9544,7 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
 
 void VCmpxGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9532,7 +9627,8 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9554,7 +9650,7 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
 
 void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9666,7 +9762,8 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9688,7 +9785,7 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
 
 void VCmpFI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9761,7 +9858,8 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9783,7 +9881,7 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
 
 void VCmpLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9856,7 +9954,8 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9878,7 +9977,7 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
 
 void VCmpEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -9951,7 +10050,8 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -9973,7 +10073,7 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
 
 void VCmpLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10046,7 +10146,8 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10068,7 +10169,7 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
 
 void VCmpGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10141,7 +10242,8 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10163,7 +10265,7 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
 
 void VCmpNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10236,7 +10338,8 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10258,7 +10361,7 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
 
 void VCmpGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10331,7 +10434,8 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10353,7 +10457,7 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
 
 void VCmpTI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10426,7 +10530,8 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10448,7 +10553,7 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
 
 void VCmpClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10521,7 +10626,8 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10543,7 +10649,7 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
 
 void VCmpLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10616,7 +10722,8 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10638,7 +10745,7 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
 
 void VCmpEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10711,7 +10818,8 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10733,7 +10841,7 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
 
 void VCmpLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10806,7 +10914,8 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10828,7 +10937,7 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
 
 void VCmpGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10901,7 +11010,8 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -10923,7 +11033,7 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
 
 void VCmpNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -10996,7 +11106,8 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11018,7 +11129,7 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
 
 void VCmpGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -11091,7 +11202,8 @@ VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11113,7 +11225,7 @@ VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
 
 void VCmpxFI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -11193,7 +11305,8 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11215,7 +11328,7 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
 
 void VCmpxLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -11298,7 +11411,8 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11320,7 +11434,7 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
 
 void VCmpxEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -11403,7 +11517,8 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11425,7 +11540,7 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
 
 void VCmpxLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -11508,7 +11623,8 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11530,7 +11646,7 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
 
 void VCmpxGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -11613,7 +11729,8 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11635,7 +11752,7 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
 
 void VCmpxNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -11718,7 +11835,8 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11740,7 +11858,7 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
 
 void VCmpxGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -11823,7 +11941,8 @@ VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11845,7 +11964,7 @@ VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
 
 void VCmpxTI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -11925,7 +12044,8 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -11947,7 +12067,7 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
 
 void VCmpxClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12055,7 +12175,8 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12077,7 +12198,7 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
 
 void VCmpxLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12160,7 +12281,8 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12182,7 +12304,7 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
 
 void VCmpxEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12265,7 +12387,8 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12287,7 +12410,7 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
 
 void VCmpxLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12370,7 +12493,8 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12392,7 +12516,7 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
 
 void VCmpxGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12475,7 +12599,8 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12497,7 +12622,7 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
 
 void VCmpxNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12580,7 +12705,8 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12602,7 +12728,7 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
 
 void VCmpxGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12685,7 +12811,8 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12707,7 +12834,7 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
 
 void VCmpFU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12780,7 +12907,8 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12802,7 +12930,7 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
 
 void VCmpLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12875,7 +13003,8 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12897,7 +13026,7 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
 
 void VCmpEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -12970,7 +13099,8 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -12992,7 +13122,7 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
 
 void VCmpLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13065,7 +13195,8 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13087,7 +13218,7 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
 
 void VCmpGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13160,7 +13291,8 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13182,7 +13314,7 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
 
 void VCmpNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13255,7 +13387,8 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13277,7 +13410,7 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
 
 void VCmpGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13350,7 +13483,8 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13372,7 +13506,7 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
 
 void VCmpTU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13445,7 +13579,8 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13467,7 +13602,7 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
 
 void VCmpFF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13540,7 +13675,8 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13562,7 +13698,7 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
 
 void VCmpLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13635,7 +13771,8 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13657,7 +13794,7 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
 
 void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13730,7 +13867,8 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13752,7 +13890,7 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
 
 void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13825,7 +13963,8 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13847,7 +13986,7 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
 
 void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -13920,7 +14059,8 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -13942,7 +14082,7 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
 
 void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14015,7 +14155,8 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14037,7 +14178,7 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
 
 void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14110,7 +14251,8 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14132,7 +14274,7 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
 
 void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14205,7 +14347,8 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14227,7 +14370,7 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
 
 void VCmpxFU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14307,7 +14450,8 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14329,7 +14473,7 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
 
 void VCmpxLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14412,7 +14556,8 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14434,7 +14579,7 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
 
 void VCmpxEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14517,7 +14662,8 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14539,7 +14685,7 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
 
 void VCmpxLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14622,7 +14768,8 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14644,7 +14791,7 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
 
 void VCmpxGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14727,7 +14874,8 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14749,7 +14897,7 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
 
 void VCmpxNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14832,7 +14980,8 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14854,7 +15003,7 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
 
 void VCmpxGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -14937,7 +15086,8 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -14959,7 +15109,7 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
 
 void VCmpxTU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15039,7 +15189,8 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15061,7 +15212,7 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
 
 void VCmpxFF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15141,7 +15292,8 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15163,7 +15315,7 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
 
 void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15246,7 +15398,8 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15268,7 +15421,7 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
 
 void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15351,7 +15504,8 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15373,7 +15527,7 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
 
 void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15456,7 +15610,8 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15478,7 +15633,7 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
 
 void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15561,7 +15716,8 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15583,7 +15739,7 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
 
 void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15666,7 +15822,8 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15688,7 +15845,7 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
 
 void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15771,7 +15928,8 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15793,7 +15951,7 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
 
 void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15876,7 +16034,8 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15898,7 +16057,7 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
 
 void VCmpFU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -15971,7 +16130,8 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -15993,7 +16153,7 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
 
 void VCmpLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16066,7 +16226,8 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16088,7 +16249,7 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
 
 void VCmpEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16161,7 +16322,8 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16183,7 +16345,7 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
 
 void VCmpLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16256,7 +16418,8 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16278,7 +16441,7 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
 
 void VCmpGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16351,7 +16514,8 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16373,7 +16537,7 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
 
 void VCmpNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16446,7 +16610,8 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16468,7 +16633,7 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
 
 void VCmpGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16541,7 +16706,8 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16563,7 +16729,7 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
 
 void VCmpTU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16636,7 +16802,8 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16658,7 +16825,7 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
 
 void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16731,7 +16898,8 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16753,7 +16921,7 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
 
 void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16826,7 +16994,8 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16848,7 +17017,7 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
 
 void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -16921,7 +17090,8 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -16943,7 +17113,7 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
 
 void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17016,7 +17186,8 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17038,7 +17209,7 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
 
 void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17111,7 +17282,8 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17133,7 +17305,7 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
 
 void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17206,7 +17378,8 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17228,7 +17401,7 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
 
 void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17301,7 +17474,8 @@ VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17323,7 +17497,7 @@ VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
 
 void VCmpTruF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17396,7 +17570,8 @@ VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17418,7 +17593,7 @@ VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
 
 void VCmpxFU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17498,7 +17673,8 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17520,7 +17696,7 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
 
 void VCmpxLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17603,7 +17779,8 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17625,7 +17802,7 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
 
 void VCmpxEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17708,7 +17885,8 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17730,7 +17908,7 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
 
 void VCmpxLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17813,7 +17991,8 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17835,7 +18014,7 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
 
 void VCmpxGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -17918,7 +18097,8 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -17940,7 +18120,7 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
 
 void VCmpxNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18023,7 +18203,8 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18045,7 +18226,7 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
 
 void VCmpxGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18128,7 +18309,8 @@ VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18150,7 +18332,7 @@ VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
 
 void VCmpxTU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18230,7 +18412,8 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18252,7 +18435,7 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
 
 void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18335,7 +18518,8 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18357,7 +18541,7 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
 
 void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18440,7 +18624,8 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18462,7 +18647,7 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
 
 void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18545,7 +18730,8 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18567,7 +18753,7 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
 
 void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18650,7 +18836,8 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18672,7 +18859,7 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
 
 void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18755,7 +18942,8 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18777,7 +18965,7 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
 
 void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18860,7 +19048,8 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18882,7 +19071,7 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
 
 void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
@@ -18965,7 +19154,8 @@ VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::UnimplementedInst("VOPC DPP");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const VopcVopSdwaSdstEncMachineInst *>(inst);
@@ -18987,7 +19177,7 @@ VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
 
 void VCmpxTruF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();

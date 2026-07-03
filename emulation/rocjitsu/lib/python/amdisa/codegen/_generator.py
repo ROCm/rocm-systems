@@ -258,6 +258,21 @@ class CodeGenerator:
             f'{enc.fmt_enc_name}MachineInst' for enc in self.isa_spec.inst_encodings
         }
 
+    def _machine_inst_struct_fields(self, struct_name: str) -> frozenset[str]:
+        for enc in self.isa_spec.inst_encodings:
+            if f'{enc.fmt_enc_name}MachineInst' == struct_name:
+                return frozenset(
+                    field.name for field in getattr(enc, 'ucode_fields', ())
+                )
+        return frozenset()
+
+    def _machine_inst_struct_has_field(
+        self, struct_name: str | None, field: str
+    ) -> bool:
+        if struct_name is None:
+            return False
+        return field in self._machine_inst_struct_fields(struct_name)
+
     def _supports_vop_dpp8(self) -> bool:
         return any(
             self._has_machine_inst_struct(f'{base}VopDpp8MachineInst')
@@ -267,12 +282,12 @@ class CodeGenerator:
     def _vop_dpp_struct_names(self, enc_name: str) -> tuple[str | None, str | None]:
         enc_upper = enc_name.upper()
         dpp_bases = {
-            'ENC_VOP1': 'Vop1',
-            'ENC_VOP2': 'Vop2',
-            'ENC_VOPC': 'Vop1',
-            'ENC_VOP3': 'Vop3',
-            'ENC_VOP3P': 'Vop3p',
-            'VOP3_SDST_ENC': 'Vop3SdstEnc',
+            'ENC_VOP1': ('Vop1',),
+            'ENC_VOP2': ('Vop2',),
+            'ENC_VOPC': ('Vopc', 'Vop1'),
+            'ENC_VOP3': ('Vop3',),
+            'ENC_VOP3P': ('Vop3p',),
+            'VOP3_SDST_ENC': ('Vop3SdstEnc',),
         }
         dpp8_bases = {
             'ENC_VOP1': 'Vop1',
@@ -282,8 +297,8 @@ class CodeGenerator:
             'ENC_VOP3P': 'Vop3p',
             'VOP3_SDST_ENC': 'Vop3SdstEnc',
         }
-        enc_base = dpp_bases.get(enc_upper)
-        if enc_base is None:
+        enc_bases = dpp_bases.get(enc_upper)
+        if enc_bases is None:
             return None, None
 
         is_rdna = any(
@@ -291,9 +306,12 @@ class CodeGenerator:
             for ie in self.isa_spec.inst_encodings
         )
         dpp_suffix = 'VopDpp16' if is_rdna else 'VopDpp'
-        dpp_struct = f'{enc_base}{dpp_suffix}MachineInst'
-        if not self._has_machine_inst_struct(dpp_struct):
-            dpp_struct = None
+        dpp_struct = None
+        for enc_base in enc_bases:
+            candidate = f'{enc_base}{dpp_suffix}MachineInst'
+            if self._has_machine_inst_struct(candidate):
+                dpp_struct = candidate
+                break
 
         dpp8_struct = None
         dpp8_base = dpp8_bases.get(enc_upper)
@@ -1559,6 +1577,7 @@ class CodeGenerator:
                 class_members.append(cgen.Statement('uint32_t dpp_row_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bank_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bound_ctrl_ = 0'))
+                class_members.append(cgen.Statement('uint32_t dpp_fi_ = 1'))
                 if _dpp8_struct:
                     class_members.append(cgen.Statement('uint32_t dpp8_lane_sel_ = 0'))
                 class_members.append(
@@ -5431,6 +5450,12 @@ class CodeGenerator:
                         _dpp_struct is not None
                         and self._supports_dpp_for_encoding(enc.enc_name)
                     )
+                    _dpp_struct_has_fi = self._machine_inst_struct_has_field(
+                        _dpp_struct, 'fi'
+                    )
+                    _dpp_fi_ctor_stmt = (
+                        ' dpp_fi_ = dp->fi;' if _dpp_struct_has_fi else ''
+                    )
                     if _enc_base:
                         for opnd in inst.operands:
                             if opnd.name == 'src0' and opnd.name in enc_field_names:
@@ -5443,6 +5468,7 @@ class CodeGenerator:
                                         f' (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) |'
                                         f' (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |'
                                         f' (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);'
+                                        f' dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);'
                                         f'}}'
                                     )
                                 # DPP (src0 == amdgpu::SRC_DPP): read vsrc0 and DPP control
@@ -5458,11 +5484,13 @@ class CodeGenerator:
                                         f' dpp_row_mask_ = dp->row_mask;'
                                         f' dpp_bank_mask_ = dp->bank_mask;'
                                         f' dpp_bound_ctrl_ = dp->bound_ctrl;'
+                                        f'{_dpp_fi_ctor_stmt}'
                                         f'}}'
                                     )
                                 elif _dpp_struct:
                                     ctor_body_parts.append(
-                                        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) '
+                                        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP || '
+                                        'amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) '
                                         'throw util::UnimplementedInst("VOPC DPP");'
                                     )
                                 # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
@@ -5747,7 +5775,7 @@ class CodeGenerator:
                                     )
                                 elif _dpp_struct:
                                     _dpp_preamble += (
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                         '    throw util::UnimplementedInst(mnemonic());\n'
                                     )
                             elif not _is_vopc:
@@ -5778,13 +5806,13 @@ class CodeGenerator:
                                 _dpp_preamble += (
                                     '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                     '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
-                                    '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,\n'
+                                    '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_, dpp_fi_,\n'
                                     '        dpp_src0_, wf);\n'
                                 )
                             if _dpp8_struct:
                                 _dpp_preamble += (
                                     '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
-                                    '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_,\n'
+                                    '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_,\n'
                                     '        dpp_src0_, wf);\n'
                                 )
                             if _has_sdwa_encoding:
