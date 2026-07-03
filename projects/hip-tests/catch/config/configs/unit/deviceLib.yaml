@@ -504,7 +504,7 @@ deviceLib:
     <<: *level_default
     tags: [types]
   Unit_device_memcpy_async:
-    <<: *level_2
+    <<: *level_default
     tags: [memory]
   Unit_MemcpyToSymbolInParallelWithStreamLaunch:
     <<: *level_3

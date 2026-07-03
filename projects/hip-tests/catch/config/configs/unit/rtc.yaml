@@ -222,8 +222,8 @@ rtc:
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
   Unit_RTC_BUNDLE_FROM_FILE:
-    <<: *level_2
+    <<: *level_default
     tags: [link]
   Unit_hiprtc_fp8_simple:
-    <<: *level_2
+    <<: *level_default
     tags: [compile]

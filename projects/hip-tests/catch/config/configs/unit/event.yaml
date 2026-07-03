@@ -56,7 +56,7 @@ event:
     disabled: [amd_windows, amd_wsl]
     tags: [ipc]
   Unit_hipEventIpc_DestroyNonBlocking:
-    <<: *level_2
+    <<: *level_default
     tags: [ipc, lifecycle]
   Unit_hipEventDestroy_Unfinished:
     <<: *level_default

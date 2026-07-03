@@ -106,14 +106,14 @@ stream:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipStreamPriorityAqlLog_ChildWorkload:
-    <<: *level_2
+    <<: *level_default
     # Internal helper, only invoked by the parent test via re-exec (by exact
     # name, which still runs hidden [.] cases). Disabled everywhere so it does
     # not run as a standalone no-op in the regular suite.
     disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
     tags: [lifecycle]
   Unit_hipStreamPriorityAqlLog_TraceReportsPriority:
-    <<: *level_2
+    <<: *level_default
     # Verifies AQL packet trace reports stream priority next to HWq; relies on
     # AMD_LOG AQL output, so AMD/Linux only.
     disabled: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
@@ -440,14 +440,14 @@ stream:
     <<: *level_default
     tags: [synchronization]
   Unit_hipStreamWriteValue_Decrement_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization]
   Unit_hipStreamWriteValue_Decrement_MultiStream_MultiDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, multigpu]
   Unit_hipStreamWriteValue_Increment_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization]
   Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, multigpu]
