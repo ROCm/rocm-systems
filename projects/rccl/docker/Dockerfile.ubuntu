@@ -4,11 +4,11 @@ ARG ROCM_IMAGE_TAG=latest
 FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
 
 ## rccl repo
-ARG RCCL_REPO=https://github.com/ROCm/rocm-systems
+ARG RCCL_REPO=https://github.com/ROCm/rccl
 ARG RCCL_BRANCH=develop
 
 ## rccl-tests repo
-ARG RCCL_TESTS_REPO=https://github.com/ROCm/rocm-systems
+ARG RCCL_TESTS_REPO=https://github.com/ROCm/rccl-tests
 ARG RCCL_TESTS_BRANCH=develop
 
 ## AMD GPU Targets
@@ -101,21 +101,13 @@ RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.g
 
 ## building RCCL
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl/install
-RUN git clone --no-checkout --filter=blob:none "${RCCL_REPO}" ./rccl \
+RUN git clone --recurse-submodules -b "${RCCL_BRANCH}" "${RCCL_REPO}" \
     && cd ./rccl \
-    && git sparse-checkout init --cone \
-    && git sparse-checkout set projects/rccl \
-    && git checkout "${RCCL_BRANCH}" \
-    && cd ./projects/rccl \
     && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX}
 
 ## building RCCL-Tests
-RUN git clone --no-checkout --filter=blob:none "${RCCL_TESTS_REPO}" ./rccl-tests \
+RUN git clone -b "${RCCL_TESTS_BRANCH}" "${RCCL_TESTS_REPO}" ./rccl-tests \
     && cd ./rccl-tests \
-    && git sparse-checkout init --cone \
-    && git sparse-checkout set projects/rccl-tests \
-    && git checkout "${RCCL_TESTS_BRANCH}" \
-    && cd ./projects/rccl-tests \
     && mkdir build \
     && cd build \
     && cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} .. \
