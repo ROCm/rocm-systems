@@ -716,7 +716,7 @@ if(DEBIAN)
   file(WRITE "${CMAKE_BINARY_DIR}/copyright"
   "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: rccl
-Source: https://github.com/ROCm/rccl
+Source: https://github.com/ROCm/rocm-systems
 
 Files: *
 Copyright: (c) 2016-2020, NVIDIA CORPORATION. All rights reserved.
