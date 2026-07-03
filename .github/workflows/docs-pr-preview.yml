@@ -34,14 +34,14 @@ jobs:
     steps:
       - name: Generate a token
         id: generate-token
-        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
       - name: Checkout config files only
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
@@ -74,12 +74,14 @@ jobs:
 
       - name: Extract first project
         id: extract
+        env:
+          SUBTREES: ${{ steps.detect.outputs.subtrees }}
         run: |
           # pr_detect_changed_subtrees.py returns a string of project names
           # separated by "\n", i.e. "projects/rocprim\nprojects/hipblaslt\nshared/tensile"
           # head -n1: extracts the first project, i.e. "projects/rocprim"
           # cut -d'/' -f2:  cuts the "projects/" prefix, leaving "rocprim" for project_name
-          project=$(echo "${{ steps.detect.outputs.subtrees }}" | head -n1)
+          project=$(echo "$SUBTREES" | head -n1)
           echo "project=$project" >> $GITHUB_OUTPUT
           echo "project_name=$(echo "$project" | cut -d'/' -f2)" >> $GITHUB_OUTPUT
 
@@ -90,18 +92,32 @@ jobs:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           PR_DATA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }})
-          echo "branch=$(echo $PR_DATA | jq -r .head.ref)" >> $GITHUB_OUTPUT
+          # Previews are only supported for branches in the upstream repo.
+          # Fork PRs are not supported (see the PR Docs Preview runbook).
+          head_repo=$(echo "$PR_DATA" | jq -r .head.repo.full_name)
+          base_repo=$(echo "$PR_DATA" | jq -r .base.repo.full_name)
+          if [ "$head_repo" != "$base_repo" ]; then
+            echo "PR is from a fork ($head_repo); docs preview is only supported for branches in $base_repo. Refusing to run." >&2
+            exit 1
+          fi
+          echo "branch=$(echo "$PR_DATA" | jq -r .head.ref)" >> $GITHUB_OUTPUT
 
       - name: Derive RTD slugs and verify project exists
         if: steps.extract.outputs.project
         id: rtd
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+          FOLDER_NAME: ${{ steps.extract.outputs.project_name }}
+          BRANCH_NAME: ${{ steps.pr.outputs.branch }}
         run: |
-          branch_name="${{ steps.pr.outputs.branch }}"
+          branch_name="$BRANCH_NAME"
           # Generate slug like 'user-me-my_test_branch' from 'user/me/my_test_branch'
           version_slug="${branch_name//\//-}"
-          project_slug="advanced-micro-devices-${{ steps.extract.outputs.project_name }}"
+
+          # Load the map and look up the rtd_slug by rtd_alias
+          project_slug=$(jq -r --arg folder_name "$FOLDER_NAME" \
+            '.projects[] | select(.folder == $folder_name) | .rtd_slug' \
+            .github/docs-config.json)
 
           echo "version_slug=$version_slug" >> $GITHUB_OUTPUT
           echo "project_slug=$project_slug" >> $GITHUB_OUTPUT
@@ -129,7 +145,7 @@ jobs:
             doc_base=$(echo "$doc_url" | sed 's|/[^/]\+/\?$||')
             echo "doc_base=$doc_base" >> $GITHUB_OUTPUT
           else
-            echo "${{ steps.extract.outputs.project_name }} does not exist on Read the Docs, skipping."
+            echo "$FOLDER_NAME does not exist on Read the Docs, skipping."
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
@@ -140,20 +156,23 @@ jobs:
         if: steps.rtd.outputs.exists == 'true'
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+          PROJECT_SLUG: ${{ steps.rtd.outputs.project_slug }}
         run: |
           curl \
             --connect-timeout 180 \
             --fail \
             --request POST \
             --header "Authorization: Token $RTD_TOKEN" \
-            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/sync-versions/"
+            "https://app.readthedocs.com/api/v3/projects/${PROJECT_SLUG}/sync-versions/"
 
       - name: Wait for RTD to register PR branch version
         if: steps.rtd.outputs.exists == 'true'
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+          PROJECT_SLUG: ${{ steps.rtd.outputs.project_slug }}
+          VERSION_SLUG: ${{ steps.rtd.outputs.version_slug }}
         run: |
-          declare version_url="https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
+          declare version_url="https://app.readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/"
 
           declare -i MAXIMUM_NUMBER_OF_POLLS=20
           declare -i SLEEP_BETWEEN_POLLS_SECONDS=15
@@ -177,6 +196,8 @@ jobs:
         if: steps.rtd.outputs.exists == 'true'
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+          PROJECT_SLUG: ${{ steps.rtd.outputs.project_slug }}
+          VERSION_SLUG: ${{ steps.rtd.outputs.version_slug }}
         run: |
           curl \
             --connect-timeout 180 \
@@ -185,27 +206,32 @@ jobs:
             --header "Authorization: Token $RTD_TOKEN" \
             --header "Content-Type: application/json" \
             --data '{"active": true, "hidden": true, "privacy_level": "private"}' \
-            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
+            "https://app.readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/"
 
       - name: Trigger RTD build for PR branch
         if: steps.rtd.outputs.exists == 'true'
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+          PROJECT_SLUG: ${{ steps.rtd.outputs.project_slug }}
+          VERSION_SLUG: ${{ steps.rtd.outputs.version_slug }}
         run: |
           curl \
             --fail \
             --silent \
             --request POST \
             --header "Authorization: Token $RTD_TOKEN" \
-            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/builds/"
+            "https://app.readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${VERSION_SLUG}/builds/"
 
       - name: Comment RTD preview URL on PR
         if: steps.rtd.outputs.exists == 'true'
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          DOC_BASE: ${{ steps.rtd.outputs.doc_base }}
+          VERSION_SLUG: ${{ steps.rtd.outputs.version_slug }}
+          FOLDER_NAME: ${{ steps.extract.outputs.project_name }}
         run: |
-          preview_url="${{ steps.rtd.outputs.doc_base }}/${{ steps.rtd.outputs.version_slug }}/"
+          preview_url="${DOC_BASE}/${VERSION_SLUG}/"
           gh pr comment ${{ github.event.issue.number }} \
             --repo ${{ github.repository }} \
-            --body "Docs preview for **${{ steps.extract.outputs.project_name }}** is building on Read the Docs: $preview_url \
+            --body "Docs preview for **$FOLDER_NAME** is building on Read the Docs: $preview_url \
             (Note: If a pull request includes multiple projects, only the preview for the first project will be built.)"
