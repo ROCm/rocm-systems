@@ -282,7 +282,7 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
         captured = capsys.readouterr()
         error_output = captured.err + captured.out
         assert code != 0
-        assert "Invalid --block value 100" in error_output
+        assert "Invalid --block value '100'" in error_output
 
         common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -926,31 +926,33 @@ def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute, capsys):
     """Test basic filters that should work"""
-    for dir in ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]:
-        if os.path.exists(dir):
-            workload_dir = common.setup_workload_dir(dir)
+    candidates = ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]
+    dir = next((d for d in candidates if os.path.exists(d)), None)
+    if dir is None:
+        pytest.skip(f"no vcopy workload available: {candidates}")
 
-            code = binary_handler_analyze_rocprof_compute([
-                "analyze",
-                "--path",
-                workload_dir,
-            ])
-            assert code == 0
+    workload_dir = common.setup_workload_dir(dir)
 
-            code = binary_handler_analyze_rocprof_compute([
-                "analyze",
-                "--path",
-                workload_dir,
-                "--block",
-                "SQ",
-            ])
-            captured = capsys.readouterr()
-            error_output = captured.err + captured.out
-            assert code != 0
-            assert "Invalid --block value SQ" in error_output
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
 
-            common.clean_output_dir(config["cleanup"], workload_dir)
-            break
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--block",
+        "SQ",
+    ])
+    captured = capsys.readouterr()
+    error_output = captured.err + captured.out
+    assert code != 0
+    assert "Invalid --block value 'SQ'" in error_output
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
