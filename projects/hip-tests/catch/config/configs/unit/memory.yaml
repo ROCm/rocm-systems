@@ -849,6 +849,22 @@ memory:
     tags: [transfer, stream]
   Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
   Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_Swap_H2D_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_Swap_D2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_Swap_MultiOp: *level_2
+  Unit_hipMemcpyBatchAsync_Swap_PreferCE: *level_2
+  Unit_hipMemcpyBatchAsync_Swap_Async_Ordering: *level_2
+  Unit_hipMemcpyBatchAsync_Swap_ForcedShader: *level_2
+  Unit_hipMemcpyBatchAsync_Swap_ThresholdSelection: *level_2
+  # Marked !shouldfail: exposes a pre-existing, swap-specific bug where a batch
+  # swap with a non-zero buffer offset does not update the device->host side at
+  # the offset (offset-0 swaps and offset linear copies both work; confirmed via
+  # a standalone reproducer). This is an EXISTING BUG THAT MUST BE FIXED; remove
+  # the !shouldfail tag once the swap offset handling is corrected.
+  Unit_hipMemcpyBatchAsync_Swap_AlignmentCoverage:
+    <<: *level_2
+    tags: ["!shouldfail"]
+  Unit_hipMemcpyBatchAsync_Swap_MixedBatch: *level_2
   Unit_hipMemcpyBatchAsync_Mixed_Functional:
     <<: *level_2
     tags: [transfer]

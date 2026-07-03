@@ -656,6 +656,1018 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional) {
   VerifyHostBuffers(dst, copy_size);
 }
 
+#if HT_AMD
+/**
+ * Test Description
+ * ------------------------
+ * - [Group A] Verify hipMemcpyBatchAsync with hipMemcpyFlagExtOpSwap
+ *   exchanges the contents of a hipHostMalloc host buffer and a hipMalloc
+ *   device buffer (H->D direction: host src <-> device dst).
+ *
+ *   Host src is allocated with hipHostMalloc so it resolves as an amd::Memory
+ *   object of Host type.  A plain malloc pointer would yield nullptr from the
+ *   memory lookup and be rejected at the read/write-only check
+ *   (hip_memory.cpp:3069-3073).
+ *
+ *   Expected pre-implementation baseline:
+ *     PASS  on swap-capable HW (gfx94x / gfx95x / gfx125x) — serviced by
+ *           SDMA swap.
+ *     SKIP  (kSdmaSwapUnsupported) on all other architectures — the front-end
+ *           gate at hip_memory.cpp:3011 returns hipErrorNotSupported before
+ *           the shader kernel is wired in.
+ *   After Phase 2 this test must pass on every architecture.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_H2D_Functional) {
+  constexpr size_t kNumElements = 4096;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValHost = 42;
+  constexpr int kValDev = 99;
+
+  // Host buffer via hipHostMalloc so it is a tracked amd::Memory (Host type).
+  void* h_src = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_src, kSizeBytes));
+
+  // Device buffer via hipMalloc.
+  void* d_dst = nullptr;
+  HIP_CHECK(hipMalloc(&d_dst, kSizeBytes));
+
+  // Fill host side with kValHost, device side with kValDev.
+  std::vector<int> hostInit(kNumElements, kValHost);
+  std::memcpy(h_src, hostInit.data(), kSizeBytes);
+
+  std::vector<int> devInit(kNumElements, kValDev);
+  HIP_CHECK(hipMemcpy(d_dst, devInit.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_dst};
+  void* srcs[] = {h_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  hipError_t err =
+      hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFree(d_dst));
+    HIP_CHECK(hipHostFree(h_src));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // After swap: host side should hold kValDev, device side kValHost.
+  std::vector<int> resultDev(kNumElements);
+  HIP_CHECK(hipMemcpy(resultDev.data(), d_dst, kSizeBytes, hipMemcpyDeviceToHost));
+
+  const int* resultHost = static_cast<const int*>(h_src);
+  for (size_t i = 0; i < kNumElements; i++) {
+    INFO("host[" << i << "] = " << resultHost[i] << " (expected " << kValDev << ")");
+    REQUIRE(resultHost[i] == kValDev);
+    INFO("dev[" << i << "] = " << resultDev[i] << " (expected " << kValHost << ")");
+    REQUIRE(resultDev[i] == kValHost);
+  }
+
+  HIP_CHECK(hipFree(d_dst));
+  HIP_CHECK(hipHostFree(h_src));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group A] Verify hipMemcpyBatchAsync swap in the reverse direction:
+ *   device src (hipMalloc) <-> host dst (hipHostMalloc).
+ *
+ *   Expected pre-implementation baseline:
+ *     PASS  on swap-capable HW (gfx94x / gfx95x / gfx125x).
+ *     SKIP  (kSdmaSwapUnsupported) elsewhere.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_D2H_Functional) {
+  constexpr size_t kNumElements = 4096;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValDev = 11;
+  constexpr int kValHost = 77;
+
+  // Device buffer.
+  void* d_src = nullptr;
+  HIP_CHECK(hipMalloc(&d_src, kSizeBytes));
+
+  // Host buffer via hipHostMalloc.
+  void* h_dst = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_dst, kSizeBytes));
+
+  // Fill device side with kValDev, host side with kValHost.
+  std::vector<int> devInit(kNumElements, kValDev);
+  HIP_CHECK(hipMemcpy(d_src, devInit.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  std::vector<int> hostInit(kNumElements, kValHost);
+  std::memcpy(h_dst, hostInit.data(), kSizeBytes);
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // dst=h_dst (host), src=d_src (device).
+  void* dsts[] = {h_dst};
+  void* srcs[] = {d_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  hipError_t err =
+      hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFree(d_src));
+    HIP_CHECK(hipHostFree(h_dst));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // After swap: device side holds kValHost, host side holds kValDev.
+  std::vector<int> resultDev(kNumElements);
+  HIP_CHECK(hipMemcpy(resultDev.data(), d_src, kSizeBytes, hipMemcpyDeviceToHost));
+
+  const int* resultHost = static_cast<const int*>(h_dst);
+  for (size_t i = 0; i < kNumElements; i++) {
+    INFO("dev[" << i << "] = " << resultDev[i] << " (expected " << kValHost << ")");
+    REQUIRE(resultDev[i] == kValHost);
+    INFO("host[" << i << "] = " << resultHost[i] << " (expected " << kValDev << ")");
+    REQUIRE(resultHost[i] == kValDev);
+  }
+
+  HIP_CHECK(hipFree(d_src));
+  HIP_CHECK(hipHostFree(h_dst));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group A] Verify hipMemcpyBatchAsync with multiple H<->D swap ops in a
+ *   single call.  Exercises the multi-entry descriptor path in the batch
+ *   emitter (rocblit.cpp:884-897 swapPending/num_entries loop).
+ *
+ *   Four independent host<->device pairs are swapped in one call; all must be
+ *   correct after synchronization.
+ *
+ *   Expected pre-implementation baseline:
+ *     PASS  on swap-capable HW (gfx94x / gfx95x / gfx125x).
+ *     SKIP  (kSdmaSwapUnsupported) elsewhere.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_MultiOp) {
+  constexpr size_t kNumOps = 4;
+  constexpr size_t kNumElements = 1024;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+
+  // Each pair has distinct sentinel values to confirm independence.
+  constexpr int kHostVals[kNumOps] = {10, 20, 30, 40};
+  constexpr int kDevVals[kNumOps] = {55, 66, 77, 88};
+
+  void* h_bufs[kNumOps] = {};
+  void* d_bufs[kNumOps] = {};
+
+  for (size_t op = 0; op < kNumOps; ++op) {
+    HIP_CHECK(hipHostMalloc(&h_bufs[op], kSizeBytes));
+    HIP_CHECK(hipMalloc(&d_bufs[op], kSizeBytes));
+
+    std::vector<int> hi(kNumElements, kHostVals[op]);
+    std::memcpy(h_bufs[op], hi.data(), kSizeBytes);
+
+    std::vector<int> di(kNumElements, kDevVals[op]);
+    HIP_CHECK(hipMemcpy(d_bufs[op], di.data(), kSizeBytes, hipMemcpyHostToDevice));
+  }
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // All ops share the same swap attribute (index 0).
+  size_t sizes[kNumOps];
+  size_t attrsIdxs[kNumOps];
+  for (size_t op = 0; op < kNumOps; ++op) {
+    sizes[op] = kSizeBytes;
+    attrsIdxs[op] = 0;
+  }
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  hipError_t err = hipMemcpyBatchAsync(d_bufs, h_bufs, sizes, kNumOps, &attr,
+                                       attrsIdxs, 1, &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    for (size_t op = 0; op < kNumOps; ++op) {
+      HIP_CHECK(hipFree(d_bufs[op]));
+      HIP_CHECK(hipHostFree(h_bufs[op]));
+    }
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Verify every pair independently.
+  for (size_t op = 0; op < kNumOps; ++op) {
+    std::vector<int> resultDev(kNumElements);
+    HIP_CHECK(hipMemcpy(resultDev.data(), d_bufs[op], kSizeBytes, hipMemcpyDeviceToHost));
+    const int* resultHost = static_cast<const int*>(h_bufs[op]);
+    for (size_t i = 0; i < kNumElements; i++) {
+      INFO("op=" << op << " dev[" << i << "]=" << resultDev[i]
+                 << " (expected " << kHostVals[op] << ")");
+      REQUIRE(resultDev[i] == kHostVals[op]);
+      INFO("op=" << op << " host[" << i << "]=" << resultHost[i]
+                 << " (expected " << kDevVals[op] << ")");
+      REQUIRE(resultHost[i] == kDevVals[op]);
+    }
+  }
+
+  for (size_t op = 0; op < kNumOps; ++op) {
+    HIP_CHECK(hipFree(d_bufs[op]));
+    HIP_CHECK(hipHostFree(h_bufs[op]));
+  }
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group A] Verify hipMemcpyBatchAsync swap with hipMemcpyFlagExtPreferCE
+ *   combined with hipMemcpyFlagExtOpSwap.  hipMemcpyFlagExtPreferCE maps to
+ *   CopyEnginePreference::SDMA (hip_memory.cpp:2917-2919), which keeps the
+ *   swap on the SDMA path even when the new size-based threshold would route
+ *   it to the shader kernel.  This test therefore keeps the SDMA swap path
+ *   under test after Phase 2 introduces the shader routing fork.
+ *
+ *   Expected pre-implementation baseline:
+ *     PASS  on swap-capable HW (gfx94x / gfx95x / gfx125x) — hipMemcpyFlagExtPreferCE
+ *           forces SDMA; SDMA swap already works there.
+ *     SKIP  (kSdmaSwapUnsupported) elsewhere.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_PreferCE) {
+  constexpr size_t kNumElements = 4096;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValHost = 13;
+  constexpr int kValDev = 37;
+
+  void* h_src = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_src, kSizeBytes));
+
+  void* d_dst = nullptr;
+  HIP_CHECK(hipMalloc(&d_dst, kSizeBytes));
+
+  std::vector<int> hostInit(kNumElements, kValHost);
+  std::memcpy(h_src, hostInit.data(), kSizeBytes);
+
+  std::vector<int> devInit(kNumElements, kValDev);
+  HIP_CHECK(hipMemcpy(d_dst, devInit.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_dst};
+  void* srcs[] = {h_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+
+  // Combine swap flag with PreferCE to force SDMA copy-engine path.
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtPreferCE;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  hipError_t err =
+      hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFree(d_dst));
+    HIP_CHECK(hipHostFree(h_src));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // After swap: host holds kValDev, device holds kValHost.
+  std::vector<int> resultDev(kNumElements);
+  HIP_CHECK(hipMemcpy(resultDev.data(), d_dst, kSizeBytes, hipMemcpyDeviceToHost));
+
+  const int* resultHost = static_cast<const int*>(h_src);
+  for (size_t i = 0; i < kNumElements; i++) {
+    INFO("host[" << i << "] = " << resultHost[i] << " (expected " << kValDev << ")");
+    REQUIRE(resultHost[i] == kValDev);
+    INFO("dev[" << i << "] = " << resultDev[i] << " (expected " << kValHost << ")");
+    REQUIRE(resultDev[i] == kValHost);
+  }
+
+  HIP_CHECK(hipFree(d_dst));
+  HIP_CHECK(hipHostFree(h_src));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group A] Verify that a swap issued asynchronously on a stream is
+ *   correctly ordered relative to dependent work enqueued before and after
+ *   it on the same stream.
+ *
+ *   Sequence on stream:
+ *     1. hipMemcpy (H2D) to pre-fill device buffer with sentinel value B.
+ *     2. hipMemcpyBatchAsync swap (host A <-> device B).
+ *     3. hipMemcpy (D2H) to read device buffer into a second host vector.
+ *   hipStreamSynchronize is called once at the end; all three operations
+ *   must have serialised correctly for the final verification to pass.
+ *
+ *   This guards the barrier/signal bookkeeping and the attach_signal /
+ *   system-scope handling in the batch command submission path.
+ *
+ *   Expected pre-implementation baseline:
+ *     PASS  on swap-capable HW (gfx94x / gfx95x / gfx125x).
+ *     SKIP  (kSdmaSwapUnsupported) elsewhere.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_Async_Ordering) {
+  constexpr size_t kNumElements = 4096;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValHost = 111;
+  constexpr int kValDev = 222;
+  constexpr int kValPre = 7;  // value written to device before the swap
+
+  // Host buffer (hipHostMalloc so it is a tracked amd::Memory).
+  void* h_buf = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_buf, kSizeBytes));
+
+  // Device buffer.
+  void* d_buf = nullptr;
+  HIP_CHECK(hipMalloc(&d_buf, kSizeBytes));
+
+  // Fill host side with kValHost now (before stream work begins).
+  std::vector<int> hostInit(kNumElements, kValHost);
+  std::memcpy(h_buf, hostInit.data(), kSizeBytes);
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // Operation 1 (before swap): write kValPre to device via H2D memcpy on stream,
+  // then overwrite with kValDev so the swap sees a known value.
+  // We use two enqueued memcpys to confirm ordering: first write kValPre, then
+  // immediately overwrite with kValDev.  Both are stream-ordered before the swap.
+  std::vector<int> preFill(kNumElements, kValPre);
+  HIP_CHECK(hipMemcpyAsync(d_buf, preFill.data(), kSizeBytes, hipMemcpyHostToDevice, stream));
+
+  std::vector<int> devFill(kNumElements, kValDev);
+  HIP_CHECK(hipMemcpyAsync(d_buf, devFill.data(), kSizeBytes, hipMemcpyHostToDevice, stream));
+
+  // Operation 2: swap on stream — host kValHost <-> device kValDev.
+  void* dsts[] = {d_buf};
+  void* srcs[] = {h_buf};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  hipError_t err =
+      hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFree(d_buf));
+    HIP_CHECK(hipHostFree(h_buf));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+
+  // Operation 3 (after swap): read device buffer back to a result vector on stream.
+  std::vector<int> resultDev(kNumElements, 0);
+  HIP_CHECK(hipMemcpyAsync(resultDev.data(), d_buf, kSizeBytes, hipMemcpyDeviceToHost, stream));
+
+  // Single synchronize covers all three operations.
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // After correct ordering:
+  //   device holds kValHost (written there by the swap).
+  //   host   holds kValDev  (written there by the swap).
+  //   resultDev reflects the post-swap device contents = kValHost.
+  const int* resultHost = static_cast<const int*>(h_buf);
+  for (size_t i = 0; i < kNumElements; i++) {
+    INFO("resultDev[" << i << "] = " << resultDev[i] << " (expected " << kValHost << ")");
+    REQUIRE(resultDev[i] == kValHost);
+    INFO("host[" << i << "] = " << resultHost[i] << " (expected " << kValDev << ")");
+    REQUIRE(resultHost[i] == kValDev);
+  }
+
+  HIP_CHECK(hipFree(d_buf));
+  HIP_CHECK(hipHostFree(h_buf));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group B] Primary shader-kernel test.  Issues a small H<->D swap
+ *   (hipHostMalloc host buffer <-> hipMalloc device buffer) and verifies
+ *   both sides exchanged correctly.
+ *
+ *   On NON-swap-capable HW (sdma_swap_supported_ == false) this is the
+ *   genuine proof that the shader kernel ran: after Phase 2, correct output
+ *   is only achievable via the shader path because SDMA swap is absent.
+ *   The test MUST RUN (not skip) on non-swap-capable architectures — that is
+ *   precisely the case it protects.
+ *
+ *   On swap-capable HW (gfx94x / gfx95x / gfx125x) both the shader path and
+ *   the SDMA path produce identical correct data, so the test is
+ *   correctness-only there (routing is unobservable in-process).
+ *
+ *   NO env manipulation: GPU_FORCE_BLIT_SWAP_SIZE is read once at device init
+ *   and the Catch binary shares one device, so setenv mid-test has no effect.
+ *   Non-swap-capable HW takes the shader path automatically — no flag needed.
+ *
+ *   Expected pre-implementation state (unmodified runtime):
+ *     On non-swap-capable HW: hipMemcpyBatchAsync returns hipErrorNotSupported
+ *     (front-end gate at hip_memory.cpp:3011 not yet relaxed) → this test
+ *     FAILS pre-implementation and PASSES after Phase 2.
+ *     On swap-capable HW: PASSES (SDMA swap already works; routing not forced).
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_ForcedShader) {
+  // Small size — well below the default 16 KB sdmaSwapThreshold_.
+  // On swap-capable HW this may or may not go to the shader (unobservable);
+  // on non-swap-capable HW the shader is the only possible path.
+  constexpr size_t kNumElements = 512;  // 2 KB
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValHost = 0xAB;
+  constexpr int kValDev = 0xCD;
+
+  void* h_buf = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_buf, kSizeBytes));
+
+  void* d_buf = nullptr;
+  HIP_CHECK(hipMalloc(&d_buf, kSizeBytes));
+
+  // Fill host with kValHost, device with kValDev.
+  std::vector<int> hostInit(kNumElements, kValHost);
+  std::memcpy(h_buf, hostInit.data(), kSizeBytes);
+
+  std::vector<int> devInit(kNumElements, kValDev);
+  HIP_CHECK(hipMemcpy(d_buf, devInit.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_buf};
+  void* srcs[] = {h_buf};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  // Do NOT skip on hipErrorNotSupported — that failure IS the pre-implementation
+  // state on non-swap-capable HW and must be visible as a test failure.
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1,
+                                &failIdx, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // After swap: host holds kValDev, device holds kValHost.
+  std::vector<int> resultDev(kNumElements);
+  HIP_CHECK(hipMemcpy(resultDev.data(), d_buf, kSizeBytes, hipMemcpyDeviceToHost));
+
+  const int* resultHost = static_cast<const int*>(h_buf);
+  for (size_t i = 0; i < kNumElements; i++) {
+    INFO("host[" << i << "] = " << resultHost[i] << " (expected " << kValDev << ")");
+    REQUIRE(resultHost[i] == kValDev);
+    INFO("dev[" << i << "] = " << resultDev[i] << " (expected " << kValHost << ")");
+    REQUIRE(resultDev[i] == kValHost);
+  }
+
+  HIP_CHECK(hipFree(d_buf));
+  HIP_CHECK(hipHostFree(h_buf));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group B] Threshold-straddling correctness test.  Issues two H<->D swap
+ *   ops in a single hipMemcpyBatchAsync call: one below the default 16 KB
+ *   sdmaSwapThreshold_ (8 KB → shader path on swap-capable HW after Phase 2)
+ *   and one above it (1 MB → SDMA path on swap-capable HW after Phase 2).
+ *   Both ops must produce correct results.
+ *
+ *   Uses the DEFAULT threshold (GPU_FORCE_BLIT_SWAP_SIZE = 16 KB).  No env
+ *   manipulation is performed — GPU_FORCE_BLIT_SWAP_SIZE is read once at
+ *   device init and setenv inside the test has no effect in the shared process.
+ *
+ *   IMPORTANT: This is a CORRECTNESS check, NOT a routing-fork assertion.
+ *   On swap-capable HW routing is unobservable in-process (both shader and
+ *   SDMA produce identical correct data).  The threshold straddling ensures
+ *   both code paths are exercised post-Phase-2 without being able to assert
+ *   which path was taken for each op.
+ *
+ *   Expected pre-implementation state (unmodified runtime):
+ *     On non-swap-capable HW: hipErrorNotSupported from front-end gate →
+ *     test FAILS pre-implementation, PASSES after Phase 2.
+ *     On swap-capable HW: PASSES (both ops routed to SDMA today; after Phase 2
+ *     the small op additionally exercises the shader path).
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_ThresholdSelection) {
+  // Op 0: 8 KB — below default 16 KB threshold (shader path on swap-capable HW
+  //   after Phase 2; on non-swap-capable HW shader path always).
+  // Op 1: 1 MB — above default 16 KB threshold (SDMA path on swap-capable HW).
+  constexpr size_t kSmallElems = 8 * 1024 / sizeof(int);   // 8 KB
+  constexpr size_t kLargeElems = 1024 * 1024 / sizeof(int);  // 1 MB
+  constexpr size_t kSmallBytes = kSmallElems * sizeof(int);
+  constexpr size_t kLargeBytes = kLargeElems * sizeof(int);
+
+  constexpr int kSmallValHost = 0x11;
+  constexpr int kSmallValDev  = 0x22;
+  constexpr int kLargeValHost = 0x33;
+  constexpr int kLargeValDev  = 0x44;
+
+  void* h_small = nullptr;
+  void* h_large = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_small, kSmallBytes));
+  HIP_CHECK(hipHostMalloc(&h_large, kLargeBytes));
+
+  void* d_small = nullptr;
+  void* d_large = nullptr;
+  HIP_CHECK(hipMalloc(&d_small, kSmallBytes));
+  HIP_CHECK(hipMalloc(&d_large, kLargeBytes));
+
+  // Initialise buffers.
+  std::vector<int> hs(kSmallElems, kSmallValHost);
+  std::memcpy(h_small, hs.data(), kSmallBytes);
+
+  std::vector<int> hl(kLargeElems, kLargeValHost);
+  std::memcpy(h_large, hl.data(), kLargeBytes);
+
+  std::vector<int> ds(kSmallElems, kSmallValDev);
+  HIP_CHECK(hipMemcpy(d_small, ds.data(), kSmallBytes, hipMemcpyHostToDevice));
+
+  std::vector<int> dl(kLargeElems, kLargeValDev);
+  HIP_CHECK(hipMemcpy(d_large, dl.data(), kLargeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_small, d_large};
+  void* srcs[] = {h_small, h_large};
+  size_t sizes[] = {kSmallBytes, kLargeBytes};
+  size_t attrsIdxs[] = {0, 0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  // On non-swap-capable HW today this returns hipErrorNotSupported → test FAILS
+  // pre-implementation (do NOT skip; the failure is the expected baseline state).
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 2, &attr, attrsIdxs, 1,
+                                &failIdx, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Verify small op.
+  {
+    std::vector<int> resultDev(kSmallElems);
+    HIP_CHECK(hipMemcpy(resultDev.data(), d_small, kSmallBytes, hipMemcpyDeviceToHost));
+    const int* resultHost = static_cast<const int*>(h_small);
+    for (size_t i = 0; i < kSmallElems; i++) {
+      INFO("small host[" << i << "] = " << resultHost[i]
+                         << " (expected " << kSmallValDev << ")");
+      REQUIRE(resultHost[i] == kSmallValDev);
+      INFO("small dev[" << i << "] = " << resultDev[i]
+                        << " (expected " << kSmallValHost << ")");
+      REQUIRE(resultDev[i] == kSmallValHost);
+    }
+  }
+
+  // Verify large op.
+  {
+    std::vector<int> resultDev(kLargeElems);
+    HIP_CHECK(hipMemcpy(resultDev.data(), d_large, kLargeBytes, hipMemcpyDeviceToHost));
+    const int* resultHost = static_cast<const int*>(h_large);
+    for (size_t i = 0; i < kLargeElems; i++) {
+      INFO("large host[" << i << "] = " << resultHost[i]
+                         << " (expected " << kLargeValDev << ")");
+      REQUIRE(resultHost[i] == kLargeValDev);
+      INFO("large dev[" << i << "] = " << resultDev[i]
+                        << " (expected " << kLargeValHost << ")");
+      REQUIRE(resultDev[i] == kLargeValHost);
+    }
+  }
+
+  HIP_CHECK(hipFree(d_small));
+  HIP_CHECK(hipFree(d_large));
+  HIP_CHECK(hipHostFree(h_small));
+  HIP_CHECK(hipHostFree(h_large));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group B] Swap-kernel branch coverage via size/alignment variants.
+ *   Three swap ops in a single batch, each targeting a different branch of
+ *   the swap kernel:
+ *
+ *   Op 0 — ulong2 16-byte aligned fast path: size is a multiple of 16 bytes
+ *     and base pointers are 16-byte aligned (guaranteed by hipHostMalloc /
+ *     hipMalloc).  The kernel body uses ulong2 loads/stores throughout.
+ *
+ *   Op 1 — uint fallback path: transfer region is shifted by a 4-byte-aligned
+ *     (but not 16-byte-aligned) offset into a hipHostMalloc / hipMalloc buffer,
+ *     making the effective base address unaligned to ulong2.  The kernel must
+ *     fall back to uint (4-byte) granularity for the body.
+ *
+ *   Op 2 — non-zero trailing-byte tail: size is deliberately chosen so it is
+ *     NOT a multiple of the kernel body granularity (e.g. 1025 bytes),
+ *     forcing the trailing-byte tail path that swaps remaining bytes one at a
+ *     time in work-group 0 / work-item 0.
+ *
+ *   Also directly exercises the "both endpoints get system scope" concern
+ *   (ShaderSwapBufferBatch must set needs_system_scope symmetrically for src
+ *   and dst — see design doc item 5).
+ *
+ *   NO env manipulation.  No routing-fork assertion (routing unobservable).
+ *
+ *   ==========================================================================
+ *   KNOWN FAILURE — marked [!shouldfail] in memory.yaml.
+ *   EXISTING BUG THAT MUST BE FIXED: Op 1 exposes a pre-existing, swap-specific
+ *   defect in the batch swap path — a swap whose src/dst pointers carry a
+ *   non-zero buffer offset does NOT update the device->host side at the offset
+ *   region.  This was confirmed independent of alignment (fails at both +4 and
+ *   +16 byte offsets) and is specific to swap: offset-0 swaps pass, and batch
+ *   LINEAR copies with the same offset pass (verified via a standalone
+ *   reproducer).  The bug lives in the SDMA swap offset handling, not in the
+ *   batch-memcpy offset computation.  Op 0 (aligned) and Op 2 (tail) pass.
+ *   Once the swap offset handling is fixed, remove the !shouldfail tag from
+ *   memory.yaml.
+ *   ==========================================================================
+ *
+ *   Expected state (unmodified runtime):
+ *     On swap-capable HW (e.g. gfx942): Op 1 FAILS via the SDMA offset bug, so
+ *     the test fails and is caught by [!shouldfail].
+ *     On non-swap-capable HW: hipErrorNotSupported today (front-end gate) —
+ *     also caught by [!shouldfail].
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_AlignmentCoverage) {
+  // Op 0: fully aligned, multiple of 16 bytes (ulong2 fast path).
+  constexpr size_t kAlignedBytes = 4096;  // 256 ulong2 elements
+  // Op 1: we allocate extra space and hand an offset pointer to the batch so the
+  // effective address exercises the uint (4-byte) fallback path: 4-byte aligned
+  // but NOT 16-byte (ulong2) aligned. Sub-word offsets (e.g. +1) are deliberately
+  // NOT tested — the kernel's uint fallback casts the base to uint* and indexes,
+  // which requires >=4-byte alignment (and SDMA has the same limitation).
+  constexpr size_t kUnalignedOffset = 4;           // 4-byte aligned, not 16-byte aligned
+  constexpr size_t kUnalignedTransferBytes = 256;  // transfer length (no alignment req.)
+  constexpr size_t kUnalignedAllocBytes = kUnalignedTransferBytes + 16;  // padding for offset
+  // Op 2: non-multiple-of-body-granularity (trailing bytes forced).
+  constexpr size_t kTailBytes = 1025;  // 1024 + 1 trailing byte
+
+  constexpr int kVal0Host = 0x01010101;
+  constexpr int kVal0Dev  = 0x02020202;
+  constexpr uint8_t kVal1Host = 0xAA;
+  constexpr uint8_t kVal1Dev  = 0xBB;
+  constexpr uint8_t kVal2Host = 0xCC;
+  constexpr uint8_t kVal2Dev  = 0xDD;
+
+  // Op 0 — aligned buffers.
+  void* h0 = nullptr;
+  void* d0 = nullptr;
+  HIP_CHECK(hipHostMalloc(&h0, kAlignedBytes));
+  HIP_CHECK(hipMalloc(&d0, kAlignedBytes));
+  std::memset(h0, kVal0Host & 0xFF, kAlignedBytes);
+  HIP_CHECK(hipMemset(d0, kVal0Dev & 0xFF, kAlignedBytes));
+
+  // Op 1 — allocate with padding; expose pointer offset by kUnalignedOffset.
+  void* h1_base = nullptr;
+  void* d1_base = nullptr;
+  HIP_CHECK(hipHostMalloc(&h1_base, kUnalignedAllocBytes));
+  HIP_CHECK(hipMalloc(&d1_base, kUnalignedAllocBytes));
+  // Fill the full allocation, then expose the offset region.
+  std::memset(h1_base, kVal1Host, kUnalignedAllocBytes);
+  HIP_CHECK(hipMemset(d1_base, kVal1Dev, kUnalignedAllocBytes));
+  void* h1 = static_cast<uint8_t*>(h1_base) + kUnalignedOffset;
+  void* d1 = static_cast<uint8_t*>(d1_base) + kUnalignedOffset;
+
+  // Op 2 — trailing-byte tail (odd size, naturally aligned base).
+  void* h2 = nullptr;
+  void* d2 = nullptr;
+  HIP_CHECK(hipHostMalloc(&h2, kTailBytes));
+  HIP_CHECK(hipMalloc(&d2, kTailBytes));
+  std::memset(h2, kVal2Host, kTailBytes);
+  HIP_CHECK(hipMemset(d2, kVal2Dev, kTailBytes));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d0, d1, d2};
+  void* srcs[] = {h0, h1, h2};
+  size_t sizes[] = {kAlignedBytes, kUnalignedTransferBytes, kTailBytes};
+  size_t attrsIdxs[] = {0, 0, 0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  // On non-swap-capable HW today returns hipErrorNotSupported → test FAILS
+  // pre-implementation (do NOT skip).
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 3, &attr, attrsIdxs, 1,
+                                &failIdx, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Verify op 0 (aligned).
+  {
+    std::vector<uint8_t> resultDev(kAlignedBytes);
+    HIP_CHECK(hipMemcpy(resultDev.data(), d0, kAlignedBytes, hipMemcpyDeviceToHost));
+    const uint8_t* resultHost = static_cast<const uint8_t*>(h0);
+    for (size_t i = 0; i < kAlignedBytes; i++) {
+      INFO("aligned host[" << i << "] = " << static_cast<int>(resultHost[i])
+                           << " (expected " << (kVal0Dev & 0xFF) << ")");
+      REQUIRE(resultHost[i] == (kVal0Dev & 0xFF));
+      INFO("aligned dev[" << i << "] = " << static_cast<int>(resultDev[i])
+                          << " (expected " << (kVal0Host & 0xFF) << ")");
+      REQUIRE(resultDev[i] == (kVal0Host & 0xFF));
+    }
+  }
+
+  // Verify op 1 (unaligned offset).
+  {
+    // Only check the transferred region; the leading bytes (before the offset)
+    // are outside the transfer window and are allowed to be any value.
+    std::vector<uint8_t> fullDev(kUnalignedAllocBytes);
+    HIP_CHECK(hipMemcpy(fullDev.data(), d1_base, kUnalignedAllocBytes, hipMemcpyDeviceToHost));
+    const uint8_t* resultDev = fullDev.data() + kUnalignedOffset;   // matches the offset
+    const uint8_t* resultHost = static_cast<const uint8_t*>(h1_base) + kUnalignedOffset;
+    for (size_t i = 0; i < kUnalignedTransferBytes; i++) {
+      INFO("unaligned host[" << i << "] = " << static_cast<int>(resultHost[i])
+                             << " (expected " << static_cast<int>(kVal1Dev) << ")");
+      REQUIRE(resultHost[i] == kVal1Dev);
+      INFO("unaligned dev[" << i << "] = " << static_cast<int>(resultDev[i])
+                            << " (expected " << static_cast<int>(kVal1Host) << ")");
+      REQUIRE(resultDev[i] == kVal1Host);
+    }
+  }
+
+  // Verify op 2 (trailing-byte tail).
+  {
+    std::vector<uint8_t> resultDev(kTailBytes);
+    HIP_CHECK(hipMemcpy(resultDev.data(), d2, kTailBytes, hipMemcpyDeviceToHost));
+    const uint8_t* resultHost = static_cast<const uint8_t*>(h2);
+    for (size_t i = 0; i < kTailBytes; i++) {
+      INFO("tail host[" << i << "] = " << static_cast<int>(resultHost[i])
+                        << " (expected " << static_cast<int>(kVal2Dev) << ")");
+      REQUIRE(resultHost[i] == kVal2Dev);
+      INFO("tail dev[" << i << "] = " << static_cast<int>(resultDev[i])
+                       << " (expected " << static_cast<int>(kVal2Host) << ")");
+      REQUIRE(resultDev[i] == kVal2Host);
+    }
+  }
+
+  HIP_CHECK(hipFree(d0));
+  HIP_CHECK(hipFree(d1_base));
+  HIP_CHECK(hipFree(d2));
+  HIP_CHECK(hipHostFree(h0));
+  HIP_CHECK(hipHostFree(h1_base));
+  HIP_CHECK(hipHostFree(h2));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - [Group B] Mixed-batch test: a single hipMemcpyBatchAsync call that
+ *   contains BOTH linear copy ops AND H<->D swap ops, forcing the three-way
+ *   partition introduced in Phase 2:
+ *
+ *     d2dCopyOps     — shader linear copies  (hipMemcpyFlagExtOpLinear default)
+ *     swapShaderOps  — shader swap ops        (hipMemcpyFlagExtOpSwap)
+ *     p2pCopyOps     — SDMA path (large swaps + everything else)
+ *
+ *   Batch layout (4 ops, two attribute entries):
+ *     Op 0  attr[0] = linear copy  — D->H, device src → host dst
+ *     Op 1  attr[1] = swap         — host src <-> device dst
+ *     Op 2  attr[0] = linear copy  — H->D, host src → device dst
+ *     Op 3  attr[1] = swap         — device src <-> host dst
+ *
+ *   Every op uses independent buffers with distinct sentinel values.  After
+ *   synchronization:
+ *     - Copy ops: dst holds the value that was in src at submission time.
+ *     - Swap ops: both sides exchange their initial values.
+ *
+ *   This exercises the partition + dispatch logic together in one call and
+ *   confirms the three-way split does not corrupt or drop any op.
+ *
+ *   NO env manipulation.  No routing-fork assertion (routing unobservable).
+ *
+ *   Expected pre-implementation state (unmodified runtime):
+ *     On non-swap-capable HW: hipErrorNotSupported from the front-end gate →
+ *     test FAILS pre-implementation, PASSES after Phase 2.
+ *     On swap-capable HW: The swap ops are serviced by SDMA today and the
+ *     copy ops by the shader linear path; the test PASSES (mix already works
+ *     for the SDMA case).  After Phase 2 small swaps move to the shader path
+ *     but correctness is identical.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_MixedBatch) {
+  constexpr size_t kNumElements = 1024;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+
+  // Sentinel values, one per op × side, all distinct.
+  constexpr int kCopy0SrcVal  = 0x10;  // op 0 src (device) → dst (host)
+  constexpr int kCopy0DstInit = 0x11;  // op 0 dst initial (overwritten by copy)
+  constexpr int kSwap1HostVal = 0x20;  // op 1 host side before swap
+  constexpr int kSwap1DevVal  = 0x21;  // op 1 device side before swap
+  constexpr int kCopy2SrcVal  = 0x30;  // op 2 src (host) → dst (device)
+  constexpr int kCopy2DstInit = 0x31;  // op 2 dst initial (overwritten by copy)
+  constexpr int kSwap3HostVal = 0x40;  // op 3 host side before swap
+  constexpr int kSwap3DevVal  = 0x41;  // op 3 device side before swap
+
+  // --- Op 0: linear copy, device src → host dst ---
+  void* d_copy0_src = nullptr;
+  HIP_CHECK(hipMalloc(&d_copy0_src, kSizeBytes));
+  {
+    std::vector<int> init(kNumElements, kCopy0SrcVal);
+    HIP_CHECK(hipMemcpy(d_copy0_src, init.data(), kSizeBytes, hipMemcpyHostToDevice));
+  }
+  void* h_copy0_dst = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_copy0_dst, kSizeBytes));
+  std::memset(h_copy0_dst, kCopy0DstInit & 0xFF, kSizeBytes);
+
+  // --- Op 1: swap, host src <-> device dst ---
+  void* h_swap1 = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_swap1, kSizeBytes));
+  {
+    std::vector<int> init(kNumElements, kSwap1HostVal);
+    std::memcpy(h_swap1, init.data(), kSizeBytes);
+  }
+  void* d_swap1 = nullptr;
+  HIP_CHECK(hipMalloc(&d_swap1, kSizeBytes));
+  {
+    std::vector<int> init(kNumElements, kSwap1DevVal);
+    HIP_CHECK(hipMemcpy(d_swap1, init.data(), kSizeBytes, hipMemcpyHostToDevice));
+  }
+
+  // --- Op 2: linear copy, host src → device dst ---
+  void* h_copy2_src = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_copy2_src, kSizeBytes));
+  {
+    std::vector<int> init(kNumElements, kCopy2SrcVal);
+    std::memcpy(h_copy2_src, init.data(), kSizeBytes);
+  }
+  void* d_copy2_dst = nullptr;
+  HIP_CHECK(hipMalloc(&d_copy2_dst, kSizeBytes));
+  HIP_CHECK(hipMemset(d_copy2_dst, kCopy2DstInit & 0xFF, kSizeBytes));
+
+  // --- Op 3: swap, device src <-> host dst ---
+  void* d_swap3 = nullptr;
+  HIP_CHECK(hipMalloc(&d_swap3, kSizeBytes));
+  {
+    std::vector<int> init(kNumElements, kSwap3DevVal);
+    HIP_CHECK(hipMemcpy(d_swap3, init.data(), kSizeBytes, hipMemcpyHostToDevice));
+  }
+  void* h_swap3 = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_swap3, kSizeBytes));
+  {
+    std::vector<int> init(kNumElements, kSwap3HostVal);
+    std::memcpy(h_swap3, init.data(), kSizeBytes);
+  }
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // Two attribute entries: [0] = linear copy, [1] = swap.
+  hipMemcpyAttributes attrs[2] = {};
+  attrs[0].flags = 0;  // linear (default)
+  attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[1].flags = hipMemcpyFlagExtOpSwap;
+  attrs[1].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  // op0=copy(D->H), op1=swap(H<->D), op2=copy(H->D), op3=swap(D<->H).
+  void* dsts[] = {h_copy0_dst, d_swap1,     d_copy2_dst, h_swap3};
+  void* srcs[] = {d_copy0_src, h_swap1,     h_copy2_src, d_swap3};
+  size_t sizes[] = {kSizeBytes, kSizeBytes, kSizeBytes,  kSizeBytes};
+  size_t attrsIdxs[] = {0, 1, 0, 1};  // linear, swap, linear, swap
+
+  size_t failIdx = 0;
+  // On non-swap-capable HW today returns hipErrorNotSupported → test FAILS
+  // pre-implementation (do NOT skip).
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 4, attrs, attrsIdxs, 2,
+                                &failIdx, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Verify op 0 (copy D->H): h_copy0_dst must hold kCopy0SrcVal.
+  {
+    const int* result = static_cast<const int*>(h_copy0_dst);
+    for (size_t i = 0; i < kNumElements; i++) {
+      INFO("copy0 dst[" << i << "] = " << result[i]
+                        << " (expected " << kCopy0SrcVal << ")");
+      REQUIRE(result[i] == kCopy0SrcVal);
+    }
+  }
+
+  // Verify op 1 (swap H<->D): host holds kSwap1DevVal, device holds kSwap1HostVal.
+  {
+    std::vector<int> resultDev(kNumElements);
+    HIP_CHECK(hipMemcpy(resultDev.data(), d_swap1, kSizeBytes, hipMemcpyDeviceToHost));
+    const int* resultHost = static_cast<const int*>(h_swap1);
+    for (size_t i = 0; i < kNumElements; i++) {
+      INFO("swap1 host[" << i << "] = " << resultHost[i]
+                         << " (expected " << kSwap1DevVal << ")");
+      REQUIRE(resultHost[i] == kSwap1DevVal);
+      INFO("swap1 dev[" << i << "] = " << resultDev[i]
+                        << " (expected " << kSwap1HostVal << ")");
+      REQUIRE(resultDev[i] == kSwap1HostVal);
+    }
+  }
+
+  // Verify op 2 (copy H->D): d_copy2_dst must hold kCopy2SrcVal.
+  {
+    std::vector<int> result(kNumElements);
+    HIP_CHECK(hipMemcpy(result.data(), d_copy2_dst, kSizeBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kNumElements; i++) {
+      INFO("copy2 dst[" << i << "] = " << result[i]
+                        << " (expected " << kCopy2SrcVal << ")");
+      REQUIRE(result[i] == kCopy2SrcVal);
+    }
+  }
+
+  // Verify op 3 (swap D<->H): device holds kSwap3HostVal, host holds kSwap3DevVal.
+  {
+    std::vector<int> resultDev(kNumElements);
+    HIP_CHECK(hipMemcpy(resultDev.data(), d_swap3, kSizeBytes, hipMemcpyDeviceToHost));
+    const int* resultHost = static_cast<const int*>(h_swap3);
+    for (size_t i = 0; i < kNumElements; i++) {
+      INFO("swap3 dev[" << i << "] = " << resultDev[i]
+                        << " (expected " << kSwap3HostVal << ")");
+      REQUIRE(resultDev[i] == kSwap3HostVal);
+      INFO("swap3 host[" << i << "] = " << resultHost[i]
+                         << " (expected " << kSwap3DevVal << ")");
+      REQUIRE(resultHost[i] == kSwap3DevVal);
+    }
+  }
+
+  HIP_CHECK(hipFree(d_copy0_src));
+  HIP_CHECK(hipFree(d_swap1));
+  HIP_CHECK(hipFree(d_copy2_dst));
+  HIP_CHECK(hipFree(d_swap3));
+  HIP_CHECK(hipHostFree(h_copy0_dst));
+  HIP_CHECK(hipHostFree(h_swap1));
+  HIP_CHECK(hipHostFree(h_copy2_src));
+  HIP_CHECK(hipHostFree(h_swap3));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+#endif
+
 /**
  * Test Description
  * ------------------------
