@@ -659,7 +659,7 @@ main(int argc, char** argv)
     parser
         .add_argument(
             { "-L", "--library" },
-            fmt::format("Libraries with instrumentation routines (default: \"{}\")",
+            fmt::format(R"(Libraries with instrumentation routines (default: "{}"))",
                         inputlib.front()))
         .action([&inputlib](parser_t& p) { inputlib = p.get<strvec_t>("library"); });
     parser

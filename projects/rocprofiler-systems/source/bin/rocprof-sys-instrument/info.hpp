@@ -6,7 +6,6 @@
 #include "fwd.hpp"
 #include "module_function.hpp"
 
-#include "common/delimit.hpp"
 #include <spdlog/fmt/fmt.h>
 #include <timemory/log/color.hpp>
 #include <timemory/mpl/policy.hpp>

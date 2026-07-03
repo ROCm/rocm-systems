@@ -1156,14 +1156,27 @@ to_string(error_level_t _level)
 {
     switch(_level)
     {
-        case BPatchFatal: return fmt::format("{}FatalError", tim::log::color::fatal());
+        case BPatchFatal:
+        {
+            return fmt::format("{}FatalError", tim::log::color::fatal());
+        }
         case BPatchSerious:
+        {
             return fmt::format("{}SeriousError", tim::log::color::fatal());
-        case BPatchWarning: return fmt::format("{}Warning", tim::log::color::warning());
-        case BPatchInfo: return fmt::format("{}Info", tim::log::color::info());
+        }
+        case BPatchWarning:
+        {
+            return fmt::format("{}Warning", tim::log::color::warning());
+        }
+        case BPatchInfo:
+        {
+            return fmt::format("{}Info", tim::log::color::info());
+        }
         default:
+        {
             return fmt::format("{}UnknownErrorLevel{}", tim::log::color::warning(),
                                static_cast<int>(_level));
+        }
     }
 }
 
