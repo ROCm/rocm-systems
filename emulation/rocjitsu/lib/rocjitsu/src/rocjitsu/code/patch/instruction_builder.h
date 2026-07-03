@@ -19,10 +19,13 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "rocjitsu/code/rj_code.h"
@@ -327,6 +330,47 @@ inline constexpr uint16_t kWaitAluDepctrSaSdst0 = 0xFF9E;
   }
 }
 
+/// @brief Get the s_getpc_b64 SOP1 opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sop1_op_getpc_b64(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return 0x1f;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 0x47;
+  default:
+    return 0x1c;
+  }
+}
+
+/// @brief Get the s_setpc_b64 SOP1 opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sop1_op_setpc_b64(rj_code_arch_t arch) {
+  return sop1_op_getpc_b64(arch) + 1;
+}
+
+/// @brief Get the s_swappc_b64 SOP1 opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sop1_op_swappc_b64(rj_code_arch_t arch) {
+  return sop1_op_getpc_b64(arch) + 2;
+}
+
+/// @brief Get the s_call_b64 SOPK opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sopk_op_call_b64(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return 0x16;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 0x14;
+  default:
+    return 0x15;
+  }
+}
+
 /// @brief Get the s_lshl_b32 opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sop2_op_lshl_b32(rj_code_arch_t arch) {
   switch (arch) {
@@ -436,6 +480,28 @@ inline constexpr uint16_t kWaitAluDepctrSaSdst0 = 0xFF9E;
   return build_sopp_encoding(arch, sopp_op_branch(arch), static_cast<uint16_t>(offset_dwords));
 }
 
+/// @brief Encode an s_getpc_b64 instruction for the given target ISA.
+[[nodiscard]] inline constexpr uint32_t build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch) {
+  return pack_sop1(sop1_op_getpc_b64(arch), sdst, 0);
+}
+
+/// @brief Encode an s_setpc_b64 instruction for the given target ISA.
+[[nodiscard]] inline constexpr uint32_t build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch) {
+  return pack_sop1(sop1_op_setpc_b64(arch), 0, ssrc0);
+}
+
+/// @brief Encode an s_swappc_b64 instruction for the given target ISA.
+[[nodiscard]] inline constexpr uint32_t build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0,
+                                                           rj_code_arch_t arch) {
+  return pack_sop1(sop1_op_swappc_b64(arch), sdst, ssrc0);
+}
+
+/// @brief Encode an s_call_b64 instruction for the given target ISA.
+[[nodiscard]] inline constexpr uint32_t build_s_call_b64(uint16_t sdst, int16_t offset_dwords,
+                                                         rj_code_arch_t arch) {
+  return pack_sopk(sopk_op_call_b64(arch), sdst, static_cast<uint16_t>(offset_dwords));
+}
+
 /// @brief Patch an emitted direct PC-relative branch instruction in-place.
 ///
 /// @details @p words points into the translated output buffer. @p delta_bytes is
@@ -540,6 +606,15 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 /// @brief Encode an s_endpgm instruction for the given target ISA.
 [[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
   return pack_sopp(sopp_op_endpgm(arch), 0);
+}
+
+/// @brief Encode an s_trap instruction for the given target ISA.
+///
+/// @details The immediate is a trap code, not a printable message. Runtime DBT
+/// uses a rocjitsu-specific value for skipped-kernel stubs so a surfaced trap
+/// code can be distinguished from guest code traps.
+[[nodiscard]] inline constexpr uint32_t build_s_trap(rj_code_arch_t arch, uint16_t simm16 = 0) {
+  return pack_sopp(sopp_op_trap(arch), simm16);
 }
 
 /// @brief Encode s_delay_alu for the given target ISA.

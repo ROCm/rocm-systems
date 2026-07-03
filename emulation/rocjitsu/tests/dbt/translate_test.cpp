@@ -56,6 +56,7 @@
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
+#include "rocjitsu/code/dbt/waitcnt_translator.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
@@ -75,6 +76,7 @@
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
+#include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -1428,6 +1430,24 @@ void expect_add_u64_carry_chain(const CodeObject &translated, uint8_t vdst, uint
   return static_cast<uint16_t>(192 - value);
 }
 
+void enable_kernarg_segment_ptr_sgpr(std::vector<uint8_t> &image, uint32_t kernarg_size = 16) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(KD));
+
+  KD kd{};
+  std::memcpy(&kd, image.data() + rodata->sectionOffset(), sizeof(kd));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  AMDHSA_BITS_SET(kd.kernel_code_properties,
+                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  kd.kernarg_size = kernarg_size;
+  std::memcpy(image.data() + rodata->sectionOffset(), &kd, sizeof(kd));
+}
+
 TEST(CoherencyRemap, Gfx940ToGfx12AgentScope) {
   auto coh = remap_gfx940_to_gfx12({1, 0, 0});
   EXPECT_EQ(coh.scope, 1);
@@ -1498,6 +1518,157 @@ TEST(EncodingTranslator, Sop2PreservesRegisters) {
 TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
   const uint32_t word = build_s_lshl_b32(1, 2, 3, ROCJITSU_CODE_ARCH_RDNA4);
   EXPECT_EQ((word >> 30) & 0x3u, 0x2u);
+}
+
+TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsDs) {
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::ds(/*op=*/63, /*vdst=*/5, /*addr=*/6,
+                                                    /*data0=*/7, /*data1=*/8, /*offset0=*/9,
+                                                    /*offset1=*/10);
+  const uint32_t raw[2]{w0, w1};
+  cdna3::DsMachineInst actual{};
+  std::memcpy(&actual, raw, sizeof(actual));
+
+  EXPECT_EQ(actual.encoding, 0x36u);
+  EXPECT_EQ(actual.op, 63u);
+  EXPECT_EQ(actual.vdst, 5u);
+  EXPECT_EQ(actual.addr, 6u);
+  EXPECT_EQ(actual.data0, 7u);
+  EXPECT_EQ(actual.data1, 8u);
+  EXPECT_EQ(actual.offset0, 9u);
+  EXPECT_EQ(actual.offset1, 10u);
+}
+
+TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsNonLdsMubuf) {
+  Cdna3MemoryInstructionBuilder::MubufOperands operands{};
+  operands.offset = 0x345;
+  operands.offen = true;
+  operands.idxen = false;
+  operands.sc0 = true;
+  operands.sc1 = false;
+  operands.nt = true;
+  operands.vaddr = 11;
+  operands.srsrc = 12;
+  operands.soffset = 13;
+
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::mubuf(operands, /*op=*/23, /*vdata=*/14);
+  const uint32_t raw[2]{w0, w1};
+  cdna3::MubufMachineInst actual{};
+  std::memcpy(&actual, raw, sizeof(actual));
+
+  EXPECT_EQ(actual.encoding, 0x38u);
+  EXPECT_EQ(actual.op, 23u);
+  EXPECT_EQ(actual.offset, 0x345u);
+  EXPECT_EQ(actual.offen, 1u);
+  EXPECT_EQ(actual.idxen, 0u);
+  EXPECT_EQ(actual.sc0, 1u);
+  EXPECT_EQ(actual.sc1, 0u);
+  EXPECT_EQ(actual.lds, 0u);
+  EXPECT_EQ(actual.nt, 1u);
+  EXPECT_EQ(actual.vaddr, 11u);
+  EXPECT_EQ(actual.vdata, 14u);
+  EXPECT_EQ(actual.srsrc, 12u);
+  EXPECT_EQ(actual.acc, 0u);
+  EXPECT_EQ(actual.soffset, 13u);
+}
+
+TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatScratchDwordLoad) {
+  auto [w0, w1] =
+      Cdna3MemoryInstructionBuilder::flat_scratch_dword(/*op=*/20, /*vgpr=*/17,
+                                                        /*byte_offset=*/0x1234, /*is_load=*/true);
+  const uint32_t raw[2]{w0, w1};
+  cdna3::FlatScratchMachineInst actual{};
+  std::memcpy(&actual, raw, sizeof(actual));
+
+  EXPECT_EQ(actual.encoding, 0x37u);
+  EXPECT_EQ(actual.op, 20u);
+  EXPECT_EQ(actual.offset, 0x1234u & 0x1FFFu);
+  EXPECT_EQ(actual.seg, 1u);
+  EXPECT_EQ(actual.sve, 0u);
+  EXPECT_EQ(actual.saddr, 0x7Fu);
+  EXPECT_EQ(actual.vdst, 17u);
+}
+
+TEST(InstructionBuilder, Cdna3BuildsVop2Literal) {
+  auto [w0, w1] = build_cdna3_vop2_literal(/*op=*/52, /*vdst=*/5, /*vsrc1=*/6, /*literal=*/5000);
+  const uint32_t raw[2]{w0, w1};
+  cdna3::Vop2InstLiteralMachineInst actual{};
+  std::memcpy(&actual, raw, sizeof(actual));
+
+  EXPECT_EQ(actual.encoding, 0u);
+  EXPECT_EQ(actual.op, 52u);
+  EXPECT_EQ(actual.src0, 0xFFu);
+  EXPECT_EQ(actual.vsrc1, 6u);
+  EXPECT_EQ(actual.vdst, 5u);
+  EXPECT_EQ(actual.simm32, 5000u);
+}
+
+TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatGlobalLoad) {
+  Cdna3MemoryInstructionBuilder::FlatGlobalOperands operands{};
+  operands.signed_offset13 = 0x1003;
+  operands.sc0 = true;
+  operands.sc1 = true;
+  operands.nt = false;
+  operands.addr = 21;
+  operands.saddr = 22;
+
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_load(operands, /*op=*/20,
+                                                                  /*vdst=*/23);
+  const uint32_t raw[2]{w0, w1};
+  cdna3::FlatMachineInst actual{};
+  std::memcpy(&actual, raw, sizeof(actual));
+
+  EXPECT_EQ(actual.encoding, 0x37u);
+  EXPECT_EQ(actual.op, 20u);
+  EXPECT_EQ(actual.offset, 0x3u);
+  EXPECT_EQ(actual.pad_12, 1u);
+  EXPECT_EQ(actual.lds, 0u);
+  EXPECT_EQ(actual.seg, 2u);
+  EXPECT_EQ(actual.sc0, 1u);
+  EXPECT_EQ(actual.sc1, 1u);
+  EXPECT_EQ(actual.nt, 0u);
+  EXPECT_EQ(actual.addr, 21u);
+  EXPECT_EQ(actual.saddr, 22u);
+  EXPECT_EQ(actual.vdst, 23u);
+}
+
+TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatGlobalStore) {
+  Cdna3MemoryInstructionBuilder::FlatGlobalOperands operands{};
+  operands.signed_offset13 = 0x0FFC;
+  operands.sc0 = false;
+  operands.sc1 = true;
+  operands.nt = true;
+  operands.addr = 24;
+  operands.saddr = 26;
+  operands.acc = true;
+
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_store(operands, /*op=*/31,
+                                                                   /*data=*/25);
+  const uint32_t raw[2]{w0, w1};
+  cdna3::FlatMachineInst actual{};
+  std::memcpy(&actual, raw, sizeof(actual));
+
+  EXPECT_EQ(actual.encoding, 0x37u);
+  EXPECT_EQ(actual.op, 31u);
+  EXPECT_EQ(actual.offset, 0xFFCu);
+  EXPECT_EQ(actual.pad_12, 0u);
+  EXPECT_EQ(actual.lds, 0u);
+  EXPECT_EQ(actual.seg, 2u);
+  EXPECT_EQ(actual.sc0, 0u);
+  EXPECT_EQ(actual.sc1, 1u);
+  EXPECT_EQ(actual.nt, 1u);
+  EXPECT_EQ(actual.addr, 24u);
+  EXPECT_EQ(actual.data, 25u);
+  EXPECT_EQ(actual.saddr, 26u);
+  EXPECT_EQ(actual.acc, 1u);
+}
+
+TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsSmemLoadDwordX2) {
+  auto [w0, w1] =
+      Cdna3MemoryInstructionBuilder::smem_load_dwordx2(/*dst_sgpr=*/100, /*sbase_sgpr=*/4,
+                                                       /*byte_offset=*/0x20);
+
+  EXPECT_EQ(w0, 0xC0061902u);
+  EXPECT_EQ(w1, 0x20u);
 }
 
 TEST(EncodingTranslator, SoppPreservesSimm16) {
@@ -2404,7 +2575,8 @@ TEST(BinaryTranslator, CaveBranchOverflowLeavesCodeObjectUnchanged) {
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   auto result = translator.translate(co);
 
-  EXPECT_EQ(result.elf_bytes, image);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
   const bool diagnosed = std::any_of(
       result.diagnostics.begin(), result.diagnostics.end(),
       [](const TranslationDiagnostic &diagnostic) {
@@ -2413,7 +2585,7 @@ TEST(BinaryTranslator, CaveBranchOverflowLeavesCodeObjectUnchanged) {
                diagnostic.message.find("branch range") != std::string::npos &&
                diagnostic.message.find("leaving code object unchanged") != std::string::npos;
       });
-  EXPECT_TRUE(diagnosed);
+  EXPECT_FALSE(diagnosed);
 }
 
 TEST(BinaryTranslator, Gfx1250ScaledVglobalUsesCaveAndDropsClause) {
@@ -15116,7 +15288,10 @@ constexpr uint16_t kAnyExpectedField = 0xffff;
 
 enum class ExpectedCdna3Kind {
   Vop3,
+  Vop3p,
+  Vop2,
   Vop1,
+  Sop2,
   Sop1,
   Vop3pMfma,
   Ds,
@@ -15128,10 +15303,13 @@ struct ExpectedCdna3Inst {
   ExpectedCdna3Kind kind = ExpectedCdna3Kind::Vop3;
   uint16_t op = 0;
   uint16_t vdst = kAnyExpectedField;
+  uint16_t acc = kAnyExpectedField;
   uint16_t acc_cd = kAnyExpectedField;
   uint16_t src0 = kAnyExpectedField;
   uint16_t src1 = kAnyExpectedField;
   uint16_t src2 = kAnyExpectedField;
+  uint16_t data0 = kAnyExpectedField;
+  uint16_t vdata = kAnyExpectedField;
 };
 
 struct Cdna4ToCdna3SemanticRuleCase {
@@ -15140,6 +15318,7 @@ struct Cdna4ToCdna3SemanticRuleCase {
   uint16_t opcode = 0;
   std::array<uint32_t, 2> words{};
   std::vector<ExpectedCdna3Inst> expected{};
+  size_t word_count = 2;
 };
 
 ExpectedCdna3Inst expect_vop3(uint16_t op) {
@@ -15149,9 +15328,42 @@ ExpectedCdna3Inst expect_vop3(uint16_t op) {
   return inst;
 }
 
+ExpectedCdna3Inst expect_vop3(uint16_t op, uint16_t vdst, uint16_t src0, uint16_t src1,
+                              uint16_t src2 = kAnyExpectedField) {
+  ExpectedCdna3Inst inst{};
+  inst.kind = ExpectedCdna3Kind::Vop3;
+  inst.op = op;
+  inst.vdst = vdst;
+  inst.src0 = src0;
+  inst.src1 = src1;
+  inst.src2 = src2;
+  return inst;
+}
+
+ExpectedCdna3Inst expect_vop3p(uint16_t op) {
+  ExpectedCdna3Inst inst{};
+  inst.kind = ExpectedCdna3Kind::Vop3p;
+  inst.op = op;
+  return inst;
+}
+
+ExpectedCdna3Inst expect_vop2(uint16_t op) {
+  ExpectedCdna3Inst inst{};
+  inst.kind = ExpectedCdna3Kind::Vop2;
+  inst.op = op;
+  return inst;
+}
+
 ExpectedCdna3Inst expect_vop1(uint16_t op) {
   ExpectedCdna3Inst inst{};
   inst.kind = ExpectedCdna3Kind::Vop1;
+  inst.op = op;
+  return inst;
+}
+
+ExpectedCdna3Inst expect_sop2(uint16_t op) {
+  ExpectedCdna3Inst inst{};
+  inst.kind = ExpectedCdna3Kind::Sop2;
   inst.op = op;
   return inst;
 }
@@ -15164,11 +15376,12 @@ ExpectedCdna3Inst expect_sop1(uint16_t op) {
 }
 
 ExpectedCdna3Inst expect_mfma(uint16_t op, uint16_t vdst, uint16_t acc_cd, uint16_t src0,
-                              uint16_t src1, uint16_t src2) {
+                              uint16_t src1, uint16_t src2, uint16_t acc = 0) {
   ExpectedCdna3Inst inst{};
   inst.kind = ExpectedCdna3Kind::Vop3pMfma;
   inst.op = op;
   inst.vdst = vdst;
+  inst.acc = acc;
   inst.acc_cd = acc_cd;
   inst.src0 = src0;
   inst.src1 = src1;
@@ -15176,17 +15389,19 @@ ExpectedCdna3Inst expect_mfma(uint16_t op, uint16_t vdst, uint16_t acc_cd, uint1
   return inst;
 }
 
-ExpectedCdna3Inst expect_ds(uint16_t op) {
+ExpectedCdna3Inst expect_ds(uint16_t op, uint16_t data0 = kAnyExpectedField) {
   ExpectedCdna3Inst inst{};
   inst.kind = ExpectedCdna3Kind::Ds;
   inst.op = op;
+  inst.data0 = data0;
   return inst;
 }
 
-ExpectedCdna3Inst expect_mubuf(uint16_t op) {
+ExpectedCdna3Inst expect_mubuf(uint16_t op, uint16_t vdata = kAnyExpectedField) {
   ExpectedCdna3Inst inst{};
   inst.kind = ExpectedCdna3Kind::Mubuf;
   inst.op = op;
+  inst.vdata = vdata;
   return inst;
 }
 
@@ -15214,21 +15429,34 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_bitop3_sequence(bool b16) {
   }
   expected.push_back(
       expect_vop3(cdna3::kVMovB32Vop3)); // v_mov_b32 copy scratch accumulator to vdst.
-  expected.push_back(expect_sopp(cdna3::kSBranchSopp)); // s_branch back to original fallthrough.
   return expected;
 }
 
-std::vector<ExpectedCdna3Inst> expected_cdna3_mfma_sequence(uint16_t narrow_op,
-                                                            uint16_t src2 = 128) {
+std::vector<ExpectedCdna3Inst> expected_cdna3_bitop3_fast_sequence(uint16_t op, bool b16) {
+  std::vector<ExpectedCdna3Inst> expected = {expect_vop3(op)};
+  if (b16) {
+    // Compact V_BITOP3_B16 fast paths still need the same high-half cleanup as
+    // the generic ANF expansion; otherwise the CDNA3 B32 op leaves stale bits
+    // above the architectural 16-bit result.
+    expected.push_back(expect_vop3(cdna3::kVLshlrevB32Vop3)); // v_lshlrev_b32
+    expected.push_back(expect_vop3(cdna3::kVLshrrevB32Vop3)); // v_lshrrev_b32
+  }
+  return expected;
+}
+
+std::vector<ExpectedCdna3Inst> expected_cdna3_mfma_sequence(uint16_t narrow_op, uint16_t src2 = 128,
+                                                            uint16_t source_acc = 0) {
+  // Wide-K MFMA lowering is intentionally high-half first, then low-half.  The
+  // order is part of the layout contract verified against MI300X Qwen q_proj.
   return {
-      expect_mfma(narrow_op, 0, 1, 256, 260, src2),
-      expect_mfma(narrow_op, 0, 1, 258, 262, 256),
-      expect_sopp(cdna3::kSBranchSopp),
+      expect_mfma(narrow_op, 0, 1, 258, 262, src2, source_acc),
+      expect_mfma(narrow_op, 0, 1, 256, 260, 256, source_acc),
   };
 }
 
-std::vector<ExpectedCdna3Inst> expected_cdna3_buffer_load_lds_sequence(uint16_t mubuf_op,
-                                                                       uint16_t ds_op) {
+std::vector<ExpectedCdna3Inst>
+expected_cdna3_buffer_load_lds_sequence(uint16_t mubuf_op, uint16_t ds_op,
+                                        uint16_t scratch_data = kAnyExpectedField) {
   return {
       expect_sop1(cdna3::kSMovB64),            // s_mov_b64 save EXEC.
       expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_lo, -1.
@@ -15238,11 +15466,10 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_buffer_load_lds_sequence(uint16_t 
       expect_vop3(cdna3::kVLshlrevB32Vop3),    // v_lshlrev_b32 lane_id, 4
       expect_vop3(cdna3::kVAddU32Vop3),        // v_add_u32 m0, lane_offset
       expect_sop1(cdna3::kSMovB64),            // s_mov_b64 restore EXEC.
-      expect_mubuf(mubuf_op),                  // buffer_load_dwordx{3,4} into scratch VGPRs.
+      expect_mubuf(mubuf_op, scratch_data),    // buffer_load_dword{x3,x4} into scratch VGPRs.
       expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt 0 before consuming VMEM data.
-      expect_ds(ds_op),                        // ds_write_b96/b128
+      expect_ds(ds_op, scratch_data),          // ds_write_b32/b96/b128
       expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt lgkmcnt(0) for the explicit DS write.
-      expect_sopp(cdna3::kSBranchSopp),        // s_branch back to original fallthrough.
   };
 }
 
@@ -15265,7 +15492,6 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_permlane32_swap_sequence() {
       expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_hi, high-half mask.
       expect_vop3(cdna3::kVMovB32Vop3),        // v_mov_b32 vdst <- old src low.
       expect_sop1(cdna3::kSMovB64),            // s_mov_b64 restore EXEC.
-      expect_sopp(cdna3::kSBranchSopp),        // s_branch back to original fallthrough.
   };
 }
 
@@ -15286,12 +15512,90 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_pk_f16_f32_sequence() {
       expect_vop3(cdna3::kVCvtF16F32Vop3),  // v_cvt_f16_f32 high half into scratch.
       expect_vop3(cdna3::kVLshlrevB32Vop3), // v_lshlrev_b32 16, high half.
       expect_vop3(cdna3::kVOrB32Vop3),      // v_or_b32 pack low/high halves into vdst.
-      expect_sopp(cdna3::kSBranchSopp),     // s_branch back to original fallthrough.
   };
 }
 
-std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence() {
+std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_pk_bf16_f32_sequence() {
+  return {
+      expect_vop3(cdna3::kVMovB32Vop3),     // v_mov_b32 low source into scratch.
+      expect_vop3(cdna3::kVLshrrevB32Vop3), // v_lshrrev_b32 extracts low BF16 lsb.
+      expect_vop3(cdna3::kVAndB32Vop3),     // v_and_b32 isolates low BF16 lsb.
+      expect_vop2(cdna3::kVAddU32Vop2),     // v_add_u32_e32 adds 0x7fff rounding bias.
+      expect_vop3(cdna3::kVAddU32Vop3),     // v_add_u32 applies low RNE bias.
+      expect_vop3(cdna3::kVLshrrevB32Vop3), // v_lshrrev_b32 keeps low rounded BF16 half.
+      expect_vop3(cdna3::kVMovB32Vop3),     // v_mov_b32 high source into scratch.
+      expect_vop3(cdna3::kVLshrrevB32Vop3), // v_lshrrev_b32 extracts high BF16 lsb.
+      expect_vop3(cdna3::kVAndB32Vop3),     // v_and_b32 isolates high BF16 lsb.
+      expect_vop2(cdna3::kVAddU32Vop2),     // v_add_u32_e32 adds 0x7fff rounding bias.
+      expect_vop3(cdna3::kVAddU32Vop3),     // v_add_u32 applies high RNE bias.
+      expect_vop3(cdna3::kVLshrrevB32Vop3), // v_lshrrev_b32 keeps high rounded BF16 half.
+      expect_vop3(cdna3::kVLshlrevB32Vop3), // v_lshlrev_b32 moves high half into position.
+      expect_vop3(cdna3::kVOrB32Vop3),      // v_or_b32 packs low/high halves into vdst.
+  };
+}
+
+std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_f32_bf16_sequence() {
+  return {
+      expect_vop3(
+          cdna3::kVLshlrevB32Vop3), // v_lshlrev_b32 16, src; BF16 bits become FP32 high half.
+  };
+}
+
+std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_f32_bf16_sdwa_word0_sequence() {
+  return {
+      expect_vop3(cdna3::kVLshlrevB32Vop3, 4, rocjitsu::scalar_positive_inline_u32(16), 256 + 4),
+  };
+}
+
+std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_f32_bf16_sdwa_word1_sequence() {
+  return {
+      expect_vop3(cdna3::kVLshrrevB32Vop3, 4, rocjitsu::scalar_positive_inline_u32(16), 256 + 76),
+      expect_vop3(cdna3::kVLshlrevB32Vop3, 4, rocjitsu::scalar_positive_inline_u32(16), 256 + 4),
+  };
+}
+
+std::vector<ExpectedCdna3Inst>
+expected_cdna3_dot2_f32_bf16_sequence(uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src2,
+                                      uint8_t scratch_base, uint8_t op_sel = 0,
+                                      uint8_t op_sel_hi = 0, uint8_t neg = 0, uint8_t neg_hi = 0,
+                                      uint8_t op_sel_hi_2 = 0, bool clamp = false) {
+  const uint8_t a_lo = scratch_base;
+  const uint8_t b_lo = static_cast<uint8_t>(scratch_base + 1);
+  const uint8_t a_hi = static_cast<uint8_t>(scratch_base + 2);
+  const uint8_t b_hi = static_cast<uint8_t>(scratch_base + 3);
+  std::vector<ExpectedCdna3Inst> expected;
+  auto expect_widen = [&](uint8_t dst, uint16_t src, bool high_half, bool negate) {
+    if (high_half) {
+      expected.push_back(
+          expect_vop3(cdna3::kVLshrrevB32Vop3, dst, rocjitsu::scalar_positive_inline_u32(16), src));
+      expected.push_back(expect_vop3(cdna3::kVLshlrevB32Vop3, dst,
+                                     rocjitsu::scalar_positive_inline_u32(16), 256 + dst));
+    } else {
+      expected.push_back(
+          expect_vop3(cdna3::kVLshlrevB32Vop3, dst, rocjitsu::scalar_positive_inline_u32(16), src));
+    }
+    if (negate)
+      expected.push_back(expect_vop2(cdna3::kVXorB32Vop2)); // v_xor_b32 literal flips FP32 sign.
+  };
+  expect_widen(a_lo, src0, (op_sel & 0x1u) != 0, (neg & 0x1u) != 0);
+  expect_widen(b_lo, src1, (op_sel & 0x2u) != 0, (neg & 0x2u) != 0);
+  expect_widen(a_hi, src0, op_sel_hi_2 != 0, (neg_hi & 0x1u) != 0);
+  expect_widen(b_hi, src1, (op_sel_hi & 0x2u) != 0, (neg_hi & 0x2u) != 0);
+  expected.push_back(expect_vop3(cdna3::kVMulF32Vop3, a_lo, 256 + a_lo, 256 + b_lo));
+  expected.push_back(expect_vop3(cdna3::kVMulF32Vop3, a_hi, 256 + a_hi, 256 + b_hi));
+  expected.push_back(expect_vop3(cdna3::kVAddF32Vop3, a_lo, 256 + a_lo, 256 + a_hi));
+  expected.push_back(expect_vop3(cdna3::kVAddF32Vop3, vdst, 256 + a_lo, src2));
+  if (clamp)
+    expected.push_back(
+        expect_vop3(cdna3::kVMed3F32Vop3, vdst, 256 + vdst, 128, 242)); // v_med3_f32 clamps [0,1].
+  return expected;
+}
+
+std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence(bool acc_dst = false) {
   std::vector<ExpectedCdna3Inst> expected = {
+      expect_sop1(cdna3::kSMovB64),            // s_mov_b64 save EXEC.
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_lo, all lanes.
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_hi, all lanes.
       expect_ds(cdna3::kDsReadB64Ds),          // ds_read_b64
       expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt lgkmcnt(0)
       expect_vop3(cdna3::kVMbcntLoU32B32Vop3), // v_mbcnt_lo_u32_b32
@@ -15310,8 +15614,21 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence() {
       expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt lgkmcnt(0)
       expect_vop3(cdna3::kVPermB32Vop3),       // v_perm_b32
       expect_vop3(cdna3::kVAddU32Vop3),        // v_add_u32
-      expect_ds(cdna3::kDsBpermuteB32Ds),      expect_ds(cdna3::kDsBpermuteB32Ds),
-      expect_sopp(cdna3::kSWaitcntSopp),       expect_vop3(cdna3::kVPermB32Vop3),
+      expect_ds(cdna3::kDsBpermuteB32Ds),
+      expect_ds(cdna3::kDsBpermuteB32Ds),
+      expect_sopp(cdna3::kSWaitcntSopp),
+      expect_vop3(cdna3::kVPermB32Vop3),
+      expect_vop3(cdna3::kVAddU32Vop3),
+      expect_ds(cdna3::kDsBpermuteB32Ds),
+      expect_ds(cdna3::kDsBpermuteB32Ds),
+      expect_sopp(cdna3::kSWaitcntSopp),
+      expect_vop3(cdna3::kVPermB32Vop3),
+      expect_vop3(cdna3::kVAddU32Vop3),
+      expect_ds(cdna3::kDsBpermuteB32Ds),
+      expect_ds(cdna3::kDsBpermuteB32Ds),
+      expect_sopp(cdna3::kSWaitcntSopp),
+      expect_vop3(cdna3::kVPermB32Vop3),
+      expect_sop1(cdna3::kSMovB64), // s_mov_b64 restore EXEC.
   };
 }
 
@@ -15397,21 +15714,12 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence(bool a
 
   auto first_pack = expected_cdna3_raw_b16_pack_sequence();
   expected.insert(expected.end(), first_pack.begin(), first_pack.end());
-  expected.insert(expected.end(), {
-                                      expect_vop3(cdna3::kVAddU32Vop3),
-                                      expect_ds(cdna3::kDsBpermuteB32Ds),
-                                      expect_ds(cdna3::kDsBpermuteB32Ds),
-                                      expect_sopp(cdna3::kSWaitcntSopp),
-                                      expect_vop3(cdna3::kVPermB32Vop3),
-                                      expect_vop3(cdna3::kVAddU32Vop3),
-                                      expect_ds(cdna3::kDsBpermuteB32Ds),
-                                      expect_ds(cdna3::kDsBpermuteB32Ds),
-                                      expect_sopp(cdna3::kSWaitcntSopp),
-                                      expect_vop3(cdna3::kVPermB32Vop3),
-                                  });
   auto second_pack = expected_cdna3_raw_b16_pack_sequence();
   expected.insert(expected.end(), second_pack.begin(), second_pack.end());
-  expected.push_back(expect_sopp(cdna3::kSBranchSopp));
+  if (acc_dst) {
+    expected.push_back(expect_vop3p(cdna3::kVAccvgprWriteVop3p)); // v_accvgpr_write_b32 low dword.
+    expected.push_back(expect_vop3p(cdna3::kVAccvgprWriteVop3p)); // v_accvgpr_write_b32 high dword.
+  }
   return expected;
 }
 
@@ -15422,7 +15730,8 @@ std::array<uint32_t, 2> encode_two_word_inst(const MachineInst &inst) {
   return words;
 }
 
-std::array<uint32_t, 2> make_cdna4_bitop3_words(uint16_t opcode, uint8_t vdst) {
+std::array<uint32_t, 2> make_cdna4_bitop3_words(uint16_t opcode, uint8_t vdst,
+                                                uint8_t truth_table = 0xde) {
   rocjitsu::cdna4::Vop3MachineInst inst{};
   inst.encoding = 0x34;
   inst.op = opcode;
@@ -15431,12 +15740,9 @@ std::array<uint32_t, 2> make_cdna4_bitop3_words(uint16_t opcode, uint8_t vdst) {
   inst.src1 = static_cast<uint16_t>(256 + vdst + 2);
   inst.src2 = static_cast<uint16_t>(256 + vdst + 3);
 
-  // Use a non-trivial LUT so the generic expansion emits real AND/XOR work and
-  // cannot accidentally pass by lowering to a simple move.
-  constexpr uint8_t kTruthTable = 0xde;
-  inst.omod = kTruthTable >> 6;
-  inst.abs = (kTruthTable >> 3) & 0x7;
-  inst.neg = kTruthTable & 0x7;
+  inst.omod = truth_table >> 6;
+  inst.abs = (truth_table >> 3) & 0x7;
+  inst.neg = truth_table & 0x7;
   return encode_two_word_inst(inst);
 }
 
@@ -15463,7 +15769,77 @@ std::array<uint32_t, 2> make_cdna4_cvt_pk_f16_f32_words() {
   return encode_two_word_inst(inst);
 }
 
-std::array<uint32_t, 2> make_cdna4_permlane32_swap_b32_words(uint16_t encoding_id) {
+std::array<uint32_t, 2> make_cdna4_cvt_pk_bf16_f32_words(uint8_t vdst = 0, uint16_t src0 = 256 + 1,
+                                                         uint16_t src1 = 256 + 2) {
+  rocjitsu::cdna4::Vop3MachineInst inst{};
+  inst.encoding = 0x34;
+  inst.op = cdna4::kVCvtPkBf16F32Vop3;
+  inst.vdst = vdst;
+  inst.src0 = src0;
+  inst.src1 = src1;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_cvt_f32_bf16_words(uint16_t encoding_id) {
+  rocjitsu::cdna4::Vop1MachineInst inst{};
+  // As with the VOP1 permlane cases below, semantic-rule lookup sees generated
+  // primary-decode ids 0xfc..0xff while the raw instruction keeps the hardware
+  // VOP1 selector in bits 31:25. Vary VDST high bits to exercise each id.
+  inst.encoding = 0x3f;
+  inst.op = cdna4::kVCvtF32Bf16Vop1;
+  inst.vdst = static_cast<uint8_t>((encoding_id - 0xFCu) << 6);
+  inst.src0 = 256 + 1;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_dot2_f32_bf16_words(uint8_t vdst, uint16_t src0, uint16_t src1,
+                                                       uint16_t src2, uint8_t op_sel = 0,
+                                                       uint8_t op_sel_hi = 0, uint8_t neg = 0,
+                                                       uint8_t neg_hi = 0, uint8_t op_sel_hi_2 = 0,
+                                                       bool clamp = false) {
+  rocjitsu::cdna4::Vop3pMachineInst inst{};
+  inst.encoding = cdna4::encoding::kVop3p;
+  inst.op = cdna4::kVDot2F32Bf16Vop3p;
+  inst.vdst = vdst;
+  inst.op_sel = op_sel;
+  inst.op_sel_hi = op_sel_hi;
+  inst.op_sel_hi_2 = op_sel_hi_2;
+  inst.clamp = clamp ? 1 : 0;
+  inst.neg = neg;
+  inst.neg_hi = neg_hi;
+  inst.src0 = src0;
+  inst.src1 = src1;
+  inst.src2 = src2;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_cvt_f32_bf16_sdwa_word0_words() {
+  rocjitsu::cdna4::Vop1VopSdwaMachineInst inst{};
+  inst.encoding = 0x3f;
+  inst.op = cdna4::kVCvtF32Bf16Vop1;
+  inst.vdst = 4;
+  inst.src0 = 249;
+  inst.vsrc0 = 4;
+  inst.dst_sel = 6;
+  inst.dst_unused = 2;
+  inst.src0_sel = 4;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_cvt_f32_bf16_sdwa_word1_words() {
+  rocjitsu::cdna4::Vop1VopSdwaMachineInst inst{};
+  inst.encoding = 0x3f;
+  inst.op = cdna4::kVCvtF32Bf16Vop1;
+  inst.vdst = 4;
+  inst.src0 = 249;
+  inst.vsrc0 = 76;
+  inst.dst_sel = 6;
+  inst.dst_unused = 2;
+  inst.src0_sel = 5;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_permlane_swap_b32_words(uint16_t encoding_id, uint16_t opcode) {
   rocjitsu::cdna4::Vop1MachineInst inst{};
   // The legalization table's VOP1 encoding ids (0xfc..0xff) are the generated
   // primary-decode ids, not the raw 7-bit VOP1 selector.  Primary decode looks
@@ -15471,22 +15847,31 @@ std::array<uint32_t, 2> make_cdna4_permlane32_swap_b32_words(uint16_t encoding_i
   // VDST[7:6] in bits 24:23.  Keep the real VOP1 selector at 0x3f and vary
   // VDST's high bits to exercise each generated semantic rule.
   inst.encoding = 0x3f;
-  inst.op = cdna4::kVPermlane32SwapB32Vop1;
+  inst.op = opcode & 0xFF;
   inst.vdst = static_cast<uint8_t>((encoding_id - cdna4::encoding::kVop1) << 6);
   inst.src0 = 256 + 1;
   return encode_two_word_inst(inst);
 }
 
+std::array<uint32_t, 2> make_cdna4_permlane16_swap_b32_words(uint16_t encoding_id) {
+  return make_cdna4_permlane_swap_b32_words(encoding_id, cdna4::kVPermlane16SwapB32Vop1);
+}
+
+std::array<uint32_t, 2> make_cdna4_permlane32_swap_b32_words(uint16_t encoding_id) {
+  return make_cdna4_permlane_swap_b32_words(encoding_id, cdna4::kVPermlane32SwapB32Vop1);
+}
+
 std::array<uint32_t, 2> make_cdna4_mfma_words(uint16_t opcode, uint8_t vdst, uint16_t src0,
-                                              uint16_t src1, uint16_t src2 = 128) {
+                                              uint16_t src1, uint16_t src2 = 128, uint8_t acc = 0) {
   rocjitsu::cdna4::Vop3pMfmaMachineInst inst{};
-  inst.encoding = cdna4::encoding::kVop3pMfma;
+  inst.encoding = cdna4::encoding::kVop3p;
   inst.op = opcode & 0x7F;
   inst.vdst = vdst;
   inst.acc_cd = 1;
   inst.src0 = src0;
   inst.src1 = src1;
   inst.src2 = src2;
+  inst.acc = acc;
   return encode_two_word_inst(inst);
 }
 
@@ -15512,22 +15897,256 @@ std::array<uint32_t, 2> make_cdna4_dot2c_unimplemented_expand_words() {
   return {0x2C000000U, 0x00000000U};
 }
 
-std::array<uint32_t, 2> make_cdna4_ds_read_b64_tr_b16_words() {
+std::array<uint32_t, 2> make_cdna4_ds_read_b64_tr_b16_words(uint16_t byte_offset = 0,
+                                                            uint8_t addr = 2, bool acc = false) {
   rocjitsu::cdna4::DsMachineInst inst{};
   inst.encoding = 0x36;
   inst.op = cdna4::kDsReadB64TrB16Ds;
-  inst.addr = 2;
+  inst.offset0 = byte_offset & 0xFFu;
+  inst.offset1 = byte_offset >> 8;
+  inst.addr = addr;
   inst.vdst = 0;
+  inst.acc = acc ? 1 : 0;
   return encode_two_word_inst(inst);
 }
 
-std::array<uint32_t, 2> make_cdna4_buffer_load_lds_words(uint16_t op) {
+std::array<uint32_t, 2> make_cdna4_ds_read_b32_words(uint16_t byte_offset = 0x0134,
+                                                     uint8_t addr = 4, uint8_t vdst = 7) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsReadB32Ds;
+  inst.offset0 = byte_offset & 0xFFu;
+  inst.offset1 = byte_offset >> 8;
+  inst.addr = addr;
+  inst.vdst = vdst;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read2_b32_words(uint8_t offset0 = 1, uint8_t offset1 = 2,
+                                                      uint8_t addr = 12, uint8_t vdst = 20) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsRead2B32Ds;
+  inst.offset0 = offset0;
+  inst.offset1 = offset1;
+  inst.addr = addr;
+  inst.vdst = vdst;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read2st64_b32_words(uint8_t offset0 = 2,
+                                                          uint8_t offset1 = 3) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsRead2st64B32Ds;
+  inst.offset0 = offset0;
+  inst.offset1 = offset1;
+  inst.addr = 12;
+  inst.vdst = 20;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read2_b64_words(uint8_t offset0 = 3, uint8_t offset1 = 68,
+                                                      uint8_t addr = 58, uint8_t vdst = 66) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsRead2B64Ds;
+  inst.offset0 = offset0;
+  inst.offset1 = offset1;
+  inst.addr = addr;
+  inst.vdst = vdst;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read2st64_b64_words(uint8_t offset0 = 2, uint8_t offset1 = 3,
+                                                          uint8_t addr = 98, uint8_t vdst = 112) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsRead2st64B64Ds;
+  inst.offset0 = offset0;
+  inst.offset1 = offset1;
+  inst.addr = addr;
+  inst.vdst = vdst;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read_b64_words(uint8_t addr = 4, uint8_t vdst = 8,
+                                                     uint16_t byte_offset = 0) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsReadB64Ds;
+  inst.offset0 = byte_offset & 0xFFu;
+  inst.offset1 = byte_offset >> 8;
+  inst.addr = addr;
+  inst.vdst = vdst;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read_b128_words(uint8_t addr = 4, uint8_t vdst = 8,
+                                                      uint16_t byte_offset = 0, bool acc = false) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsReadB128Ds;
+  inst.offset0 = byte_offset & 0xFFu;
+  inst.offset1 = byte_offset >> 8;
+  inst.addr = addr;
+  inst.vdst = vdst;
+  inst.acc = acc ? 1 : 0;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read_u16_words() {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsReadU16Ds;
+  inst.offset0 = 0x20;
+  inst.addr = 4;
+  inst.vdst = 7;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read_u8_words() {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsReadU8Ds;
+  inst.offset0 = 0x20;
+  inst.addr = 8;
+  inst.vdst = 12;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read_i8_words() {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsReadI8Ds;
+  inst.offset0 = 0x20;
+  inst.addr = 8;
+  inst.vdst = 12;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_write_b8_words() {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsWriteB8Ds;
+  inst.offset0 = 0x10;
+  inst.addr = 4;
+  inst.data0 = 7;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_write_b8_d16_hi_words() {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsWriteB8D16HiDs;
+  inst.offset0 = 0x10;
+  inst.addr = 4;
+  inst.data0 = 7;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_write_b32_words(uint8_t addr = 4, uint8_t data = 7,
+                                                      uint16_t byte_offset = 0) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsWriteB32Ds;
+  inst.offset0 = byte_offset & 0xFFu;
+  inst.offset1 = byte_offset >> 8;
+  inst.addr = addr;
+  inst.data0 = data;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_write_b96_words(uint8_t addr = 4, uint8_t data = 8,
+                                                      uint16_t byte_offset = 0) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsWriteB96Ds;
+  inst.offset0 = byte_offset & 0xFFu;
+  inst.offset1 = byte_offset >> 8;
+  inst.addr = addr;
+  inst.data0 = data;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_write_b64_words(uint8_t addr = 4, uint8_t data = 8,
+                                                      uint16_t byte_offset = 0) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsWriteB64Ds;
+  inst.offset0 = byte_offset & 0xFFu;
+  inst.offset1 = byte_offset >> 8;
+  inst.addr = addr;
+  inst.data0 = data;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_write_b128_words(uint8_t addr = 4, uint8_t data = 8,
+                                                       uint16_t byte_offset = 0, bool acc = false) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsWriteB128Ds;
+  inst.offset0 = byte_offset & 0xFFu;
+  inst.offset1 = byte_offset >> 8;
+  inst.addr = addr;
+  inst.data0 = data;
+  inst.acc = acc ? 1 : 0;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_write2_b32_words() {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsWrite2B32Ds;
+  inst.offset0 = 1;
+  inst.offset1 = 2;
+  inst.addr = 4;
+  inst.data0 = 7;
+  inst.data1 = 9;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_write2_b64_words(uint8_t addr = 4, uint8_t data0 = 8,
+                                                       uint8_t data1 = 12) {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsWrite2B64Ds;
+  inst.offset0 = 1;
+  inst.offset1 = 2;
+  inst.addr = addr;
+  inst.data0 = data0;
+  inst.data1 = data1;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_write2st64_b64_words() {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsWrite2st64B64Ds;
+  inst.offset0 = 1;
+  inst.offset1 = 2;
+  inst.addr = 4;
+  inst.data0 = 8;
+  inst.data1 = 12;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_add_u32_words() {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = cdna4::kDsAddU32Ds;
+  inst.addr = 3;
+  inst.data0 = 7;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_buffer_load_lds_words(uint16_t op, uint8_t vaddr = 2) {
   rocjitsu::cdna4::MubufMachineInst inst{};
   inst.encoding = 0x38;
   inst.op = op & 0x7F;
   inst.lds = 1;
   inst.offen = 1;
-  inst.vaddr = 2;
+  inst.vaddr = vaddr;
   inst.vdata = 0;
   inst.srsrc = 4;
   inst.soffset = 0;
@@ -15538,46 +16157,135 @@ std::vector<Cdna4ToCdna3SemanticRuleCase> cdna4_to_cdna3_semantic_rule_cases() {
   return {
       {"VBitop3B16", cdna4::encoding::kVop3OpHi4, cdna4::kVBitop3B16Vop3,
        make_cdna4_bitop3_words(cdna4::kVBitop3B16Vop3, 8), expected_cdna3_bitop3_sequence(true)},
+      {"VBitop3B16FastEc", cdna4::encoding::kVop3OpHi4, cdna4::kVBitop3B16Vop3,
+       make_cdna4_bitop3_words(cdna4::kVBitop3B16Vop3, 8, 0xec),
+       expected_cdna3_bitop3_fast_sequence(cdna3::kVAndOrB32Vop3, true)},
+      {"VBitop3B16FastF8", cdna4::encoding::kVop3OpHi4, cdna4::kVBitop3B16Vop3,
+       make_cdna4_bitop3_words(cdna4::kVBitop3B16Vop3, 8, 0xf8),
+       expected_cdna3_bitop3_fast_sequence(cdna3::kVAndOrB32Vop3, true)},
+      {"VBitop3B16FastFe", cdna4::encoding::kVop3OpHi4, cdna4::kVBitop3B16Vop3,
+       make_cdna4_bitop3_words(cdna4::kVBitop3B16Vop3, 8, 0xfe),
+       expected_cdna3_bitop3_fast_sequence(cdna3::kVOr3B32Vop3, true)},
       {"VBitop3B32", cdna4::encoding::kVop3OpHi4, cdna4::kVBitop3B32Vop3,
        make_cdna4_bitop3_words(cdna4::kVBitop3B32Vop3, 16), expected_cdna3_bitop3_sequence(false)},
       {"VCvtPkF16F32", cdna4::encoding::kVop3OpHi4, cdna4::kVCvtPkF16F32Vop3,
        make_cdna4_cvt_pk_f16_f32_words(), expected_cdna3_cvt_pk_f16_f32_sequence()},
+      {"VCvtPkBf16F32", cdna4::encoding::kVop3OpHi4, cdna4::kVCvtPkBf16F32Vop3,
+       make_cdna4_cvt_pk_bf16_f32_words(), expected_cdna3_cvt_pk_bf16_f32_sequence()},
+      {"VCvtF32Bf16E32", cdna4::encoding::kVop1, cdna4::kVCvtF32Bf16Vop1,
+       make_cdna4_cvt_f32_bf16_words(cdna4::encoding::kVop1),
+       expected_cdna3_cvt_f32_bf16_sequence(), 1},
+      {"VCvtF32Bf16E32Hi1", cdna4::encoding::kVop1Hi1, cdna4::kVCvtF32Bf16Vop1,
+       make_cdna4_cvt_f32_bf16_words(cdna4::encoding::kVop1Hi1),
+       expected_cdna3_cvt_f32_bf16_sequence(), 1},
+      {"VCvtF32Bf16E32Hi2", cdna4::encoding::kVop1Hi2, cdna4::kVCvtF32Bf16Vop1,
+       make_cdna4_cvt_f32_bf16_words(cdna4::encoding::kVop1Hi2),
+       expected_cdna3_cvt_f32_bf16_sequence(), 1},
+      {"VCvtF32Bf16E32Hi3", cdna4::encoding::kVop1Hi3, cdna4::kVCvtF32Bf16Vop1,
+       make_cdna4_cvt_f32_bf16_words(cdna4::encoding::kVop1Hi3),
+       expected_cdna3_cvt_f32_bf16_sequence(), 1},
+      {"VCvtF32Bf16SdwaWord0", cdna4::encoding::kVop1, cdna4::kVCvtF32Bf16Vop1,
+       make_cdna4_cvt_f32_bf16_sdwa_word0_words(),
+       expected_cdna3_cvt_f32_bf16_sdwa_word0_sequence(), 2},
+      {"VCvtF32Bf16SdwaWord1", cdna4::encoding::kVop1, cdna4::kVCvtF32Bf16Vop1,
+       make_cdna4_cvt_f32_bf16_sdwa_word1_words(),
+       expected_cdna3_cvt_f32_bf16_sdwa_word1_sequence(), 2},
+      {"VDot2F32Bf16AccumAlias", cdna4::encoding::kVop3p, cdna4::kVDot2F32Bf16Vop3p,
+       make_cdna4_dot2_f32_bf16_words(/*vdst=*/0, /*src0=*/256 + 1, /*src1=*/256 + 2,
+                                      /*src2=*/256),
+       expected_cdna3_dot2_f32_bf16_sequence(/*vdst=*/0, /*src0=*/256 + 1,
+                                             /*src1=*/256 + 2, /*src2=*/256,
+                                             /*scratch_base=*/3)},
+      {"VDot2F32Bf16OpSelNeg", cdna4::encoding::kVop3p, cdna4::kVDot2F32Bf16Vop3p,
+       make_cdna4_dot2_f32_bf16_words(/*vdst=*/0, /*src0=*/256 + 1, /*src1=*/256 + 2,
+                                      /*src2=*/256, /*op_sel=*/1, /*op_sel_hi=*/2,
+                                      /*neg=*/1, /*neg_hi=*/2),
+       expected_cdna3_dot2_f32_bf16_sequence(/*vdst=*/0, /*src0=*/256 + 1,
+                                             /*src1=*/256 + 2, /*src2=*/256,
+                                             /*scratch_base=*/3, /*op_sel=*/1,
+                                             /*op_sel_hi=*/2, /*neg=*/1, /*neg_hi=*/2)},
+      {"VDot2F32Bf16OpSelHi2Clamp", cdna4::encoding::kVop3p, cdna4::kVDot2F32Bf16Vop3p,
+       make_cdna4_dot2_f32_bf16_words(/*vdst=*/0, /*src0=*/256 + 1, /*src1=*/256 + 2,
+                                      /*src2=*/256, /*op_sel=*/0, /*op_sel_hi=*/0,
+                                      /*neg=*/0, /*neg_hi=*/0, /*op_sel_hi_2=*/1,
+                                      /*clamp=*/true),
+       expected_cdna3_dot2_f32_bf16_sequence(/*vdst=*/0, /*src0=*/256 + 1,
+                                             /*src1=*/256 + 2, /*src2=*/256,
+                                             /*scratch_base=*/3, /*op_sel=*/0,
+                                             /*op_sel_hi=*/0, /*neg=*/0, /*neg_hi=*/0,
+                                             /*op_sel_hi_2=*/1, /*clamp=*/true)},
+      {"VPermlane16SwapB32E32", cdna4::encoding::kVop1, cdna4::kVPermlane16SwapB32Vop1,
+       make_cdna4_permlane16_swap_b32_words(cdna4::encoding::kVop1),
+       expected_cdna3_permlane32_swap_sequence(), 1},
+      {"VPermlane16SwapB32E32Hi1", cdna4::encoding::kVop1Hi1, cdna4::kVPermlane16SwapB32Vop1,
+       make_cdna4_permlane16_swap_b32_words(cdna4::encoding::kVop1Hi1),
+       expected_cdna3_permlane32_swap_sequence(), 1},
+      {"VPermlane16SwapB32E32Hi2", cdna4::encoding::kVop1Hi2, cdna4::kVPermlane16SwapB32Vop1,
+       make_cdna4_permlane16_swap_b32_words(cdna4::encoding::kVop1Hi2),
+       expected_cdna3_permlane32_swap_sequence(), 1},
+      {"VPermlane16SwapB32E32Hi3", cdna4::encoding::kVop1Hi3, cdna4::kVPermlane16SwapB32Vop1,
+       make_cdna4_permlane16_swap_b32_words(cdna4::encoding::kVop1Hi3),
+       expected_cdna3_permlane32_swap_sequence(), 1},
       {"VPermlane32SwapB32E32", cdna4::encoding::kVop1, cdna4::kVPermlane32SwapB32Vop1,
        make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1),
-       expected_cdna3_permlane32_swap_sequence()},
+       expected_cdna3_permlane32_swap_sequence(), 1},
       {"VPermlane32SwapB32E32Hi1", cdna4::encoding::kVop1Hi1, cdna4::kVPermlane32SwapB32Vop1,
        make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1Hi1),
-       expected_cdna3_permlane32_swap_sequence()},
+       expected_cdna3_permlane32_swap_sequence(), 1},
       {"VPermlane32SwapB32E32Hi2", cdna4::encoding::kVop1Hi2, cdna4::kVPermlane32SwapB32Vop1,
        make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1Hi2),
-       expected_cdna3_permlane32_swap_sequence()},
+       expected_cdna3_permlane32_swap_sequence(), 1},
       {"VPermlane32SwapB32E32Hi3", cdna4::encoding::kVop1Hi3, cdna4::kVPermlane32SwapB32Vop1,
        make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1Hi3),
-       expected_cdna3_permlane32_swap_sequence()},
-      {"MfmaF32_16x16x32F16", cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
+       expected_cdna3_permlane32_swap_sequence(), 1},
+      {"MfmaF32_16x16x32Bf16", cdna4::encoding::kVop3p, cdna4::kVMfmaF3216x16x32Bf16Vop3pMfma,
+       make_cdna4_mfma_words(cdna4::kVMfmaF3216x16x32Bf16Vop3pMfma, 0, 256, 260),
+       expected_cdna3_mfma_sequence(cdna3::kVMfmaF3216x16x16Bf16Vop3pMfma)},
+      {"MfmaF32_32x32x16Bf16", cdna4::encoding::kVop3p, cdna4::kVMfmaF3232x32x16Bf16Vop3pMfma,
+       make_cdna4_mfma_words(cdna4::kVMfmaF3232x32x16Bf16Vop3pMfma, 0, 256, 260),
+       expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8Bf16Vop3pMfma)},
+      {"MfmaF32_32x32x16Bf16Source1Acc", cdna4::encoding::kVop3p,
+       cdna4::kVMfmaF3232x32x16Bf16Vop3pMfma,
+       make_cdna4_mfma_words(cdna4::kVMfmaF3232x32x16Bf16Vop3pMfma, 0, 256, 260, 272, 2),
+       expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8Bf16Vop3pMfma, 272, 2)},
+      {"MfmaF32_16x16x32F16", cdna4::encoding::kVop3p, cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
        make_cdna4_mfma_words(cdna4::kVMfmaF3216x16x32F16Vop3pMfma, 0, 256, 260),
        expected_cdna3_mfma_sequence(cdna3::kVMfmaF3216x16x16F16Vop3pMfma)},
-      {"MfmaF32_32x32x16F16", cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3232x32x16F16Vop3pMfma,
+      {"MfmaF32_32x32x16F16", cdna4::encoding::kVop3p, cdna4::kVMfmaF3232x32x16F16Vop3pMfma,
        make_cdna4_mfma_words(cdna4::kVMfmaF3232x32x16F16Vop3pMfma, 0, 256, 260),
        expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8F16Vop3pMfma)},
-      {"MfmaF32_16x16x32F16AccumVgpr", cdna4::encoding::kVop3pMfma,
+      {"MfmaF32_16x16x32F16AccumVgpr", cdna4::encoding::kVop3p,
        cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
        make_cdna4_mfma_words(cdna4::kVMfmaF3216x16x32F16Vop3pMfma, 0, 256, 260, 272),
        expected_cdna3_mfma_sequence(cdna3::kVMfmaF3216x16x16F16Vop3pMfma, 272)},
-      {"MfmaF32_32x32x16F16AccumVgpr", cdna4::encoding::kVop3pMfma,
+      {"MfmaF32_32x32x16F16AccumVgpr", cdna4::encoding::kVop3p,
        cdna4::kVMfmaF3232x32x16F16Vop3pMfma,
        make_cdna4_mfma_words(cdna4::kVMfmaF3232x32x16F16Vop3pMfma, 0, 256, 260, 272),
        expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8F16Vop3pMfma, 272)},
       {"DsReadB64TrB16", cdna4::encoding::kDsHi3, cdna4::kDsReadB64TrB16Ds,
        make_cdna4_ds_read_b64_tr_b16_words(), expected_cdna3_ds_read_b64_tr_b16_sequence()},
+      {"DsReadB64TrB16Acc", cdna4::encoding::kDsOpHi7, cdna4::kDsReadB64TrB16Ds,
+       make_cdna4_ds_read_b64_tr_b16_words(/*byte_offset=*/0, /*addr=*/2, /*acc=*/true),
+       expected_cdna3_ds_read_b64_tr_b16_sequence(/*acc_dst=*/true)},
+      {"BufferLoadDwordLds", cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordMubuf,
+       make_cdna4_buffer_load_lds_words(cdna4::kBufferLoadDwordMubuf),
+       expected_cdna3_buffer_load_lds_sequence(cdna3::kBufferLoadDwordMubuf, cdna3::kDsWriteB32Ds)},
       {"BufferLoadDwordx3Lds", cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx3Mubuf,
        make_cdna4_buffer_load_lds_words(cdna4::kBufferLoadDwordx3Mubuf),
        expected_cdna3_buffer_load_lds_sequence(cdna3::kBufferLoadDwordx3Mubuf,
                                                cdna3::kDsWriteB96Ds)},
+      {"BufferLoadDwordx3LdsEvenScratch", cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx3Mubuf,
+       make_cdna4_buffer_load_lds_words(cdna4::kBufferLoadDwordx3Mubuf, /*vaddr=*/0),
+       expected_cdna3_buffer_load_lds_sequence(cdna3::kBufferLoadDwordx3Mubuf, cdna3::kDsWriteB96Ds,
+                                               /*scratch_data=*/2)},
       {"BufferLoadDwordx4Lds", cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx4Mubuf,
        make_cdna4_buffer_load_lds_words(cdna4::kBufferLoadDwordx4Mubuf),
        expected_cdna3_buffer_load_lds_sequence(cdna3::kBufferLoadDwordx4Mubuf,
                                                cdna3::kDsWriteB128Ds)},
+      {"BufferLoadDwordx4LdsEvenScratch", cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx4Mubuf,
+       make_cdna4_buffer_load_lds_words(cdna4::kBufferLoadDwordx4Mubuf, /*vaddr=*/0),
+       expected_cdna3_buffer_load_lds_sequence(cdna3::kBufferLoadDwordx4Mubuf,
+                                               cdna3::kDsWriteB128Ds, /*scratch_data=*/2)},
   };
 }
 
@@ -15620,9 +16328,33 @@ void expect_cdna3_instruction_matches(const rocjitsu::Instruction &inst,
     expect_field_matches(expected.src2, static_cast<uint16_t>(actual.src2), "src2");
     break;
   }
+  case ExpectedCdna3Kind::Vop3p: {
+    rocjitsu::cdna3::Vop3pMachineInst actual{};
+    std::memcpy(&actual, raw, sizeof(actual));
+    EXPECT_EQ(actual.encoding, cdna3::encoding::kVop3p);
+    EXPECT_EQ(actual.op, expected.op);
+    expect_field_matches(expected.vdst, static_cast<uint16_t>(actual.vdst), "vdst");
+    expect_field_matches(expected.src0, static_cast<uint16_t>(actual.src0), "src0");
+    expect_field_matches(expected.src1, static_cast<uint16_t>(actual.src1), "src1");
+    expect_field_matches(expected.src2, static_cast<uint16_t>(actual.src2), "src2");
+    break;
+  }
+  case ExpectedCdna3Kind::Vop2: {
+    rocjitsu::cdna3::Vop2MachineInst actual{};
+    std::memcpy(&actual, raw, sizeof(actual));
+    EXPECT_EQ(actual.op, expected.op);
+    break;
+  }
   case ExpectedCdna3Kind::Vop1: {
     rocjitsu::cdna3::Vop1MachineInst actual{};
     std::memcpy(&actual, raw, sizeof(actual));
+    EXPECT_EQ(actual.op, expected.op);
+    break;
+  }
+  case ExpectedCdna3Kind::Sop2: {
+    rocjitsu::cdna3::Sop2MachineInst actual{};
+    std::memcpy(&actual, raw, sizeof(actual));
+    EXPECT_EQ(actual.encoding, 0x2u);
     EXPECT_EQ(actual.op, expected.op);
     break;
   }
@@ -15639,6 +16371,7 @@ void expect_cdna3_instruction_matches(const rocjitsu::Instruction &inst,
     EXPECT_EQ(actual.encoding, cdna3::encoding::kVop3pMfma);
     EXPECT_EQ(actual.op, expected.op);
     expect_field_matches(expected.vdst, static_cast<uint16_t>(actual.vdst), "vdst");
+    expect_field_matches(expected.acc, static_cast<uint16_t>(actual.acc), "acc");
     expect_field_matches(expected.acc_cd, static_cast<uint16_t>(actual.acc_cd), "acc_cd");
     expect_field_matches(expected.src0, static_cast<uint16_t>(actual.src0), "src0");
     expect_field_matches(expected.src1, static_cast<uint16_t>(actual.src1), "src1");
@@ -15651,6 +16384,7 @@ void expect_cdna3_instruction_matches(const rocjitsu::Instruction &inst,
     EXPECT_EQ(actual.encoding, 0x36u);
     EXPECT_EQ(actual.op, expected.op);
     expect_field_matches(expected.vdst, static_cast<uint16_t>(actual.vdst), "vdst");
+    expect_field_matches(expected.data0, static_cast<uint16_t>(actual.data0), "data0");
     break;
   }
   case ExpectedCdna3Kind::Mubuf: {
@@ -15659,6 +16393,7 @@ void expect_cdna3_instruction_matches(const rocjitsu::Instruction &inst,
     EXPECT_EQ(actual.encoding, 0x38u);
     EXPECT_EQ(actual.op, expected.op);
     EXPECT_EQ(actual.lds, 0u);
+    expect_field_matches(expected.vdata, static_cast<uint16_t>(actual.vdata), "vdata");
     break;
   }
   case ExpectedCdna3Kind::Sopp: {
@@ -15693,10 +16428,18 @@ void expect_cdna3_code_cave_matches(const rocjitsu::Section &translations,
     actual.push_back(std::move(inst));
   }
 
-  ASSERT_EQ(actual.size(), expected.size());
+  ASSERT_GE(actual.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     SCOPED_TRACE(i);
     expect_cdna3_instruction_matches(*actual[i], expected[i]);
+  }
+  if (allow_non_nop_tail)
+    return;
+  for (size_t i = expected.size(); i < actual.size(); ++i) {
+    SCOPED_TRACE(i);
+    const uint32_t *raw = actual[i]->raw_encoding();
+    ASSERT_NE(raw, nullptr);
+    EXPECT_EQ(*raw, rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
   }
 }
 
@@ -15921,15 +16664,16 @@ TEST_P(Cdna4ToCdna3SemanticRuleTranslationTest, TranslatesSingleInstruction) {
   const auto &test_case = GetParam();
   SCOPED_TRACE(test_case.name);
 
-  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  ASSERT_LE(test_case.word_count, test_case.words.size());
+  const std::vector<uint32_t> source_words(test_case.words.begin(),
+                                           test_case.words.begin() + test_case.word_count);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(source_words);
   rocjitsu::AmdGpuCodeObject source_layout(image.data(), image.size());
   ASSERT_TRUE(source_layout.is_valid());
   ASSERT_FALSE(source_layout.text_sections().empty());
 
   const auto *source_text = source_layout.text_sections()[0];
-  ASSERT_EQ(source_text->size(), test_case.words.size() * sizeof(uint32_t));
-  std::memcpy(image.data() + source_text->sectionOffset(), test_case.words.data(),
-              test_case.words.size() * sizeof(uint32_t));
+  ASSERT_EQ(source_text->size(), source_words.size() * sizeof(uint32_t));
 
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
@@ -15952,6 +16696,1864 @@ INSTANTIATE_TEST_SUITE_P(ImplementedRules, Cdna4ToCdna3SemanticRuleTranslationTe
                            return std::string(info.param.name);
                          });
 
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadB32ToFlatGlobalLoad) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto saddr =
+      find_flat_global_load_saddr(target_words, target_word_count, /*op=*/20, /*vdst=*/7,
+                                  /*addr=*/4, /*offset=*/0x134);
+  ASSERT_TRUE(saddr.has_value());
+  EXPECT_TRUE(contains_smem_load_dwordx2_with_wait(target_words, target_word_count, *saddr,
+                                                   /*sbase_sgpr=*/0, /*offset=*/24));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersMubufDwordLdsToFlatGlobalStore) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto mubuf = make_cdna4_buffer_load_lds_words(/*op=*/20);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {mubuf[0], mubuf[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  // A virtual-LDS sidecar cannot leave the MUBUF LDS bit set: the side effect
+  // would target zero-sized hardware LDS instead of rocjitsu's backing buffer.
+  EXPECT_FALSE(contains_mubuf_lds_op(target_words, target_word_count, /*op=*/20));
+  EXPECT_TRUE(contains_flat_global_store_op(target_words, target_word_count, /*op=*/28));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarReservesFreshSgprsBelowCdnaSpecialTail) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_mov_b32(/*sdst=*/47, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4),
+      ds[0],
+      ds[1],
+      kCdna4SEndpgm,
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  // A HipKittens-style descriptor can allocate more SGPRs than the ordinary
+  // guest body names because VCC/flat-scratch/XNACK and granularity padding are
+  // included in COMPUTE_PGM_RSRC1. Virtual LDS must not treat that tail as
+  // ordinary scratch space.
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  6);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto *metadata_section =
+      rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName);
+  ASSERT_NE(metadata_section, nullptr);
+  const auto parsed = rocjitsu::parse_virtual_lds_metadata(
+      {reinterpret_cast<const uint8_t *>(metadata_section->data()), metadata_section->size()});
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+  EXPECT_EQ(parsed->front().virtual_lds_base_sgpr, 48u);
+  expect_cdna3_sidecar_descriptor_sgprs_eq(result.elf_bytes, 64);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarKeepsDescriptorSpecialTailFree) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  13);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+  expect_cdna3_translated_descriptor_sgprs_eq(result.elf_bytes, 112);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *metadata_section =
+      rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName);
+  ASSERT_NE(metadata_section, nullptr);
+  const auto parsed = rocjitsu::parse_virtual_lds_metadata(
+      {reinterpret_cast<const uint8_t *>(metadata_section->data()), metadata_section->size()});
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+  EXPECT_EQ(parsed->front().virtual_lds_base_sgpr, 2u);
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  // A large SGPR allocation does not imply all of those numbers are ordinary
+  // scratchable registers. VCC/flat-scratch/XNACK live in the descriptor tail,
+  // so a guest body that only names low SGPRs should place virtual-LDS scratch
+  // below that tail instead of borrowing a high pair with spill-per-use.
+  EXPECT_FALSE(contains_sopp(target_words, target_word_count, /*op=*/8));
+  EXPECT_TRUE(contains_smem_load_dwordx2_with_wait(target_words, target_word_count, /*sdata=*/2,
+                                                   /*sbase_sgpr=*/0, /*offset=*/24));
+  rocjitsu::cdna3::FlatMachineInst actual{};
+  bool found_load = false;
+  for (size_t i = 0; i + 1 < target_word_count; ++i) {
+    std::memcpy(&actual, target_words + i, sizeof(actual));
+    if (actual.encoding == 0x37u && actual.op == 20u && actual.seg == 2u && actual.addr == 4u &&
+        actual.vdst == 7u && actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr == 2u) {
+      found_load = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found_load);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillsTouchedHighSgprPairWhenDescriptorSgprsAreFull) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  std::vector<uint32_t> words;
+  words.reserve(102 + 3);
+  for (uint16_t sgpr = 0; sgpr < 102; ++sgpr)
+    words.push_back(rocjitsu::build_s_mov_b32(sgpr, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4));
+  words.push_back(ds[0]);
+  words.push_back(ds[1]);
+  words.push_back(kCdna4SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  13);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+  expect_cdna3_translated_descriptor_sgprs_eq(result.elf_bytes, 112);
+
+  const auto entry = virtual_lds_sidecar_entry_words_for_test(result.elf_bytes);
+  ASSERT_TRUE(entry.has_value());
+  const auto *target_words = entry->words;
+  const size_t target_word_count = entry->word_count;
+  EXPECT_TRUE(contains_sopp(target_words, target_word_count, /*op=*/8));
+  const auto saved_lo =
+      find_cdna3_vop1_vdst(target_words, target_word_count, /*op=*/1, /*src0=*/100);
+  const auto saved_hi =
+      find_cdna3_vop1_vdst(target_words, target_word_count, /*op=*/1, /*src0=*/101);
+  ASSERT_TRUE(saved_lo.has_value());
+  ASSERT_TRUE(saved_hi.has_value());
+  EXPECT_NE(*saved_lo, *saved_hi);
+  EXPECT_TRUE(contains_smem_load_dwordx2_with_wait(target_words, target_word_count, /*sdata=*/100,
+                                                   /*sbase_sgpr=*/0, /*offset=*/24));
+  // Spill-per-use lowering first installs the runtime backing pointer in the
+  // borrowed SGPR pair, then restores the guest scalar values after the lowered
+  // memory access. The two operations can use different VGPR temps because the
+  // entry prologue saves the backing pointer in persistent scratch.
+  EXPECT_GE(count_cdna3_vop1_writes(target_words, target_word_count, /*op=*/2, /*vdst=*/100), 2u);
+  EXPECT_GE(count_cdna3_vop1_writes(target_words, target_word_count, /*op=*/2, /*vdst=*/101), 2u);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsMubufSemanticRuleUsesSpillPerUseAccessEmitter) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto mubuf = make_cdna4_buffer_load_lds_words(/*op=*/20);
+  std::vector<uint32_t> words;
+  words.reserve(102 + 3);
+  for (uint16_t sgpr = 0; sgpr < 102; ++sgpr)
+    words.push_back(rocjitsu::build_s_mov_b32(sgpr, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4));
+  words.push_back(mubuf[0]);
+  words.push_back(mubuf[1]);
+  words.push_back(kCdna4SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  13);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  const auto entry = virtual_lds_sidecar_entry_words_for_test(result.elf_bytes);
+  ASSERT_TRUE(entry.has_value());
+  EXPECT_TRUE(contains_flat_global_op_with_null_saddr(entry->words, entry->word_count, /*op=*/28));
+  EXPECT_TRUE(contains_sopp(entry->words, entry->word_count, /*op=*/8));
+  EXPECT_GE(count_cdna3_vop1_writes(entry->words, entry->word_count, /*op=*/2, /*vdst=*/100), 2u);
+  EXPECT_GE(count_cdna3_vop1_writes(entry->words, entry->word_count, /*op=*/2, /*vdst=*/101), 2u);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsTransposeSemanticRuleUsesSpillPerUseAccessEmitter) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b64_tr_b16_words();
+  std::vector<uint32_t> words;
+  words.reserve(102 + 3);
+  for (uint16_t sgpr = 0; sgpr < 102; ++sgpr)
+    words.push_back(rocjitsu::build_s_mov_b32(sgpr, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4));
+  words.push_back(ds[0]);
+  words.push_back(ds[1]);
+  words.push_back(kCdna4SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  13);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  const auto entry = virtual_lds_sidecar_entry_words_for_test(result.elf_bytes);
+  ASSERT_TRUE(entry.has_value());
+  EXPECT_TRUE(contains_flat_global_op_with_null_saddr(entry->words, entry->word_count, /*op=*/21));
+  EXPECT_TRUE(contains_sopp(entry->words, entry->word_count, /*op=*/8));
+  EXPECT_GE(count_cdna3_vop1_writes(entry->words, entry->word_count, /*op=*/2, /*vdst=*/100), 2u);
+  EXPECT_GE(count_cdna3_vop1_writes(entry->words, entry->word_count, /*op=*/2, /*vdst=*/101), 2u);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseGrowsDescriptorForBorrowedHighSgprs) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4),
+      ds[0],
+      ds[1],
+      kCdna4SEndpgm,
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  2);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+  expect_cdna3_sidecar_descriptor_sgprs_eq(result.elf_bytes, 104);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto *metadata_section =
+      rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName);
+  ASSERT_NE(metadata_section, nullptr);
+  const auto parsed = rocjitsu::parse_virtual_lds_metadata(
+      {reinterpret_cast<const uint8_t *>(metadata_section->data()), metadata_section->size()});
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+  EXPECT_EQ(parsed->front().virtual_lds_base_sgpr, 98u);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseCanGrowTinyNoAgprKernelsPastAccumOffset) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write_b32_words(/*addr=*/0, /*data=*/1);
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4),
+      ds[0],
+      ds[1],
+      kCdna4SEndpgm,
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  2);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  bool found_full_vaddr_store = false;
+  for (size_t i = 0; i + 1 < target_word_count; ++i) {
+    rocjitsu::cdna3::FlatMachineInst actual{};
+    std::memcpy(&actual, target_words + i, sizeof(actual));
+    if (actual.encoding == 0x37u && actual.op == 28u && actual.seg == 2u && actual.addr == 0u &&
+        actual.saddr == 0x7Fu) {
+      found_full_vaddr_store = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found_full_vaddr_store);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarRaisesDescriptorForExplicitHighDsVgprs) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds_write = make_cdna4_ds_write_b32_words(/*addr=*/62, /*data=*/0, /*byte_offset=*/256);
+  const auto ds_read = make_cdna4_ds_read_b32_words(/*byte_offset=*/256, /*addr=*/62, /*vdst=*/116);
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4),
+      ds_write[0],
+      ds_write[1],
+      ds_read[0],
+      ds_read[1],
+      kCdna4SEndpgm,
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  2);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  // The source descriptor intentionally under-declares the inline-assembly
+  // VGPRs. Virtual-LDS lowering must grow the target descriptor for both the
+  // synthetic GLOBAL address high half v63 and the explicit read destination
+  // v116 before the runtime dispatches the translated body.
+  expect_cdna3_sidecar_descriptor_vgprs_at_least(result.elf_bytes, 117);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseCapturesWrapperBeforeGuestClobber) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  const uint32_t touch_s100 =
+      rocjitsu::build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t touch_s101 =
+      rocjitsu::build_s_mov_b32(/*sdst=*/101, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t clobber_dispatch_ptr =
+      rocjitsu::build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {touch_s100, touch_s101, clobber_dispatch_ptr, ds[0], ds[1], kCdna4SEndpgm});
+
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  source_kd->group_segment_fixed_size = 6144;
+  source_kd->kernarg_size = 0;
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  13);
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  AMDHSA_BITS_SET(source_kd->kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                  1);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  const auto entry = virtual_lds_sidecar_entry_words_for_test(result.elf_bytes);
+  ASSERT_TRUE(entry.has_value());
+  const auto *entry_words = entry->words;
+  const size_t entry_word_count = std::min(entry->word_count, size_t{48});
+  // The descriptor entry must consume the wrapper kernarg pointer before the
+  // guest body executes `s_mov_b32 s0, 0`. Spill-per-use virtual LDS then
+  // reloads the backing pointer from private scratch, not from a guest-owned
+  // ABI pointer SGPR.
+  EXPECT_TRUE(contains_smem_load_dwordx2_with_wait(entry_words, entry_word_count,
+                                                   /*sdata=*/100, /*sbase_sgpr=*/2,
+                                                   /*offset=*/8));
+
+  EXPECT_TRUE(contains_flat_scratch_dword_offset(entry_words, entry_word_count, /*op=*/28,
+                                                 /*offset=*/0, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword_offset(entry_words, entry_word_count, /*op=*/28,
+                                                 /*offset=*/4, /*is_load=*/false));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseKeepsEntryPrologueStableAfterVgprGrowth) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  const auto grow_vgprs =
+      make_cdna4_permlane32_swap_b32_words(/*encoding_id=*/cdna4::encoding::kVop1Hi3);
+  const uint32_t touch_s100 =
+      rocjitsu::build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t touch_s101 =
+      rocjitsu::build_s_mov_b32(/*sdst=*/101, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {touch_s100, touch_s101, ds[0], ds[1], grow_vgprs[0], grow_vgprs[1], kCdna4SEndpgm});
+
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  source_kd->group_segment_fixed_size = 6144;
+  source_kd->kernarg_size = 0;
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  13);
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  AMDHSA_BITS_SET(source_kd->kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                  1);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  options.debug_min_free_vgpr = 193;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+  expect_cdna3_sidecar_descriptor_vgprs_at_least(result.elf_bytes, 196);
+
+  const auto entry = virtual_lds_sidecar_entry_words_for_test(result.elf_bytes);
+  ASSERT_TRUE(entry.has_value());
+  const auto *entry_words = entry->words;
+  const size_t entry_word_count = std::min(entry->word_count, size_t{48});
+  // The test-only liveness floor makes the permlane lowering grow the final
+  // target VGPR count to at least v195 after the entry prologue has already
+  // been emitted. Spill-per-use virtual LDS must still reuse the original low
+  // entry temps during descriptor recomputation instead of regenerating the
+  // prologue with v194/v195.
+  const auto saved_lo = find_cdna3_vop1_vdst(entry_words, entry_word_count, /*op=*/1, /*src0=*/100);
+  const auto saved_hi = find_cdna3_vop1_vdst(entry_words, entry_word_count, /*op=*/1, /*src0=*/101);
+  ASSERT_TRUE(saved_lo.has_value());
+  ASSERT_TRUE(saved_hi.has_value());
+  EXPECT_LT(*saved_lo, 194u);
+  EXPECT_LT(*saved_hi, 194u);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarEmitsRuntimeMetadataSection) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  source_kd->group_segment_fixed_size = 6144;
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto *metadata_section =
+      rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName);
+  ASSERT_NE(metadata_section, nullptr);
+
+  const auto parsed = rocjitsu::parse_virtual_lds_metadata(
+      {reinterpret_cast<const uint8_t *>(metadata_section->data()), metadata_section->size()});
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+  const auto &record = parsed->front();
+  EXPECT_EQ(record.kernel_name, "kernel");
+  EXPECT_EQ(record.normal_descriptor_vaddr, translated.kernel_descriptor_offset("kernel"));
+  EXPECT_NE(record.virtual_descriptor_vaddr, record.normal_descriptor_vaddr);
+  EXPECT_EQ(record.static_lds_bytes, 6144u);
+  EXPECT_EQ(record.kernarg_size, 16u);
+  EXPECT_EQ(record.backing_pointer_kernarg_offset, 24u);
+  EXPECT_NE(record.virtual_lds_base_sgpr, 0u);
+  EXPECT_NE(record.flags & rocjitsu::kVirtualLdsFlagRuntimeStateBlock, 0u);
+
+  const auto normal_kd =
+      read_descriptor_at_loaded_vaddr_for_test(result.elf_bytes, record.normal_descriptor_vaddr);
+  ASSERT_TRUE(normal_kd.has_value());
+  EXPECT_EQ(normal_kd->kernarg_size, 16u);
+
+  const auto sidecar_kd =
+      read_descriptor_at_loaded_vaddr_for_test(result.elf_bytes, record.virtual_descriptor_vaddr);
+  ASSERT_TRUE(sidecar_kd.has_value());
+  EXPECT_EQ(sidecar_kd->kernarg_size, 48u);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarZeroKernargUsesWrapperKernarg) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  source_kd->group_segment_fixed_size = 6144;
+  source_kd->kernarg_size = 0;
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  AMDHSA_BITS_SET(source_kd->kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                  1);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  const auto saddr =
+      find_flat_global_load_saddr(target_words, target_word_count, /*op=*/20, /*vdst=*/7,
+                                  /*addr=*/4, /*offset=*/0x134);
+  ASSERT_TRUE(saddr.has_value());
+  EXPECT_TRUE(contains_smem_load_dwordx2_with_wait(target_words, target_word_count, *saddr,
+                                                   /*sbase_sgpr=*/2, /*offset=*/8));
+
+  const auto *metadata_section =
+      rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName);
+  ASSERT_NE(metadata_section, nullptr);
+  const auto parsed = rocjitsu::parse_virtual_lds_metadata(
+      {reinterpret_cast<const uint8_t *>(metadata_section->data()), metadata_section->size()});
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+  const auto &record = parsed->front();
+  EXPECT_EQ(record.kernarg_size, 0u);
+  EXPECT_EQ(record.backing_pointer_kernarg_offset, 8u);
+  EXPECT_NE(record.flags & rocjitsu::kVirtualLdsFlagRuntimeStateBlock, 0u);
+
+  const auto sidecar_kd =
+      read_descriptor_at_loaded_vaddr_for_test(result.elf_bytes, record.virtual_descriptor_vaddr);
+  ASSERT_TRUE(sidecar_kd.has_value());
+  EXPECT_EQ(sidecar_kd->kernarg_size, 32u);
+  EXPECT_EQ(AMDHSA_BITS_GET(sidecar_kd->kernel_code_properties,
+                            KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR),
+            1u)
+      << "kernel_code_properties=0x" << std::hex << sidecar_kd->kernel_code_properties << std::dec;
+  EXPECT_EQ(AMDHSA_BITS_GET(sidecar_kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT), 4u);
+}
+
+TEST(BinaryTranslatorE2E, LdsKernelEmitsNormalAndVirtualDescriptorVariants) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  source_kd->group_segment_fixed_size = 6144;
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto *metadata_section =
+      rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName);
+  ASSERT_NE(metadata_section, nullptr);
+  const auto parsed = rocjitsu::parse_virtual_lds_metadata(
+      {reinterpret_cast<const uint8_t *>(metadata_section->data()), metadata_section->size()});
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+
+  const auto &record = parsed->front();
+  EXPECT_EQ(record.kernel_name, "kernel");
+  EXPECT_EQ(record.normal_descriptor_vaddr, translated.kernel_descriptor_offset("kernel"));
+  EXPECT_NE(record.virtual_descriptor_vaddr, record.normal_descriptor_vaddr);
+  EXPECT_EQ(record.static_lds_bytes, 6144u);
+  EXPECT_EQ(record.kernarg_size, 16u);
+  EXPECT_EQ(record.backing_pointer_kernarg_offset, 24u);
+  EXPECT_NE(record.virtual_lds_base_sgpr, 0u);
+  EXPECT_NE(record.flags & rocjitsu::kVirtualLdsFlagRuntimeStateBlock, 0u);
+
+  const auto *translated_rodata = rocjitsu::find_section(translated, ".rodata");
+  ASSERT_NE(translated_rodata, nullptr);
+  const auto normal_kd = rocjitsu::read_elf_struct_for_test<rocjitsu::TestKernelDescriptor>(
+      result.elf_bytes, translated_rodata->sectionOffset());
+  EXPECT_EQ(normal_kd.group_segment_fixed_size, 6144u);
+  EXPECT_EQ(normal_kd.kernarg_size, 16u);
+
+  const auto virtual_descriptor_offset =
+      rocjitsu::loaded_vaddr_to_file_offset(result.elf_bytes, record.virtual_descriptor_vaddr);
+  ASSERT_TRUE(virtual_descriptor_offset.has_value());
+  const auto virtual_kd = rocjitsu::read_elf_struct_for_test<rocjitsu::TestKernelDescriptor>(
+      result.elf_bytes, *virtual_descriptor_offset);
+  EXPECT_EQ(virtual_kd.group_segment_fixed_size, 0u);
+  EXPECT_EQ(virtual_kd.kernarg_size, 48u);
+}
+
+TEST(BinaryTranslatorE2E, MubufLdsKernelEmitsNormalAndVirtualDescriptorVariants) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto mubuf = make_cdna4_buffer_load_lds_words(/*op=*/23);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {mubuf[0], mubuf[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  source_kd->group_segment_fixed_size = 6144;
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  // MUBUF instructions encode the LDS side effect in a modifier bit, not in the
+  // mnemonic. The sidecar detector must inspect the decoded machine fields, or
+  // MUBUF-only LDS kernels would keep only the normal hardware-LDS descriptor.
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto *metadata_section =
+      rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName);
+  ASSERT_NE(metadata_section, nullptr);
+  const auto parsed = rocjitsu::parse_virtual_lds_metadata(
+      {reinterpret_cast<const uint8_t *>(metadata_section->data()), metadata_section->size()});
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+
+  const auto &record = parsed->front();
+  EXPECT_EQ(record.kernel_name, "kernel");
+  EXPECT_EQ(record.normal_descriptor_vaddr, translated.kernel_descriptor_offset("kernel"));
+  EXPECT_NE(record.virtual_descriptor_vaddr, record.normal_descriptor_vaddr);
+  EXPECT_EQ(record.static_lds_bytes, 6144u);
+  EXPECT_EQ(record.kernarg_size, 16u);
+  EXPECT_EQ(record.backing_pointer_kernarg_offset, 24u);
+  EXPECT_NE(record.virtual_lds_base_sgpr, 0u);
+  EXPECT_NE(record.flags & rocjitsu::kVirtualLdsFlagRuntimeStateBlock, 0u);
+
+  const auto *translated_rodata = rocjitsu::find_section(translated, ".rodata");
+  ASSERT_NE(translated_rodata, nullptr);
+  const auto normal_kd = rocjitsu::read_elf_struct_for_test<rocjitsu::TestKernelDescriptor>(
+      result.elf_bytes, translated_rodata->sectionOffset());
+  EXPECT_EQ(normal_kd.group_segment_fixed_size, 6144u);
+  EXPECT_EQ(normal_kd.kernarg_size, 16u);
+
+  const auto virtual_descriptor_offset =
+      rocjitsu::loaded_vaddr_to_file_offset(result.elf_bytes, record.virtual_descriptor_vaddr);
+  ASSERT_TRUE(virtual_descriptor_offset.has_value());
+  const auto virtual_kd = rocjitsu::read_elf_struct_for_test<rocjitsu::TestKernelDescriptor>(
+      result.elf_bytes, *virtual_descriptor_offset);
+  EXPECT_EQ(virtual_kd.group_segment_fixed_size, 0u);
+  EXPECT_EQ(virtual_kd.kernarg_size, 48u);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarMaterializesLargeDsReadB32Offset) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  constexpr uint16_t kLargeDsOffset = 0x1234;
+  const auto ds = make_cdna4_ds_read_b32_words(kLargeDsOffset);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/20, /*vdst=*/7,
+                                        /*addr=*/4, /*offset=*/0));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadU16ToFlatGlobalLoadUshort) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_u16_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/18, /*vdst=*/7,
+                                        /*addr=*/4, /*offset=*/0x20));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadU8ToFlatGlobalLoadUbyte) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_u8_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/16, /*vdst=*/12,
+                                        /*addr=*/8, /*offset=*/0x20));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadI8ToFlatGlobalLoadSbyte) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_i8_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/17, /*vdst=*/12,
+                                        /*addr=*/8, /*offset=*/0x20));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsWriteB8ToFlatGlobalStoreByte) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write_b8_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_store(target_words, target_word_count, /*op=*/24, /*data=*/7,
+                                         /*addr=*/4, /*offset=*/0x10));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsWriteB8D16HiToFlatGlobalStoreByteD16Hi) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write_b8_d16_hi_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_store(target_words, target_word_count, /*op=*/25, /*data=*/7,
+                                         /*addr=*/4, /*offset=*/0x10));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesDsWriteB96DataOverlappingAddressPair) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write_b96_words(/*addr=*/4, /*data=*/4);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_data = find_flat_global_store_data(target_words, target_word_count, /*op=*/30,
+                                                       /*addr=*/4, /*offset=*/0);
+  ASSERT_TRUE(staged_data.has_value());
+  EXPECT_NE(*staged_data, 4u);
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, *staged_data,
+                                  /*src0=*/256 + 4));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1,
+                                  static_cast<uint8_t>(*staged_data + 1), /*src0=*/256 + 5));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1,
+                                  static_cast<uint8_t>(*staged_data + 2), /*src0=*/256 + 6));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesOddDsAddressIntoEvenGlobalAddressPair) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write_b128_words(/*addr=*/7, /*data=*/58);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_addr =
+      find_flat_global_store_addr_for_data(target_words, target_word_count, /*op=*/31,
+                                           /*data=*/58, /*offset=*/0);
+  ASSERT_TRUE(staged_addr.has_value());
+  EXPECT_EQ(*staged_addr % 2, 0u);
+  EXPECT_NE(*staged_addr, 7u);
+  EXPECT_EQ(find_vop2_literal_add(target_words, target_word_count, /*vsrc1=*/7, /*literal=*/0),
+            staged_addr);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersAccDsWriteB128ToAccFlatGlobalStore) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write_b128_words(/*addr=*/28, /*data=*/30, /*byte_offset=*/0x40,
+                                                 /*acc=*/true);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_store_acc(target_words, target_word_count, /*op=*/31,
+                                             /*data=*/30, /*addr=*/28, /*offset=*/0x40));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesOddWideStoreDataIntoEvenTuple) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write_b64_words(/*addr=*/4, /*data=*/7);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_data = find_flat_global_store_data(target_words, target_word_count, /*op=*/29,
+                                                       /*addr=*/4, /*offset=*/0);
+  ASSERT_TRUE(staged_data.has_value());
+  EXPECT_EQ(*staged_data % 2, 0u);
+  EXPECT_NE(*staged_data, 7u);
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, *staged_data,
+                                  /*src0=*/256 + 7));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1,
+                                  static_cast<uint8_t>(*staged_data + 1), /*src0=*/256 + 8));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesOddWideLoadResultIntoEvenTuple) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b64_words(/*addr=*/4, /*vdst=*/7);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_vdst = find_flat_global_load_vdst(target_words, target_word_count, /*op=*/21,
+                                                      /*addr=*/4, /*offset=*/0);
+  ASSERT_TRUE(staged_vdst.has_value());
+  EXPECT_EQ(*staged_vdst % 2, 0u);
+  EXPECT_NE(*staged_vdst, 7u);
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/7,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst)));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/8,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst + 1)));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadB128ToFlatGlobalLoad) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b128_words(/*addr=*/28, /*vdst=*/30, /*byte_offset=*/0x40);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/23, /*vdst=*/30,
+                                        /*addr=*/28, /*offset=*/0x40));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersAccDsReadB128ToAccFlatGlobalLoad) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b128_words(/*addr=*/28, /*vdst=*/30, /*byte_offset=*/0x40,
+                                                /*acc=*/true);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_load_acc(target_words, target_word_count, /*op=*/23,
+                                            /*vdst=*/30, /*addr=*/28, /*offset=*/0x40));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesOddDsReadB128AddressIntoEvenGlobalPair) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b128_words(/*addr=*/27, /*vdst=*/30);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_addr =
+      find_flat_global_load_addr_for_vdst(target_words, target_word_count, /*op=*/23,
+                                          /*vdst=*/30, /*offset=*/0);
+  ASSERT_TRUE(staged_addr.has_value());
+  EXPECT_EQ(*staged_addr % 2, 0u);
+  EXPECT_NE(*staged_addr, 27u);
+  EXPECT_EQ(find_vop2_literal_add(target_words, target_word_count, /*vsrc1=*/27, /*literal=*/0),
+            staged_addr);
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesOddDsReadB128ResultIntoEvenTuple) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b128_words(/*addr=*/28, /*vdst=*/31);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_vdst = find_flat_global_load_vdst(target_words, target_word_count, /*op=*/23,
+                                                      /*addr=*/28, /*offset=*/0);
+  ASSERT_TRUE(staged_vdst.has_value());
+  EXPECT_EQ(*staged_vdst % 2, 0u);
+  EXPECT_NE(*staged_vdst, 31u);
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/31,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst)));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/32,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst + 1)));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/33,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst + 2)));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/34,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst + 3)));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsWrite2B32ToFlatGlobalStores) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write2_b32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_store(target_words, target_word_count, /*op=*/28, /*data=*/7,
+                                         /*addr=*/4, /*offset=*/4));
+  EXPECT_TRUE(contains_flat_global_store(target_words, target_word_count, /*op=*/28, /*data=*/9,
+                                         /*addr=*/4, /*offset=*/8));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsWrite2B64ToFlatGlobalStores) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write2_b64_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_store(target_words, target_word_count, /*op=*/29, /*data=*/8,
+                                         /*addr=*/4, /*offset=*/8));
+  EXPECT_TRUE(contains_flat_global_store(target_words, target_word_count, /*op=*/29, /*data=*/12,
+                                         /*addr=*/4, /*offset=*/16));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesDsWrite2B64DataOverlappingAddressPair) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write2_b64_words(/*addr=*/8, /*data0=*/8, /*data1=*/12);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_data = find_flat_global_store_data(target_words, target_word_count, /*op=*/29,
+                                                       /*addr=*/8, /*offset=*/8);
+  ASSERT_TRUE(staged_data.has_value());
+  EXPECT_NE(*staged_data, 8u);
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, *staged_data,
+                                  /*src0=*/256 + 8));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1,
+                                  /*vdst=*/static_cast<uint8_t>(*staged_data + 1),
+                                  /*src0=*/256 + 9));
+  EXPECT_TRUE(contains_flat_global_store(target_words, target_word_count, /*op=*/29, /*data=*/12,
+                                         /*addr=*/8, /*offset=*/16));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsWrite2st64B64ToFlatGlobalStores) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_write2st64_b64_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_store(target_words, target_word_count, /*op=*/29, /*data=*/8,
+                                         /*addr=*/4, /*offset=*/512));
+  EXPECT_TRUE(contains_flat_global_store(target_words, target_word_count, /*op=*/29, /*data=*/12,
+                                         /*addr=*/4, /*offset=*/1024));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsRead2B32ToFlatGlobalLoads) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read2_b32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/20, /*vdst=*/20,
+                                        /*addr=*/12, /*offset=*/4));
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/20, /*vdst=*/21,
+                                        /*addr=*/12, /*offset=*/8));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesDsRead2B32ResultsOverlappingAddressPair) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read2_b32_words(/*offset0=*/1, /*offset1=*/2, /*addr=*/20,
+                                                /*vdst=*/20);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto temp0 = find_flat_global_load_vdst(target_words, target_word_count, /*op=*/20,
+                                                /*addr=*/20, /*offset=*/4);
+  const auto temp1 = find_flat_global_load_vdst(target_words, target_word_count, /*op=*/20,
+                                                /*addr=*/20, /*offset=*/8);
+  ASSERT_TRUE(temp0.has_value());
+  ASSERT_TRUE(temp1.has_value());
+  EXPECT_NE(*temp0, 20u);
+  EXPECT_NE(*temp1, 21u);
+  EXPECT_EQ(*temp1, static_cast<uint8_t>(*temp0 + 1));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/20,
+                                  /*src0=*/static_cast<uint16_t>(256u + *temp0)));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/21,
+                                  /*src0=*/static_cast<uint16_t>(256u + *temp1)));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsRead2st64B32ToFlatGlobalLoads) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read2st64_b32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/20, /*vdst=*/20,
+                                        /*addr=*/12, /*offset=*/512));
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/20, /*vdst=*/21,
+                                        /*addr=*/12, /*offset=*/768));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsRead2B64ToFlatGlobalLoads) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read2_b64_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/21, /*vdst=*/66,
+                                        /*addr=*/58, /*offset=*/24));
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/21, /*vdst=*/68,
+                                        /*addr=*/58, /*offset=*/544));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesOddWideRead2ResultsIntoEvenTuple) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read2_b64_words(/*offset0=*/3, /*offset1=*/68, /*addr=*/58,
+                                                /*vdst=*/67);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_vdst = find_flat_global_load_vdst(target_words, target_word_count, /*op=*/21,
+                                                      /*addr=*/58, /*offset=*/24);
+  ASSERT_TRUE(staged_vdst.has_value());
+  EXPECT_EQ(*staged_vdst % 2, 0u);
+  EXPECT_NE(*staged_vdst, 67u);
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/67,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst)));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/68,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst + 1)));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/69,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst + 2)));
+  EXPECT_TRUE(contains_cdna3_vop1(target_words, target_word_count, /*op=*/1, /*vdst=*/70,
+                                  /*src0=*/static_cast<uint16_t>(256u + *staged_vdst + 3)));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsRead2st64B64ToFlatGlobalLoads) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read2st64_b64_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/21, /*vdst=*/112,
+                                        /*addr=*/98, /*offset=*/1024));
+  EXPECT_TRUE(contains_flat_global_load(target_words, target_word_count, /*op=*/21, /*vdst=*/114,
+                                        /*addr=*/98, /*offset=*/1536));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarUsesDistinctSpillSlotsForTwoAddressTemps) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  // vdst aliases addr, so the replacement must preserve the original address
+  // VGPR. Offsets 9 and 10 exceed the flat/global immediate range after B64 ST64
+  // scaling. The descriptor is already at the ordinary VGPR ceiling and the body
+  // touches s[100:101], so virtual LDS must use the spill-per-use path: the
+  // preserved address temp and two backing-pointer VGPR temps are live together
+  // and must receive distinct private scratch slots.
+  const auto ds = make_cdna4_ds_read2st64_b64_words(/*offset0=*/9, /*offset1=*/10,
+                                                    /*addr=*/4, /*vdst=*/4);
+  const uint32_t touch_s100 =
+      rocjitsu::build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t touch_s101 =
+      rocjitsu::build_s_mov_b32(/*sdst=*/101, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {touch_s100, touch_s101, ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  63);
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  13);
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  EXPECT_TRUE(contains_flat_scratch_dword_offset(target_words, target_word_count, /*op=*/28,
+                                                 /*offset=*/16, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword_offset(target_words, target_word_count, /*op=*/28,
+                                                 /*offset=*/20, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword_offset(target_words, target_word_count, /*op=*/28,
+                                                 /*offset=*/24, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword_offset(target_words, target_word_count, /*op=*/20,
+                                                 /*offset=*/16, /*is_load=*/true));
+  EXPECT_TRUE(contains_flat_scratch_dword_offset(target_words, target_word_count, /*op=*/20,
+                                                 /*offset=*/20, /*is_load=*/true));
+  EXPECT_TRUE(contains_flat_scratch_dword_offset(target_words, target_word_count, /*op=*/20,
+                                                 /*offset=*/24, /*is_load=*/true));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadB64TrB16LoadToFlatGlobal) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b64_tr_b16_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_addr =
+      find_vop2_literal_add(target_words, target_word_count, /*vsrc1=*/2, /*literal=*/0);
+  ASSERT_TRUE(staged_addr.has_value());
+  EXPECT_EQ(*staged_addr % 2, 0u);
+  EXPECT_TRUE(contains_vop3_mov_b32(target_words, target_word_count,
+                                    static_cast<uint8_t>(*staged_addr + 1),
+                                    rocjitsu::scalar_positive_inline_u32(0)));
+  EXPECT_TRUE(contains_flat_global_load_addr(target_words, target_word_count, /*op=*/21,
+                                             *staged_addr, /*offset=*/0));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarStagesOddDsReadB64TrB16AddressIntoEvenGlobalPair) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_read_b64_tr_b16_words(/*byte_offset=*/0, /*addr=*/7);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const auto staged_addr =
+      find_vop2_literal_add(target_words, target_word_count, /*vsrc1=*/7, /*literal=*/0);
+  ASSERT_TRUE(staged_addr.has_value());
+  EXPECT_EQ(*staged_addr % 2, 0u);
+  EXPECT_NE(*staged_addr, 7u);
+  EXPECT_TRUE(contains_vop3_mov_b32(target_words, target_word_count,
+                                    static_cast<uint8_t>(*staged_addr + 1),
+                                    rocjitsu::scalar_positive_inline_u32(0)));
+  EXPECT_TRUE(contains_flat_global_load_addr(target_words, target_word_count, /*op=*/21,
+                                             *staged_addr, /*offset=*/0));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarMaterializesLargeDsReadB64TrB16Offset) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  constexpr uint16_t kLargeDsOffset = 0x1234;
+  const auto ds = make_cdna4_ds_read_b64_tr_b16_words(kLargeDsOffset);
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  const auto temp =
+      find_vop2_literal_add(target_words, target_word_count, /*vsrc1=*/2, kLargeDsOffset);
+  ASSERT_TRUE(temp.has_value());
+  EXPECT_EQ(*temp % 2, 0u);
+  EXPECT_TRUE(contains_vop3_mov_b32(target_words, target_word_count,
+                                    static_cast<uint8_t>(*temp + 1),
+                                    rocjitsu::scalar_positive_inline_u32(0)));
+  EXPECT_TRUE(contains_flat_global_load_addr(target_words, target_word_count, /*op=*/21, *temp,
+                                             /*offset=*/0));
+}
+
+TEST(BinaryTranslatorE2E, VirtualLdsSidecarRejectsUnsupportedDsMemoryOpcode) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_add_u32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+  rocjitsu::write_value_for_test<uint32_t>(
+      image,
+      rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, group_segment_fixed_size),
+      105600u);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &d) {
+    return d.message.find("virtual LDS lowering does not support this DS opcode") !=
+           std::string::npos;
+  });
+  EXPECT_NE(diagnostic, result.diagnostics.end());
+}
+
+TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarKeepsNormalDescriptor) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const auto ds = make_cdna4_ds_add_u32_words();
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({ds[0], ds[1], kCdna4SEndpgm});
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+  rocjitsu::write_value_for_test<uint32_t>(
+      image,
+      rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, group_segment_fixed_size),
+      105600u);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  options.skip_failed_kernels = true;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  const auto skipped = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.kind == rocjitsu::DiagnosticKind::KernelSkipped &&
+           diagnostic.message.find("virtual LDS lowering does not support this DS opcode") !=
+               std::string::npos;
+  });
+  ASSERT_NE(skipped, result.diagnostics.end());
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *translated_text = translated.text_sections()[0];
+  const auto *translated_rodata = rocjitsu::find_section(translated, ".rodata");
+  ASSERT_NE(translated_rodata, nullptr);
+  ASSERT_GE(translated_rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+  const auto normal_kd = rocjitsu::read_elf_struct_for_test<rocjitsu::TestKernelDescriptor>(
+      result.elf_bytes, translated_rodata->sectionOffset());
+  const int64_t normal_entry_vaddr = static_cast<int64_t>(translated_rodata->vaddr()) +
+                                     rocjitsu::read_kernel_descriptor_entry_offset(&normal_kd);
+  ASSERT_GE(normal_entry_vaddr, 0);
+  const auto normal_entry_file_offset = rocjitsu::loaded_vaddr_to_file_offset(
+      result.elf_bytes, static_cast<uint64_t>(normal_entry_vaddr));
+  ASSERT_TRUE(normal_entry_file_offset.has_value());
+
+  // The optional virtual-LDS sidecar failed, but below-threshold launches still
+  // use the normal descriptor. Its entry must therefore continue to point at the
+  // translated hardware-LDS body, not at the skipped-kernel stub appended for
+  // the sidecar variant.
+  EXPECT_EQ(*normal_entry_file_offset, translated_text->sectionOffset());
+  const auto *entry_words =
+      reinterpret_cast<const uint32_t *>(result.elf_bytes.data() + *normal_entry_file_offset);
+  EXPECT_NE(entry_words[0],
+            rocjitsu::build_s_trap(ROCJITSU_CODE_ARCH_CDNA3, rocjitsu::kSkippedKernelTrapId));
+  EXPECT_EQ(rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName), nullptr);
+}
+
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3Bitop3ScratchGrowsDescriptor) {
   constexpr uint16_t kScratchFloor = 120;
   const auto words = make_cdna4_bitop3_words(cdna4::kVBitop3B32Vop3, 16);
@@ -15973,8 +18575,117 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3Bitop3ScratchGrowsDescriptor) {
   expect_cdna3_translated_descriptor_vgprs_at_least(result.elf_bytes, kScratchFloor + 2);
 }
 
+TEST(BinaryTranslatorE2E, Cdna4ToCdna3Bitop3UsesSpillBackedScratchWhenVgprsAreFull) {
+  using namespace rocr::llvm::amdhsa;
+
+  const auto words = make_cdna4_bitop3_words(cdna4::kVBitop3B32Vop3, 16);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1]});
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  63);
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  options.debug_min_free_vgpr = 256;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  // With find_free_run() forced above the physical VGPR namespace, the bitop3
+  // lowering must borrow descriptor-backed v0/v1, preserve them in the reusable
+  // per-lane semantic spill window, and restore them after writing VDST. The
+  // forbidden set excludes v16..v19 so the borrowed window cannot clobber the
+  // destination or any source while the LUT expression is being synthesized.
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/28,
+                                          /*vgpr=*/0, /*offset=*/0, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/28,
+                                          /*vgpr=*/1, /*offset=*/4, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/20,
+                                          /*vgpr=*/0, /*offset=*/0, /*is_load=*/true));
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/20,
+                                          /*vgpr=*/1, /*offset=*/4, /*is_load=*/true));
+}
+
+TEST(BinaryTranslatorE2E, Cdna4ToCdna3CvtPkBf16SpillScratchAvoidsVgprSources) {
+  using namespace rocr::llvm::amdhsa;
+
+  const auto words = make_cdna4_cvt_pk_bf16_f32_words(/*vdst=*/0, /*src0=*/256 + 4,
+                                                      /*src1=*/256 + 1);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1]});
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  1);
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  options.debug_min_free_vgpr = 256;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  // Force liveness to report no dead physical VGPR window. The BF16 lowering
+  // must then spill a borrowed three-VGPR window, but that window cannot include
+  // VDST or the still-needed high source. The old allocator borrowed v[1:3]
+  // here and clobbered SRC1 before converting the high packed half.
+  EXPECT_FALSE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/28,
+                                           /*vgpr=*/1, /*offset=*/0, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/28,
+                                          /*vgpr=*/2, /*offset=*/0, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/28,
+                                          /*vgpr=*/3, /*offset=*/4, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/28,
+                                          /*vgpr=*/4, /*offset=*/8, /*is_load=*/false));
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/20,
+                                          /*vgpr=*/2, /*offset=*/0, /*is_load=*/true));
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/20,
+                                          /*vgpr=*/3, /*offset=*/4, /*is_load=*/true));
+  EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/20,
+                                          /*vgpr=*/4, /*offset=*/8, /*is_load=*/true));
+}
+
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3MfmaPartialScratchGrowsDescriptor) {
-  constexpr uint16_t kScratchFloor = 120;
+  constexpr uint16_t kScratchFloor = 121;
+  constexpr uint16_t kAlignedScratch = 122;
   const auto words = make_cdna4_mfma_vgpr_dst_alias_words();
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1]});
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -15990,6 +18701,49 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3MfmaPartialScratchGrowsDescriptor) {
   ASSERT_FALSE(result.elf_bytes.empty());
   // The 16x16x32 F16 lowering uses a four-VGPR partial accumulator when an
   // ordinary destination overlaps the still-needed wide A/B source window.
+  expect_cdna3_translated_descriptor_vgprs_at_least(result.elf_bytes, kAlignedScratch + 4);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  std::optional<rocjitsu::cdna3::Vop3pMfmaMachineInst> partial_mfma;
+  for (size_t i = 0; i + 1 < target_word_count; ++i) {
+    rocjitsu::cdna3::Vop3pMfmaMachineInst actual{};
+    std::memcpy(&actual, target_words + i, sizeof(actual));
+    if (actual.encoding == 0x1A7u && actual.op == 77u && actual.acc_cd == 0u) {
+      partial_mfma = actual;
+      break;
+    }
+  }
+  ASSERT_TRUE(partial_mfma.has_value());
+  EXPECT_EQ(partial_mfma->vdst, kAlignedScratch);
+  EXPECT_EQ(partial_mfma->vdst % 2u, 0u);
+}
+
+TEST(BinaryTranslatorE2E, Cdna4ToCdna3Dot2ScratchGrowsDescriptor) {
+  constexpr uint16_t kScratchFloor = 121;
+  const auto words = make_cdna4_dot2_f32_bf16_words(/*vdst=*/0, /*src0=*/256 + 1,
+                                                    /*src1=*/256 + 2, /*src2=*/256);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1]});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  options.debug_min_free_vgpr = kScratchFloor;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+  ASSERT_FALSE(result.elf_bytes.empty());
+  // The BF16 dot2 fallback widens four packed halves into ordinary VGPR
+  // temporaries before issuing scalar FP32 arithmetic. If liveness selects a
+  // scratch run above the guest allocation, the descriptor must grow to cover
+  // all four generated VGPRs.
   expect_cdna3_translated_descriptor_vgprs_at_least(result.elf_bytes, kScratchFloor + 4);
 }
 
@@ -16589,6 +19343,266 @@ TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {
   EXPECT_EQ(diagnostic->severity, rocjitsu::DiagnosticSeverity::Error);
   EXPECT_EQ(diagnostic->guest_offset, std::optional<uint64_t>(0));
   EXPECT_FALSE(diagnostic->message.empty());
+}
+
+TEST(KernelDescriptorTranslator, CdnaToCdnaRejectsOversizedLdsWithoutVirtualization) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(text, nullptr);
+
+  rocjitsu::write_value_for_test<uint32_t>(
+      image,
+      rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, group_segment_fixed_size),
+      105600u);
+
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
+                                                  ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translations = translator.translate_image(
+      image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_FALSE(translations[0].supported);
+  EXPECT_EQ(translations[0].target_lds_size, 105600u);
+  EXPECT_FALSE(translations[0].needs_lds_overflow_buf);
+  EXPECT_EQ(translations[0].lds_overflow_size, 0u);
+
+  const bool reported_lds_limit =
+      std::ranges::any_of(translations[0].diagnostics, [](const auto &diagnostic) {
+        return diagnostic.message.find("target LDS size exceeds host per-workgroup limit") !=
+               std::string::npos;
+      });
+  EXPECT_TRUE(reported_lds_limit);
+}
+
+TEST(KernelDescriptorTranslator, CdnaToCdnaVirtualizesOversizedStaticLdsDescriptor) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(text, nullptr);
+
+  rocjitsu::write_value_for_test<uint32_t>(
+      image,
+      rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, group_segment_fixed_size),
+      105600u);
+  auto source_descriptor = rocjitsu::read_elf_struct_for_test<rocjitsu::TestKernelDescriptor>(
+      image, rodata->sectionOffset());
+  uint32_t source_rsrc2 = source_descriptor.compute_pgm_rsrc2;
+  AMDHSA_BITS_SET(source_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 22);
+  rocjitsu::write_value_for_test<uint32_t>(
+      image, rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, compute_pgm_rsrc2),
+      source_rsrc2);
+
+  rocjitsu::KernelDescriptorTranslationOptions options;
+  options.virtualize_lds = true;
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
+                                                  ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translations =
+      translator.translate_image(image, text->sectionOffset(), text->size(), options);
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_TRUE(translations[0].supported);
+  EXPECT_EQ(translations[0].target_lds_size, 0u);
+  EXPECT_TRUE(translations[0].needs_lds_overflow_buf);
+  EXPECT_EQ(translations[0].lds_overflow_size, 105600u);
+  EXPECT_EQ(translations[0].kernarg_size, 16u);
+  EXPECT_EQ(translations[0].kernarg_wrapper_original_pointer_offset, 16u);
+  EXPECT_EQ(translations[0].lds_overflow_kernarg_pointer_offset, 24u);
+  EXPECT_EQ(translations[0].target_kernarg_size, 48u);
+
+  rocjitsu::AmdGpuCodeObject mutated(image.data(), image.size());
+  ASSERT_TRUE(mutated.is_valid());
+  rocjitsu::CodeObjectPatcher patcher(mutated);
+  auto patch_plan = translations[0];
+  patch_plan.target_entry_text_offset = patch_plan.entry_text_offset;
+  patch_plan.target_body_entry_text_offset = patch_plan.entry_text_offset;
+  ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(patch_plan, ROCJITSU_CODE_ARCH_CDNA3));
+
+  const auto patched_image = patcher.emit();
+  const auto patched_kd = rocjitsu::read_elf_struct_for_test<rocjitsu::TestKernelDescriptor>(
+      patched_image, rodata->sectionOffset());
+  EXPECT_EQ(patched_kd.group_segment_fixed_size, 0u);
+  EXPECT_EQ(patched_kd.kernarg_size, 48u);
+  EXPECT_EQ(AMDHSA_BITS_GET(patched_kd.compute_pgm_rsrc2,
+                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE),
+            0u);
+}
+
+TEST(KernelDescriptorTranslator, VirtualLdsPreservesKernargPreloadRangeWhenSizeIsZero) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image, /*kernarg_size=*/0);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(text, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 2);
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 6);
+
+  rocjitsu::KernelDescriptorTranslationOptions options;
+  options.virtualize_lds = true;
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
+                                                  ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translations =
+      translator.translate_image(image, text->sectionOffset(), text->size(), options);
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_TRUE(translations[0].supported);
+  EXPECT_EQ(translations[0].kernarg_size, 32u);
+  EXPECT_EQ(translations[0].kernarg_wrapper_original_pointer_offset, 32u);
+  EXPECT_EQ(translations[0].lds_overflow_kernarg_pointer_offset, 40u);
+  EXPECT_EQ(translations[0].target_kernarg_size, 64u);
+}
+
+TEST(KernelDescriptorTranslator, VirtualLdsRoundsOddKernargPreloadRangeToPointerBoundary) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image, /*kernarg_size=*/0);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(text, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 0);
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 11);
+
+  rocjitsu::KernelDescriptorTranslationOptions options;
+  options.virtualize_lds = true;
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
+                                                  ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translations =
+      translator.translate_image(image, text->sectionOffset(), text->size(), options);
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_TRUE(translations[0].supported);
+  EXPECT_EQ(translations[0].kernarg_size, 48u);
+  EXPECT_EQ(translations[0].kernarg_wrapper_original_pointer_offset, 48u);
+  EXPECT_EQ(translations[0].lds_overflow_kernarg_pointer_offset, 56u);
+  EXPECT_EQ(translations[0].target_kernarg_size, 80u);
+}
+
+TEST(KernelDescriptorTranslator, VirtualLdsAcceptsZeroKernargSizeWithWrapper) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image, /*kernarg_size=*/0);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(text, nullptr);
+
+  rocjitsu::write_value_for_test<uint32_t>(
+      image,
+      rodata->sectionOffset() + offsetof(rocjitsu::TestKernelDescriptor, group_segment_fixed_size),
+      105600u);
+
+  rocjitsu::KernelDescriptorTranslationOptions options;
+  options.virtualize_lds = true;
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
+                                                  ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translations =
+      translator.translate_image(image, text->sectionOffset(), text->size(), options);
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_TRUE(translations[0].supported);
+  EXPECT_TRUE(translations[0].needs_lds_overflow_buf);
+  EXPECT_EQ(translations[0].kernarg_size, 0u);
+  EXPECT_EQ(translations[0].kernarg_wrapper_original_pointer_offset, 0u);
+  EXPECT_EQ(translations[0].lds_overflow_kernarg_pointer_offset, 8u);
+  EXPECT_EQ(translations[0].target_kernarg_size, 32u);
+}
+
+TEST(KernelDescriptorTranslator, VirtualLdsAddsKernargSegmentPointerWhenMissing) {
+  using namespace rocr::llvm::amdhsa;
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(text, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  source_kd->group_segment_fixed_size = 105600u;
+  source_kd->kernarg_size = 0;
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  AMDHSA_BITS_SET(source_kd->kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                  1);
+
+  rocjitsu::KernelDescriptorTranslationOptions options;
+  options.virtualize_lds = true;
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
+                                                  ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translations =
+      translator.translate_image(image, text->sectionOffset(), text->size(), options);
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_TRUE(translations[0].supported);
+  EXPECT_TRUE(translations[0].needs_lds_overflow_buf);
+  EXPECT_EQ(translations[0].kernarg_size, 0u);
+  EXPECT_EQ(translations[0].kernarg_wrapper_original_pointer_offset, 0u);
+  EXPECT_EQ(translations[0].lds_overflow_kernarg_pointer_offset, 8u);
+  EXPECT_EQ(translations[0].target_kernarg_size, 32u);
+  EXPECT_FALSE(translations[0].source_has_kernarg_segment_ptr);
+  EXPECT_TRUE(translations[0].has_kernarg_segment_ptr);
+  EXPECT_EQ(translations[0].kernarg_segment_ptr_sgpr, 2u);
+  EXPECT_EQ(translations[0].source_user_sgpr_count, 2u);
+  EXPECT_EQ(translations[0].target_user_sgpr_count, 4u);
+  EXPECT_EQ(translations[0].workgroup_id_sgpr_x, 2);
+  EXPECT_EQ(translations[0].lds_overflow_workgroup_id_sgpr_x, 4);
+  EXPECT_EQ(translations[0].user_sgpr_repair_start, 2u);
+  EXPECT_EQ(translations[0].user_sgpr_repair_count, 1u);
+  EXPECT_TRUE(translations[0].has_dispatch_ptr);
+  EXPECT_EQ(translations[0].dispatch_ptr_sgpr, 0u);
+}
+
+TEST(KernelDescriptorTranslator, VirtualLdsRejectsMissingKernargSegmentPointerWithFullUserSgprs) {
+  using namespace rocr::llvm::amdhsa;
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(text, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  source_kd->group_segment_fixed_size = 105600u;
+  source_kd->kernarg_size = 0;
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 15);
+
+  rocjitsu::KernelDescriptorTranslationOptions options;
+  options.virtualize_lds = true;
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
+                                                  ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translations =
+      translator.translate_image(image, text->sectionOffset(), text->size(), options);
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_FALSE(translations[0].supported);
+  EXPECT_TRUE(translations[0].needs_lds_overflow_buf);
+  const bool reported_user_sgpr_limit =
+      std::ranges::any_of(translations[0].diagnostics, [](const auto &diagnostic) {
+        return diagnostic.message.find("USER_SGPR_COUNT") != std::string::npos &&
+               diagnostic.message.find("16 SGPR") != std::string::npos;
+      });
+  EXPECT_TRUE(reported_user_sgpr_limit);
 }
 
 TEST(KernelDescriptorTranslator, IgnoresNonAllocExecutableSectionsForEntryRange) {

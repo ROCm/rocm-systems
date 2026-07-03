@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -16,6 +15,12 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 struct KdTranslation;
+
+/// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
+struct AppendedSidecarDescriptor {
+  uint64_t file_offset = 0;
+  uint64_t vaddr = 0;
+};
 
 class CodeObjectPatcher {
 public:

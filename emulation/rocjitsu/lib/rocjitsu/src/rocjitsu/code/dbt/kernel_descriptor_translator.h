@@ -44,6 +44,8 @@ struct KernelDescriptorTranslationOptions {
 /// ELF/kernel descriptor bytes.
 struct KdTranslation {
   uint64_t descriptor_file_offset = 0;
+  /// @brief Kernel symbol name without the AMDHSA ".kd" descriptor suffix.
+  std::string kernel_name;
   /// @brief Original .text-relative kernel entry decoded from the source descriptor.
   uint64_t entry_text_offset = 0;
   std::string symbol_name;
@@ -112,17 +114,70 @@ struct KdTranslation {
   /// @brief Future spill tier: number of VGPRs to virtualize through scratch memory.
   uint32_t vgpr_spill_to_scratch_count = 0;
 
+  /// @brief True when this plan describes a non-symbolized sidecar descriptor.
+  ///
+  /// @details Sidecar descriptors are materialized in a loaded ELF segment and
+  /// referenced only by rocjitsu metadata; they are not exported as additional
+  /// AMDHSA kernel symbols. Virtual LDS is the first producer, but the patching
+  /// contract is deliberately descriptor-generic so DBI instrumentation can add
+  /// its own sidecar descriptors later.
+  bool sidecar_descriptor = false;
+
   uint32_t target_sgpr_count = 0;
   uint32_t target_sgpr_granulated = 0;
   uint32_t sgpr_spill_count = 0;
   int16_t rdna4_grid_x_sgpr = -1;
   int16_t rdna4_grid_yz_sgpr = -1;
 
+  /// @brief Hardware LDS bytes encoded in GROUP_SEGMENT_FIXED_SIZE.
   uint32_t target_lds_size = 0;
   uint32_t lds_spill_zone_base = 0;
   uint32_t lds_spill_zone_bytes = 0;
+  /// @brief Static LDS bytes that must be backed by a virtual LDS buffer.
   uint32_t lds_overflow_size = 0;
+  /// @brief True when the dispatch path must provide a virtual LDS buffer.
   bool needs_lds_overflow_buf = false;
+  /// @brief Concrete scratch choices made while lowering the virtual-LDS body.
+  ///
+  /// @details This state is deliberately separate from descriptor-derived ABI
+  /// fields because descriptor recomputation must preserve it byte-for-byte.
+  VirtualLdsLoweringState virtual_lds_lowering;
+  /// @brief Source kernarg bytes copied into the wrapper prefix.
+  ///
+  /// @details The copied prefix preserves original kernarg offsets while DBT
+  /// prologue code consumes extension payloads from the same wrapper. The size
+  /// is the descriptor kernarg byte count widened only by descriptor-declared
+  /// kernarg preloads; DBT deliberately does not infer additional live bytes by
+  /// scanning guest code.
+  uint32_t kernarg_size = 0;
+  /// @brief Kernarg segment size required by the translated target descriptor.
+  ///
+  /// @details Normal kernels preserve the source descriptor size. Virtual-LDS
+  /// kernels advertise the rocjitsu wrapper size: copied original prefix,
+  /// original-pointer field, and extension payloads.
+  uint32_t target_kernarg_size = 0;
+  /// @brief Wrapper byte offset of the saved original kernarg pointer.
+  uint32_t kernarg_wrapper_original_pointer_offset = 0;
+  /// @brief Wrapper byte offset of the virtual-LDS runtime state payload.
+  uint32_t lds_overflow_kernarg_pointer_offset = 0;
+  /// @brief True if the source descriptor exposes a kernarg segment pointer SGPR.
+  bool source_has_kernarg_segment_ptr = false;
+  /// @brief True if the target descriptor exposes a kernarg segment pointer SGPR.
+  bool has_kernarg_segment_ptr = false;
+  /// @brief First target SGPR of the descriptor-selected kernarg segment pointer pair.
+  uint16_t kernarg_segment_ptr_sgpr = 0;
+  /// @brief True if the source descriptor exposes a dispatch-packet pointer SGPR.
+  bool has_dispatch_ptr = false;
+  /// @brief First SGPR of the descriptor-selected dispatch-packet pointer pair.
+  uint16_t dispatch_ptr_sgpr = 0;
+  /// @brief Descriptor-selected workgroup-id SGPRs, or -1 when a dimension is disabled.
+  int16_t workgroup_id_sgpr_x = -1;
+  int16_t workgroup_id_sgpr_y = -1;
+  int16_t workgroup_id_sgpr_z = -1;
+  /// @brief Target workgroup-id SGPRs seen before wrapper prologue ABI repair.
+  int16_t lds_overflow_workgroup_id_sgpr_x = -1;
+  int16_t lds_overflow_workgroup_id_sgpr_y = -1;
+  int16_t lds_overflow_workgroup_id_sgpr_z = -1;
 
   uint32_t target_private_size = 0;
   uint32_t private_spill_zone_base = 0;
@@ -190,7 +245,12 @@ struct KdTranslation {
   uint32_t target_occupancy = 0;
 
   bool supported = true;
+  /// @brief True when DBT preserved this source kernel instead of translating it.
+  bool skipped = false;
   std::vector<TranslationDiagnostic> diagnostics;
+
+  /// @brief Replace target resource/ABI state with a minimal skipped-kernel stub plan.
+  void configure_skipped_stub();
 };
 
 /// @brief Compute descriptor patches and semantic metadata for one DBT pair.

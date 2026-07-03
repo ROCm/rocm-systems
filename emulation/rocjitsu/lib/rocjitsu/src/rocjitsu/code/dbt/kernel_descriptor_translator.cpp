@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
@@ -31,6 +32,7 @@ RJ_DIAGNOSTIC_POP
 #include <functional>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -233,28 +235,30 @@ constexpr uint8_t kSmemSoffsetNone = 0x7c;
 // ELF kernel-descriptor discovery.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] bool kernel_descriptor_symbol(const Elf64_Sym &sym, const char *strtab,
-                                            size_t strtab_size) {
+[[nodiscard]] std::optional<std::string>
+kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
   if (sym.st_size != sizeof(KD))
-    return false;
+    return std::nullopt;
 
   // AMDHSA kernel descriptors are global object symbols. Size alone is not a
   // durable signal because unrelated data objects can also be 64 bytes.
   if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject ||
       elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
-    return false;
+    return std::nullopt;
 
   // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global
   // object is ambiguous, so require the ABI suffix instead of treating stripped
   // or minimized symbol records as descriptors.
   if (strtab == nullptr || strtab_size == 0 || sym.st_name == 0)
-    return false;
+    return std::nullopt;
   if (sym.st_name >= strtab_size)
-    return false;
+    return std::nullopt;
 
   const char *name = strtab + sym.st_name;
   const size_t len = strnlen(name, strtab_size - sym.st_name);
-  return len > 3 && std::strcmp(name + len - 3, ".kd") == 0;
+  if (len <= 3 || std::strcmp(name + len - 3, ".kd") != 0)
+    return std::nullopt;
+  return std::string(name, len - 3);
 }
 
 [[nodiscard]] std::optional<uint64_t> text_vaddr_for_section(uint64_t text_offset,
@@ -336,7 +340,8 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
     const auto *symtab = reinterpret_cast<const Elf64_Sym *>(image.data() + shdr[i].sh_offset);
     const size_t nsyms = shdr[i].sh_size / shdr[i].sh_entsize;
     for (size_t j = 0; j < nsyms; ++j) {
-      if (!kernel_descriptor_symbol(symtab[j], strtab, strtab_size))
+      auto kernel_name = kernel_descriptor_symbol_name(symtab[j], strtab, strtab_size);
+      if (!kernel_name)
         continue;
 
       const uint16_t sec_idx = symtab[j].st_shndx;
@@ -373,7 +378,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
 
 [[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t guest_arch, const KD &desc) {
   // CDNA kernels are Wave64 in the code objects currently translated here.
-  if (is_cdna_arch(guest_arch))
+  if (arch_is_cdna(guest_arch))
     return 64;
 
   // gfx1250 is GFX12-like for descriptor format, but unlike RDNA4 targets it
@@ -384,7 +389,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
 
   // RDNA descriptors opt into Wave32 with ENABLE_WAVEFRONT_SIZE32. If the bit is
   // clear, launch hardware interprets the descriptor as Wave64.
-  if (is_rdna_arch(guest_arch)) {
+  if (arch_is_rdna(guest_arch)) {
     const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
                                         kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
     return wave32 ? 32 : 64;
@@ -395,6 +400,45 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
 
 [[nodiscard]] uint32_t user_sgpr_count(const KD &desc) {
   return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
+}
+
+[[nodiscard]] bool has_kernarg_segment_ptr(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
+}
+
+[[nodiscard]] bool has_dispatch_ptr(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0;
+}
+
+[[nodiscard]] std::optional<uint16_t> dispatch_ptr_sgpr(const KD &desc) {
+  uint32_t sgpr = 0;
+  if (AMDHSA_BITS_GET(desc.kernel_code_properties,
+                      kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
+    sgpr += 4;
+  }
+  if (!has_dispatch_ptr(desc))
+    return std::nullopt;
+  return static_cast<uint16_t>(sgpr);
+}
+
+[[nodiscard]] uint16_t kernarg_segment_ptr_slot(const KD &desc) {
+  const uint32_t properties = desc.kernel_code_properties;
+  uint32_t sgpr = 0;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
+    sgpr += 4;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
+    sgpr += 2;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
+    sgpr += 2;
+  return static_cast<uint16_t>(sgpr);
+}
+
+[[nodiscard]] std::optional<uint16_t> kernarg_segment_ptr_sgpr(const KD &desc) {
+  if (!has_kernarg_segment_ptr(desc))
+    return std::nullopt;
+  return kernarg_segment_ptr_slot(desc);
 }
 
 [[nodiscard]] uint32_t kernarg_preload_length(const KD &desc) {
@@ -428,6 +472,22 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return -1;
 }
 
+[[nodiscard]] uint32_t source_initial_sgpr_count(const KD &desc) {
+  uint32_t sgprs = user_sgpr_count(desc);
+  const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
+  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT))
+    ++sgprs;
+  return sgprs;
+}
+
 [[nodiscard]] bool uses_gfx90a_accum_offset(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
          arch == ROCJITSU_CODE_ARCH_CDNA4;
@@ -450,7 +510,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   // occupancy would mix two different hardware contracts.
   if (arch == ROCJITSU_CODE_ARCH_CDNA1)
     return 4;
-  if (is_cdna_arch(arch))
+  if (arch_is_cdna(arch))
     return 8;
   if (is_gfx1250_arch(arch))
     return 16;
@@ -727,6 +787,29 @@ void append_descriptor_error(KdTranslation &result, std::string message) {
   result.supported = false;
 }
 
+[[nodiscard]] std::string hex_u64(uint64_t value) {
+  std::ostringstream os;
+  os << std::hex << value;
+  return os.str();
+}
+
+void append_descriptor_resource_error(KdTranslation &result, std::string message,
+                                      uint32_t required_vgprs, uint32_t required_vgpr_allocation,
+                                      uint32_t max_host_vgprs,
+                                      const KernelDescriptorTranslationOptions &options) {
+  message += " (descriptor_offset=0x" + hex_u64(result.descriptor_file_offset) +
+             ", entry_text_offset=0x" + hex_u64(result.entry_text_offset) +
+             ", guest_vgprs=" + std::to_string(result.guest_vgpr_count) +
+             ", minimum_vgprs=" + std::to_string(options.minimum_vgprs) +
+             ", required_vgprs=" + std::to_string(required_vgprs) +
+             ", accvgpr_base=" + std::to_string(result.accvgpr_base) +
+             ", target_accvgpr_base=" + std::to_string(result.target_accvgpr_base) +
+             ", target_agprs=" + std::to_string(result.target_agpr_count) +
+             ", required_allocation=" + std::to_string(required_vgpr_allocation) +
+             ", max_vgprs=" + std::to_string(max_host_vgprs) + ")";
+  append_descriptor_error(result, std::move(message));
+}
+
 [[nodiscard]] uint32_t clamp_granulated(uint32_t value, uint32_t max_value, KdTranslation &result,
                                         const char *field_name) {
   if (value <= max_value)
@@ -745,6 +828,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
                          const KernelDescriptorTranslationOptions &options) {
   KdTranslation result;
   result.descriptor_file_offset = descriptor_file_offset;
+  result.kernel_name = std::move(kernel_name);
   result.entry_text_offset = entry_text_offset;
   result.symbol_name = std::string(symbol_name);
 
@@ -756,7 +840,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.guest_wavefront_size = kernel_wavefront_size(guest_arch, src);
   result.host_wavefront_size = choose_host_wavefront_size(result.guest_wavefront_size, host_arch);
   result.target_wave_size = result.host_wavefront_size;
-  result.force_wave64 = is_rdna_arch(host_arch) && result.target_wave_size == 64;
+  result.force_wave64 = arch_is_rdna(host_arch) && result.target_wave_size == 64;
   if (result.guest_wavefront_size != result.host_wavefront_size) {
     append_descriptor_error(result,
                             "guest and host wavefront sizes differ; descriptor was translated "
@@ -785,11 +869,11 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       AMDHSA_BITS_GET(src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   result.guest_vgpr_allocation_count =
       granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity);
+  result.guest_vgpr_count = result.guest_vgpr_allocation_count;
   if (arch_has_accvgpr(guest_arch) && result.accvgpr_base != 0 &&
       result.guest_vgpr_allocation_count > result.accvgpr_base) {
     result.guest_agpr_count = result.guest_vgpr_allocation_count - result.accvgpr_base;
   }
-  result.guest_vgpr_count = result.guest_vgpr_allocation_count - result.guest_agpr_count;
 
   // Start from the guest's ordinary VGPR count. Keep the descriptor allocation
   // count separate: CDNA kernels with AccVGPRs encode a unified allocation end
@@ -824,7 +908,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   required_vgprs = std::max(required_vgprs, options.minimum_vgprs);
   if (arch_has_accvgpr(guest_arch) && arch_has_accvgpr(host_arch) &&
       uses_gfx90a_accum_offset(host_arch) && result.accvgpr_base != 0) {
-    if (result.target_agpr_count != 0 && options.minimum_vgprs > result.accvgpr_base) {
+    if (options.minimum_vgprs > result.accvgpr_base) {
       result.target_accvgpr_base = util::align_up(options.minimum_vgprs, 4u);
       if (result.target_accvgpr_base > 256) {
         append_descriptor_error(result,
@@ -906,7 +990,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
     }
   }
   result.target_sgpr_count = result.host_sgpr_count;
-  if (arch_max_sgprs(host_arch) != 0 && result.host_sgpr_count > arch_max_sgprs(host_arch)) {
+  const uint32_t max_descriptor_sgprs = arch_descriptor_sgpr_allocation_limit(host_arch);
+  if (max_descriptor_sgprs != 0 && result.host_sgpr_count > max_descriptor_sgprs) {
     append_descriptor_error(result, "required SGPR count exceeds target limit; spill tiers are not "
                                     "implemented for this descriptor");
   }
@@ -984,6 +1069,31 @@ options_for_entry(const KernelDescriptorTranslationOptions &options, uint64_t en
 KernelDescriptorTranslator::KernelDescriptorTranslator(rj_code_arch_t guest_arch,
                                                        rj_code_arch_t host_arch)
     : guest_arch_(guest_arch), host_arch_(host_arch) {}
+
+void KdTranslation::configure_skipped_stub() {
+  skipped = true;
+  target_vgpr_count = 0;
+  target_vgpr_allocation_count = 0;
+  target_vgpr_granulated = 0;
+  target_agpr_count = 0;
+  target_accvgpr_base = 4;
+  target_sgpr_count = 0;
+  target_sgpr_granulated = 0;
+  target_lds_size = 0;
+  lds_overflow_size = 0;
+  needs_lds_overflow_buf = false;
+  virtual_lds_lowering = {};
+  kernarg_size = 0;
+  target_kernarg_size = 0;
+  kernarg_wrapper_original_pointer_offset = 0;
+  lds_overflow_kernarg_pointer_offset = 0;
+  target_private_size = 0;
+  target_user_sgpr_count = 0;
+  source_user_sgpr_count = 0;
+  user_sgpr_repair_start = 0;
+  user_sgpr_repair_count = 0;
+  prologue_words.clear();
+}
 
 std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
     std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,

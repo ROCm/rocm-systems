@@ -21,12 +21,13 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <limits>
 #include <numeric>
-#include <optional>
 // Standard library
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -793,12 +794,13 @@ void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
 } // namespace
 
 CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
-    : image_(obj.image_data(), obj.image_data() + obj.image_size()), text_offset_(0),
-      text_size_(0) {
+    : image_(obj.image_data(), obj.image_data() + obj.image_size()), text_offset_(0), text_size_(0),
+      text_vaddr_(0), text_tail_size_(0) {
   auto &text_secs = obj.text_sections();
   if (!text_secs.empty()) {
     text_offset_ = text_secs[0]->sectionOffset();
     text_size_ = text_secs[0]->size();
+    text_vaddr_ = text_secs[0]->vaddr();
   }
 }
 
@@ -1452,6 +1454,8 @@ bool CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   return true;
 }
 
-std::vector<uint8_t> CodeObjectPatcher::emit() const { return image_; }
+std::vector<uint8_t> CodeObjectPatcher::emit() const & { return image_; }
+
+std::vector<uint8_t> CodeObjectPatcher::emit() && { return std::move(image_); }
 
 } // namespace rocjitsu
