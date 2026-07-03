@@ -564,6 +564,12 @@ class TestDeriveScalarMovrel:
 
 
 class TestDeriveScalarSplitBarrier:
+    def test_barrier_wait_derives_current_workgroup_barrier_model(self):
+        sem = derive_semantics('S_BARRIER_WAIT', 'ENC_SOPP')
+        assert sem is not None
+        assert sem.semantic_class == 'barrier'
+        assert sem.sets_scc is None
+
     def test_get_barrier_state_derives_idle_state_read(self):
         sem = derive_semantics('S_GET_BARRIER_STATE', 'ENC_SOP1')
         assert sem is not None
@@ -574,6 +580,8 @@ class TestDeriveScalarSplitBarrier:
     @pytest.mark.parametrize(
         'name',
         [
+            'S_BARRIER_SIGNAL',
+            'S_BARRIER_SIGNAL_ISFIRST',
             'S_BARRIER_INIT',
             'S_BARRIER_JOIN',
             'S_WAKEUP_BARRIER',
