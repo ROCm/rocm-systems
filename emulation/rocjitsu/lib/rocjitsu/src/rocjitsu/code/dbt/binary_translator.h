@@ -110,6 +110,23 @@ struct BinaryTranslatorOptions {
   /// because the partially translated text is only useful for finding failures,
   /// not for execution.
   bool debug_continue_after_failure = false;
+
+  /// @brief Preserve a failed kernel body and keep translating independent kernels.
+  ///
+  /// @details This is intended for load-time DBT of large code objects where not
+  /// every kernel symbol is necessarily dispatched. A failed kernel is replaced
+  /// by a minimal target-ISA endpgm stub, while the diagnostic is reported as a
+  /// skipped-kernel warning. The symbol remains loadable so other kernels in the
+  /// same code object are not blocked by one untranslated kernel.
+  bool skip_failed_kernels = false;
+
+  /// @brief Translate every kernel as a virtual-LDS body.
+  ///
+  /// @details This bring-up control exercises LDS virtualization lowering. It
+  /// does not implement final runtime dispatch selection by dynamic LDS size;
+  /// callers must only execute the result after initializing the reserved
+  /// backing-buffer SGPR pair before kernel entry.
+  bool force_virtual_lds = false;
 };
 
 /// @brief Result of translating a code object.
@@ -117,6 +134,15 @@ struct TranslatedCodeObject {
   std::vector<uint8_t> elf_bytes;                        ///< Translated ELF for the host ISA.
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
   std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
+  /// @brief Kernel symbols replaced by target-ISA stubs because per-kernel DBT failed.
+  ///
+  /// @details Names are stored without the AMDHSA ".kd" suffix, matching
+  /// KdTranslation::kernel_name. The translated ELF still contains safe no-op
+  /// descriptors for these kernels so other independent kernels in the same code
+  /// object can load. Dispatching one of these symbols executes only the stub;
+  /// callers should use diagnostics or dump artifacts to identify the real
+  /// translation failure for that kernel.
+  std::vector<std::string> skipped_kernel_symbols;
 
   [[nodiscard]] bool ok() const { return !has_error_diagnostic(diagnostics); }
 };

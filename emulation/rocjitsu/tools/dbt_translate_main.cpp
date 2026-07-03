@@ -78,6 +78,8 @@ void print_help() {
       << "  --output-mode MODE              disasm, code-object, or diff (default: disasm)\n"
       << "  --debug-conservative-liveness N Only allocate free VGPR scratch at or above N\n"
       << "  --debug-continue-after-failure Continue collecting diagnostics after failures\n"
+      << "  --debug-force-virtual-lds    Force virtual-LDS descriptor/instruction lowering\n"
+      << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
       << "Supported target names: ";
@@ -152,6 +154,14 @@ void print_help() {
     }
     if (arg == "--debug-continue-after-failure") {
       options.translate.debug_continue_after_failure = true;
+      continue;
+    }
+    if (arg == "--debug-force-virtual-lds") {
+      options.translate.debug_force_virtual_lds = true;
+      continue;
+    }
+    if (arg == "--skip-failed-kernels") {
+      options.translate.skip_failed_kernels = true;
       continue;
     }
 
@@ -269,6 +279,8 @@ struct ReportTotals {
     return "expand-failed";
   case DiagnosticKind::ResourceLimit:
     return "resource-limit";
+  case DiagnosticKind::KernelSkipped:
+    return "kernel-skipped";
   }
   return "unknown";
 }

@@ -79,6 +79,64 @@ struct TranslationContext {
   /// plus one.
   uint32_t required_sgpr_count = 0;
 
+  /// @brief Initial per-lane private segment size from descriptor translation.
+  uint32_t private_segment_fixed_size = 0;
+
+  /// @brief Minimum per-lane private segment size required after spill-backed lowerings.
+  uint32_t required_private_segment_fixed_size = 0;
+
+  /// @brief End of persistent semantic spill storage before reusable temp slots.
+  ///
+  /// @details Persistent spill storage must not overlap the reusable
+  /// per-instruction spill window. Virtual LDS uses this when a descriptor-full
+  /// kernel has to save the backing-buffer pointer in private memory before the
+  /// guest body is allowed to clobber the dispatch/kernarg pointer SGPRs.
+  uint32_t semantic_spill_persistent_end = 0;
+
+  /// @brief True when this kernel's LDS accesses target a global-memory backing buffer.
+  ///
+  /// @details Descriptor translation sets hardware LDS to zero in this mode, so
+  /// any real LDS read/write instruction in the source body must be rewritten.
+  /// Cross-lane DS instructions that do not access LDS storage, such as
+  /// bpermute, may still use the DS unit directly.
+  bool virtualize_lds = false;
+
+  /// @brief 64-bit SGPR-pair base address for the virtual LDS backing buffer.
+  ///
+  /// @details CDNA3 flat/global addressing uses this SGPR pair plus the source
+  /// DS address VGPR and folded DS immediate offset. The runtime/prologue path
+  /// is responsible for loading this pair before the rewritten body executes.
+  uint16_t virtual_lds_base_sgpr = 0;
+
+  /// @brief True when the virtual-LDS base SGPR pair is borrowed per DS use.
+  ///
+  /// @details Some kernels already allocate and touch every ordinary SGPR pair.
+  /// For those kernels, DBT preserves the selected pair around each lowered LDS
+  /// memory operation instead of permanently clobbering it in the entry
+  /// prologue.
+  bool virtual_lds_base_sgpr_spill_per_use = false;
+
+  /// @brief True when the runtime backing pointer was spilled at entry.
+  bool virtual_lds_base_pointer_spilled = false;
+
+  /// @brief Private scratch offset of the spilled virtual-LDS backing pointer.
+  uint32_t virtual_lds_base_pointer_spill_offset = 0;
+
+  /// @brief Source SGPR pair used to reload the backing base.
+  ///
+  /// @details This is normally the kernarg segment pointer. For descriptors
+  /// that advertise `kernarg_size == 0`, DBT can instead load the backing
+  /// pointer from rocjitsu-owned dispatch-packet state through the dispatch
+  /// pointer SGPR pair.
+  uint16_t virtual_lds_kernarg_segment_ptr_sgpr = 0;
+
+  /// @brief Byte offset of the runtime virtual-LDS backing pointer.
+  ///
+  /// @details The offset is relative to the SGPR pair above: kernarg segment
+  /// for the normal ABI, dispatch packet for descriptor-zero kernels that use
+  /// the dispatch-packet ABI.
+  uint32_t virtual_lds_kernarg_pointer_offset = 0;
+
   /// @brief Construct an empty context for tests or call sites without descriptor feedback.
   TranslationContext() = default;
 
@@ -95,9 +153,13 @@ struct TranslationContext {
   /// @param agprs Initial target AccVGPR count.
   /// @param accum_base Initial target AccVGPR base.
   /// @param sgprs Initial target SGPR count.
-  TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs)
+  /// @param private_bytes Initial per-lane private segment size.
+  TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
+                     uint32_t private_bytes = 0)
       : num_vgprs(vgprs), num_agprs(agprs), accum_offset(accum_base), num_sgprs(sgprs),
-        required_vgpr_count(0), required_sgpr_count(0) {}
+        required_vgpr_count(0), required_sgpr_count(0), private_segment_fixed_size(private_bytes),
+        required_private_segment_fixed_size(private_bytes),
+        semantic_spill_persistent_end(private_bytes) {}
 
   /// @brief Record that semantic lowering requires at least @p count ordinary VGPRs.
   ///
@@ -115,6 +177,41 @@ struct TranslationContext {
   void require_sgprs(uint32_t count) {
     if (required_sgpr_count < count)
       required_sgpr_count = count;
+  }
+
+  /// @brief Reserve @p dwords persistent 32-bit per-lane spill slots.
+  ///
+  /// @details Persistent semantic spill slots hold values across multiple
+  /// replacement sequences. They are allocated before the reusable temp window
+  /// so later per-instruction spills cannot overwrite them.
+  [[nodiscard]] uint32_t reserve_persistent_semantic_spill_dwords(uint32_t dwords) {
+    constexpr uint32_t kSpillAlignment = 16;
+    const uint32_t base =
+        (semantic_spill_persistent_end + kSpillAlignment - 1u) & ~(kSpillAlignment - 1u);
+    const uint32_t required = base + dwords * 4u;
+    semantic_spill_persistent_end = required;
+    if (required_private_segment_fixed_size < required)
+      required_private_segment_fixed_size = required;
+    return base;
+  }
+
+  /// @brief Reserve @p dwords reusable 32-bit per-lane spill slots.
+  ///
+  /// @details Semantic spill slots are appended after the kernel's original
+  /// private segment and any persistent semantic spill storage at a 16-byte
+  /// boundary, matching the patch-layer spill manager's flat-scratch layout.
+  /// They are scratch temporaries for a single replacement sequence, not
+  /// persistent virtual registers, so every lowering site in the kernel can
+  /// reuse the same slot range. Descriptor recomputation later raises
+  /// private_segment_fixed_size to cover the largest reservation.
+  [[nodiscard]] uint32_t reserve_semantic_spill_dwords(uint32_t dwords) {
+    constexpr uint32_t kSpillAlignment = 16;
+    const uint32_t base =
+        (semantic_spill_persistent_end + kSpillAlignment - 1u) & ~(kSpillAlignment - 1u);
+    const uint32_t required = base + dwords * 4u;
+    if (required_private_segment_fixed_size < required)
+      required_private_segment_fixed_size = required;
+    return base;
   }
 };
 

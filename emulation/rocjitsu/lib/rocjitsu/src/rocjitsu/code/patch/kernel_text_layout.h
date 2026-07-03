@@ -39,7 +39,8 @@ struct BranchFixup {
   const Instruction *inst = nullptr; ///< Decoded source branch instruction.
   uint64_t source_inst_offset = 0;   ///< Original .text offset of the branch.
   uint64_t source_target_offset = 0; ///< Original .text offset of the branch target.
-  uint64_t target_inst_offset = 0;   ///< New .text offset of the branch instruction.
+  uint64_t target_inst_offset = 0;   ///< New .text offset of the branch patch window.
+  uint64_t target_window_bytes = 0;  ///< Reserved bytes available for final branch encoding.
 };
 
 /// @brief Pending recovered indirect branch/call window in one relocated kernel.
@@ -72,12 +73,28 @@ struct TextRelocationResult {
 /// patches explicit PC-relative branch immediates and reserved recovered-indirect
 /// windows after all translated block starts are known.
 struct KernelTextLayout {
-  KdTranslation *translation = nullptr;   ///< Descriptor plan for this kernel.
-  uint64_t source_entry = 0;              ///< Original descriptor entry offset.
-  uint64_t target_entry = 0;              ///< Final descriptor entry offset.
-  uint64_t target_body_entry = 0;         ///< Relocated original entry offset.
-  uint64_t body_begin = 0;                ///< First emitted body byte.
-  uint64_t body_end = 0;                  ///< One-past-end of emitted body.
+  KdTranslation *translation = nullptr; ///< Descriptor plan for this kernel.
+  uint64_t source_entry = 0;            ///< Original descriptor entry offset.
+  uint64_t target_entry = 0;            ///< Final descriptor entry offset.
+  uint64_t target_body_entry = 0;       ///< Relocated original entry offset.
+  uint64_t body_begin = 0;              ///< First emitted body byte.
+  uint64_t body_end = 0;                ///< One-past-end of emitted body.
+  /// SGPR pair reserved by the descriptor for out-of-range direct branches.
+  ///
+  /// Direct branches normally patch in place as one SOPP/SOPK instruction. When
+  /// semantic expansions push a branch target outside the signed 16-bit branch
+  /// range, DBT rewrites the reserved branch window into a canonical
+  /// getpc/add/setpc sequence. The SGPR pair named here is descriptor-grown
+  /// scratch and is never a guest live register.
+  std::optional<uint16_t> long_branch_sgpr;
+  /// Non-executed SOPP branch slots available for SGPR-free long direct branches.
+  ///
+  /// Full-SGPR kernels cannot build an arbitrary target PC in a scratch scalar
+  /// pair. The translator can instead insert skipped branch-island pools while
+  /// emitting the body. Each recorded offset names one private `s_branch` slot
+  /// that patch_direct_branch_fixups() may dedicate to a single out-of-range
+  /// direct branch chain.
+  std::vector<uint64_t> branch_island_slots;
   std::vector<BlockPlacement> blocks;     ///< Kernel-local block placements.
   std::vector<BranchFixup> branch_fixups; ///< Explicit branch patches.
   std::vector<RecoveredIndirectFixup> recovered_indirect_fixups;

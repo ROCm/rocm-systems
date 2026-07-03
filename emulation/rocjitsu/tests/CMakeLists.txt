@@ -1153,6 +1153,31 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test(hip_vector_add_test)
     rj_add_hip_test_case(hip_vector_add_test "HipVectorAddTest.CorrectResult")
     rj_add_hip_test(hip_ds_transpose_acc_test)
+    rj_add_hip_test(hip_lds_copy_test)
+    add_dependencies(hip_lds_copy_test_target rocjitsu_hooks)
+    if(DEFINED HAS_CDNA3_GPU AND HAS_CDNA3_GPU)
+        foreach(
+            TC
+            IN
+            ITEMS
+                LargeStaticLdsCopyLowOffset
+                LargeStaticLdsCopyHighOffset
+                LargeStaticLdsReverseHighOffset
+                LargeStaticLdsMultiBlockHighOffset
+                LargeStaticLdsCrossWaveExchangeHighOffset
+                LargeStaticLdsB128ReverseHighOffset
+                LargeStaticLdsB128ReverseImmediateOffset
+                LargeStaticLdsReadB64TrB16
+        )
+            rj_add_hip_test_case(
+                hip_lds_copy_test
+                "HipLdsCopyDbtTest.${TC}"
+                CONFIG ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx942.json
+                NAME "HipLdsCopyDbtTest.${TC}"
+                TIMEOUT 120
+            )
+        endforeach()
+    endif()
 
     # --- RCCL collective test ---
     find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)

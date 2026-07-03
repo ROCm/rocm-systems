@@ -21,9 +21,11 @@
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
+#include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -48,6 +50,10 @@ constexpr uint64_t kKernargPreloadSkipBytes = 256;
 constexpr uint16_t kScalarOperandTtmpBase = 108;
 constexpr uint16_t kTtmpRdna4GridYz = 7;
 constexpr uint16_t kTtmpRdna4GridX = 9;
+constexpr uint32_t kVirtualLdsRuntimeStateBytes = 24;
+constexpr uint32_t kCdnaSmemImmediateByteOffsetMax = 0x1FFFFF;
+constexpr uint32_t kVirtualLdsDispatchPacketPointerOffset =
+    offsetof(hsa_kernel_dispatch_packet_t, reserved2);
 
 // -----------------------------------------------------------------------------
 // ISA-family helpers.
@@ -176,6 +182,23 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   }
 }
 
+[[nodiscard]] uint32_t arch_max_lds_bytes(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return 64u * 1024u;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 160u * 1024u;
+  default:
+    // Keep this helper conservative. The current DBT repro path only needs the
+    // CDNA3/CDNA4 limits mirrored from the checked-in topology configs; other
+    // targets should get an explicit limit when they need LDS compatibility
+    // filtering.
+    return 0;
+  }
+}
+
 [[nodiscard]] bool arch_has_accvgpr(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -216,28 +239,30 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 // ELF kernel-descriptor discovery.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] bool kernel_descriptor_symbol(const Elf64_Sym &sym, const char *strtab,
-                                            size_t strtab_size) {
+[[nodiscard]] std::optional<std::string>
+kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
   if (sym.st_size != sizeof(KD))
-    return false;
+    return std::nullopt;
 
   // AMDHSA kernel descriptors are global object symbols. Size alone is not a
   // durable signal because unrelated data objects can also be 64 bytes.
   if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject ||
       elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
-    return false;
+    return std::nullopt;
 
   // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global
   // object is ambiguous, so require the ABI suffix instead of treating stripped
   // or minimized symbol records as descriptors.
   if (strtab == nullptr || strtab_size == 0 || sym.st_name == 0)
-    return false;
+    return std::nullopt;
   if (sym.st_name >= strtab_size)
-    return false;
+    return std::nullopt;
 
   const char *name = strtab + sym.st_name;
   const size_t len = strnlen(name, strtab_size - sym.st_name);
-  return len > 3 && std::strcmp(name + len - 3, ".kd") == 0;
+  if (len <= 3 || std::strcmp(name + len - 3, ".kd") != 0)
+    return std::nullopt;
+  return std::string(name, len - 3);
 }
 
 [[nodiscard]] std::optional<uint64_t> text_vaddr_for_section(uint64_t text_offset,
@@ -251,8 +276,9 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return std::nullopt;
 }
 
-using KernelDescriptorVisitor = std::function<void(uint64_t descriptor_file_offset,
-                                                   uint64_t entry_text_offset, const KD &desc)>;
+using KernelDescriptorVisitor =
+    std::function<void(uint64_t descriptor_file_offset, std::string kernel_name,
+                       uint64_t entry_text_offset, const KD &desc)>;
 
 void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset,
                               uint64_t text_size, const KernelDescriptorVisitor &callback) {
@@ -296,7 +322,8 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
     const auto *symtab = reinterpret_cast<const Elf64_Sym *>(image.data() + shdr[i].sh_offset);
     const size_t nsyms = shdr[i].sh_size / shdr[i].sh_entsize;
     for (size_t j = 0; j < nsyms; ++j) {
-      if (!kernel_descriptor_symbol(symtab[j], strtab, strtab_size))
+      auto kernel_name = kernel_descriptor_symbol_name(symtab[j], strtab, strtab_size);
+      if (!kernel_name)
         continue;
 
       const uint16_t sec_idx = symtab[j].st_shndx;
@@ -320,7 +347,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
         continue;
 
       const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;
-      callback(file_off, entry_text_offset, *desc);
+      callback(file_off, std::move(*kernel_name), entry_text_offset, *desc);
     }
   }
 }
@@ -349,8 +376,74 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 }
 
+[[nodiscard]] bool has_kernarg_segment_ptr(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
+}
+
+[[nodiscard]] bool has_dispatch_ptr(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0;
+}
+
+[[nodiscard]] std::optional<uint16_t> dispatch_ptr_sgpr(const KD &desc) {
+  uint32_t sgpr = 0;
+  if (AMDHSA_BITS_GET(desc.kernel_code_properties,
+                      kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
+    sgpr += 4;
+  }
+  if (!has_dispatch_ptr(desc))
+    return std::nullopt;
+  return static_cast<uint16_t>(sgpr);
+}
+
+[[nodiscard]] std::optional<uint16_t> kernarg_segment_ptr_sgpr(const KD &desc) {
+  const uint32_t properties = desc.kernel_code_properties;
+  uint32_t sgpr = 0;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
+    sgpr += 4;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
+    sgpr += 2;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
+    sgpr += 2;
+  if (!has_kernarg_segment_ptr(desc))
+    return std::nullopt;
+  return static_cast<uint16_t>(sgpr);
+}
+
 [[nodiscard]] uint32_t kernarg_preload_length(const KD &desc) {
   return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
+}
+
+[[nodiscard]] uint32_t kernarg_preload_offset(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET);
+}
+
+[[nodiscard]] std::optional<uint32_t> kernarg_bytes_to_preserve(const KD &desc) {
+  const uint32_t preload_length = kernarg_preload_length(desc);
+  if (preload_length == 0)
+    return desc.kernarg_size;
+
+  const uint32_t preload_offset = kernarg_preload_offset(desc);
+  if (preload_offset > std::numeric_limits<uint32_t>::max() - preload_length)
+    return std::nullopt;
+  const uint32_t preload_end_dwords = preload_offset + preload_length;
+  if (preload_end_dwords > std::numeric_limits<uint32_t>::max() / sizeof(uint32_t))
+    return std::nullopt;
+  const uint32_t preload_end_bytes = preload_end_dwords * static_cast<uint32_t>(sizeof(uint32_t));
+  if (preload_end_bytes > std::numeric_limits<uint32_t>::max() - 7u)
+    return std::nullopt;
+
+  // The descriptor preload range is dword-granular, but the kernarg block is an
+  // ABI byte array and often carries 64-bit pointers. Virtual LDS redirects the
+  // packet to a rocjitsu-owned copy before appending its runtime state. If the
+  // last preloaded dword is the low half of a pointer, copying exactly the
+  // dword range would zero the pointer's high half in the redirected kernarg.
+  // Preserve through the next 8-byte boundary so a tail 64-bit kernarg value
+  // remains intact while still keeping the copied range derived from descriptor
+  // preload facts rather than msgpack metadata.
+  const uint32_t aligned_preload_bytes = (preload_end_bytes + 7u) & ~uint32_t{7u};
+  return std::max(desc.kernarg_size, aligned_preload_bytes);
 }
 
 [[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension) {
@@ -554,16 +647,30 @@ void append_descriptor_resource_error(KdTranslation &result, std::string message
 
 [[nodiscard]] KdTranslation
 translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
-                         uint64_t descriptor_file_offset, uint64_t entry_text_offset, const KD &src,
+                         uint64_t descriptor_file_offset, std::string kernel_name,
+                         uint64_t entry_text_offset, const KD &src,
                          const KernelDescriptorTranslationOptions &options) {
   KdTranslation result;
   result.descriptor_file_offset = descriptor_file_offset;
+  result.kernel_name = std::move(kernel_name);
   result.entry_text_offset = entry_text_offset;
   result.target_entry_text_offset = entry_text_offset;
   result.target_body_entry_text_offset = entry_text_offset;
   result.has_kernarg_preload = kernarg_preload_length(src) != 0;
   result.kernarg_preload_entry_text_offset =
       result.has_kernarg_preload ? entry_text_offset + kKernargPreloadSkipBytes : entry_text_offset;
+  const auto preserved_kernarg_bytes = kernarg_bytes_to_preserve(src);
+  result.kernarg_size = preserved_kernarg_bytes.value_or(src.kernarg_size);
+  result.target_kernarg_size = src.kernarg_size;
+  result.has_kernarg_segment_ptr = has_kernarg_segment_ptr(src);
+  if (auto kernarg_sgpr = kernarg_segment_ptr_sgpr(src))
+    result.kernarg_segment_ptr_sgpr = *kernarg_sgpr;
+  result.has_dispatch_ptr = has_dispatch_ptr(src);
+  if (auto dispatch_sgpr = dispatch_ptr_sgpr(src))
+    result.dispatch_ptr_sgpr = *dispatch_sgpr;
+  result.workgroup_id_sgpr_x = workgroup_id_sgpr(src, 0);
+  result.workgroup_id_sgpr_y = workgroup_id_sgpr(src, 1);
+  result.workgroup_id_sgpr_z = workgroup_id_sgpr(src, 2);
 
   // The source descriptor encodes the guest launch wave size. The target
   // descriptor must request a wave size the host can actually launch. We do not
@@ -717,11 +824,82 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   }
 
   // LDS/private sizes are copied from the source descriptor and extended by
-  // explicit lowering addends. Spill-zone allocation and Zorua-style LDS
-  // overflow are represented in KdTranslation but are not implemented yet.
+  // explicit lowering addends. In normal mode the translated descriptor still
+  // uses hardware LDS and must fit the host limit. In virtualized mode the
+  // descriptor advertises zero fixed LDS so the launch can fit on gfx942; all
+  // LDS accesses in the kernel body must then be lowered to a backing buffer
+  // supplied by the dispatch path.
   result.target_private_size =
       src.private_segment_fixed_size + options.private_segment_fixed_size_addend;
-  result.target_lds_size = src.group_segment_fixed_size + options.group_segment_fixed_size_addend;
+  const uint32_t requested_lds_size =
+      src.group_segment_fixed_size + options.group_segment_fixed_size_addend;
+  if (options.virtualize_lds) {
+    result.target_lds_size = 0;
+    result.lds_overflow_size = requested_lds_size;
+    result.needs_lds_overflow_buf = true;
+    if (!preserved_kernarg_bytes) {
+      append_descriptor_error(
+          result,
+          "virtual LDS cannot preserve kernarg preload bytes because the preload range overflows");
+    }
+    const bool can_use_dispatch_packet_pointer =
+        result.kernarg_size == 0 && result.has_dispatch_ptr &&
+        result.dispatch_ptr_sgpr + 2 <= user_sgpr_count(src);
+    const uint64_t backing_pointer_offset =
+        can_use_dispatch_packet_pointer
+            ? kVirtualLdsDispatchPacketPointerOffset
+            : ((static_cast<uint64_t>(result.kernarg_size) + 7u) & ~uint64_t{7});
+    if (backing_pointer_offset <= kCdnaSmemImmediateByteOffsetMax) {
+      result.lds_overflow_kernarg_pointer_offset = static_cast<uint32_t>(backing_pointer_offset);
+      if (can_use_dispatch_packet_pointer) {
+        result.lds_overflow_pointer_in_dispatch_packet = true;
+        result.target_kernarg_size = src.kernarg_size;
+      } else {
+        result.target_kernarg_size =
+            result.lds_overflow_kernarg_pointer_offset + kVirtualLdsRuntimeStateBytes;
+      }
+    }
+    if (!result.lds_overflow_pointer_in_dispatch_packet && !result.has_kernarg_segment_ptr) {
+      append_descriptor_error(
+          result,
+          "virtual LDS requires ENABLE_SGPR_KERNARG_SEGMENT_PTR so the entry prologue can load "
+          "the runtime state from an extended kernarg segment");
+    } else if (!result.lds_overflow_pointer_in_dispatch_packet &&
+               result.kernarg_segment_ptr_sgpr + 2 > user_sgpr_count(src)) {
+      append_descriptor_error(
+          result,
+          "virtual LDS requires USER_SGPR_COUNT to cover the kernarg segment pointer SGPR pair");
+    }
+    if (result.kernarg_size == 0 && !result.lds_overflow_pointer_in_dispatch_packet) {
+      // The virtual-LDS prologue appends runtime state to a copied kernarg
+      // buffer and then redirects the packet's kernarg pointer to that extended
+      // buffer. Some hand-written assembly descriptors advertise a zero kernarg
+      // size while still dereferencing the kernarg pointer at runtime. Without
+      // a descriptor size or preload range, the dispatch hook has no defensible
+      // byte count to copy, so redirecting the pointer would silently replace
+      // the kernel's real argument block with only DBT state.
+      append_descriptor_error(
+          result,
+          "virtual LDS cannot append runtime state because the descriptor kernarg size is zero "
+          "and neither a kernarg preload range nor a dispatch-packet pointer describes a safe "
+          "runtime-state ABI");
+    }
+    if (backing_pointer_offset > kCdnaSmemImmediateByteOffsetMax) {
+      append_descriptor_error(result, "virtual LDS runtime-state kernarg offset exceeds CDNA3 SMEM "
+                                      "immediate range");
+    }
+  } else {
+    result.target_lds_size = requested_lds_size;
+    const uint32_t max_host_lds_bytes = arch_max_lds_bytes(host_arch);
+    if (!options.allow_oversized_lds && max_host_lds_bytes != 0 &&
+        result.target_lds_size > max_host_lds_bytes) {
+      append_descriptor_error(
+          result, "target LDS size exceeds host per-workgroup limit; LDS virtualization is not "
+                  "enabled (target_lds_size=" +
+                      std::to_string(result.target_lds_size) +
+                      ", max_lds=" + std::to_string(max_host_lds_bytes) + ")");
+    }
+  }
 
   // The fixed user-SGPR prefix is preserved. Workgroup-id SGPRs are derived
   // separately from the enable bits because they are allocated immediately after
@@ -741,14 +919,15 @@ std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
     const KernelDescriptorTranslationOptions &options) const {
   std::vector<KdTranslation> translations;
 
-  visit_kernel_descriptors(
-      image, text_offset, text_size,
-      [&](uint64_t descriptor_file_offset, uint64_t entry_text_offset, const KD &src) {
-        KD desc{};
-        std::memcpy(&desc, &src, sizeof(desc));
-        translations.push_back(translate_one_descriptor(
-            guest_arch_, host_arch_, descriptor_file_offset, entry_text_offset, desc, options));
-      });
+  visit_kernel_descriptors(image, text_offset, text_size,
+                           [&](uint64_t descriptor_file_offset, std::string kernel_name,
+                               uint64_t entry_text_offset, const KD &src) {
+                             KD desc{};
+                             std::memcpy(&desc, &src, sizeof(desc));
+                             translations.push_back(translate_one_descriptor(
+                                 guest_arch_, host_arch_, descriptor_file_offset,
+                                 std::move(kernel_name), entry_text_offset, desc, options));
+                           });
 
   return translations;
 }
@@ -761,7 +940,7 @@ std::optional<KdTranslation> KernelDescriptorTranslator::translate_descriptor(
 
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  return translate_one_descriptor(guest_arch_, host_arch_, descriptor_file_offset,
+  return translate_one_descriptor(guest_arch_, host_arch_, descriptor_file_offset, {},
                                   entry_text_offset, desc, options);
 }
 

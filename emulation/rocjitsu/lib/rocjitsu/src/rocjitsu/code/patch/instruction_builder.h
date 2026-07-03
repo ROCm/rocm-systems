@@ -43,6 +43,7 @@ inline constexpr uint32_t kSopkEncodingPrefix = 0xB;
 inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 inline constexpr size_t kMaxRecoveredIndirectTransferWords = 6;
+inline constexpr size_t kMaxDirectBranchTransferWords = 7;
 
 /// @brief CDNA3 memory instruction encoder used by handwritten DBT lowerings.
 ///
@@ -187,6 +188,41 @@ public:
     return encode_pair(dst);
   }
 
+  /// @brief Encode `s_load_dwordx2` with an immediate byte offset.
+  ///
+  /// @details CDNA3 SMEM encodes the scalar base register as an SGPR pair index:
+  /// `s[4:5]` is encoded as SBASE=2. Virtual-LDS entry prologues use this to
+  /// load an appended 64-bit backing-buffer pointer from the kernarg segment
+  /// into the descriptor-reserved LDS base SGPR pair.
+  [[nodiscard]] static WordPair smem_load_dwordx2(uint8_t dst_sgpr, uint8_t sbase_sgpr,
+                                                  uint32_t byte_offset) {
+    cdna3::SmemMachineInst dst{};
+    dst.encoding = 0x30;
+    dst.op = 1; // s_load_dwordx2
+    dst.sbase = (sbase_sgpr / 2) & 0x3F;
+    dst.sdata = dst_sgpr & 0x7F;
+    dst.imm = 1;
+    dst.offset = byte_offset & 0x1FFFFF;
+    return encode_pair(dst);
+  }
+
+  /// @brief Encode `s_load_dword` with an immediate byte offset.
+  ///
+  /// @details Virtual-LDS entry prologues use scalar loads for compact
+  /// per-dispatch state such as per-workgroup byte strides. Keep this beside
+  /// the `s_load_dwordx2` builder so SMEM bitfield details stay target-local.
+  [[nodiscard]] static WordPair smem_load_dword(uint8_t dst_sgpr, uint8_t sbase_sgpr,
+                                                uint32_t byte_offset) {
+    cdna3::SmemMachineInst dst{};
+    dst.encoding = 0x30;
+    dst.op = 0; // s_load_dword
+    dst.sbase = (sbase_sgpr / 2) & 0x3F;
+    dst.sdata = dst_sgpr & 0x7F;
+    dst.imm = 1;
+    dst.offset = byte_offset & 0x1FFFFF;
+    return encode_pair(dst);
+  }
+
 private:
   template <typename MachineInst>
   [[nodiscard]] static WordPair encode_pair(const MachineInst &inst) {
@@ -197,6 +233,27 @@ private:
     return {words[0], words[1]};
   }
 };
+
+/// @brief Encode a CDNA3 VOP2 instruction with a 32-bit literal source.
+///
+/// @details The source operand is forced to the hardware literal-constant
+/// selector (`0xff`) and the literal itself is carried in the second dword.
+/// Virtual-LDS address materialization uses this for `v_add_u32_e32` so large DS
+/// byte offsets do not require an extra scalar register.
+[[nodiscard]] inline std::pair<uint32_t, uint32_t>
+build_cdna3_vop2_literal(uint8_t op, uint8_t vdst, uint8_t vsrc1, uint32_t literal) {
+  cdna3::Vop2InstLiteralMachineInst dst{};
+  dst.src0 = 0xFF;
+  dst.vsrc1 = vsrc1;
+  dst.vdst = vdst;
+  dst.op = op;
+  dst.encoding = 0;
+  dst.simm32 = literal;
+
+  uint32_t words[2]{};
+  std::memcpy(words, &dst, sizeof(dst));
+  return {words[0], words[1]};
+}
 
 /// @brief Pack a SOPP instruction word from its constituent fields.
 ///

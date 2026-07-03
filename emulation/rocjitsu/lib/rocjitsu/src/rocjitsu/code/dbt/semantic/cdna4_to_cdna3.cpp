@@ -17,6 +17,7 @@
 #include <array>
 #include <bit>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <optional>
 #include <string>
@@ -86,6 +87,7 @@ constexpr uint16_t kInlineConstNeg1 = 193;
 constexpr uint16_t kM0 = 124;
 
 // CDNA3 VOP3 opcodes used by the bitop3, wide-K, and DS transpose expansions.
+constexpr uint8_t kCdna3Vop2OpAddU32 = 52;
 constexpr uint16_t kCdna3OpMovB32 = 321;
 constexpr uint16_t kCdna3OpLshrrevB32 = 272;
 constexpr uint16_t kCdna3OpLshlrevB32 = 274;
@@ -116,10 +118,39 @@ constexpr uint8_t kCdna3SoppOpWaitcnt = 12;
 constexpr uint16_t kCdnaWaitcntLgkmcnt0 = 0xC07F;
 constexpr uint16_t kCdnaWaitcntAll0 = 0x0000;
 constexpr uint32_t kCdna3MaxOrdinarySgprs = 102;
+constexpr uint8_t kCdna3FlatOpLoadDword = 20;
+constexpr uint8_t kCdna3FlatOpStoreDword = 28;
+constexpr uint32_t kScratchPositiveImm13Max = 4095;
+constexpr uint32_t kFlatGlobalPositiveImm13Max = 4095;
+
+struct VgprTemp {
+  uint8_t reg = 0;
+  bool spilled = false;
+  uint32_t spill_offset = 0;
+};
+
+struct VgprWindow {
+  uint8_t base = 0;
+  uint16_t count = 0;
+  bool spilled = false;
+  uint32_t spill_offset = 0;
+};
+
+struct VgprForbiddenRange {
+  uint16_t base = 0;
+  uint16_t count = 0;
+};
 
 void emit_cdna3_vop3(std::vector<uint32_t> &words, uint16_t op, uint8_t vdst, uint16_t src0,
                      uint16_t src1 = 0, uint16_t src2 = 0) {
   auto [w0, w1] = build_cdna3_vop3(op, vdst, src0, src1, src2);
+  words.push_back(w0);
+  words.push_back(w1);
+}
+
+void emit_cdna3_vop2_literal(std::vector<uint32_t> &words, uint8_t op, uint8_t vdst, uint8_t vsrc1,
+                             uint32_t literal) {
+  auto [w0, w1] = build_cdna3_vop2_literal(op, vdst, vsrc1, literal);
   words.push_back(w0);
   words.push_back(w1);
 }
@@ -147,6 +178,132 @@ void emit_cdna3_wait_all(std::vector<uint32_t> &words) {
 }
 
 [[nodiscard]] constexpr uint16_t vgpr_src(uint8_t reg) { return static_cast<uint16_t>(256 + reg); }
+
+[[nodiscard]] bool vgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
+                                       uint16_t rhs_count) {
+  return lhs_base < rhs_base + rhs_count && rhs_base < lhs_base + lhs_count;
+}
+
+void emit_cdna3_scratch_store_b32(std::vector<uint32_t> &words, uint8_t data,
+                                  uint32_t byte_offset) {
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_scratch_dword(kCdna3FlatOpStoreDword, data,
+                                                                    byte_offset, false);
+  words.push_back(w0);
+  words.push_back(w1);
+}
+
+void emit_cdna3_scratch_load_b32(std::vector<uint32_t> &words, uint8_t dst, uint32_t byte_offset) {
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_scratch_dword(kCdna3FlatOpLoadDword, dst,
+                                                                    byte_offset, true);
+  words.push_back(w0);
+  words.push_back(w1);
+}
+
+void emit_cdna3_flat_global_store(std::vector<uint32_t> &words, uint8_t op, uint8_t data,
+                                  uint8_t addr, uint8_t saddr) {
+  Cdna3MemoryInstructionBuilder::FlatGlobalOperands operands{};
+  operands.addr = addr;
+  operands.saddr = saddr;
+  // Virtual LDS stores target a workgroup-local backing buffer in global
+  // memory. Group scope matches the native LDS sharing domain.
+  operands.sc0 = true;
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_store(operands, op, data);
+  words.push_back(w0);
+  words.push_back(w1);
+}
+
+void emit_cdna3_flat_global_load(std::vector<uint32_t> &words, uint8_t op, uint8_t vdst,
+                                 uint8_t addr, uint8_t saddr, uint32_t byte_offset) {
+  Cdna3MemoryInstructionBuilder::FlatGlobalOperands operands{};
+  operands.signed_offset13 = static_cast<uint16_t>(byte_offset);
+  operands.addr = addr;
+  operands.saddr = saddr;
+  // Keep virtual-LDS loads in the same group-scoped coherency domain as the
+  // matching virtual-LDS stores.
+  operands.sc0 = true;
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_load(operands, op, vdst);
+  words.push_back(w0);
+  words.push_back(w1);
+}
+
+[[nodiscard]] std::optional<uint8_t> vgpr_operand_index(uint16_t encoded_src) {
+  if (encoded_src < 256 || encoded_src > 511)
+    return std::nullopt;
+  return static_cast<uint8_t>(encoded_src - 256);
+}
+
+[[nodiscard]] std::optional<VgprTemp>
+choose_one_vgpr_temp_or_spill(const Instruction &inst, const LivenessAnalysis &liveness,
+                              TranslationContext &context, uint8_t forbidden,
+                              std::optional<uint8_t> preferred_victim) {
+  // Prefer a genuinely dead register first. The caller passes `forbidden` for
+  // values such as the final destination that cannot be restored after the
+  // replacement sequence without overwriting architectural output.
+  uint16_t search_start = 0;
+  while (auto free = liveness.find_free_run(&inst, 1, search_start)) {
+    if (*free < 256 && *free != forbidden)
+      return VgprTemp{static_cast<uint8_t>(*free), false, 0};
+    search_start = static_cast<uint16_t>(*free + 1);
+  }
+
+  auto choose_victim = [&]() -> std::optional<uint8_t> {
+    const uint32_t ordinary_vgprs = std::min<uint32_t>(context.num_vgprs, 256);
+    if (preferred_victim && *preferred_victim != forbidden && *preferred_victim < ordinary_vgprs)
+      return *preferred_victim;
+    for (uint32_t reg = 0; reg < ordinary_vgprs; ++reg) {
+      if (reg != forbidden)
+        return static_cast<uint8_t>(reg);
+    }
+    return std::nullopt;
+  };
+
+  auto victim = choose_victim();
+  if (!victim)
+    return std::nullopt;
+
+  const uint32_t spill_offset = context.reserve_semantic_spill_dwords(1);
+  if (spill_offset > kScratchPositiveImm13Max)
+    return std::nullopt;
+  return VgprTemp{*victim, true, spill_offset};
+}
+
+[[nodiscard]] std::optional<VgprWindow>
+choose_vgpr_window_or_spill(const Instruction &inst, const LivenessAnalysis &liveness,
+                            TranslationContext &context, uint16_t count, uint16_t alignment,
+                            std::initializer_list<VgprForbiddenRange> forbidden_ranges) {
+  if (alignment == 0)
+    alignment = 1;
+  auto usable = [&](uint16_t base, uint16_t available_count) {
+    if (base + count > available_count)
+      return false;
+    if (base % alignment != 0)
+      return false;
+    for (const VgprForbiddenRange &range : forbidden_ranges) {
+      if (range.count != 0 && vgpr_ranges_overlap(base, count, range.base, range.count))
+        return false;
+    }
+    return true;
+  };
+
+  uint16_t search_start = 0;
+  while (auto free = liveness.find_free_run(&inst, count, search_start)) {
+    if (usable(*free, 256))
+      return VgprWindow{static_cast<uint8_t>(*free), count, false, 0};
+    search_start = static_cast<uint16_t>(*free + 1);
+  }
+
+  const uint16_t ordinary_vgprs = static_cast<uint16_t>(std::min<uint32_t>(context.num_vgprs, 256));
+  for (uint16_t base = 0; base + count <= ordinary_vgprs; base = static_cast<uint16_t>(base + 1)) {
+    if (!usable(base, ordinary_vgprs))
+      continue;
+    const uint32_t spill_offset = context.reserve_semantic_spill_dwords(count);
+    if (spill_offset + (static_cast<uint32_t>(count) - 1u) * 4u > kScratchPositiveImm13Max)
+      return std::nullopt;
+    return VgprWindow{static_cast<uint8_t>(base), count, true, spill_offset};
+  }
+
+  return std::nullopt;
+}
 
 void emit_cdna3_mubuf(std::vector<uint32_t> &words, const cdna4::MubufMachineInst &src, uint8_t op,
                       uint8_t vdata) {
@@ -183,9 +340,29 @@ void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
 }
 
 [[nodiscard]] uint8_t choose_cdna3_exec_save_sgpr(const TranslationContext &context) {
-  if (context.num_sgprs >= kCdna3MaxOrdinarySgprs)
-    return static_cast<uint8_t>(kCdna3MaxOrdinarySgprs - 2);
-  return static_cast<uint8_t>((context.num_sgprs + 1u) & ~1u);
+  const auto overlaps_virtual_lds_base = [&](uint32_t candidate) {
+    if (!context.virtualize_lds)
+      return false;
+    return candidate < context.virtual_lds_base_sgpr + 2u &&
+           context.virtual_lds_base_sgpr < candidate + 2u;
+  };
+
+  // Prefer growing the descriptor with a fresh pair just above the original
+  // SGPR allocation. Virtual-LDS mode also reserves a DBT-owned SGPR pair for
+  // the backing pointer; clobbering that pair with an EXEC save turns the next
+  // virtual-LDS global access into a wild pointer.
+  const uint32_t preferred = context.num_sgprs >= kCdna3MaxOrdinarySgprs
+                                 ? kCdna3MaxOrdinarySgprs - 2u
+                                 : ((context.num_sgprs + 1u) & ~1u);
+  for (uint32_t candidate = preferred; candidate + 1u < kCdna3MaxOrdinarySgprs; candidate += 2u) {
+    if (!overlaps_virtual_lds_base(candidate))
+      return static_cast<uint8_t>(candidate);
+  }
+  for (uint32_t candidate = preferred; candidate >= 2u; candidate -= 2u) {
+    if (!overlaps_virtual_lds_base(candidate))
+      return static_cast<uint8_t>(candidate);
+  }
+  return 0;
 }
 
 void emit_cdna3_mfma(std::vector<uint32_t> &words, uint8_t op,
@@ -567,26 +744,50 @@ ExpandResult lower_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &inst,
   //
   // CDNA3's packed form is RTZ, so use scalar conversions to preserve the
   // source instruction's ordinary f32->f16 rounding semantics before packing.
-  uint16_t scratch_start = static_cast<uint16_t>(src.vdst + uint16_t{1});
-  if (src.src0 >= 256)
-    scratch_start = std::max<uint16_t>(scratch_start, static_cast<uint16_t>(src.src0 - 256 + 1));
-  if (src.src1 >= 256)
-    scratch_start = std::max<uint16_t>(scratch_start, static_cast<uint16_t>(src.src1 - 256 + 1));
-  auto scratch = liveness.find_free_run(&inst, 2, scratch_start);
-  if (!scratch)
-    return failed_existing_expand_rule(inst, "No free VGPR pair for packed F16 conversion",
-                                       {"Provide two temporary VGPRs so destination/source "
-                                        "aliases preserve both input values."});
+  const uint8_t vdst = static_cast<uint8_t>(src.vdst);
+  const std::optional<uint8_t> src0_vgpr = vgpr_operand_index(static_cast<uint16_t>(src.src0));
+  const std::optional<uint8_t> src1_vgpr = vgpr_operand_index(static_cast<uint16_t>(src.src1));
+  const bool vdst_is_src1 = src1_vgpr && vdst == *src1_vgpr;
 
-  const uint8_t lo = static_cast<uint8_t>(*scratch);
-  const uint8_t hi = static_cast<uint8_t>(*scratch + 1);
-  context.require_vgprs(static_cast<uint32_t>(*scratch) + 2);
+  const std::optional<uint8_t> preferred_temp =
+      vdst_is_src1 ? src0_vgpr : (src1_vgpr ? src1_vgpr : src0_vgpr);
+  auto temp = choose_one_vgpr_temp_or_spill(inst, liveness, context, vdst, preferred_temp);
+  if (!temp) {
+    return failed_existing_expand_rule(
+        inst, "No VGPR temporary or scratch spill slot for packed F16 conversion",
+        {"Provide one temporary VGPR or an encodable per-lane scratch spill slot."});
+  }
+  if (!temp->spilled)
+    context.require_vgprs(static_cast<uint32_t>(temp->reg) + 1);
 
   std::vector<uint32_t> words;
-  emit_cdna3_vop3(words, kCdna3OpCvtF16F32, lo, static_cast<uint16_t>(src.src0));
-  emit_cdna3_vop3(words, kCdna3OpCvtF16F32, hi, static_cast<uint16_t>(src.src1));
-  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, hi, scalar_positive_inline_u32(16), vgpr_src(hi));
-  emit_cdna3_vop3(words, kCdna3OpOrB32, static_cast<uint8_t>(src.vdst), vgpr_src(lo), vgpr_src(hi));
+  if (temp->spilled) {
+    emit_cdna3_scratch_store_b32(words, temp->reg, temp->spill_offset);
+    emit_cdna3_wait_all(words);
+  }
+
+  if (vdst_is_src1) {
+    // When VDST aliases SRC1, materialize the low half in the temporary first
+    // so the second conversion can still read SRC1's original value.
+    emit_cdna3_vop3(words, kCdna3OpCvtF16F32, temp->reg, static_cast<uint16_t>(src.src0));
+    emit_cdna3_vop3(words, kCdna3OpCvtF16F32, vdst, static_cast<uint16_t>(src.src1));
+    emit_cdna3_vop3(words, kCdna3OpLshlrevB32, vdst, scalar_positive_inline_u32(16),
+                    vgpr_src(vdst));
+    emit_cdna3_vop3(words, kCdna3OpOrB32, vdst, vgpr_src(temp->reg), vgpr_src(vdst));
+  } else {
+    // Otherwise VDST can hold the low half directly and only the high half
+    // needs a temporary register.
+    emit_cdna3_vop3(words, kCdna3OpCvtF16F32, vdst, static_cast<uint16_t>(src.src0));
+    emit_cdna3_vop3(words, kCdna3OpCvtF16F32, temp->reg, static_cast<uint16_t>(src.src1));
+    emit_cdna3_vop3(words, kCdna3OpLshlrevB32, temp->reg, scalar_positive_inline_u32(16),
+                    vgpr_src(temp->reg));
+    emit_cdna3_vop3(words, kCdna3OpOrB32, vdst, vgpr_src(vdst), vgpr_src(temp->reg));
+  }
+
+  if (temp->spilled) {
+    emit_cdna3_scratch_load_b32(words, temp->reg, temp->spill_offset);
+    emit_cdna3_wait_all(words);
+  }
   return ExpandResult::success(std::move(words));
 }
 
@@ -842,6 +1043,14 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
     return failed_existing_expand_rule(
         inst, "DS transpose lowering does not support destination ACCVGPR results",
         {"Define an AccVGPR destination path for transposed DS read lowering."});
+  const uint32_t ds_offset = (static_cast<uint32_t>(src.offset1) << 8) | src.offset0;
+  if (context.virtualize_lds) {
+    if (context.virtual_lds_base_sgpr > 126 || (context.virtual_lds_base_sgpr % 2) != 0) {
+      return failed_existing_expand_rule(
+          inst, "virtual LDS backing-buffer SGPR pair is not encodable",
+          {"Reserve an even SGPR pair that CDNA3 flat/global instructions can encode as saddr."});
+    }
+  }
 
   const uint8_t vdst = static_cast<uint8_t>(src.vdst);
   const uint8_t addr = static_cast<uint8_t>(src.addr);
@@ -849,49 +1058,34 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // Pair validity is part of the source instruction's ISA contract.
 
   constexpr uint16_t kScratchCount = 10;
-  uint16_t scratch_start =
-      std::max<uint16_t>(static_cast<uint16_t>(vdst + 2), static_cast<uint16_t>(addr + 1));
-  if ((scratch_start & 1) != 0)
-    ++scratch_start;
-
-  std::optional<uint16_t> scratch;
   // The pack helper wants several even/odd register relationships to stay
-  // simple, so search only for an even-aligned run. If liveness first reports
-  // an odd free run, advance past it and keep looking instead of accepting a
-  // scratch layout that would make the emitted DS transpose sequence harder to
-  // reason about.
-  for (uint16_t search = scratch_start;;) {
-    auto candidate = liveness.find_free_run(&inst, kScratchCount, search);
-    if (!candidate)
-      break;
-    if ((*candidate & 1) == 0) {
-      scratch = candidate;
-      break;
-    }
-    search = static_cast<uint16_t>(*candidate + 1);
-    if ((search & 1) != 0)
-      ++search;
-  }
+  // simple, so require an even-aligned window.  Do not spill through the output
+  // pair because restoring it would overwrite the architectural result, and do
+  // not use the LDS address operand as a destination in the opening DS read.
+  auto scratch = choose_vgpr_window_or_spill(
+      inst, liveness, context, kScratchCount, 2,
+      {{static_cast<uint16_t>(vdst), 2}, {static_cast<uint16_t>(addr), 1}});
   if (!scratch)
     return failed_existing_expand_rule(
         inst, "No even-aligned VGPR window found for transpose scratch",
         {"Provide enough aligned scratch registers or add a spill-backed "
          "transpose lowering."});
 
-  const uint8_t raw_lo = static_cast<uint8_t>(*scratch + 0);
-  const uint8_t raw_hi = static_cast<uint8_t>(*scratch + 1);
-  const uint8_t lane_base = static_cast<uint8_t>(*scratch + 2);
-  const uint8_t halfword_selector = static_cast<uint8_t>(*scratch + 3);
-  const uint8_t tmp = static_cast<uint8_t>(*scratch + 4);
-  const uint8_t h0 = static_cast<uint8_t>(*scratch + 5);
-  const uint8_t h1 = static_cast<uint8_t>(*scratch + 6);
-  const uint8_t h2 = static_cast<uint8_t>(*scratch + 7);
-  const uint8_t h3 = static_cast<uint8_t>(*scratch + 8);
-  const uint8_t gather_tmp = static_cast<uint8_t>(*scratch + 9);
+  const uint8_t raw_lo = static_cast<uint8_t>(scratch->base + 0);
+  const uint8_t raw_hi = static_cast<uint8_t>(scratch->base + 1);
+  const uint8_t lane_base = static_cast<uint8_t>(scratch->base + 2);
+  const uint8_t halfword_selector = static_cast<uint8_t>(scratch->base + 3);
+  const uint8_t tmp = static_cast<uint8_t>(scratch->base + 4);
+  const uint8_t h0 = static_cast<uint8_t>(scratch->base + 5);
+  const uint8_t h1 = static_cast<uint8_t>(scratch->base + 6);
+  const uint8_t h2 = static_cast<uint8_t>(scratch->base + 7);
+  const uint8_t h3 = static_cast<uint8_t>(scratch->base + 8);
+  const uint8_t gather_tmp = static_cast<uint8_t>(scratch->base + 9);
   // Liveness may choose a scratch window beyond the guest kernel's original
   // VGPR allocation. The kernel descriptor must be grown to cover those
   // generated temporaries before the translated CDNA3 code can legally use them.
-  context.require_vgprs(static_cast<uint32_t>(*scratch) + kScratchCount);
+  if (!scratch->spilled)
+    context.require_vgprs(static_cast<uint32_t>(scratch->base) + kScratchCount);
   const uint8_t saved_exec = choose_cdna3_exec_save_sgpr(context);
   if (static_cast<uint32_t>(saved_exec) + 2 > context.num_sgprs)
     context.require_sgprs(static_cast<uint32_t>(saved_exec) + 2);
@@ -920,9 +1114,36 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // raw 16-bit payloads, not FP16 values.
   emit_s_mov_b64(words, saved_exec, kExecLo);
   emit_cdna3_exec_mask(words, UINT64_MAX);
+  if (scratch->spilled) {
+    // ds_read_b64_tr_b16 is only valid with all lanes active, and the lowering
+    // already materializes that EXEC state. Save the live victim window under
+    // the same all-lane contract before reusing it for transpose temporaries.
+    for (uint16_t i = 0; i < scratch->count; ++i) {
+      emit_cdna3_scratch_store_b32(words, static_cast<uint8_t>(scratch->base + i),
+                                   scratch->spill_offset + static_cast<uint32_t>(i) * 4u);
+    }
+    emit_cdna3_wait_all(words);
+  }
 
-  emit_cdna3_ds(words, kCdna3DsOpReadB64, raw_lo, addr, 0, 0, src.offset0, src.offset1);
-  emit_cdna3_lgkm_wait(words);
+  if (context.virtualize_lds) {
+    uint8_t virtual_addr = addr;
+    uint32_t virtual_offset = ds_offset;
+    if (ds_offset > kFlatGlobalPositiveImm13Max) {
+      // The transpose lowering already owns `tmp` until the lane-id calculation
+      // below. Reuse it as a one-instruction address temporary so large DS
+      // immediates do not require another spill or SGPR literal register.
+      emit_cdna3_vop2_literal(words, kCdna3Vop2OpAddU32, tmp, addr, ds_offset);
+      virtual_addr = tmp;
+      virtual_offset = 0;
+    }
+    emit_cdna3_flat_global_load(words, static_cast<uint8_t>(kCdna3FlatOpLoadDword + 1), raw_lo,
+                                virtual_addr, static_cast<uint8_t>(context.virtual_lds_base_sgpr),
+                                virtual_offset);
+    emit_cdna3_wait_all(words);
+  } else {
+    emit_cdna3_ds(words, kCdna3DsOpReadB64, raw_lo, addr, 0, 0, src.offset0, src.offset1);
+    emit_cdna3_lgkm_wait(words);
+  }
 
   emit_cdna3_vop3(words, kCdna3OpMbcntLoU32B32, tmp, kInlineConstNeg1, kInlineConst0);
   emit_cdna3_vop3(words, kCdna3OpMbcntHiU32B32, tmp, kInlineConstNeg1, vgpr_src(tmp));
@@ -963,6 +1184,13 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   emit_s_mov_b64(words, kExecLo, saved_exec);
   emit_cdna3_pack_low_b16_pair(words, vdst, h0, h1, tmp, gather_tmp);
   emit_cdna3_pack_low_b16_pair(words, static_cast<uint8_t>(vdst + 1), h2, h3, tmp, gather_tmp);
+  if (scratch->spilled) {
+    for (uint16_t i = 0; i < scratch->count; ++i) {
+      emit_cdna3_scratch_load_b32(words, static_cast<uint8_t>(scratch->base + i),
+                                  scratch->spill_offset + static_cast<uint32_t>(i) * 4u);
+    }
+    emit_cdna3_wait_all(words);
+  }
 
   return ExpandResult::success(std::move(words));
 }
@@ -1023,23 +1251,16 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // architectural destination is LDS, not the source instruction's vdata
   // register tuple.
   //
-  // Start scratch after the ordinary VGPRs, not after the existing AccVGPR
-  // window. Leave one CDNA VGPR descriptor quantum of slack above that floor:
-  // CK kernels can carry scheduler/descriptor-reserved state in registers that
-  // are not visible to this instruction liveness model, and placing the five
-  // temporaries for this LDS-DMA fallback immediately after the decoded count
-  // can clobber those values. If the chosen scratch overlaps the source
-  // accumulator window, require_vgprs() records the new ordinary VGPR end and
-  // descriptor recomputation moves ACCUM_OFFSET above it while preserving
-  // num_agprs.
-  constexpr uint16_t kCdnaVgprDescriptorQuantum = 8;
+  // Let liveness choose any dead ordinary VGPR run. The original MUBUF source
+  // operands are live-before this instruction, so a vaddr that is dead after
+  // the source LDS-DMA instruction is still protected until the emitted MUBUF
+  // consumes it. Starting at the descriptor count would ignore that liveness
+  // fact and unnecessarily force high-pressure kernels into descriptor growth
+  // or spill paths.
   const uint8_t vaddr_count = (src.offen && src.idxen) ? 2 : ((src.offen || src.idxen) ? 1 : 0);
   const uint16_t scratch_count = static_cast<uint16_t>(data_count + 1);
-  const uint32_t descriptor_slack_start = context.num_vgprs + kCdnaVgprDescriptorQuantum;
-  const uint16_t scratch_start = static_cast<uint16_t>(
-      std::min<uint32_t>(std::max<uint32_t>(src.vaddr + vaddr_count, descriptor_slack_start),
-                         std::numeric_limits<uint16_t>::max()));
-  auto scratch = liveness.find_free_run(&inst, scratch_count, scratch_start);
+  auto scratch = choose_vgpr_window_or_spill(inst, liveness, context, scratch_count, 1,
+                                             {{static_cast<uint16_t>(src.vaddr), vaddr_count}});
   if (!scratch) {
     return failed_existing_expand_rule(
         inst, "No scratch VGPR window found for temporary global-load destination and LDS address",
@@ -1047,8 +1268,8 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
          "Add a spill-backed lowering for high-pressure inputs if no dead VGPR run exists."});
   }
 
-  const uint8_t data = static_cast<uint8_t>(*scratch);
-  const uint8_t lds_addr = static_cast<uint8_t>(*scratch + data_count);
+  const uint8_t data = scratch->base;
+  const uint8_t lds_addr = static_cast<uint8_t>(scratch->base + data_count);
   // Use a new descriptor-backed SGPR pair for EXEC save/restore instead of a
   // liveness-selected guest pair.  The LDS form hides important SGPR resource
   // uses inside buffer descriptors, and clobbering one of those descriptors for
@@ -1078,7 +1299,8 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   }
   if (static_cast<uint32_t>(saved_exec) + 2 > context.num_sgprs)
     context.require_sgprs(static_cast<uint32_t>(saved_exec) + 2);
-  context.require_vgprs(static_cast<uint32_t>(*scratch) + scratch_count);
+  if (!scratch->spilled)
+    context.require_vgprs(static_cast<uint32_t>(scratch->base) + scratch_count);
 
   std::vector<uint32_t> words;
   // MUBUF-to-LDS uses physical TID-in-wave for the LDS lane slot, not the
@@ -1088,6 +1310,16 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // instruction.
   emit_s_mov_b64(words, saved_exec, kExecLo);
   emit_cdna3_exec_mask(words, UINT64_MAX);
+  if (scratch->spilled) {
+    // The all-lane address calculation below clobbers `lds_addr` for lanes
+    // outside the original EXEC mask. Save every lane of the spilled window so
+    // restoring it later preserves dormant lanes as well as active ones.
+    for (uint16_t i = 0; i < scratch->count; ++i) {
+      emit_cdna3_scratch_store_b32(words, static_cast<uint8_t>(scratch->base + i),
+                                   scratch->spill_offset + static_cast<uint32_t>(i) * 4u);
+    }
+    emit_cdna3_wait_all(words);
+  }
   emit_cdna3_vop3(words, kCdna3OpMbcntLoU32B32, lds_addr, kInlineConstNeg1, kInlineConst0);
   emit_cdna3_vop3(words, kCdna3OpMbcntHiU32B32, lds_addr, kInlineConstNeg1, vgpr_src(lds_addr));
   emit_cdna3_vop3(words, kCdna3OpLshlrevB32, lds_addr,
@@ -1097,12 +1329,36 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
 
   emit_cdna3_mubuf(words, src, load_op, data);
   emit_cdna3_wait_all(words);
-  emit_cdna3_ds(words, ds_op, 0, lds_addr, data);
-  // Native buffer_load_* ... lds exposes a VMEM-completed LDS side effect. The
-  // fallback sequence creates that side effect with an explicit DS write, so
-  // wait for the DS operation here before branching back to code that was
-  // scheduled around the original LDS-DMA instruction.
-  emit_cdna3_lgkm_wait(words);
+  if (context.virtualize_lds) {
+    if (context.virtual_lds_base_sgpr > 126 || (context.virtual_lds_base_sgpr % 2) != 0) {
+      return failed_existing_expand_rule(
+          inst, "virtual LDS backing-buffer SGPR pair is not encodable",
+          {"Reserve an even SGPR pair that CDNA3 flat/global instructions can encode as saddr."});
+    }
+    emit_cdna3_flat_global_store(
+        words, static_cast<uint8_t>(kCdna3FlatOpStoreDword + data_count - 1), data, lds_addr,
+        static_cast<uint8_t>(context.virtual_lds_base_sgpr));
+    // The native instruction exposes a completed LDS side effect. In virtual
+    // mode the side effect is a VMEM store to the backing buffer, so wait for
+    // VMEM here rather than relying on a later lgkmcnt wait to observe it.
+    emit_cdna3_wait_all(words);
+  } else {
+    emit_cdna3_ds(words, ds_op, 0, lds_addr, data);
+    // Native buffer_load_* ... lds exposes a VMEM-completed LDS side effect. The
+    // fallback sequence creates that side effect with an explicit DS write, so
+    // wait for the DS operation here before branching back to code that was
+    // scheduled around the original LDS-DMA instruction.
+    emit_cdna3_lgkm_wait(words);
+  }
+  if (scratch->spilled) {
+    emit_cdna3_exec_mask(words, UINT64_MAX);
+    for (uint16_t i = 0; i < scratch->count; ++i) {
+      emit_cdna3_scratch_load_b32(words, static_cast<uint8_t>(scratch->base + i),
+                                  scratch->spill_offset + static_cast<uint32_t>(i) * 4u);
+    }
+    emit_cdna3_wait_all(words);
+    emit_s_mov_b64(words, kExecLo, saved_exec);
+  }
 
   return ExpandResult::success(std::move(words));
 }

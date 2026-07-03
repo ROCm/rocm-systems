@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace rocjitsu {
@@ -22,6 +23,24 @@ struct KernelDescriptorTranslationOptions {
   uint32_t minimum_sgprs = 0;
   uint32_t private_segment_fixed_size_addend = 0;
   uint32_t group_segment_fixed_size_addend = 0;
+  /// @brief Encode the target descriptor with zero hardware LDS and require a
+  /// virtual LDS backing buffer for the kernel body.
+  ///
+  /// @details This is an explicit per-descriptor mode because the runtime must
+  /// only select the virtualized copy when the dispatch's static plus dynamic
+  /// LDS demand cannot fit on the host GPU. The descriptor translator records
+  /// the static byte demand in KdTranslation; runtime dispatch adds the packet's
+  /// dynamic group-segment size when allocating the backing buffer.
+  bool virtualize_lds = false;
+  /// @brief Permit a normal descriptor to retain an LDS size above the host
+  /// hardware limit.
+  ///
+  /// @details This is only valid when the caller is also emitting a virtual-LDS
+  /// sidecar descriptor for the same kernel. The normal descriptor is kept so
+  /// launches that fit on the host can still use hardware LDS; runtime dispatch
+  /// rewriting must select the virtual descriptor whenever static plus dynamic
+  /// LDS exceeds the host limit.
+  bool allow_oversized_lds = false;
 };
 
 /// @brief Per-kernel descriptor/resource/ABI translation plan.
@@ -32,6 +51,8 @@ struct KernelDescriptorTranslationOptions {
 /// ELF/kernel descriptor bytes.
 struct KdTranslation {
   uint64_t descriptor_file_offset = 0;
+  /// @brief Kernel symbol name without the AMDHSA ".kd" descriptor suffix.
+  std::string kernel_name;
   /// @brief Original .text-relative kernel entry decoded from the source descriptor.
   uint64_t entry_text_offset = 0;
 
@@ -99,14 +120,94 @@ struct KdTranslation {
   /// @brief Future spill tier: number of VGPRs to virtualize through scratch memory.
   uint32_t vgpr_spill_to_scratch_count = 0;
 
+  /// @brief True when this plan describes the sidecar virtual-LDS descriptor.
+  ///
+  /// @details The original symbol descriptor remains the normal hardware-LDS
+  /// path. Sidecar descriptors are materialized in a loaded ELF segment and
+  /// referenced only by rocjitsu's dispatch metadata; they are not exported as
+  /// additional AMDHSA kernel symbols.
+  bool virtual_lds_variant = false;
+
   uint32_t target_sgpr_count = 0;
   uint32_t target_sgpr_granulated = 0;
   uint32_t sgpr_spill_count = 0;
 
+  /// @brief Hardware LDS bytes encoded in GROUP_SEGMENT_FIXED_SIZE.
   uint32_t target_lds_size = 0;
+  /// @brief Future in-hardware LDS bytes reserved for register spill zones.
   uint32_t lds_spill_zone_bytes = 0;
+  /// @brief Static LDS bytes that must be backed by a virtual LDS buffer.
   uint32_t lds_overflow_size = 0;
+  /// @brief True when the dispatch path must provide a virtual LDS buffer.
   bool needs_lds_overflow_buf = false;
+  /// @brief SGPR pair reserved for the virtual LDS backing-buffer base address.
+  uint16_t lds_overflow_base_sgpr = 0;
+  /// @brief Temporary SGPR pair used by the entry prologue's workgroup offset math.
+  ///
+  /// @details The virtual-LDS prologue adjusts the backing pointer by the
+  /// current workgroup's per-dispatch byte stride before the translated body
+  /// runs. This scratch SGPR is descriptor-backed when there is room, otherwise
+  /// it borrows an ordinary high SGPR at entry before guest code has defined it.
+  uint16_t lds_overflow_prologue_temp_sgpr = 0;
+  /// @brief True when @ref lds_overflow_base_sgpr is preserved around each DS use.
+  bool lds_overflow_base_sgpr_spill_per_use = false;
+  /// @brief True when the backing pointer itself is saved in private scratch.
+  ///
+  /// @details The dispatch/kernarg pointer SGPR pair is guest-owned after
+  /// entry. When the virtual-LDS base SGPR pair is borrowed per use, DBT must
+  /// consume the runtime pointer before the body can clobber that SGPR pair and
+  /// reload the saved backing pointer from private scratch at each lowered LDS
+  /// operation.
+  bool lds_overflow_base_pointer_spilled = false;
+  /// @brief Per-lane private scratch offset of the saved 64-bit backing pointer.
+  uint32_t lds_overflow_base_pointer_spill_offset = 0;
+  /// @brief True when spill-per-use entry prologue VGPR temps have been chosen.
+  ///
+  /// @details The descriptor may be recomputed after body lowering requests
+  /// more registers or private scratch. Spill-per-use virtual LDS prologues
+  /// are emitted before that recompute, so the temporary VGPRs used to save
+  /// the runtime backing pointer must remain byte-for-byte stable across the
+  /// recomputed descriptor.
+  bool lds_overflow_entry_temp_vgprs_valid = false;
+  /// @brief First VGPR temp used by the spill-per-use entry prologue.
+  uint8_t lds_overflow_entry_temp_vgpr_lo = 0;
+  /// @brief Second VGPR temp used by the spill-per-use entry prologue.
+  uint8_t lds_overflow_entry_temp_vgpr_hi = 0;
+  /// @brief Source kernarg bytes the runtime must preserve before appended data.
+  ///
+  /// @details Some assembly code objects leave the descriptor kernarg_size field
+  /// at zero while using AMDHSA kernarg preloading. For virtual LDS, dispatch
+  /// rewriting must still copy the preloaded byte range into the extended
+  /// kernarg buffer before writing the backing-pointer tail.
+  uint32_t kernarg_size = 0;
+  /// @brief Kernarg segment size required by the translated target descriptor.
+  ///
+  /// @details Normal kernels preserve @ref kernarg_size. Virtual-LDS kernels
+  /// append a rocjitsu runtime-state block after the original kernarg payload
+  /// and load it in the entry prologue, so their target descriptor advertises
+  /// the extended byte count.
+  uint32_t target_kernarg_size = 0;
+  /// @brief Byte offset of the virtual-LDS runtime state.
+  ///
+  /// @details This is a kernarg-segment offset for the normal extended-kernarg
+  /// ABI. When @ref lds_overflow_pointer_in_dispatch_packet is true, it is
+  /// instead an `hsa_kernel_dispatch_packet_t` byte offset that points at a
+  /// GPU-visible rocjitsu runtime-state block.
+  uint32_t lds_overflow_kernarg_pointer_offset = 0;
+  /// @brief True when the backing pointer is passed through the AQL dispatch packet.
+  bool lds_overflow_pointer_in_dispatch_packet = false;
+  /// @brief True if the source descriptor exposes a kernarg segment pointer SGPR.
+  bool has_kernarg_segment_ptr = false;
+  /// @brief First SGPR of the descriptor-selected kernarg segment pointer pair.
+  uint16_t kernarg_segment_ptr_sgpr = 0;
+  /// @brief True if the source descriptor exposes a dispatch-packet pointer SGPR.
+  bool has_dispatch_ptr = false;
+  /// @brief First SGPR of the descriptor-selected dispatch-packet pointer pair.
+  uint16_t dispatch_ptr_sgpr = 0;
+  /// @brief Descriptor-selected workgroup-id SGPRs, or -1 when a dimension is disabled.
+  int16_t workgroup_id_sgpr_x = -1;
+  int16_t workgroup_id_sgpr_y = -1;
+  int16_t workgroup_id_sgpr_z = -1;
 
   uint32_t target_private_size = 0;
 
@@ -163,6 +264,8 @@ struct KdTranslation {
   uint32_t target_occupancy = 0;
 
   bool supported = true;
+  /// @brief True when DBT preserved this source kernel instead of translating it.
+  bool skipped = false;
   std::vector<TranslationDiagnostic> diagnostics;
 };
 
