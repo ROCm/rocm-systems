@@ -58,6 +58,7 @@ class Settings : public device::Settings {
   size_t pinnedMinXferSize_;  //!< Minimal buffer size for pinned transfer
 
   size_t sdmaCopyThreshold_;   //!< Use SDMA to copy above this size
+  size_t sdmaSwapThreshold_;   //!< Use SDMA for batch swaps above this size
   size_t sdma_p2p_threshold_;  //!< Use SDMA in P2P above this size
 
   uint32_t hmmFlags_;       //!< HMM functionality control flags

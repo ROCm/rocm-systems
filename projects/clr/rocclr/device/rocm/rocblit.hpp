@@ -309,6 +309,7 @@ class KernelBlitManager : public DmaBlitManager {
     StreamOpsIncrement,
     StreamOpsDecrement,
     BlitCopyBufferBatch,
+    BlitSwapBufferBatch,
     BlitLinearTotal,
     FillImage = BlitLinearTotal,
     BlitCopyImage,
@@ -634,6 +635,13 @@ class KernelBlitManager : public DmaBlitManager {
   //! Copies a batch of raw virtual-address ranges using the shader path
   bool ShaderCopyBufferBatchRaw(const std::vector<BatchRawCopyOp>& copy_ops) const;
 
+  //! Returns true if a batch swap should use the shader path.
+  bool useShaderSwapPath(const Memory& src, const Memory& dst, size_t size,
+                         const amd::CopyMetadata& metadata) const;
+
+  //! Swaps a batch of buffer pairs using a single/multiple shader dispatch
+  bool ShaderSwapBufferBatch(const std::vector<amd::BatchCopyOp>& copy_operations) const;
+
   //! Atomically updates a memory location (i.e. writes, increments or decrements the memory).
   bool streamOpsUpdate(uint blitType, device::Memory& memory, uint64_t value, size_t offset,
                        size_t sizeBytes) const;
@@ -659,6 +667,7 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_initHeap",           "__amd_rocclr_batchMemOp",
     "__amd_rocclr_streamOpsIncrement", "__amd_rocclr_streamOpsDecrement",
     "__amd_rocclr_copyBufferBatch",
+    "__amd_rocclr_swapBufferBatch",
     "__amd_rocclr_fillImage",          "__amd_rocclr_copyImage",
     "__amd_rocclr_copyImage1DA",       "__amd_rocclr_copyImageToBuffer",
     "__amd_rocclr_copyBufferToImage"};

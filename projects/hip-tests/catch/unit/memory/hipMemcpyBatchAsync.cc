@@ -1332,24 +1332,25 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_ThresholdSelection) {
  *   NO env manipulation.  No routing-fork assertion (routing unobservable).
  *
  *   ==========================================================================
- *   KNOWN FAILURE — marked [!shouldfail] in memory.yaml.
- *   EXISTING BUG THAT MUST BE FIXED: Op 1 exposes a pre-existing, swap-specific
- *   defect in the batch swap path — a swap whose src/dst pointers carry a
- *   non-zero buffer offset does NOT update the device->host side at the offset
- *   region.  This was confirmed independent of alignment (fails at both +4 and
- *   +16 byte offsets) and is specific to swap: offset-0 swaps pass, and batch
- *   LINEAR copies with the same offset pass (verified via a standalone
- *   reproducer).  The bug lives in the SDMA swap offset handling, not in the
- *   batch-memcpy offset computation.  Op 0 (aligned) and Op 2 (tail) pass.
- *   Once the swap offset handling is fixed, remove the !shouldfail tag from
- *   memory.yaml.
+ *   RESIDUAL EXISTING BUG (still must be fixed, but NOT exercised by this test):
+ *   Op 1 originally exposed a pre-existing, swap-specific defect where a batch
+ *   swap whose src/dst pointers carry a non-zero buffer offset does NOT update
+ *   the device->host side at the offset region.  It is confirmed independent of
+ *   alignment (failed at both +4 and +16 byte offsets) and specific to the
+ *   *SDMA* swap path: offset-0 swaps pass, and batch LINEAR copies with the same
+ *   offset pass (verified via a standalone reproducer).  The shader swap path
+ *   added by this feature computes virtualAddress()+offset like the shader
+ *   linear copy and therefore handles offsets correctly, so this test now PASSES
+ *   because its small ops (<= sdmaSwapThreshold_) route to the shader.  A LARGE
+ *   (> threshold) offset swap on swap-capable HW still routes to SDMA and
+ *   remains broken until the SDMA swap offset handling is fixed.
  *   ==========================================================================
  *
- *   Expected state (unmodified runtime):
- *     On swap-capable HW (e.g. gfx942): Op 1 FAILS via the SDMA offset bug, so
- *     the test fails and is caught by [!shouldfail].
- *     On non-swap-capable HW: hipErrorNotSupported today (front-end gate) —
- *     also caught by [!shouldfail].
+ *   Expected state:
+ *     Unmodified runtime: Op 1 fails via the SDMA offset bug (this test was
+ *     tagged [!shouldfail] at that baseline).
+ *     With this feature: small offset swaps route to the shader path and pass,
+ *     so the test passes normally (the [!shouldfail] tag has been removed).
  *
  * Test source
  * ------------------------

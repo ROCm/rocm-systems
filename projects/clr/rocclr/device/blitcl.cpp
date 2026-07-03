@@ -176,6 +176,52 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       }
     }
 
+    __kernel void __amd_rocclr_swapBufferBatch(
+        __global const CopyBufferBatchDescriptor *descriptors,
+        uint workgroup_size,
+        uint copy_stride) {
+      uint work_item_id = __builtin_amdgcn_workitem_id_x();
+      uint group_ordinal = __builtin_amdgcn_workgroup_id_x();
+      uint descriptor_index = __builtin_amdgcn_workgroup_id_y();
+
+      CopyBufferBatchDescriptor descriptor = descriptors[descriptor_index];
+      __global uchar *source = (__global uchar *)descriptor.source_address;
+      __global uchar *destination =
+          (__global uchar *)descriptor.destination_address;
+      ulong copy_index = ((ulong)group_ordinal * workgroup_size) + work_item_id;
+
+      if (descriptor.aligned_element_size == sizeof(ulong2)) {
+        __global ulong2 *source_data = (__global ulong2 *)(source);
+        __global ulong2 *destination_data = (__global ulong2 *)(destination);
+        while (copy_index < descriptor.aligned_element_count) {
+          ulong2 tmp = source_data[copy_index];
+          source_data[copy_index] = destination_data[copy_index];
+          destination_data[copy_index] = tmp;
+          copy_index += copy_stride;
+        }
+      } else {
+        __global uint *source_data = (__global uint *)(source);
+        __global uint *destination_data = (__global uint *)(destination);
+        while (copy_index < descriptor.aligned_element_count) {
+          uint tmp = source_data[copy_index];
+          source_data[copy_index] = destination_data[copy_index];
+          destination_data[copy_index] = tmp;
+          copy_index += copy_stride;
+        }
+      }
+      if ((descriptor.trailing_byte_count != 0) && (group_ordinal == 0) &&
+          (work_item_id == 0)) {
+        ulong tail_start =
+            descriptor.aligned_element_count * descriptor.aligned_element_size;
+        ulong tail_end = tail_start + descriptor.trailing_byte_count;
+        for (ulong i = tail_start; i < tail_end; ++i) {
+          uchar t = source[i];
+          source[i] = destination[i];
+          destination[i] = t;
+        }
+      }
+    }
+
     __kernel void __amd_rocclr_copyBufferAligned(__global uint* src, __global uint* dst,
                                                  ulong srcOrigin, ulong dstOrigin, ulong size,
                                                  uint alignment) {
