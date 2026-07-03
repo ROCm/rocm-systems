@@ -705,6 +705,72 @@ TEST(L2CacheTest, UcReadFlushesDirtyResidentLine) {
   EXPECT_EQ(read_value, 9u);
 }
 
+TEST(L2CacheTest, UcReadCrossingLineBoundaryFlushesBothDirtyResidentLines) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kBase = 0x3000;
+  constexpr uint64_t kAddr = kBase + amdgpu::L2Cache::LINE_SIZE - 4;
+  static_assert((kBase & (amdgpu::L2Cache::LINE_SIZE - 1)) == 0);
+
+  std::array<uint8_t, amdgpu::L2Cache::LINE_SIZE> first_line{};
+  std::array<uint8_t, amdgpu::L2Cache::LINE_SIZE> second_line{};
+  for (uint32_t i = 0; i < amdgpu::L2Cache::LINE_SIZE; ++i) {
+    first_line[i] = static_cast<uint8_t>(0x10u + i);
+    second_line[i] = static_cast<uint8_t>(0x80u + i);
+    mem.write8(kBase + i, 0xA0u);
+    mem.write8(kBase + amdgpu::L2Cache::LINE_SIZE + i, 0xB0u);
+  }
+
+  l2.writeback_line(kBase, first_line.data(), amdgpu::Mtype::RW);
+  l2.writeback_line(kBase + amdgpu::L2Cache::LINE_SIZE, second_line.data(), amdgpu::Mtype::RW);
+
+  std::array<uint8_t, 8> read_value{};
+  l2.read(kAddr, read_value.data(), read_value.size(), amdgpu::Mtype::UC);
+
+  for (uint32_t i = 0; i < 4; ++i) {
+    EXPECT_EQ(read_value[i], first_line[amdgpu::L2Cache::LINE_SIZE - 4 + i])
+        << "first line byte " << i;
+    EXPECT_EQ(read_value[4 + i], second_line[i]) << "second line byte " << i;
+  }
+}
+
+TEST(L2CacheTest, UcWriteCrossingLineBoundaryFlushesBothDirtyResidentLines) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kBase = 0x4000;
+  constexpr uint64_t kAddr = kBase + amdgpu::L2Cache::LINE_SIZE - 4;
+  static_assert((kBase & (amdgpu::L2Cache::LINE_SIZE - 1)) == 0);
+
+  std::array<uint8_t, amdgpu::L2Cache::LINE_SIZE> first_line{};
+  std::array<uint8_t, amdgpu::L2Cache::LINE_SIZE> second_line{};
+  for (uint32_t i = 0; i < amdgpu::L2Cache::LINE_SIZE; ++i) {
+    first_line[i] = static_cast<uint8_t>(0x20u + i);
+    second_line[i] = static_cast<uint8_t>(0x90u + i);
+    mem.write8(kBase + i, 0xC0u);
+    mem.write8(kBase + amdgpu::L2Cache::LINE_SIZE + i, 0xD0u);
+  }
+
+  l2.writeback_line(kBase, first_line.data(), amdgpu::Mtype::RW);
+  l2.writeback_line(kBase + amdgpu::L2Cache::LINE_SIZE, second_line.data(), amdgpu::Mtype::RW);
+
+  const std::array<uint8_t, 8> store_value = {0x01u, 0x02u, 0x03u, 0x04u,
+                                              0x05u, 0x06u, 0x07u, 0x08u};
+  l2.write(kAddr, store_value.data(), store_value.size(), amdgpu::Mtype::UC);
+
+  for (uint32_t i = 0; i < 4; ++i) {
+    EXPECT_EQ(mem.read8(kAddr + i), store_value[i]) << "first line store byte " << i;
+    EXPECT_EQ(mem.read8(kAddr + 4 + i), store_value[4 + i]) << "second line store byte " << i;
+  }
+  EXPECT_EQ(mem.read8(kBase), first_line[0])
+      << "dirty byte outside the first-line UC store should be preserved";
+  EXPECT_EQ(mem.read8(kBase + amdgpu::L2Cache::LINE_SIZE + 4), second_line[4])
+      << "dirty byte outside the second-line UC store should be preserved";
+}
+
 // ---------------------------------------------------------------------------
 // CU factory tests — verify all 9 ISAs can be instantiated
 // ---------------------------------------------------------------------------
