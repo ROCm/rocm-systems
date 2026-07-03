@@ -75,6 +75,7 @@ public:
     void        write_instruction(const rocprofiler_compute_tool::instruction_t& inst) override;
     std::string get_result() override;
     void        flush(const std::filesystem::path& string) override;
+    bool        empty() const override;
 
     const std::vector<size_t>&                             get_start_code_obj_ids() const;
     uint32_t                                               get_end_code_obj_count() const;
