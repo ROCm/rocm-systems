@@ -11,12 +11,30 @@ RJ_DIAGNOSTIC_POP
 
 #include "util/log.h"
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <format>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+namespace {
+
+/// @brief Return a monotonic timestamp in the guest HSA system-clock domain.
+///
+/// @details `LinuxKfd::fill_get_clock_counters_ioctl` exposes a 1 GHz
+/// nanosecond clock for the synthetic guest GPU. The ROCR `amd_signal_t`
+/// profiling fields are specified in the HSA system-clock domain, so using the
+/// same source here makes `hsa_amd_profiling_get_dispatch_time` and HIP event
+/// elapsed-time math agree with the guest KFD clock.
+uint64_t hsa_system_timestamp() {
+  auto now = std::chrono::steady_clock::now().time_since_epoch();
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+}
+
+} // namespace
 
 void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
                                            std::vector<HwQueueState> &queues) {
@@ -158,10 +176,18 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
   constexpr uint32_t SIG_VAL_OFF = 8;
   constexpr uint32_t MAILBOX_PTR_OFF = 16;
   constexpr uint32_t EVENT_ID_OFF = 24;
+  // amd_signal_t::start_ts and ::end_ts. The vendored minimal HSA headers omit
+  // amd_hsa_signal.h, but ROCR's profiling APIs read these fixed ABI fields.
+  constexpr uint32_t START_TS_OFF = 32;
+  constexpr uint32_t END_TS_OFF = 40;
 
   if (memory_) {
     auto *sig_page =
         memory_->resolve_host_ptr(entry.completion_signal + SIG_VAL_OFF, entry.process_id);
+    uint64_t start_ts = entry.profiling_start_timestamp;
+    if (start_ts == 0)
+      start_ts = hsa_system_timestamp();
+    uint64_t end_ts = std::max(hsa_system_timestamp(), start_ts + 1);
 
     util::Logger::cp([&](auto &os) {
       auto *page0 = memory_->resolve_host_ptr(entry.completion_signal, entry.process_id);
@@ -188,6 +214,13 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
     int64_t old = 0;
     uint64_t new_val = 0;
     if (sig_page) {
+      auto *start_ptr = reinterpret_cast<uint64_t *>(
+          sig_page + ((entry.completion_signal + START_TS_OFF) & 0xFFF));
+      auto *end_ptr =
+          reinterpret_cast<uint64_t *>(sig_page + ((entry.completion_signal + END_TS_OFF) & 0xFFF));
+      std::atomic_ref<uint64_t>(*start_ptr).store(start_ts, std::memory_order_relaxed);
+      std::atomic_ref<uint64_t>(*end_ptr).store(end_ts, std::memory_order_release);
+
       auto *sig_ptr = reinterpret_cast<uint64_t *>(
           sig_page + ((entry.completion_signal + SIG_VAL_OFF) & 0xFFF));
       old =
@@ -195,6 +228,8 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
       new_val = static_cast<uint64_t>(old - 1);
       std::atomic_ref<uint64_t>(*sig_ptr).store(new_val, std::memory_order_release);
     } else {
+      memory_->write64(entry.completion_signal + START_TS_OFF, start_ts, entry.process_id);
+      memory_->write64(entry.completion_signal + END_TS_OFF, end_ts, entry.process_id);
       old = static_cast<int64_t>(
           memory_->read64(entry.completion_signal + SIG_VAL_OFF, entry.process_id));
       new_val = static_cast<uint64_t>(old - 1);

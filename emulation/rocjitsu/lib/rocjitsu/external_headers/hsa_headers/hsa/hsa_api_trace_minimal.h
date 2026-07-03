@@ -41,11 +41,12 @@ struct AmdExtTable {
   ApiTableVersion version;
   void *hsa_amd_coherency_get_type_fn;
   void *hsa_amd_coherency_set_type_fn;
-  void *hsa_amd_profiling_set_profiler_enabled_fn;
+  hsa_amd_profiling_set_profiler_enabled_fn_t hsa_amd_profiling_set_profiler_enabled_fn;
   void *hsa_amd_profiling_async_copy_enable_fn;
-  void *hsa_amd_profiling_get_dispatch_time_fn;
+  hsa_amd_profiling_get_dispatch_time_fn_t hsa_amd_profiling_get_dispatch_time_fn;
   void *hsa_amd_profiling_get_async_copy_time_fn;
-  void *hsa_amd_profiling_convert_tick_to_system_domain_fn;
+  hsa_amd_profiling_convert_tick_to_system_domain_fn_t
+      hsa_amd_profiling_convert_tick_to_system_domain_fn;
   void *hsa_amd_signal_async_handler_fn;
   void *hsa_amd_async_function_fn;
   void *hsa_amd_signal_wait_any_fn;

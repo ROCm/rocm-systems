@@ -23,6 +23,12 @@ using hsa_amd_sdma_engine_id_t = uint32_t;
 using hsa_amd_pointer_type_t = uint32_t;
 using hsa_amd_copy_direction_t = uint32_t;
 
+/// @brief Minimal profiling dispatch-time result mirror.
+struct hsa_amd_profiling_dispatch_time_t {
+  uint64_t start;
+  uint64_t end;
+};
+
 // Public hsa_ext_amd.h enum values mirrored by name so ABI renumbering is visible.
 inline constexpr uint32_t HSA_AMD_AGENT_INFO_DRIVER_NODE_ID = 0xA004;
 inline constexpr hsa_amd_memory_pool_info_t HSA_AMD_MEMORY_POOL_INFO_SEGMENT = 0;
@@ -135,6 +141,12 @@ using hsa_amd_agent_memory_pool_get_info_fn_t = hsa_status_t(HSA_API *)(
 using hsa_amd_memory_pool_allocate_fn_t = hsa_status_t(HSA_API *)(hsa_amd_memory_pool_t, size_t,
                                                                   uint32_t, void **);
 using hsa_amd_memory_pool_free_fn_t = hsa_status_t(HSA_API *)(void *);
+using hsa_amd_profiling_set_profiler_enabled_fn_t = hsa_status_t(HSA_API *)(hsa_queue_t *, int);
+using hsa_amd_profiling_get_dispatch_time_fn_t =
+    hsa_status_t(HSA_API *)(hsa_agent_t, hsa_signal_t, hsa_amd_profiling_dispatch_time_t *);
+using hsa_amd_profiling_convert_tick_to_system_domain_fn_t = hsa_status_t(HSA_API *)(hsa_agent_t,
+                                                                                     uint64_t,
+                                                                                     uint64_t *);
 using hsa_amd_agents_allow_access_fn_t = hsa_status_t(HSA_API *)(uint32_t, const hsa_agent_t *,
                                                                  const uint32_t *, const void *);
 using hsa_amd_memory_async_copy_fn_t = hsa_status_t(HSA_API *)(void *, hsa_agent_t, const void *,

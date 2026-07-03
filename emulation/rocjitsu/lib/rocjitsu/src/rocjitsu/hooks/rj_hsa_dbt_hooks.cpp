@@ -622,6 +622,18 @@ hsa_status_t HSA_API rj_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_po
 /// @brief Free host-backed memory allocated through mapped pools.
 hsa_status_t HSA_API rj_amd_memory_pool_free(void *ptr);
 
+/// @brief Enable profiling on the mapped host queue.
+hsa_status_t HSA_API rj_amd_profiling_set_profiler_enabled(hsa_queue_t *queue, int enable);
+
+/// @brief Query dispatch timestamps through the mapped host agent.
+hsa_status_t HSA_API rj_amd_profiling_get_dispatch_time(hsa_agent_t agent, hsa_signal_t signal,
+                                                        hsa_amd_profiling_dispatch_time_t *time);
+
+/// @brief Convert agent ticks through the mapped host agent.
+hsa_status_t HSA_API rj_amd_profiling_convert_tick_to_system_domain(hsa_agent_t agent,
+                                                                    uint64_t agent_tick,
+                                                                    uint64_t *system_tick);
+
 /// @brief Query agent/pool relationships through mapped host handles.
 hsa_status_t HSA_API rj_amd_agent_memory_pool_get_info(hsa_agent_t agent,
                                                        hsa_amd_memory_pool_t memory_pool,
@@ -779,6 +791,16 @@ void clear_memory_pool_mapper();
     hsa_amd_memory_pool_allocate_fn_t)                                                             \
   X(amd_memory_pool_free, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_pool_free_fn,        \
     rj_amd_memory_pool_free, hsa_amd_memory_pool_free_fn_t)                                        \
+  X(amd_profiling_set_profiler_enabled, amd_ext_, amd_ext_ != nullptr, true,                       \
+    hsa_amd_profiling_set_profiler_enabled_fn, rj_amd_profiling_set_profiler_enabled,              \
+    hsa_amd_profiling_set_profiler_enabled_fn_t)                                                   \
+  X(amd_profiling_get_dispatch_time, amd_ext_, amd_ext_ != nullptr, true,                          \
+    hsa_amd_profiling_get_dispatch_time_fn, rj_amd_profiling_get_dispatch_time,                    \
+    hsa_amd_profiling_get_dispatch_time_fn_t)                                                      \
+  X(amd_profiling_convert_tick_to_system_domain, amd_ext_, amd_ext_ != nullptr, true,              \
+    hsa_amd_profiling_convert_tick_to_system_domain_fn,                                            \
+    rj_amd_profiling_convert_tick_to_system_domain,                                                \
+    hsa_amd_profiling_convert_tick_to_system_domain_fn_t)                                          \
   X(amd_agent_memory_pool_get_info, amd_ext_, amd_ext_ != nullptr, true,                           \
     hsa_amd_agent_memory_pool_get_info_fn, rj_amd_agent_memory_pool_get_info,                      \
     hsa_amd_agent_memory_pool_get_info_fn_t)                                                       \
@@ -1792,6 +1814,51 @@ hsa_status_t HSA_API rj_amd_memory_pool_free(void *ptr) {
   log_message(kLogVerbose, "amd_memory_pool_free ptr=%p", ptr);
   hsa_status_t status = original(ptr);
   log_message(kLogVerbose, "amd_memory_pool_free status=%d", static_cast<int>(status));
+  return status;
+}
+
+hsa_status_t HSA_API rj_amd_profiling_set_profiler_enabled(hsa_queue_t *queue, int enable) {
+  auto *original = layer().amd_profiling_set_profiler_enabled();
+  if (!original)
+    return HSA_STATUS_ERROR;
+  log_message(kLogVerbose, "amd_profiling_set_profiler_enabled queue=%p enable=%d",
+              static_cast<void *>(queue), enable);
+  return original(queue, enable);
+}
+
+hsa_status_t HSA_API rj_amd_profiling_get_dispatch_time(hsa_agent_t agent, hsa_signal_t signal,
+                                                        hsa_amd_profiling_dispatch_time_t *time) {
+  auto *original = layer().amd_profiling_get_dispatch_time();
+  if (!original)
+    return HSA_STATUS_ERROR;
+  hsa_agent_t mapped = AgentMapper::instance().map(agent);
+  hsa_status_t status = original(mapped, signal, time);
+  log_message(kLogVerbose,
+              "amd_profiling_get_dispatch_time agent=%llu mapped=%llu signal=%llu status=%d "
+              "start=%llu end=%llu",
+              static_cast<unsigned long long>(agent.handle),
+              static_cast<unsigned long long>(mapped.handle),
+              static_cast<unsigned long long>(signal.handle), static_cast<int>(status),
+              static_cast<unsigned long long>(time ? time->start : 0),
+              static_cast<unsigned long long>(time ? time->end : 0));
+  return status;
+}
+
+hsa_status_t HSA_API rj_amd_profiling_convert_tick_to_system_domain(hsa_agent_t agent,
+                                                                    uint64_t agent_tick,
+                                                                    uint64_t *system_tick) {
+  auto *original = layer().amd_profiling_convert_tick_to_system_domain();
+  if (!original)
+    return HSA_STATUS_ERROR;
+  hsa_agent_t mapped = AgentMapper::instance().map(agent);
+  hsa_status_t status = original(mapped, agent_tick, system_tick);
+  log_message(kLogVerbose,
+              "amd_profiling_convert_tick_to_system_domain agent=%llu mapped=%llu status=%d "
+              "agent_tick=%llu system_tick=%llu",
+              static_cast<unsigned long long>(agent.handle),
+              static_cast<unsigned long long>(mapped.handle), static_cast<int>(status),
+              static_cast<unsigned long long>(agent_tick),
+              static_cast<unsigned long long>(system_tick ? *system_tick : 0));
   return status;
 }
 
