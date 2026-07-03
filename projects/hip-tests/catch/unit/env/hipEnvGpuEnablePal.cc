@@ -149,13 +149,18 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
     // Debug: print what we received
     INFO("Received output length: " << output1.length());
     INFO("Output content: " << output1);
-
-    REQUIRE(result1 == 0);  // HIP should initialize successfully
-
     bool palInit1 = (output1.find("] PAL backend initialized") != std::string::npos);
     bool rocrInit1 = (output1.find("] ROCr backend initialized") != std::string::npos);
-    REQUIRE(palInit1 == true);
-    REQUIRE(rocrInit1 == false);
+    #if defined(_WIN32)
+      REQUIRE(result1 == 0);  // HIP should initialize successfully
+      REQUIRE(palInit1 == true);
+      REQUIRE(rocrInit1 == false);
+    #else
+      REQUIRE(result1 != 0);  // HIP init fails
+      // Linux: PAL not supported . So init fails
+      REQUIRE(palInit1 == false);
+      REQUIRE(rocrInit1 == false);
+    #endif
   }
 
   // Test GPU_ENABLE_PAL="2" -> Auto-select
@@ -171,8 +176,14 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
     // Auto-select initializes both backends
     bool palInit2 = (output2.find("] PAL backend initialized") != std::string::npos);
     bool rocrInit2 = (output2.find("] ROCr backend initialized") != std::string::npos);
-    REQUIRE(palInit2 == true);
-    REQUIRE(rocrInit2 == true);
+    #if defined(_WIN32)
+      REQUIRE(palInit2 == true;
+      REQUIRE(rocrInit2 == true);
+    #else
+      // Linux: PAL not supported . rocr should init correctly
+      REQUIRE(palInit2 == false);
+      REQUIRE(rocrInit2 == true);
+    #endif
   }
 }
 

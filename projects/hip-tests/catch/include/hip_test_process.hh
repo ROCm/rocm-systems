@@ -230,6 +230,7 @@ class SpawnProc {
         int fd = open(tmpFileName_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd >= 0) {
           dup2(fd, STDOUT_FILENO);
+          dup2(fd, STDERR_FILENO);  // Redirect stderr to the same file as stdout
           close(fd);
         }
       }
