@@ -7,9 +7,12 @@
  ************************************************************************/
 
 #include "rccl_ptr.h"
-template<typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline, int useAcc>
-class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc>:
-    public PrimitivesWithoutDirect<Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc>> {
+// UserRegMode is accepted only to match the Primitives primary template (which
+// carries it for LL128, see primitives.h/prims_ll128.h). The LL protocol path is
+// unchanged from the baseline and ignores it.
+template<typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline, int useAcc, int UserRegMode>
+class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>:
+    public PrimitivesWithoutDirect<Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>> {
 
   // In the case of Fan::MaxRecv == 0, we need to force MaxRecv to 1 for this to compile
   // This is because of a recv buffer which is allocated to MaxRecv length in send-only cases.

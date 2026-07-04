@@ -15,8 +15,27 @@ all_algos     = ["TREE","RING", "", "", "", "", "PAT"]
 all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
 all_unrolls   = ["1", "2", "4"]
+# User-buffer registration mode (compile-time UserRegMode template parameter):
+#   "0" = runtime / not-applicable (single kernel, current behavior)
+#   "1" = registered user buffer   (LL128 Direct path bypasses cache)
+#   "2" = non-registered user buffer (LL128 Direct path uses plain/non-temporal)
+# Only LL128 for the collectives in `ll128_reg_variant_colls` is split into the
+# "1"/"2" pair; everything else stays a single "0" kernel.
+all_regs      = ["0", "1", "2"]
 
-all_params = [all_colls, all_algos, all_protos, all_redops, all_tys, all_accs, all_pipelines, all_unrolls]
+all_params = [all_colls, all_algos, all_protos, all_redops, all_tys, all_accs, all_pipelines, all_unrolls, all_regs]
+
+# Collectives whose LL128 kernels are specialized into separate registered /
+# non-registered variants (their LL128 user-buffer path is Direct=1, so the
+# compile-time split removes a runtime branch and its dead code). Keep this in
+# sync with `ncclDevFuncIsLL128RegVariant()` in src/include/device.h and the
+# selection logic in src/enqueue.cc.
+ll128_reg_variant_colls = {"AllReduce", "AllGather", "Broadcast"}
+
+def reg_values_of(coll, proto):
+  if proto == "LL128" and coll in ll128_reg_variant_colls:
+    return ["1", "2"]
+  return ["0"]
 
 ################################################################################
 # The first command line argument is the path to the directory to generate and
@@ -189,9 +208,10 @@ class Fn:
   acc: str
   pipeline: str
   unroll: str
+  reg: str
 
   def __iter__(self):
-    return iter((self.coll, self.algo, self.proto, self.redop, self.ty, self.acc, self.pipeline, self.unroll))
+    return iter((self.coll, self.algo, self.proto, self.redop, self.ty, self.acc, self.pipeline, self.unroll, self.reg))
 
 def calc_unroll_and_pipeline_for_local_arch():
 
@@ -242,7 +262,7 @@ local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
 
 # Helper function to check if the conditions for the collective is being met
-def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll):
+def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
   if redop == "SumPostDiv" and ty[0] not in ("i","u"):
     return False
   if coll == "" or algo == "":
@@ -256,7 +276,8 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll):
       acc not in acc_of_coll[coll] or
       pipeline not in pipelines_of_coll[coll] or (pipeline in ["1"] and ty not in pipelined_types) or
       pipeline not in local_pipeline or
-      unroll not in local_unroll):
+      unroll not in local_unroll or
+      reg not in reg_values_of(coll, proto)):
     return False
   return True
 
@@ -301,9 +322,9 @@ def func_filter(function_params, current_idx, item_list=None):
         # For each loop layer remove the last element in item_list
         item_list.pop()
   else:
-    coll, algo, proto, redop, ty, acc, pipeline, unroll = item_list
-    if func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll):
-      yield(coll, algo, proto, redop, ty, acc, pipeline, unroll)
+    coll, algo, proto, redop, ty, acc, pipeline, unroll, reg = item_list
+    if func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
+      yield(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
 
 
 # Parse ONLY_FUNCS input and feed it to func_filter
@@ -324,7 +345,7 @@ def parse_input(func_pattern):
 
 # Maps functions to the chosen representative for the equivalence class it
 # belongs to. For instance (sum, signed int) maps to (sum, unsigned int).
-def equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, unroll):
+def equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
   if coll in ("AllReduce", "Reduce", "ReduceScatter"):
     # map signed integer sum/prod to unsigned
     if redop in ("Sum","Prod","PreMulSum","SumPostDiv") and ty[0]=="i":
@@ -336,7 +357,7 @@ def equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, unroll):
     if (pipeline != "0" and proto != "SIMPLE"):
       pipeline = "0"
 
-  return (coll, algo, proto, redop, ty, acc, pipeline, unroll)
+  return (coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
 
 # Order rows are enumerated must match formula of `ncclDevFuncId()`:
 # outermost loop should be for unroll factor; refer to host_table section
@@ -349,8 +370,9 @@ def enumerate_func_rows():
             for ty in all_tys:
               for acc in all_accs:
                 for pipeline in local_pipeline:
-                  if func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll):
-                    yield (coll, algo, proto, redop, ty, acc, pipeline, unroll)
+                  for reg in all_regs:
+                    if func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
+                      yield (coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
 
 # Sort the hashmap based on custom key <coll> <algo> <proto> <redop> <ty>
 def custom_sort_key(fn: Fn):
@@ -362,7 +384,8 @@ def custom_sort_key(fn: Fn):
         all_redops.index(fn.redop),
         all_tys.index(fn.ty),
         all_accs.index(fn.acc),
-        local_pipeline.index(fn.pipeline)
+        local_pipeline.index(fn.pipeline),
+        all_regs.index(fn.reg)
     )
 
 def get_arch_guard(fn):
@@ -376,6 +399,13 @@ def get_arch_guard(fn):
       cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
 
   return cond
+
+# Build the mangled function symbol suffix. The user-buffer registration mode is
+# only appended when it is meaningful (LL128 reg-variant kernels, reg == "1"/"2")
+# so that all other kernels keep their historical names.
+def fn_sym(fn):
+  reg = fn.reg if fn.reg != "0" else None
+  return paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll, reg)
 
 ################################################################################
 
@@ -401,7 +431,7 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   # Plain forward declarations; noinline (device-linker only) is controlled
   # solely by DEFINE_ncclDevFunc in common.h.
   for fn in primary_funcs:
-    sym = paste("_", "ncclDevFunc", *fn)
+    sym = "ncclDevFunc_" + fn_sym(fn)
     guard = get_arch_guard(fn)
     if guard:
       out("#if %s\n__device__ void %s();\n#endif\n" % (guard, sym))
@@ -420,7 +450,7 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
     out("static __device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
     for fn in primary_funcs:
       if fn.unroll != unroll: continue
-      sym = paste("_", "ncclDevFunc", *fn)
+      sym = "ncclDevFunc_" + fn_sym(fn)
       guard = get_arch_guard(fn)
       if guard:
         out("#if %s\n/*%4d*/ %s,\n#else\n/*%4d*/ nullptr,\n#endif\n" % (guard, index[unroll], sym, index[unroll]))
@@ -486,6 +516,7 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
   out("//   bits 16-19:  ty index\n")
   out("//   bits 20-23:  accumulator index\n")
   out("//   bits 24-27:  pipeline index\n")
+  out("//   bits 28-31:  user-buffer registration mode index (LL128 reg/noreg)\n")
   out("#include <unordered_map>\n")
   out("std::unordered_map<uint64_t, int> ncclDevFuncNameToId = {\n")
 
@@ -507,6 +538,7 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       ty_idx = all_tys.index(fn.ty)
       acc_idx = all_accs.index(fn.acc)
       pipeline_idx = all_pipelines.index(fn.pipeline)
+      reg_idx = all_regs.index(fn.reg)
       # Assert that 4 bits (16 values) is enough to map all_colls, all_algos, etc.
       assert len(all_colls) <= 16, "Error: all_colls has more than 16 values, which exceeds 4-bit capacity."
       assert len(all_algos) <= 16, "Error: all_algos has more than 16 values, which exceeds 4-bit capacity."
@@ -515,6 +547,7 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       assert len(all_tys) <= 16, "Error: all_tys has more than 16 values, which exceeds 4-bit capacity."
       assert len(all_accs) <= 16, "Error: all_accs has more than 16 values, which exceeds 4-bit capacity."
       assert len(all_pipelines) <= 16, "Error: all_pipelines has more than 16 values, which exceeds 4-bit capacity."
+      assert len(all_regs) <= 16, "Error: all_regs has more than 16 values, which exceeds 4-bit capacity."
       # Create a 64-bit unsigned integer key and pack the indices into 4 bits each
       key = (
         (coll_idx & 0xF)
@@ -524,9 +557,10 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
         | ((ty_idx & 0xF) << 16)
         | ((acc_idx & 0xF) << 20)
         | ((pipeline_idx & 0xF) << 24)
+        | ((reg_idx & 0xF) << 28)
       )
       if fn.coll == "Broadcast":
-        key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8))
+        key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8) | ((reg_idx & 0xF) << 28))
       if fn.coll in ["SendRecv", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
         key = ((coll_idx & 0x3F))
       
@@ -536,7 +570,7 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
 # Maps to .cu filename which implements this func. The only constraint is that
 # "coll" is reflected in the name: formally that no two funcs having different
 # coll's map to the same filename.
-def impl_filename(coll, algo, proto, redop, ty, acc, pipeline, unroll):
+def impl_filename(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
   return "%s.cpp" % paste("_", coll_camel_to_lower[coll], redop and redop.lower(), ty)
 
 # Partition the functions and kernels to the .cu filenames. The partition is
@@ -592,14 +626,14 @@ for name in name_to_funcs.keys():
     )
 
     for fn in fns:
-      sym = paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll)
+      sym = fn_sym(fn)
       guard = get_arch_guard(fn)
       if guard:
         out("#if %s\n" % guard)
       out(
-        "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll})\n"
+        "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll}, {reg})\n"
         .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop], ty_cxx=ty_to_cxx[fn.ty],
-                algo=(fn.algo or "RING"), proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline, unroll=fn.unroll)
+                algo=(fn.algo or "RING"), proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline, unroll=fn.unroll, reg=fn.reg)
       )
       if guard: 
         out("#endif\n")
@@ -621,7 +655,7 @@ specialized_filelist = []
 for fn in primary_funcs:
   if fn.coll == "Nop":
     continue
-  sym = paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll)
+  sym = fn_sym(fn)
   func_name = "ncclDevFunc_" + sym
   lower_coll = coll_camel_to_lower[fn.coll]
   guard = get_arch_guard(fn)
@@ -638,7 +672,7 @@ for fn in primary_funcs:
       out("#if %s\n" % guard)
     out(
       "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, "
-      "NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll})\n\n"
+      "NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll}, {reg})\n\n"
       "__launch_bounds__(NCCL_MAX_NTHREADS, 1)\n"
       "__global__ void ncclDevKernel_{sym}_Specialized(\n"
       "    ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{\n"
@@ -648,7 +682,7 @@ for fn in primary_funcs:
       .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop],
               ty_cxx=ty_to_cxx[fn.ty], algo=(fn.algo or "RING"),
               proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline,
-              unroll=fn.unroll, func_name=func_name)
+              unroll=fn.unroll, reg=fn.reg, func_name=func_name)
     )
     if guard:
       out("#endif\n")
