@@ -1526,13 +1526,23 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
   for (const auto& f : kd_fixups_) max_pref_lines = std::max(max_pref_lines, f.inst_pref);
   const size_t pref_bytes = static_cast<size_t>(max_pref_lines) * kInstPrefUnitBytes;
   const size_t guard = pref_bytes > kTrampolineStubStride ? pref_bytes - kTrampolineStubStride : 0;
-  const size_t pool = n * kTrampolineStubStride + guard;
+  const size_t pool_raw = n * kTrampolineStubStride + guard;
+
+  // ROCM-27380 workaround: gfx1250 CP prefetches much further ahead than
+  // INST_PREF_SIZE suggests (observed: 20-28KB vs expected max 8KB). Add a
+  // large guard region to prevent page faults from prefetch running off the
+  // end of mapped memory. Also ensure page-aligned allocation.
+  const size_t kPageSize = static_cast<size_t>(DEFAULT_GPU_PAGE_SIZE);
+  const size_t kMinGuardPages = 8;  // 32KB guard for aggressive gfx1250 prefetch
+  const size_t pool_with_guard = pool_raw + kMinGuardPages * kPageSize;
+  const size_t pool = AlignUp(pool_with_guard, kPageSize);
+  const size_t align = std::max(static_cast<size_t>(AMD_ISA_ALIGN_BYTES), kPageSize);
 
   // AMDGPU_HSA_SEGMENT_CODE_AGENT yields *executable* device memory: the loader
   // context backs it with RegionMemory(..., is_code=true), which sets
   // core::MemoryRegion::AllocateExecutable (see amd_loader_context.cpp).
   void* ptr = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, pool,
-                                     AMD_ISA_ALIGN_BYTES, /*zero=*/true);
+                                     align, /*zero=*/true);
   if (!ptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   // vaddr == 0: Address()/Copy() index by raw byte offset into the pool.
@@ -1550,7 +1560,7 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
         reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr + f.entry_off));
     const uint64_t stub_dev = reinterpret_cast<uint64_t>(tramp->Address(stub_off));
 
-    uint8_t blob[kTrampolineStubStride];
+    alignas(uint32_t) uint8_t blob[kTrampolineStubStride];
     BuildTrampolineGfx1250(blob, entry_dev);    // stub jumps to the real entry
     tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
 
