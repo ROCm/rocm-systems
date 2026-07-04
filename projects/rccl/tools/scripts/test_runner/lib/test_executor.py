@@ -2316,10 +2316,17 @@ class TestExecutor:
         for record in self.test_records:
             emitter.add_test(record)
 
-        # Attach coverage if a report was generated this run.
-        cov = re_mod.parse_coverage_report(
-            os.path.join(self.report_dir, "function_coverage_report.txt")
+        # Attach coverage if a report was generated this run. The authoritative
+        # overall summary is llvm-cov's index.html Totals row; the text report is
+        # a --show-functions dump with only per-file totals, so it is a last
+        # resort used only when index.html is missing.
+        cov = re_mod.parse_coverage_index_html(
+            os.path.join(self.report_dir, "index.html")
         )
+        if not cov:
+            cov = re_mod.parse_coverage_report(
+                os.path.join(self.report_dir, "function_coverage_report.txt")
+            )
         emitter.set_coverage(cov)
 
         summary = {
