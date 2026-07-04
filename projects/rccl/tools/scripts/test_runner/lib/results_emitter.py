@@ -167,6 +167,7 @@ def parse_coverage_index_html(index_html_path):
         return None
     # Each tuple is (pct, covered, total). index.html order: Function, Line,
     # Region, Branch. Branch may be absent, so require only the first three.
+    # NB: column order reflects current llvm-cov HTML; revisit if it changes.
     vals = re.findall(r">\s*([0-9.]+)%\s*\((\d+)/(\d+)\)", m.group(0))
     if len(vals) < 3:
         return None
@@ -224,11 +225,13 @@ def parse_coverage_report(report_txt_path):
         return None
     total_line = total_lines[0]
 
-    pcts = [float(p) for p in re.findall(r"([0-9]+\.[0-9]+)%", total_line)]
+    pcts = [float(p) for p in re.findall(r"([0-9.]+)%", total_line)]
     # Plain report order: Region, Function, Line, Branch (branch may be absent).
+    # NB: column order reflects current llvm-cov `report`; revisit if a future
+    # llvm-cov reorders columns.
     keys = ["regions_pct", "functions_pct", "lines_pct", "branches_pct"]
     cov = {k: (pcts[i] if i < len(pcts) else None) for i, k in enumerate(keys)}
-    cov["raw"] = {"source": "report.txt", "total_line": total_line.strip(), "percents": pcts}
+    cov["raw"] = {"source": "plain-report", "total_line": total_line.strip(), "percents": pcts}
     return cov
 
 

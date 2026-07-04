@@ -2238,7 +2238,7 @@ class TestExecutor:
                 )
             print(f"Coverage summary report generated: {summary_report}")
         except subprocess.CalledProcessError as e:
-            print(f"ERROR: Failed to generate plain coverage summary report")
+            print("ERROR: Failed to generate plain coverage summary report")
             print(f"Error: {e.stderr}")
             if self.args.verbose:
                 print(f"Command was: {' '.join(summary_cmd)}")
@@ -2249,7 +2249,8 @@ class TestExecutor:
         print(f"Report directory: {self.report_dir}")
         print(f"HTML report: {self.report_dir}/index.html")
         print(f"Text report: {text_report}")
-        print(f"Summary report: {summary_report}")
+        if os.path.isfile(summary_report):
+            print(f"Summary report: {summary_report}")
 
     def _resolve_rccl_lib(self):
         """Best-effort: identify the librccl.so the tests actually loaded, and --
@@ -2261,7 +2262,6 @@ class TestExecutor:
         Returns a dict describing the chosen lib (or {"resolved": False, ...}).
         Never raises -- provenance metadata must not break a run."""
         try:
-            import glob as _glob
             from lib import results_emitter as re_mod
 
             cand_dirs = []
@@ -2289,7 +2289,7 @@ class TestExecutor:
                         found = p
                         break
                 if not found:
-                    hits = sorted(_glob.glob(os.path.join(d, "librccl.so*")))
+                    hits = sorted(glob.glob(os.path.join(d, "librccl.so*")))
                     if hits:
                         found = hits[0]
                 if found:
@@ -2323,7 +2323,7 @@ class TestExecutor:
                 info["soname_version"] = sm.group(1)
 
             bd = os.path.realpath(build_dir) if build_dir else None
-            if bd and (real == os.path.join(bd, os.path.basename(real)) or real.startswith(bd + os.sep)):
+            if bd and real.startswith(bd + os.sep):
                 info["source"] = "custom" if getattr(self, "using_custom_lib", False) else "test-build"
             else:
                 # Walk up to the ROCm root (the dir holding .info/version).
