@@ -2251,6 +2251,103 @@ class TestExecutor:
         print(f"Text report: {text_report}")
         print(f"Summary report: {summary_report}")
 
+    def _resolve_rccl_lib(self):
+        """Best-effort: identify the librccl.so the tests actually loaded, and --
+        if it came from a ROCm install rather than a fresh build -- which one.
+
+        Resolution mirrors the loader search order the runner sets in
+        LD_LIBRARY_PATH: the (test) build_dir first, then the caller's
+        LD_LIBRARY_PATH, then <rocm_root>/lib, then the system ldconfig cache.
+        Returns a dict describing the chosen lib (or {"resolved": False, ...}).
+        Never raises -- provenance metadata must not break a run."""
+        try:
+            import glob as _glob
+
+            cand_dirs = []
+            build_dir = getattr(self, "build_dir", None)
+            if build_dir:
+                cand_dirs.append(build_dir)
+            for d in (os.environ.get("LD_LIBRARY_PATH", "") or "").split(":"):
+                if d:
+                    cand_dirs.append(d)
+            rocm_root = None
+            try:
+                rocm_root = self._rocm_root()
+            except Exception:
+                rocm_root = None
+            if rocm_root:
+                cand_dirs.append(os.path.join(rocm_root, "lib"))
+
+            found = None
+            for d in cand_dirs:
+                if not d:
+                    continue
+                for name in ("librccl.so", "librccl.so.1"):
+                    p = os.path.join(d, name)
+                    if os.path.isfile(p) or os.path.islink(p):
+                        found = p
+                        break
+                if not found:
+                    hits = sorted(_glob.glob(os.path.join(d, "librccl.so*")))
+                    if hits:
+                        found = hits[0]
+                if found:
+                    break
+
+            if not found:  # system loader cache
+                try:
+                    out = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, timeout=10)
+                    m = re.search(r"librccl\.so\S*\s+.*=>\s+(\S+)", out.stdout or "")
+                    if m:
+                        found = m.group(1)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+
+            if not found:
+                return {"resolved": False,
+                        "note": "librccl.so not found on the test LD_LIBRARY_PATH or in ldconfig"}
+
+            real = os.path.realpath(found)
+            info = {"resolved": True, "path": found, "realpath": real}
+            try:
+                st = os.stat(real)
+                info["size"] = st.st_size
+                info["mtime"] = datetime.datetime.fromtimestamp(
+                    st.st_mtime, datetime.timezone.utc).isoformat()
+            except OSError:
+                pass
+
+            sm = re.search(r"librccl\.so\.([0-9][0-9.]*)$", real)
+            if sm:
+                info["soname_version"] = sm.group(1)
+
+            bd = os.path.realpath(build_dir) if build_dir else None
+            if bd and (real == os.path.join(bd, os.path.basename(real)) or real.startswith(bd + os.sep)):
+                info["source"] = "custom" if getattr(self, "using_custom_lib", False) else "test-build"
+            else:
+                # Walk up to the ROCm root (the dir holding .info/version).
+                root = None
+                d = os.path.dirname(real)
+                for _ in range(6):
+                    if os.path.isfile(os.path.join(d, ".info", "version")):
+                        root = d
+                        break
+                    nd = os.path.dirname(d)
+                    if nd == d:
+                        break
+                    d = nd
+                if root:
+                    info["source"] = "rocm-install"
+                    info["rocm_root"] = root
+                    rv = re_mod._rocm_version(root)
+                    if rv:
+                        info["rocm_version"] = rv
+                else:
+                    info["source"] = "system"
+            return info
+        except Exception as e:  # provenance is best-effort
+            return {"resolved": False, "note": f"rccl lib resolution failed: {e}"}
+
     def emit_results(self):
         """Emit structured results for the results dashboard.
 
@@ -2337,6 +2434,11 @@ class TestExecutor:
                 build_type = "release"
             md["rccl_build_type"] = build_type
             md["mpi_impl"] = self.mpi_impl
+            # Which librccl.so the tests actually loaded (and, if it came from a
+            # ROCm install rather than a fresh build, which install). rccl_sha/
+            # rccl_branch describe the *source* checkout, which may differ from
+            # the loaded lib on --no-build / system-RCCL runs.
+            md["rccl_lib"] = self._resolve_rccl_lib()
             md.setdefault("checks", {})["release_build"] = {
                 "status": "OK" if build_type == "release" else ("SKIP" if build_type == "custom" else "WARN"),
                 "value": build_type + (" (perf should use release)" if build_type == "debug" else ""),
