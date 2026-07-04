@@ -1624,10 +1624,10 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
     if (trampoline_enabled_gfx125x_) {
       // Record this descriptor; the trampoline is installed after relocations.
       // sym->VAddr() is the descriptor's ELF vaddr (matches SymbolAddress below).
-      // INST_PREF_SIZE (GFX11+) = number of 128B I$ lines the CP prefetches ahead
-      // of the entry; captured here to size the trampoline's prefetch guard.
+      // INST_PREF_SIZE = number of 128B I$ lines the CP prefetches ahead of the
+      // entry; captured here to size the trampoline's prefetch guard.
       uint32_t inst_pref = AMDHSA_BITS_GET(
-          kd.compute_pgm_rsrc3, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE);
+          kd.compute_pgm_rsrc3, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE);
       kd_fixups_.push_back(
           {SymbolSegment(agent, sym), sym->VAddr(), kd.kernel_code_entry_byte_offset, inst_pref});
     }
