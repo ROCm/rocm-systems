@@ -10,6 +10,7 @@ set(rocprofiler_sdk_sources
     ${CMAKE_CURRENT_LIST_DIR}/marker_writer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/trace_control.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rccl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/spm_config.cpp
     ${CMAKE_CURRENT_LIST_DIR}/spm.cpp
 )
 

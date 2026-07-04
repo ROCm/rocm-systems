@@ -6,7 +6,7 @@ set(rocprofiler_sdk_components_unit_tests_sources
     test_roctx_client.cpp
     test_spm.cpp
     ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/trace_control.cpp
-    ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/spm.cpp
+    ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/spm_config.cpp
 )
 
 add_library(
