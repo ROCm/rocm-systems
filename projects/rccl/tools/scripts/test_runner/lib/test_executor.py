@@ -238,7 +238,7 @@ class TestExecutor:
     MPI_IMPL_CONFIG = {
         "openmpi": {
             "env_format": "-x {key}='{value}'",
-            "default_args": "--mca btl ^vader,openib --mca pml ucx --bind-to none",
+            "default_args": "--mca btl ^vader,openib --bind-to none",
         },
         "mpich": {
             "env_format": "-env {key} '{value}'",
@@ -295,6 +295,14 @@ class TestExecutor:
         self.test_names = []
         self.test_durations = []
         self.test_suites = []
+
+        # Structured result emission (dashboard). Enabling either --emit-results or
+        # --db-push turns on per-test log capture so perf output can be parsed.
+        self.emit_enabled = bool(
+            getattr(args, "emit_results", False) or getattr(args, "db_push", False)
+        )
+        self.test_records = []       # rich per-test records for the emitter
+        self._emit_log_counter = 0   # keeps captured-log filenames unique
 
         # Rerun tracking
         self.failed_test_info = []  # Store info needed to rerun failed tests
@@ -357,6 +365,13 @@ class TestExecutor:
                 print(f"  (Custom path via {'--build-dir' if self.args.build_dir else 'RCCL_LIB_PATH/RCCL_BUILD_DIR'})")
             print(f"Log directory:    {self.log_dir}")
             print(f"Report directory: {self.report_dir}")
+
+    def _emit_log_path(self, test_name):
+        """Unique per-test captured-log path under log_dir (used when result
+        emission is enabled)."""
+        self._emit_log_counter += 1
+        safe = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(test_name or "test"))
+        return os.path.join(self.log_dir, f"{self._emit_log_counter:04d}_{safe}.log")
 
     @property
     def mpi_hostfile(self):
@@ -1032,6 +1047,16 @@ class TestExecutor:
         test_args = test_config.get("command_args", "")
         custom_args = f"{base_args} {test_args}".strip()
 
+        # rccl-tests dtype flag (-d <type>) for result emission; None for gtests.
+        _dtype_match = re.search(r'(?:^|\s)-d\s+(\S+)', custom_args)
+        perf_dtype = _dtype_match.group(1) if _dtype_match else None
+
+        # Execution mode: MPI (>1 rank -> mpirun) vs single-process multithreaded
+        # (-t N) vs single. Recorded per test so results are attributable.
+        _t_match = re.search(r'(?:^|\s)-t\s+(\d+)', custom_args)
+        perf_nthreads = int(_t_match.group(1)) if _t_match else 1
+        exec_mode = "mpi" if num_ranks > 1 else ("threaded" if perf_nthreads > 1 else "single")
+
         # Merge environment variables
         merged_env = {
             **self.global_env,
@@ -1052,7 +1077,7 @@ class TestExecutor:
             if description:
                 print(f"  Description: {description}")
             print(f"  Type:    {'gtest' if is_gtest else 'non-gtest'}")
-            print(f"  Binary:  {binary}")
+            print(f"  Binary:  {os.path.expanduser(expand_env_vars(str(binary)))}")
             print(f"  Filter:  {test_filter}")
             print(f"  Ranks:   {num_ranks}")
             print(f"  Nodes:   {num_nodes}")
@@ -1274,7 +1299,15 @@ class TestExecutor:
             suite_args = self._normalize_mpi_args(suite_config.get("mpi_args"))
             test_args = self._normalize_mpi_args(test_config.get("mpi_args"))
 
-            mca_params = " ".join(p for p in (base_args, suite_args, test_args) if p)
+            # User-supplied extra mpi args, appended last so they override/extend
+            # whatever the config provides. Both the --mpi-args CLI flag and the
+            # RCCL_TEST_MPI_ARGS env var are honored (CLI first, then env).
+            cli_extra_args = self._normalize_mpi_args(getattr(self.args, 'mpi_args', ''))
+            env_extra_args = self._normalize_mpi_args(os.environ.get('RCCL_TEST_MPI_ARGS', ''))
+
+            mca_params = " ".join(
+                p for p in (base_args, suite_args, test_args, cli_extra_args, env_extra_args) if p
+            )
 
             mpi_args = (
                 f"-np {num_ranks} "
@@ -1339,14 +1372,30 @@ class TestExecutor:
         # subprocess.run(timeout=...) only SIGKILLs the immediate /bin/sh child,
         # leaving mpirun and all of its ranks running (and holding the GPUs),
         # which is exactly the orphaned-process behaviour seen on timeout.
+        # When result emission is enabled, tee output to a per-test log so perf
+        # (busbw/algbw) numbers can be parsed afterwards, while still streaming to
+        # the console. ``set -o pipefail`` keeps the pipeline's exit status equal to
+        # the test's (not tee's). Default behaviour (inherited stdout, no capture)
+        # is unchanged when emission is off.
+        emit_log_path = None
         start_time = time.time()
-        proc = subprocess.Popen(
-            cmd,
-            shell=True,
-            cwd=os.path.join(self.build_dir, "test"),
-            env=env,
-            start_new_session=True,
-        )
+        if self.emit_enabled:
+            emit_log_path = self._emit_log_path(test_name)
+            wrapped = f"set -o pipefail; ({cmd}) 2>&1 | tee {shlex.quote(emit_log_path)}"
+            proc = subprocess.Popen(
+                ["bash", "-c", wrapped],
+                cwd=os.path.join(self.build_dir, "test"),
+                env=env,
+                start_new_session=True,
+            )
+        else:
+            proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                cwd=os.path.join(self.build_dir, "test"),
+                env=env,
+                start_new_session=True,
+            )
         try:
             try:
                 returncode = proc.wait(timeout=timeout if timeout > 0 else None)
@@ -1360,6 +1409,10 @@ class TestExecutor:
                     "result": TestResult.RESULT_TIMEOUT.value,
                     "duration": duration,
                     "error": f"Test timed out after {timeout} seconds",
+                    "binary": binary, "is_gtest": is_gtest, "dtype": perf_dtype,
+                    "num_nodes": num_nodes, "num_gpus": num_gpus,
+                    "num_ranks": num_ranks, "log_file": emit_log_path,
+                    "exec_mode": exec_mode, "nthreads": perf_nthreads,
                 }
             except KeyboardInterrupt:
                 # Make sure Ctrl-C tears down the whole MPI job, not just the shell.
@@ -1397,6 +1450,10 @@ class TestExecutor:
                 "result": test_result,
                 "duration": duration,
                 "exit_code": int(returncode) if returncode is not None else -1,
+                "binary": binary, "is_gtest": is_gtest, "dtype": perf_dtype,
+                "num_nodes": num_nodes, "num_gpus": num_gpus,
+                "num_ranks": num_ranks, "log_file": emit_log_path,
+                "exec_mode": exec_mode, "nthreads": perf_nthreads,
             }
         finally:
             if gtest_json_path:
@@ -1641,6 +1698,12 @@ class TestExecutor:
             self.test_results.append(result["result"])
             self.test_durations.append(result["duration"])
             self.test_suites.append(suite_name)
+
+            if self.emit_enabled:
+                record = dict(result)
+                record["suite"] = suite_name
+                record["test_name"] = test_name
+                self.test_records.append(record)
 
             # If test failed and rerun flag is set, rerun immediately
             if self.args.rerun_failed and result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
@@ -2151,4 +2214,126 @@ class TestExecutor:
         print(f"Report directory: {self.report_dir}")
         print(f"HTML report: {self.report_dir}/index.html")
         print(f"Text report: {text_report}")
+
+    def emit_results(self):
+        """Emit structured results for the results dashboard.
+
+        Always writes local JSON/JSONL + a .tar.gz snapshot (the durable source of
+        truth). When --db-push is set, additionally pushes to PostgreSQL on a best
+        effort basis -- a DB failure/timeout is logged but never fails the run.
+
+        No-op unless --emit-results or --db-push was passed.
+        """
+        if not self.emit_enabled:
+            return
+
+        import socket
+        import uuid
+        from lib import results_emitter as re_mod
+        from lib import host_metadata
+
+        print(f"\n{'='*80}")
+        print("EMITTING RESULTS")
+        print(f"{'='*80}")
+
+        stamp = datetime.datetime.now(datetime.timezone.utc)
+        run_id = f"{stamp.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+
+        sha, branch = re_mod.git_info(os.path.dirname(os.path.abspath(__file__)))
+
+        # num_nodes: largest node count seen across recorded tests (falls back to 1).
+        node_counts = [r.get("num_nodes") for r in self.test_records
+                       if isinstance(r.get("num_nodes"), int)]
+        num_nodes = max(node_counts) if node_counts else 1
+
+        sys_cfg = {}
+        try:
+            sys_cfg = self.config_processor.config.get("system_configurations", {}) or {}
+        except AttributeError:
+            sys_cfg = {}
+
+        def _redact_sensitive_env(env):
+            # Persist env for debugging, but mask values of secret-like keys so
+            # tokens/passwords/DSNs never land in the tarball or DB.
+            if not env:
+                return None
+            sensitive = re.compile(r"(?i)(pass|secret|token|api[_-]?key|access[_-]?key|credential|dsn)")
+            return {k: ("***redacted***" if sensitive.search(k) else v) for k, v in env.items()}
+
+        # Run tags (from --tag / --tags), de-duplicated in order.
+        run_tags = list(getattr(self.args, "tag", []) or [])
+        for _t in (getattr(self.args, "tags", "") or "").split(","):
+            _t = _t.strip()
+            if _t and _t not in run_tags:
+                run_tags.append(_t)
+
+        manifest = {
+            "run_id": run_id,
+            "created_at": stamp.isoformat(),
+            "started_at": stamp.isoformat(),
+            "rccl_sha": sha,
+            "rccl_branch": branch,
+            "rocm_version": re_mod._rocm_version(self._rocm_root()),
+            "host": socket.gethostname(),
+            "hosts": self.mpi_hosts or None,
+            "gpu_arch": re_mod.gpu_arch(),
+            "node_names": re_mod.node_names_from_mpi_hosts(self.mpi_hosts) or [socket.gethostname()],
+            "num_nodes": num_nodes,
+            "gpus_per_node": self.gpus_per_node or None,
+            "config_name": sys_cfg.get("name"),
+            "config_description": sys_cfg.get("description"),
+            "label": getattr(self.args, "run_label", "") or None,
+            "tags": run_tags or None,
+            "env": _redact_sensitive_env(self.global_env),
+        }
+
+        # Rich host/telemetry snapshot (best-effort; scale-up fabric gated on capability).
+        try:
+            md = host_metadata.collect(rocm_version=re_mod._rocm_version(self._rocm_root()))
+
+            # RCCL build type (perf configs should use a Release build).
+            install_flags = self.build_config.get("install_flags", []) if isinstance(self.build_config, dict) else []
+            if getattr(self, "using_custom_lib", False):
+                build_type = "custom"
+            elif any(f in install_flags for f in ("--debug", "--debug-fast")):
+                build_type = "debug"
+            else:
+                build_type = "release"
+            md["rccl_build_type"] = build_type
+            md["mpi_impl"] = self.mpi_impl
+            md.setdefault("checks", {})["release_build"] = {
+                "status": "OK" if build_type == "release" else ("SKIP" if build_type == "custom" else "WARN"),
+                "value": build_type + (" (perf should use release)" if build_type == "debug" else ""),
+            }
+            manifest["metadata"] = md
+        except Exception as e:
+            print(f"WARNING: host metadata collection failed: {e}")
+
+        results_dir = (getattr(self.args, "results_dir", "") or
+                       os.path.join(self.workspace_dir, "results"))
+
+        emitter = re_mod.ResultsEmitter(manifest, results_dir)
+        for record in self.test_records:
+            emitter.add_test(record)
+
+        # Attach coverage if a report was generated this run.
+        cov = re_mod.parse_coverage_report(
+            os.path.join(self.report_dir, "function_coverage_report.txt")
+        )
+        emitter.set_coverage(cov)
+
+        summary = {
+            "total": len(self.test_results),
+            "passed": self.test_results.count(TestResult.RESULT_PASSED.value),
+            "failed": self.test_results.count(TestResult.RESULT_FAILED.value),
+            "timeout": self.test_results.count(TestResult.RESULT_TIMEOUT.value),
+            "skipped": self.test_results.count(TestResult.RESULT_SKIPPED.value),
+            "duration_s": sum(self.test_durations) if self.test_durations else 0,
+        }
+        emitter.finalize_summary(summary)
+
+        emitter.write_local(log_dir=self.log_dir, report_dir=self.report_dir)
+
+        if getattr(self.args, "db_push", False):
+            emitter.push_postgres(timeout=getattr(self.args, "db_timeout", 10))
 

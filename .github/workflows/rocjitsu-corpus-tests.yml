@@ -66,6 +66,14 @@ jobs:
             enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 0
+          - name: asan-ubsan-gcc
+            build_type: RelWithDebInfo
+            enable_asan: 1
+            enable_ubsan: 1
+            enable_tsan: 0
+            enable_msan: 0
+            c_compiler: gcc
+            cxx_compiler: g++
 
     steps:
       - name: Install base dependencies
@@ -172,15 +180,24 @@ jobs:
           )
 
           CMAKE_CONFIG_FLAGS=()
-          if [[ "${{ matrix.name }}" == "asan-ubsan" ]]; then
+          if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
             CMAKE_CONFIG_FLAGS+=(
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
             )
           fi
+          if [[ -n "${{ matrix.c_compiler }}" ]]; then
+            CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
+          fi
+          if [[ -n "${{ matrix.cxx_compiler }}" ]]; then
+            CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${{ matrix.cxx_compiler }}")
+          fi
 
-          CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          CXXFLAGS=""
+          if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
+            CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          fi
           ROCM_PATH=`rocm-sdk path --root` \
             cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
