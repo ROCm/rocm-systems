@@ -177,7 +177,7 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
     bool palInit2 = (output2.find("] PAL backend initialized") != std::string::npos);
     bool rocrInit2 = (output2.find("] ROCr backend initialized") != std::string::npos);
     #if defined(_WIN32)
-      REQUIRE(palInit2 == true;
+      REQUIRE(palInit2 == true);
       REQUIRE(rocrInit2 == true);
     #else
       // Linux: PAL not supported . rocr should init correctly
