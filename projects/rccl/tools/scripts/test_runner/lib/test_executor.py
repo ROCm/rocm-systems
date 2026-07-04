@@ -2208,12 +2208,48 @@ class TestExecutor:
             if self.args.verbose:
                 print(f"Command was: {' '.join(text_cmd)}")
 
+        # Generate a plain (no --show-functions) llvm-cov report. Unlike the
+        # per-file --show-functions report above, a plain report ends in a single
+        # grand-TOTAL line, so it is a valid overall summary. This is the fallback
+        # the emitter parses when index.html is unavailable.
+        print("Generating plain coverage summary report...")
+        summary_report = os.path.join(self.report_dir, "coverage_summary.txt")
+        summary_cmd = [
+            llvm_cov,
+            "report",
+            f"--instr-profile={merged_profdata}",
+            "--Xdemangler=c++filt"
+        ]
+        summary_cmd.extend(object_files)
+        summary_cmd.extend([
+            f"--ignore-filename-regex={ignore_regex}",
+            "--sources",
+            self.build_dir
+        ])
+
+        try:
+            with open(summary_report, 'w') as f:
+                subprocess.run(
+                    summary_cmd,
+                    stdout=f,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=True
+                )
+            print(f"Coverage summary report generated: {summary_report}")
+        except subprocess.CalledProcessError as e:
+            print(f"ERROR: Failed to generate plain coverage summary report")
+            print(f"Error: {e.stderr}")
+            if self.args.verbose:
+                print(f"Command was: {' '.join(summary_cmd)}")
+
         print(f"\n{'='*80}")
         print("COVERAGE REPORT GENERATION COMPLETE")
         print(f"{'='*80}")
         print(f"Report directory: {self.report_dir}")
         print(f"HTML report: {self.report_dir}/index.html")
         print(f"Text report: {text_report}")
+        print(f"Summary report: {summary_report}")
 
     def emit_results(self):
         """Emit structured results for the results dashboard.
@@ -2317,15 +2353,16 @@ class TestExecutor:
             emitter.add_test(record)
 
         # Attach coverage if a report was generated this run. The authoritative
-        # overall summary is llvm-cov's index.html Totals row; the text report is
-        # a --show-functions dump with only per-file totals, so it is a last
-        # resort used only when index.html is missing.
+        # overall summary is llvm-cov's index.html Totals row. The fallback is the
+        # plain (no --show-functions) report, whose single grand-TOTAL line is a
+        # valid overall summary; the --show-functions function_coverage_report.txt
+        # is deliberately NOT used here (it has only per-file totals).
         cov = re_mod.parse_coverage_index_html(
             os.path.join(self.report_dir, "index.html")
         )
         if not cov:
             cov = re_mod.parse_coverage_report(
-                os.path.join(self.report_dir, "function_coverage_report.txt")
+                os.path.join(self.report_dir, "coverage_summary.txt")
             )
         emitter.set_coverage(cov)
 
