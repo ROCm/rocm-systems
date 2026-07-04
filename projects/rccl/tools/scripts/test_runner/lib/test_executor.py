@@ -2262,6 +2262,7 @@ class TestExecutor:
         Never raises -- provenance metadata must not break a run."""
         try:
             import glob as _glob
+            from lib import results_emitter as re_mod
 
             cand_dirs = []
             build_dir = getattr(self, "build_dir", None)
