@@ -498,10 +498,67 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
 
 std::string getRankLogFilePath(int rank)
 {
+    // Prefer the live GTest test name when called during a running test so that
+    // every rank's log file is named after the specific test, regardless of how
+    // the binary was invoked (--gtest_filter is absent, has wildcards, etc.).
+#if defined(RCCL_MPIHelpers_HAS_GTEST)
+    {
+        const ::testing::TestInfo* info
+            = ::testing::UnitTest::GetInstance()->current_test_info();
+        if(info && info->test_suite_name() && info->name())
+        {
+            const std::string label = sanitizeForFilename(std::string{info->test_suite_name()}
+                                                          + "." + info->name());
+            return getLogBaseDir() + "/rccl_test_" + label + "_rank_" + std::to_string(rank)
+                   + "_pid" + std::to_string(::getpid()) + ".log";
+        }
+    }
+#endif
+    // Fallback: use the --gtest_filter label from process startup (may be empty).
     const std::string& label  = getRunLabel();
     const std::string  prefix = label.empty() ? std::string{"rccl_test"} : "rccl_test_" + label;
     return getLogBaseDir() + "/" + prefix + "_rank_" + std::to_string(rank)
            + "_pid" + std::to_string(::getpid()) + ".log";
+}
+
+void renameRankLogForTest(int rank)
+{
+#if defined(RCCL_MPIHelpers_HAS_GTEST)
+    if(!isPerRankLoggingEnabled())
+        return;
+
+    // Build the test-specific name using current_test_info().
+    // getRankLogFilePath() now returns the test-specific path when a test is
+    // running, so we just need to find and rename the fallback file that was
+    // opened at process start (which used the --gtest_filter label or no label).
+    const ::testing::TestInfo* info
+        = ::testing::UnitTest::GetInstance()->current_test_info();
+    if(!info || !info->test_suite_name() || !info->name())
+        return;
+
+    const std::string newPath = getRankLogFilePath(rank);
+
+    // Build the fallback path that setupRankLogging used at process start.
+    const std::string& label   = getRunLabel();
+    const std::string  prefix  = label.empty() ? std::string{"rccl_test"} : "rccl_test_" + label;
+    const std::string  oldPath = getLogBaseDir() + "/" + prefix + "_rank_" + std::to_string(rank)
+                                 + "_pid" + std::to_string(::getpid()) + ".log";
+
+    if(oldPath == newPath)
+        return; // Already has the right name (e.g. exact --gtest_filter was used).
+
+    // rename() on Linux is atomic and the open FD keeps writing to the inode.
+    if(::rename(oldPath.c_str(), newPath.c_str()) != 0 && errno != ENOENT)
+    {
+        TEST_WARN("Rank %d: Failed to rename log file %s -> %s: %s",
+                  rank,
+                  oldPath.c_str(),
+                  newPath.c_str(),
+                  std::strerror(errno));
+    }
+#else
+    (void)rank;
+#endif
 }
 
 std::uintmax_t getFileSizeBytes(const std::string& path)

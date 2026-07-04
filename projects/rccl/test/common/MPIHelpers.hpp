@@ -220,6 +220,20 @@ inline bool isPerRankLoggingEnabled()
 std::string getRankLogFilePath(int rank);
 
 /**
+ * @brief Rename the per-rank log file to include the current GTest test name.
+ *
+ * Call this at the start of each test (e.g. from a TestEventListener::OnTestStart).
+ * setupRankLogging() opens the file before GTest knows which test is running, so
+ * the initial filename uses the --gtest_filter label or a bare fallback.  This
+ * function renames that file on disk to the test-specific name so the logs match
+ * the pattern rccl_test_{Suite}.{Test}_rank_{R}_pid{P}.log.  The open file
+ * descriptor keeps writing to the inode after the rename (Linux guarantee).
+ *
+ * No-op when RCCL_MPI_LOG_ALL_RANKS is not set, or when GTest is not linked.
+ */
+void renameRankLogForTest(int rank);
+
+/**
  * @brief Read an entire file into a string (e.g. NCCL_DEBUG_FILE output)
  *
  * @return File contents, or empty string if the file could not be read

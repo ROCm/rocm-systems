@@ -56,6 +56,24 @@ int main(int argc, char* argv[])
         delete listeners.Release(listeners.default_xml_generator());
     }
 
+    // Rename per-rank log files at test start so each file is named after the
+    // actual test (rccl_test_{Suite}.{Test}_rank_{R}_pid{P}.log) rather than the
+    // --gtest_filter value, which may be absent or contain wildcards.
+    if(per_rank_logging_enabled)
+    {
+        struct RankLogRenameListener : ::testing::EmptyTestEventListener
+        {
+            int rank_;
+            explicit RankLogRenameListener(int rank) : rank_(rank) {}
+            void OnTestStart(const ::testing::TestInfo&) override
+            {
+                MPIHelpers::renameRankLogForTest(rank_);
+            }
+        };
+        ::testing::UnitTest::GetInstance()->listeners().Append(
+            new RankLogRenameListener(world_rank));
+    }
+
     // Set up the RCCL MPI environment for all tests
     ::testing::AddGlobalTestEnvironment(new MPIEnvironment());
 
