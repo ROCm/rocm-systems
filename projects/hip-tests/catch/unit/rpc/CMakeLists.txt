@@ -41,9 +41,10 @@ endif()
 message(STATUS "RPC: using shared headers from ${_rpc_include}")
 
 set(TEST_SRC
-    rpc_ping.cc)
+    rpc_ping.cc
+    csan_report_test.cc)
 
-set_source_files_properties(rpc_ping.cc PROPERTIES
+set_source_files_properties(${TEST_SRC} PROPERTIES
     COMPILE_OPTIONS "-I${_rpc_include}")
 
 hip_add_exe_to_target(NAME RpcTest

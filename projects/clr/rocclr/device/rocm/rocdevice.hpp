@@ -598,6 +598,10 @@ class Device : public NullDevice {
   //! executable, pointing it at this device's RPC buffer.
   bool initRpcForProgram(hsa_executable_t executable);
 
+  //! Resolve the loaded code object covering \p devicePc through the ROCr
+  //! loader extension, for on-demand GPU sanitizer symbolization.
+  bool ResolveSanitizerCodeObject(uint64_t devicePc, SanitizerCodeObject* out) const override;
+
   //! Drain all pending RPC requests on this device's buffer. Called before
   //! teardown unloads images so sanitizer reports remain resolvable.
   void flushRpc();

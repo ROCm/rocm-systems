@@ -2416,6 +2416,21 @@ class Device : public RuntimeObject {
   //! Clears hostcall memory tracking list without releasing.
   void ClearHostcallMemories();
 
+  //! Data associated with a loaded code object for sanitizer reporting.
+  struct SanitizerCodeObject {
+    const void* memory = nullptr;  //!< ELF bytes when memory-backed, else null.
+    int fd = -1;                   //!< File descriptor when file-backed.
+    uint64_t offset = 0;           //!< Byte offset of the slice in the file.
+    uint64_t size = 0;             //!< Size of the code object in bytes.
+    int64_t bias = 0;              //!< Converts between PC and VA in the CO.
+  };
+
+  //! Identify and return the loaded code object that contains the program
+  //! counter the sanitizer event is associated with.
+  virtual bool ResolveSanitizerCodeObject(uint64_t devicePc, SanitizerCodeObject* out) const {
+    return false;
+  }
+
   //! Enable the specified extension
   char* getExtensionString();
 

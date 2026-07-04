@@ -4462,6 +4462,96 @@ bool Device::initRpcForProgram(hsa_executable_t executable) {
 }
 
 // ================================================================================================
+namespace {
+
+// Parse the "offset=" / "size=" fields of a loader code-object URI
+// ("...#offset=N&size=N"), used for file-backed code objects.
+bool parseUriRange(const char* uri, uint64_t* offset, uint64_t* size) {
+  const char* off = strstr(uri, "offset=");
+  const char* sz = strstr(uri, "size=");
+  if (!off || !sz) return false;
+  *offset = strtoull(off + 7, nullptr, 0);
+  *size = strtoull(sz + 5, nullptr, 0);
+  return true;
+}
+
+struct ResolveContext {
+  uint64_t pc;
+  amd::Device::SanitizerCodeObject* out;
+  bool found;
+};
+
+// Fill ResolveContext::out from the loaded code object covering the PC.
+hsa_status_t resolveLoadedCodeObject(hsa_executable_t, hsa_loaded_code_object_t lco, void* data) {
+  auto* ctx = static_cast<ResolveContext*>(data);
+  const auto& ext = Device::loaderExtensionTable();
+  auto get = [&](hsa_ven_amd_loader_loaded_code_object_info_t attr, void* value) {
+    return ext.hsa_ven_amd_loader_loaded_code_object_get_info(lco, attr, value) ==
+           HSA_STATUS_SUCCESS;
+  };
+
+  uint64_t base = 0, size = 0;
+  if (!get(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE, &base) ||
+      !get(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE, &size))
+    return HSA_STATUS_SUCCESS;
+  if (ctx->pc < base || ctx->pc >= base + size) return HSA_STATUS_SUCCESS;
+
+  int64_t delta = 0;
+  get(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA, &delta);
+  ctx->out->bias = -delta;  // image_va = device_addr - load_delta.
+
+  uint32_t storage = HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE;
+  get(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE, &storage);
+  if (storage == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY) {
+    ctx->found = get(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE,
+                     &ctx->out->memory) &&
+                 get(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
+                     &ctx->out->size);
+  } else if (storage == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE) {
+    int fd = -1;
+    uint32_t uriLen = 0;
+    if (get(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_FILE, &fd) &&
+        get(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH, &uriLen)) {
+      std::string uri(uriLen + 1, '\0');
+      if (get(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI, uri.data()) &&
+          parseUriRange(uri.c_str(), &ctx->out->offset, &ctx->out->size)) {
+        ctx->out->fd = fd;
+        ctx->found = true;
+      }
+    }
+  }
+  return HSA_STATUS_INFO_BREAK;
+}
+
+// Search a frozen executable's loaded code objects for the one covering the PC.
+hsa_status_t resolveExecutable(hsa_executable_t exec, void* data) {
+  int state = 0;
+  if (Hsa::executable_get_info(exec, HSA_EXECUTABLE_INFO_STATE, &state) != HSA_STATUS_SUCCESS ||
+      state != HSA_EXECUTABLE_STATE_FROZEN)
+    return HSA_STATUS_SUCCESS;
+
+  Device::loaderExtensionTable().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+      exec, resolveLoadedCodeObject, data);
+
+  return static_cast<ResolveContext*>(data)->found ? HSA_STATUS_INFO_BREAK : HSA_STATUS_SUCCESS;
+}
+
+}  // namespace
+
+// ================================================================================================
+bool Device::ResolveSanitizerCodeObject(uint64_t devicePc, SanitizerCodeObject* out) const {
+  const auto& ext = loaderExtensionTable();
+  if (!ext.hsa_ven_amd_loader_iterate_executables ||
+      !ext.hsa_ven_amd_loader_executable_iterate_loaded_code_objects ||
+      !ext.hsa_ven_amd_loader_loaded_code_object_get_info)
+    return false;
+
+  ResolveContext ctx{devicePc, out, false};
+  ext.hsa_ven_amd_loader_iterate_executables(resolveExecutable, &ctx);
+  return ctx.found;
+}
+
+// ================================================================================================
 void Device::DestroyExtSemaphore(void* extSemaphore) {
   if (extSemaphore == nullptr) return;
   auto* holder = static_cast<hsa_amd_external_semaphore_t*>(extSemaphore);

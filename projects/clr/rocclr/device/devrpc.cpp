@@ -12,6 +12,7 @@
 #include "top.hpp"
 
 #include "device/devhcmessages.hpp"
+#include "device/devcsan.hpp"
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -121,6 +122,14 @@ static rpc::RPCStatus handleClrOpcodes(rpc::Server::Port& port, const amd::Devic
         if (!messages.handlePayload(SERVICE_PRINTF, Buffer->data)) {
           ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, "ROCM_HOSTCALL_PRINTF: invalid message payload");
         }
+      });
+      break;
+    }
+    case TSAN_GPU_REPORT_OPCODE: {
+      static_assert(sizeof(__tsan_gpu_race) <= sizeof(rpc::Buffer),
+                    "Report must fit in a single packet");
+      port.recv([&](rpc::Buffer* Buffer, uint32_t) {
+        reportGpuCSanRace(dev, *reinterpret_cast<__tsan_gpu_race*>(Buffer->data));
       });
       break;
     }

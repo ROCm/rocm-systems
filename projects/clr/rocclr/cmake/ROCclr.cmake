@@ -45,6 +45,7 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/blit.cpp
   ${ROCCLR_SRC_DIR}/device/blitcl.cpp
   ${ROCCLR_SRC_DIR}/device/comgrctx.cpp
+  ${ROCCLR_SRC_DIR}/device/devcsan.cpp
   ${ROCCLR_SRC_DIR}/device/devhcmessages.cpp
   ${ROCCLR_SRC_DIR}/device/devhcprintf.cpp
   ${ROCCLR_SRC_DIR}/device/devhostcall.cpp
