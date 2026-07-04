@@ -465,6 +465,16 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.regUsed = 1;
     devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
 
+    // LL128 for the reg-variant collectives is compiled as two separate kernels
+    // (registered vs non-registered user buffer). Now that registration status is
+    // known, select the matching device function index.
+    if (ncclDevFuncIsLL128RegVariant(task->func, task->protocol)) {
+      int accFlag = (task->func == ncclFuncAllReduce && task->acc != nullptr) ? 1 : 0;
+      int regMode = (devWork.regUsed || devWork.netRegUsed) ? 1 : 2;
+      int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag, task->pipeline, regMode);
+      if (id >= 0) task->devFuncId = id;
+    }
+
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
       struct ncclDevWorkCollReg workReg = {};
       workReg.coll = devWork; // C++ struct assignment
@@ -543,10 +553,14 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
       }
 
       NCCLCHECK(getAlgoInfo(comm, &agg, collNetSupport, nvlsSupport, nTasksPerChannel, simInfo));
+      // LL128 reg-variant collectives have no UserRegMode=0 kernel; use the
+      // non-registered (2) variant as a valid placeholder here. The final choice
+      // is made in ncclTasksRegAndEnqueue() once registration status is known.
+      int reg0 = ncclDevFuncIsLL128RegVariant(agg.func, agg.protocol) ? 2 : 0;
       if(agg.func==ncclFuncAllReduce && agg.acc != nullptr)
-        agg.devFuncId = ncclDevFuncId(agg.func, agg.opDev.op, agg.datatype, agg.algorithm, agg.protocol, 1, agg.pipeline);
+        agg.devFuncId = ncclDevFuncId(agg.func, agg.opDev.op, agg.datatype, agg.algorithm, agg.protocol, 1, agg.pipeline, reg0);
       else
-        agg.devFuncId = ncclDevFuncId(agg.func, agg.opDev.op, agg.datatype, agg.algorithm, agg.protocol, 0, agg.pipeline);
+        agg.devFuncId = ncclDevFuncId(agg.func, agg.opDev.op, agg.datatype, agg.algorithm, agg.protocol, 0, agg.pipeline, reg0);
       if (agg.devFuncId < 0) {
         WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
         return ncclInvalidUsage;
