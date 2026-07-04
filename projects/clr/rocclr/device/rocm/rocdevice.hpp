@@ -590,6 +590,21 @@ class Device : public NullDevice {
   //! Return the pre-computed metadata packet version header bits
   uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
 
+  //! Get or create the RPC buffer for this device. The buffer is lazily
+  //! allocated the first time a loaded program contains `__llvm_rpc_client`.
+  void* getOrCreateRpcBuffer();
+
+  //! Initialize the `__llvm_rpc_client` device symbol for the given
+  //! executable, pointing it at this device's RPC buffer.
+  bool initRpcForProgram(hsa_executable_t executable);
+
+  //! Drain all pending RPC requests on this device's buffer. Called before
+  //! teardown unloads images so sanitizer reports remain resolvable.
+  void flushRpc();
+
+  //! Free the device's RPC buffer during teardown.
+  void destroyRpcBuffer();
+
   //! Return multi GPU grid launch sync buffer
   address MGSync() const { return mg_sync_; }
 
@@ -763,6 +778,9 @@ class Device : public NullDevice {
                                 hsa_queue_t* preferred = nullptr,
                                 const std::unordered_set<uint64_t>* excluded_ids = nullptr,
                                 void** metadata_ring_buffer = nullptr);
+
+  std::atomic<void*> rpcBuffer_{nullptr};  //!< RPC shared memory buffer for this device
+  uint32_t rpcPortCount_ = 0;              //!< Number of RPC ports allocated
 
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,
