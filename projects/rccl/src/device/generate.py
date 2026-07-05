@@ -462,7 +462,10 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
           out(f"#if {guard}\n")
           out(f"{spec} {{ {sym}(); }} }};\n")
           out("#else\n")
-          out(f"{spec} {{}} }};\n")
+          # Arch-guarded-out slot: the function does not exist for this arch.
+          # Trap instead of a silent no-op so an out-of-range/inconsistent funcId
+          # fails fast, matching the nullptr entries of the function-pointer table.
+          out(f"{spec} {{ __builtin_trap(); }} }};\n")
           out("#endif\n")
         else:
           out(f"{spec} {{ {sym}(); }} }};\n")
