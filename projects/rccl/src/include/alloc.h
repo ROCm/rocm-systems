@@ -497,15 +497,22 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   prop.requestedHandleTypes = type;
   prop.location.id = currentDev;
 #if defined(__HIP_PLATFORM_AMD__)
-  // ROCM-2550: Use cuDeviceGetAttribute to check if RDMA support is available
-  // TODO: Remove once ROCM-2550 is fixed and uncomment the commented code below.
-  // Always enable gpuDirectRDMACapable: the non-RDMA VMM code path in
-  // HIP crashes (SIGSEGV in hipMemMap) after many allocations.
+  // Query device to see if RDMA support is available; only set gpuDirectRDMACapable
+  // when the RDMA peer-memory stack is actually functional on this system.
+  // Previously forced to 1 unconditionally as a ROCM-2550 workaround, but that
+  // caused cuMemCreate to require RDMA backing even on nodes where ib_umem_get
+  // fails (e.g. bng_re0 without peer_mem), making every VMM allocation fail.
+  //
+  // hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported was added in ROCm 7.13.
+  // On older ROCm (< 7.13) the attribute does not exist: fall back to flag=1 to
+  // avoid a SIGSEGV in hipMemMap on the non-RDMA VMM code path (ROCM-2550).
+#if ROCM_VERSION >= 71300000
+  CUCHECK(cuDeviceGetAttribute(&flag, hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported, currentDev));
+  if (flag) prop.allocFlags.gpuDirectRDMACapable = 1;
+#else
   flag = 1;
   prop.allocFlags.gpuDirectRDMACapable = flag;
-  // // Query device to see if RDMA support is available
-  // CUCHECK(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, currentDev));
-  // if (flag) prop.allocFlags.gpuDirectRDMACapable = 1;
+#endif
 #endif
   CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
   ALIGN_SIZE(size, granularity);
