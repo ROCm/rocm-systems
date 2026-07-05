@@ -9,6 +9,8 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
 #include "ResourceGuards.hpp"
@@ -263,6 +265,56 @@ protected:
     // Helper: Deregister memory
     ncclResult_t DeregisterMemory(void* comm, void* mhandle) {
         return net_->deregMr(comm, mhandle);
+    }
+
+    // Helper: Does this device support registering GPU memory for RDMA at all,
+    // via either GDR path?
+    //   - peer-mem NICs advertise NCCL_PTR_CUDA
+    //   - DMA-buf-only NICs (e.g. RoCE without peer_mem) advertise NCCL_PTR_DMABUF
+    // Use this instead of checking (ptrSupport & NCCL_PTR_CUDA) so GPU tests also
+    // run on DMA-buf-only NICs rather than skipping.
+    bool GpuRegSupported(int dev) {
+        ncclNetProperties_t props;
+        if (GetDeviceProperties(dev, &props) != ncclSuccess) return false;
+        return (props.ptrSupport & (NCCL_PTR_CUDA | NCCL_PTR_DMABUF)) != 0;
+    }
+
+    // Helper: Register a GPU buffer using whichever GPU Direct RDMA path the NIC
+    // supports, mirroring the core proxy (net.cc):
+    //   - peer-mem NICs (NCCL_PTR_CUDA)  -> regMr on the device VA
+    //   - DMA-buf-only NICs (NCCL_PTR_DMABUF) -> export a DMA-buf fd, regMrDmaBuf
+    // Works for both plain hipMalloc and cuMem/VMM device pointers. Returns
+    // ncclInternalError if the NIC advertises neither GPU path.
+    ncclResult_t RegisterGpuBuffer(void* comm, int dev, void* data, size_t size, void** mhandle) {
+        ncclNetProperties_t props;
+        ncclResult_t res = GetDeviceProperties(dev, &props);
+        if (res != ncclSuccess) return res;
+
+        if (props.ptrSupport & NCCL_PTR_CUDA) {
+            // Peer-mem path: register the device virtual address directly.
+            return net_->regMr(comm, data, size, NCCL_PTR_CUDA, mhandle);
+        }
+
+        if (props.ptrSupport & NCCL_PTR_DMABUF) {
+            // DMA-buf path: export an fd for the (page-aligned) buffer, then
+            // register through regMrDmaBuf. ibv_reg_dmabuf_mr dups the fd, so we
+            // close our copy right after registration.
+            const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+            uintptr_t start = reinterpret_cast<uintptr_t>(data);
+            uintptr_t base = start & ~(page - 1);
+            size_t span = ((start + size) - base + page - 1) & ~(page - 1);
+            int fd = -1;
+            uint64_t offset = 0;
+            if (hsa_amd_portable_export_dmabuf(reinterpret_cast<void*>(base), span,
+                                               &fd, &offset) != HSA_STATUS_SUCCESS) {
+                return ncclSystemError;
+            }
+            res = net_->regMrDmaBuf(comm, data, size, NCCL_PTR_CUDA, offset, fd, mhandle);
+            if (fd >= 0) close(fd);
+            return res;
+        }
+
+        return ncclInternalError;  // No GPU Direct RDMA support on this NIC.
     }
 
     // Helper: Post send operation

@@ -159,6 +159,12 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 
+    // Register GPU memory via whichever GDR path the NIC supports (peer-mem or
+    // DMA-buf). Skip only if the NIC advertises neither.
+    if (!GpuRegSupported(0)) {
+        GTEST_SKIP() << "NIC advertises no GPU Direct RDMA (neither peer-mem nor DMA-buf)";
+    }
+
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
@@ -172,7 +178,7 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
     void* mhandle = nullptr;
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
-    EXPECT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_CUDA, &mhandle), ncclSuccess);
+    EXPECT_EQ(RegisterGpuBuffer(comm, 0, buffer, bufferSize, &mhandle), ncclSuccess);
     EXPECT_NE(mhandle, nullptr);
 
     // Use NetMHandleGuard for automatic deregistration before connection closes
@@ -400,11 +406,8 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
     ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
     ASSERT_GT(ndev, 0);
 
-    // Check if GDR is available
-    ncclNetProperties_t props;
-    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
-
-    if (!(props.ptrSupport & NCCL_PTR_CUDA)) {
+    // Check if GDR is available (peer-mem or DMA-buf).
+    if (!GpuRegSupported(0)) {
         GTEST_SKIP() << "GDR not supported, skipping flush test";
     }
 
@@ -432,7 +435,7 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
 
     void* mhandle = nullptr;
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_CUDA, &mhandle), ncclSuccess);
+    ASSERT_EQ(RegisterGpuBuffer(comm, 0, buffer, bufferSize, &mhandle), ncclSuccess);
     NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
 
     void* request = nullptr;

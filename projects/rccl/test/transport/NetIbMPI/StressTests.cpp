@@ -1451,10 +1451,8 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
-    // Check GDR support
-    ncclNetProperties_t props;
-    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
-    if (!(props.ptrSupport & NCCL_PTR_CUDA)) {
+    // Check GDR support (peer-mem or DMA-buf)
+    if (!GpuRegSupported(0)) {
         GTEST_SKIP() << "No GPU Direct RDMA support";
     }
 
@@ -1473,7 +1471,7 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
 
         void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
         void* mh = nullptr;
-        ASSERT_EQ(RegisterMemory(comm, devBuf, sz, NCCL_PTR_CUDA, &mh), ncclSuccess);
+        ASSERT_EQ(RegisterGpuBuffer(comm, 0, devBuf, sz, &mh), ncclSuccess);
         NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
         if (rank == 1) {

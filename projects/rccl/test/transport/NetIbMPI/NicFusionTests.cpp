@@ -1012,10 +1012,8 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
         GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
     }
 
-    // Check GDR support on device 0 before creating the vNIC.
-    ncclNetProperties_t props;
-    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
-    if (!(props.ptrSupport & NCCL_PTR_CUDA)) {
+    // Check GDR support (peer-mem or DMA-buf) on device 0 before creating the vNIC.
+    if (!GpuRegSupported(0)) {
         GTEST_SKIP() << "GDR not supported, skipping flush test";
     }
 
@@ -1045,7 +1043,7 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
 
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
     void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, gpuBuffer, bufferSize, NCCL_PTR_CUDA, &mhandle), ncclSuccess);
+    ASSERT_EQ(RegisterGpuBuffer(comm, vdev, gpuBuffer, bufferSize, &mhandle), ncclSuccess);
     NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
 
     for (int iter = 0; iter < numIterations; iter++) {
@@ -1198,8 +1196,8 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
     memset(&mProps, 0, sizeof(mProps));
     ASSERT_EQ(GetDeviceProperties(mergedDev, &mProps), ncclSuccess);
 
-    // Check GDR support across both ranks
-    int localGdr = (mProps.ptrSupport & NCCL_PTR_CUDA) ? 1 : 0;
+    // Check GDR support (peer-mem or DMA-buf) across both ranks
+    int localGdr = GpuRegSupported(mergedDev) ? 1 : 0;
     int globalGdr = 0;
     MPI_Allreduce(&localGdr, &globalGdr, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
     bool gdr = (globalGdr == 1);
@@ -1251,7 +1249,11 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
 
         void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
         void* mh = nullptr;
-        ASSERT_EQ(RegisterMemory(comm, buf, sz, memType, &mh), ncclSuccess);
+        if (memType == NCCL_PTR_CUDA) {
+            ASSERT_EQ(RegisterGpuBuffer(comm, mergedDev, buf, sz, &mh), ncclSuccess);
+        } else {
+            ASSERT_EQ(RegisterMemory(comm, buf, sz, memType, &mh), ncclSuccess);
+        }
         NetMHandleGuard mhG(mh, NetMHandleDeleter(net_, comm));
 
         uint8_t seed = static_cast<uint8_t>(c.send * 10 + c.recv * 3 + 42);
@@ -2077,12 +2079,8 @@ TEST_F(NetIbMPITest, MultiRecvGPUShuffled) {
         GTEST_SKIP() << "Failed to create 3-NIC merged device";
     }
 
-    {
-        ncclNetProperties_t props = {};
-        ASSERT_EQ(GetDeviceProperties(dev, &props), ncclSuccess);
-        if (!(props.ptrSupport & NCCL_PTR_CUDA)) {
-            GTEST_SKIP() << "GDR not supported on this device, skipping GPU MultiRecv test";
-        }
+    if (!GpuRegSupported(dev)) {
+        GTEST_SKIP() << "GDR not supported on this device, skipping GPU MultiRecv test";
     }
 
     static constexpr int kWidth = 8;
@@ -2155,8 +2153,8 @@ TEST_F(NetIbMPITest, MultiRecvGPUShuffled) {
                 HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuBufs[slot], recvSizesArg[slot]));
                 HIP_TEST_CHECK_GTEST_FAIL(hipMemset(gpuBufs[slot], 0xCC, recvSizesArg[slot]));
 
-                ASSERT_EQ(RegisterMemory(recvComm, gpuBufs[slot], recvSizesArg[slot],
-                                         NCCL_PTR_CUDA, &mhs[slot]),
+                ASSERT_EQ(RegisterGpuBuffer(recvComm, dev, gpuBufs[slot], recvSizesArg[slot],
+                                            &mhs[slot]),
                           ncclSuccess)
                     << "GPU RegisterMemory failed for recv batch=" << batch << " slot=" << slot;
                 ASSERT_NE(mhs[slot], nullptr);
@@ -2212,8 +2210,8 @@ TEST_F(NetIbMPITest, MultiRecvGPUShuffled) {
                     hipMemcpy(gpuBufs[msgId], hostBuf.data(), msgSizes[msgId],
                               hipMemcpyHostToDevice));
 
-                ASSERT_EQ(RegisterMemory(sendComm, gpuBufs[msgId], msgSizes[msgId],
-                                         NCCL_PTR_CUDA, &mhs[msgId]),
+                ASSERT_EQ(RegisterGpuBuffer(sendComm, dev, gpuBufs[msgId], msgSizes[msgId],
+                                            &mhs[msgId]),
                           ncclSuccess)
                     << "GPU RegisterMemory failed for send batch=" << batch
                     << " msgId=" << msgId;
