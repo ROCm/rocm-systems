@@ -398,6 +398,183 @@ std::pair<hipError_t, std::vector<T>> downloadBuffer(const void* device_buffer, 
     return {err, std::move(host_data)};
 }
 
+// ============================================================================
+// cuMem / VMM Device Allocation
+// ============================================================================
+//
+// The helpers above operate on any device pointer (hipMemcpy/hipMemset work on
+// both hipMalloc and VMM pointers). However, hipMalloc allocates *legacy*
+// device memory and does NOT exercise RCCL's cuMem/VMM code path. To test the
+// cuMem path (cuMemCreate + address reserve + map + set-access, and DMA-buf
+// export via hipMemGetHandleForAddressRange) allocate with the helpers below,
+// then feed the resulting pointer into the (unchanged) init/verify helpers.
+
+/**
+ * @brief Result of a cuMem/VMM allocation. Keep it alive until you are done and
+ *        release it with cuMemFreeDevice() (or use CuMemBufferAutoGuard).
+ */
+struct CuMemAllocation
+{
+    void*                           ptr    = nullptr;  // mapped device VA
+    size_t                          size   = 0;        // rounded up to granularity
+    hipMemGenericAllocationHandle_t handle = {};       // backing physical handle
+    bool valid() const { return ptr != nullptr; }
+};
+
+/**
+ * @brief Allocate device memory via the HIP Virtual Memory Management (cuMem) API.
+ *
+ * Mirrors RCCL's ncclCuMemAlloc: a pinned device allocation that is POSIX-fd
+ * exportable (so it can be registered via DMA-buf), with gpuDirectRDMACapable
+ * set only when the device advertises HIP-VMM RDMA support.
+ *
+ * @param out    [out] Receives the allocation (ptr/size/handle).
+ * @param bytes  Requested size in bytes (rounded up to the VMM granularity).
+ * @param device HIP device ordinal.
+ * @return hipSuccess on success; on failure any partial state is cleaned up.
+ */
+inline hipError_t cuMemAllocDevice(CuMemAllocation* out, size_t bytes, int device = 0)
+{
+    if(!out || bytes == 0)
+    {
+        return hipErrorInvalidValue;
+    }
+    *out = CuMemAllocation{};
+
+    hipMemAllocationProp prop = {};
+    prop.type                 = hipMemAllocationTypePinned;
+    prop.location.type        = hipMemLocationTypeDevice;
+    prop.location.id          = device;
+    prop.requestedHandleType  = hipMemHandleTypePosixFileDescriptor;  // exportable to DMA-buf
+
+    // Only advertise RDMA backing when the device actually supports GPU Direct
+    // RDMA with HIP VMM; otherwise cuMemCreate may require RDMA backing and fail
+    // on nodes without a functional peer-memory stack.
+    int rdmaCapable = 0;
+    if(hipDeviceGetAttribute(&rdmaCapable,
+                             hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported,
+                             device) == hipSuccess
+       && rdmaCapable)
+    {
+        prop.allocFlags.gpuDirectRDMACapable = 1;
+    }
+
+    size_t     granularity = 0;
+    hipError_t err = hipMemGetAllocationGranularity(&granularity, &prop,
+                                                    hipMemAllocationGranularityMinimum);
+    if(err != hipSuccess)
+    {
+        return err;
+    }
+    if(granularity == 0)
+    {
+        return hipErrorInvalidValue;
+    }
+    const size_t size = ((bytes + granularity - 1) / granularity) * granularity;
+
+    hipMemGenericAllocationHandle_t handle;
+    err = hipMemCreate(&handle, size, &prop, 0);
+    if(err != hipSuccess)
+    {
+        return err;
+    }
+
+    void* ptr = nullptr;
+    err       = hipMemAddressReserve(&ptr, size, granularity, nullptr, 0);
+    if(err != hipSuccess)
+    {
+        (void)hipMemRelease(handle);
+        return err;
+    }
+
+    err = hipMemMap(ptr, size, 0, handle, 0);
+    if(err != hipSuccess)
+    {
+        (void)hipMemAddressFree(ptr, size);
+        (void)hipMemRelease(handle);
+        return err;
+    }
+
+    hipMemAccessDesc access = {};
+    access.location.type    = hipMemLocationTypeDevice;
+    access.location.id      = device;
+    access.flags            = hipMemAccessFlagsProtReadWrite;
+    err                     = hipMemSetAccess(ptr, size, &access, 1);
+    if(err != hipSuccess)
+    {
+        (void)hipMemUnmap(ptr, size);
+        (void)hipMemAddressFree(ptr, size);
+        (void)hipMemRelease(handle);
+        return err;
+    }
+
+    out->ptr    = ptr;
+    out->size   = size;
+    out->handle = handle;
+    return hipSuccess;
+}
+
+/**
+ * @brief Release a cuMem/VMM allocation made by cuMemAllocDevice().
+ */
+inline void cuMemFreeDevice(CuMemAllocation* alloc)
+{
+    if(!alloc || !alloc->ptr)
+    {
+        return;
+    }
+    (void)hipMemUnmap(alloc->ptr, alloc->size);
+    (void)hipMemRelease(alloc->handle);
+    (void)hipMemAddressFree(alloc->ptr, alloc->size);
+    *alloc = CuMemAllocation{};
+}
+
+/**
+ * @brief Export a DMA-buf fd for a cuMem/VMM allocation.
+ *
+ * Useful for tests that register cuMem memory through the DMA-buf path
+ * (regMrDmaBuf). The caller owns the returned fd and must close() it.
+ *
+ * @param alloc  A valid allocation from cuMemAllocDevice().
+ * @return fd >= 0 on success, or -1 on failure.
+ */
+inline int cuMemExportDmaBufFd(const CuMemAllocation& alloc)
+{
+    if(!alloc.ptr)
+    {
+        return -1;
+    }
+    int fd = -1;
+    if(hipMemGetHandleForAddressRange(&fd, alloc.ptr, alloc.size,
+                                      hipMemRangeHandleTypeDmaBufFd, 0) != hipSuccess)
+    {
+        return -1;
+    }
+    return fd;
+}
+
+/**
+ * @brief RAII guard that releases a cuMem/VMM allocation on scope exit.
+ */
+class CuMemBufferAutoGuard
+{
+public:
+    CuMemBufferAutoGuard() = default;
+    explicit CuMemBufferAutoGuard(const CuMemAllocation& alloc) : alloc_(alloc) {}
+    ~CuMemBufferAutoGuard() { cuMemFreeDevice(&alloc_); }
+
+    CuMemBufferAutoGuard(const CuMemBufferAutoGuard&)            = delete;
+    CuMemBufferAutoGuard& operator=(const CuMemBufferAutoGuard&) = delete;
+
+    void                   set(const CuMemAllocation& alloc) { cuMemFreeDevice(&alloc_); alloc_ = alloc; }
+    void*                  ptr() const { return alloc_.ptr; }
+    size_t                 size() const { return alloc_.size; }
+    const CuMemAllocation& get() const { return alloc_; }
+
+private:
+    CuMemAllocation alloc_{};
+};
+
 } // namespace RCCLTestHelpers
 
 #endif // DEVICE_BUFFER_HELPERS_HPP
