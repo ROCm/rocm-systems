@@ -572,11 +572,17 @@ ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->pciPath = ibDev->pciPath;
   props->guid = ibDev->guid;
   props->ptrSupport = NCCL_PTR_HOST;
-  if (ncclIbGdrSupport() == ncclSuccess) {
+  // Gate GDR on the device actually supporting RDMA with the memory RCCL will
+  // register. When cuMem/VMM is enabled on a device without HIP-VMM RDMA
+  // support, advertising GPU pointer support leads to registering non-RDMA VMM
+  // memory and faulting on transfer/flush; keep host-only so the core stages
+  // through host memory instead.
+  bool vmmGdrCapable = (ncclIbVmmGdrCapable() == ncclSuccess);
+  if (vmmGdrCapable && ncclIbGdrSupport() == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_CUDA; // GDR support via nv_peermem
   }
   props->regIsGlobal = 1;
-  if (ncclIbDmaBufSupport(dev) == ncclSuccess) {
+  if (vmmGdrCapable && ncclIbDmaBufSupport(dev) == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
   }
   props->forceFlush = 0;

@@ -102,6 +102,26 @@ ncclResult_t ncclIbGdrSupport() {
   return ncclSuccess;
 }
 
+// When cuMem/VMM is enabled RCCL registers VMM memory (including its internal
+// GDR flush buffer) for RDMA. VMM memory is only reliably RDMA-capable when a
+// peer-memory module is present: peer-mem registers the device VA directly. On
+// dmabuf-only NICs (e.g. Broadcom bng_re0 RoCE without peer-mem) the dmabuf MR
+// for VMM memory is accepted but the NIC faults ("local access violation") on
+// the actual transfer/flush, while legacy hipMalloc dmabuf RDMA works fine.
+// Report GDR unusable for the cuMem + dmabuf-only case so the core falls back
+// to host staging instead of registering non-functional VMM memory.
+//
+// Note: hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported reports the GPU's
+// capability (1 on MI455), not the NIC's, so it cannot be used to detect this.
+ncclResult_t ncclIbVmmGdrCapable() {
+  // Legacy (non-VMM) allocations RDMA correctly on these NICs.
+  if (!ncclCuMemEnable()) return ncclSuccess;
+  // peer-mem present: VMM memory registers via the device VA and works.
+  if (ncclIbGdrSupport() == ncclSuccess) return ncclSuccess;
+  // cuMem enabled on a dmabuf-only NIC: VMM RDMA is not functional.
+  return ncclSystemError;
+}
+
 static int ncclIbPeerMemModuleLoaded = 0; // 1 = true, 0 = false
 static void ibPeerMemSupportInitOnce() {
   ncclIbPeerMemModuleLoaded = KNL_MODULE_LOADED("/sys/module/nvidia_peermem/version");

@@ -506,7 +506,7 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   // hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported was added in ROCm 7.13.
   // On older ROCm (< 7.13) the attribute does not exist: fall back to flag=1 to
   // avoid a SIGSEGV in hipMemMap on the non-RDMA VMM code path (ROCM-2550).
-#if ROCM_VERSION >= 71300000
+#if ROCM_VERSION >= 71300
   CUCHECK(cuDeviceGetAttribute(&flag, hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported, currentDev));
   if (flag) prop.allocFlags.gpuDirectRDMACapable = 1;
 #else

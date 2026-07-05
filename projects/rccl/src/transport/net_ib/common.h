@@ -556,6 +556,7 @@ extern std::thread ncclIbAsyncThread;
 void* ncclIbAsyncThreadMain(void* args);
 
 ncclResult_t ncclIbGdrSupport();
+ncclResult_t ncclIbVmmGdrCapable();
 ncclResult_t ncclIbPeerMemSupport();
 ncclResult_t ncclIbDmaBufSupport(int dev);
 
