@@ -14,6 +14,7 @@
 #include "core/util/os.h"
 #include "gfx1250_min_hsaco.h"
 #include "gtest/gtest.h"
+#include "loader/AMDHSAKernelDescriptor.h"
 
 #if defined(_WIN32) || defined(_WIN64)
 #ifndef NOMINMAX
@@ -304,6 +305,31 @@ TEST(HotswapRewriteDecision, EntryTrampolinesBlockNonGfx12_5) {
       MakeRevision("gfx942", 0), kGfx942Isa, kGfx942Isa, {});
 
   EXPECT_FALSE(decision.has_value());
+}
+
+TEST(HotswapRewrite, Gfx12InstPrefSizeUsesFullDescriptorField) {
+  namespace hsa = rocr::llvm::amdhsa;
+
+  uint32_t rsrc3 = 0;
+  AMDHSA_BITS_SET(rsrc3, hsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE,
+                  0xff);
+  rsrc3 |= hsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_GLG_EN;
+  AMDHSA_BITS_SET(rsrc3, hsa::COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT, 3);
+  AMDHSA_BITS_SET(rsrc3, hsa::COMPUTE_PGM_RSRC3_GFX125_TCP_SPLIT, 5);
+
+  EXPECT_EQ(AMDHSA_BITS_GET(
+                rsrc3, hsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE),
+            0xffu);
+  EXPECT_EQ(AMDHSA_BITS_GET(
+                rsrc3, hsa::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE),
+            0x3fu);
+  EXPECT_NE(rsrc3 & hsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_GLG_EN, 0u);
+  EXPECT_EQ(AMDHSA_BITS_GET(rsrc3,
+                            hsa::COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT),
+            3u);
+  EXPECT_EQ(AMDHSA_BITS_GET(rsrc3,
+                            hsa::COMPUTE_PGM_RSRC3_GFX125_TCP_SPLIT),
+            5u);
 }
 
 TEST(HotswapRewrite, GetIsaNameRealCodeObject) {
