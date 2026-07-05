@@ -44,7 +44,7 @@ Settings::Settings() {
 
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
   pinnedMinXferSize_ =
-      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 1 * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
+      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 64 * Ki : GPU_PINNED_MIN_XFER_SIZE * Mi;
 
   sdmaCopyThreshold_ = GPU_FORCE_BLIT_COPY_SIZE * Ki;
 
@@ -145,7 +145,8 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
 
-  if (gfxipMajor == 9 && gfxipMinor >= 4) {
+  if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
+      (gfxipMajor == 12 && gfxipMinor >= 5)) {
     sdma_swap_supported_ = true;
   }
 
@@ -159,7 +160,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
      } else {
         enableWgpMode_ = GPU_ENABLE_WGP_MODE;
      }
-     if (gfxipMinor == 1) {
+     if (gfxipMajor == 10 && gfxipMinor == 1) {
        // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
        // TODO: This should be updated when ROCr support custom pitch
        imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
@@ -184,11 +185,24 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if (gfxipMajor == 12 && gfxipMinor >= 5) {
     ext_dispatch_packet_ = true;
     groupMemCarveout_ = true;
-    groupMemPref_.totalSharedBanks = 7;
-    groupMemPref_.preferLDSBanks = 5;
-    groupMemPref_.preferCacheLDSBanks = 2;
-    groupMemPref_.preferEqualLDSBanks = 3;
   }
+
+  // SDMA indirect copy uses the gfx1250 wait/signal-indirect SDMA
+  // packet that dereferences a pointer-to-pointer slot before issuing the
+  // copy.
+  if (gfxipMajor == 12 && gfxipMinor == 5) {
+    sdma_indirect_supported_ = true;
+  }
+
+#if defined(_WIN32)
+  if (gfxipMajor >= 11) {
+    // Due to driver limitation,
+    // D3D10/11 sharing extensions are only supported on GFX11 or later,
+    // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
+    enableExtension(ClKhrD3d10Sharing);
+    enableExtension(ClKhrD3d11Sharing);
+  }
+#endif
 
   // Override current device settings
   override();

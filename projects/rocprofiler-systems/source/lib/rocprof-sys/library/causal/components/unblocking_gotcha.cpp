@@ -78,7 +78,8 @@ unblocking_gotcha::shutdown()
 }
 
 template <size_t Idx, typename Ret, typename... Args>
-std::enable_if_t<(Idx < unblocking_gotcha::indexes::kill_idx), Ret>
+    requires(Idx < unblocking_gotcha::indexes::kill_idx)
+Ret
 unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                               Args... _args) const noexcept
 {
@@ -90,7 +91,8 @@ unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 
         if constexpr(Idx == pthread_barrier_wait_idx)
         {
-            int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+            std::int64_t _delay_value =
+                (_active) ? causal::delay::get_global().load() : 0;
 
             causal::sampling::block_backtrace_samples();
             auto _ret = (*_func)(_args...);

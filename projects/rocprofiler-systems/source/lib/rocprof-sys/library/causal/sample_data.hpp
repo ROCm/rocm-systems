@@ -15,8 +15,8 @@ namespace causal
 {
 struct sample_data
 {
-    uintptr_t        address = 0x0;
-    mutable uint64_t count   = 0;
+    uintptr_t             address = 0x0;
+    mutable std::uint64_t count   = 0;
 
     bool operator==(sample_data _v) const { return (address == _v.address); }
     bool operator!=(sample_data _v) const { return !(*this == _v); }
@@ -32,17 +32,17 @@ struct sample_data
     }
 };
 
-std::map<uint32_t, std::vector<sample_data>>
+std::map<std::uint32_t, std::vector<sample_data>>
 get_samples();
 
 void
-add_samples(uint32_t, const std::vector<uintptr_t>&);
+add_samples(std::uint32_t, const std::vector<uintptr_t>&);
 
-std::vector<sample_data> get_samples(uint32_t);
+std::vector<sample_data> get_samples(std::uint32_t);
 
-void add_sample(uint32_t, uintptr_t, uint64_t = 1);
+void add_sample(std::uint32_t, uintptr_t, std::uint64_t = 1);
 
 void
-add_samples(uint32_t, const std::map<uintptr_t, uint64_t>&);
+add_samples(std::uint32_t, const std::map<uintptr_t, std::uint64_t>&);
 }  // namespace causal
 }  // namespace rocprofsys

@@ -60,8 +60,7 @@ HIP_TEST_CASE(Unit_hipDeviceComputeCapability_Negative) {
       REQUIRE_FALSE(hipDeviceComputeCapability(&major, &minor, numDevices) == hipSuccess);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 }
 

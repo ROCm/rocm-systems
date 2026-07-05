@@ -7,8 +7,6 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import dcc, html
 
-from utils import schema
-
 AVAIL_NORMALIZATIONS = ["per_wave", "per_cycle", "per_second", "per_kernel"]
 
 
@@ -31,12 +29,11 @@ def create_span(input_value: str) -> dict[str, Union[html.Span, str]]:
 def get_header(
     raw_pmc: pd.DataFrame, input_filters: dict[str, Any], kernel_names: list[str]
 ) -> html.Header:
-    pmc_data = raw_pmc[schema.PMC_PERF_FILE_PREFIX]
-    kernel_names = [str(name).strip() for name in pmc_data["Kernel_Name"]]
+    kernel_names = [str(name).strip() for name in raw_pmc["Kernel_Name"]]
 
     # Extract GPU and Dispatch IDs
-    gpu_ids = [str(gpu_id) for gpu_id in pmc_data["GPU_ID"]]
-    dispatch_ids = [str(dispatch_id) for dispatch_id in pmc_data["Dispatch_ID"]]
+    gpu_ids = [str(gpu_id) for gpu_id in raw_pmc["GPU_ID"]]
+    dispatch_ids = [str(dispatch_id) for dispatch_id in raw_pmc["Dispatch_ID"]]
 
     return html.Header(
         id="home",

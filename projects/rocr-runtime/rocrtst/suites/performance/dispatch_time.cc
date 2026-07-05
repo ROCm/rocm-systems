@@ -119,6 +119,7 @@ void DispatchTime::SetUp() {
   }
 
   TestBase::SetUp();
+  if (test_skipped_) return;
   // If it indicates to use default signal, set env var properly
 
   err = SetDefaultAgents(this);

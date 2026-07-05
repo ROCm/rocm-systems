@@ -1,0 +1,255 @@
+# ROCm Systems - rocshmem CTest Test Categories
+#
+# This file defines test organization for rocshmem using the shared YAML-based
+# CTest categorization framework. Tests are organized into tiered categories
+# with automatic label inheritance.
+#
+# Tier Inheritance:
+#   quick -> gets labels: quick, standard, comprehensive, full
+#   standard -> gets labels: standard, comprehensive, full
+#   comprehensive -> gets labels: comprehensive, full
+#   full -> gets labels: full
+#
+# Multi-dimensional labels (backend, GPU, variant, category) are applied
+# via CMake functions in CTestFunctionalTests.cmake and CTestUnitTests.cmake
+
+test_categories:
+  quick:
+    description: "Quick sanity checks - Run pre-commit (target: ~1-2 min, ~9 tests)"
+    test_patterns:
+      # Device bitcode tests - early validation
+      - "device_bitcode_.*"
+
+      # Baseline RMA tests (single workgroup configuration)
+      # Matches both base variant (MPI) and uuid variant (SLR)
+      - "put_n2_w8_z1_1048576B(_uuid)?"
+      - "get_n2_w8_z1_1048576B(_uuid)?"
+
+      # Workgroup-level RMA tests (basic, any thread count for GPU portability)
+      - "wgput_n2_w1_z.*_1048576B(_uuid)?"
+      - "wgget_n2_w1_z.*_1048576B(_uuid)?"
+
+      # Context-specific RMA tests
+      - "defaultctxput_.*"
+      - "defaultctxget_.*"
+
+      # Single collective test
+      - "barrierall_n2_w8_z1"
+
+      # Stream tests (basic)
+      - "putmem_on_stream_.*"
+
+      # AMO operations (basic)
+      - "amo_fadd_.*"
+
+      # Specialized tests
+      - "pingpong_.*"
+
+      # Single element operations
+      - "p_n.*"
+      - "g_n.*"
+
+# Unit tests
+      - "unit_tests_n4"
+
+    labels:
+      - "smoke"
+      - "pre-commit"
+
+  standard:
+    description: "Core functionality - Run on every PR (target: ~15-20 min, ~121 tests)"
+    test_patterns:
+      # Extended RMA tests (various rank counts, 1 or 8 workgroups)
+      - "put_n.*_w[18]_z1_.*"
+      - "get_n.*_w[18]_z1_.*"
+      - "putnbi_n.*_w[18]_z1_.*"
+      - "getnbi_n.*_w[18]_z1_.*"
+
+      # AMO operations (basic)
+      - "amo_add_.*"
+      - "amo_inc_.*"
+      - "amo_finc_.*"
+
+      # Collective operations (sync/barrier variants)
+      - "barrierall_.*"
+      - "syncall_.*"
+      - "alltoall_n.*"
+      - "wavebarrierall_.*"
+      - "wgbarrierall_.*"
+      - "wavesyncall_.*"
+      - "wgsyncall_.*"
+      - "teamsync_.*"
+
+      # Signal operations
+      - "putsignal_.*"
+      - "signalfetch_.*"
+
+      # Stream tests (basic)
+      - "putmem_signal_on_stream_.*"
+      - "barrier_all_on_stream_.*"
+      - "signal_wait_until_on_stream_.*"
+
+      # Specialized tests
+      - "shmemptr_.*"
+      - "library_info_.*"
+      - "hipmodule_init_.*"
+
+    labels:
+      - "pr"
+
+  comprehensive:
+    description: "Extended testing - Run nightly (target: ~30-40 min, ~208 tests)"
+    test_patterns:
+      # Extended RMA tests with more workgroups (16, 32, 64)
+      - "put_n.*_w(16|32|64)_.*"
+      - "get_n.*_w(16|32|64)_.*"
+      - "putnbi_n.*_w(16|32|64)_.*"
+      - "getnbi_n.*_w(16|32|64)_.*"
+
+      # Workgroup-level RMA operations
+      - "wgput_.*"
+      - "wgget_.*"
+      - "wgputnbi_.*"
+      - "wggetnbi_.*"
+
+      # Wavefront-level RMA operations
+      - "waveput_.*"
+      - "waveget_.*"
+      - "waveputnbi_.*"
+      - "wavegetnbi_.*"
+
+      # Context-specific RMA tests
+      - "defaultctxput_.*"
+      - "defaultctxget_.*"
+      - "defaultctxputnbi_.*"
+      - "defaultctxgetnbi_.*"
+      - "teamctxput_.*"
+      - "teamctxget_.*"
+      - "teamctxputnbi_.*"
+      - "teamctxgetnbi_.*"
+
+      # Extended AMO operations
+      - "amo_fetch_.*"
+      - "amo_fcswap_.*"
+      - "amo_set_.*"
+      - "amo_swap_.*"
+      - "amo_and_.*"
+      - "amo_or_.*"
+      - "amo_xor_.*"
+      - "amo_fetchand_.*"
+      - "amo_fetchor_.*"
+      - "amo_fetchxor_.*"
+
+      # Extended collective operations
+      - "alltoallv_.*"
+      - "fcollect_.*"
+      - "teambroadcast_.*"
+      - "teamreduction_.*"
+      - "teamreducescatter_.*"
+      - "teambarrier_.*"
+      - "teamwavebarrier_.*"
+      - "teamwgbarrier_.*"
+      - "teamwavesync_.*"
+      - "teamwgsync_.*"
+      - "teamsplit2d_.*"
+
+      # Extended signal operations
+      - "wgputsignal_.*"
+      - "waveputsignal_.*"
+      - "putsignalnbi_.*"
+      - "wgputsignalnbi_.*"
+      - "waveputsignalnbi_.*"
+      - "wgsignalfetch_.*"
+      - "wavesignalfetch_.*"
+
+      # Extended stream tests
+      - "getmem_on_stream_.*"
+      - "quiet_on_stream_.*"
+      - "sync_all_on_stream_.*"
+      - "alltoallmem_on_stream_.*"
+      - "broadcastmem_on_stream_.*"
+
+      # Team context infrastructure tests
+      - "teamctxinfra_.*"
+      - "teamctxsingleinfra_.*"
+      - "teamctxblockinfra_.*"
+      - "teamctxoddeveninfra_.*"
+      - "teamctxsharedinfra_.*"
+      - "teamctxsubsetparentinfra_.*"
+
+      # Specialized tests
+      - "pingall_.*"
+      - "randomaccess_.*"
+      - "init_.*"
+
+      # Single element operations
+      - "p_n.*"
+      - "g_n.*"
+      - "defaultctxp_.*"
+      - "defaultctxg_.*"
+
+      # Tile RMA tests (2D/strided operations, IPC-only)
+      - "tile_put_.*"
+      - "tile_get_.*"
+
+      # Host RMA/AMO tests (non-MPI IPC TcpBootstrap path, IPC-only)
+      - "host_putmem_.*"
+      - "host_getmem_.*"
+      - "host_amo_fadd_.*"
+      - "host_amo_fcswap_.*"
+      - "host_ctx_putmem_.*"
+      - "host_ctx_getmem_.*"
+      - "host_int_amo_fadd_.*"
+      - "host_int_amo_fcswap_.*"
+      - "host_amo_all_pes_.*"
+      - "host_amo_self_.*"
+
+      # Host P2P sync tests (non-MPI IPC TcpBootstrap path, IPC-only)
+      - "host_wait_until_.*"
+      - "host_test_.*"
+
+      # Tile collective tests (IPC-only)
+      - "tile_broadcast_.*"
+      - "tile_allgather_.*"
+
+    labels:
+      - "nightly"
+
+  full:
+    description: "Full test suite - Run weekly (target: ~45-60 min, ~229 tests)"
+    test_patterns:
+      # Flood tests (high load, multiple workgroups)
+      - "flood_put_.*"
+      - "flood_get_.*"
+      - "flood_add_.*"
+      - "flood_fadd_.*"
+      - "flood_wgput_.*"
+      - "flood_wgget_.*"
+      - "flood_wgadd_.*"
+      - "flood_wgfadd_.*"
+      - "flood_putnbi_.*"
+      - "flood_getnbi_.*"
+      - "flood_p_.*"
+      - "flood_g_.*"
+      - "flood_waitadd_.*"
+
+      # Fence tests (synchronization patterns)
+      - "fence_putwavesignal_.*"
+      - "fence_putlargesmall_.*"
+      - "fence_fanout_.*"
+      - "fence_putwavenbichunks_.*"
+
+      # Heatmap/performance tests (no timeout)
+      - "heatmap_.*"
+
+    labels:
+      - "weekly"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 120        # 2 minutes
+    standard: 1800    # 30 minutes
+    comprehensive: 7200  # 2 hours
+    full: 14400       # 4 hours

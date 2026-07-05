@@ -27,8 +27,8 @@ __constant__ float yuv_to_rgb_mat[3][3];
 __constant__ float rgb_to_yuv_mat[3][3];
 
 
-void inline GetColMatCoefficients(int col_standard, float &wr, float &wb, int &black, int &white, int &max) {
-    black = 16; white = 235;
+void inline GetColMatCoefficients(int col_standard, float &wr, float &wb, int &black, int &white, int &white_c, int &max) {
+    black = 16; white = 235; white_c = 240;
     max = 255;
 
     switch (col_standard)
@@ -55,42 +55,42 @@ void inline GetColMatCoefficients(int col_standard, float &wr, float &wb, int &b
     case ColorSpaceStandard_BT2020C:
         wr = 0.2627f; wb = 0.0593f;
         // 10-bit only
-        black = 64 << 6; white = 940 << 6;
-        max = (1 << 16) - 1;
+        black = 64 << 6; white = 940 << 6; white_c = 960 << 6;
+        max = 1023 << 6;
         break;
     }
 }
 
 void SetMatYuv2Rgb(int col_standard) {
     float wr, wb;
-    int black, white, max;
-    GetColMatCoefficients(col_standard, wr, wb, black, white, max);
+    int black, white, white_c, max;
+    GetColMatCoefficients(col_standard, wr, wb, black, white, white_c, max);
     float mat[3][3] = {
         1.0f, 0.0f, (1.0f - wr) / 0.5f,
         1.0f, -wb * (1.0f - wb) / 0.5f / (1 - wb - wr), -wr * (1 - wr) / 0.5f / (1 - wb - wr),
         1.0f, (1.0f - wb) / 0.5f, 0.0f,
     };
     for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            mat[i][j] = (float)(1.0 * max / (white - black) * mat[i][j]);
-        }
+        mat[i][0] = (float)(1.0 * max / (white - black) * mat[i][0]);
+        mat[i][1] = (float)(1.0 * max / (white_c - black) * mat[i][1]);
+        mat[i][2] = (float)(1.0 * max / (white_c - black) * mat[i][2]);
     }
     HIP_API_CALL(hipMemcpyToSymbol(yuv_to_rgb_mat, mat, sizeof(mat)));
 }
 
 void SetMatRgb2Yuv(int col_standard) {
     float wr, wb;
-    int black, white, max;
-    GetColMatCoefficients(col_standard, wr, wb, black, white, max);
+    int black, white, white_c, max;
+    GetColMatCoefficients(col_standard, wr, wb, black, white, white_c, max);
     float mat[3][3] = {
         wr, 1.0f - wb - wr, wb,
         -0.5f * wr / (1.0f - wb), -0.5f * (1 - wb - wr) / (1.0f - wb), 0.5f,
         0.5f, -0.5f * (1.0f - wb - wr) / (1.0f - wr), -0.5f * wb / (1.0f - wr),
     };
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            mat[i][j] = (float)(1.0 * (white - black) / max * mat[i][j]);
-        }
+    for (int j = 0; j < 3; j++) {
+        mat[0][j] = (float)(1.0 * (white - black) / max * mat[0][j]);
+        mat[1][j] = (float)(1.0 * (white_c - black) / max * mat[1][j]);
+        mat[2][j] = (float)(1.0 * (white_c - black) / max * mat[2][j]);
     }
     HIP_API_CALL(hipMemcpyToSymbol(rgb_to_yuv_mat, mat, sizeof(mat)));
 }

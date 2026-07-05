@@ -84,7 +84,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
     uint32_t core_count = 0;
 
     // Set processor type as AMDSMI_PROCESSOR_TYPE_AMD_CPU
-    processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
+    amdsmi_processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
     ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, nullptr, &cpu_count);
     CHK_AMDSMI_RET(ret)
 

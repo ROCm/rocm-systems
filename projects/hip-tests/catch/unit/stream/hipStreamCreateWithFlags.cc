@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipStreamCreateWithFlags_DefaultStreamInteraction) {
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreateWithFlags(&stream, flagUnderTest));
 
-  constexpr auto delay = std::chrono::milliseconds(500);
+  const auto delay = std::chrono::milliseconds(isQuickLevel() ? 100 : 500);
 
   SECTION("default stream waiting for created stream") {
     const hipError_t expectedError =

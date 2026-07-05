@@ -244,7 +244,7 @@ def add_args(parser: argparse.ArgumentParser):
             "'anthropic' (ANTHROPIC_API_KEY), 'openai' (OPENAI_API_KEY), "
             "'ollama' (local daemon, PERFXPERT_LLM_LOCAL_URL), "
             "'private' (self-hosted OpenAI-compatible endpoint, PERFXPERT_LLM_PRIVATE_URL + _API_KEY), "
-            "'opencode' (bundled opencode CLI, PERFXPERT_OPENCODE_PATH), "
+            "'opencode' (bundled opencode CLI), "
             "'claude-code' (compatibility alias for opencode). "
             "Local analysis always runs first; LLM provides additional natural language insights."
         ),
@@ -1461,10 +1461,11 @@ _PROVIDER_CREDENTIALS = {
     "private": {
         "env_vars": ("PERFXPERT_LLM_PRIVATE_API_KEY",),
         "hint": (
-            "private provider requires PERFXPERT_LLM_PRIVATE_URL + "
-            "PERFXPERT_LLM_PRIVATE_API_KEY (or --llm-api-key <key>)"
+            "private provider requires PERFXPERT_LLM_PRIVATE_URL "
+            "(or PRIVATE_LLM_ENDPOINT) plus PERFXPERT_LLM_PRIVATE_API_KEY "
+            "(or --llm-api-key <key>)"
         ),
-        "required_env": ("PERFXPERT_LLM_PRIVATE_URL",),
+        "required_env_any": (("PERFXPERT_LLM_PRIVATE_URL", "PRIVATE_LLM_ENDPOINT"),),
     },
     "ollama": {
         "env_vars": (),  # Ollama needs no key; URL is the credential.
@@ -1477,8 +1478,8 @@ _PROVIDER_CREDENTIALS = {
     "opencode": {
         "env_vars": (),
         "hint": (
-            "opencode provider requires the bundled CLI on PATH or set "
-            "PERFXPERT_OPENCODE_PATH=/path/to/opencode"
+            "opencode provider requires the bundled patched CLI produced by "
+            "the perfxpert install/build hook"
         ),
         "required_env": (),
     },
@@ -1522,11 +1523,14 @@ def _preflight_provider_auth(provider: str, flag_api_key: Optional[str]) -> None
 
 
 def _require_additional_env(provider: str, info: Dict[str, Any]) -> None:
-    """Verify any ``required_env`` vars for ``provider`` are set."""
+    """Verify any additional env requirements for ``provider`` are set."""
     from perfxpert.providers._exceptions import AuthError
 
     for var in info.get("required_env", ()) or ():
         if not os.environ.get(var):
+            raise AuthError(provider, info["hint"])
+    for choices in info.get("required_env_any", ()) or ():
+        if not any(os.environ.get(var) for var in choices):
             raise AuthError(provider, info["hint"])
 
 
@@ -1822,6 +1826,10 @@ def _execute_agentic(
     _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}
     _ext = _ext_map.get(output_format, ".txt")
 
+    if config and config.output_file == "-":
+        print(output)
+        return input
+
     if config and output_format != "text":
         if not config.output_path:
             config.output_path = "."
@@ -1830,6 +1838,8 @@ def _execute_agentic(
                 config.output_file = os.path.splitext(os.path.basename(database_path))[0]
             else:
                 config.output_file = "analysis"
+    elif config and config.output_file and not config.output_path:
+        config.output_path = "."
     elif config and config.output_path and not config.output_file:
         if database_path:
             config.output_file = os.path.splitext(os.path.basename(database_path))[0]
@@ -1844,12 +1854,13 @@ def _execute_agentic(
         os.makedirs(config.output_path, exist_ok=True)
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(output)
-        print(f"Analysis written to: {output_file}")
+        print(f"Analysis written to: {output_file}", file=sys.stderr)
         if output_format == "text":
             print(
                 "Tip: use --format webview for an interactive HTML report, "
                 "--format json for machine-readable output, "
-                "or --format markdown for Markdown."
+                "or --format markdown for Markdown.",
+                file=sys.stderr,
             )
     else:
         print(output)
@@ -1988,9 +1999,12 @@ def _render_cli_error(exc: BaseException) -> int:
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
             "ollama": "PERFXPERT_LLM_LOCAL_URL",
-            "private": "PERFXPERT_LLM_PRIVATE_API_KEY",
-            "opencode": "PERFXPERT_OPENCODE_PATH",
-            "claude-code": "PERFXPERT_OPENCODE_PATH",
+            "private": (
+                "PERFXPERT_LLM_PRIVATE_URL or PRIVATE_LLM_ENDPOINT, plus "
+                "PERFXPERT_LLM_PRIVATE_API_KEY or --llm-api-key"
+            ),
+            "opencode": "the bundled patched opencode build",
+            "claude-code": "the bundled patched opencode build",
         }.get(prov, f"{prov.upper()}_API_KEY")
         print(
             f"⚠ LLM auth failed for {prov}. "

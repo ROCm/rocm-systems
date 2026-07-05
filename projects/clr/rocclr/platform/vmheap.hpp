@@ -18,7 +18,7 @@ class HeapBlock;
 class VmHeap;
 class VmHeapArray;
 
-class HeapBlock : public amd::HeapObject {
+class HeapBlock {
  public:
   friend VmHeap;
   //! Constructor

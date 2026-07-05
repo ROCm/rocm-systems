@@ -34,8 +34,7 @@ HIP_TEST_CASE(Unit_hipDeviceEnableDisablePeerAccess_positive) {
   int canAccessPeer = 0;
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int dev = GENERATE(range(0, HipTest::getGeviceCount()));
@@ -53,8 +52,7 @@ HIP_TEST_CASE(Unit_hipDeviceEnableDisablePeerAccess_positive) {
     HIP_CHECK(hipStreamDestroy(stream));
 
     if (canAccessPeer == 0) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
     HIP_CHECK(hipDeviceEnablePeerAccess(peerDev, 0));
     HIP_CHECK(hipDeviceDisablePeerAccess(peerDev));
@@ -82,8 +80,7 @@ HIP_TEST_CASE(Unit_hipDeviceEnableDisablePeerAccess_positive) {
 HIP_TEST_CASE(Unit_hipDeviceEnablePeerAccess_negative) {
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   SECTION("peerDeviceId is invalid") {
@@ -146,8 +143,7 @@ HIP_TEST_CASE(Unit_hipDeviceEnablePeerAccess_negative) {
 HIP_TEST_CASE(Unit_hipDeviceDisablePeerAccess_negative) {
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   SECTION("peerDeviceId is invalid") {
@@ -159,8 +155,7 @@ HIP_TEST_CASE(Unit_hipDeviceDisablePeerAccess_negative) {
     int canAccessPeer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
     if (canAccessPeer == 0) {
-      HipTest::HIP_SKIP_TEST("Skipping because no P2P support between device 0 and 1");
-      return;
+      HIP_SKIP_TEST("Skipping because no P2P support between device 0 and 1");
     }
     HIP_CHECK_ERROR(hipDeviceDisablePeerAccess(1), hipErrorPeerAccessNotEnabled);
   }

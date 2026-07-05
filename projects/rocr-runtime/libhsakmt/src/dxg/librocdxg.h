@@ -217,6 +217,12 @@ extern hsakmtRuntime *dxg_runtime;
 	hsakmt_print(HSAKMT_DEBUG_LEVEL_INFO, fmt, ##__VA_ARGS__)
 #define pr_debug(fmt, ...) \
 	hsakmt_print(HSAKMT_DEBUG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define pr_rocr_info(fmt, ...) \
+	do { \
+		if (HSAKMT_DEBUG_LEVEL_INFO <= dxg_runtime->hsakmt_debug_level) { \
+			hsakmt_print_common(stdout, fmt, ##__VA_ARGS__); \
+		} \
+	} while (false)
 #define pr_err_once(fmt, ...)                   \
 {                                               \
         static bool __print_once;               \
@@ -294,7 +300,8 @@ uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 bool is_ipc_sysmemfd(uint64_t fd);
 
 HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
-                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle);
+                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle,
+                               uint64_t size_hint = 0);
 
 bool hsakmt_hsa_loader_init();
 

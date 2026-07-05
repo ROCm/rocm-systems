@@ -5,7 +5,7 @@
 .. _thread-trace:
 
 ROCprof Trace Decoder and thread trace APIs
-======================================================
+============================================
 
 Thread trace is a profiling method that provides fine-grained insight into GPU kernel execution by collecting detailed traces of shader instructions executed by the GPU. This feature captures GPU occupancy, instruction execution times, fast performance counters, and other detailed performance data. Thread trace utilizes GPU hardware instrumentation to record events as they happen, resulting in precise timing information about wave (threads) execution behavior.
 
@@ -15,12 +15,8 @@ ROCprofiler-SDK provides wrapper APIs for the ROCprof Trace Decoder, a library t
 
     Thread trace can generate large amounts of data, especially when profiling complex applications or longer execution runs. This might require handling potentially high volumes of trace data, so it’s recommended to implement appropriate filtering strategies to focus on the specific parts of interest in your application.
 
-.. note::
-
-    ROCprof Trace Decoder is a binary-only library and can be found `here <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
-
 Thread trace service API
-------------------------------------
+--------------------------
 
 This section describes how to use the ROCprofiler-SDK thread trace API to configure and use the thread trace service. For fully functional examples, see `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples/thread_trace>`_.
 
@@ -179,10 +175,14 @@ To stop the context to end data collection for device-wide thread trace, use:
 ROCprof Trace Decoder API
 --------------------------------
 
-The thread trace functionality requires you to install the ROCprof Trace Decoder package separately. This package provides the necessary decoder library for processing thread trace data. Ensure to install this package on your system before using the thread trace feature.
+The ROCProf Trace Decoder is a dedicated library for processing thread trace data.
+
+.. note::
+
+    For ROCm releases earlier than 7.13, using the thread trace functionality requires you to install the ROCprof Trace Decoder package separately.
 
 Trace Decoder setup
-++++++++++++++
+++++++++++++++++++++
 
 To decode the raw thread trace data, create and initialize a Trace Decoder:
 
@@ -300,7 +300,7 @@ The trace decoder provides decoded information through a callback:
     }
 
 Trace Decoder info events
-++++++++++++++++++
++++++++++++++++++++++++++++
 
 The Trace Decoder provides important information about the quality and comprehensiveness of the trace data through ``ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO`` events. It is important to handle these events to understand potential issues with your trace data:
 

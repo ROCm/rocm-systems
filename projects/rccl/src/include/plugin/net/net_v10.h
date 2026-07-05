@@ -1,13 +1,16 @@
-/*
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
- */
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NET_V10_H_
 #define NET_V10_H_
 
 typedef struct {
   int ndevs;
-  int devs[NCCL_NET_MAX_DEVS_PER_NIC];
+  int devs[NCCL_NET_MAX_DEVS_PER_NIC_V11];
 } ncclNetVDeviceProps_v10_t;
 
 #define NCCL_NET_TRAFFIC_CLASS_UNDEF -1

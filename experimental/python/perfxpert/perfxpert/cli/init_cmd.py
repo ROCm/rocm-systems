@@ -10,11 +10,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import importlib.util
-import json
 import os
-import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -25,6 +21,7 @@ from perfxpert.analysis.payload import scan_tier0_sources
 from perfxpert.config._cli import _config_path as _default_config_path
 from perfxpert.config._config import PerfXpertConfig
 from perfxpert.tools.arch import lookup_peaks
+from perfxpert.tools.gpu_discovery import first_runtime_gpu_specs
 
 
 __all__ = ["add_args", "run_init"]
@@ -67,79 +64,19 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-_GFX_RE = re.compile(r"\b(gfx\d{3,4}[a-z]?)\b")
-
-
-def _detect_gpu_via_rocm_smi() -> Optional[str]:
-    """Run rocm-smi and return the first gfx arch string, or None."""
-    if shutil.which("rocm-smi") is None:
-        return None
-    try:
-        proc = subprocess.run(
-            ["rocm-smi", "--showproductname", "--showmeminfo", "vram", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-
-    text = proc.stdout or ""
-    try:
-        data = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        match = _GFX_RE.search(text)
-        return match.group(1) if match else None
-
-    def _walk(obj: Any) -> Optional[str]:
-        if isinstance(obj, str):
-            match = _GFX_RE.search(obj)
-            return match.group(1) if match else None
-        if isinstance(obj, dict):
-            for value in obj.values():
-                hit = _walk(value)
-                if hit:
-                    return hit
-        if isinstance(obj, list):
-            for value in obj:
-                hit = _walk(value)
-                if hit:
-                    return hit
-        return None
-
-    return _walk(data)
-
-
-def _detect_gpu_via_rocminfo() -> Optional[str]:
-    """Fallback: parse rocminfo output for a gfx architecture."""
-    if shutil.which("rocminfo") is None:
-        return None
-    try:
-        proc = subprocess.run(
-            ["rocminfo"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    match = _GFX_RE.search(proc.stdout or "")
-    return match.group(1) if match else None
-
-
 def _detect_gpu(override: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Resolve a gfx id and look up peak specs."""
-    gfx_id = override or _detect_gpu_via_rocm_smi() or _detect_gpu_via_rocminfo()
+    """Resolve a local GPU and look up runtime-enriched peak specs."""
+    if override:
+        gfx_id = override
+    else:
+        detected = first_runtime_gpu_specs()
+        gfx_id = detected.get("gfx_id") if detected else None
     if not gfx_id:
         return None
     try:
-        peaks = lookup_peaks(gfx_id)
+        peaks = lookup_peaks(gfx_id, prefer_runtime=True)
     except KeyError:
-        return {"gfx_id": gfx_id, "peaks": None}
+        peaks = None
     return {"gfx_id": gfx_id, "peaks": peaks}
 
 
@@ -277,11 +214,7 @@ def _suggest_first_command(framework_info: Dict[str, Any]) -> List[str]:
             "GRBM_COUNT",
             "GRBM_GUI_ACTIVE",
         ]
-        commands.append(
-            "rocprofv3 --pmc "
-            + " ".join(counters)
-            + f" -d ./profile_out_pmc -- {target}"
-        )
+        commands.append("rocprofv3 --pmc " + " ".join(counters) + f" -d ./profile_out_pmc -- {target}")
     return commands
 
 
@@ -300,7 +233,7 @@ def _print_step(n: int, total: int, title: str, body: str, stream=sys.stdout) ->
 def _format_gpu_info(gpu_info: Optional[Dict[str, Any]]) -> str:
     if gpu_info is None:
         return (
-            "could not detect GPU via rocm-smi or rocminfo.\n"
+            "could not detect GPU via rocminfo, rocm-smi, or amd-smi.\n"
             "pass `--arch gfx942` (or similar) to proceed manually."
         )
     gfx_id = gpu_info.get("gfx_id", "unknown")
@@ -312,9 +245,7 @@ def _format_gpu_info(gpu_info: Optional[Dict[str, Any]]) -> str:
     bandwidth = peaks.get("memory_bandwidth_tbs", "?")
     fp32 = peaks.get("peak_fp32_tflops", "?")
     return (
-        f"detected: {gfx_id} ({name}, {cu_count} CU)\n"
-        f"  peak FP32: {fp32} TFLOPS\n"
-        f"  peak HBM : {bandwidth} TB/s"
+        f"detected: {gfx_id} ({name}, {cu_count} CU)\n" f"  peak FP32: {fp32} TFLOPS\n" f"  peak HBM : {bandwidth} TB/s"
     )
 
 
@@ -350,9 +281,7 @@ def _format_suggested_cmds(commands: List[str]) -> str:
     for index, command in enumerate(commands):
         prefix = "primary : " if index == 0 else "extra   : "
         lines.append(prefix + command)
-    lines.append(
-        "(--pc-sampling / --att are second-tier - run after Tier-1 identifies hot kernels)"
-    )
+    lines.append("(--pc-sampling / --att are second-tier - run after Tier-1 identifies hot kernels)")
     return "\n".join(lines)
 
 

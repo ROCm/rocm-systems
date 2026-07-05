@@ -96,7 +96,7 @@ class ROBackend : public Backend {
   void create_new_team(Team *parent_team,
                        const TeamInfo& team_info_wrt_parent,
                        const TeamInfo& team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm team_comm,
+                       int my_pe_in_new_team, MPI_Comm new_team_comm,
                        rocshmem_team_t *new_team) override;
 
   /**
@@ -146,7 +146,7 @@ class ROBackend : public Backend {
   /**
    * @brief Handle to device memory fields.
    */
-  BackendProxyT backend_proxy{};
+  BackendProxy backend_proxy{};
 
   /**
    * @brief Handle to block resources
@@ -159,6 +159,15 @@ class ROBackend : public Backend {
   DefaultBlockHandleProxyT default_block_handle_proxy_;
 
  protected:
+  /**
+   * @copydoc Backend::accumulate_ctx_device_stats()
+   */
+  void accumulate_ctx_device_stats() override;
+  /**
+   * @copydoc Backend::accumulate_default_host_ctx_stats()
+   */
+  void accumulate_default_host_ctx_stats() override;
+
   /**
    * @copydoc Backend::dump_backend_stats()
    */
@@ -205,7 +214,7 @@ class ROBackend : public Backend {
    *
    * See the transport class for more details.
    */
-  ROTeamProxyT *team_world_proxy_;
+  ROTeamProxy *team_world_proxy_;
 
   /**
    * @brief Allocate and initialize team shared.
@@ -233,7 +242,7 @@ class ROBackend : public Backend {
   /**
    * @brief Pool of contexts for RO_NET
    */
-  WindowProxyT *ro_window_proxy_;
+  WindowProxy *ro_window_proxy_;
 
  protected:
   /**
@@ -248,7 +257,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  ProfilerProxyT profiler_proxy_;  // init handled in constructor
+  ProfilerProxy profiler_proxy_;  // init handled in constructor
 
  public:
   /**
@@ -262,7 +271,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  DefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  DefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief Controls how many thread blocks are monitored by polling thread.

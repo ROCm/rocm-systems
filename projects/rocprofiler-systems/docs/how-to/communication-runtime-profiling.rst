@@ -104,14 +104,19 @@ ROCm Systems Profiler provides automatic output labeling based on MPI rank IDs:
 * When full MPI support is enabled (``ROCPROFSYS_USE_MPI=ON``), output files are labeled with the ``MPI_COMM_WORLD`` rank ID
 * The ``ROCPROFSYS_USE_PID`` setting controls whether process IDs or MPI rank IDs are used for output labeling
 
-For detailed information on building rocprofiler-systems with MPI support, see the :doc:`installation guide <../install/install>`.
+For detailed information on building ROCm Systems Profiler with MPI support, see the :doc:`installation guide <../install/install>`.
 
 Selective rank profiling
 -------------------------
 
-When running large-scale MPI jobs, collecting profiling data from all ranks is not always desired.
+When running large-scale MPI jobs, you might not always want to collect profiling data and console output from all MPI ranks.
+ROCm Systems Profiler provides two independent rank-filtering options:
+
+- ``--rank-filter-output``: Only the specified MPI ranks produce profile and trace output files. Other ranks run normally but don't generate output files. The corresponding configuration setting is ``ROCPROFSYS_RANK_FILTER_OUTPUT``.
+- ``--rank-filter-logs``: Only the listed MPI ranks emit console output. Other ranks run normally but don't generate console output. The corresponding configuration setting is ``ROCPROFSYS_RANK_FILTER_LOGS``.
+
 The ``--rank-filter-output`` option allows you to specify which MPI ranks should provide profile and trace output files.
-Below are examples using ``rocprof-sys-sample`` to profile an appliction using a variety of rank selection syntaxes.
+Below are some examples using ``rocprof-sys-sample`` to profile an application using a variety of rank selection syntaxes.
 
 .. code-block:: bash
 
@@ -124,36 +129,79 @@ Below are examples using ``rocprof-sys-sample`` to profile an appliction using a
     # Profile ranks 0, 4, 8, and 12
     mpirun -n 16 rocprof-sys-sample --rank-filter-output 0,4,8,12 -- <application_path>
 
-Supported rank specification syntax:
+Use the ``--rank-filter-logs`` option to specify which MPI ranks emit console output:
 
-- **Individual ranks**: Comma-separated integers (e.g., ``0,1,2,8``)
-- **Ranges**: Hyphen-separated start and end values (e.g., ``0-7`` for ranks 0 through 7)
-- **Combined**: Mix of individual ranks and ranges (e.g., ``0-3,8,10-15``)
+.. code-block:: bash
 
-Supported rank identification variables:
+    # Show console output from ranks 0-3 and rank 8
+    mpirun -n 16 rocprof-sys-sample --rank-filter-logs 0-3,8 -- <application_path>
 
-- **MPI_RANK**
-- **MPI_LOCALRANKID**
-- **MPI_RANKID**
-- **MV2_COMM_WORLD_RANK**
-- **OMPI_COMM_WORLD_RANK**
+You can also combine the two filters. For example, to write profile data only for rank 0 while keeping console logs visible from ranks 0-3, use:
 
-If rank detection fails, data is collected from all ranks.
+.. code-block:: bash
+
+    mpirun -n 16 rocprof-sys-sample --rank-filter-output 0 --rank-filter-logs 0-3 -- <application_path>
+
+For both the filters, you can specify ranks using any of these formats:
+
+- **Individual ranks**: List specific ranks separated by commas, such as ``0,1,2,8``
+- **Ranges**: Use hyphens to specify consecutive ranks, such as ``0-7`` for ranks 0 through 7
+- **Combined**: Mix individual ranks and ranges, such as ``0-3,8,10-15``
+- **All ranks**: Leave the value empty to include all ranks (default behavior)
+
+If the total number of MPI ranks (world size) can be determined from the launcher environment
+(``OMPI_COMM_WORLD_SIZE``, ``MV2_COMM_WORLD_SIZE``, ``PMI_SIZE``, ``SLURM_NTASKS``, or ``SLURM_NPROCS``),
+any filter value outside the valid range ``[0, world_size - 1]`` triggers a warning and is ignored.
+If every value in the filter is out of range, filtering is disabled and the output is produced for all ranks.
+
+However, if the world size cannot be determined, no such validation is performed and specifying correct
+rank values is the user's responsibility.
+
+.. code-block:: bash
+
+    # Rank 100 is out of range for a 16-rank job: it is reported and ignored,
+    # so only rank 1 produces output
+    mpirun -n 16 rocprof-sys-sample --rank-filter-output "1,100" -- <application_path>
+
+ROCm Systems Profiler automatically detects each process's MPI rank by checking these _`rank identification` environment variables:
+
+- ``MPI_RANKID``
+- ``PMI_RANK`` 
+- ``MV2_COMM_WORLD_RANK``
+- ``OMPI_COMM_WORLD_RANK``
+- ``SLURM_PROCID``
+
+These environment variables are checked in the listed order top-to-bottom, and the first one that is set to a non-negative integer is used as the rank. The profiler uses the detected rank number to determine whether that process should produce output files or console logs based on your filter settings. If rank detection fails using these standard variables, both filters are disabled and all ranks produce the output.
+
+Similarly, if the detected rank itself is out of the range ``[0, world_size - 1]``, the filtering is disabled for that rank and all ranks produce the output.
+
+.. note::
+
+   For maximum console output suppression, use the ``ROCPROFSYS_RANK_FILTER_LOGS`` configuration setting instead of the ``--rank-filter-logs`` CLI option. The command-line option may show more log messages during startup. Also note that errors and critical messages are emitted for all ranks regardless of rank-based filtering option.
+
+   .. code-block:: bash
+
+       # Show console output only from rank 0
+       export ROCPROFSYS_RANK_FILTER_LOGS=0
+       mpirun -n 16 rocprof-sys-sample -- <application_path>
 
 Custom MPI environment variables
 ----------------------------------
 
-For mixed environments or non-standard MPI configurations, you can specify custom environment variables for rank detection.
-When using custom environment variables, both ``--rank-filter-output`` and ``--rank-filter-id`` must be specified.
-The ``--rank-filter-id`` will take precedence over automatic detection.
+For mixed environments or non-standard MPI configurations, you can specify custom environment variables for rank detection using ``--rank-filter-id`` CLI option or the corresponding ``ROCPROFSYS_RANK_FILTER_ID`` configuration setting.
+When using custom environment variables, ``--rank-filter-id`` must be specified together with at least one of the filter:  ``--rank-filter-output`` or ``--rank-filter-logs``.
+The ``--rank-filter-id`` will take precedence over automatic detection for both filters.
 Below is an example using the ``MY_CUSTOM_RANK`` environment variable with ``rocprof-sys-sample`` to profile ranks 0-3 and 8:
 
 .. code-block:: bash
 
-    # Use custom environment variables for rank detection
+    # Use custom environment variable MY_CUSTOM_RANK for rank detection (file output filter)
     mpirun -n 16 rocprof-sys-sample --rank-filter-output 0-3,8 --rank-filter-id MY_CUSTOM_RANK -- <application_path>
 
-If rank detection using the custom variable fails, the above-listed supported variables are used instead.
+    # Use custom environment variable MY_CUSTOM_RANK for rank detection (console log filter)
+    mpirun -n 16 rocprof-sys-sample --rank-filter-logs 0-3,8 --rank-filter-id MY_CUSTOM_RANK -- <application_path>
+
+If rank detection using the custom variable fails, the above-listed `rank identification`_ environment variables are used instead.
 
 Profiling RCCL
 ==============
@@ -390,6 +438,22 @@ Run with your OpenSHMEM launcher (e.g., ``oshrun``) and ``rocprof-sys-sample`` o
 .. code-block:: shell
 
    oshrun -n 4 rocprof-sys-sample -- ./my_shmem_app
+
+.. note::
+
+   PRRTE-based ``oshrun`` (Open MPI 5.0 and later) strips the first literal ``--``
+   from the program's argument list before passing it to the target application. This
+   breaks commands like ``rocprof-sys-run -- <binary>`` because ``rocprof-sys-run``
+   never receives the ``--`` separator and misinterprets its arguments. Older ORTE-based
+   ``oshrun`` (4.x and earlier) preserves ``--`` and is not affected.
+
+   As a workaround, pass ``-- --`` (two separate ``--`` delimiters) so that ``oshrun``
+   consumes the first one and the second reaches ``rocprof-sys-sample`` or
+   ``rocprof-sys-run`` as expected:
+
+   .. code-block:: shell
+
+      oshrun -n 4 rocprof-sys-sample -- -- ./my_shmem_app
 
 
 Multi-Layer Communication Analysis

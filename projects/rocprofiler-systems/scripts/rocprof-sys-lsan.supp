@@ -1,0 +1,78 @@
+# LeakSanitizer suppression file for rocprofiler-systems
+# See: https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer#suppression
+#
+# Format: leak:<pattern>
+# LSan runs as part of ASan when detect_leaks=1
+
+# Dyninst - third-party binary instrumentation framework
+leak:Dyninst::
+leak:dyninst
+
+# TBB - Intel Threading Building Blocks
+leak:tbb::
+leak:libtbb
+
+# OpenMP runtime (libgomp): worker threads, internal allocators
+leak:libgomp
+leak:gomp_
+
+# Boost - third-party library
+leak:boost::
+
+# DWARF debugging library
+leak:libdw
+
+# ROCm libraries
+leak:libamd_comgr
+leak:libpfm4
+leak:libhsa
+leak:libamdhip64
+leak:libroctracer64
+leak:librocprofiler64
+
+# timemory internals
+leak:__cxx_global_var_init
+leak:tim::timemory_argparse
+leak:tim::argparse::argument_parser::parse_known_args
+leak:std::shared_ptr<std::promise<void> >
+
+# Known allocator patterns
+leak:realloc
+
+# OpenMPI / Open RTE runtime
+leak:orte_iof_base_write_output
+leak:orte_init
+leak:orte_submit_init
+leak:orte_state_base_activate_job_state
+leak:orte_rmaps_base_print_mapping
+leak:orte_rmaps_base_setup_proc
+leak:orte_daemon_recv
+leak:orte_rml_base_process_msg
+leak:orte_odls_base_default_construct_child_list
+leak:orte_pmix_server_register_nspace
+
+# Open PAL (OpenMPI portability layer)
+leak:opal_dss_buffer_extend
+leak:opal_dss_pack
+leak:opal_pointer_array_init
+
+# PMIx
+leak:pmix_server_init
+
+# hwloc (hardware locality, used by OpenMPI)
+leak:hwloc_alloc_setup_object
+leak:hwloc_bitmap_alloc
+leak:hwloc_bitmap_dup
+leak:hwloc_topology_load
+
+# libevent (used by OpenMPI)
+leak:event_base_loop
+
+# PAPI - external performance counter library
+leak:allocate_native_event
+
+# Dynamic linker / dlopen
+leak:_dl_catch_exception
+
+# Kokkos runtime
+leak:Kokkos::

@@ -55,6 +55,14 @@ struct cache_policy
             { "ainic_rx_rdma_cnp_pkts", thread_id, "{}" });
         trace_cache::get_metadata_registry().add_track(
             { "ainic_tx_rdma_cnp_pkts", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_tx_rdma_ack_timeout", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_resp_tx_pkt_seq_err", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_req_rx_pkt_seq_err", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_req_rx_impl_nak_seq_err", thread_id, "{}" });
     }
 
     /**
@@ -119,6 +127,38 @@ struct cache_policy
               trait::name<category::amd_smi_nic_tx_ucast_bytes>::description,
               LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+              "NIC TX RDMA ACK Timeout",
+              trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description,
+              LONG_DESCRIPTION, COMPONENT, "timeouts", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+              "NIC RESP TX PKT SEQ Error",
+              trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description,
+              LONG_DESCRIPTION, COMPONENT, "errors", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+              "NIC REQ RX PKT SEQ Error",
+              trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description,
+              LONG_DESCRIPTION, COMPONENT, "errors", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+              "NIC REQ RX Impl NAK SEQ Error",
+              trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description,
+              LONG_DESCRIPTION, COMPONENT, "errors", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
     }
 
     /**
@@ -134,14 +174,14 @@ struct cache_policy
     static void store_sample(size_t device_id, const std::string& device_name,
                              const enabled_metrics& enabled_metrics_cfg,
                              const enabled_metrics& supported_metrics,
-                             const metrics& metric_values, uint64_t timestamp)
+                             const metrics& metric_values, std::uint64_t timestamp)
     {
         enabled_metrics _enabled_metrics;
         _enabled_metrics.value = enabled_metrics_cfg.value & supported_metrics.value;
 
         trace_cache::get_buffer_storage().store(trace_cache::ainic_pmc_sample{
-            _enabled_metrics, static_cast<uint32_t>(device_id), device_name, timestamp,
-            metric_values });
+            _enabled_metrics, static_cast<std::uint32_t>(device_id), device_name,
+            timestamp, metric_values });
     }
 };
 

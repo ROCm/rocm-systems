@@ -82,6 +82,7 @@ struct MemoryTimestamp {
 
   std::unordered_set<hip::Stream*> safe_streams_;  //!< Safe streams for memory reuse
   hip::Event* event_ = nullptr;  //!< Last known HIP event, associated with the memory object
+  uint32_t refcount_ = 0;  //!< VA-mapping refcount: >0 means skip unmap/erase (graph caching)
 };
 
 class Heap : public amd::EmbeddedObject {
@@ -136,6 +137,17 @@ class Heap : public amd::EmbeddedObject {
   /// Get the size of all allocations in the heap
   uint64_t GetTotalSize() const { return total_size_; }
 
+  /// Get the total size of allocations with refcount > 0 (graph-cached, VA-mapped)
+  uint64_t GetRefcountedSize() const {
+    uint64_t size = 0;
+    for (const auto& it : allocations_) {
+      if (it.second.refcount_ > 0) {
+        size += it.first.first;
+      }
+    }
+    return size;
+  }
+
   /// Get the size of all allocations in the heap
   uint64_t GetMaxTotalSize() const { return max_total_size_; }
 
@@ -155,6 +167,21 @@ class Heap : public amd::EmbeddedObject {
   /// Checks if memory belongs to this heap
   bool IsActiveMemory(amd::Memory* memory) const {
     return (allocations_.find({memory->getSize(), memory}) != allocations_.end());
+  }
+
+  /// Increments refcount for the given memory allocation
+  void IncrementRefCount(amd::Memory* memory) {
+    if (auto it = allocations_.find({memory->getSize(), memory}); it != allocations_.end()) {
+      it->second.refcount_++;
+    }
+  }
+
+  /// Decrements refcount for the given memory allocation
+  void DecrementRefCount(amd::Memory* memory) {
+    if (auto it = allocations_.find({memory->getSize(), memory}); it != allocations_.end()) {
+      assert(it->second.refcount_ > 0);
+      it->second.refcount_--;
+    }
   }
 
   /// Enabled VM heap for memory, instead of direct allocations
@@ -250,7 +277,8 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   void* AllocateMemory(size_t size, Stream* stream, void* dptr = nullptr);
 
   /// Frees memory by placing memory object with HIP event into free_heap_
-  bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr);
+  bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr,
+                  bool skip_event = false);
 
   /// Check if memory is active and belongs to the busy heap
   bool IsBusyMemory(amd::Memory* memory) const { return busy_heap_.IsActiveMemory(memory); }
@@ -312,6 +340,20 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   bool InternalDependencies() const { return (state_.internal_dependencies_) ? true : false; }
   bool GraphInUse() const { return (state_.graph_in_use_) ? true : false; }
   void SetGraphInUse() { state_.graph_in_use_ = true; }
+
+  /// Increments refcount for the given memory in either busy or free heap
+  void IncrementRefCount(amd::Memory* memory) {
+    std::scoped_lock lock(lock_pool_ops_);
+    busy_heap_.IncrementRefCount(memory);
+    free_heap_.IncrementRefCount(memory);
+  }
+
+  /// Decrements refcount for the given memory in either busy or free heap
+  void DecrementRefCount(amd::Memory* memory) {
+    std::scoped_lock lock(lock_pool_ops_);
+    busy_heap_.DecrementRefCount(memory);
+    free_heap_.DecrementRefCount(memory);
+  }
 
  private:
   MemoryPool() = delete;

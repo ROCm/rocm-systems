@@ -1,0 +1,100 @@
+name: hipfile-clang-tidy
+run-name: Run clang-tidy analysis on hipFile
+
+env:
+  AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
+
+on:
+  workflow_call:
+    inputs:
+      ci_image:
+        description: "Full CI image name & tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  clang_tidy:
+    name: clang-tidy
+    runs-on: [ubuntu-24.04]
+    steps:
+      - name: Set AIS CI container name
+        # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
+        run: |
+          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
+      - name: Compute container name
+        run: |
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_clang_tidy" >> "${GITHUB_ENV}"
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          path: rocm-systems
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - name: Authenticating to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Starting Docker Container
+        run: |
+          docker run \
+            -dt \
+            --rm \
+            --pull always \
+            -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
+            --name "${AIS_CONTAINER_NAME}" \
+            "${AIS_INPUT_CI_IMAGE}"
+      - name: Make copy of the code repository and create build directories
+        # Single quotes necessary to ensure string/command substitutions happen
+        # in the container and not on the host.
+        run: |
+          docker exec \
+            -t \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cp -R /mnt/ais /ais
+              mkdir -p /ais/build/hipfile
+            '
+      - name: Generate build files for hipFile with clang-tidy enabled
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_CXX_COMPILER=amdclang++ \
+                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_PLATFORM=amd \
+                -DAIS_USE_CLANG_TIDY=ON \
+                ../../rocm-systems/projects/hipfile
+            '
+      - name: Compile hipFile with clang-tidy
+        # clang-tidy runs as part of compilation via CMAKE_CXX_CLANG_TIDY.
+        # AISClangTidy.cmake passes -warnings-as-errors=*, so any finding fails
+        # the build. No tests are run; we only care about clang-tidy diagnostics.
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake --build . --parallel
+            '
+      - name: Cleanup & Stop the Docker container
+        if: ${{ always() }}
+        run: |
+          if docker inspect "${AIS_CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker stop "${AIS_CONTAINER_NAME}"
+          else
+            echo "Container ${AIS_CONTAINER_NAME} does not exist; skipping stop"
+          fi

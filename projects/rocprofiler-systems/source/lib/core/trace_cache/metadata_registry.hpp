@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -19,10 +20,10 @@
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <set>
 #include <spdlog/fmt/ranges.h>
-#include <stdint.h>
 #include <string.h>
 #include <string>
 #include <sys/types.h>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -34,34 +35,34 @@ namespace info
 {
 struct process
 {
-    pid_t       pid;  // < Unique
-    pid_t       ppid;
-    std::string command;
-    std::string environment;
-    std::string extdata;
-    uint32_t    start;
-    uint32_t    end;
+    pid_t         pid;  // < Unique
+    pid_t         ppid;
+    std::string   command;
+    std::string   environment;
+    std::string   extdata;
+    std::uint32_t start;
+    std::uint32_t end;
 };
 
 struct pmc
 {
-    agent_type  type;
-    size_t      agent_type_index;
-    std::string target_arch;
-    size_t      event_code;
-    size_t      instance_id;
-    std::string name;  // < Unique
-    std::string symbol;
-    std::string description;
-    std::string long_description;
-    std::string component;
-    std::string units;
-    std::string value_type;
-    std::string block;
-    std::string expression;
-    uint32_t    is_constant;
-    uint32_t    is_derived;
-    std::string extdata;
+    agent_type    type;
+    size_t        agent_type_index;
+    std::string   target_arch;
+    size_t        event_code;
+    size_t        instance_id;
+    std::string   name;  // < Unique
+    std::string   symbol;
+    std::string   description;
+    std::string   long_description;
+    std::string   component;
+    std::string   units;
+    std::string   value_type;
+    std::string   block;
+    std::string   expression;
+    std::uint32_t is_constant;
+    std::uint32_t is_derived;
+    std::string   extdata;
 };
 
 struct pmc_info_hash
@@ -86,13 +87,13 @@ struct pmc_info_equal
 
 struct thread
 {
-    int32_t     parent_process_id;
-    int32_t     process_id;
-    uint64_t    thread_id;  // < Unique
-    uint32_t    start;
-    uint32_t    end;
-    std::string extdata;
-    friend bool operator<(const thread& lhs, const thread& rhs)
+    std::int32_t  parent_process_id;
+    std::int32_t  process_id;
+    std::uint64_t thread_id;  // < Unique
+    std::uint32_t start;
+    std::uint32_t end;
+    std::string   extdata;
+    friend bool   operator<(const thread& lhs, const thread& rhs)
     {
         return lhs.thread_id < rhs.thread_id;
     }
@@ -158,6 +159,19 @@ struct kernel_symbol_less
     }
 };
 
+/**
+ * @brief Maps a sample value index to its pmc_info and track names.
+ *
+ * Stored in metadata_registry per device. Processors use these to
+ * emit pmc_events and samples from batched gpu_perf_counter_sample values.
+ */
+struct gpu_perf_counter_name_entry
+{
+    std::uint64_t counter_id;     ///< SDK counter instance ID (counter_id_t)
+    std::string   pmc_info_name;  ///< Qualified counter name, e.g. "SQ_WAVES[WGP=0,SA=0]"
+    std::string   track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
+};
+
 }  // namespace info
 
 struct metadata_registry
@@ -172,19 +186,19 @@ struct metadata_registry
     void add_pmc_info(const info::pmc& pmc_info);
     void add_thread_info(const info::thread& thread_info);
     void add_track(const info::track& track_info);
-    void add_queue(const uint64_t& queue_handle);
-    void add_stream(const uint64_t& stream_handle);
+    void add_queue(const std::uint64_t& queue_handle);
+    void add_stream(const std::uint64_t& stream_handle);
     void add_string(const std::string_view string_value);
 
     info::process               get_process_info() const;
     std::optional<info::pmc>    get_pmc_info(const std::string_view& unique_name) const;
-    std::optional<info::thread> get_thread_info(const uint32_t& thread_id) const;
+    std::optional<info::thread> get_thread_info(const std::uint32_t& thread_id) const;
     std::optional<info::track>  get_track_info(const std::string_view& track_name) const;
     std::vector<info::pmc>      get_pmc_info_list() const;
     std::vector<info::thread>   get_thread_info_list() const;
     std::vector<info::track>    get_track_info_list() const;
-    std::vector<uint64_t>       get_queue_list() const;
-    std::vector<uint64_t>       get_stream_list() const;
+    std::vector<std::uint64_t>  get_queue_list() const;
+    std::vector<std::uint64_t>  get_stream_list() const;
     std::vector<std::string_view> get_string_list() const;
 
     bool save_to_file(const std::string&                         filepath,
@@ -202,11 +216,17 @@ struct metadata_registry
     std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
     get_kernel_symbol_list() const;
     std::optional<rocprofiler_callback_tracing_code_object_load_data_t> get_code_object(
-        uint64_t code_object_id) const;
+        std::uint64_t code_object_id) const;
     std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
-    get_kernel_symbol(uint64_t kernel_id) const;
+    get_kernel_symbol(std::uint64_t kernel_id) const;
     rocprofiler::sdk::buffer_name_info_t<const char*>   get_buffer_name_info() const;
     rocprofiler::sdk::callback_name_info_t<const char*> get_callback_tracing_info() const;
+
+    void set_gpu_perf_counter_counter_names(
+        std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries);
+
+    std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
+    find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
 
 private:
     common::synchronized<info::process> m_process{};
@@ -216,8 +236,8 @@ private:
     common::synchronized<std::set<info::thread>> m_threads{};
     common::synchronized<std::set<info::track>>  m_tracks{};
 
-    common::synchronized<std::set<uint64_t>>              m_streams{};
-    common::synchronized<std::set<uint64_t>>              m_queues{};
+    common::synchronized<std::set<std::uint64_t>>         m_streams{};
+    common::synchronized<std::set<std::uint64_t>>         m_queues{};
     common::synchronized<std::unordered_set<std::string>> m_strings{};
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>>
@@ -232,6 +252,13 @@ private:
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
+
+    // SDK PMC counter name ordering: device_id -> ordered name entries
+    std::map<std::uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
+        m_gpu_perf_counter_counter_names{};
+    // O(1) lookup index: device_id -> counter_id -> index into the vector above
+    std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
+        m_gpu_perf_counter_index{};
 
     using callback_rename_map_t =
         std::map<rocprofiler_tracing_operation_t, std::string_view>;

@@ -39,6 +39,7 @@ extern "C" {
   __device__ int rocshmem_n_pes();
   __device__ void rocshmem_barrier_all();
   __device__ void rocshmem_barrier_all_wave();
+  __device__ int rocshmem_int_sum_reduce_wg(int team, int *dest, const int *source, int nreduce);
   __device__ void rocshmem_quiet();
 
   __device__ void rocshmem_putmem(void*, const void*, size_t, int);
@@ -135,7 +136,7 @@ extern "C" __global__ void test_typed_float_put_get(
 }
 
 extern "C" __global__ void test_typed_atomic(
-    int64_t *sym_counter, int64_t *out_old, int my_pe, int n_pes)
+    int64_t *sym_counter, int64_t *out_old, int my_pe, [[maybe_unused]] int n_pes)
 {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     int64_t old = rocshmem_int64_atomic_fetch_add(sym_counter, 10, my_pe);
@@ -264,4 +265,12 @@ extern "C" __global__ void test_typed_wait_vector(
 
     *out_idx = 1;
   }
+}
+
+// All threads in the workgroup participate in the wg collective.
+// Source is pre-filled by the host (1 per PE); expected dest = n_pes after sum.
+extern "C" __global__ void test_int_sum_reduce(
+    int *sym_dest, int *sym_src, int nreduce, int team)
+{
+  rocshmem_int_sum_reduce_wg(team, sym_dest, sym_src, nreduce);
 }

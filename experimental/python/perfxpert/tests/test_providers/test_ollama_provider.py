@@ -30,6 +30,7 @@ def test_dry_run_no_network():
 
 def test_default_url_localhost(monkeypatch):
     monkeypatch.delenv("PERFXPERT_LLM_LOCAL_URL", raising=False)
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
     from perfxpert.providers.ollama_provider import OllamaProvider
     with patch(
         "perfxpert.providers.ollama_provider.httpx.post",
@@ -49,6 +50,18 @@ def test_custom_url_from_env(monkeypatch):
     ) as mock_post:
         OllamaProvider().complete([{"role": "user", "content": "hi"}])
         assert mock_post.call_args.args[0] == "http://gpu-box:11434/api/chat"
+
+
+def test_compat_ollama_host_env(monkeypatch):
+    monkeypatch.delenv("PERFXPERT_LLM_LOCAL_URL", raising=False)
+    monkeypatch.setenv("OLLAMA_HOST", "compat-ollama:11434")
+    from perfxpert.providers.ollama_provider import OllamaProvider
+    with patch(
+        "perfxpert.providers.ollama_provider.httpx.post",
+        return_value=_fake_response(),
+    ) as mock_post:
+        OllamaProvider().complete([{"role": "user", "content": "hi"}])
+        assert mock_post.call_args.args[0] == "http://compat-ollama:11434/api/chat"
 
 
 def test_complete_response_shape():

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/units.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/timemory.hpp"
@@ -15,7 +16,6 @@
 #include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/unwind.hpp>
 
 #include <chrono>
@@ -45,15 +45,15 @@ struct overflow : comp::empty_base
     const auto& get_stack() const { return m_stack; }
 
 private:
-    int32_t     m_selected = 0;
-    uint32_t    m_index    = 0;
-    alt_stack_t m_stack    = {};
+    std::int32_t  m_selected = 0;
+    std::uint32_t m_index    = 0;
+    alt_stack_t   m_stack    = {};
 };
 
 struct backtrace : comp::empty_base
 {
     using value_type  = void;
-    using callchain_t = container::static_vector<uint64_t, unwind_depth>;
+    using callchain_t = container::static_vector<std::uint64_t, unwind_depth>;
 
     static std::string label() { return "causal::backtrace"; }
     static void        global_init();
@@ -72,12 +72,12 @@ struct backtrace : comp::empty_base
     auto get_index() const { return m_index; }
     auto get_stack() const { return m_stack; }
 
-    template <typename Tp = uint64_t>
-    static Tp get_period(uint64_t _units = units::nsec);
+    template <typename Tp = std::uint64_t>
+    static Tp get_period(std::uint64_t _units = units::nsec);
 
 private:
     bool                  m_selected = false;
-    uint32_t              m_index    = 0;
+    std::uint32_t         m_index    = 0;
     causal::unwind_addr_t m_stack    = {};
 };
 }  // namespace component

@@ -57,7 +57,8 @@ HIP_TEST_CASE(Unit_hipEventDestroy_Unfinished) {
   HIP_CHECK(hipEventCreate(&event));
 
   float *A_h, *B_h, *C_h;
-  launchVectorAdd(A_h, B_h, C_h, std::chrono::milliseconds(1000));
+  launchVectorAdd(A_h, B_h, C_h,
+                  std::chrono::milliseconds(isQuickLevel() ? 100 : 1000));
 
   HIP_CHECK(hipEventRecord(event));
   HIP_CHECK_ERROR(hipEventQuery(event), hipErrorNotReady);

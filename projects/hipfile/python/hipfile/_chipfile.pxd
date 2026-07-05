@@ -18,7 +18,7 @@ cdef extern from "hip/hip_runtime_api.h":
     ctypedef enum hipError_t:
         hipSuccess = 0
 
-    hipError_t hipPeekAtLastError()
+    hipError_t hipPeekAtLastError() nogil
 
 
 # ---------------------------------------------------------------------------
@@ -158,33 +158,33 @@ cdef extern from "hipfile.h":
     # -- Function declarations ----------------------------------------------
 
     # Error
-    const char *hipFileGetOpErrorString(hipFileOpError_t status)
+    const char *hipFileGetOpErrorString(hipFileOpError_t status) nogil
 
     # File handles
     hipFileError_t hipFileHandleRegister(hipFileHandle_t *fh,
-                                         hipFileDescr_t *descr)
-    void hipFileHandleDeregister(hipFileHandle_t fh)
+                                         hipFileDescr_t *descr) nogil
+    void hipFileHandleDeregister(hipFileHandle_t fh) nogil
 
     # Buffer registration
     hipFileError_t hipFileBufRegister(const void *buffer_base,
-                                      size_t length, int flags)
-    hipFileError_t hipFileBufDeregister(const void *buffer_base)
+                                      size_t length, int flags) nogil
+    hipFileError_t hipFileBufDeregister(const void *buffer_base) nogil
 
     # Synchronous I/O
     ssize_t hipFileRead(hipFileHandle_t fh, void *buffer_base, size_t size,
-                        hoff_t file_offset, hoff_t buffer_offset)
+                        hoff_t file_offset, hoff_t buffer_offset) nogil
     ssize_t hipFileWrite(hipFileHandle_t fh, const void *buffer_base,
                          size_t size, hoff_t file_offset,
-                         hoff_t buffer_offset)
+                         hoff_t buffer_offset) nogil
 
     # Driver lifecycle
-    hipFileError_t hipFileDriverOpen()
-    hipFileError_t hipFileDriverClose()
-    int64_t hipFileUseCount()
+    hipFileError_t hipFileDriverOpen() nogil
+    hipFileError_t hipFileDriverClose() nogil
+    int64_t hipFileUseCount() nogil
 
     # Driver properties
-    hipFileError_t hipFileDriverGetProperties(hipFileDriverProps_t *props)
+    hipFileError_t hipFileDriverGetProperties(hipFileDriverProps_t *props) nogil
 
     # Version
     hipFileError_t hipFileGetVersion(unsigned *major, unsigned *minor,
-                                      unsigned *patch)
+                                      unsigned *patch) nogil

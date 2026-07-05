@@ -40,7 +40,7 @@ rocprof-sys-python -- ./source-numpy.py -n 3 -v 20
 **Common arguments:**
 
 | Flag | Description | Default |
-|------|-------------|---------|
+| ------ | ------------- | --------- |
 | `-n, --num-iterations` | Number of iterations | 3 |
 | `-v, --value` | Starting Fibonacci value | 20 |
 | `-s, --stop-profile` | Stop tracing after N iterations (0 = never) | 0 |
@@ -54,7 +54,7 @@ rocprof-sys-python -- ./source.py -n 5 -v 20
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace with Python call stacks |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable statistical sampling |

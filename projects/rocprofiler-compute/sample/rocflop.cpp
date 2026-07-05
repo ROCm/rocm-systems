@@ -54,10 +54,12 @@ template<typename T> __global__ void fma_throughput(vec4<T>* buffer, int count)
     ptr[tid] = value0 + value1 + value2 + value3;
 }
 
-// MFMA instructions are available on selected CDNA targets, but not on gfx906, gfx1151, or gfx1250.
-#if !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
+// MFMA requires CDNA's mai-insts target feature; kernel bodies are empty on
+// targets without the builtin and are never launched (run_tests gates on a
+// runtime has_mfma check).
 __global__ void matmul_fp16_throughput(vec4<float16>* inputs, vec4<float>* outputs, int count)
 {
+#if __has_builtin(__builtin_amdgcn_mfma_f32_16x16x16f16)
     int grid_size = gridDim.x * blockDim.x;
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -83,10 +85,12 @@ __global__ void matmul_fp16_throughput(vec4<float16>* inputs, vec4<float>* outpu
     }
 
     outputs[tid] = accum0 + accum1 + accum2 + accum3;
+#endif
 }
 
 __global__ void matmul_fp32_throughput(float* inputs, vec4<float>* outputs, int count)
 {
+#if __has_builtin(__builtin_amdgcn_mfma_f32_16x16x4f32)
     int grid_size = gridDim.x * blockDim.x;
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -112,14 +116,20 @@ __global__ void matmul_fp32_throughput(float* inputs, vec4<float>* outputs, int 
     }
 
     outputs[tid] = accum0 + accum1 + accum2 + accum3;
+#endif
 }
-#endif // !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 
-// SMFMAC (Sparse MFMA) instructions are only available on selected CDNA targets,
-// and this block is excluded on gfx906, gfx908, gfx90a, gfx1151, and gfx1250.
-#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
+// SMFMAC needs CDNA3+ (gfx940 and later). Clang over-reports the builtin
+// on gfx908/gfx90a so specifically guard those until upstream catches up.
+// Empty body never launched on unsupported targets (like MFMA)
+//
+// TODO: remove the `!defined(__gfx908__) && !defined(__gfx90a__)` portion
+// once ROCm/llvm-project picks up llvm/llvm-project#193999
+// Fixes the over-report, builtin check alone becomes correct.
 __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float16>* input1, vec4<float>* outputs, int count)
 {
+#if __has_builtin(__builtin_amdgcn_smfmac_f32_16x16x32_f16) && \
+    !defined(__gfx908__) && !defined(__gfx90a__)
     int grid_size = gridDim.x * blockDim.x;
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -152,8 +162,8 @@ __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float1
     }
 
     outputs[tid] = accum0 + accum1 + accum2 + accum3;
+#endif
 }
-#endif // !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 
 int g_current_device = -1;
 
@@ -273,7 +283,6 @@ template<typename T> double fma_throughput_test(int device, int count, int runs 
     return flops;
 }
 
-#if !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 template<typename matT, typename accumT> double matmul_throughput_test(int device, int count, int runs = 1)
 {
     const int wave_size = 64;
@@ -329,9 +338,7 @@ template<typename matT, typename accumT> double matmul_throughput_test(int devic
 
     return flops;
 }
-#endif // !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 
-#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 template<typename matT, typename accumT> double sparse_matmul_throughput_test(int device, int count, int runs = 1)
 {
     const int wave_size = 64;
@@ -385,7 +392,6 @@ template<typename matT, typename accumT> double sparse_matmul_throughput_test(in
 
     return flops;
 }
-#endif // !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 
 struct Result {
     int device = -1;
@@ -461,50 +467,28 @@ Result run_tests(int device, int runs, uint32_t mask)
         res.valu_int32 = fma_throughput_test<int>(device, 4096, runs);
     }
 
-#if !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
-    // MFMA available on gfx908+ (excludes gfx906 with rev=6, gfx1151, and gfx1250)
+    // MFMA available on gfx908+ (excludes gfx906 with rev=6); kernel bodies are
+    // empty on targets without the builtin, so only launch when has_mfma.
     bool has_mfma = arch.major == 0x9 && (arch.minor >= 0x4 || (arch.minor == 0 && arch.rev >= 8));
 
     if(mask & MATRIX_FP16) {
         if(has_mfma) {
             res.mfma_fp16 = matmul_throughput_test<float16, float>(device, 4096, runs);
-        } else {
-            res.mfma_fp16 = 0;
         }
     }
 
     if(mask & MATRIX_FP32) {
         if(has_mfma) {
             res.mfma_fp32 = matmul_throughput_test<float, float>(device, 4096, runs);
-        } else {
-            res.mfma_fp32 = 0;
         }
     }
-#else
-    // MFMA not available when compiling for gfx906, gfx1151, or gfx1250
-    if(mask & MATRIX_FP16) {
-        res.mfma_fp16 = 0;
-    }
-    if(mask & MATRIX_FP32) {
-        res.mfma_fp32 = 0;
-    }
-#endif
 
-#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
+    // SMFMAC only available on gfx940 (MI300) and later.
     if(mask & SMATRIX_FP16) {
-        // SMFMAC only available on gfx940 (MI300) and later, not on gfx906, gfx908, or gfx90a
         if(arch.major == 0x9 && arch.minor >= 0x4) {
             res.smfmac_fp16 = sparse_matmul_throughput_test<float16, float>(device, 4096, runs);
-        } else {
-            res.smfmac_fp16 = 0;
         }
     }
-#else
-    // SMFMAC not available when compiling for gfx906, gfx908, gfx90a, gfx1151, gfx1250
-    if(mask & SMATRIX_FP16) {
-        res.smfmac_fp16 = 0;
-    }
-#endif
 
     return res;
 }

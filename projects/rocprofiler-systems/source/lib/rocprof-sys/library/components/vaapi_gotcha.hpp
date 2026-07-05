@@ -81,7 +81,7 @@ struct vaapi_gotcha : tim::component::base<vaapi_gotcha, void>
     static void audit(const gotcha_data&, audit::incoming, VADisplay dpy,
                       VAContextID context);
     static void audit(const gotcha_data&, audit::incoming, VADisplay dpy,
-                      VASurfaceID surface_id, uint32_t mem_type, uint32_t flags,
+                      VASurfaceID surface_id, std::uint32_t mem_type, std::uint32_t flags,
                       void* descriptor);
     static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
                       VASurfaceID surface, int x, int y, unsigned int width,

@@ -62,7 +62,7 @@ rdc_status_t RdcPartitionImpl::rdc_instance_profile_get_impl(
 
   amdsmi_accelerator_partition_profile_t active_profile;
   memset(&active_profile, 0, sizeof(active_profile));
-  uint32_t num = 0;  // This is unused
+  uint32_t num = 0;
   ret = amdsmi_get_gpu_accelerator_partition_profile(proc_handle, &active_profile, &num);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return RDC_ST_UNKNOWN_ERROR;

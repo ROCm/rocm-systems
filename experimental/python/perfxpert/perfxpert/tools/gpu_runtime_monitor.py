@@ -16,10 +16,10 @@
 
 """gpu_runtime_monitor — parse pre-captured amd-smi / rocm-smi JSON logs.
 
-We do NOT shell out to ``amd-smi`` / ``rocm-smi`` at analyze time: users
-capture the JSON in advance (``amd-smi monitor --json > log.json``) and
-we ingest it offline. Eliminates the need for sudo, live sampling, and
-host-side privilege escalation inside analyze.
+This module does not shell out to ``amd-smi`` / ``rocm-smi`` for live
+monitoring logs: users capture the JSON in advance
+(``amd-smi monitor --json > log.json``) and we ingest it offline. Runtime
+hardware-spec discovery is handled separately by ``gpu_discovery``.
 
 Users can either pass the log path directly to the parsers or set
 ``PERFXPERT_GPU_MONITOR_LOG=<path>`` to let other modules auto-pick it up.
@@ -41,8 +41,8 @@ PERFXPERT_GPU_MONITOR_LOG = "PERFXPERT_GPU_MONITOR_LOG"
 
 # Default thermal thresholds — overridable per-arch via thermal_specs.yaml.
 _DEFAULT_TJMAX_C = 105.0
-_DEFAULT_TJ_THROTTLE_MARGIN_C = 5.0   # throttling begins within 5 C of TjMax
-_DEFAULT_POWER_HEADROOM_PCT = 0.95    # 95 % of TDP = power-throttle suspect
+_DEFAULT_TJ_THROTTLE_MARGIN_C = 5.0  # throttling begins within 5 C of TjMax
+_DEFAULT_POWER_HEADROOM_PCT = 0.95  # 95 % of TDP = power-throttle suspect
 
 
 def _coerce_float(x: Any) -> float:
@@ -103,28 +103,38 @@ def parse_amd_smi_json(path: str) -> Dict[str, Any]:
                 continue
             gpu_id = rec.get("gpu_id", rec.get("id", 0))
             temp_c = _coerce_float(
-                rec.get("temp_edge_c",
+                rec.get(
+                    "temp_edge_c",
+                    (
                         rec.get("temperature", {}).get("edge", 0)
-                        if isinstance(rec.get("temperature"), dict) else
-                        rec.get("temp", 0))
+                        if isinstance(rec.get("temperature"), dict)
+                        else rec.get("temp", 0)
+                    ),
+                )
             )
             power_w = _coerce_float(
-                rec.get("power_w",
+                rec.get(
+                    "power_w",
+                    (
                         rec.get("power", {}).get("socket", 0)
-                        if isinstance(rec.get("power"), dict) else
-                        rec.get("power", 0))
+                        if isinstance(rec.get("power"), dict)
+                        else rec.get("power", 0)
+                    ),
+                )
             )
             sclk_mhz = _coerce_float(rec.get("sclk_mhz", rec.get("sclk", 0)))
             mclk_mhz = _coerce_float(rec.get("mclk_mhz", rec.get("mclk", 0)))
             gfx_busy = _coerce_float(rec.get("gfx_busy_pct", rec.get("utilization", 0)))
-            samples.append({
-                "gpu_id": int(gpu_id) if isinstance(gpu_id, (int, str)) else 0,
-                "temp_c": temp_c,
-                "power_w": power_w,
-                "sclk_mhz": sclk_mhz,
-                "mclk_mhz": mclk_mhz,
-                "gfx_busy_pct": gfx_busy,
-            })
+            samples.append(
+                {
+                    "gpu_id": int(gpu_id) if isinstance(gpu_id, (int, str)) else 0,
+                    "temp_c": temp_c,
+                    "power_w": power_w,
+                    "sclk_mhz": sclk_mhz,
+                    "mclk_mhz": mclk_mhz,
+                    "gfx_busy_pct": gfx_busy,
+                }
+            )
             gpu_ids.add(int(gpu_id) if isinstance(gpu_id, (int, str)) else 0)
 
     return {
@@ -171,14 +181,16 @@ def parse_rocm_smi_json(path: str) -> Dict[str, Any]:
         mclk_raw = rec.get("mclk clock level", rec.get("mclk", "0Mhz"))
         mclk_mhz = _coerce_float(str(mclk_raw).replace("Mhz", "").replace("MHz", ""))
         gfx_busy = _coerce_float(rec.get("GPU use (%)", rec.get("GPU use", 0)))
-        samples.append({
-            "gpu_id": gpu_id,
-            "temp_c": temp_c,
-            "power_w": power_w,
-            "sclk_mhz": sclk_mhz,
-            "mclk_mhz": mclk_mhz,
-            "gfx_busy_pct": gfx_busy,
-        })
+        samples.append(
+            {
+                "gpu_id": gpu_id,
+                "temp_c": temp_c,
+                "power_w": power_w,
+                "sclk_mhz": sclk_mhz,
+                "mclk_mhz": mclk_mhz,
+                "gfx_busy_pct": gfx_busy,
+            }
+        )
 
     return {
         "source": "rocm-smi",
@@ -227,8 +239,11 @@ def analyze_thermal(
     samples = metrics.get("samples", []) if isinstance(metrics, dict) else []
     if not samples:
         return {
-            "max_temp_c": 0.0, "avg_temp_c": 0.0, "p95_temp_c": 0.0,
-            "max_power_w": 0.0, "throttle_events": 0,
+            "max_temp_c": 0.0,
+            "avg_temp_c": 0.0,
+            "p95_temp_c": 0.0,
+            "max_power_w": 0.0,
+            "throttle_events": 0,
             "power_throttle_suspected": False,
             "thermal_headroom_c": tjmax_c,
             "verdict": "healthy",

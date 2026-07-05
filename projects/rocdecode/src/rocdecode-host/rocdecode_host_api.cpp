@@ -28,9 +28,9 @@ THE SOFTWARE.
 //! \fn rocDecStatus ROCDECAPI rocDecCreateDecoderHost(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfoHost *decoder_create_info)
 //! Create the decoder object based on decoder_create_info. A handle to the created decoder is returned
 /*****************************************************************************************************/
-rocDecStatus ROCDECAPI 
+rocDecStatus ROCDECAPI
 rocDecCreateDecoderHost(rocDecDecoderHandle *decoder_handle, RocDecoderHostCreateInfo *decoder_create_info) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(decoder_handle) + ", " + RocDecFmtPtr(decoder_create_info));
     if (decoder_handle == nullptr || decoder_create_info == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -55,9 +55,9 @@ rocDecCreateDecoderHost(rocDecDecoderHandle *decoder_handle, RocDecoderHostCreat
 //! \fn rocDecStatus ROCDECAPI rocDecDestroyDecoderHost(rocDecDecoderHandle decoder_handle)
 //! Destroy the decoder object
 /*****************************************************************************************************/
-rocDecStatus ROCDECAPI 
+rocDecStatus ROCDECAPI
 rocDecDestroyDecoderHost(rocDecDecoderHandle decoder_handle) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(decoder_handle));
     if (decoder_handle == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -79,7 +79,7 @@ rocDecDestroyDecoderHost(rocDecDecoderHandle decoder_handle) {
 /**********************************************************************************************************************/
 rocDecStatus ROCDECAPI
 rocDecGetDecoderCapsHost(RocdecDecodeCaps *pdc) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(pdc));
     if (pdc == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -95,9 +95,9 @@ rocDecGetDecoderCapsHost(RocdecDecodeCaps *pdc) {
 //! Decodes a single picture
 //! Submits the frame for HW decoding 
 /*****************************************************************************************************/
-rocDecStatus ROCDECAPI 
+rocDecStatus ROCDECAPI
 rocDecDecodeFrameHost(rocDecDecoderHandle decoder_handle, _RocdecPicParamsHost *pic_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(decoder_handle) + ", " + RocDecFmtPtr(pic_params));
     if (decoder_handle == nullptr || pic_params == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -124,9 +124,9 @@ rocDecDecodeFrameHost(rocDecDecoderHandle decoder_handle, _RocdecPicParamsHost *
 //! API is currently supported for HEVC codec.
 //! API returns ROCDEC_NOT_SUPPORTED error code for unsupported GPU or codec.
 /************************************************************************************************************/
-rocDecStatus ROCDECAPI 
+rocDecStatus ROCDECAPI
 rocDecGetDecodeStatusHost(rocDecDecoderHandle decoder_handle, int pic_idx, RocdecDecodeStatus* decode_status) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(decoder_handle) + ", " + ROCDEC_TOSTR(pic_idx) + ", " + RocDecFmtPtr(decode_status));
     if (decoder_handle == nullptr || decode_status == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -152,9 +152,9 @@ rocDecGetDecodeStatusHost(rocDecDecoderHandle decoder_handle, int pic_idx, Rocde
 //! Used to reuse single decoder for multiple clips. Currently supports resolution change, resize params
 //! params, target area params change for same codec. Must be called during RocdecParserParams::pfn_sequence_callback
 /*********************************************************************************************************/
-rocDecStatus ROCDECAPI 
+rocDecStatus ROCDECAPI
 rocDecReconfigureDecoderHost(rocDecDecoderHandle decoder_handle, RocdecReconfigureDecoderInfo *reconfig_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(decoder_handle) + ", " + RocDecFmtPtr(reconfig_params));
     if (decoder_handle == nullptr || reconfig_params == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -181,11 +181,12 @@ rocDecReconfigureDecoderHost(rocDecDecoderHandle decoder_handle, RocdecReconfigu
 //! Post-process and map video frame corresponding to pic_idx for use in HIP. Returns HIP device pointer and associated
 //! pitch(horizontal stride) of the video frame. Returns device memory pointers for each plane (Y, U and V) separately
 /************************************************************************************************************************/
-rocDecStatus ROCDECAPI 
+rocDecStatus ROCDECAPI
 rocDecGetVideoFrameHost(rocDecDecoderHandle decoder_handle, int pic_idx,
-                                                    void **frame_data, uint32_t *line_size,
-                                                    RocdecProcParams *vid_postproc_params) {
-    FunctionEntryLog(g_rocdec_logger);
+                        void **frame_data, uint32_t *line_size,
+                        RocdecProcParams *vid_postproc_params) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(decoder_handle) + ", " + ROCDEC_TOSTR(pic_idx) + ", " +
+                             RocDecFmtPtr(frame_data) + ", " + RocDecFmtPtr(line_size) + ", " + RocDecFmtPtr(vid_postproc_params));
     if (decoder_handle == nullptr || frame_data == nullptr || line_size == nullptr || vid_postproc_params == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -212,7 +213,7 @@ rocDecGetVideoFrameHost(rocDecDecoderHandle decoder_handle, int pic_idx,
 //! Return name of the specified error code in text form.
 /*****************************************************************************************************/
 const char* ROCDECAPI rocDecGetErrorNameHost(rocDecStatus rocdec_status) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(rocdec_status));
     const char* name;
     switch (rocdec_status) {
         case ROCDEC_DEVICE_INVALID:

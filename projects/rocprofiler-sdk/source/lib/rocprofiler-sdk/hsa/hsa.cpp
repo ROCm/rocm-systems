@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
@@ -567,6 +568,13 @@ hsa_shut_down_refcnt_impl()
     if(hsa_reference_count_value > 0)
     {
         --hsa_reference_count_value;
+        if(hsa_reference_count_value == 0)
+        {
+            // Last HSA reference is about to drop.  Stop and join any running
+            // thread-trace producer/consumer threads *before* ROCR tears down
+            // SDMA engines and signal pools in Runtime::Unload().
+            thread_trace::flush_and_stop();
+        }
         return get_core_table()->hsa_shut_down_fn();
     }
     return HSA_STATUS_SUCCESS;

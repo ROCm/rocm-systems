@@ -56,7 +56,7 @@ void RocJpegVaapiMemoryPool::ReleaseResources() {
             if (!entry.va_surface_ids.empty()) {
                 va_status = vaDestroySurfaces(va_display_, entry.va_surface_ids.data(), entry.va_surface_ids.size());
                 if (va_status != VA_STATUS_SUCCESS) {
-                    ERR("ERROR: vaDestroySurfaces failed!");
+                    ErrorLog(g_rocjpeg_logger, "vaDestroySurfaces failed!");
                 }
             }
             if (!entry.hip_interops.empty()) {
@@ -64,13 +64,13 @@ void RocJpegVaapiMemoryPool::ReleaseResources() {
                     if (hip_interop_entry.hip_mapped_device_mem != nullptr) {
                         hip_status = hipFree(hip_interop_entry.hip_mapped_device_mem);
                         if (hip_status != hipSuccess) {
-                            ERR("ERROR: hipFree failed!");
+                            ErrorLog(g_rocjpeg_logger, "hipFree failed!");
                         }
                     }
                     if (hip_interop_entry.hip_ext_mem != nullptr) {
                         hip_status = hipDestroyExternalMemory(hip_interop_entry.hip_ext_mem);
                         if (hip_status != hipSuccess) {
-                            ERR("ERROR: hipDestroyExternalMemory failed!");
+                            ErrorLog(g_rocjpeg_logger, "hipDestroyExternalMemory failed!");
                         }
                     }
                 }
@@ -163,7 +163,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, cons
         if (DeleteIdleEntry()) {
             entries.push_back(pool_entry);
         } else {
-            ERR("cannot find an idle entry in the the memory pool!");
+            ErrorLog(g_rocjpeg_logger, "Cannot find an idle entry in the the memory pool!");
             return ROCJPEG_STATUS_INVALID_PARAMETER;
         }
     }
@@ -310,7 +310,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, H
         }
     }
     // it shouldn't reach here unless the requested surface_id is not in the memory pool.
-    ERR("the surface_id: " + TOSTR(surface_id) + " was not found in the memory pool!");
+    ErrorLog(g_rocjpeg_logger, "The surface_id: " + ROCJPEG_TOSTR(surface_id) + " was not found in the memory pool!");
     return ROCJPEG_STATUS_INVALID_PARAMETER;
 }
 
@@ -355,24 +355,24 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
         vaapi_mem_pool_->ReleaseResources();
         RocJpegStatus rocjpeg_status = DestroyDataBuffers();
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            ERR("Error: Failed to destroy VAAPI buffer");
+            ErrorLog(g_rocjpeg_logger, "Failed to destroy VAAPI buffer");
         }
         VAStatus va_status;
         if (va_context_id_ != 0) {
             va_status = vaDestroyContext(va_display_, va_context_id_);
             if (va_status != VA_STATUS_SUCCESS) {
-                ERR("ERROR: vaDestroyContext failed!");
+                ErrorLog(g_rocjpeg_logger, "vaDestroyContext failed!");
             }
         }
         if (va_config_id_) {
             va_status = vaDestroyConfig(va_display_, va_config_id_);
             if (va_status != VA_STATUS_SUCCESS) {
-                ERR("ERROR: vaDestroyConfig failed!");
+                ErrorLog(g_rocjpeg_logger, "vaDestroyConfig failed!");
             }
         }
         va_status = vaTerminate(va_display_);
         if (va_status != VA_STATUS_SUCCESS) {
-            ERR("ERROR: vaTerminate failed!");
+            ErrorLog(g_rocjpeg_logger, "vaTerminate failed!");
         }
 
     }
@@ -403,6 +403,20 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, in
     int render_node_id = (gpu_uuids_to_render_nodes_map_.find(gpu_uuid) != gpu_uuids_to_render_nodes_map_.end()) ? gpu_uuids_to_render_nodes_map_[gpu_uuid] : 128;
     drm_node += std::to_string(render_node_id + offset);
 
+    if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogInfo) {
+        std::ostringstream oss;
+        oss << '{';
+        bool first = true;
+        for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
+            if (!first) oss << ", ";
+            oss << entry.first << ": " << entry.second;
+            first = false;
+        }
+        oss << '}';
+        InfoLog(g_rocjpeg_logger, "gpu_uuids_to_render_nodes_map_: " + oss.str());
+        InfoLog(g_rocjpeg_logger, "Selected GPU UUID: " + gpu_uuid);
+    }
+
     CHECK_ROCJPEG(InitVAAPI(drm_node));
     CHECK_ROCJPEG(CreateDecoderConfig());
     CHECK_ROCJPEG(CreateDecoderContext());
@@ -432,7 +446,7 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
     const char *enable_vcn_hw_csc_str = std::getenv("ROCJPEG_ENABLE_VCN_HW_CSC");
     bool enable_vcn_hw_csc = (enable_vcn_hw_csc_str != nullptr && strcmp(enable_vcn_hw_csc_str, "1") == 0);
     if (amdgpu_device_initialize(drm_fd_, &major_version, &minor_version, &dev_handle)) {
-        ERR("amdgpu_device_initialize failed!");
+        ErrorLog(g_rocjpeg_logger, "amdgpu_device_initialize failed!");
         return;
     }
     error_code = amdgpu_query_hw_ip_count(dev_handle, AMDGPU_HW_IP_VCN_JPEG, &num_jpeg_cores);
@@ -442,7 +456,7 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
         current_vcn_jpeg_spec_.can_roi_decode = (num_jpeg_cores >= 8);
         current_vcn_jpeg_spec_.can_convert_to_rgb = (num_jpeg_cores >= 8) && enable_vcn_hw_csc;
     } else {
-        ERR("Failed to get the number of jpeg cores.");
+        ErrorLog(g_rocjpeg_logger, "Failed to get the number of jpeg cores.");
     }
     amdgpu_device_deinitialize(dev_handle);
 }
@@ -458,19 +472,37 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
  *         - ROCJPEG_STATUS_NOT_INITIALIZED if the initialization fails.
  */
 RocJpegStatus RocJpegVappiDecoder::InitVAAPI(std::string drm_node) {
+    InfoLog(g_rocjpeg_logger, "Opening DRM node: " + drm_node);
     drm_fd_ = open(drm_node.c_str(), O_RDWR);
     if (drm_fd_ < 0) {
-        ERR("ERROR: failed to open drm node " + drm_node);
+        ErrorLog(g_rocjpeg_logger, "Failed to open drm node: " + drm_node);
         return ROCJPEG_STATUS_NOT_INITIALIZED;
     }
     va_display_ = vaGetDisplayDRM(drm_fd_);
     if (!va_display_) {
-        ERR("ERROR: failed to create va_display!");
+        ErrorLog(g_rocjpeg_logger, "failed to create va_display!");
         return ROCJPEG_STATUS_NOT_INITIALIZED;
     }
-    vaSetInfoCallback(va_display_, NULL, NULL);
+    std::string va_driver_path;
+    vaSetInfoCallback(va_display_, [](void* user_context, const char* message) {
+        std::string msg(message);
+        if (msg.find("Trying to open") != std::string::npos) {
+            *static_cast<std::string*>(user_context) = msg;
+        }
+    }, &va_driver_path);
     int major_version = 0, minor_version = 0;
-    CHECK_VAAPI(vaInitialize(va_display_, &major_version, &minor_version))
+    VAStatus va_status = vaInitialize(va_display_, &major_version, &minor_version);
+    vaSetInfoCallback(va_display_, nullptr, nullptr);
+    if (va_status != VA_STATUS_SUCCESS) {
+        ErrorLog(g_rocjpeg_logger, std::string("vaInitialize failed: ") + vaErrorStr(va_status));
+        return ROCJPEG_STATUS_NOT_INITIALIZED;
+    }
+    InfoLog(g_rocjpeg_logger, "VA-API version " + std::to_string(major_version) + "." + std::to_string(minor_version));
+    const char* vendor_str = vaQueryVendorString(va_display_);
+    InfoLog(g_rocjpeg_logger, "VA-API vendor: " + std::string(vendor_str ? vendor_str : ""));
+    if (!va_driver_path.empty()) {
+        InfoLog(g_rocjpeg_logger, va_driver_path);
+    }
     return ROCJPEG_STATUS_SUCCESS;
 }
 
@@ -609,7 +641,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
         jpeg_stream_params->picture_parameter_buffer.picture_height < min_picture_height_ ||
         jpeg_stream_params->picture_parameter_buffer.picture_width > max_picture_width_ ||
         jpeg_stream_params->picture_parameter_buffer.picture_height > max_picture_height_) {
-            ERR("The JPEG image resolution is not supported!");
+            ErrorLog(g_rocjpeg_logger, "The JPEG image resolution is not supported!");
             return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
         }
 
@@ -654,7 +686,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
                 surface_attrib.value.value.i = VA_FOURCC_Y800;
                 break;
             default:
-                ERR("ERROR: The chroma subsampling is not supported by the VCN hardware!");
+                ErrorLog(g_rocjpeg_logger, "The chroma subsampling is not supported by the VCN hardware!");
                 return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
                 break;
         }
@@ -752,7 +784,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
             jpeg_stream_key.height < min_picture_height_ ||
             jpeg_stream_key.width > max_picture_width_ ||
             jpeg_stream_key.height > max_picture_height_) {
-                ERR("The JPEG image resolution is not supported!");
+                ErrorLog(g_rocjpeg_logger, "The JPEG image resolution is not supported!");
                 return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
             }
 
@@ -787,7 +819,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                     jpeg_stream_key.pixel_format = VA_FOURCC_Y800;
                     break;
                 default:
-                    ERR("ERROR: The chroma subsampling is not supported by the VCN hardware!");
+                    ErrorLog(g_rocjpeg_logger, "The chroma subsampling is not supported by the VCN hardware!");
                     return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
                     break;
             }
@@ -987,11 +1019,19 @@ void RocJpegVappiDecoder::GetDrmNodeOffset(std::string device_name, uint8_t devi
             // Instead, use the device name to identify MI300A, etc.
             std::string mi300a = "MI300A";
             size_t found_mi300a = device_name.find(mi300a);
+            std::string mi308 = "MI308";
+            size_t found_mi308 = device_name.find(mi308);
             if (found_mi300a != std::string::npos) {
                 if (device_id < visible_devices.size()) {
                     offset = (visible_devices[device_id] % 6);
                 } else {
                     offset = (device_id % 6);
+                }
+            } else if (found_mi308 != std::string::npos) {
+                if (device_id < visible_devices.size()) {
+                    offset = (visible_devices[device_id] % 4);
+                } else {
+                    offset = (device_id % 4);
                 }
             } else {
                 if (device_id < visible_devices.size()) {

@@ -46,6 +46,7 @@ DxcoreLoader::DxcoreLoader()
     , pfn_D3DKMTShareObjects(nullptr)
     , pfn_D3DKMTQueryResourceInfoFromNtHandle(nullptr)
     , pfn_D3DKMTOpenResourceFromNtHandle(nullptr)
+    , pfn_D3DKMTOpenSyncObjectFromNtHandle2(nullptr)
     , pfn_D3DKMTCreateHwQueue(nullptr)
     , pfn_D3DKMTDestroyHwQueue(nullptr)
     , pfn_D3DKMTSubmitCommandToHwQueue(nullptr)
@@ -84,7 +85,7 @@ bool DxcoreLoader::Initialize() {
 
 void DxcoreLoader::Shutdown() {
     if (dxcore_handle_) {
-        if (rocr::os::CloseLib(dxcore_handle_) != 0) {
+        if (!rocr::os::CloseLib(dxcore_handle_)) {
             pr_err("[DxcoreLoader] Cannot unload libdxcore.so: %s\n", rocr::os::DlError());
         } else {
             pr_info("[DxcoreLoader] libdxcore.so unloaded successfully\n");
@@ -140,6 +141,7 @@ bool DxcoreLoader::LoadDxcoreApis() {
     LOAD_DXCORE_API(D3DKMTQueryResourceInfoFromNtHandle);
     LOAD_DXCORE_API(D3DKMTQueryResourceInfo);
     LOAD_DXCORE_API(D3DKMTOpenResourceFromNtHandle);
+    LOAD_DXCORE_API(D3DKMTOpenSyncObjectFromNtHandle2);
     LOAD_DXCORE_API(D3DKMTOpenResource);
     LOAD_DXCORE_API(D3DKMTCreateHwQueue);
     LOAD_DXCORE_API(D3DKMTDestroyHwQueue);

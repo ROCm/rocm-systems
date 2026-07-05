@@ -35,8 +35,7 @@
 HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   const auto device_count = HipTest::getDeviceCount();
@@ -93,8 +92,7 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic) {
 HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   const auto device_count = HipTest::getDeviceCount();
@@ -211,15 +209,13 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Paramete
 HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   int device_count;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   std::vector<hipFunctionLaunchParams> params_list(device_count);
   std::vector<hipModule_t> modules_list(device_count);

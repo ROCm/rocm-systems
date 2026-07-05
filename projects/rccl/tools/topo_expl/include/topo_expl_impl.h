@@ -25,6 +25,7 @@ struct allGatherInfo {
   struct graphInfo graphInfo[NCCL_NUM_ALGORITHMS];
   struct ncclTopoRanks topoRanks;
   int nc;
+  int romeTopoModelIdx;
   bool pivotA2AEnabled;
   bool ll128Enabled;
   bool mscclEnabled;

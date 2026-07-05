@@ -44,7 +44,7 @@ cmake --build <build_dir> --target trace-time-window
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | 1 | Number of repeat iterations | 1 |
 
 ## Profiling with rocprofiler-systems
@@ -56,7 +56,7 @@ rocprof-sys-run -- ./trace-time-window 2
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace for timeline visualization |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_VERBOSE` | `2` | Verbose output for debugging trace windows |

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/pmc/collectors/common/collector_slice.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -18,27 +19,27 @@ class mock_gpu_collector
 public:
     void setup() { setup_called = true; }
     void config() { config_called = true; }
-    void sample(int64_t ts)
+    void sample(std::int64_t ts)
     {
         sample_called  = true;
         last_timestamp = ts;
     }
     void post_process() { post_process_called = true; }
     void shutdown() { shutdown_called = true; }
-    void pause(int64_t ts)
+    void pause(std::int64_t ts)
     {
         pause_called    = true;
         pause_timestamp = ts;
     }
 
-    bool    setup_called        = false;
-    bool    config_called       = false;
-    bool    sample_called       = false;
-    int64_t last_timestamp      = 0;
-    bool    post_process_called = false;
-    bool    shutdown_called     = false;
-    bool    pause_called        = false;
-    int64_t pause_timestamp     = 0;
+    bool         setup_called        = false;
+    bool         config_called       = false;
+    bool         sample_called       = false;
+    std::int64_t last_timestamp      = 0;
+    bool         post_process_called = false;
+    bool         shutdown_called     = false;
+    bool         pause_called        = false;
+    std::int64_t pause_timestamp     = 0;
 };
 
 class mock_nic_collector
@@ -46,22 +47,22 @@ class mock_nic_collector
 public:
     void setup() { setup_called = true; }
     void config() { config_called = true; }
-    void sample(int64_t ts)
+    void sample(std::int64_t ts)
     {
         sample_count++;
         last_timestamp = ts;
     }
     void post_process() { post_process_called = true; }
     void shutdown() { shutdown_called = true; }
-    void pause(int64_t /*ts*/) { pause_called = true; }
+    void pause(std::int64_t /*ts*/) { pause_called = true; }
 
-    bool    setup_called        = false;
-    bool    config_called       = false;
-    int     sample_count        = 0;
-    int64_t last_timestamp      = 0;
-    bool    post_process_called = false;
-    bool    shutdown_called     = false;
-    bool    pause_called        = false;
+    bool         setup_called        = false;
+    bool         config_called       = false;
+    int          sample_count        = 0;
+    std::int64_t last_timestamp      = 0;
+    bool         post_process_called = false;
+    bool         shutdown_called     = false;
+    bool         pause_called        = false;
 };
 
 class collector_slice_test : public ::testing::Test

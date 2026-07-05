@@ -10,9 +10,7 @@ Jacobi_t::Jacobi_t(grid_t& grid_, mesh_t& mesh_):
   grid(grid_),
   mesh(mesh_)
 {
-  // Ensure that HIP is initialized before profiler is loaded
   SafeHipCall(hipInit(0));
-  initialize_logger();
   BEGIN_RANGE("Jacobi_t::Jacobi_t", "Top Level Init");
 
   BEGIN_RANGE("ApplyTopology", "Init");
@@ -44,7 +42,6 @@ Jacobi_t::~Jacobi_t() {
   SafeHipCall(hipHostFree(mesh.sendBuffer));
   SafeHipCall(hipHostFree(mesh.recvBuffer));
   SafeHipCall(hipFree(mesh.d_haloBuffer));
-  finalize_logger();
 }
 
 // ====================

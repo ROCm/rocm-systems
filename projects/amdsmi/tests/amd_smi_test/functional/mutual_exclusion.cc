@@ -19,18 +19,36 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
 #include "mutual_exclusion.h"
 
 #include <gtest/gtest.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
+#include <cerrno>
+#include <csignal>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <initializer_list>
 #include <iostream>
 #include <string>
+#include <vector>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_test_internal.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 
-#define AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
+// How long the mutex-holder process holds the device mutex (seconds).
+// The tester process uses trylock (RESRV_TEST1 mode) so all its API calls
+// return AMDSMI_STATUS_BUSY immediately — it completes well within kTesterWaitSeconds.
+// kHoldSeconds only needs to exceed kTesterWaitSeconds by a comfortable margin.
+// NOTE: minimum expected test runtime is ~kHoldSeconds.
+static constexpr uint32_t kHoldSeconds = 4;
+// How long the tester process waits after SetUp before making API calls,
+// giving the holder enough time to acquire the mutex first.
+static constexpr unsigned int kTesterWaitSeconds = 2;
 
 TestMutualExclusion::TestMutualExclusion() : TestBase() {
   set_title("Mutual Exclusion Test");
@@ -45,8 +63,6 @@ TestMutualExclusion::TestMutualExclusion() : TestBase() {
 
 TestMutualExclusion::~TestMutualExclusion(void) {}
 
-extern amdsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
-
 void TestMutualExclusion::SetUp(void) {
   std::string label;
   amdsmi_status_t ret;
@@ -59,33 +75,137 @@ void TestMutualExclusion::SetUp(void) {
 
   sleeper_process_ = false;
   child_ = 0;
+
+  // Cross-process shared memory mutex is required for this test.
+  // Must be set before fork() so both processes inherit it and amdsmi_init()
+  // uses shm_open/mmap instead of a per-process pthread_mutex_t.
+  // Save original value so Close() can restore it after the test.
+  const char* orig = getenv("AMDSMI_MUTEX_CROSS_PROCESS");
+  orig_cross_process_env_ = orig ? orig : "";
+  orig_cross_process_env_was_set_ = (orig != nullptr);
+  setenv("AMDSMI_MUTEX_CROSS_PROCESS", "1", 1);
+
+  // Two pipes provide deterministic init ordering, replacing the previous
+  // sleep(1)/sleep(2) approach that was fragile under load with
+  // AMDSMI_MUTEX_CROSS_PROCESS=1 and RSMI_INIT_FLAG_RESRV_TEST1 (trylock mode):
+  //   init_pipe_:         sleeper → tester  (sleeper amdsmi_init complete)
+  //   tester_ready_pipe_: tester → sleeper  (tester amdsmi_init complete)
+  if (pipe(init_pipe_) < 0) {
+    std::cout << "pipe(init_pipe_) failed: " << strerror(errno) << std::endl;
+    setup_failed_ = true;
+    return;
+  }
+  if (pipe(tester_ready_pipe_) < 0) {
+    std::cout << "pipe(tester_ready_pipe_) failed: " << strerror(errno) << std::endl;
+    close(init_pipe_[0]);
+    close(init_pipe_[1]);
+    setup_failed_ = true;
+    return;
+  }
+
   child_ = fork();
+  if (child_ < 0) {
+    std::cout << "fork() failed: " << strerror(errno) << std::endl;
+    close(init_pipe_[0]);
+    close(init_pipe_[1]);
+    close(tester_ready_pipe_[0]);
+    close(tester_ready_pipe_[1]);
+    setup_failed_ = true;
+    return;
+  }
 
   if (child_ != 0) {
     sleeper_process_ = true;  // sleeper_process is parent
+    // Sleeper: does not read init_pipe, does not write tester_ready_pipe.
+    close(init_pipe_[0]);
+    close(tester_ready_pipe_[1]);
 
     // AMD_SMI_INIT_FLAG_RESRV_TEST1 tells rsmi to fail immediately
     // if it can't get the mutex instead of waiting.
-    ret = amdsmi_init(AMD_SMI_INIT_FLAG_RESRV_TEST1);
+    DISPLAY_AMDSMI_API("[sleeper] amdsmi_init(AMD_SMI_INIT_AMD_GPUS|AMD_SMI_INIT_FLAG_RESRV_TEST1)",
+                       "", VERB(STANDARD));
+    ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS | AMD_SMI_INIT_FLAG_RESRV_TEST1);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }
-    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
+    // Phase 1: signal tester that sleeper's amdsmi_init is complete.
+    // Always write even on failure so tester doesn't hang.
+    char ready = 1;
+    if (write(init_pipe_[1], &ready, 1) < 0) {
+      std::cout << "write(init_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
+    close(init_pipe_[1]);
 
-    sleep(2);  // Let both processes get through amdsmi_init
+    // Phase 2: wait for tester to also finish amdsmi_init before entering Run().
+    char tester_done = 0;
+    if (read(tester_ready_pipe_[0], &tester_done, 1) < 0) {
+      std::cout << "read(tester_ready_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
+    close(tester_ready_pipe_[0]);
+
+    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   } else {
-    sleep(1);  // Let the sleeper process get through amdsmi_init() before
-               // this one goes, so it doesn't fail.
-    ret = amdsmi_init(AMD_SMI_INIT_FLAG_RESRV_TEST1);
+    // Tester: does not write init_pipe, does not read tester_ready_pipe.
+    close(init_pipe_[1]);
+    close(tester_ready_pipe_[0]);
+
+    // Phase 1: block until sleeper's amdsmi_init is complete.
+    char ready = 0;
+    if (read(init_pipe_[0], &ready, 1) < 0) {
+      std::cout << "read(init_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
+    close(init_pipe_[0]);
+
+    DISPLAY_AMDSMI_API("[tester] amdsmi_init(AMD_SMI_INIT_AMD_GPUS|AMD_SMI_INIT_FLAG_RESRV_TEST1)",
+                       "", VERB(STANDARD));
+    ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS | AMD_SMI_INIT_FLAG_RESRV_TEST1);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }
-    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
+    // Phase 2: signal sleeper that tester's amdsmi_init is also complete.
+    char tester_done = 1;
+    if (write(tester_ready_pipe_[1], &tester_done, 1) < 0) {
+      std::cout << "write(tester_ready_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
+    close(tester_ready_pipe_[1]);
 
-    sleep(2);  // Let both processes get through amdsmi_init;
+    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   }
 
-  num_monitor_devs_ = num_monitor_devs();
+  // Enumerate sockets and processor handles in each process after amdsmi_init()
+  amdsmi_status_t enum_err = amdsmi_get_socket_handles(&socket_count_, nullptr);
+  if (enum_err != AMDSMI_STATUS_SUCCESS) {
+    setup_failed_ = true;
+    return;
+  }
+  sockets_.resize(socket_count_);
+  enum_err = amdsmi_get_socket_handles(&socket_count_, &sockets_[0]);
+  if (enum_err != AMDSMI_STATUS_SUCCESS) {
+    setup_failed_ = true;
+    return;
+  }
+  num_monitor_devs_ = 0;
+  for (uint32_t i = 0; i < socket_count_; i++) {
+    uint32_t device_count = 0;
+    amdsmi_status_t status = amdsmi_get_processor_handles(sockets_[i], &device_count, nullptr);
+    if (status != AMDSMI_STATUS_SUCCESS || device_count == 0) {
+      continue;
+    }
+    std::vector<amdsmi_processor_handle> handles(device_count);
+    status = amdsmi_get_processor_handles(sockets_[i], &device_count, &handles[0]);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    for (uint32_t j = 0; j < device_count && num_monitor_devs_ < MAX_MONITOR_DEVICES; j++) {
+      processor_handles_[num_monitor_devs_++] = handles[j];
+    }
+  }
 
   if (num_monitor_devs_ == 0) {
     std::cout << "No monitor devices found on this machine." << std::endl;
@@ -106,9 +226,18 @@ void TestMutualExclusion::DisplayResults(void) const {
 }
 
 void TestMutualExclusion::Close() {
-  // This will close handles opened within rsmitst utility calls and call
-  // amdsmi_shut_down(), so it should be done after other hsa cleanup
+  // Shut down first while AMDSMI_MUTEX_CROSS_PROCESS is still set, so that
+  // shared_mutex_close() correctly munmaps the shared-memory mutex instead of
+  // calling delete on it (which would crash with "free(): invalid pointer").
   TestBase::Close();
+
+  // Restore AMDSMI_MUTEX_CROSS_PROCESS to its original state so subsequent
+  // tests in this process are not affected.
+  if (orig_cross_process_env_was_set_) {
+    setenv("AMDSMI_MUTEX_CROSS_PROCESS", orig_cross_process_env_.c_str(), 1);
+  } else {
+    unsetenv("AMDSMI_MUTEX_CROSS_PROCESS");
+  }
 }
 
 void TestMutualExclusion::Run(void) {
@@ -116,22 +245,52 @@ void TestMutualExclusion::Run(void) {
 
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    if (!sleeper_process_) {
+      // Child (tester) process: exit immediately to avoid running GTest/AMDSMI
+      // cleanup that was never meant to run here.
+      std::cout.flush();
+      _exit(1);
+    }
+    // Sleeper (parent) process: reap the child to avoid leaving a zombie.
+    if (child_ > 0) {
+      int child_status = 0;
+      waitpid(child_, &child_status, 0);
+    }
     return;
   }
 
   if (sleeper_process_) {
+    PRINT_VERBOSITY();
+    // Block SIGCHLD so that when the child exits, the signal does not interrupt
+    // sleep() inside rsmi_test_sleep and cause the mutex to be released early.
+    sigset_t sigchld_mask, old_mask;
+    sigemptyset(&sigchld_mask);
+    sigaddset(&sigchld_mask, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &sigchld_mask, &old_mask);
+
+    // NOTE: minimum expected test runtime is ~kHoldSeconds;
+    // CI timeouts should account for this.
     IF_VERB(STANDARD) {
-      std::cout << "MUTEX_HOLDER process: started sleeping for 10 seconds..." << std::endl;
+      std::cout << "MUTEX_HOLDER process: started sleeping for " << kHoldSeconds << " seconds..."
+                << std::endl;
     }
-    ret = rsmi_test_sleep(0, 10);
+    ret = amdsmi_test_sleep(processor_handles_[0], kHoldSeconds);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
     IF_VERB(STANDARD) { std::cout << "MUTEX_HOLDER process: Sleep process woke up." << std::endl; }
-    pid_t cpid = wait(nullptr);
+
+    // Restore signal mask before wait() so SIGCHLD can be delivered and the
+    // child can be reaped normally.
+    sigprocmask(SIG_SETMASK, &old_mask, nullptr);
+    int child_status = 0;
+    pid_t cpid = wait(&child_status);
     ASSERT_EQ(cpid, child_);
+    ASSERT_TRUE(WIFEXITED(child_status))
+        << "TESTER child process terminated by signal " << WTERMSIG(child_status);
+    EXPECT_EQ(WEXITSTATUS(child_status), 0) << "TESTER child process reported CHECK_RET failure(s)";
   } else {
     // Both processes should have completed amdsmi_init().
-    // let the other process get started on rsmi_test_sleep().
-    sleep(2);
+    // Wait for the holder to acquire the mutex before making API calls.
+    sleep(kTesterWaitSeconds);
     TestBase::Run();
     IF_VERB(STANDARD) {
       std::cout << "TESTER process: verifying that all amdsmi_dev_* functions "
@@ -154,71 +313,172 @@ void TestMutualExclusion::Run(void) {
     amdsmi_error_count_t dmy_err_cnt{};
     amdsmi_ras_err_state_t dmy_ras_err_st;
 
-    // This can be replaced with ASSERT_EQ() once env. stabilizes
-#define CHECK_RET(A, B)                                                               \
-  {                                                                                   \
-    if ((A) != (B)) {                                                                 \
-      std::cout << "Expected return value of " << B << " but got " << A << std::endl; \
-      std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl;                 \
-    }                                                                                 \
+// Accepts one or more expected values; passes if actual matches any of them.
+#define CHECK_RET(retVal, ...)                                                             \
+  {                                                                                        \
+    auto _tst_ret_val = (retVal);                                                          \
+    std::initializer_list<decltype(_tst_ret_val)> _expected_returns = {__VA_ARGS__};       \
+    bool _chk_matched = false;                                                             \
+    for (auto _chk_e : _expected_returns) {                                                \
+      if (_tst_ret_val == _chk_e) {                                                        \
+        _chk_matched = true;                                                               \
+        break;                                                                             \
+      }                                                                                    \
+    }                                                                                      \
+    if (!_chk_matched) {                                                                   \
+      std::cout << "Expected return value of one of {";                                    \
+      bool _chk_first = true;                                                              \
+      for (auto _chk_e : _expected_returns) {                                              \
+        if (!_chk_first) std::cout << ", ";                                                \
+        std::string status = smi_amdgpu_get_status_string(_chk_e, false);                  \
+        std::cout << status << " (" << _chk_e << ")";                                      \
+        _chk_first = false;                                                                \
+      }                                                                                    \
+      std::string ret_status = smi_amdgpu_get_status_string(_tst_ret_val, false);          \
+      std::cout << "} but got " << ret_status << " (" << _tst_ret_val << ")" << std::endl; \
+      std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl;                      \
+    }                                                                                      \
+    EXPECT_TRUE(_chk_matched);                                                             \
   }
+    // TODO(amdsmi_team): Add more device calls here, we should also check how CPU/NIC/etc handle
+    // These are APIs which either need to include:
+    // DEVICE_MUTEX or SMIGPUDEVICE_MUTEX (refer to AMDSMI_MUTEX_CROSS_PROCESS references)
+    // to safely handle multithreaded/process access, or need to be checked for AMDSMI_STATUS_BUSY
+    // if the mutex is held by another process. These are not exhaustive lists, just examples.
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_id", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_id(processor_handles_[0], &dmy_ui16);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "0", VERB(STANDARD));
+    ret = amdsmi_get_temp_metric(processor_handles_[0], AMDSMI_TEMPERATURE_TYPE_EDGE,
+                                 AMDSMI_TEMP_CURRENT, &dmy_i64);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
     // vendor_id, unique_id
     amdsmi_asic_info_t asic_info;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_asic_info", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_asic_info(processor_handles_[0], &asic_info);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
     // device name, brand, serial_number
     amdsmi_board_info_t board_info;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_board_info", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_board_info(processor_handles_[0], &board_info);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vendor_name", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_vendor_name(processor_handles_[0], dmy_str, 10);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_vendor", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_vram_vendor(processor_handles_[0], dmy_str, 10);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_subsystem_id", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_subsystem_id(processor_handles_[0], &dmy_ui16);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_bdf_id", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_bdf_id(processor_handles_[0], &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_throughput", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_pci_throughput(processor_handles_[0], &dmy_ui64, &dmy_ui64, &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_pci_replay_counter(processor_handles_[0], &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth", "0", VERB(STANDARD));
     ret = amdsmi_set_gpu_pci_bandwidth(processor_handles_[0], 0);
-    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY,
+                          AMDSMI_STATUS_NO_PERM);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NO_PERM);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_fan_rpms(processor_handles_[0], dmy_ui32, &dmy_i64);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_fan_speed(processor_handles_[0], 0, &dmy_i64);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_max", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_fan_speed_max(processor_handles_[0], 0, &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret = amdsmi_get_temp_metric(processor_handles_[0], AMDSMI_TEMPERATURE_TYPE_EDGE,
-                                 AMDSMI_TEMP_CURRENT, &dmy_i64);
-    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_reset_gpu_fan", "0", VERB(STANDARD));
     ret = amdsmi_reset_gpu_fan(processor_handles_[0], 0);
-    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY,
+                          AMDSMI_STATUS_NO_PERM);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NO_PERM);
+
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fan_speed", "0", VERB(STANDARD));
     ret = amdsmi_set_gpu_fan_speed(processor_handles_[0], dmy_ui32, 0);
-    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY,
+                          AMDSMI_STATUS_NO_PERM);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NO_PERM);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_perf_level(processor_handles_[0], &dmy_perf_lvl);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_overdrive_level", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_overdrive_level(processor_handles_[0], &dmy_ui32);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "0", VERB(STANDARD));
     ret = amdsmi_get_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, &dmy_freqs);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_info", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_od_volt_info(processor_handles_[0], &dmy_od_volt);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_curve_regions", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[0], &dmy_ui32, &dmy_vlt_reg);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "0", VERB(STANDARD));
     ret = amdsmi_set_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, 0);
-    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY,
+                          AMDSMI_STATUS_NO_PERM);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NO_PERM);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_ecc_count(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_err_cnt);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_ecc_enabled(processor_handles_[0], &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_ecc_status(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+#undef CHECK_RET
 
     /* Other functions holding device mutexes. Listed for reference.
     amdsmi_dev_sku_get
@@ -275,6 +535,12 @@ void TestMutualExclusion::Run(void) {
                    "amdsmi_dev_* functions returned AMDSMI_STATUS_BUSY"
                 << std::endl;
     }
-    exit(0);
+    std::cout.flush();
+    // Use _exit() to terminate immediately without running atexit handlers or
+    // static destructors — exit() would trigger gtest/RocmSMI cleanup that
+    // was never meant to run in the child process, causing heap corruption.
+    // Exit with 1 if any EXPECT_* in this process failed, so the parent can
+    // detect and report the failure via WEXITSTATUS.
+    _exit(::testing::Test::HasFailure() ? 1 : 0);
   }
 }

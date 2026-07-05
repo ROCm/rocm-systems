@@ -2080,6 +2080,17 @@ static void parseOptions(struct ncclTopoSystem* system, const char *options) {
   }
 }
 
+static ncclResult_t rcclTopoSetPresetRomeModelIdx(struct ncclTopoSystem* system, int idx) {
+  if (system->romeTopoModelIdx == RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE) {
+    system->romeTopoModelIdx = idx;
+  } else if (system->romeTopoModelIdx != idx) {
+    WARN("RCCL: conflicting preset Rome topology model index on this node (already %d, attempted %d).",
+         system->romeTopoModelIdx, idx);
+    return ncclInvalidUsage;
+  }
+  return ncclSuccess;
+}
+
 static bool checkOption(const char *options, const char *name) {
   if (strcmp(options, "")) {
     char *str_temp = (char *)malloc(strlen(options) + 1);
@@ -2124,12 +2135,9 @@ ncclResult_t parseChordalRing(struct ncclTopoSystem* system, struct ncclTopoGrap
     int sum = ngpus*(ngpus-1)/2 - node->gpu.dev;
     int count = 0;
     for (int n = 0; n<ngpus; n++) {
-      struct ncclTopoLink* link;
-      for (link = node->links; link->remNode; link++) {
-        if (link->remNode->gpu.dev == n) break;
-      }
-      if (!link->remNode) continue;
-      if (link->type != LINK_NVL) continue;
+      // Direct XGMI neighbor: post NCCL-2.30 a direct GPU->GPU path is GPU-DEV-DEV-GPU (count<=3).
+      struct ncclTopoLinkList* path = node->paths[GPU] + n;
+      if (path->type != PATH_NVL || path->count > 3) continue;
       sum -= system->nodes[GPU].nodes[n].gpu.dev;
       count ++;
     }
@@ -2267,7 +2275,9 @@ static ncclResult_t parseRomeSystem(struct ncclTopoSystem* system, struct rcclRo
     for (n = 0; n < romeTopo->nGpus; n++) {
       romeTopo->connMatrix[i*romeTopo->nGpus+n] = 0;
       struct ncclTopoLinkList *path = node->paths[GPU] + gpu_scores[n].g;
-      if (path->type != LINK_NVL) continue;
+      // Only count direct XGMI links: since NCCL 2.30, GPU->GPU routes via DEV nodes, so direct is
+      // count==3 and indirect count==4. Counting indirect breaks Rome matching on sparse topos.
+      if (path->type != PATH_NVL || path->count > 3) continue;
       romeTopo->connMatrix[i*romeTopo->nGpus+n] = path->bw/ncclTopoXGMISpeed(node->gpu.gcn);
       count ++;
     }
@@ -2311,7 +2321,9 @@ static ncclResult_t parseRomeSystem(struct ncclTopoSystem* system, struct rcclRo
     int n = net_scores[i].n;
     for (int j = 0; j < romeTopo->nGpus; j++) {
       int g = gpu_scores[j].g;
-      romeTopo->gdrLevel[i*romeTopo->nGpus+j] = system->nodes[GPU].nodes[g].paths[NET][n].type;
+      struct ncclTopoNode* gpuNode = &system->nodes[GPU].nodes[g];
+      // paths[NET] is null when the GPU has no topology path to any NET node (e.g. remote NICs in MNNVL)
+      romeTopo->gdrLevel[i*romeTopo->nGpus+j] = (gpuNode->paths[NET] != NULL) ? gpuNode->paths[NET][n].type : PATH_DIS;
     }
   }
 
@@ -2666,6 +2678,10 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     break;
   }
 
+  if (graph->nChannels) {
+    NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, i));
+  }
+
   // clean up
   free(all_gpu_permutations);
   return ncclSuccess;
@@ -2833,6 +2849,9 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
     applyNetOverride(system, romeTopoModels[i].options);
     break;
   }
+  if (graph->nChannels) {
+    NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, i));
+  }
   return ncclSuccess;
 }
 
@@ -2972,6 +2991,9 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   NCCLCHECK(parseGraph(romeTopoModels[i].ringBase, system, graph, rdm, nnets > 1 ? n : NULL, false));
 
   if (romeTopoModels[i].treeBase != nullptr) NCCLCHECK(parseGraphLight(romeTopoModels[i].treeBase, system, graph, rdm));
+  if (graph->nChannels) {
+    NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, i));
+  }
   // clean up
   free(all_gpu_permutations);
   return ncclSuccess;
@@ -3092,6 +3114,9 @@ ncclResult_t parse4H4P(struct ncclTopoSystem* system, struct ncclTopoGraph* grap
   parseOptions(system, rome_model_68.options);
   // create 4P4H based on reference and remapped ids
   NCCLCHECK(parseGraph(rome_model_68.ringBase, system, graph, rdm, n_hives.data(), false));
+  if (graph->nChannels) {
+    NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P));
+  }
   return ncclSuccess;
 }
 
@@ -3170,6 +3195,9 @@ ncclResult_t parseGIOTopos(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   system->type |= RCCL_TOPO_4P2H_ROME;
 
   NCCLCHECKGOTO(parseGraph(gio16gColumbaModel.ringBase, system, graph, rdm, NULL, false), r, exit);
+  if (graph->nChannels) {
+    NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, RCCL_ROME_TOPO_PRESET_MODEL_IDX_GIO_COLUMBA));
+  }
 
 exit:
   return ncclSuccess;

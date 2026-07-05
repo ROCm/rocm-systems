@@ -59,19 +59,56 @@ static inline bool skip_payload(Cursor& cur, AMDGpuMetricAttributeType_t t, uint
 }
 
 // Lookup a schema instance for (attr_id, attr_type)
+// When schema_type_validate is false, returns schema entry for attr_id regardless of type mismatch
+// This allows reading values with actual type from data, not schema type
 static inline rsmi_status_t schema_lookup_instance(AMDGpuMetricAttributeId_t attr_id,
                                                    AMDGpuMetricAttributeType_t attr_type,
-                                                   AMDGpuMetricAttributeInstance_t& schema_inst) {
+                                                   AMDGpuMetricAttributeInstance_t& schema_inst,
+                                                   bool schema_type_validate = false) {
   if (const auto attr_id_itr = AMDGpuMetricsBaseSchema.find(attr_id);
       attr_id_itr != AMDGpuMetricsBaseSchema.end()) {
     const auto& inst = attr_id_itr->second.m_instance;
-    if (inst.m_attribute_type == attr_type) {
+    if (!schema_type_validate || inst.m_attribute_type == attr_type) {
+      // Log type mismatch when debug is enabled
+      if (!schema_type_validate && inst.m_attribute_type != attr_type) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | Debug: Type mismatch for Attr ID: "
+           << static_cast<std::underlying_type_t<AMDGpuMetricAttributeId_t>>(attr_id)
+           << " | Schema Type: " << static_cast<int>(inst.m_attribute_type)
+           << " | Driver Type: " << static_cast<int>(attr_type);
+        LOG_DEBUG(ss);
+      }
+      // Override schema type with actual type from data
       schema_inst = inst;
+      schema_inst.m_attribute_type = attr_type;
       return RSMI_STATUS_SUCCESS;
     }
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   return RSMI_STATUS_NOT_FOUND;
+}
+
+static inline std::string attr_type_to_string(AMDGpuMetricAttributeType_t t) {
+  switch (t) {
+    case AMDGpuMetricAttributeType_t::TYPE_UINT8:
+      return "TYPE_UINT8";
+    case AMDGpuMetricAttributeType_t::TYPE_INT8:
+      return "TYPE_INT8";
+    case AMDGpuMetricAttributeType_t::TYPE_UINT16:
+      return "TYPE_UINT16";
+    case AMDGpuMetricAttributeType_t::TYPE_INT16:
+      return "TYPE_INT16";
+    case AMDGpuMetricAttributeType_t::TYPE_UINT32:
+      return "TYPE_UINT32";
+    case AMDGpuMetricAttributeType_t::TYPE_INT32:
+      return "TYPE_INT32";
+    case AMDGpuMetricAttributeType_t::TYPE_UINT64:
+      return "TYPE_UINT64";
+    case AMDGpuMetricAttributeType_t::TYPE_INT64:
+      return "TYPE_INT64";
+    default:
+      return "UNKNOWN";
+  }
 }
 
 template <class T>
@@ -187,16 +224,29 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data, std::size_
       return RSMI_STATUS_UNEXPECTED_SIZE;
     }
 
-    // Schema lookup
+    // Schema lookup - use actual type from driver data, not schema type (schema_type_validate =
+    // false) This allows different pmfw versions having different data types for same attribute ID
     AMDGpuMetricAttributeInstance_t inst{};
-    status = schema_lookup_instance(attr_id, attr_type, inst);
+    status = schema_lookup_instance(attr_id, attr_type, inst, false);
     if (status != RSMI_STATUS_SUCCESS) {
+      const auto attr_name = [&]() -> std::string {
+        const auto it = AMDGpuMetricAttributeIdToString.find(attr_id);
+        return (it != AMDGpuMetricAttributeIdToString.end()) ? it->second.m_short_info : "UNKNOWN";
+      }();
+
       ss << __PRETTY_FUNCTION__ << " | Warn: schema lookup miss"
-         << " | Attr ID: "
+         << " | Attr Name: " << attr_name << " | Attr ID: "
          << static_cast<std::underlying_type_t<AMDGpuMetricAttributeId_t>>(attr_id)
-         << " | Attr Type: "
-         << static_cast<std::underlying_type_t<AMDGpuMetricAttributeType_t>>(attr_type)
-         << " | Returning = " << getRSMIStatusString(status) << " |";
+         << " | Attr Type: " << attr_type_to_string(attr_type) << " ("
+         << static_cast<std::underlying_type_t<AMDGpuMetricAttributeType_t>>(attr_type) << ")";
+
+      if (status == RSMI_STATUS_NOT_SUPPORTED) {
+        const auto expected_type = AMDGpuMetricsBaseSchema.at(attr_id).m_instance.m_attribute_type;
+        ss << " | Size mismatch: schema expects " << attr_type_to_string(expected_type) << ", got "
+           << attr_type_to_string(attr_type);
+      }
+
+      ss << " | Returning = " << getRSMIStatusString(status, false) << " |";
       LOG_TRACE(ss);
 
       if (!skip_payload(cur, attr_type, instances)) {

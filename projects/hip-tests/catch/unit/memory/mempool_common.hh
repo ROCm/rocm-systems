@@ -19,21 +19,19 @@ namespace {
 constexpr auto wait_ms = 500;
 }  // anonymous namespace
 
-#define checkMempoolSupported(device) {\
-  int deviceSupportsMemoryPools = 0;\
-  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,\
-        hipDeviceAttributeMemoryPoolsSupported, device));\
-  if (0 == deviceSupportsMemoryPools) {\
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);\
-    return;\
-  }\
+#define checkMempoolSupported(device) {                                                            \
+  int deviceSupportsMemoryPools = 0;                                                               \
+  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,                                      \
+        hipDeviceAttributeMemoryPoolsSupported, device));                                          \
+  if (0 == deviceSupportsMemoryPools) {                                                            \
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);                                    \
+  }                                                                                                \
 }
 
-#define checkIfMultiDev(numOfDev) {\
-  if (numOfDev < 2) {\
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);\
-    return;\
-  }\
+#define checkIfMultiDev(numOfDev) {                                                                \
+  if (numOfDev < 2) {                                                                              \
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);                                         \
+  }                                                                                                \
 }
 
 template <typename T> __global__ void kernel_500ms(T* host_res, int clk_rate) {
@@ -75,8 +73,9 @@ template <typename T> __global__ void kernel_500ms_gfx11(T* host_res, int clk_ra
 template <typename T> __global__ void notifiedKernel(T* host_res, volatile unsigned int* notified) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   host_res[tid] = tid + 1;
-  __threadfence_system();
-  while (*notified == 0) { }
+  if (threadIdx.x == 0) {
+    while (*notified == 0) { }
+  }
 }
 
 template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemPools mempool_type) {
@@ -86,8 +85,7 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -146,8 +144,7 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -226,8 +223,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -307,19 +303,21 @@ class streamMemAllocTest {
   int size;
   size_t byte_size;
   hipMemPool_t mem_pool;
+  bool threadSafe;
 
  public:
-  explicit streamMemAllocTest(int N) : size(N) {
+  explicit streamMemAllocTest(int N, bool threadSafe = false)
+      : size(N), threadSafe(threadSafe) {
     byte_size = N*sizeof(int);
   }
   // Create host buffers and initialize them with input data
   void createHostBufferWithData() {
     A_h = reinterpret_cast<int*>(malloc(byte_size));
-    REQUIRE(A_h != nullptr);
+    REQUIRE_OPT_THREAD(threadSafe, A_h != nullptr);
     B_h = reinterpret_cast<int*>(malloc(byte_size));
-    REQUIRE(B_h != nullptr);
+    REQUIRE_OPT_THREAD(threadSafe, B_h != nullptr);
     C_h = reinterpret_cast<int*>(malloc(byte_size));
-    REQUIRE(C_h != nullptr);
+    REQUIRE_OPT_THREAD(threadSafe, C_h != nullptr);
     // set data to host
     for (int i = 0; i < size; i++) {
       A_h[i] = 2*i + 1;  // Odd
@@ -339,13 +337,13 @@ class streamMemAllocTest {
     pool_props.allocType = hipMemAllocationTypePinned;
     pool_props.location.id = dev;
     pool_props.location.type = hipMemLocationTypeDevice;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolCreate(&mem_pool, &pool_props));
     if (attr == hipMemPoolAttrReleaseThreshold) {
       uint64_t setThreshold = 0;
       if (testtype == testMaximum) {
         setThreshold = UINT64_MAX;
       }
-      HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &setThreshold));
+      HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolSetAttribute(mem_pool, attr, &setThreshold));
     } else if ((attr == hipMemPoolReuseFollowEventDependencies) ||
               (attr == hipMemPoolReuseAllowOpportunistic) ||
               (attr == hipMemPoolReuseAllowInternalDependencies)) {
@@ -353,32 +351,32 @@ class streamMemAllocTest {
       if (testtype == testEnabled) {
         value = 1;
       }
-      HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+      HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolSetAttribute(mem_pool, attr, &value));
     }
   }
   // allocate device memory from mempool.
   void allocFromMempool(hipStream_t stream) {
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
               byte_size, mem_pool, stream));
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d),
               byte_size, mem_pool, stream));
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&C_d),
               byte_size, mem_pool, stream));
   }
   // Transfer data from host to device asynchronously.
   void transferToMempool(hipStream_t stream) {
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice,
               stream));
-    HIP_CHECK(hipMemcpyAsync(B_d, B_h, byte_size, hipMemcpyHostToDevice,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpyAsync(B_d, B_h, byte_size, hipMemcpyHostToDevice,
               stream));
   }
   // allocate from default mempool.
   void allocFromDefMempool(hipStream_t stream) {
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&A_d),
               byte_size, stream));
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&B_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&B_d),
               byte_size, stream));
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&C_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&C_d),
               byte_size, stream));
   }
   // Execute Kernel to process input data and wait for it.
@@ -387,13 +385,13 @@ class streamMemAllocTest {
                                                  : ((size / THREADS_PER_BLOCK) + 1);
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(THREADS_PER_BLOCK), 0, stream,
                        static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, size);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK_OPT_THREAD(threadSafe, hipGetLastError());
   }
   // Transfer data from device to host asynchronously.
   void transferFromMempool(hipStream_t stream) {
-    HIP_CHECK(hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost,
                         stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipStreamSynchronize(stream));
   }
   // Validate the data returned from device.
   bool validateResult() {
@@ -403,15 +401,26 @@ class streamMemAllocTest {
     }
     return true;
   }
+  // Thread-safe variant of validateResult(): returns a bool instead of using a
+  // Catch2 macro, so it is safe to call from worker threads.
+  bool validateResultThreadSafe() {
+    for (int i = 0; i < size; i++) {
+      auto res = A_h[i] + B_h[i];
+      if (res != C_h[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
   // Free device memory
   void freeDevBuf(hipStream_t stream) {
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B_d), stream));
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C_d), stream));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipFreeAsync(reinterpret_cast<void*>(B_d), stream));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipFreeAsync(reinterpret_cast<void*>(C_d), stream));
   }
   // Free mempool if not using global mempool
   void freeMempool() {
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolDestroy(mem_pool));
   }
   // Free all host buffers
   void freeHostBuf() {

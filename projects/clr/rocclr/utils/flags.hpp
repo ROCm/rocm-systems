@@ -203,8 +203,8 @@ release(cstring, ROC_GLOBAL_CU_MASK, "",                                      \
         "Each active bit represents using one CU (e.g., 0xf enables only 4 CUs)") \
 release(size_t, PAL_PREPINNED_MEMORY_SIZE, 64,                                \
         "Size in KBytes of prepinned memory")                                 \
-release(bool, AMD_CPU_AFFINITY, false,                                        \
-        "Reset CPU affinity of any runtime threads")                          \
+release(bool, AMD_CPU_AFFINITY, false,                                         \
+        "Prefer GPU-local NUMA CPU affinity when the application has not set a CPU mask") \
 release(bool, ROC_USE_FGS_KERNARG, true,                                      \
         "Use fine grain kernel args segment for supported asics")             \
 release(uint, ROC_P2P_SDMA_SIZE, 1024,                                        \
@@ -233,6 +233,8 @@ release(cstring, HIPRTC_COMPILE_OPTIONS_APPEND, "",                           \
         "Set compile options needed for hiprtc compilation")                  \
 release(cstring, HIPRTC_LINK_OPTIONS_APPEND, "",                              \
         "Set link options needed for hiprtc compilation")                     \
+release(cstring, GPU_CLR_PROFILE_OUTPUT, "",                                  \
+        "Enable built-in HIP profiling and write Chrome trace JSON to this path on exit") \
 release(bool, HIP_VMEM_MANAGE_SUPPORT, true,                                  \
         "Virtual Memory Management Support")                                  \
 release(uint, DEBUG_HIP_GRAPH_DOT_PRINT, 0,                               \
@@ -245,6 +247,11 @@ release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
         "Number of graph nodes to batch at a time")                           \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 1,                          \
         "0 = Disable, 1 = Enable, 2 = Force")                                 \
+release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
+        "Min overlappable work (in occupancy passes) per unit of cross-stream "\
+        "sync (barrier packets + completion signals) to keep a graph "         \
+        "multi-stream; below this ratio it collapses to a single stream. "     \
+        "0 = off.")                                                            \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \
@@ -262,15 +269,22 @@ release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
-release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
+release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 16,                               \
         "Forces the minimum batch size for CPU sync")                         \
 release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
         "1 = Disable Image support for ROC path")                             \
 release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
         "Enable metadata prefetch for some Aql packets")                      \
+release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
+        "Set to a directory path to enable HRR capture; archive written there") \
+release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
+        "Enable HRR capture argument-provenance tracing (per-arg dumps and "  \
+        "H2D destination logging) at LOG_INFO level")                         \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
-        "Number of consecutive dispatches that may skip the doorbell flush.")
- 
+        "Number of consecutive dispatches that may skip the doorbell flush.") \
+release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
+        "Disables certain fallback paths")
+
 
 namespace amd {
 

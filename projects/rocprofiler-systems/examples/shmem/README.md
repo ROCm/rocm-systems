@@ -33,7 +33,7 @@ cmake --build <build_dir> --target shmem_hello shmem_pingpong
 **Targets:**
 
 | Target | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `shmem_hello` | Basic SHMEM hello world |
 | `shmem_pingpong` | Ping-pong latency benchmark |
 
@@ -50,7 +50,7 @@ oshrun -np 2 ./shmem_pingpong
 **shmem_pingpong flags:**
 
 | Flag | Description | Default |
-|------|-------------|---------|
+| ------ | ------------- | --------- |
 | `-n` | Number of iterations | 10000 |
 | `-s` | Message size in bytes | 4 |
 | `-w` | Use `shmem_wait_until()` instead of polling | off |
@@ -67,7 +67,7 @@ oshrun -np 2 rocprof-sys-run -- ./shmem_pingpong -n 1000
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable statistical sampling |

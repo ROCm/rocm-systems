@@ -350,10 +350,18 @@ void* Context::svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
 
 void Context::svmFree(void* ptr) const {
   amd::ScopedLock lock(&ctxLock_);
+  // Atomically remove from map before any device frees the GPU VA.
+  // This prevents a concurrent allocation from reusing the same VA and being
+  // wrongly freed by a subsequent device iteration (MGPU race).
+  // The actual HSA free (release) is deferred until after all devices have
+  // iterated, so KFD cannot reuse the VA during the loop.
+  amd::Memory* svmMem = amd::MemObjMap::FindAndRemoveMemObj(ptr);
   for (const auto& dev : svmAllocDevice_) {
-    dev->svmFree(ptr);
+    dev->svmFree(ptr);  // FindMemObj returns nullptr → no-op for GPU path
   }
-  return;
+  if (svmMem != nullptr) {
+    svmMem->release();
+  }
 }
 
 bool Context::containsDevice(const Device* device) const {

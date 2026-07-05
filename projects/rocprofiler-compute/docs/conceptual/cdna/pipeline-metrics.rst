@@ -7,7 +7,7 @@
 Pipeline metrics
 ****************
 
-In this section, we describe the metrics available in ROCm Compute Profiler to analyze the
+This section details the metrics available in ROCm Compute Profiler to analyze the
 pipelines discussed in the :doc:`pipeline-descriptions`.
 
 .. _wavefront:
@@ -79,14 +79,14 @@ execution of wavefronts in a kernel:
 
 .. note::
 
-   As mentioned earlier, the measurement of kernel cycles and time typically
-   cannot be directly compared to, for example, wave cycles. This is due to two factors:
-   first, the kernel cycles/timings are measured using a counter that is
+   The measurement of kernel cycles and time typically
+   cannot be directly compared to other cycles, such as, wave cycles. This is due to two factors:
+   * The kernel cycles/timings are measured using a counter that is
    impacted by scheduling overhead, this is particularly noticeable for
-   "short-running" kernels (less than 1ms) where scheduling overhead forms a
-   significant portion of the overall kernel runtime. Secondly, the wave cycles
-   metric is incremented per-wavefront scheduled to a SIMD every cycle whereas
-   the kernel cycles counter is incremented only once per-cycle when *any*
+   short-running kernels (less than 1ms) where scheduling overhead forms a
+   significant portion of the overall kernel runtime. 
+   * The wave cycles metric is incremented per-wavefront scheduled to a SIMD every cycle whereas
+   the kernel cycles counter is incremented only once per-cycle when any
    wavefront is scheduled.
 
 .. _instruction-mix:
@@ -103,12 +103,12 @@ instructions.
 
 .. note::
 
-   All metrics in this section count *instructions issued*, and *not* the total
+   All metrics in this section count the instructions issued, and not the total
    number of operations executed. The values reported by these metrics will not
    change regardless of the execution mask of the wavefront. Note that even if
-   the execution mask is identically zero (meaning that *no lanes are active*)
-   the instruction will still be counted, as CDNA accelerators still consider
-   these instructions *issued*. See
+   the execution mask is identically zero (meaning no lanes are active)
+   the instruction will still be counted, as CDNA architecture-based GPUs still consider
+   these as instructions issued. See
    :mi200-isa-pdf:`EXECute Mask, section 3.3 of the CDNA2 ISA guide<19>` for
    examples and further details.
 
@@ -144,9 +144,8 @@ the :doc:`various compute pipelines <pipeline-descriptions>` on the
 
 .. note::
 
-   Note, as mentioned in the :ref:`desc-branch` section: branch
-   operations are not used for execution mask updates, but only for "whole
-   wavefront" control flow changes.
+   Branch operations are not used for execution mask updates, but only for whole
+   wavefront control flow changes. For more details, see :ref:`desc-branch`.
 
 .. _valu-arith-instruction-mix:
 
@@ -155,8 +154,8 @@ VALU arithmetic instruction mix
 
 .. warning::
 
-   Not all metrics in this section (for instance, the floating-point instruction
-   breakdowns) are available on CDNA accelerators older than the
+   Not all metrics in this section (such as, the floating-point instruction
+   breakdowns) are available on CDNA architecture-based GPUs older than the
    :ref:`MI2XX <mixxx-note>` series.
 
 This panel details the various types of vector instructions that were
@@ -204,8 +203,8 @@ Matrix instruction mix
 
 .. warning::
 
-   The metrics in this section are only available on CDNA2
-   (:ref:`MI2XX <mixxx-note>`) accelerators and newer.
+   The metrics in this section are only available on CDNA2-CDNA4 architecture-based GPUs
+   (:ref:`MI2XX <mixxx-note>`) and newer.
 
 This section details the types of Matrix Fused Multiply-Add
 (:ref:`MFMA <desc-mfma>`) instructions that were issued. Note that
@@ -263,7 +262,7 @@ the operation, and will report the same value even if the execution mask
 is identically zero.
 
 For example, a FMA instruction operating on 32-bit floating-point
-operands (such as ``v_fma_f32`` on a :ref:`MI2XX <mixxx-note>` accelerator)
+operands (such as ``v_fma_f32`` on a AMD Instinct :ref:`MI2XX <mixxx-note>` Series GPUs)
 would be counted as 128 total FLOPs: 2 operations (due to the
 instruction type) multiplied by 64 operations (because the wavefront is
 composed of 64 work-items).
@@ -277,7 +276,7 @@ Compute Speed-of-Light
 
    The theoretical maximum throughput for some metrics in this section are
    currently computed with the maximum achievable clock frequency, as reported
-   by ``rocminfo``, for an accelerator. This may not be realistic for all
+   by ``rocminfo``, for a GPU. This may not be realistic for all
    workloads.
 
 This section reports the number of floating-point and integer operations
@@ -358,16 +357,15 @@ operations executed in various precisions. Unlike the
 :ref:`compute-speed-of-light` panel, this section reports both
 :ref:`VALU <desc-valu>` and :ref:`MFMA <desc-mfma>` operations of the same precision
 (e.g., F32) in the same metric. Additionally, this panel lets the user
-control how the data is normalized (i.e., control the
+control how the data is normalized (such as, control the
 :ref:`normalization unit <normalization-units>`), while the speed-of-light panel does
-not. For more detail on how operations are counted see the
-:ref:`FLOP counting convention <metrics-flop-count>` section.
+not. For more details on how operations are counted, see :ref:`FLOP counting convention <metrics-flop-count>`.
 
 .. warning::
 
-   As discussed in :ref:`instruction-mix`, the metrics in this section do not
+   The metrics in this section do not
    take into account the execution mask of the operation, and will report the
-   same value even if EXEC is identically zero.
+   same value even if EXEC is identically zero. For more details, see :ref:`instruction-mix`. 
 
 .. tab-set::
 

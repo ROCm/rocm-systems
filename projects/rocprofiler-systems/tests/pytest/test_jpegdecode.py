@@ -14,7 +14,6 @@ pytestmark = [
     pytest.mark.gpu,
     pytest.mark.decode,
     pytest.mark.jpegdecode,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
     pytest.mark.rocm,
 ]
 
@@ -29,7 +28,7 @@ def jpeg_decode_env() -> dict[str, str]:
     """Environment variables for JPEG decode tests."""
     return {
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,rocjpeg_api",
-        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,jpeg_activity,mem_usage",
+        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,jpeg_activity,mem_usage,gfx_clock,mem_clock",
         "ROCPROFSYS_SAMPLING_CPUS": "none",
     }
 

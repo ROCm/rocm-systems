@@ -108,7 +108,7 @@ rocprofsys_pop_trace_hidden(const char* name)
 extern "C" void
 rocprofsys_flush_pending_region_cache_hidden()
 {
-    flush_pending_cached_entries();
+    rocprofsys::utility::category_region<>::instance().flush_pending_cached_entries();
 }
 
 //======================================================================================//
@@ -143,6 +143,13 @@ rocprofsys_push_category_region_hidden(rocprofsys_category_t _category, const ch
     rocprofsys::impl::invoke_category_region_start(
         _category, name, _annotations, _annotation_count,
         rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+}
+
+extern "C" void
+rocprofsys_push_trace_with_args_hidden(const char* name, const char* serialized_args)
+{
+    rocprofsys::component::category_region<rocprofsys::category::host>::start_with_args(
+        name, serialized_args ? serialized_args : "");
 }
 
 extern "C" void

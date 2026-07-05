@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -42,8 +42,6 @@
 
 #ifndef HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
 #define HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
-
-#include <limits>
 
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/queue.h"
@@ -100,32 +98,26 @@ class AieAqlQueue : public core::Queue,
   void ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
                   hsa_fence_scope_t releaseFence, hsa_signal_t* signal) override;
 
- private:
-  HSA_QUEUEID queue_id_ = INVALID_QUEUEID;
-  /// @brief ID of AIE device on which this queue has been mapped.
-  uint32_t node_id_ = std::numeric_limits<uint32_t>::max();
-  /// @brief Queue size in bytes.
-  uint32_t queue_size_bytes_ = std::numeric_limits<uint32_t>::max();
-
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
  private:
-  AieAgent &agent_;
-
-  /// @brief Base of the queue's ring buffer storage.
-  void *ring_buf_ = nullptr;
-
   /// @brief Called when the doorbell is rung to submit all queued packets.
   void SubmitPackets();
 
-  /// @brief Indicates if queue is active.
-  std::atomic<bool> active_;
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;
     return rtti_id_;
   }
 
+  /// @brief Queue size in bytes.
+  uint32_t queue_size_bytes_ = 0;
+  /// @brief Base of the queue's ring buffer storage.
+  void* ring_buf_ = nullptr;
+  /// @brief Kernel Mode Queue (KMQ) metadata associated with this queue.
+  void* kmq_metadata_ = nullptr;
+  /// @brief Indicates if queue is active.
+  std::atomic<bool> active_ = false;
 };
 
 } // namespace AMD

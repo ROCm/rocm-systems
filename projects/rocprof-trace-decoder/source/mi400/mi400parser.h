@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #pragma once
-#include <unordered_map>
+#include <cstring>
 #include "gfx12/gfx12parser.h"
 #include "mi400token.h"
 
@@ -31,40 +31,11 @@ namespace mi400
 class TokenLookupTable : public gfx12::TokenLookupTable
 {
 public:
-    TokenLookupTable()
-    {
-        AddEncoding({
-            RdnaType::INST, {0, 1, 0, 0}
-        });
-        AddEncoding({
-            RdnaType::VALU_INST, {1, 1, 0}
-        });
-        AddEncoding({
-            RdnaType::NOP, {0, 0, 0, 0}
-        });
-        AddEncoding({
-            RdnaType::IMM_ONE, {1, 0, 1, 1}
-        });
-        AddEncoding({
-            RdnaType::WAVE_END, {1, 0, 0, 0, 0, 0, 1}
-        });
-        AddEncoding({
-            RdnaType::LDS_CONFIG, {0, 1, 1, 0, 0, 1, 0, 0}
-        });
-        AddEncoding({
-            RdnaType::MISC_GFX10, {1, 0, 0, 0, 1, 0, 1}
-        });
-        AddEncoding({
-            RdnaType::TIME, {0, 1, 1, 1}
-        });
-        AddEncoding({
-            RdnaType::MEDIUM_TIME, {0, 1, 1, 0, 0, 1, 0, 1}
-        });
-    }
+    TokenLookupTable();
 
-    int64_t getTime(RdnaType type, uint64_t contents, int64_t cur_time, bool& PL, int64_t& rt)
+    int64_t getTime(const token_info_t& info, uint64_t contents, int64_t cur_time, bool& PL, int64_t& rt)
     {
-        if (type == RdnaType::TIMESTAMP)
+        if (info.type == RdnaType::TIMESTAMP)
         {
             gfx12::timestamp_type stamp{.raw = contents};
             PL |= bool(stamp.pl && !stamp.rt);
@@ -73,27 +44,25 @@ public:
             if (stamp.pl == 0) rt = stamp.time;
             return cur_time;
         }
-        else if (type == RdnaType::TIME) { cur_time += 1; }
-        return getDelta(type, contents) + cur_time;
+        else if (info.type == RdnaType::TIME) { cur_time += 1; }
+        return getDelta(info, contents) + cur_time;
     };
 
 private:
-    int64_t getDelta(RdnaType type, uint64_t contents)
+    // MI400 omits the +4 cycle adjustment that gfx10/11/12 apply to TIME tokens; the
+    // +1 above already covers it. Hides gfx12::TokenLookupTable::getDelta via name lookup.
+    static int64_t getDelta(const token_info_t& info, uint64_t contents)
     {
-        auto res = time_bits[type];
-        uint64_t beg = res.first;
-        uint64_t mask = (1ull << (res.second - beg)) - 1;
-        return ((contents >> beg) & mask);
+        uint64_t mask = (1ull << (info.time_end - info.time_begin)) - 1;
+        return ((contents >> info.time_begin) & mask);
     };
-
-    static std::array<std::pair<int, int>, NAVI_TYPE_LAST> time_bits;
 };
 
 class TokenGenerator : public NaviTokenGenerator
 {
 public:
     TokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time);
-    gfx10::Token next() override;
+    gfx10::Token next() final;
 
     inline uint64_t getBuffer400() { return buffer[byte_ptr]; };
 
@@ -117,6 +86,17 @@ public:
     void update_fifo(int wave);
     int get_valu_inst_mi400();
 
+    // The rare-token cluster lives at positions 0..4 in RdnaType
+    // (gfx10/token_types.h): UNKNOWN, EVENT, EVENT_SYNC, REG, REG_INIT.
+    // The check then reduces to `unsigned(type) < RARE_END` — a single
+    // unsigned compare, with no subtract.
+    static constexpr unsigned RARE_END = 5;
+    static_assert(
+        RdnaType::UNKNOWN == 0 && RdnaType::EVENT == 1 && RdnaType::EVENT_SYNC == 2 && RdnaType::REG == 3 &&
+            RdnaType::REG_INIT == 4,
+        "Rare-token cluster must occupy positions 0..4 — update if enum reordered"
+    );
+
 protected:
     std::array<int, 6> FIFO = {-1, -1, -1, -1, -1, -1};
 
@@ -124,7 +104,6 @@ private:
     size_t byte_ptr = 0;
     bool bIsExt = false;
     TokenLookupTable lookupbits{};
-    static std::array<uint8_t, 64> TOKEN_LEN;
 };
 
 } // namespace mi400

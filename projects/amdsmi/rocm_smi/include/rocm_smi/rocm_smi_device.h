@@ -171,6 +171,7 @@ enum DevInfoTypes {
   kDevSupportedXcpConfigs,
   kDevSupportedNpsConfigs,
   kDevXcpConfig,
+  kDevComputePartitionMemAllocMode,
 
   /**
    * Possible xcp config resources start

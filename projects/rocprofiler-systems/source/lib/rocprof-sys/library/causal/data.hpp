@@ -11,6 +11,7 @@
 #include "core/utility.hpp"
 #include "library/causal/fwd.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
@@ -34,7 +35,7 @@ get_line_info(uintptr_t _addr, bool include_discarded = true);
 bool is_eligible_address(uintptr_t);
 
 size_t set_current_selection(unwind_addr_t);
-size_t set_current_selection(container::c_array<uint64_t>);
+size_t set_current_selection(container::c_array<std::uint64_t>);
 
 void
 reset_sample_selection();
@@ -49,7 +50,7 @@ void pop_progress_point(std::string_view);
 void
 mark_progress_point(std::string_view, bool force = false);
 
-uint16_t
+std::uint16_t
 sample_virtual_speedup();
 
 void

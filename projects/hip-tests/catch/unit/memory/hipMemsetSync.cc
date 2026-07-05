@@ -389,9 +389,11 @@ void runTests(allocType type, memSetType memsetType, MultiDData data, hipStream_
   bool async = GENERATE(true, false);
   CAPTURE(type, memsetType, data.width, data.height, data.depth, stream, async);
   std::pair<T*, T*> aPtr = initMemory<T>(type, memsetType, data);
-  using namespace std::chrono_literals;
-  const std::chrono::duration<uint64_t, std::milli> delay = 100ms;
-  LaunchDelayKernel(delay, stream);
+  const auto delay = std::chrono::milliseconds(isQuickLevel() ? 10 : 100);
+  // Keep the stream busy with a host-side delay rather than the GPU Delay
+  // kernel: the host timer is deterministic and doesn't depend on the device
+  // wall-clock-rate attribute, which makes this synchronization check robust.
+  LaunchDelayHostFunc(delay, stream);
   memsetCheck(aPtr.first, testValue, memsetType, data, async, stream);
 
   if (async || type == allocType::deviceMalloc) {
@@ -413,7 +415,9 @@ void runTests(allocType type, memSetType memsetType, MultiDData data, hipStream_
 template <typename T>
 static void doMemsetTest(allocType mallocType, memSetType memset_type, MultiDData data) {
   enum StreamType { NULLSTR, CREATEDSTR };
-  auto streamType = GENERATE(NULLSTR, CREATEDSTR);
+  auto streamType = isQuickLevel()
+      ? GENERATE(CREATEDSTR)
+      : GENERATE(NULLSTR, CREATEDSTR);
   hipStream_t stream{nullptr};
 
   if (streamType == CREATEDSTR) HIP_CHECK(hipStreamCreate(&stream));
@@ -455,8 +459,8 @@ HIP_TEST_CASE(Unit_hipMemset2DSync) {
                                   allocType::hostRegisted, allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset2D;
   MultiDData data;
-  data.width = GENERATE(512, 1024);
-  data.height = GENERATE(512, 1024);
+  data.width = isQuickLevel() ? GENERATE(128, 256) : GENERATE(512, 1024);
+  data.height = isQuickLevel() ? GENERATE(128, 256) : GENERATE(512, 1024);
 
   doMemsetTest<char>(mallocType, memset_type, data);
 }
@@ -466,9 +470,9 @@ HIP_TEST_CASE(Unit_hipMemset3DSync) {
                                   allocType::hostRegisted, allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset3D;
   MultiDData data;
-  data.width = GENERATE(128, 256);
-  data.height = GENERATE(128, 256);
-  data.depth = GENERATE(128, 256);
+  data.width = isQuickLevel() ? GENERATE(32, 64) : GENERATE(128, 256);
+  data.height = isQuickLevel() ? GENERATE(32, 64) : GENERATE(128, 256);
+  data.depth = isQuickLevel() ? GENERATE(32, 64) : GENERATE(128, 256);
 
   doMemsetTest<char>(mallocType, memset_type, data);
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "binary/address_range.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -83,9 +84,9 @@ bool
 address_range::overlaps(address_range _v) const
 {
     if(contains(_v)) return false;
-    int64_t _lhs_diff = (high - low);
-    int64_t _rhs_diff = (_v.high - _v.low);
-    int64_t _diff     = (std::max(high, _v.high) - std::min(low, _v.low));
+    std::int64_t _lhs_diff = (high - low);
+    std::int64_t _rhs_diff = (_v.high - _v.low);
+    std::int64_t _diff     = (std::max(high, _v.high) - std::min(low, _v.low));
     return (_diff < (_lhs_diff + _rhs_diff));
 }
 

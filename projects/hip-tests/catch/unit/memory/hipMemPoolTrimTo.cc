@@ -190,7 +190,7 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
       // create a stream
       hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  constexpr int N = 1 << 20;
+  const int N = isQuickLevel() ? (1 << 12) : (1 << 20);
   REQUIRE(true == checkhipMemPoolTrimTo(stream, N));
   HIP_CHECK(hipStreamDestroy(stream));
 }
@@ -206,12 +206,11 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
-  constexpr int N = 1 << 20;
+  const int N = isQuickLevel() ? (1 << 12) : (1 << 20);
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   for (int dev = 0; dev < numDevices; dev++) {
     checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
@@ -229,7 +228,7 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
 static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int dev = 0) {
   HIP_CHECK_THREAD(hipSetDevice(dev));
 
-  streamMemAllocTest testObj(N);
+  streamMemAllocTest testObj(N, true);
   size_t byte_size = N * sizeof(int);
   testObj.createHostBufferWithData();
 
@@ -256,7 +255,7 @@ static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int de
 
     // Verify and validate
     HIP_CHECK_THREAD(hipStreamSynchronize(stream));
-    REQUIRE_THREAD(true == testObj.validateResult());
+    REQUIRE_THREAD(true == testObj.validateResultThreadSafe());
   }
 
   HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool));

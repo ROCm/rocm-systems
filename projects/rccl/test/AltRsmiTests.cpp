@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "alt_rsmi.h"
+#include "debug.h"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include <cerrno>
@@ -21,6 +22,14 @@
 #include <cstdlib>
 #include <limits>
 #include <filesystem>
+
+// Weak stub for ncclDebugLog, required because alt_rsmi.cc uses debug.h macros.
+// Debug builds: ncclDebugLog is exported from librccl.so (-fvisibility=default),
+//   so the strong shared-library definition wins at link time — stub is unused.
+// Release builds: ncclDebugLog is hidden in librccl.so (-fvisibility=hidden),
+//   so it is not exported; this stub provides the symbol and silently drops logs.
+void __attribute__((weak)) ncclDebugLog(ncclDebugLogLevel, unsigned long,
+                                        const char*, int, const char*, ...) {}
 
 // ============================================================================
 // Internal structures and variables from alt_rsmi.cc (TEST USE ONLY)
@@ -44,6 +53,7 @@ struct ARSMI_systemNode {
 
 // External declarations of internal variables from alt_rsmi.cc
 extern thread_local const char *kKFDNodesPathRoot;
+extern thread_local const char *kDrmClassRoot;
 extern thread_local int ARSMI_num_devices;
 extern thread_local std::vector<ARSMI_systemNode> ARSMI_orderedNodes;
 extern thread_local std::vector<std::vector<ARSMI_linkInfo>> ARSMI_orderedLinks;
@@ -61,6 +71,16 @@ static std::string sTestNodesPath;
 static void SetNodesPath(const std::string& path) {
     sTestNodesPath = path;
     kKFDNodesPathRoot = sTestNodesPath.c_str();
+}
+
+// Storage for the DRM class root path (keeps c_str() pointer stable)
+static std::string sDrmClassRoot;
+
+// Redirect DRM sysfs reads to a test sandbox directory.
+// MUST be called inside the RUN_ISOLATED_TEST lambda (thread_local is per-thread).
+static void SetDrmRoot(const std::string& path) {
+    sDrmClassRoot = path;
+    kDrmClassRoot = sDrmClassRoot.c_str();
 }
 
 // Reset ARSMI internal state between tests
@@ -84,6 +104,12 @@ static const std::string kTestKFDBasePath =
     std::filesystem::temp_directory_path().string() + "/test_kfd_arsmi";
 static const std::string kTestKFDPath =
     std::filesystem::temp_directory_path().string() + "/test_kfd_arsmi/topology/nodes";
+
+// PID-scoped DRM sandbox path — avoids collisions with parallel CI runs.
+// BDF correspondence: location_id=23552 (0x5C00), domain=0
+//   s_bus=0x5C=92, s_device=0, s_function=0 → PCI_SLOT_NAME=0000:5c:00.0
+static const std::string kTestDrmBasePath =
+    std::filesystem::temp_directory_path().string() + "/test_drm_arsmi_" + std::to_string(getpid());
 
 namespace RcclUnitTesting {
 
@@ -230,6 +256,74 @@ namespace {
       return -1; // Return error if file removal fails
     }
     return 0; // Success
+  }
+
+  // -------------------------------------------------------------------------
+  // DRM sandbox helpers (operate under kTestDrmBasePath)
+  // -------------------------------------------------------------------------
+
+  int removeDrmSandbox() {
+    return removeDirectoryImpl(kTestDrmBasePath);
+  }
+
+  void createDrmDirectory(const std::string& relPath) {
+    createDirectoryImpl(kTestDrmBasePath + "/" + relPath);
+  }
+
+  void createDrmFile(const std::string& relPath, const std::string& content) {
+    std::string full = kTestDrmBasePath + "/" + relPath;
+    std::ofstream f(full);
+    if (!f) {
+      std::cerr << "Failed to create DRM file: " << full << ", errno: " << errno << std::endl;
+      return;
+    }
+    f << content;
+  }
+
+  // Create a DRM card directory with a uevent file whose PCI_SLOT_NAME matches
+  // the BDF encoded in location_id (see kTestDrmBasePath comment for formula).
+  void setupDrmCard(int card, const std::string& pciSlotName) {
+    createDrmDirectory("card" + std::to_string(card));
+    createDrmDirectory("card" + std::to_string(card) + "/device");
+    createDrmFile("card" + std::to_string(card) + "/device/uevent",
+                  "PCI_SLOT_NAME=" + pciSlotName + "\n");
+  }
+
+  // Populate a ualink/ directory under the given card with all attributes.
+  // ppodIdHex: UUID string "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", or "" to omit.
+  void setupUalink(int card,
+                   const std::string& linkType,
+                   const std::string& accelState,
+                   uint32_t accelId,
+                   uint32_t bw,
+                   uint32_t lat,
+                   uint32_t ppodSize,
+                   uint32_t vpodId,
+                   uint32_t vpodSize,
+                   const std::string& addrMode,
+                   const std::string& ppodIdUuid) {
+    std::string base = "card" + std::to_string(card) + "/device/ualink";
+    createDrmDirectory(base);
+    createDrmFile(base + "/link_type",   linkType   + "\n");
+    createDrmFile(base + "/accel_state", accelState + "\n");
+    createDrmFile(base + "/accel_id",    std::to_string(accelId)  + "\n");
+    createDrmFile(base + "/bandwidth",   std::to_string(bw)       + "\n");
+    createDrmFile(base + "/latency",     std::to_string(lat)      + "\n");
+    createDrmFile(base + "/ppod_size",   std::to_string(ppodSize) + "\n");
+    createDrmFile(base + "/vpod_id",     std::to_string(vpodId)   + "\n");
+    createDrmFile(base + "/vpod_size",   std::to_string(vpodSize) + "\n");
+    createDrmFile(base + "/addr_mode",   addrMode   + "\n");
+    if (!ppodIdUuid.empty())
+      createDrmFile(base + "/ppod_id",   ppodIdUuid + "\n");
+  }
+
+  // Populate a fw_version/ directory under the given card.
+  void setupFwVersion(int card, uint64_t version) {
+    std::string base = "card" + std::to_string(card) + "/device/fw_version";
+    createDrmDirectory(base);
+    char hex[32];
+    snprintf(hex, sizeof(hex), "0x%lx\n", version);
+    createDrmFile(base + "/mec_fw_version", hex);
   }
 
   // Function to create the test directory structure and files
@@ -1268,6 +1362,325 @@ TEST(AltRsmiTest, BDFSortingLambda) {
       ASSERT_EQ(ARSMI_orderedNodes[1].s_unique_id, ARSMI_orderedNodes[2].s_unique_id);
       ASSERT_EQ(ARSMI_orderedNodes[2].s_unique_id, ARSMI_orderedNodes[3].s_unique_id);
 
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+// ============================================================================
+// ARSMI_get_fw_version tests (4)
+// kDrmClassRoot is redirected to kTestDrmBasePath inside each lambda.
+// removeDrmSandbox() is called first in each lambda so that leftover files
+// from a previously failed test do not affect the current one (ASSERT_*
+// causes early return, skipping the trailing cleanup call).
+// ============================================================================
+
+TEST(AltRsmiTest, FwVersion_NullPointer) {
+  RUN_ISOLATED_TEST(
+    "FwVersion_NullPointer",
+    []() {
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      int result = ARSMI_get_fw_version(0, nullptr);
+      ASSERT_EQ(result, EINVAL);
+      removeDrmSandbox();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FwVersion_FileFound) {
+  RUN_ISOLATED_TEST(
+    "FwVersion_FileFound",
+    []() {
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      setupFwVersion(0, 0x12345);
+      uint64_t fw = 0xdeadbeef;
+      int result = ARSMI_get_fw_version(0, &fw);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(fw, 0x12345u);
+      removeDrmSandbox();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FwVersion_NoFile) {
+  RUN_ISOLATED_TEST(
+    "FwVersion_NoFile",
+    []() {
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      // No DRM card directories created — loop finds nothing.
+      uint64_t fw = 0xdeadbeef;
+      int result = ARSMI_get_fw_version(0, &fw);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(fw, 0u);
+      removeDrmSandbox();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FwVersion_FirstCardWins) {
+  RUN_ISOLATED_TEST(
+    "FwVersion_FirstCardWins",
+    []() {
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      // card0 has no fw_version; card1 has 0xabcd.
+      // Loop must stop at card1 (the first readable file).
+      createDrmDirectory("card0");
+      createDrmDirectory("card0/device");
+      setupFwVersion(1, 0xabcd);
+      uint64_t fw = 0;
+      int result = ARSMI_get_fw_version(0, &fw);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(fw, 0xabcdu);
+      removeDrmSandbox();
+    }
+  );
+}
+
+// ============================================================================
+// ARSMI_get_fabric_info tests (11)
+//
+// BDF correspondence for the standard KFD fixture (location_id=23552, domain=0):
+//   s_bus=0x5C, s_device=0, s_function=0 → PCI_SLOT_NAME=0000:5c:00.0
+//
+// Tests that need ARSMI_orderedNodes (all except NullPointer) call
+// setupTestEnvironment() first to populate it via ARSMI_init().
+// ============================================================================
+
+TEST(AltRsmiTest, FabricInfo_NullPointer) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_NullPointer",
+    []() {
+      // Null check (line 456) fires before num_devices check — no KFD setup needed.
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      int result = ARSMI_get_fabric_info(0, nullptr);
+      ASSERT_EQ(result, EINVAL);
+      removeDrmSandbox();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_OutOfRange) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_OutOfRange",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      // KFD fixture creates 2 nodes (0 and 1); dv_ind=2 is out of range.
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(2, &info);
+      ASSERT_EQ(result, EINVAL);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_CardNotFound) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_CardNotFound",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      // No DRM cards created — findCardForBdf returns -1 → ENODEV.
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(0, &info);
+      ASSERT_EQ(result, ENODEV);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_NoUalinkDir) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_NoUalinkDir",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      // DRM card exists with matching uevent, but no ualink/ subdirectory.
+      setupDrmCard(0, "0000:5c:00.0");
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(0, &info);
+      ASSERT_EQ(result, ENODEV);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_UALoE_Active) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_UALoE_Active",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      setupDrmCard(0, "0000:5c:00.0");
+      // ppod_id UUID: 01020304-0506-0708-090a-0b0c0d0e0f10
+      setupUalink(0, "UALoE", "active", 7, 200000, 100,
+                  4, 2, 8, "source-aliasing",
+                  "01020304-0506-0708-090a-0b0c0d0e0f10");
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(0, &info);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(info.supported, 1);
+      ASSERT_EQ(info.fabric_type, ARSMI_FABRIC_TYPE_UALOE);
+      ASSERT_EQ(info.accel_state, ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE);
+      ASSERT_EQ(info.accel_id, 7u);
+      ASSERT_EQ(info.bandwidth, 200000u);
+      ASSERT_EQ(info.latency, 100u);
+      ASSERT_EQ(info.ppod_size, 4u);
+      ASSERT_EQ(info.vpod_id, 2u);
+      ASSERT_EQ(info.vpod_size, 8u);
+      ASSERT_EQ(info.addr_mode, ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING);
+      // ppod_id bytes: 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10
+      ASSERT_EQ(info.ppod_id[0],  0x01);
+      ASSERT_EQ(info.ppod_id[3],  0x04);
+      ASSERT_EQ(info.ppod_id[15], 0x10);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_UALLink_Ready) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_UALLink_Ready",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      setupDrmCard(0, "0000:5c:00.0");
+      setupUalink(0, "UALLink", "ready", 1, 100000, 50,
+                  2, 0, 4, "source-identification", "");
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(0, &info);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(info.supported, 1);
+      ASSERT_EQ(info.fabric_type, ARSMI_FABRIC_TYPE_UALLINK);
+      ASSERT_EQ(info.accel_state, ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
+      ASSERT_EQ(info.addr_mode, ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_ConfiguredState) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_ConfiguredState",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      setupDrmCard(0, "0000:5c:00.0");
+      // "configured" is not ACTIVE or READY → supported must be 0.
+      setupUalink(0, "UALoE", "configured", 0, 0, 0, 0, 0, 0, "source-aliasing", "");
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(0, &info);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(info.supported, 0);
+      ASSERT_EQ(info.fabric_type, ARSMI_FABRIC_TYPE_UALOE);
+      ASSERT_EQ(info.accel_state, ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_UnknownLinkType) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_UnknownLinkType",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      setupDrmCard(0, "0000:5c:00.0");
+      setupUalink(0, "SomeFutureFabric", "active", 0, 0, 0, 0, 0, 0, "source-aliasing", "");
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(0, &info);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(info.fabric_type, ARSMI_FABRIC_TYPE_UNKNOWN);
+      ASSERT_EQ(info.supported, 0);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_MalformedPpodId) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_MalformedPpodId",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      setupDrmCard(0, "0000:5c:00.0");
+      // ppod_id file exists but cannot be parsed as a UUID — sscanf returns <16.
+      setupUalink(0, "UALoE", "active", 0, 0, 0, 0, 0, 0, "source-aliasing", "not-a-uuid");
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(0, &info);
+      ASSERT_EQ(result, 0);
+      // ppod_id must be zeroed on parse failure.
+      for (int i = 0; i < 16; i++) ASSERT_EQ(info.ppod_id[i], 0);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_MissingPpodIdFile) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_MissingPpodIdFile",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      setupDrmCard(0, "0000:5c:00.0");
+      // ppod_id file absent — readUalinkStr returns -1; initial memset keeps it zero.
+      setupUalink(0, "UALoE", "active", 0, 0, 0, 0, 0, 0, "source-aliasing", "");
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(0, &info);
+      ASSERT_EQ(result, 0);
+      for (int i = 0; i < 16; i++) ASSERT_EQ(info.ppod_id[i], 0);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_AddrModeUnknown) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_AddrModeUnknown",
+    []() {
+      setupTestEnvironment();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ARSMI_init();
+      setupDrmCard(0, "0000:5c:00.0");
+      setupUalink(0, "UALoE", "active", 0, 0, 0, 0, 0, 0, "something-new", "");
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(0, &info);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(info.addr_mode, ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN);
+      removeDrmSandbox();
       cleanupTestEnvironment();
     }
   );

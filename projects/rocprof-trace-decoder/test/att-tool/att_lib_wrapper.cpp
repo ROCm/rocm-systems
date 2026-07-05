@@ -37,9 +37,10 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-ATTFileMgr::ATTFileMgr(Fspath _dir, std::vector<std::string> _counters, std::shared_ptr<AddressTable>& codeobj_files)
+ATTFileMgr::ATTFileMgr(Fspath _dir, std::vector<std::string> _counters, std::shared_ptr<AddressTable>& codeobj_files, rocprof_trace_decoder_handle_t _decoder)
 : dir(std::move(_dir))
 , table(codeobj_files)
+, decoder(_decoder)
 {
     std::filesystem::create_directories(dir);
     codefile  = std::make_shared<CodeFile>(dir, table);
@@ -54,7 +55,7 @@ void
 ATTFileMgr::parseShader(int se_id, const std::vector<char>& data)
 {
     WaveConfig config(se_id, filenames, codefile);
-    ToolData   tooldata(data, config);
+    ToolData   tooldata(data, config, decoder);
 
     if(!config.occupancy.empty()) occupancy.emplace(se_id, std::move(config.occupancy));
 
@@ -83,10 +84,11 @@ ATTDecoder::parse(const Fspath&                       input_dir,
                   const Fspath&                       output_dir,
                   const std::vector<std::string>&     att_files,
                   std::shared_ptr<AddressTable>&      codeobj_files,
+                  rocprof_trace_decoder_handle_t       decoder,
                   const std::vector<std::string>&     counters_names,
                   const std::string&                  /* output_formats */)
 {
-    ATTFileMgr mgr(output_dir, counters_names, codeobj_files);
+    ATTFileMgr mgr(output_dir, counters_names, codeobj_files, decoder);
 
     for(const auto& shader : att_files)
     {

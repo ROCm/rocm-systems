@@ -46,8 +46,8 @@ struct backtrace_timestamp : comp::empty_base
     bool is_valid() const;
 
 private:
-    int64_t  m_tid  = 0;
-    uint64_t m_real = 0;
+    std::int64_t  m_tid  = 0;
+    std::uint64_t m_real = 0;
 };
 }  // namespace component
 }  // namespace rocprofsys

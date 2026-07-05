@@ -260,6 +260,45 @@ void TeamCtxInfraTester::preLaunchKernel() {
     team_world_dup[0] = ROCSHMEM_TEAM_SHARED;
     _expected_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_SHARED);
     _expected_n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_SHARED);
+  } else if (_splitType == ROCSHMEM_TEST_TEAM_SUBSET_PARENT) {
+    // First create a subset parent team via parity-based partition:
+    // even PEs create team {0,2,4,...}, odd PEs create team {1,3,5,...}
+    int start_pe = (my_pe % 2) == 0 ? 0 : 1;
+    int num_pes = n_pes / 2;
+    if (((n_pes % 2) != 0) && ((my_pe % 2) == 0))
+      num_pes++;
+
+    rocshmem_team_split_strided(_parentTeam, start_pe, 2, num_pes, nullptr, 0,
+                                &subset_parent_team);
+
+    if (subset_parent_team == ROCSHMEM_TEAM_INVALID) {
+      printf("ROCSHMEM_TEST_TEAM_SUBSET_PARENT: Failed to create subset parent team!\n");
+      abort();
+    }
+
+    // Now split this subset parent team into two halves
+    int subset_n_pes = rocshmem_team_n_pes(subset_parent_team);
+    int subset_my_pe = rocshmem_team_my_pe(subset_parent_team);
+    int mid_pe = subset_n_pes / 2;
+    int subset_start_pe  = subset_my_pe < mid_pe ? 0 : mid_pe;
+    int subset_end_pe = subset_my_pe < mid_pe ? (mid_pe - 1) : (subset_n_pes - 1);
+    int subset_num_pes = subset_end_pe - subset_start_pe + 1;
+    int new_pe =  subset_my_pe < mid_pe ? subset_my_pe : (subset_my_pe - subset_start_pe);
+
+    rocshmem_team_split_strided(subset_parent_team, subset_start_pe, 1, subset_num_pes, nullptr, 0,
+                                &team_world_dup[0]);
+    _expected_pe = rocshmem_team_my_pe(team_world_dup[0]);
+    _expected_n_pes = rocshmem_team_n_pes(team_world_dup[0]);
+
+    if (_expected_n_pes != subset_num_pes) {
+      printf("ROCSHMEM_TEST_TEAM_SUBSET_PARENT: n_pes %d expected: %d\n", _expected_n_pes, subset_num_pes);
+      abort();
+    }
+
+    if (_expected_pe != new_pe) {
+      printf("ROCSHMEM_TEST_TEAM_SUBSET_PARENT: my_pe %d expected: %d\n", _expected_pe, new_pe);
+      abort();
+    }
   }
 }
 
@@ -277,7 +316,8 @@ void TeamCtxInfraTester::launchKernel(dim3 gridSize, dim3 blockSize, [[maybe_unu
   } else if (_splitType == ROCSHMEM_TEST_TEAM_SINGLE ||
              _splitType == ROCSHMEM_TEST_TEAM_BLOCK  ||
              _splitType == ROCSHMEM_TEST_TEAM_ODDEVEN ||
-             _splitType == ROCSHMEM_TEST_TEAM_SHARED ) {
+             _splitType == ROCSHMEM_TEST_TEAM_SHARED ||
+             _splitType == ROCSHMEM_TEST_TEAM_SUBSET_PARENT ) {
     hipLaunchKernelGGL(TeamCtxInfraSimpleTest, gridSize, blockSize, shared_bytes,
                        stream, _shmem_context, team_world_dup[0], _expected_pe, _expected_n_pes);
   }
@@ -289,6 +329,13 @@ void TeamCtxInfraTester::postLaunchKernel() {
   int teams_to_destroy = _splitType == ROCSHMEM_TEST_TEAM_DUP ? num_teams : 1;
   for (int team_i = 0; team_i < teams_to_destroy; team_i++) {
     rocshmem_team_destroy(team_world_dup[team_i]);
+  }
+
+  // Destroy the subset parent team if it was created
+  if (_splitType == ROCSHMEM_TEST_TEAM_SUBSET_PARENT &&
+      subset_parent_team != ROCSHMEM_TEAM_INVALID) {
+    rocshmem_team_destroy(subset_parent_team);
+    subset_parent_team = ROCSHMEM_TEAM_INVALID;
   }
 }
 

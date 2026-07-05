@@ -296,9 +296,18 @@ def write_memory_allocation_csv(importData, config) -> None:
             guid,
             'MEMORY_ALLOCATION' AS Kind,
             CASE
-                WHEN type = 'ALLOC'
+                WHEN type = 'ALLOC' AND level = 'REAL'
                 THEN 'MEMORY_ALLOCATION_ALLOCATE'
-                ELSE 'MEMORY_ALLOCATION_' || type
+                WHEN type = 'ALLOC' AND level = 'VIRTUAL'
+                THEN 'MEMORY_ALLOCATION_VMEM_ALLOCATE'
+                WHEN type = 'ALLOC' AND level = 'SCRATCH'
+                THEN 'SCRATCH_MEMORY_ALLOCATE'
+                WHEN type = 'FREE' AND level = 'REAL'
+                THEN 'MEMORY_ALLOCATION_FREE'
+                WHEN type = 'FREE' AND level = 'VIRTUAL'
+                THEN 'MEMORY_ALLOCATION_VMEM_FREE'
+                WHEN type = 'FREE' AND level = 'SCRATCH'
+                THEN 'SCRATCH_MEMORY_FREE'
             END AS Operation,
             CASE
                 WHEN type != 'FREE'

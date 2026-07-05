@@ -11,7 +11,7 @@
 namespace rocprofsys
 {
 
-enum class agent_type : uint8_t
+enum class agent_type : std::uint8_t
 {
     CPU,  ///< Agent type is a CPU
     GPU,  ///< Agent type is a GPU
@@ -32,16 +32,16 @@ to_string(agent_type type)
 
 struct agent
 {
-    agent_type  type;
-    uint64_t    handle;
-    uint64_t    device_id;
-    uint32_t    node_id;
-    int32_t     logical_node_id;
-    int32_t     logical_node_type_id;
-    std::string name;
-    std::string model_name;
-    std::string vendor_name;
-    std::string product_name;
+    agent_type    type;
+    std::uint64_t handle;
+    std::uint64_t device_id;
+    std::uint32_t node_id;
+    std::int32_t  logical_node_id;
+    std::int32_t  logical_node_type_id;
+    std::string   name;
+    std::string   model_name;
+    std::string   vendor_name;
+    std::string   product_name;
 
     size_t device_type_index{
         0

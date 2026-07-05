@@ -583,6 +583,71 @@ def test_sdk_invoke_private_provider_uses_custom_openai_base_url(monkeypatch):
     assert "model_provider" in captured["run_config"]["kwargs"]
 
 
+def test_sdk_invoke_private_provider_accepts_compat_endpoint_env(monkeypatch):
+    captured = {}
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model):
+            captured["model"] = model
+
+    class _FakeRunResult:
+        def __init__(self):
+            self.final_output = {"narrative": "ok"}
+            self.new_items = []
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(*, starting_agent, input, max_turns, run_config):
+            captured["run_config"] = run_config
+            return _FakeRunResult()
+
+    import agents.models.openai_provider as openai_provider_module
+    import httpx as httpx_module
+    import openai as openai_module
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+    class _FakeOpenAIProvider:
+        def __init__(self, **kwargs):
+            captured["provider_kwargs"] = kwargs
+
+    class _FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured["http_client_kwargs"] = kwargs
+
+    monkeypatch.setattr(openai_module, "AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr(openai_provider_module, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setattr(httpx_module, "AsyncClient", _FakeAsyncClient)
+
+    monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_URL", raising=False)
+    monkeypatch.setenv("PRIVATE_LLM_ENDPOINT", "https://compat-llm.example/v1")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "compat-codex")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_API_KEY", "sk-private")
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: {"kwargs": kwargs})
+    monkeypatch.setattr(framework, "sdk_function_tool", lambda fn, **kwargs: {"fn": fn, **kwargs})
+
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
+    )
+
+    framework._sdk_invoke(agent, {"user_query": "?"}, provider="private")
+
+    assert captured["model"] == "private/compat-codex"
+    assert captured["client_kwargs"]["base_url"] == "https://compat-llm.example/v1"
+    assert captured["client_kwargs"]["api_key"] == "sk-private"
+    assert "model_provider" in captured["run_config"]["kwargs"]
+
+
 def test_sdk_invoke_opencode_dispatches_to_subprocess_provider(monkeypatch):
     captured = {}
 

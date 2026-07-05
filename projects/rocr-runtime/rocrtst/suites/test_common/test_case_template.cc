@@ -154,6 +154,7 @@ void TestExample::SetUp(void) {
   // TestBase::SetUp() will set HSA_ENABLE_INTERRUPT if enable_interrupt() is
   // true, and call hsa_init(). It also prints the SetUp header.
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   // SetDefaultAgents(this) will assign the first CPU and GPU found on
   // iterating through the agents and assign them to cpu_device_ and

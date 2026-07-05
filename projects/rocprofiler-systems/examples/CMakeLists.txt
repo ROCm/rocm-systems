@@ -99,8 +99,9 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     hpc
     shmem
     scratch-memory
-    sdma_test
+    sdma-test
     unified-memory
+    minimal
 )
 
 foreach(_example_dir IN LISTS ROCPROFSYS_EXAMPLE_DIRS)

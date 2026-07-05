@@ -894,7 +894,9 @@ hsa_status_t BlitKernel::ConvertImage(const Image& original_image,
     converted_geometry = HSA_EXT_IMAGE_GEOMETRY_2DA;
   }
 
-  hsa_ext_image_format_t new_format = { converted_type, converted_order };
+  hsa_ext_image_format_t new_format = {
+      static_cast<hsa_ext_image_channel_type32_t>(converted_type),
+      static_cast<hsa_ext_image_channel_order32_t>(converted_order)};
 
   Image* new_image_handle = Image::Create(original_image.component);
   *new_image_handle=original_image;

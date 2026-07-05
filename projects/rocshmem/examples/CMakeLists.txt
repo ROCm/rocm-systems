@@ -30,9 +30,9 @@ include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_examples VERSION 1.0.0 LANGUAGES CXX)
 
 find_package(MPI)
-find_package(hip REQUIRED PATHS /opt/rocm)
+find_package(hip REQUIRED)
 if (NOT TARGET roc::rocshmem)
-  find_package(rocshmem REQUIRED PATHS /opt/rocm)
+  find_package(rocshmem REQUIRED)
 endif()
 
 ###############################################################################
@@ -45,6 +45,8 @@ set(EXAMPLE_SOURCES
   rocshmem_getmem_test.cc
   rocshmem_put_signal_test.cc
   rocshmem_user_mem_test.cc
+  tile_distributed_gemm.cc
+  tile_halo_exchange.cc
 )
 
 if (MPI_CXX_FOUND)

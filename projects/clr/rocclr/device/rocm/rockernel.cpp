@@ -48,6 +48,19 @@ bool Kernel::postLoad() {
     return false;
   }
 
+  // Resolve the metadata kernel descriptor for prefetching at load time,
+  // so dispatch doesn't need to call loaderQueryHostAddress per packet.
+  const void* host_address = nullptr;
+  Device::loaderQueryHostAddress(reinterpret_cast<void*>(kernelCodeHandle_), &host_address);
+  if (host_address != nullptr) {
+    constexpr size_t KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET = 16;
+    auto* descriptor = reinterpret_cast<const hsa_amd_metadata_kernel_descriptor_t*>(
+        reinterpret_cast<const uint8_t*>(host_address) + KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET);
+    metadataKernelDescriptor_ = descriptor;
+    metadata_preload_length_ = descriptor->kernarg_preload.length;
+    metadata_preload_offset_ = descriptor->kernarg_preload.offset;
+  }
+
   hsaStatus = Hsa::executable_symbol_get_info(
       symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK, &kernelHasDynamicCallStack_);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
@@ -79,7 +92,7 @@ bool Kernel::postLoad() {
     hsaStatus = Hsa::executable_symbol_get_info(
         kernelSymbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &variable_size);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, 
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
           "[ROC][Kernel] Cannot get Kernel Symbol Info, failed with hsa_status: %d \n", hsaStatus);
       return false;
     }

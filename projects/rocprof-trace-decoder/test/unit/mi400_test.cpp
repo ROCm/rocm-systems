@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 #include <array>
 #include <cstdint>
+#include <cstring>
+#include <string>
 #include <vector>
 #include "gfx10/gfx10wave.h"
 #include "mi400/mi400parser.h"
@@ -30,6 +32,44 @@ TEST(MI400TokenTypeTest, WendTypeMi400GetMethod)
     EXPECT_EQ(common.wid, wend.wid);
 }
 
+TEST(MI400TokenTypeTest, DiagnosticPrintsReportDecodedFields)
+{
+    mi400::immed_one_type immed{};
+    immed.header = 0b1101;
+    immed.wid = 17;
+
+    mi400::misc_type misc{};
+    misc.header = 0b1010001;
+    misc.CLF = 1;
+    misc.CLID = 9;
+
+    mi400::header_type header{};
+    header.header = 0b0010001;
+    header.version = 5;
+    header.DWGP = 3;
+    header.DSIMD = 2;
+    header.DSA = 1;
+    header.UCF = 1;
+    header.DPRate = 4;
+    header.WSM = 2;
+
+    EXPECT_STREQ(immed.typestr(), "IMMEDONE");
+    EXPECT_NE(immed.print().str().find("wid:17"), std::string::npos);
+
+    EXPECT_STREQ(misc.typestr(), "MISC");
+    EXPECT_NE(misc.print().str().find("raw:0x"), std::string::npos);
+
+    EXPECT_STREQ(header.typestr(), "HEADER");
+    const std::string header_text = header.print().str();
+    EXPECT_NE(header_text.find("TT Version:5"), std::string::npos);
+    EXPECT_NE(header_text.find("DWGP:3"), std::string::npos);
+    EXPECT_NE(header_text.find("DSIMD:2"), std::string::npos);
+    EXPECT_NE(header_text.find("DSA:1"), std::string::npos);
+    EXPECT_NE(header_text.find("UCF:1"), std::string::npos);
+    EXPECT_NE(header_text.find("DPRate:4"), std::string::npos);
+    EXPECT_NE(header_text.find("WSM:2"), std::string::npos);
+}
+
 //=============================================================================
 // MI400 Token Lookup Table Tests
 //=============================================================================
@@ -38,9 +78,9 @@ TEST(MI400LookupTableTest, BasicEncodingLookups)
 {
     mi400::TokenLookupTable lookup;
 
-    EXPECT_EQ(lookup.lookup(0b0010), RdnaType::INST);
-    EXPECT_EQ(lookup.lookup(0b011), RdnaType::VALU_INST);
-    EXPECT_EQ(lookup.lookup(0b1000001), RdnaType::WAVE_END);
+    EXPECT_EQ(lookup.lookup(0b0010).type, RdnaType::INST);
+    EXPECT_EQ(lookup.lookup(0b011).type, RdnaType::VALU_INST);
+    EXPECT_EQ(lookup.lookup(0b1000001).type, RdnaType::WAVE_END);
 }
 
 TEST(MI400LookupTableTest, GetTimeForTimestamp)
@@ -56,7 +96,7 @@ TEST(MI400LookupTableTest, GetTimeForTimestamp)
     int64_t realtime = 0;
     int64_t cur_time = 500;
 
-    auto result = lookup.getTime(RdnaType::TIMESTAMP, ts.raw, cur_time, packetlost, realtime);
+    auto result = lookup.getTime(lookup.lookup(0b0000001), ts.raw, cur_time, packetlost, realtime);
     EXPECT_EQ(result, ts.time + cur_time);
 }
 
@@ -73,7 +113,7 @@ TEST(MI400LookupTableTest, GetTimeForRealtimeTimestamp)
     int64_t realtime = 0;
     int64_t cur_time = 500;
 
-    auto result = lookup.getTime(RdnaType::TIMESTAMP, ts.raw, cur_time, packetlost, realtime);
+    auto result = lookup.getTime(lookup.lookup(0b0000001), ts.raw, cur_time, packetlost, realtime);
     EXPECT_EQ(result, cur_time);
     EXPECT_EQ(realtime, ts.time);
 }
@@ -91,7 +131,7 @@ TEST(MI400LookupTableTest, GetTimeWithPacketLoss)
     int64_t realtime = 0;
     int64_t cur_time = 500;
 
-    lookup.getTime(RdnaType::TIMESTAMP, ts.raw, cur_time, packetlost, realtime);
+    lookup.getTime(lookup.lookup(0b0000001), ts.raw, cur_time, packetlost, realtime);
     EXPECT_TRUE(packetlost);
 }
 
@@ -103,7 +143,7 @@ TEST(MI400LookupTableTest, GetTimeForTimeToken)
     int64_t realtime = 0;
     int64_t cur_time = 500;
 
-    auto result = lookup.getTime(RdnaType::TIME, 0, cur_time, packetlost, realtime);
+    auto result = lookup.getTime(lookup.lookup(0b1110), 0, cur_time, packetlost, realtime);
     EXPECT_GT(result, cur_time);
 }
 
@@ -190,6 +230,17 @@ TEST(MI400WaveTest, MapToCommonTypeBlockStore)
     auto mapped2 = mi400::map_to_common_type(225, 0);
     EXPECT_EQ(mapped2.category, WaveInstCategory::VMEM);
     EXPECT_EQ(mapped2.cycles, 4);
+}
+
+TEST(MI400WaveTest, MapToCommonTypeWmma)
+{
+    auto xdl4 = mi400::map_to_common_type(184, 0);
+    EXPECT_EQ(xdl4.category, WaveInstCategory::VALU);
+    EXPECT_EQ(xdl4.cycles, 4);
+
+    auto dp32 = mi400::map_to_common_type(187, 0);
+    EXPECT_EQ(dp32.category, WaveInstCategory::VALU);
+    EXPECT_EQ(dp32.cycles, 32);
 }
 
 //=============================================================================
@@ -375,6 +426,58 @@ TEST(MI400TokenGeneratorTest, NextValuAndLongTokenPaths)
         std::array<uint8_t, 16> buffer{};
         buffer[0] = 0x21; // NEW_PC_GFX12 encoding: {1,0,0,0,0,1,0}
         buffer[8] = 0xAB; // consumed by bits_toread > 64 path
+
+        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+        auto token = gen.next();
+
+        EXPECT_EQ(token.type, RdnaType::NEW_PC_GFX12);
+        EXPECT_EQ(token.contents, 0xAB00000000000000ull);
+    }
+}
+
+TEST(MI400TokenGeneratorTest, SafeReaderHandlesRealtimeValuAndExtendedPcTokens)
+{
+    {
+        gfx12::timestamp_type ts{};
+        ts.header = 0b0000001;
+        ts.rt = 1;
+        ts.pl = 0;
+        ts.time = 0x123456789ull;
+
+        std::array<uint8_t, sizeof(uint64_t)> buffer{};
+        std::memcpy(buffer.data(), &ts.raw, sizeof(ts.raw));
+
+        mi400::TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+        auto token = gen.next();
+
+        EXPECT_EQ(token.type, RdnaType::TIMESTAMP);
+        ASSERT_EQ(gen.realtime.size(), 1u);
+        EXPECT_EQ(gen.realtime.front().shader_clock, 0);
+        EXPECT_EQ(gen.realtime.front().realtime_clock, ts.time);
+    }
+
+    {
+        mi400::valu_inst_type valu{};
+        valu.header = 0b011;
+        valu.wavetm = 0;
+
+        std::array<uint8_t, 1> buffer{static_cast<uint8_t>(valu.raw)};
+        TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+        gen.FIFO[0] = 9;
+
+        auto token = gen.next();
+        EXPECT_EQ(token.type, RdnaType::VALU_INST);
+        EXPECT_EQ(token.time, 1);
+
+        ::valu_inst_type mapped{};
+        mapped.raw = token.contents;
+        EXPECT_EQ(mapped.wid, 9);
+    }
+
+    {
+        std::array<uint8_t, 9> buffer{};
+        buffer[0] = 0x21; // NEW_PC_GFX12 encoding: {1,0,0,0,0,1,0}
+        buffer[8] = 0xAB;
 
         TestMI400TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
         auto token = gen.next();

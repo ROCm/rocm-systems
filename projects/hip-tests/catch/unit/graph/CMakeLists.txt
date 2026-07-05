@@ -46,6 +46,7 @@ set(TEST_SRC
   hipGraphEventWaitNodeSetEvent.cc
   hipGraphMemsetNodeGetParams.cc
   hipGraphMemsetNodeSetParams.cc
+  hipGraphMemsetNodeFlatAlloc.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol_old.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol.cc
   hipGraphEventRecordNodeGetEvent.cc
@@ -64,7 +65,8 @@ set(TEST_SRC
   hipGraphAddBatchMemOpNode.cc
   hipGraphBatchMemOpNodeSetParams.cc
   hipDrvGraphExecMemcpyNodeSetParams.cc
-  hipDrvGraphAddMemFreeNode.cc)
+  hipDrvGraphAddMemFreeNode.cc
+  hipGraphAddNodeConcurrent.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
@@ -136,6 +138,7 @@ set(TEST_SRC
   hipGraphMemAllocNodeGetParams.cc
   hipGraphAddMemAllocNode.cc
   hipGraphAddMemFreeNode.cc
+  hipGraphAllocNodeMemReuse.cc
   hipDrvGraphMemcpyNodeGetParams.cc
   hipDrvGraphMemcpyNodeSetParams.cc
   hipDeviceSetGraphMemAttribute.cc

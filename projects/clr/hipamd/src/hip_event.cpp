@@ -151,6 +151,9 @@ int64_t EventDD::time(bool getStartTs) const {
 }
 // ================================================================================================
 hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream) {
+  // Guard event_ against concurrent record/sync. Graph stream-wait nodes call
+  // this directly (not via the locked streamWait path); lock_ is recursive.
+  std::scoped_lock lock(lock_);
   const amd::Command::EventWaitList eventWaitList =
       (event_ != nullptr) ? amd::Command::EventWaitList{event_} : amd::Command::EventWaitList{};
 
@@ -186,12 +189,15 @@ hipError_t Event::streamWait(hip::Stream* stream, uint flags) {
 // ================================================================================================
 hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, uint32_t ext_flags,
                                 bool batch_flush) {
+  // Guard event state against concurrent access. Graph event-record nodes call
+  // this directly (not via the locked addMarker path); lock_ is recursive.
+  std::scoped_lock lock(lock_);
   if (command != nullptr) {
     return hipSuccess;
   }
 
   const auto flags = (ext_flags == 0) ? flags_ : ext_flags;
-  
+
   const auto releaseFlags = [&]() {
     if (flags & hipEventDisableSystemFence) {
       return amd::Device::kCacheStateIgnore;
@@ -201,12 +207,34 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
 
   constexpr bool kMarkerTs = true;
   constexpr bool kFlushCache = false;
-  command = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags, batch_flush);
+
+  // Check hipEventDisableTiming flag to skip profiling/timing infrastructure
+  const bool enable_profiling = !(flags & hipEventDisableTiming);
+
+  auto* marker = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags,
+                                      batch_flush, enable_profiling);
+
+  // Only timing-disabled events opt into coalescing: a non-null coalesceEvent()
+  // marks the record eligible and carries its identity for the device layer.
+  if (flags & hipEventDisableTiming) {
+    // Assign monotonic ID on first record to avoid address-reuse collision
+    if (coalesce_id_ == 0) {
+      coalesce_id_ = GenerateCoalesceId();
+    }
+    marker->setCoalesceEvent(coalesce_id_);
+    marker->setSyncedSinceRecord(WasSyncedSinceLastRecord());
+  }
+
+  command = marker;
+
   return hipSuccess;
 }
 
 // ================================================================================================
 hipError_t Event::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  // Guard event_ release/replace against concurrent access. Graph event-record
+  // nodes call this directly (not via locked addMarker); lock_ is recursive.
+  std::scoped_lock lock(lock_);
   command->enqueue();
 
   amd::Event& new_event = command->event();
@@ -273,7 +301,15 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, uint32_t flags) {
   // Create appropriate event type based on flags
   hip::Event* e = nullptr;
   if (flags & hipEventInterprocess) {
-    e = new hip::IPCEvent(flags);
+    auto* dev = g_devices[hip::getCurrentDevice()->deviceId()]->devices()[0];
+    // Probe whether the device supports IPC signals
+    auto* probe = dev->createIpcSignal();
+    if (probe != nullptr) {
+      delete probe;
+      e = new hip::IPCEvent(flags);
+    } else {
+      e = new hip::IPCEventEmulated(flags);
+    }
   } else if (AMD_DIRECT_DISPATCH) {
     e = new hip::EventDD(flags);
   } else {
@@ -289,11 +325,49 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, uint32_t flags) {
 }
 
 // ================================================================================================
+// Create an IPC event of a specific implementation type (ROCr or Emulated).
+// Used by hipIpcOpenEventHandle to match the opener to the exporter's type.
+hipError_t ihipCreateIpcEventByType(hipEvent_t* event, ihipIpcEventHandleType type) {
+  constexpr uint32_t kIpcEventFlags = hipEventDisableTiming | hipEventInterprocess;
+
+  hip::Event* e = nullptr;
+  switch (type) {
+    case kIpcEventHandleROCr:
+      e = new hip::IPCEvent(kIpcEventFlags);
+      break;
+    case kIpcEventHandleEmulated:
+      e = new hip::IPCEventEmulated(kIpcEventFlags);
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+
+  if (e == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+
+  *event = reinterpret_cast<hipEvent_t>(e);
+  std::unique_lock lock(hip::eventSetLock);
+  hip::eventSet.insert(*event);
+  return hipSuccess;
+}
+
+// ================================================================================================
+// Destroy an event created by ihipCreateIpcEventByType (removes from eventSet + deletes).
+void ihipDestroyIpcEvent(hipEvent_t event) {
+  if (event == nullptr) return;
+  std::unique_lock lock(hip::eventSetLock);
+  hip::eventSet.erase(event);
+  lock.unlock();
+  delete reinterpret_cast<hip::Event*>(event);
+}
+
+// ================================================================================================
 hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   HIP_INIT_API(hipEventCreateWithFlags, event, flags);
 
   if (event == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, flags), *event);
@@ -304,7 +378,7 @@ hipError_t hipEventCreate(hipEvent_t* event) {
   HIP_INIT_API(hipEventCreate, event);
 
   if (event == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, 0), *event);
@@ -320,7 +394,7 @@ hipError_t hipEventDestroy(hipEvent_t event) {
 
   std::unique_lock lock(hip::eventSetLock);
   if (hip::eventSet.erase(event) == 0) {
-    return hipErrorContextIsDestroyed;
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   auto* e = reinterpret_cast<hip::Event*>(event);
@@ -367,6 +441,7 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
   }
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   auto* const e = reinterpret_cast<hip::Event*>(event);
   auto* const hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
@@ -442,7 +517,7 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
   if (s->GetCaptureStatus() == hipStreamCaptureStatusActive && s->IsEventCaptured(event)) {
     s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
     return hipErrorCapturedEvent;
-  }  
+  }
   // Case 2: The event was recorded on a stream that is neither actively capturing nor part of an
   // active capture session (proceed to next checks).
 
@@ -489,6 +564,10 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
 
   auto* e = reinterpret_cast<hip::Event*>(event);
   const auto status = e->synchronize();
+  // Mark event as synced to prevent coalescing until next record
+  if (status == hipSuccess) {
+    e->MarkSynced();
+  }
   // Release freed memory for all memory pools on the device
   g_devices[e->deviceId()]->ReleaseFreedMemory();
   HIP_RETURN(status);

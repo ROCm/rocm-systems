@@ -10,9 +10,6 @@ namespace amd::device {
 
 const char* BlitLinearSourceCode = BLIT_KERNELS(
     // Extern
-    extern void __amd_fillBufferAligned(__global uchar*, __global ushort*, __global uint*,
-                                        __global ulong*, __constant uchar*, uint, ulong, ulong);
-
     extern void __amd_fillBufferAligned2D(__global uchar*, __global ushort*, __global uint*,
                                           __global ulong*, __constant uchar*, uint, ulong, ulong,
                                           ulong, ulong);
@@ -37,62 +34,59 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 
     extern void __ockl_dm_init_v1(ulong, ulong, uint, uint);
 
-    __kernel void __amd_rocclr_fillBufferAligned(__global void* buf, __constant uchar* pattern,
-                                                 uint pattern_size, uint alignment, ulong end_ptr,
-                                                 uint next_chunk, uint workgroup_size) {
-      uint l = __builtin_amdgcn_workitem_id_x();
-      uint g = __builtin_amdgcn_workgroup_id_x();
-      ulong id = (g * workgroup_size + l);
-      long cur_id = id * pattern_size;
-      if (alignment == sizeof(ulong2)) {
-        __global ulong2* bufULong2 = (__global ulong2*)buf;
-        __global ulong2* element = &bufULong2[cur_id];
-        __constant ulong2* pt = (__constant ulong2*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
+    extern void __amd_fillBufferUnAligned(
+        __global void* __restrict buf, __constant uchar* __restrict pattern,
+        ulong2 body_tile_pattern, ulong body_pattern, ulong body_tail_pattern,
+        ulong body_tile_count, ulong body_tile_passes, ulong stride,
+        ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
+        __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
+        __global ulong2* __restrict element_tiled, ushort4 counts);
+
+    __kernel void __amd_rocclr_fillBufferUnAligned(
+        __global void* __restrict buf, __constant uchar* __restrict pattern,
+        ulong2 body_tile_pattern, ulong body_pattern, ulong body_tail_pattern,
+        ulong body_tile_count, ulong body_tile_passes, ulong stride,
+        ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
+        __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
+        __global ulong2* __restrict element_tiled, ushort4 counts) {
+      ulong id = get_global_id(0);
+
+      // Cleanup region: lanes 0..15 of group 0 wave 0 handle head/body/body_tail/tail.
+      // Body and body_tail are always uint64 stores (always either 0 or 1 element).
+      // Aligned-buffer case: counts are all zero, predicates fall through with no work.
+      // body_pattern and body_tail_pattern are host-rotated u64 payloads (rotated by their
+      // byte-offset-from-fill-start mod patternSize), so the unaligned-base case is byte-correct.
+      if (id < 16) {
+        __global uchar* head_ptr = (__global uchar*)buf;
+        const uint lane = (uint)id;
+        const uint head_end = (uint)counts.s0;
+        const uint body_end = head_end + (uint)counts.s1;
+        const uint body_tail_end = body_end + (uint)counts.s2;
+        const uint tail_end = body_tail_end + (uint)counts.s3;
+
+        if (lane < head_end) {
+          head_ptr[lane] = pattern[lane & (pattern_size - 1)];
+        } else if (lane < body_end) {
+          *(__global ulong*)body_ptr = body_pattern;
+        } else if (lane < body_tail_end) {
+          *(__global ulong*)body_tail_ptr = body_tail_pattern;
+        } else if (lane < tail_end) {
+          const ulong tail_byte_idx = (ulong)(lane - body_tail_end);
+          tail_ptr[tail_byte_idx] =
+              pattern[(tail_offset + tail_byte_idx) & (pattern_size - 1)];
         }
-      } else if (alignment == sizeof(ulong)) {
-        __global ulong* bufULong = (__global ulong*)buf;
-        __global ulong* element = &bufULong[cur_id];
-        __constant ulong* pt = (__constant ulong*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
-        }
-      } else if (alignment == sizeof(uint)) {
-        __global uint* bufUInt = (__global uint*)buf;
-        __global uint* element = &bufUInt[cur_id];
-        __constant uint* pt = (__constant uint*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
-        }
-      } else if (alignment == sizeof(ushort)) {
-        __global ushort* bufUShort = (__global ushort*)buf;
-        __global ushort* element = &bufUShort[cur_id];
-        __constant ushort* pt = (__constant ushort*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
-        }
-      } else {
-        __global uchar* bufUChar = (__global uchar*)buf;
-        __global uchar* element = &bufUChar[cur_id];
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pattern[i];
-          }
-          element += next_chunk;
-        }
+      }
+
+      // Tile region: split-last-pass. Bulk passes have unconditional stores
+      // (host guarantees they are in-bounds); only the tail pass is per-lane guarded.
+      // body_tile_passes is a CPU-known bound for codegen.
+      ulong j = 0;
+      ulong idx = id;
+      for (; j + 1 < body_tile_passes; ++j, idx += stride) {
+        element_tiled[idx] = body_tile_pattern;
+      }
+      if (j < body_tile_passes && idx < body_tile_count) {
+        element_tiled[idx] = body_tile_pattern;
       }
     }
 
@@ -130,6 +124,54 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       if ((remainder != 0) && (id_remainder == 0)) {
         for (ulong i = size - remainder; i < size; ++i) {
           dst[i] = src[i];
+        }
+      }
+    }
+
+    typedef struct CopyBufferBatchDescriptor {
+      ulong source_address;
+      ulong destination_address;
+      ulong aligned_element_count;
+      uint aligned_element_size;
+      uint trailing_byte_count;
+    } CopyBufferBatchDescriptor;
+
+    __kernel void __amd_rocclr_copyBufferBatch(
+        __global const CopyBufferBatchDescriptor *descriptors,
+        uint workgroup_size,
+        uint copy_stride) {
+      uint work_item_id = __builtin_amdgcn_workitem_id_x();
+      uint group_ordinal = __builtin_amdgcn_workgroup_id_x();
+      uint descriptor_index = __builtin_amdgcn_workgroup_id_y();
+
+      CopyBufferBatchDescriptor descriptor = descriptors[descriptor_index];
+      __global uchar *source = (__global uchar *)descriptor.source_address;
+      __global uchar *destination =
+          (__global uchar *)descriptor.destination_address;
+      ulong copy_index = ((ulong)group_ordinal * workgroup_size) + work_item_id;
+
+      if (descriptor.aligned_element_size == sizeof(ulong2)) {
+        __global ulong2 *source_data = (__global ulong2 *)(source);
+        __global ulong2 *destination_data = (__global ulong2 *)(destination);
+        while (copy_index < descriptor.aligned_element_count) {
+          destination_data[copy_index] = source_data[copy_index];
+          copy_index += copy_stride;
+        }
+      } else {
+        __global uint *source_data = (__global uint *)(source);
+        __global uint *destination_data = (__global uint *)(destination);
+        while (copy_index < descriptor.aligned_element_count) {
+          destination_data[copy_index] = source_data[copy_index];
+          copy_index += copy_stride;
+        }
+      }
+      if ((descriptor.trailing_byte_count != 0) && (group_ordinal == 0) &&
+          (work_item_id == 0)) {
+        ulong tail_start =
+            descriptor.aligned_element_count * descriptor.aligned_element_size;
+        ulong tail_end = tail_start + descriptor.trailing_byte_count;
+        for (ulong i = tail_start; i < tail_end; ++i) {
+          destination[i] = source[i];
         }
       }
     }

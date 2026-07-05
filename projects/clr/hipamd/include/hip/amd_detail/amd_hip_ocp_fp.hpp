@@ -10,6 +10,7 @@
 #include "amd_hip_common.h"
 #include "host_defines.h"
 #include "amd_hip_ocp_types.h"
+#include "amd_hip_fp16.h"
 #include "amd_hip_bf16.h"
 #include "amd_hip_ocp_host.hpp"
 

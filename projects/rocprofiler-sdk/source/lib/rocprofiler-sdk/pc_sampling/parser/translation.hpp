@@ -24,6 +24,7 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx11.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx12.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx1250.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx9.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx950.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.hpp"
@@ -342,7 +343,7 @@ copySample<GFX12, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sa
 
     // Extracting data from the perf_snapshot_data register
     auto perf_snapshot_data = sample_.perf_snapshot_data;
-    // The sample is valid  if perf_snapshot_data.valid == 1
+    // The sample is valid if perf_snapshot_data.valid == 1
     auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
     if(!valid)
     {
@@ -399,6 +400,123 @@ copySample<GFX12, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sa
     ret.memory_counters.sample_cnt = EXTRACT_BITS(perf_snapshot_data2, 20, 15);
     ret.memory_counters.ds_cnt     = EXTRACT_BITS(perf_snapshot_data2, 26, 21);
     ret.memory_counters.km_cnt     = EXTRACT_BITS(perf_snapshot_data2, 31, 27);
+
+    return ret;
+}
+
+/**
+ * @brief Host trap V0 sample for GFX1250
+ */
+template <>
+inline rocprofiler_pc_sampling_record_host_trap_v0_t
+copySample<GFX1250, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sample)
+{
+    // Host-trap samples are same for GFX12 and GFX1250
+    auto ret = copySample<GFX12, rocprofiler_pc_sampling_record_host_trap_v0_t>(sample);
+    // Only difference are chiplets that exist on GFX1250
+    copyChipletId<GFX1250>(ret, *static_cast<const perf_sample_snapshot_v1*>(sample));
+    return ret;
+}
+
+/**
+ * @brief Stochastic sample for GFX1250
+ */
+template <>
+inline rocprofiler_pc_sampling_record_stochastic_v0_t
+copySample<GFX1250, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sample)
+{
+    // Differences compared to the GFX12:
+    // - SAMPLING_LOCK_ERR introduced in the GFX1250 and means:
+    //   A wave tried taking a snapshot but was unable to as the previous snapshot had not yet been
+    //   read.
+    // - ARB_STATE_* begins at different offset
+    // - XCNT, ASYNC_CNT, TENSOR_CNT introduced in GFX1250.
+    // - GFX1250 uses chiplets
+    // Due to all differences and potential adaptation to the future subfamily members,
+    // we decided to have a separate implementation of copySample for GFX1250 stochastic.
+
+    const auto& sample_ = *static_cast<const perf_sample_snapshot_v1*>(sample);
+
+    // Extracting data from the perf_snapshot_data register
+    auto perf_snapshot_data = sample_.perf_snapshot_data;
+    // The sample is valid  if perf_snapshot_data.valid == 1
+    auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
+    if(!valid)
+    {
+        // To reduce refactoring of the PC sampling parser, we agreed to internally represent
+        // invalid samples with `rocprofiler_pc_sampling_record_stochastic_v0_t` with size 0.
+        // Eventually, those records are replaced with rocprofiler_pc_sampling_record_invalid_t
+        // and placed into the SDK buffer consumed by the end tool.
+        rocprofiler_pc_sampling_record_stochastic_v0_t invalid{};
+        invalid.size = 0;
+        // No need to further process invalid samples
+        return invalid;
+    }
+
+    auto ret = copySampleHeader<rocprofiler_pc_sampling_record_stochastic_v0_t>(sample_);
+    // GFX1250 has chiplets
+    copyChipletId<GFX1250>(ret, sample_);
+    // ROCr uses same hw_id struct for both GFX12 and GFX1250.
+    copyHwId<GFX12>(ret.hw_id, sample_.hw_id);
+
+    // wave issued an instruction
+    ret.wave_issued = EXTRACT_BITS(perf_snapshot_data, 1, 1);
+    // TODO: we need to handle new instruction type I think
+    // type of issued instruction, valid only if `ret.wave_issued` is true.
+    ret.inst_type = translate_inst<GFX12>(EXTRACT_BITS(perf_snapshot_data, 5, 2));
+    // reason for not issuing an instruction, valid only if `ret.wave_issued` is false
+    ret.snapshot.reason_not_issued =
+        translate_reason<GFX12>(EXTRACT_BITS(perf_snapshot_data, 8, 6));
+
+    // Sampling lock error indicates that reading this sample took to long
+    // so at least one wave was locked out from taking a sample.
+    ret.snapshot.sampling_lock_error = EXTRACT_BITS(perf_snapshot_data, 14, 14);
+
+    // arbiter state information
+    auto     perf_snapshot_data1 = sample_.perf_snapshot_data1;
+    uint16_t arb_state           = EXTRACT_BITS(perf_snapshot_data1, 24, 9);
+
+    ret.snapshot.arb_state_issue_brmsg      = EXTRACT_BITS(arb_state, 0, 0);
+    ret.snapshot.arb_state_issue_exp        = EXTRACT_BITS(arb_state, 1, 1);
+    ret.snapshot.arb_state_issue_lds_direct = EXTRACT_BITS(arb_state, 2, 2);
+    ret.snapshot.arb_state_issue_lds        = EXTRACT_BITS(arb_state, 3, 3);
+    ret.snapshot.arb_state_issue_vmem_tex   = EXTRACT_BITS(arb_state, 4, 4);
+    ret.snapshot.arb_state_issue_scalar     = EXTRACT_BITS(arb_state, 5, 5);
+    ret.snapshot.arb_state_issue_valu       = EXTRACT_BITS(arb_state, 6, 6);
+
+    ret.snapshot.arb_state_stall_brmsg      = EXTRACT_BITS(arb_state, 8, 8);
+    ret.snapshot.arb_state_stall_exp        = EXTRACT_BITS(arb_state, 9, 9);
+    ret.snapshot.arb_state_stall_lds_direct = EXTRACT_BITS(arb_state, 10, 10);
+    ret.snapshot.arb_state_stall_lds        = EXTRACT_BITS(arb_state, 11, 11);
+    ret.snapshot.arb_state_stall_vmem_tex   = EXTRACT_BITS(arb_state, 12, 12);
+    ret.snapshot.arb_state_stall_scalar     = EXTRACT_BITS(arb_state, 13, 13);
+    ret.snapshot.arb_state_stall_valu       = EXTRACT_BITS(arb_state, 14, 14);
+
+    ret.wave_count = EXTRACT_BITS(perf_snapshot_data1, 5, 0);
+
+    // Memory counters exist on GFX1250.
+    ret.flags.has_memory_counter = true;
+    // Extracting memory counters from the perf_snapshot_data2 register
+    auto perf_snapshot_data2       = sample_.perf_snapshot_data2;
+    ret.memory_counters.load_cnt   = EXTRACT_BITS(perf_snapshot_data2, 5, 0);
+    ret.memory_counters.store_cnt  = EXTRACT_BITS(perf_snapshot_data2, 11, 6);
+    ret.memory_counters.bvh_cnt    = EXTRACT_BITS(perf_snapshot_data2, 14, 12);
+    ret.memory_counters.sample_cnt = EXTRACT_BITS(perf_snapshot_data2, 20, 15);
+    ret.memory_counters.ds_cnt     = EXTRACT_BITS(perf_snapshot_data2, 26, 21);
+    ret.memory_counters.km_cnt     = EXTRACT_BITS(perf_snapshot_data2, 31, 27);
+    // counters available in perf_snapshot_data
+    ret.memory_counters.async_cnt  = EXTRACT_BITS(perf_snapshot_data, 25, 20);
+    ret.memory_counters.tensor_cnt = EXTRACT_BITS(perf_snapshot_data, 31, 26);
+    // counters available in perf_snapshot_data1
+    ret.memory_counters.xnack_cnt = EXTRACT_BITS(perf_snapshot_data1, 31, 26);
+
+    // ensure that the wave_id of snapshot_data matches the hw_id.wave_id
+    auto sampled_wave_id = EXTRACT_BITS(perf_snapshot_data, 13, 9);
+    if(sampled_wave_id != ret.hw_id.wave_id)
+    {
+        ROCP_FATAL << "sampled_wave_id: " << sampled_wave_id
+                   << " mismatches the hw_id.wave_id: " << ret.hw_id.wave_id;
+    }
 
     return ret;
 }

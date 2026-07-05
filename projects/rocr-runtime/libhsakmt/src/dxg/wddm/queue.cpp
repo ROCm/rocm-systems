@@ -179,7 +179,7 @@ void ComputeQueue::HandleError(hsa_status_t status) {
   for (std::size_t i = 0; i < sizeof(QueueErrors) / sizeof(QueueErrors[0]); ++i) {
     if (QueueErrors[i].status == status) {
       val = QueueErrors[i].code;
-      pr_err("error %d, sig_val %lld\n", status, val);
+      pr_err("error %d, sig_val %" PRId64 "\n", status, val);
       break;
     }
   }
@@ -591,6 +591,17 @@ void ComputeQueue::RingDoorbell(uint64_t value) {
 }
 
 hsa_status_t ComputeQueue::Init(void) {
+  if (use_hws) {
+    pr_rocr_info("Scheduler: Microsoft Hardware Scheduler (HWS)\n");
+  } else {
+    pr_rocr_info("Scheduler: AMD proprietary\n");
+  }
+
+  if (native_aql_)
+    pr_rocr_info("Submission type: AQL packet\n");
+  else
+    pr_rocr_info("Submission type: PM4 packet (AQL->PM4 translation)\n");
+
   hsa_status_t ret = use_hws ? HwsInit() : SwsInit();
   if (ret) {
     return ret;
@@ -755,7 +766,7 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
 
   // Check if we exceeded the frame size
   if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in KernelDispatch: used %lld bytes, limit %ulld bytes\n",
+    pr_err("PM4 command buffer overflow in KernelDispatch: used %" PRIu64 " bytes, limit %u bytes\n",
            i - ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -844,7 +855,7 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
 
   // Check if we exceeded the frame size
   if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in BarrierGeneric: used %lld bytes, limit %d bytes\n",
+    pr_err("PM4 command buffer overflow in BarrierGeneric: used %d bytes, limit %d bytes\n",
            i - ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -923,7 +934,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
 
   // Check if we exceeded the frame size
   if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in VendorSpecific: used %lld bytes, limit %d bytes\n",
+    pr_err("PM4 command buffer overflow in VendorSpecific: used %d bytes, limit %d bytes\n",
            i - ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -1038,7 +1049,7 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
     }
 
     for (const auto [start, end] : pendings) {
-      pr_debug("wptr %llx %llx\n", start, end);
+      pr_debug("wptr %lx %lx\n", start, end);
 
       SDMA_PKT_POLL_REGMEM* poll_pkt = reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(
           queue->cmdbuf_addr + queue->WrapIntoRocrRing(start));
@@ -1064,7 +1075,7 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
 
         amd_signal_t* signal = (amd_signal_t*)((char*)poll_addr - offsetof(amd_signal_t, value));
         uint64_t signal_handle = reinterpret_cast<uint64_t>(signal);
-        pr_debug("poll signal %#llx addr %#llx val %lld\n", signal_handle, poll_addr, poll_val);
+        pr_debug("poll signal %#lx addr %#lx val %ld\n", signal_handle, poll_addr, poll_val);
         hsa_signal_t hsa_signal = {signal_handle};
         hsa_signal_value_t value = hsakmt_hsa_signal_wait_relaxed(
             hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
@@ -1108,7 +1119,7 @@ SDMAQueue::~SDMAQueue() {
 }
 
 void SDMAQueue::RingDoorbell(uint64_t value) {
-  pr_debug("ringdoorbell %#llx %#llx\n", wptr_pre_, wptr_next_);
+  pr_debug("ringdoorbell %#lx %#lx\n", wptr_pre_, wptr_next_);
   thread_cond_lock_.lock();
 
   wptr_queue_.emplace_back(wptr_pre_, wptr_next_);

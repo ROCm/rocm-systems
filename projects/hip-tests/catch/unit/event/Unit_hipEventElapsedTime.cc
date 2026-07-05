@@ -95,8 +95,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
 HIP_TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   // create event on dev=0
@@ -149,7 +148,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_NotReady_Negative) {
   // Record start event
   HIP_CHECK(hipEventRecord(start, nullptr));
 
-  LaunchDelayKernel(std::chrono::milliseconds(1000));
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 1000));
   // Record stop event
   HIP_CHECK(hipEventRecord(stop, nullptr));
 

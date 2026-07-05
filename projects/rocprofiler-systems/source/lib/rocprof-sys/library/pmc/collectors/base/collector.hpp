@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -42,7 +43,7 @@ struct collector
     using device_t          = typename Traits::device_t;
     using device_ptr_t      = typename Traits::device_ptr_t;
     using container_t       = typename Traits::container_t;
-    using driver_t          = typename Traits::driver_t;
+    using backend_t         = typename Traits::backend_t;
 
     // Type aliases from config
     using device_provider = DeviceProvider;
@@ -125,19 +126,19 @@ struct collector
      *
      * @param timestamp Current timestamp in nanoseconds for the sample.
      */
-    void sample(int64_t timestamp)
+    void sample(std::int64_t timestamp)
     {
         auto new_end = std::remove_if(
             m_device_entries.begin(), m_device_entries.end(),
             [this, timestamp](const device_entry& entry) {
-                auto _timestamp = static_cast<uint64_t>(timestamp);
+                const auto _timestamp = static_cast<std::uint64_t>(timestamp);
 
                 try
                 {
-                    auto _metrics =
+                    const auto& _metrics =
                         Traits::get_metrics(entry.device, m_enabled_metrics, _timestamp);
-                    auto _device_id   = entry.device->get_index();
-                    auto _device_name = entry.device->get_name();
+                    const auto  _device_id   = entry.device->get_index();
+                    const auto& _device_name = entry.device->get_name();
 
                     CacheApi::store_sample(_device_id, _device_name, m_enabled_metrics,
                                            entry.supported_metrics, _metrics, _timestamp);
@@ -146,6 +147,7 @@ struct collector
                     {
                         PerfettoApi::store_sample(_device_id, _metrics, _timestamp);
                     }
+                    m_sample_counts[_device_id]++;
                     return false;  // Keep device
                 } catch(const std::runtime_error& e)
                 {
@@ -169,6 +171,23 @@ struct collector
         {
             Traits::template post_process_perfetto<PerfettoApi>(m_device_entries,
                                                                 m_enabled_metrics);
+        }
+        for(const auto& entry : m_device_entries)
+        {
+            const auto   _device_id   = entry.device->get_index();
+            const auto&  _device_name = entry.device->get_name();
+            const auto   _it          = m_sample_counts.find(_device_id);
+            const size_t _count       = _it == m_sample_counts.end() ? 0 : _it->second;
+            if(_count == 0)
+            {
+                LOG_WARNING("No samples were collected for {} device '{}'",
+                            Traits::device_name, _device_name);
+            }
+            else
+            {
+                LOG_DEBUG("Collected {} samples for {} device '{}'", _count,
+                          Traits::device_name, _device_name);
+            }
         }
     }
 
@@ -208,9 +227,9 @@ struct collector
      *
      * @param timestamp The current time in nanoseconds, typically when the pause occurs.
      */
-    void pause(int64_t timestamp)
+    void pause(std::int64_t timestamp)
     {
-        const auto current_timestamp = static_cast<uint64_t>(timestamp);
+        const auto current_timestamp = static_cast<std::uint64_t>(timestamp);
         for(const auto& entry : m_device_entries)
         {
             auto device_id   = entry.device->get_index();
@@ -250,6 +269,7 @@ private:
     device_entries_t m_device_entries;  ///< Devices with cached supported metrics
     std::shared_ptr<device_provider> m_device_provider;  ///< Device provider instance
     enabled_metrics_t                m_enabled_metrics;  ///< Enabled metrics
+    std::map<size_t, size_t>         m_sample_counts;    ///< Per-device sample counts
 };
 
 }  // namespace rocprofsys::pmc::collectors::base

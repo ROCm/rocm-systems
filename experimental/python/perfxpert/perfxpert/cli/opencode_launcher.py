@@ -166,7 +166,9 @@ def resolve_opencode_binary() -> Path:
 
     raise FileNotFoundError(
         "bundled patched opencode binary not found. Reinstall perfxpert with the "
-        "GitHub wrapper so the pinned opencode submodule is built:\n"
+        "GitHub wrapper so the pinned opencode submodule is built. Ensure bun "
+        "is on PATH first, or explicitly set PERFXPERT_AUTO_INSTALL_BUN=1 for "
+        "a developer-local bootstrap:\n"
         '  REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"\n'
         "For a user-owned upstream opencode binary, run: perfxpert-code opencode [args]"
     )
@@ -629,7 +631,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\033[31mperfxpert-code opencode: {e}\033[0m", file=sys.stderr)
             return 1
         try:
-            proc = subprocess.run([str(binary), *argv_out], env=dict(os.environ), check=False)
+            env = dict(os.environ)
+            env.pop("PERFXPERT_IN_OPENCODE_SESSION", None)
+            proc = subprocess.run([str(binary), *argv_out], env=env, check=False)
         except KeyboardInterrupt:
             return 130
         return proc.returncode

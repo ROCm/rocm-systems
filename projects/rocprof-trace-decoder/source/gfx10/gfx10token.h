@@ -26,7 +26,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "common.hpp"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 #include "token_types.h"
 #include "trace_parser.hpp"
 
@@ -61,7 +61,10 @@ union wstart_type
             .pipe = pipe,
             .me = me,
             .count = count,
-            .isExt = 0};
+            .isExt = 0,
+            .wgid = 0,
+            .last = 0,
+            .dynvgpr = 0};
     }
 };
 } // namespace gfx10
@@ -77,7 +80,6 @@ struct wend_type_common
     uint64_t SACU() const { return get_sa_wgp(sa, wgp); }
     uint64_t getGPULocation() const { return (SACU() << 7) | (simd << 5) | wid; };
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -85,7 +87,6 @@ struct wend_type_common
         return ss;
     }
     const char* typestr() const { return "WAVE_END"; };
-#endif
 };
 
 namespace gfx10
@@ -129,16 +130,14 @@ union header_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "TT Version:" << version << " NWGP:" << NWGP << "DWGP:" << DWGP << " DSIMD:" << DSIMD << " DSA:" << DSA
+        ss << "TT Version:" << version << " NWGP:" << NWGP << " DWGP:" << DWGP << " DSIMD:" << DSIMD << " DSA:" << DSA
            << " NSA:" << NSA << " UCF:" << UCF << "DPRate:" << DPRate << " WSM:" << WSM;
         return ss;
     }
     const char* typestr() const { return "HEADER"; };
-#endif
 };
 
 struct inst_type_common
@@ -148,7 +147,6 @@ struct inst_type_common
     uint64_t wid  : 6;
     uint64_t inst : 10;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -156,7 +154,6 @@ struct inst_type_common
         return ss;
     }
     const char* typestr() const { return "INST"; };
-#endif
 };
 
 namespace gfx10
@@ -189,15 +186,13 @@ union valu_inst_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "wid:" << wid << " w64:" << (bool) w64h;
+        ss << "wid:" << wid;
         return ss;
     }
     const char* typestr() const { return "VALU"; };
-#endif
 };
 
 union immed_one_type
@@ -210,7 +205,6 @@ union immed_one_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -218,7 +212,6 @@ union immed_one_type
         return ss;
     }
     const char* typestr() const { return "IMMEDONE"; };
-#endif
 };
 
 union immediate_type
@@ -231,7 +224,6 @@ union immediate_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -239,7 +231,6 @@ union immediate_type
         return ss;
     }
     const char* typestr() const { return "IMMED"; };
-#endif
 };
 
 union wave_ready_type
@@ -252,7 +243,6 @@ union wave_ready_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -260,37 +250,46 @@ union wave_ready_type
         return ss;
     }
     const char* typestr() const { return "WAVERDY"; };
-#endif
 };
 
 namespace gfx10
 {
+union misc_fields
+{
+    struct
+    {
+        uint8_t spm_or_pl        : 1; // PL on gfx10, SPM on gfx11
+        uint8_t gc_rinse         : 1;
+        uint8_t reserved         : 1; // Absent in tt >= 5, handled in tt5_shift
+        uint8_t save_context     : 1;
+        uint8_t tt_stall_start   : 1;
+        uint8_t tt_stall_end     : 1;
+        uint8_t DIDT_stall_start : 1;
+        uint8_t DIDT_stall_end   : 1;
+    };
+    uint8_t raw;
+
+    void tt5_shift() { raw = (raw & 0x3) | ((raw & 0x7C) << 1); }
+};
+
 union misc_type
 {
     struct
     {
-        uint64_t header           : 7;
-        uint64_t tm               : 9;
-        uint64_t spm_or_pl        : 1; // PL on gfx10, SPM on gfx11+
-        uint64_t gc_rinse         : 1;
-        uint64_t reserved         : 1;
-        uint64_t save_context     : 1;
-        uint64_t tt_stall_start   : 1;
-        uint64_t tt_stall_end     : 1;
-        uint64_t DIDT_stall_start : 1;
-        uint64_t DIDT_stall_end   : 1;
+        uint64_t header  : 7;
+        uint64_t tm      : 9;
+        uint64_t fields  : 8;
+        uint64_t padding : 40;
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "raw:0x" << std::hex << raw << std::dec;
+        ss << "tm:" << tm << " fields:0x" << std::hex << fields << std::dec;
         return ss;
     }
     const char* typestr() const { return "MISC"; };
-#endif
 };
 
 union timestamp_type
@@ -304,7 +303,6 @@ union timestamp_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -312,7 +310,6 @@ union timestamp_type
         return ss;
     }
     const char* typestr() const { return "TIMESTAMP"; };
-#endif
 };
 
 union util_ctr_type
@@ -334,10 +331,8 @@ union util_ctr_type
 
     static const int ctr_size = 8;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const { return std::stringstream{}; };
     const char* typestr() const { return "UTILCTR"; };
-#endif
 };
 
 union new_pc_type
@@ -352,7 +347,6 @@ union new_pc_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -360,9 +354,7 @@ union new_pc_type
         return ss;
     }
     const char* typestr() const { return "NEW_PC"; };
-#endif
 };
-} // namespace gfx10
 
 union reg_write_type
 {
@@ -380,7 +372,6 @@ union reg_write_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -388,7 +379,6 @@ union reg_write_type
         return ss;
     }
     const char* typestr() const { return "REG_WRITE"; };
-#endif
 };
 
 union reg_init_type
@@ -401,28 +391,44 @@ union reg_init_type
         uint64_t pipe    : 2;
         uint64_t me      : 2;
         uint64_t type    : 2;
-        uint64_t data    : 24;
-        uint64_t context : 3;
-        uint64_t data2   : 5;
+        uint64_t data    : 32;
         uint64_t sync_id : 10;
         uint64_t rsvd    : 2;
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "pipe:" << pipe << " type:" << type << " context:" << context << std::hex << " data:0x" << data
-           << " data2:0x" << data2 << std::dec;
+        ss << "pipe:" << pipe << " type:" << type << std::hex << " data:0x" << data << std::dec;
         return ss;
     }
     const char* typestr() const { return "REG_INIT"; };
-#endif
 };
 
-namespace gfx10
+union event_type
 {
+    struct
+    {
+        uint64_t header : 8;
+        uint64_t tm     : 3;
+        uint64_t bop    : 1;
+        uint64_t evtype : 2;
+        uint64_t pipe   : 2;
+        uint64_t me     : 2;
+        uint64_t id     : 6;
+    };
+    uint64_t raw;
+
+    std::stringstream print() const
+    {
+        std::stringstream ss;
+        ss << "me:" << me << " pipe:" << pipe << " type:" << evtype << " id:" << id;
+        return ss;
+    }
+    const char* typestr() const { return "EVENT"; };
+};
+
 class Token
 {
 public:
@@ -455,7 +461,6 @@ struct shader_data_common_type
         data = isshort = priv = invalid = 0;
     };
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -463,7 +468,6 @@ struct shader_data_common_type
         return ss;
     }
     const char* typestr() const { return "SHADER_DATA"; };
-#endif
 };
 
 class NaviTokenGenerator : public TokenGenerator
@@ -471,7 +475,9 @@ class NaviTokenGenerator : public TokenGenerator
 public:
     NaviTokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time) :
     TokenGenerator(_buffer, size, _globaltime, _base_time)
-    {}
+    {
+        realtime.reserve(65536);
+    }
 
     virtual gfx10::Token next() = 0;
     bool bufferPadded() { return bit_ptr + 64 < 8 * BUFFER_SIZE; }
