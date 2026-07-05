@@ -1,4 +1,10 @@
 /*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/*
  * Standalone unit tests for doorbell type validation logic.
  * Can be compiled and run without ROCm/HSA runtime installed.
  *

@@ -188,8 +188,7 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
   } catch (const hsa_exception& e) {
     const hsa_status_t err = e.error_code();
     // Skip unsupported GPUs and proceed with supported ones. This covers:
-    //   - HSA_STATUS_ERROR_INVALID_ISA: unrecognized GPU generation
-    //   - HSA_STATUS_ERROR_INVALID_ISA: deprecated doorbell type (pre-Vega GPUs)
+    //   - HSA_STATUS_ERROR_INVALID_ISA: unrecognized GPU or deprecated doorbell type (pre-Vega GPUs)
     //   - Any future GpuAgent construction failure for unsupported hardware
     // Without this, a single unsupported GPU in a multi-GPU system would
     // abort HSA initialization for all devices.
