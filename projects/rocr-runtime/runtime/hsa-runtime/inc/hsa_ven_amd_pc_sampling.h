@@ -122,6 +122,10 @@ typedef enum {
  * hsa_ven_amd_pcs_data_ready_callback_t. HSA internal buffers can also be drained by calling
  * hsa_ven_amd_pcs_flush.
  *
+ * This callback must be invoked from within @p hsa_ven_amd_pcs_data_ready_callback_t, on the
+ * same thread, before the ready callback returns. Calling from a different thread or after the
+ * ready callback has returned will result in an error.
+ *
  * @param[in] hsa_callback_data private data to pass back to HSA. Provided in
  * hsa_ven_amd_pcs_data_ready_callback_t
  *
@@ -141,6 +145,11 @@ typedef hsa_status_t (*hsa_ven_amd_pcs_data_copy_callback_t)(void* hsa_callback_
  * multiple times with smaller @p data_size to split the copy operation.
  *
  * This callback must not call ::hsa_ven_amd_pcs_flush.
+ *
+ * Callbacks for a given PC sampling session are serialized by the runtime and will not be
+ * invoked concurrently within that session. On multi-XCC GPUs,
+ * data from all XCCs is aggregated internally before invoking the callback, so clients receive a
+ * unified data stream regardless of the underlying hardware topology.
  *
  * @param[in] client_callback_data client private data passed in via
  * hsa_ven_amd_pcs_create/hsa_ven_amd_pcs_create_from_id
@@ -369,6 +378,11 @@ hsa_status_t hsa_ven_amd_pcs_stop(hsa_ven_amd_pcs_t pc_sampling);
  * The function blocks until all PC samples associated with the @p pc_sampling session
  * generated prior to the function call have been communicated by invocations of
  * @p data_ready_callback having completed execution.
+ *
+ * Note: During normal operation, data_ready_callback is invoked only when at least
+ * @p buffer_size bytes are available (as specified in hsa_ven_amd_pcs_create).
+ * However, when Flush is called, the callback may be invoked with less than
+ * @p buffer_size bytes to drain any remaining partial data in internal buffers.
  *
  * @param[in] pc_sampling PC sampling session handle
  *

@@ -720,6 +720,10 @@ void Buffer::destroy() {
     if (memFlags & ROCCLR_MEM_PHYMEM) {
       // If this is physical memory, dont call hsa free function, since device mem was never created
       dev().deviceVmemRelease(owner()->getUserData().hsa_handle);
+      // Free what we counted on alloc. Imported memory was never counted.
+      if (!(memFlags & ROCCLR_MEM_INTERPROCESS)) {
+        const_cast<Device&>(dev()).updateFreeMemory(size(), true);
+      }
       return;
     }
 
@@ -756,7 +760,9 @@ void Buffer::destroy() {
       }
     }
 
-    if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain)) {
+    // Not counted on alloc (e.g. arena and VA ranges), so don't add it back on free.
+    if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain) &&
+        (kind_ != MEMORY_KIND_ARENA) && !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), true);
     }
 
@@ -867,6 +873,11 @@ bool Buffer::create(bool alloc_local) {
 
     owner()->setSvmPtr(reinterpret_cast<void*>(owner()->getUserData().hsa_handle));
 
+    // Real device memory, so count it. Imported memory isn't ours, so skip it.
+    if (!(memFlags & ROCCLR_MEM_INTERPROCESS)) {
+      const_cast<Device&>(dev()).updateFreeMemory(size(), false);
+    }
+
     return (success = true);
   }
 
@@ -958,8 +969,9 @@ bool Buffer::create(bool alloc_local) {
       }
     }
 
+    // VA ranges only reserve addresses, not real memory, so don't count them.
     if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain) &&
-        (kind_ != MEMORY_KIND_ARENA)) {
+        (kind_ != MEMORY_KIND_ARENA) && !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), false);
     }
 
