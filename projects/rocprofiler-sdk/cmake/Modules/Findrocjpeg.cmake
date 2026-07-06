@@ -26,7 +26,25 @@ include_guard(DIRECTORY)
 # Prefer the upstream rocjpeg CONFIG package (installed lowercase as `rocjpeg`). Fall back
 # to manual path/library discovery for older install layouts. Re-read the version header
 # only when CONFIG did not supply a version.
-find_package(rocjpeg CONFIG QUIET)
+#
+# In TheRock superbuilds, an optional media dependency may be enabled in the same
+# build tree without being a declared dependency of rocprofiler-sdk. In that case,
+# avoid config-mode discovery so CMake does not pick up an incomplete build-tree
+# rocjpeg-config.cmake before rocjpeg has exported its targets.
+set(_rocjpeg_FIND_CONFIG ON)
+if(DEFINED THEROCK_SUBPROJECT_TARGET)
+    set(_rocjpeg_PROVIDED_PACKAGE_INDEX -1)
+    if(DEFINED THEROCK_PROVIDED_PACKAGES)
+        list(FIND THEROCK_PROVIDED_PACKAGES rocjpeg _rocjpeg_PROVIDED_PACKAGE_INDEX)
+    endif()
+    if(_rocjpeg_PROVIDED_PACKAGE_INDEX EQUAL -1)
+        set(_rocjpeg_FIND_CONFIG OFF)
+    endif()
+endif()
+
+if(_rocjpeg_FIND_CONFIG)
+    find_package(rocjpeg CONFIG QUIET)
+endif()
 
 # handle the case where CONFIG is found but does not specify an include directory (which
 # generally shouldn't happen)
