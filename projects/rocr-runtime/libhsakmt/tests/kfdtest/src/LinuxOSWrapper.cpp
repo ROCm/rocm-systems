@@ -112,6 +112,8 @@ void ComandLineArgumentsUsage() {
     printf("\t--sleep_time\t - For testing CRIU, etc");
     printf("\t--concurrentnodes arg\t - Concurrent nodes string\n");
     printf("\t--testnodenum arg\t - Number of concurrent nodes\n");
+    printf("\t--ais_threads arg\t - Number of threads for AIS multi-threaded test (default 8)\n");
+    printf("\t--ais_size_mb arg\t - Total MB for AIS multi-threaded test (default 1024, clamped to free disk/VRAM)\n");
 }
 
 bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs) {
@@ -129,6 +131,8 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
         { "sleep_time", required_argument, 0, 0 },
         { "concurrentnodes", required_argument, 0, 0 },
         { "testnodenum", required_argument, 0, 0 },
+        { "ais_threads", required_argument, 0, 0 },
+        { "ais_size_mb", required_argument, 0, 0 },
         { 0, 0, 0, 0 }
     };
 
@@ -141,6 +145,8 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
     rArgs.SleepTime = 0;
     rArgs.ConcurrentNodes = "";
     rArgs.TestNodeNum = 0;
+    rArgs.AisThreads = 8;
+    rArgs.AisSizeMB = 1024;
 
     while (true) {
         int c = getopt_long(argc, argv, "", long_options, &option_index);
@@ -227,6 +233,20 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
                 int testNodeNum = atoi(optarg);
                 if (testNodeNum > 0)
                     rArgs.TestNodeNum = testNodeNum;
+            }
+            break;
+        case 9:
+            {
+                int aisThreads = atoi(optarg);
+                if (aisThreads > 0)
+                    rArgs.AisThreads = aisThreads;
+            }
+            break;
+        case 10:
+            {
+                int aisSizeMB = atoi(optarg);
+                if (aisSizeMB > 0)
+                    rArgs.AisSizeMB = aisSizeMB;
             }
             break;
         }

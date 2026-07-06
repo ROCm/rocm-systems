@@ -214,7 +214,8 @@ set (SRC_FILES gtest-1.6.0/gtest-all.cpp
   src/KFDRASTest.cpp
   src/KFDPCSamplingTest.cpp
   src/KFDNegativeTest.cpp
-  src/RDMATest.cpp)
+  src/RDMATest.cpp
+  src/KFDAISTest.cpp)
 
 message( STATUS "PROJECT_SOURCE_DIR:" ${PROJECT_SOURCE_DIR} )
 #message( STATUS "SRC_FILES: ")
