@@ -291,6 +291,78 @@ public:
     uint64_t scalar_ = 0;
   };
 
+  class OperandReadPair32View {
+  public:
+    OperandReadPair32View() = default;
+
+    bool has_storage() const { return storage_.lo != nullptr; }
+
+    template <typename T> util::native<T> load_lo_native(uint32_t lane_base) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "load_lo_native expects 32-bit lanes");
+      assert(op_ && "OperandReadPair32View is empty");
+      return storage_.lo ? storage_.lo->template simd_load<T>(lane_base)
+                         : util::broadcast<T>(scalar_);
+    }
+
+    template <typename T> util::native<T> load_hi_native(uint32_t lane_base) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "load_hi_native expects 32-bit lanes");
+      assert(op_ && "OperandReadPair32View is empty");
+      return storage_.hi ? storage_.hi->template simd_load<T>(lane_base)
+                         : util::broadcast<T>(scalar_);
+    }
+
+  private:
+    friend class RegisterAccess;
+
+    OperandReadPair32View(const Operand &op, const Wavefront &wf, ConstVgprStoragePair64 storage)
+        : op_(&op), storage_(storage), scalar_(storage.lo ? 0u : op.read_scalar(wf)) {}
+
+    const Operand *op_ = nullptr;
+    ConstVgprStoragePair64 storage_{};
+    uint32_t scalar_ = 0;
+  };
+
+  class OperandWritePair32View {
+  public:
+    OperandWritePair32View() = default;
+
+    bool has_storage() const { return storage_.lo != nullptr; }
+
+    template <typename T>
+    void store_native_pair(uint32_t lane_base, util::native<T> lo, util::native<T> hi,
+                           uint64_t lane_mask) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "store_native_pair expects 32-bit lanes");
+      assert(op_ && wf_ && "OperandWritePair32View is empty");
+      if (storage_.lo) {
+        storage_.lo->template simd_store<T>(lane_base, lo, lane_mask);
+        storage_.hi->template simd_store<T>(lane_base, hi, lane_mask);
+        return;
+      }
+      constexpr std::size_t W = util::native_width_v<T>;
+      alignas(util::native<T>) uint32_t lo_buf[W];
+      alignas(util::native<T>) uint32_t hi_buf[W];
+      util::blit_to_buffer<T>(lo_buf, lo);
+      util::blit_to_buffer<T>(hi_buf, hi);
+      for (std::size_t i = 0; i < W; ++i) {
+        if ((lane_mask & (1ULL << i)) == 0)
+          continue;
+        const uint64_t value =
+            static_cast<uint64_t>(lo_buf[i]) | (static_cast<uint64_t>(hi_buf[i]) << 32);
+        op_->write_lane64(*wf_, lane_base + static_cast<uint32_t>(i), value);
+      }
+    }
+
+  private:
+    friend class RegisterAccess;
+
+    OperandWritePair32View(const Operand &op, Wavefront &wf, VgprStoragePair64 storage)
+        : op_(&op), wf_(&wf), storage_(storage) {}
+
+    const Operand *op_ = nullptr;
+    Wavefront *wf_ = nullptr;
+    VgprStoragePair64 storage_{};
+  };
+
   class VgprReadRegion {
   public:
     VgprReadRegion() = default;
@@ -425,6 +497,14 @@ public:
     return OperandRead64View(op, wf, storage);
   }
 
+  OperandReadPair32View read_operand_pair32(const Operand &op, const Wavefront &wf,
+                                            uint64_t lane_mask, uint8_t byte_mask = 0xF) const {
+    ConstVgprStoragePair64 storage = SimdAccess::vgpr_storage64(op, wf);
+    if (storage.lo)
+      SimdAccess::notify_read64(op, wf, lane_mask, byte_mask);
+    return OperandReadPair32View(op, wf, storage);
+  }
+
   OperandWriteView write_operand(const Operand &op, Wavefront &wf, uint64_t /*lane_mask*/) const {
     return OperandWriteView(op, wf, SimdAccess::vgpr_storage_mut(op, wf));
   }
@@ -432,6 +512,11 @@ public:
   OperandWrite64View write_operand64(const Operand &op, Wavefront &wf,
                                      uint64_t /*lane_mask*/) const {
     return OperandWrite64View(op, wf, SimdAccess::vgpr_storage64_mut(op, wf));
+  }
+
+  OperandWritePair32View write_operand_pair32(const Operand &op, Wavefront &wf,
+                                              uint64_t /*lane_mask*/) const {
+    return OperandWritePair32View(op, wf, SimdAccess::vgpr_storage64_mut(op, wf));
   }
 
   OperandReadWriteView readwrite_operand(const Operand &op, Wavefront &wf, uint64_t lane_mask,

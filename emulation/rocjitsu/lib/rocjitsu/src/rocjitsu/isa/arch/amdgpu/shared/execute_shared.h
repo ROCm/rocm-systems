@@ -11420,7 +11420,7 @@ inline void execute_v_fmaak_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_fmac_dx9_zero_f32_vop2([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_TERNARY(
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC(
       float32_t, 0u, [](auto a, auto b, auto d, auto) { return util::stdx::fma(a, b, d); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -11479,7 +11479,7 @@ inline void execute_v_fmac_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_fmac_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_TERNARY(uint32_t, 0u, [](auto a, auto b, auto d, auto) {
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC(uint32_t, 0u, [](auto a, auto b, auto d, auto) {
     return util::f32_to_f16_simd(util::stdx::fma(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b),
                                                  util::f16_to_f32_simd(d)));
   });
@@ -11541,7 +11541,7 @@ inline void execute_v_fmac_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_fmac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_TERNARY(
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC(
       float32_t, 0u, [](auto a, auto b, auto d, auto) { return util::stdx::fma(a, b, d); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -12679,7 +12679,7 @@ inline void execute_v_lshrrev_b64_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_mac_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_TERNARY(uint32_t, 0u, [](auto a, auto b, auto d, auto) {
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC(uint32_t, 0u, [](auto a, auto b, auto d, auto) {
     return util::f32_to_f16_simd(util::stdx::fma(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b),
                                                  util::f16_to_f32_simd(d)));
   });
@@ -12741,7 +12741,7 @@ inline void execute_v_mac_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_mac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_TERNARY(
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC(
       float32_t, 0u, [](auto a, auto b, auto d, auto) { return util::stdx::fma(a, b, d); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

@@ -210,27 +210,20 @@ public:
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 private:
-  // Transitional SIMD fast-path escape hatches.
+  // Private SIMD fast-path backend for RegisterAccess.
   //
-  // These private hooks exist because today's SIMD glue needs zero-copy access
-  // to resolved VGPR storage, while plugin observation is still fired outside
-  // operand resolution. The four `simd_notify_*` hooks are not a desired
-  // long-term public contract: they are the smallest bridge that lets source
-  // operands, dst-accumulate operands, and 64-bit VGPR pairs report the same
-  // physical registers that their matching storage hooks resolve.
-  //
-  // The intended cleanup is to replace this family with a single
-  // instruction-facing register access facade that returns observed read views
-  // and write views directly. Once that exists, `simd_vgpr_storage*` and
-  // `simd_notify_*` should disappear from `Operand`.
+  // Instruction emulators should not call these hooks directly. They acquire
+  // read/write/read-write views from `amdgpu::RegisterAccess`, which centralizes
+  // plugin read observation and destination write resolution. These hooks remain
+  // as the operand-specific storage/notification backend for that facade until
+  // the VGPR resolution machinery itself moves behind a tighter abstraction.
 
   /// @brief If this operand resolves to per-lane VGPR storage, return its
   /// physical register index (`wf.vgpr_alloc().base + offset`). Otherwise
   /// nullopt (SGPR/imm/inline-const/DPP) — the caller broadcasts a scalar. The
-  /// glue passes this index to the plugin read-notification hook with the full
-  /// register extent. Internal SIMD fast-path hook, reachable only through
-  /// `amdgpu::SimdAccess`; plugins observe register reads via the public
-  /// `read_lane` / `read_lane_chunk` surface.
+  /// RegisterAccess passes this index to the plugin read-notification hook with
+  /// the full register extent. Internal SIMD fast-path hook, reachable only
+  /// through `amdgpu::SimdAccess`.
   virtual std::optional<uint32_t> simd_vgpr_base(const amdgpu::Wavefront &wf) const {
     if (delegate_)
       return delegate_->simd_vgpr_base(wf);
@@ -243,7 +236,7 @@ private:
   /// `simdojo::VectorReg<64,uint32_t>&`). Otherwise nullptr — the caller falls
   /// back to a scalar broadcast via `read_scalar`. Resolves the storage in a
   /// SINGLE virtual dispatch — the SIMD hot path reads through this without a
-  /// raw pointer crossing the operand/glue API.
+  /// raw pointer crossing the instruction-facing RegisterAccess API.
   virtual const amdgpu::VgprStorage *simd_vgpr_storage(const amdgpu::Wavefront &wf) const {
     if (delegate_)
       return delegate_->simd_vgpr_storage(wf);
@@ -426,13 +419,11 @@ private:
 };
 
 namespace amdgpu {
-/// @brief Privileged accessor for the operand SIMD fast-path hooks.
+/// @brief Privileged backend accessor for RegisterAccess.
 ///
-/// Only the SIMD glue in `arch/amdgpu/shared/simd_glue.h` (and arch operand
-/// implementations that need to forward a delegate dispatch) reaches the
-/// private `simd_vgpr_storage` / `simd_vgpr_base` virtuals through this struct.
-/// Plugin-visible register I/O stays on the public `read_lane` /
-/// `read_lane_chunk` / `write_lane` / `write_lane_chunk` surface.
+/// `RegisterAccess` uses this struct to reach operand-private VGPR storage and
+/// read-notification hooks. Instruction emulators should acquire register views
+/// from `RegisterAccess` instead of using this backend directly.
 struct SimdAccess {
   /// Physical register index for plugin read-notification (nullopt for
   /// non-VGPR / DPP operands), resolved in one virtual dispatch.
