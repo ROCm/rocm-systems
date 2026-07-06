@@ -377,7 +377,7 @@ hipIpcOpenEventHandle
 
 When adding or removing contract tests:
 
-1. Recompute the contract-domain test counts from `catch/contract/*/hip_*_contract.cc`.
+1. Recompute the contract-domain test counts from `catch/contract/*/test_hip_*_contract.cc`.
 2. Recompute directly exercised `hip*` APIs from the contract sources.
 3. Recompute the public API denominator from `projects/hip/include/hip/hip_runtime_api.h`.
 4. Update this document in the same branch as the contract-test change.
