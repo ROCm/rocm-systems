@@ -4,6 +4,7 @@
 #pragma once
 
 #include "backends/sqlite_backend.hpp"
+#include "read_statements_base.hpp"
 
 #include "profiler-hub/reader_types.hpp"
 
@@ -18,376 +19,11 @@
 namespace profiler_hub::data_storage::schema_v3
 {
 
-struct node_info_result
-{
-    size_t      node_id;
-    size_t      hash;
-    std::string machine_id;
-    std::string system_name;
-    std::string hostname;
-    std::string release;
-    std::string version;
-    std::string hardware_name;
-    std::string domain_name;
-};
-
-struct process_info_result
-{
-    size_t                     id{};
-    size_t                     nid{};
-    size_t                     pid{};
-    std::optional<size_t>      ppid;
-    std::optional<size_t>      init;
-    std::optional<size_t>      fini;
-    std::optional<size_t>      start;
-    std::optional<size_t>      end;
-    std::optional<std::string> command;
-    std::string                environment;
-    std::string                extdata;
-};
-
-struct string_result
-{
-    size_t      id{};
-    std::string value;
-};
-
-struct stream_info_result
-{
-    size_t                     id{};
-    size_t                     nid{};
-    size_t                     pid{};
-    std::optional<std::string> name;
-    std::string                extdata;
-};
-
-struct queue_info_result
-{
-    size_t                     id{};
-    size_t                     nid{};
-    size_t                     pid{};
-    std::optional<std::string> name;
-    std::string                extdata;
-};
-
-struct thread_info_result
-{
-    size_t                     id{};
-    size_t                     nid{};
-    std::optional<size_t>      ppid;
-    size_t                     pid{};
-    size_t                     tid{};
-    std::optional<std::string> name;
-    std::optional<size_t>      start;
-    std::optional<size_t>      end;
-    std::string                extdata;
-};
-
-struct agent_info_result
-{
-    size_t                     id{};
-    size_t                     nid{};
-    size_t                     pid{};
-    std::optional<std::string> type;
-    std::optional<size_t>      absolute_index;
-    std::optional<size_t>      logical_index;
-    std::optional<size_t>      type_index;
-    std::optional<size_t>      uuid;
-    std::optional<std::string> name;
-    std::optional<std::string> model_name;
-    std::optional<std::string> vendor_name;
-    std::optional<std::string> product_name;
-    std::optional<std::string> user_name;
-    std::string                extdata;
-};
-
-struct track_info_result
-{
-    size_t                id{};
-    size_t                nid{};
-    std::optional<size_t> pid;
-    std::optional<size_t> tid;
-    std::optional<size_t> name_id;
-    std::string           extdata;
-};
-
-struct kernel_symbol_info_result
-{
-    size_t                     id{};
-    size_t                     nid{};
-    size_t                     pid{};
-    size_t                     code_object_id{};
-    std::optional<std::string> kernel_name;
-    std::optional<std::string> display_name;
-    std::optional<size_t>      kernel_object;
-    std::optional<size_t>      kernarg_segment_size;
-    std::optional<size_t>      kernarg_segment_alignment;
-    std::optional<size_t>      group_segment_size;
-    std::optional<size_t>      private_segment_size;
-    std::optional<size_t>      sgpr_count;
-    std::optional<size_t>      arch_vgpr_count;
-    std::optional<size_t>      accum_vgpr_count;
-    std::string                extdata;
-};
-
-struct code_object_info_result
-{
-    size_t                     id{};
-    size_t                     nid{};
-    size_t                     pid{};
-    std::optional<size_t>      agent_id;
-    std::optional<std::string> uri;
-    std::optional<size_t>      load_base;
-    std::optional<size_t>      load_size;
-    std::optional<size_t>      load_delta;
-    std::optional<std::string> storage_type;
-    std::string                extdata;
-};
-
-struct pmc_info_result
-{
-    size_t                     id{};
-    size_t                     nid{};
-    size_t                     pid{};
-    std::optional<size_t>      agent_id;
-    std::optional<std::string> target_arch;
-    std::optional<size_t>      event_code;
-    std::optional<size_t>      instance_id;
-    std::string                name{};
-    std::string                symbol{};
-    std::optional<std::string> description;
-    std::optional<std::string> long_description;
-    std::optional<std::string> component;
-    std::optional<std::string> units;
-    std::optional<std::string> value_type;
-    std::optional<std::string> block;
-    std::optional<std::string> expression;
-    std::optional<size_t>      is_constant;
-    std::optional<size_t>      is_derived;
-    std::string                extdata;
-};
-
-struct timeline_event_result
-{
-    size_t id{};
-
-    size_t start_timestamp{};
-    size_t end_timestamp{};
-
-    std::optional<size_t> display_name_id;
-    std::optional<size_t> category_id;
-
-    size_t                nid{};
-    std::optional<size_t> pid;
-    std::optional<size_t> tid;
-    std::optional<size_t> track_id;
-};
-
-struct sample_timeline_event_result
-{
-    size_t                id{};
-    size_t                timestamp{};
-    std::optional<size_t> category_id;
-    size_t                track_id{};
-};
-
-// ----- Event detail result structs -----
-
-struct region_detail_result
-{
-    size_t                id{};
-    size_t                start{};
-    size_t                end{};
-    std::optional<size_t> name_id;
-    std::optional<size_t> event_id;
-    size_t                nid{};
-    std::optional<size_t> pid;
-    std::optional<size_t> tid;
-    std::string           extdata;
-};
-
-struct kernel_dispatch_detail_result
-{
-    size_t                id{};
-    size_t                dispatch_id{};
-    size_t                start{};
-    size_t                end{};
-    std::optional<size_t> kernel_id;
-    std::optional<size_t> private_segment_size;
-    std::optional<size_t> group_segment_size;
-    size_t                workgroup_size_x{};
-    size_t                workgroup_size_y{};
-    size_t                workgroup_size_z{};
-    size_t                grid_size_x{};
-    size_t                grid_size_y{};
-    size_t                grid_size_z{};
-    std::optional<size_t> region_name_id;
-    std::optional<size_t> event_id;
-    size_t                nid{};
-    std::optional<size_t> pid;
-    std::optional<size_t> tid;
-    std::string           extdata;
-};
-
-struct memory_copy_detail_result
-{
-    size_t                id{};
-    size_t                start{};
-    size_t                end{};
-    std::optional<size_t> name_id;
-    std::optional<size_t> dst_agent_id;
-    std::optional<size_t> dst_address;
-    std::optional<size_t> src_agent_id;
-    std::optional<size_t> src_address;
-    size_t                size{};
-    std::optional<size_t> region_name_id;
-    std::optional<size_t> event_id;
-    size_t                nid{};
-    std::optional<size_t> pid;
-    std::optional<size_t> tid;
-    std::string           extdata;
-};
-
-struct memory_alloc_detail_result
-{
-    size_t                     id{};
-    std::optional<std::string> type;
-    std::optional<std::string> level;
-    size_t                     start{};
-    size_t                     end{};
-    std::optional<size_t>      address;
-    size_t                     size{};
-    std::optional<size_t>      event_id;
-    size_t                     nid{};
-    std::optional<size_t>      pid;
-    std::optional<size_t>      tid;
-    std::string                extdata;
-};
-
-struct event_detail_result
-{
-    size_t                id{};
-    std::optional<size_t> category_id;
-    std::optional<size_t> stack_id;
-    std::optional<size_t> parent_stack_id;
-    std::optional<size_t> correlation_id;
-    std::string           call_stack;
-    std::string           line_info;
-    std::string           extdata;
-};
-
-struct arg_detail_result
-{
-    size_t      position{};
-    std::string type;
-    std::string name;
-    std::string value;
-    std::string extdata;
-};
-
-/// Lightweight result for resolving event metadata from event-specific tables.
-/// JOINs event-specific table with rocpd_event to get both event_id and event metadata.
-struct event_id_result
-{
-    std::optional<size_t> event_id;
-    std::optional<size_t> category_id;
-    std::optional<size_t> stack_id;
-    std::optional<size_t> parent_stack_id;
-    std::optional<size_t> correlation_id;
-    std::string           call_stack;
-    std::string           line_info;
-    std::string           event_extdata;
-};
-
-struct count_result
-{
-    size_t count{};
-};
-
-struct time_range_result
-{
-    std::optional<size_t> min_start;
-    std::optional<size_t> max_end;
-};
-
-// ----- Track-scoped query result structs (interval / scalar / flow) -----
-
-/// One interval row on a track. name_ref is a string id for region/memory_copy
-/// tracks and a kernel_symbol id for kernel_dispatch tracks; the reader resolves
-/// it to a display_name based on the track type.
-struct interval_row_result
-{
-    size_t                id{};
-    size_t                start{};
-    size_t                end{};
-    std::optional<size_t> name_ref;
-};
-
-/// One scalar (counter) sample on a counter track.
-struct scalar_row_result
-{
-    size_t id{};
-    size_t timestamp{};
-    double value{};
-};
-
-/// A single causal link (source event id -> destination event id).
-struct flow_row_result
-{
-    size_t source_id{};
-    size_t dest_id{};
-};
-
-/// Distinct gpu_queue topology context synthesized from rocpd_kernel_dispatch.
-struct distinct_gpu_queue_result
-{
-    size_t nid{};
-    size_t pid{};
-    size_t agent_id{};
-    size_t queue_id{};
-};
-
-/// Distinct dma topology context synthesized from rocpd_memory_copy.
-/// queue_id / stream_id are kept as distinct group values, NULL included.
-struct distinct_dma_result
-{
-    size_t                nid{};
-    size_t                pid{};
-    std::optional<size_t> queue_id;
-    std::optional<size_t> stream_id;
-};
-
-/// A track_id referenced by at least one rocpd_sample row (=> counter track).
-struct sample_track_id_result
-{
-    size_t track_id{};
-};
-
-/// MAX(id) of rocpd_track, used as the base for synthetic track ids.
-struct max_track_id_result
-{
-    std::optional<size_t> max_id;
-};
-
-/// Maps a counter track_id to its PMC name (rocpd_info_pmc.name). One row per
-/// counter track.
-struct counter_track_name_result
-{
-    size_t      track_id{};
-    std::string name;
-};
-
-/// Combined scalar detail (sample + counter value) resolved by rocpd_sample.id.
-struct scalar_detail_result
-{
-    size_t                id{};
-    size_t                track_id{};
-    size_t                timestamp{};
-    double                value{};
-    std::optional<size_t> event_id;
-};
-
-struct read_statements
+// All result structs, func typedefs, and set structs are defined in
+// read_statements_base.hpp (namespace profiler_hub::data_storage) and are
+// inherited here. This is the v3 backend: same SQL as before, now overriding
+// the abstract read_statements_base accessors.
+struct read_statements : public read_statements_base
 {
     explicit read_statements(std::shared_ptr<sqlite_backend> backend, std::string uuid)
     : m_backend{ std::move(backend) }
@@ -427,375 +63,271 @@ struct read_statements
     read_statements(read_statements&&)                 = delete;
     read_statements& operator=(const read_statements&) = delete;
     read_statements& operator=(read_statements&&)      = delete;
-    virtual ~read_statements()                         = default;
+    ~read_statements() override                        = default;
 
-    using string_statement_func_t =
-        std::function<sqlite_backend::result_set<string_result>()>;
-
-    using node_info_statement_func_t =
-        std::function<sqlite_backend::result_set<node_info_result>()>;
-
-    using process_info_statement_func_t =
-        std::function<sqlite_backend::result_set<process_info_result>()>;
-
-    using stream_info_statement_func_t =
-        std::function<sqlite_backend::result_set<stream_info_result>()>;
-
-    using queue_info_statement_func_t =
-        std::function<sqlite_backend::result_set<queue_info_result>()>;
-
-    using thread_info_statement_func_t =
-        std::function<sqlite_backend::result_set<thread_info_result>()>;
-
-    using agent_info_statement_func_t =
-        std::function<sqlite_backend::result_set<agent_info_result>()>;
-
-    using track_info_statement_func_t =
-        std::function<sqlite_backend::result_set<track_info_result>()>;
-
-    using kernel_symbol_info_statement_func_t =
-        std::function<sqlite_backend::result_set<kernel_symbol_info_result>()>;
-
-    using code_object_info_statement_func_t =
-        std::function<sqlite_backend::result_set<code_object_info_result>()>;
-
-    using pmc_info_statement_func_t =
-        std::function<sqlite_backend::result_set<pmc_info_result>()>;
-
-    using timeline_event_statement_func_t =
-        std::function<sqlite_backend::result_set<timeline_event_result>()>;
-
-    using timeline_event_time_filtered_func_t =
-        std::function<sqlite_backend::result_set<timeline_event_result>(size_t, size_t)>;
-
-    using timeline_event_track_filtered_func_t = std::function<sqlite_backend::result_set<
-        timeline_event_result>(size_t, size_t, size_t, size_t)>;
-
-    using timeline_event_track_and_time_filtered_func_t =
-        std::function<sqlite_backend::result_set<
-            timeline_event_result>(size_t, size_t, size_t, size_t, size_t, size_t)>;
-
-    // Detail statement func types (parameterized by id)
-    using region_detail_func_t =
-        std::function<sqlite_backend::result_set<region_detail_result>(size_t)>;
-    using kernel_dispatch_detail_func_t =
-        std::function<sqlite_backend::result_set<kernel_dispatch_detail_result>(size_t)>;
-    using memory_copy_detail_func_t =
-        std::function<sqlite_backend::result_set<memory_copy_detail_result>(size_t)>;
-    using memory_alloc_detail_func_t =
-        std::function<sqlite_backend::result_set<memory_alloc_detail_result>(size_t)>;
-    using event_detail_func_t =
-        std::function<sqlite_backend::result_set<event_detail_result>(size_t)>;
-    using arg_detail_func_t =
-        std::function<sqlite_backend::result_set<arg_detail_result>(size_t)>;
-    using event_id_func_t =
-        std::function<sqlite_backend::result_set<event_id_result>(size_t)>;
-    using count_func_t = std::function<sqlite_backend::result_set<count_result>()>;
-    using count_time_filtered_func_t =
-        std::function<sqlite_backend::result_set<count_result>(size_t, size_t)>;
-    using time_range_func_t =
-        std::function<sqlite_backend::result_set<time_range_result>()>;
-
-    // Correlated events: bind (stack_id, excluded_event_id)
-    using correlated_event_func_t =
-        std::function<sqlite_backend::result_set<timeline_event_result>(size_t, size_t)>;
-
-    // Track-scoped query func types
-    using interval_track_2_func_t =
-        std::function<sqlite_backend::result_set<interval_row_result>(size_t, size_t)>;
-    using interval_track_3_func_t = std::function<
-        sqlite_backend::result_set<interval_row_result>(size_t, size_t, size_t)>;
-    using interval_track_4_func_t = std::function<
-        sqlite_backend::result_set<interval_row_result>(size_t, size_t, size_t, size_t)>;
-
-    using scalar_track_func_t =
-        std::function<sqlite_backend::result_set<scalar_row_result>(size_t)>;
-
-    using flow_func_t = std::function<sqlite_backend::result_set<flow_row_result>()>;
-    using flow_time_filtered_func_t =
-        std::function<sqlite_backend::result_set<flow_row_result>(size_t, size_t)>;
-
-    using distinct_gpu_queue_func_t =
-        std::function<sqlite_backend::result_set<distinct_gpu_queue_result>()>;
-    using distinct_dma_func_t =
-        std::function<sqlite_backend::result_set<distinct_dma_result>()>;
-    using sample_track_id_func_t =
-        std::function<sqlite_backend::result_set<sample_track_id_result>()>;
-    using max_track_id_func_t =
-        std::function<sqlite_backend::result_set<max_track_id_result>()>;
-    using counter_track_name_func_t =
-        std::function<sqlite_backend::result_set<counter_track_name_result>()>;
-
-    using scalar_detail_func_t =
-        std::function<sqlite_backend::result_set<scalar_detail_result>(size_t)>;
-
-    [[nodiscard]] string_statement_func_t string_statement() const
+    [[nodiscard]] string_statement_func_t string_statement() const override
     {
         return m_string_statement;
     }
 
-    [[nodiscard]] node_info_statement_func_t node_info_statement() const
+    [[nodiscard]] node_info_statement_func_t node_info_statement() const override
     {
         return m_node_info_statement;
     }
 
-    [[nodiscard]] process_info_statement_func_t process_info_statement() const
+    [[nodiscard]] process_info_statement_func_t process_info_statement() const override
     {
         return m_process_info_statement;
     }
 
-    [[nodiscard]] stream_info_statement_func_t stream_info_statement() const
+    [[nodiscard]] stream_info_statement_func_t stream_info_statement() const override
     {
         return m_stream_info_statement;
     }
 
-    [[nodiscard]] queue_info_statement_func_t queue_info_statement() const
+    [[nodiscard]] queue_info_statement_func_t queue_info_statement() const override
     {
         return m_queue_info_statement;
     }
 
-    [[nodiscard]] thread_info_statement_func_t thread_info_statement() const
+    [[nodiscard]] thread_info_statement_func_t thread_info_statement() const override
     {
         return m_thread_info_statement;
     }
 
-    [[nodiscard]] agent_info_statement_func_t agent_info_statement() const
+    [[nodiscard]] agent_info_statement_func_t agent_info_statement() const override
     {
         return m_agent_info_statement;
     }
 
-    [[nodiscard]] track_info_statement_func_t track_info_statement() const
+    [[nodiscard]] track_info_statement_func_t track_info_statement() const override
     {
         return m_track_info_statement;
     }
 
-    [[nodiscard]] kernel_symbol_info_statement_func_t kernel_symbol_info_statement() const
+    [[nodiscard]] kernel_symbol_info_statement_func_t kernel_symbol_info_statement()
+        const override
     {
         return m_kernel_symbol_info_statement;
     }
 
-    [[nodiscard]] code_object_info_statement_func_t code_object_info_statement() const
+    [[nodiscard]] code_object_info_statement_func_t code_object_info_statement()
+        const override
     {
         return m_code_object_info_statement;
     }
 
-    [[nodiscard]] pmc_info_statement_func_t pmc_info_statement() const
+    [[nodiscard]] pmc_info_statement_func_t pmc_info_statement() const override
     {
         return m_pmc_info_statement;
     }
 
-    struct timeline_event_statement_set
-    {
-        timeline_event_statement_func_t               base;
-        timeline_event_time_filtered_func_t           time_filtered;
-        timeline_event_track_filtered_func_t          track_filtered;
-        timeline_event_track_and_time_filtered_func_t track_and_time_filtered;
-    };
-
-    [[nodiscard]] const timeline_event_statement_set& region_statements() const
+    [[nodiscard]] const timeline_event_statement_set& region_statements() const override
     {
         return m_region_statements;
     }
 
-    [[nodiscard]] const timeline_event_statement_set& kernel_dispatch_statements() const
+    [[nodiscard]] const timeline_event_statement_set& kernel_dispatch_statements()
+        const override
     {
         return m_kernel_dispatch_statements;
     }
 
-    [[nodiscard]] const timeline_event_statement_set& memory_allocate_statements() const
+    [[nodiscard]] const timeline_event_statement_set& memory_allocate_statements()
+        const override
     {
         return m_memory_allocate_statements;
     }
 
-    [[nodiscard]] const timeline_event_statement_set& memory_copy_statements() const
+    [[nodiscard]] const timeline_event_statement_set& memory_copy_statements()
+        const override
     {
         return m_memory_copy_statements;
     }
 
     // Detail query accessors
-    [[nodiscard]] const region_detail_func_t& region_detail() const
+    [[nodiscard]] const region_detail_func_t& region_detail() const override
     {
         return m_region_detail;
     }
-    [[nodiscard]] const kernel_dispatch_detail_func_t& kernel_dispatch_detail() const
+    [[nodiscard]] const kernel_dispatch_detail_func_t& kernel_dispatch_detail()
+        const override
     {
         return m_kernel_dispatch_detail;
     }
-    [[nodiscard]] const memory_copy_detail_func_t& memory_copy_detail() const
+    [[nodiscard]] const memory_copy_detail_func_t& memory_copy_detail() const override
     {
         return m_memory_copy_detail;
     }
-    [[nodiscard]] const memory_alloc_detail_func_t& memory_alloc_detail() const
+    [[nodiscard]] const memory_alloc_detail_func_t& memory_alloc_detail() const override
     {
         return m_memory_alloc_detail;
     }
-    [[nodiscard]] const event_detail_func_t& event_detail() const
+    [[nodiscard]] const event_detail_func_t& event_detail() const override
     {
         return m_event_detail;
     }
-    [[nodiscard]] const arg_detail_func_t& arg_detail() const { return m_arg_detail; }
+    [[nodiscard]] const arg_detail_func_t& arg_detail() const override
+    {
+        return m_arg_detail;
+    }
 
     // Event ID resolution accessors (one per event type)
-    [[nodiscard]] const event_id_func_t& region_event_id() const
+    [[nodiscard]] const event_id_func_t& region_event_id() const override
     {
         return m_region_event_id;
     }
-    [[nodiscard]] const event_id_func_t& kernel_dispatch_event_id() const
+    [[nodiscard]] const event_id_func_t& kernel_dispatch_event_id() const override
     {
         return m_kernel_dispatch_event_id;
     }
-    [[nodiscard]] const event_id_func_t& memory_copy_event_id() const
+    [[nodiscard]] const event_id_func_t& memory_copy_event_id() const override
     {
         return m_memory_copy_event_id;
     }
-    [[nodiscard]] const event_id_func_t& memory_alloc_event_id() const
+    [[nodiscard]] const event_id_func_t& memory_alloc_event_id() const override
     {
         return m_memory_alloc_event_id;
     }
 
-    // Correlated event accessors
-    struct correlated_event_statement_set
-    {
-        correlated_event_func_t region;
-        correlated_event_func_t kernel_dispatch;
-        correlated_event_func_t memory_copy;
-        correlated_event_func_t memory_allocate;
-    };
-
     [[nodiscard]] const correlated_event_statement_set& correlated_event_statements()
-        const
+        const override
     {
         return m_correlated_event_statements;
     }
 
     // Count and time range accessors
-    [[nodiscard]] const count_func_t& region_count() const { return m_region_count; }
-    [[nodiscard]] const count_func_t& kernel_dispatch_count() const
+    [[nodiscard]] const count_func_t& region_count() const override
+    {
+        return m_region_count;
+    }
+    [[nodiscard]] const count_func_t& kernel_dispatch_count() const override
     {
         return m_kernel_dispatch_count;
     }
-    [[nodiscard]] const count_func_t& memory_copy_count() const
+    [[nodiscard]] const count_func_t& memory_copy_count() const override
     {
         return m_memory_copy_count;
     }
-    [[nodiscard]] const count_func_t& memory_alloc_count() const
+    [[nodiscard]] const count_func_t& memory_alloc_count() const override
     {
         return m_memory_alloc_count;
     }
-    [[nodiscard]] const count_time_filtered_func_t& region_count_time_filtered() const
+    [[nodiscard]] const count_time_filtered_func_t& region_count_time_filtered()
+        const override
     {
         return m_region_count_time_filtered;
     }
     [[nodiscard]] const count_time_filtered_func_t& kernel_dispatch_count_time_filtered()
-        const
+        const override
     {
         return m_kernel_dispatch_count_time_filtered;
     }
     [[nodiscard]] const count_time_filtered_func_t& memory_copy_count_time_filtered()
-        const
+        const override
     {
         return m_memory_copy_count_time_filtered;
     }
     [[nodiscard]] const count_time_filtered_func_t& memory_alloc_count_time_filtered()
-        const
+        const override
     {
         return m_memory_alloc_count_time_filtered;
     }
-    [[nodiscard]] const time_range_func_t& region_time_range() const
+    [[nodiscard]] const time_range_func_t& region_time_range() const override
     {
         return m_region_time_range;
     }
-    [[nodiscard]] const time_range_func_t& kernel_dispatch_time_range() const
+    [[nodiscard]] const time_range_func_t& kernel_dispatch_time_range() const override
     {
         return m_kernel_dispatch_time_range;
     }
-    [[nodiscard]] const time_range_func_t& memory_copy_time_range() const
+    [[nodiscard]] const time_range_func_t& memory_copy_time_range() const override
     {
         return m_memory_copy_time_range;
     }
-    [[nodiscard]] const time_range_func_t& memory_alloc_time_range() const
+    [[nodiscard]] const time_range_func_t& memory_alloc_time_range() const override
     {
         return m_memory_alloc_time_range;
     }
 
     // Track synthesis accessors
-    [[nodiscard]] const distinct_gpu_queue_func_t& distinct_gpu_queue_tracks() const
+    [[nodiscard]] const distinct_gpu_queue_func_t& distinct_gpu_queue_tracks()
+        const override
     {
         return m_distinct_gpu_queue_tracks;
     }
-    [[nodiscard]] const distinct_dma_func_t& distinct_dma_tracks() const
+    [[nodiscard]] const distinct_dma_func_t& distinct_dma_tracks() const override
     {
         return m_distinct_dma_tracks;
     }
-    [[nodiscard]] const sample_track_id_func_t& distinct_sample_track_ids() const
+    [[nodiscard]] const sample_track_id_func_t& distinct_sample_track_ids() const override
     {
         return m_distinct_sample_track_ids;
     }
-    [[nodiscard]] const max_track_id_func_t& max_track_id() const
+    [[nodiscard]] const max_track_id_func_t& max_track_id() const override
     {
         return m_max_track_id;
     }
-    [[nodiscard]] const counter_track_name_func_t& counter_track_names() const
+    [[nodiscard]] const counter_track_name_func_t& counter_track_names() const override
     {
         return m_counter_track_names;
     }
 
     // Interval-track accessors
-    [[nodiscard]] const interval_track_3_func_t& region_interval_track() const
+    [[nodiscard]] const interval_track_3_func_t& region_interval_track() const override
     {
         return m_region_interval_track;
     }
-    [[nodiscard]] const interval_track_4_func_t& kernel_dispatch_interval_track() const
+    [[nodiscard]] const interval_track_4_func_t& kernel_dispatch_interval_track()
+        const override
     {
         return m_kernel_dispatch_interval_track;
     }
-    [[nodiscard]] const interval_track_4_func_t& memory_copy_interval_qs() const
+    [[nodiscard]] const interval_track_4_func_t& memory_copy_interval_qs() const override
     {
         return m_memory_copy_interval_qs;
     }
-    [[nodiscard]] const interval_track_3_func_t& memory_copy_interval_q_only() const
+    [[nodiscard]] const interval_track_3_func_t& memory_copy_interval_q_only()
+        const override
     {
         return m_memory_copy_interval_q_only;
     }
-    [[nodiscard]] const interval_track_3_func_t& memory_copy_interval_s_only() const
+    [[nodiscard]] const interval_track_3_func_t& memory_copy_interval_s_only()
+        const override
     {
         return m_memory_copy_interval_s_only;
     }
-    [[nodiscard]] const interval_track_2_func_t& memory_copy_interval_neither() const
+    [[nodiscard]] const interval_track_2_func_t& memory_copy_interval_neither()
+        const override
     {
         return m_memory_copy_interval_neither;
     }
 
     // Scalar-track accessors
-    [[nodiscard]] const scalar_track_func_t& scalar_track() const
+    [[nodiscard]] const scalar_track_func_t& scalar_track() const override
     {
         return m_scalar_track;
     }
-    [[nodiscard]] const scalar_detail_func_t& scalar_detail() const
+    [[nodiscard]] const scalar_detail_func_t& scalar_detail() const override
     {
         return m_scalar_detail;
     }
-    [[nodiscard]] const scalar_detail_func_t& pmc_event_detail() const
+    [[nodiscard]] const scalar_detail_func_t& pmc_event_detail() const override
     {
         return m_pmc_event_detail;
     }
 
-    // Flow accessors
-    struct flow_statement_set
-    {
-        flow_func_t               base;
-        flow_time_filtered_func_t time_filtered;
-    };
-
-    [[nodiscard]] const flow_statement_set& region_to_kernel_dispatch_flows() const
+    [[nodiscard]] const flow_statement_set& region_to_kernel_dispatch_flows()
+        const override
     {
         return m_region_to_kernel_dispatch_flows;
     }
-    [[nodiscard]] const flow_statement_set& region_to_memory_copy_flows() const
+    [[nodiscard]] const flow_statement_set& region_to_memory_copy_flows() const override
     {
         return m_region_to_memory_copy_flows;
     }
-    [[nodiscard]] const flow_statement_set& region_to_memory_allocate_flows() const
+    [[nodiscard]] const flow_statement_set& region_to_memory_allocate_flows()
+        const override
     {
         return m_region_to_memory_allocate_flows;
     }
