@@ -2280,7 +2280,7 @@ void GraphExecSegmented::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pk
 // Publish an empty metadata slot as HSA_PACKET_TYPE_INVALID. The four metadata packet headers
 // live at offsets {0, 64, 128, 192} within the 256-byte AqlMetadataPrefetchPacket layout, and
 // the low byte of each is the packet type.
-void GraphExec::PacketBatch::invalidateMetadataSlot(uint8_t* slot) {
+void GraphExecSegmented::PacketBatch::invalidateMetadataSlot(uint8_t* slot) {
   static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
   static constexpr uint32_t kInvalidMetadataHeader = 1;  // HSA_PACKET_TYPE_INVALID
   for (size_t h = 0; h < 4; ++h) {
