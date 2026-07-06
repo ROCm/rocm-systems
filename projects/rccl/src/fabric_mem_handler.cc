@@ -35,16 +35,16 @@ ncclFabricMemHandler::ncclFabricMemHandler(
       exchanged_(false) {}
 
 ncclFabricMemHandler::~ncclFabricMemHandler() {
-  if (!exchanged_) {
-    return;
-  }
-  // Free only the imported peer mappings; the local buffer is owned by the
-  // caller and freed separately.
+  // Free any imported peer mappings even if exchangeMemPtrs() failed partway
+  // (exchanged_ may be false while some peers were already mapped). Only the
+  // imported peer mappings are freed; the local buffer (memPtrs_[rank_] ==
+  // selfPtr_) is owned by the caller and freed separately.
   for (int i = 0; i < nranks_; ++i) {
     if (i == rank_ || memPtrs_[static_cast<size_t>(i)] == nullptr) {
       continue;
     }
     (void)ncclCuMemFreeAddr(memPtrs_[static_cast<size_t>(i)], manager_);
+    memPtrs_[static_cast<size_t>(i)] = nullptr;
   }
 }
 
@@ -99,8 +99,10 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
       WARN("ncclFabricMemHandler::exchangeMemPtrs: ncclCuMemAllocAddr failed for peer %d", i);
       return res;
     }
-    CUCHECK(cuMemRelease(peerHandle));
+    // Record the mapping before releasing the handle so the destructor can
+    // free it even if cuMemRelease below fails and returns early.
     memPtrs_[static_cast<size_t>(i)] = peerPtr;
+    CUCHECK(cuMemRelease(peerHandle));
   }
 
   exchanged_ = true;

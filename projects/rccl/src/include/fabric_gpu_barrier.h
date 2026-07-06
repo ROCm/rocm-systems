@@ -70,10 +70,16 @@ class FabricGpuBarrier {
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < nRanks_) {
-      const int peerRank = threadIdx.x;
+    // Each thread handles one or more peers in a strided loop so the barrier
+    // stays correct when blockDim.x < nRanks_. A small count can launch as few
+    // as 64 threads while a clique may have up to kDdaMaxNranks ranks; with a
+    // single thread per peer, peers with rank >= blockDim.x would never be
+    // signaled or waited on, hanging the barrier. Every rank walks peers in the
+    // same increasing order, so the interleaved signal/wait cannot deadlock.
+    FlagType* selfBuf = peerFlags_[selfRank_];
+    for (int peerRank = threadIdx.x; peerRank < nRanks_;
+         peerRank += blockDim.x) {
       FlagType* peerBuf = peerFlags_[peerRank];
-      FlagType* selfBuf = peerFlags_[selfRank_];
 
       // Signal the peer that this rank reached the barrier for this block.
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
