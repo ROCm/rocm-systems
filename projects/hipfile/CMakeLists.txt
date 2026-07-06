@@ -235,11 +235,6 @@ option(AIS_INSTALL_EXAMPLES "Install example programs" ON)
 option(AIS_INSTALL_TOOLS "Install tool programs" ON)
 
 #------------------
-# rocprofiler-register integration
-#------------------
-option(HIPFILE_ROCPROFILER_REGISTER "Enable rocprofiler-register API table registration" OFF)
-
-#------------------
 # Test programs
 #------------------
 # Whether to install the relocatable unit-test assets (binaries + ctest files)
@@ -273,10 +268,6 @@ if(${hip_FOUND})
     message(STATUS "hip found @  ${hip_DIR} ")
 else()
     message(NOTICE "find_package did NOT find hip")
-endif()
-
-if(HIPFILE_ROCPROFILER_REGISTER)
-    find_package(rocprofiler-register CONFIG REQUIRED)
 endif()
 
 # Find the cuFile library and headers on NVIDIA
