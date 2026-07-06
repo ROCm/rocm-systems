@@ -1444,15 +1444,15 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   if (errorCode == static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_FAULT)) {
     queue->MarkVMFaulted();
     core::Runtime::runtime_singleton_->SignalVMFault();
-    debug_print("Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
+    log_warning_n(1,"Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
     return exceptionHandlerDone();
   }
 
   const char* errorMsg = nullptr;
   if (HSA::hsa_status_string(errorCode, &errorMsg) == HSA_STATUS_SUCCESS && errorMsg) {
-    fprintf(stderr, "Queue error: %s\n", errorMsg);
+    log_warning_n(1, "Queue error: %s\n", errorMsg);
   } else {
-    fprintf(stderr, "Queue error: code 0x%lx\n", (unsigned long)error_code);
+    log_warning_n(1, "Queue error: code 0x%lx\n", (unsigned long)error_code);
   }
 
   // Fallback if KFD does not support GPU core dump. In this case, the core
