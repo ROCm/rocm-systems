@@ -20,7 +20,7 @@ from utils.logger import (
 
 NS_TO_MS = 1.0 / 1_000_000.0
 
-# Canonical column-name preference order for Pct of Peak lookups
+# Canonical column-name preference order for Percent of Peak lookups
 VALUE_COL_PREFERENCE: tuple[str, ...] = ("Avg", "Value")
 PEAK_COL_PREFERENCE: tuple[str, ...] = ("Peak", "Peak (Empirical)")
 
@@ -202,10 +202,15 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
     )
 
 
+def decode_marker_name(name: str) -> str:
+    """Decode a percent-encoded marker segment ('%2F' -> '/', '%25' -> '%')."""
+    return name.replace("%2F", "/").replace("%25", "%")
+
+
 def build_call_trees(
     df: pd.DataFrame,
 ) -> dict[str, CallTreeNode]:
-    """Build per-source-location call trees from a consolidated torch trace DataFrame.
+    """Build per-source-location call trees from a consolidated ML API trace DataFrame.
 
     Returns a dict mapping ``file:line`` to a CallTreeNode root whose
     children form the full operator/kernel hierarchy.
@@ -254,7 +259,6 @@ def build_call_trees(
             call_trees[location] = CallTreeNode(name=location)
         location_root = call_trees[location]
 
-        op_segments = op_path.split("/")
         ctx_segments = (
             str(context_id).split("/")
             if has_context_id and context_id is not None and pd.notna(context_id)
@@ -262,7 +266,8 @@ def build_call_trees(
         )
 
         current_node = location_root
-        for i, path_segment in enumerate(op_segments):
+        for i, encoded_segment in enumerate(op_path.split("/")):
+            path_segment = decode_marker_name(encoded_segment)
             if path_segment not in current_node.children:
                 current_node.children[path_segment] = CallTreeNode(name=path_segment)
             current_node = current_node.children[path_segment]
@@ -290,12 +295,12 @@ def build_call_trees(
     return call_trees
 
 
-def write_torch_trace_consolidated_csv(
+def write_ml_api_trace_consolidated_csv(
     consolidated_df: pd.DataFrame,
-    torch_trace_path: Path,
+    ml_api_trace_path: Path,
 ) -> None:
-    """Write the consolidated torch trace DataFrame to ``consolidated.csv``."""
-    output_file = torch_trace_path / "consolidated.csv"
+    """Write the consolidated ML API trace DataFrame to consolidated.csv."""
+    output_file = ml_api_trace_path / "consolidated.csv"
     consolidated_df.sort_values("Operator_Name", ignore_index=True).to_csv(
         output_file, index=False
     )
@@ -434,21 +439,21 @@ def build_operator_summary(
 
 
 @demarcate
-def process_torch_trace_output(
+def process_ml_api_trace_output(
     workload_dir: str,
 ) -> tuple[pd.DataFrame, Path]:
     """
-    Build consolidated torch trace rows and prepare output directory.
+    Build consolidated ML API trace rows and prepare output directory.
 
     - Performs inner join on Correlation_ID, filtering out unmatched entries
     - Consolidates data across passes and normalizes required columns
-    - Prepares a clean workload_dir/torch_trace/ directory for output files
+    - Prepares a clean workload_dir/ml_api_trace/ directory for output files
 
-    Returns (consolidated_df, torch_trace_path) on success.
+    Returns (consolidated_df, ml_api_trace_path) on success.
     """
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
-        Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv")
+        Path(workload_dir).glob("**/ml_api_trace*_marker_api_trace.csv")
     )
     counter_collection_csvs = [
         markers_file.parent
@@ -464,15 +469,16 @@ def process_torch_trace_output(
     if not existing_csv_files:
         console_warning(
             "No marker files with corresponding counter files found. "
-            "Ensure profiling was done with '--torch-trace'."
+            "Ensure profiling was done with ML API tracing enabled "
+            "(e.g., via '--torch-trace')."
         )
-        return pd.DataFrame(), Path(f"{workload_dir}/torch_trace")
+        return pd.DataFrame(), Path(f"{workload_dir}/ml_api_trace")
 
-    torch_trace_path = Path(f"{workload_dir}/torch_trace")
-    if torch_trace_path.exists():
-        shutil.rmtree(torch_trace_path)
-        console_log(f"Removed previous torch_trace directory: {torch_trace_path}")
-    torch_trace_path.mkdir(parents=True, exist_ok=True)
+    ml_api_trace_path = Path(f"{workload_dir}/ml_api_trace")
+    if ml_api_trace_path.exists():
+        shutil.rmtree(ml_api_trace_path)
+        console_log(f"Removed previous ml_api_trace directory: {ml_api_trace_path}")
+    ml_api_trace_path.mkdir(parents=True, exist_ok=True)
 
     # Join marker and counter data
     def _merge_pair(
@@ -527,15 +533,21 @@ def process_torch_trace_output(
     ]
     if missing_columns:
         console_error(
-            f"Consolidated torch trace is missing required columns {missing_columns}"
+            f"Consolidated ML API trace is missing required columns {missing_columns}"
         )
         raise ValueError(
-            f"Consolidated torch trace is missing required columns {missing_columns}"
+            f"Consolidated ML API trace is missing required columns {missing_columns}"
         )
-    consolidated_df = consolidated_df[required_columns]
-    if consolidated_df.isnull().values.any():
-        console_warning("Consolidated torch trace contains missing values")
-        raise ValueError("Consolidated torch trace contains missing values")
+    # Backend is added by utils_profile._augment_marker_csv. When absent,
+    # default to "torch".
+    has_backend = "Backend" in consolidated_df.columns
+    projection = [*required_columns, "Backend"] if has_backend else required_columns
+    consolidated_df = consolidated_df[projection]
+    if not has_backend:
+        consolidated_df = consolidated_df.assign(Backend="torch")
+    if consolidated_df.drop(columns=["Backend"]).isnull().values.any():
+        console_warning("Consolidated ML API trace contains missing values")
+        raise ValueError("Consolidated ML API trace contains missing values")
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
     consolidated_df["Operator_Name"] = (
@@ -549,6 +561,7 @@ def process_torch_trace_output(
         [
             "Operator_Name",
             "Context_Id",
+            "Backend",
             "Kernel_Name",
             "Counter_Name",
             "Counter_Value",
@@ -560,12 +573,12 @@ def process_torch_trace_output(
     ]
     if consolidated_df.isnull().values.any():
         console_error(
-            "Missing values in consolidated torch trace after splitting ",
+            "Missing values in consolidated ML API trace after splitting ",
             "the Function name.",
         )
-        raise ValueError("Missing values in consolidated torch trace after splitting")
+        raise ValueError("Missing values in consolidated ML API trace after splitting")
 
-    return consolidated_df, torch_trace_path
+    return consolidated_df, ml_api_trace_path
 
 
 def is_workload_empty(path: str) -> None:
@@ -728,95 +741,6 @@ def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) ->
     )
 
 
-def merge_counters_spatial_multiplex(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    For spatial multiplexing, this merges counter values for the same kernel that
-    runs on different devices. For time stamp, start time stamp will use median
-    while for end time stamp, it will be equal to the summation between median
-    start stamp and median delta time.
-    """
-    non_counter_column_index = [
-        "Dispatch_ID",
-        "GPU_ID",
-        "Queue_ID",
-        "PID",
-        "TID",
-        "Grid_Size",
-        "Workgroup_Size",
-        "LDS_Per_Workgroup",
-        "Scratch_Per_Workitem",
-        "Arch_VGPR",
-        "Accum_VGPR",
-        "SGPR",
-        "Wave_Size",
-        "Kernel_Name",
-        "Start_Timestamp",
-        "End_Timestamp",
-        "Correlation_ID",
-        "Kernel_ID",
-        "Node",
-    ]
-
-    expired_column_index = [
-        "Node",
-        "PID",
-        "TID",
-        "Queue_ID",
-    ]
-
-    kernel_name_column_name = "Kernel_Name"
-    if "Kernel_Name" not in df and "Name" in df:
-        kernel_name_column_name = "Name"
-
-    # Find the values in Kernel_Name that occur more than once
-    kernel_single_occurances = df[kernel_name_column_name].value_counts().index
-
-    # Define a list to store the merged rows
-    result_data: list[dict[str, Any]] = []
-
-    for kernel_name in kernel_single_occurances:
-        # Get all rows for the current kernel_name
-        group = df[df[kernel_name_column_name] == kernel_name]
-
-        # Create a dictionary to store the merged row for the current group
-        merged_row: dict[str, Any] = {}
-
-        # Process non-counter columns
-        for col in [
-            col for col in non_counter_column_index if col not in expired_column_index
-        ]:
-            if col == "Start_Timestamp":
-                # For Start_Timestamp, take the median
-                merged_row[col] = group["Start_Timestamp"].median()
-            elif col == "End_Timestamp":
-                # For End_Timestamp, calculate the median delta time
-                delta_time = group[col] - group["Start_Timestamp"]
-                merged_row[col] = group["Start_Timestamp"] + delta_time.median()
-            else:
-                # For other non-counter columns, take the first occurrence (0th row)
-                merged_row[col] = group.iloc[0][col]
-
-        # Process counter columns (assumed to be all columns not in
-        # non_counter_column_index)
-        counter_columns = [
-            col for col in group.columns if col not in non_counter_column_index
-        ]
-        for counter_col in counter_columns:
-            # for counter columns, take the first non-none (or non-nan) value
-            current_valid_counter_group = group[group[counter_col].notna()]
-            first_valid_value = (
-                current_valid_counter_group.iloc[0][counter_col]
-                if len(current_valid_counter_group) > 0
-                else None
-            )
-            merged_row[counter_col] = first_valid_value
-
-        # Append the merged row to the result list
-        result_data.append(merged_row)
-
-    return pd.DataFrame(result_data)
-
-
 def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     """
     Merge counters across unique dispatches from the
@@ -858,3 +782,16 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(len(df))
     return df
+
+
+def get_matrix_ops_type(gpu_series: str) -> str:
+    """
+    Get the matrix operation type supported by the profiled hardware in roofline
+    run_parameters.
+    For the supported architecture of this tool, only CDNA2/3/4 supports Matrix
+    Fused Multiply-Add instructions; all other architectures support Warp
+    Matrix Multiply-Accumulate operations.
+    """
+    if gpu_series in ["MI200", "MI300", "MI350"]:
+        return "MFMA"
+    return "WMMA"

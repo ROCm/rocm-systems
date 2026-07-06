@@ -37,6 +37,21 @@ template <typename T> __global__ void Inc(T* Ad) {
   Ad[i]++;
 }
 
+#if HT_AMD
+__global__ void AtomicFAddKernelKernel(float* data, size_t n) {
+  size_t i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i < n) {
+#if __has_builtin(__builtin_amdgcn_global_atomic_fadd_f32)
+    __builtin_amdgcn_global_atomic_fadd_f32(data, 1.0f);  // Only work on coarse grained buffer
+#else
+    if (i == 0) {
+      *data = -1.0;
+    }
+#endif
+  }
+}
+#endif
+
 template <typename T>
 void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internalRegister) {
   constexpr auto memsetval = 13.0f;
@@ -677,7 +692,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_Flags) {
       FlagType{hipHostRegisterReadOnly, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipHostRegisterReadOnly, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-      FlagType{hipHostRegisterIoMemory, true},
+      FlagType{hipHostRegisterIoMemory, true}, FlagType{hipExtHostRegisterCoarseGrained, true},
       FlagType{hipExtHostRegisterUncached, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached, true},
 #endif
@@ -698,6 +713,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_Flags) {
   }
   free(hostPtr);
 }
+
 /**
  * Test Description
  * ------------------------
@@ -831,6 +847,48 @@ HIP_TEST_CASE(Unit_hipHostRegister_Capture) {
   if (capture_error == hipSuccess) {
     HIP_CHECK(hipHostUnregister(buffer.get()));
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - This testcase verifies hipExtHostRegisterCoarseGrained flags of hipHostRegister.
+ *    - In this case L2 cache is enabled on device, atomic is valid on device only,
+ *    - and perf will be better.
+ * Test source
+ * ------------------------
+ *    - catch\unit\memory\hipHostRegister.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipHostRegister_with_hipExtHostRegisterCoarseGrained) {
+#if HT_AMD
+  const size_t count = 65536;
+  const size_t threadsPerBlock = 64;
+  size_t sizeBytes = sizeof(float);
+  float* hostPtr = reinterpret_cast<float*>(malloc(sizeBytes));
+  float* devicePtr = nullptr;
+  *hostPtr = 0;
+  HIP_CHECK(hipHostRegister(hostPtr, sizeBytes, hipExtHostRegisterCoarseGrained));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devicePtr), hostPtr, 0));
+  AtomicFAddKernelKernel<<<(count + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(
+      devicePtr, count);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipHostUnregister(hostPtr));
+  std::cout << "hostPtr=" << hostPtr << ", devicePtr=" << devicePtr << std::endl;
+  if (*hostPtr == static_cast<float>(count)) {
+    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 works well!" << std::endl;
+    REQUIRE(true);
+  } else if (*hostPtr == -1.0f) {
+    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 not supported!" << std::endl;
+    REQUIRE(true);
+  } else {
+    std::cout << count << " -> " << *hostPtr << std::endl;
+    REQUIRE(false);
+  }
+  free(hostPtr);
+#endif
 }
 
 /**

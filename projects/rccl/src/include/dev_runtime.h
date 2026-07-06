@@ -30,6 +30,12 @@ struct ncclDevrWindow {
   struct ncclComm* comm; // comm for intrusive map window <> comm look up
   void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]; // IB MR handles per GIN connection (proxy-only path)
   ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]; // device-side GIN window handles (proxy-only path)
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: intra-node IPC peer table (NULL when inactive), sized to lsaSize.
+  void** ipcPeerPtrs;
+  void** ipcPeerPtrsAllocBase;
+  int ipcPeerCount;
+#endif
 };
 
 struct ncclDevrWindowSorted;

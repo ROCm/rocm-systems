@@ -167,6 +167,18 @@ public:
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
 
+  /// @brief Return this workgroup's rank within its cluster.
+  uint32_t cluster_rank() const { return cluster_rank_; }
+
+  /// @brief Return the number of workgroups in this workgroup's cluster.
+  uint32_t cluster_size() const { return cluster_size_; }
+
+  /// @brief Set cluster placement metadata computed by the command processor.
+  void set_cluster_info(uint32_t rank, uint32_t size) {
+    cluster_rank_ = rank;
+    cluster_size_ = size == 0 ? 1 : size;
+  }
+
   /// @brief Return the SGPR register file allocation.
   /// @returns Const reference to the SGPR allocation slice.
   const RegAllocation &sgpr_alloc() const { return sgpr_alloc_; }
@@ -427,6 +439,8 @@ public:
     wg_id_ = 0;
     dispatch_id_ = 0;
     process_id_ = 0;
+    cluster_rank_ = 0;
+    cluster_size_ = 1;
     num_sgprs_ = 0;
     num_vgprs_ = 0;
     sgpr_alloc_ = {};
@@ -459,12 +473,14 @@ protected:
             uint32_t max_vgprs)
       : cu_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs), max_vgprs_(max_vgprs) {}
 
-  ComputeUnitCore &cu_;      ///< Parent CU (permanent, set at construction).
-  uint32_t wf_id_ = 0;       ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0;       ///< Workgroup ID (set per dispatch).
-  uint32_t dispatch_id_ = 0; ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t process_id_ = 0;  ///< Owning process ID (PASID analog, set per dispatch).
-  uint32_t lds_base_ = 0;    ///< Per-WG LDS base offset (set per dispatch).
+  ComputeUnitCore &cu_;       ///< Parent CU (permanent, set at construction).
+  uint32_t wf_id_ = 0;        ///< Slot index within the CU (permanent).
+  uint32_t wg_id_ = 0;        ///< Workgroup ID (set per dispatch).
+  uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
+  uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
 
   uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
   uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).

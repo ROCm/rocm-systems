@@ -85,7 +85,7 @@ class MIGPUSpecs:
                     |-- design
                         | -- physical_aid (CDNA)
                         | -- logical_partitions_per_die (CDNA)
-                        | -- memory_die (RDNA/navi3)
+                        | -- memory_levels
         """
 
         current_dir = Path(__file__).parent
@@ -370,19 +370,21 @@ class MIGPUSpecs:
     @classmethod
     def get_num_dies(cls, gpu_arch: str, gpu_model: str) -> int:
         """
-        CDNA: Some gpu models' architecture has larger physical AIDs but through
-        software divides the physical AIDs into distinct logical AID partitions.
-
-        RDNA: Check for the MCD count. *supported products at this time are APUs,
-        which do not have MCD concept like dGPUs- force to "1" to signal unified memory.
+        Some CDNA models have larger physical AIDs that software divides into
+        distinct logical AID partitions. Models without these keys (including
+        single-die gfx115x) resolve to a single die.
         """
-        if cls.get_gpu_series(gpu_arch).lower() == "navi3":
-            return cls._gpu_design[gpu_model.lower()].get("memory_die", 1)
-        else:
-            design = cls._gpu_design.get(gpu_model.lower(), {})
-            return design.get("physical_aid", 1) * design.get(
-                "logical_partitions_per_die", 1
-            )
+        design = cls._gpu_design.get(gpu_model.lower(), {})
+        return design.get("physical_aid", 1) * design.get(
+            "logical_partitions_per_die", 1
+        )
+
+    @classmethod
+    def get_memory_levels(cls, gpu_model: str) -> list[str]:
+        """
+        Return a list of the cache and memory levels supported by the specific gpu model
+        """
+        return cls._gpu_design[gpu_model.lower()].get("memory_levels", [])
 
     @classmethod
     def get_chip_id_dict(cls) -> dict[int, str]:

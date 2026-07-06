@@ -211,7 +211,7 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         };
 
         static_assert(
-            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_ROCJPEG_LIBRARY,
+            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_OMPT_LIBRARY,
             "Since a new library was added to rocprofiler_runtime_library_t, please make sure "
             "rocprofiler_agent_runtime_visiblity_t has an entry for this library (if "
             "necessary) and make the necessary updates to the logic below has been updated");

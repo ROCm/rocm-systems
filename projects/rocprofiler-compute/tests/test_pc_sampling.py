@@ -27,6 +27,19 @@ PC_SAMPLING_STOCHASTIC_FILES = sorted([
 ])
 
 
+def _assert_pc_sampling_files(file_dict, expected):
+    """Assert the PC sampling output file-set, matching the native collector's
+    ``<pid>_code_obj_info.json``.
+    """
+    keys = list(file_dict.keys())
+    code_obj = [k for k in keys if k.endswith("_code_obj_info.json")]
+    assert len(code_obj) == 1, (
+        f"expected exactly one *_code_obj_info.json, got {code_obj}"
+    )
+    remaining = sorted(k for k in keys if k not in code_obj)
+    assert remaining == sorted(expected)
+
+
 def is_pc_sampling_not_supported(output):
     """
     To be called with the stdout + stderr after profiling.
@@ -73,7 +86,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -110,7 +123,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
+    _assert_pc_sampling_files(file_dict, PC_SAMPLING_STOCHASTIC_FILES)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -241,7 +254,7 @@ def test_pc_sampling_profile_then_analyze(
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
 
     code = binary_handler_analyze_rocprof_compute(
         [
@@ -334,7 +347,7 @@ def test_pc_sampling_with_sol_block(
 
     assert code == 0
     file_dict = common.check_csv_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
 
     assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")
     assert common.check_file_pattern("- '2'", f"{workload_dir}/profiling_config.yaml")
