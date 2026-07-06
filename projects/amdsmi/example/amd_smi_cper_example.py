@@ -48,7 +48,7 @@ def gpuid(device):
 
 def dump_cper_entry(entry, cper_data, key):
     try:
-        os.mkdir("/tmp/cper_dump", mode=0o777, dir_fd=None)
+        os.mkdir("/tmp/cper_dump", mode=0o700, dir_fd=None)
     except FileExistsError:
         pass
     cper_file = f"/tmp/cper_dump/cper_entry_{key}.bin"

@@ -9,6 +9,10 @@ ARG DEBCONF_NONINTERACTIVE_SEEN=true
 ENV TZ="America/Chicago"
 RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezone
 
+# Build-toolchain packages are intentionally left at the ubuntu:22.04 archive
+# versions: exact "=version" pins break when Ubuntu rotates point releases out
+# of the archive. Reproducibility is anchored on the base image tag and the
+# pinned pip toolchain (clang/ctypeslib2) below.
 RUN apt update --yes \
         && apt install --yes \
             build-essential \
@@ -21,7 +25,6 @@ RUN apt update --yes \
             libnl-genl-3-dev \
             libpython3-dev \
             lsb-release \
-            pkg-config \
             pkg-config \
             python3-pip \
             software-properties-common \
