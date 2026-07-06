@@ -184,7 +184,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   // saves the current device id so that it can be accessed later. For host-NUMA
   // allocations location.id is a NUMA node id (not a device index), so record the
   // current device for the device-indexed bookkeeping and keep the node separately.
-  phys_mem_obj->getUserData().deviceId = isHostNuma ? dev->deviceId() : prop->location.id;
+  phys_mem_obj->getUserData().deviceId =
+      (prop->location.type == hipMemLocationTypeDevice) ? prop->location.id : dev->deviceId();
   phys_mem_obj->getUserData().locationType = prop->location.type;
   phys_mem_obj->getUserData().numaNode = numaNode;
   phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, size, *prop);
