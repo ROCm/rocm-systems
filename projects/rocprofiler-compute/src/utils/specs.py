@@ -1,7 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Get host/gpu specs."""
+"""Get host/gpu specs.
+
+This module provides:
+- MachineSpecs dataclass hierarchy (base, CDNA, RDNA) for GPU specifications
+- Functions to extract machine, GPU, and SoC information
+- generate_machine_specs() as the main entry point for spec generation
+"""
 
 from __future__ import annotations
 
@@ -31,7 +37,6 @@ from utils.utils_common import format_table_ascii, get_version
 
 T = TypeVar("T")
 
-
 VERSION_LOC: list[str] = [
     "version",
     "version-dev",
@@ -44,7 +49,151 @@ VERSION_LOC: list[str] = [
 ]
 
 
-def run(cmd: list[str]) -> Optional[str]:
+def spec_family_for_arch(gpu_arch: Optional[str]) -> type[MachineSpecs]:
+    """Return the MachineSpecs subclass for a GPU arch (by series).
+
+    The "RDNA3.5" series maps to RDNA 3.5; everything else (mi100, mi200,
+    mi300, etc.) maps to CDNA.
+    """
+    series = mi_gpu_specs.get_gpu_series(gpu_arch) if gpu_arch else None
+    if series and series.upper() == "RDNA3.5":
+        return MachineSpecsRDNA35
+    return MachineSpecsCDNA
+
+
+def generate_machine_specs(
+    args: Optional[argparse.Namespace], sysinfo: Optional[dict[str, Any]] = None
+) -> MachineSpecs:
+    """Generate machine specifications from sysinfo dict or live hardware probing.
+
+    If sysinfo is provided, reconstructs MachineSpecs from the saved data.
+    Otherwise, probes the current system for hardware information.
+    """
+    if sysinfo is not None:
+        return _reconstruct_specs_from_sysinfo(sysinfo)
+
+    return _probe_live_machine_specs(args)
+
+
+def get_rocm_ver() -> str:
+    """Detect the installed ROCm version from filesystem or environment."""
+    rocm_base_path = path(os.getenv("ROCM_PATH", "/opt/rocm"))
+
+    for version_file_name in VERSION_LOC:
+        version_file_path = rocm_base_path / ".info" / version_file_name
+        if version_file_path.exists():
+            return version_file_path.read_text(encoding="utf-8").strip()
+
+    rocm_ver_user = os.getenv("ROCM_VER")
+    if rocm_ver_user:
+        console_log(
+            "profiling",
+            f"Overriding missing ROCm version detection with "
+            f"ROCM_VER = {rocm_ver_user}",
+        )
+        return rocm_ver_user
+
+    console_warning("Unable to detect a complete local ROCm installation.")
+    console_warning(
+        f"The expected {rocm_base_path}/.info/ versioning directory is missing."
+    )
+    console_error("Ensure you have valid ROCm installation.", exit=False)
+    return ""
+
+
+def total_sqc(archname: str, num_compute_units: str, num_shader_engines: str) -> int:
+    """Calculate total SQC (scalar cache) count for an architecture."""
+    cu_per_se = float(num_compute_units) / float(num_shader_engines)
+    sq_per_se = cu_per_se / 2.0
+    if archname.lower() in ["mi50", "mi100"]:
+        sq_per_se = cu_per_se / 3
+    sq_per_se = ceil(sq_per_se)
+    return int(sq_per_se) * int(num_shader_engines)
+
+
+def totall2_banks(
+    gpu_arch: Optional[str] = None,
+    gpu_model: Optional[str] = None,
+    L2banks: Optional[str] = None,
+    compute_partition: Optional[str] = None,
+) -> Optional[str]:
+    """Calculate total L2 banks across all XCDs."""
+    xcd_count = mi_gpu_specs.get_num_xcds(gpu_arch, gpu_model, compute_partition)
+
+    if L2banks is not None and xcd_count is not None:
+        return str(int(L2banks) * int(xcd_count))
+    return None
+
+
+def set_cache_sizes(
+    gpu_model: str,
+    num_cu: int,
+    cache_info: dict,
+    num_dies: int,
+    num_se: str | int,
+    num_sa_se: str | int,
+) -> dict[str, int]:
+    """Extrapolate cache sizes from AMD-SMI cache info output."""
+    if num_cu == 0:
+        console_error("Failed to determine GPU compute unit count from AMD-SMI.")
+    if not cache_info:
+        console_error("Failed to retrieve GPU cache information from AMD-SMI.")
+
+    cache_sizes: dict[str, int] = {}
+    memory_levels = mi_gpu_specs.get_memory_levels(gpu_model)
+
+    l1_data_caches = [
+        cache_values
+        for cache_values in cache_info["cache"]
+        if cache_values["cache_level"] == 1
+        and "DATA_CACHE" in cache_values["cache_properties"]
+    ]
+    if l1_data_caches:
+        vl1d = max(l1_data_caches, key=lambda cache: cache["num_cache_instance"])
+        l1_key = "L0" if "L0" in memory_levels else "L1"
+        cache_sizes[l1_key] = int(vl1d["cache_size"]) * 1024
+
+    if "L0" in memory_levels and "L1" in memory_levels:
+        if num_sa_se is None:
+            console_warning(
+                "Shader Arrays per Shader Engine spec is not available; "
+                "skipping GL1 cache size detection"
+            )
+        else:
+            sa_level_cache = [
+                c
+                for c in l1_data_caches
+                if c["num_cache_instance"] == int(num_se) * int(num_sa_se)
+            ]
+            if sa_level_cache:
+                cache_sizes["L1"] = int(sa_level_cache[0]["cache_size"]) * 1024
+
+    for cache_values in cache_info["cache"]:
+        if cache_values["cache_level"] == 2:
+            cache_sizes["L2"] = int(cache_values["cache_size"]) * 1024
+        elif cache_values["cache_level"] == 3 and num_dies > 0:
+            cache_sizes["MALL"] = int(cache_values["cache_size"]) * 1024 // num_dies
+
+    return cache_sizes
+
+
+def _kw_only(cls: T) -> T:
+    """Enforce keyword-only dataclass initialization (Python 3.9 compatible)."""
+
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+        if args:
+            raise TypeError(
+                f"{cls.__name__}() takes keyword arguments only, "
+                f"got {len(args)} positional argument(s)"
+            )
+        for name, value in kwargs.items():
+            setattr(self, name, value)
+
+    cls.__init__ = __init__  # type: ignore
+    return cls
+
+
+def _run_command(cmd: list[str]) -> Optional[str]:
     """Run a command and return stdout, aborting on execution failures."""
     cmd_str = " ".join(cmd)
     try:
@@ -60,6 +209,7 @@ def run(cmd: list[str]) -> Optional[str]:
     except OSError as exc:
         console_error(f"Failed to execute command: {cmd_str} ({exc})")
         return None
+
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         message = f"Command failed with exit code {completed.returncode}: {cmd_str}"
@@ -67,10 +217,11 @@ def run(cmd: list[str]) -> Optional[str]:
             message += f". stderr: {stderr}"
         console_error(message)
         return None
+
     return completed.stdout
 
 
-def search(pattern: str, string: str) -> Optional[str]:
+def search_pattern(pattern: str, string: str) -> Optional[str]:
     """Return the first multiline regex capture group, if present."""
     match = re.search(pattern, string, re.MULTILINE)
     if match is not None:
@@ -78,47 +229,47 @@ def search(pattern: str, string: str) -> Optional[str]:
     return None
 
 
-def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
+def _detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
+    """Detect GPU architecture from rocminfo output."""
     supported_gpu_arch = mi_gpu_specs.get_gpu_series_dict()
     unsupported_gpu_arch: set[str] = set()
 
-    for idx1, line_text in enumerate(rocminfo_lines):
-        gpu_arch = search(
+    for idx, line_text in enumerate(rocminfo_lines):
+        gpu_arch = search_pattern(
             r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", line_text
         )
         if not gpu_arch:
             continue
 
         if gpu_arch in supported_gpu_arch:
-            return (gpu_arch, idx1)
+            return (gpu_arch, idx)
 
         if gpu_arch not in unsupported_gpu_arch:
             unsupported_gpu_arch.add(gpu_arch)
             console_warning(
-                "Detected GPU architecture: "
-                f"{gpu_arch} is currently NOT supported by the profile mode."
+                f"Detected GPU architecture: {gpu_arch} is currently NOT supported "
+                "by the profile mode."
             )
 
     if unsupported_gpu_arch:
         console_log(f"Supported architectures: {list(supported_gpu_arch.keys())}")
 
     console_error("Cannot find a supported arch in rocminfo.")
+    return None
 
 
-def detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:
+def _detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:
+    """Detect GPU chip ID from rocminfo output."""
     chip_id_dict = mi_gpu_specs.get_chip_id_dict()
     unknown_chips: list[str] = []
 
-    for idx, line_text in enumerate(rocminfo_lines):
-        chip_id = search(r"^\s*Chip ID\s*:\s* ([0-9]+).*\s*$", line_text)
+    for line_text in rocminfo_lines:
+        chip_id = search_pattern(r"^\s*Chip ID\s*:\s* ([0-9]+).*\s*$", line_text)
         if chip_id:
-            # Check if this chip ID is valid (known)
             if chip_id in chip_id_dict or int(chip_id) in chip_id_dict:
-                return chip_id  # Return first valid chip ID found
-            else:
-                unknown_chips.append(chip_id)
+                return chip_id
+            unknown_chips.append(chip_id)
 
-    # Exhausted all lines - handle the cases where no valid chip was found
     if unknown_chips:
         for chip_id in unknown_chips:
             console_warning(f"Unknown Chip ID(s) detected: {chip_id}")
@@ -128,72 +279,46 @@ def detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:
     return None
 
 
-# Custom decorator to mimic the behavior of kw_only found in Python 3.10
-def kw_only(cls: T) -> T:
-    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
-        for name, value in kwargs.items():
-            setattr(self, name, value)
+def _reconstruct_specs_from_sysinfo(sysinfo: dict[str, Any]) -> MachineSpecs:
+    """Reconstruct MachineSpecs from saved sysinfo dictionary."""
+    try:
+        sysinfo_ver = str(sysinfo["version"])
+        version = get_version(config.rocprof_compute_home)["version"]
+        curr_ver = version[: version.find(".")]
 
-    cls.__init__ = __init__  # type: ignore
-    return cls
-
-
-def generate_machine_specs(
-    args: Optional[argparse.Namespace], sysinfo: Optional[dict[str, Any]] = None
-) -> MachineSpecs:
-    if sysinfo is not None:
-        try:
-            sysinfo_ver = str(sysinfo["version"])
-            version = get_version(config.rocprof_compute_home)["version"]
-            curr_ver = version[: version.find(".")]
-
-            if sysinfo_ver != curr_ver:
-                console_warning(
-                    "Detected mismatch in sysinfo versioning. "
-                    "You need to reprofile to update data."
-                )
-
-            # Normalize arch aliases to canonical config targets
-            sysinfo_norm = dict(sysinfo)
-            gpu_arch = sysinfo_norm.get("gpu_arch")
-            sysinfo_norm["gpu_arch"] = {"gfx1152": "gfx1151"}.get(gpu_arch, gpu_arch)
-            return MachineSpecs(**sysinfo_norm)
-        except KeyError:
-            console_error(
-                "Detected mismatch in sysinfo versioning. You need to reprofile "
-                "to update data."
+        if sysinfo_ver != curr_ver:
+            console_warning(
+                "Detected mismatch in sysinfo versioning. "
+                "You need to reprofile to update data."
             )
 
-    # read timestamp info
+        spec_cls = spec_family_for_arch(sysinfo.get("gpu_arch"))
+        return spec_cls(**sysinfo)
+
+    except KeyError:
+        console_error(
+            "Detected mismatch in sysinfo versioning. "
+            "You need to reprofile to update data."
+        )
+        raise
+
+
+def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> MachineSpecs:
+    """Probe live hardware to generate MachineSpecs."""
     now = datetime.now()
     local_now = now.astimezone()
     local_tzname = local_now.tzinfo.tzname(local_now)  # type: ignore
     timestamp = f"{now.strftime('%c')} ({local_tzname})"
 
-    # set specs version
     version = get_version(config.rocprof_compute_home)["version"]
-    # NB: Just taking major as specs version.
-    # May want to make this more specific in the future
-    # version will always follow 'major.minor.patch' format
     specs_version = version[: version.find(".")]
 
-    ##########################################
-    ## A. Machine Specs
-    ##########################################
-    machine_info = extract_machine_info()
+    machine_info = _extract_machine_info()
+    soc_info = _extract_soc_info()
+    gpu_info = _extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
 
-    ##########################################
-    ## B. SoC Specs
-    ##########################################
-    soc_info = extract_soc_info()
-
-    # FIXME: use device
-    # Load amd-smi data
-    gpu_info = extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
-
-    # Combine all specifications
     with amdsmi_interface.amdsmi_ctx():
-        specs = MachineSpecs(
+        specs = spec_family_for_arch(soc_info["gpu_arch"])(
             version=specs_version,
             timestamp=timestamp,
             rocminfo_lines=soc_info["rocminfo_lines"],
@@ -207,57 +332,42 @@ def generate_machine_specs(
             linux_distro=machine_info["linux_distro"],
             rocm_version=get_rocm_ver().strip(),
             vbios=gpu_info["vbios"],
-            compute_partition=gpu_info["compute_partition"],
-            memory_partition=gpu_info["memory_partition"],
             gpu_arch=soc_info["gpu_arch"],
             gpu_chip_id=soc_info["gpu_chip_id"],
         )
 
-    # Load above SoC specs via module import
-    try:
-        soc_module = importlib.import_module(
-            f"rocprof_compute_soc.soc_{specs.gpu_arch}"
-        )
-        soc_class = getattr(soc_module, f"{specs.gpu_arch}_soc")
-        soc_obj = soc_class(args, specs)  # noqa: F841
-    except ModuleNotFoundError as e:
-        console_error(
-            f"Arch {specs.gpu_arch} marked as supported,"
-            f"but couldn't find class implementation {e}."
-        )
+    _load_soc_module(args, specs)
 
-    # Derive SoC-dependent fields
     if specs.rocminfo_lines is None:
-        # Yaml-only / no rocminfo: skip get_gpu_model (avoids chip-id warnings).
         specs.gpu_model = specs.gpu_model or ""
     else:
         specs.gpu_model = (
             mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
         )
-    specs.num_xcd = str(
-        mi_gpu_specs.get_num_xcds(
-            specs.gpu_arch, specs.gpu_model or None, specs.compute_partition
-        )
-    )
-    specs.total_l2_chan = totall2_banks(
-        specs.gpu_arch,
-        specs.gpu_model,
-        specs.l2_banks,
-        specs.compute_partition,
-    )
-    specs.num_hbm_channels = str(specs.get_hbm_channels())
 
-    specs.num_dies = mi_gpu_specs.get_num_dies(specs.gpu_arch, specs.gpu_model)
-
-    specs.cache_sizes = set_cache_sizes(
-        gpu_info["num_compute_units"], gpu_info["gpu_cache_info"], specs.num_dies
-    )
+    specs.finalize_soc_fields(gpu_info)
 
     return specs
 
 
+def _load_soc_module(args: Optional[argparse.Namespace], specs: MachineSpecs) -> None:
+    """Load the architecture-specific SoC module."""
+    try:
+        soc_module = importlib.import_module(
+            f"rocprof_compute_soc.soc_{specs.gpu_arch}"
+        )
+        soc_class = getattr(soc_module, f"{specs.gpu_arch}_soc")
+        soc_class(args, specs)
+    except ModuleNotFoundError as e:
+        console_error(
+            f"Arch {specs.gpu_arch} marked as supported, "
+            f"but couldn't find class implementation {e}."
+        )
+
+
 @demarcate
-def extract_machine_info() -> dict[str, Any]:
+def _extract_machine_info() -> dict[str, Any]:
+    """Extract machine information from /proc and /sys filesystems."""
     result: dict[str, Optional[str]] = {
         "cpu_model": None,
         "sbios": None,
@@ -272,32 +382,37 @@ def extract_machine_info() -> dict[str, Any]:
         version = path("/proc/version").read_text(encoding="utf-8")
         os_release = path("/etc/os-release").read_text(encoding="utf-8")
 
-        result["cpu_model"] = search(r"^model name\s*: (.*?)$", cpuinfo)
+        result["cpu_model"] = search_pattern(r"^model name\s*: (.*?)$", cpuinfo)
         result["sbios"] = (
             path("/sys/class/dmi/id/bios_vendor").read_text(encoding="utf-8").strip()
             + path("/sys/class/dmi/id/bios_version").read_text(encoding="utf-8").strip()
         )
-        result["linux_kernel_version"] = search(r"version (\S*)", version)
-        result["cpu_memory"] = search(r"MemTotal:\s*(\S*)", meminfo)
-        result["linux_distro"] = search(r'PRETTY_NAME="(.*?)"', os_release) or ""
+        result["linux_kernel_version"] = search_pattern(r"version (\S*)", version)
+        result["cpu_memory"] = search_pattern(r"MemTotal:\s*(\S*)", meminfo)
+        result["linux_distro"] = (
+            search_pattern(r'PRETTY_NAME="(.*?)"', os_release) or ""
+        )
 
     except OSError as e:
         console_warning(f"Could not read system files: {e}")
+
     return result
 
 
 @demarcate
-def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
+def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
+    """Extract GPU information from amd-smi."""
     is_partition_supported = gpu_arch and MIGPUSpecs.is_partition_supported(
         gpu_arch=gpu_arch, gpu_model=None
     )
 
-    result: dict[str, Optional[str]] = {
+    result: dict[str, Any] = {
         "vbios": None,
         "compute_partition": None,
         "memory_partition": None,
         "num_compute_units": None,
         "gpu_cache_info": None,
+        "vram_bit_width": None,
     }
 
     with amdsmi_interface.amdsmi_ctx():
@@ -311,8 +426,8 @@ def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
 
         result["num_compute_units"] = amdsmi_interface.get_gpu_num_compute_units()
         result["gpu_cache_info"] = amdsmi_interface.get_gpu_cache_info() or {}
+        result["vram_bit_width"] = amdsmi_interface.get_gpu_vram_bit_width()
 
-    # Apply defaults and warnings
     if is_partition_supported:
         if result["compute_partition"] == "N/A" or not result["compute_partition"]:
             console_warning("Cannot detect accelerator partition from amd-smi.")
@@ -332,45 +447,41 @@ def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
 
 
 @demarcate
-def extract_soc_info() -> dict[str, Any]:
+def _extract_soc_info() -> dict[str, Any]:
+    """Extract SoC information from rocminfo."""
     result: dict[str, Any] = {
         "rocminfo_lines": None,
         "gpu_arch": None,
         "gpu_chip_id": None,
     }
 
-    # Read rocminfo
-    rocminfo_full = run(["rocminfo"])
+    rocminfo_full = _run_command(["rocminfo"])
     if rocminfo_full is None:
         return result
 
     rocminfo_lines = rocminfo_full.split("\n")
-    arch_result = detect_arch(rocminfo_lines)
+    arch_result = _detect_arch(rocminfo_lines)
 
     if arch_result is None:
         return result
 
     result["gpu_arch"], arch_idx = arch_result
-    result["rocminfo_lines"] = rocminfo_lines[
-        arch_idx + 1 :
-    ]  # update rocminfo for target section
-    result["gpu_chip_id"] = detect_gpu_chip_id(rocminfo_lines)
+    result["rocminfo_lines"] = rocminfo_lines[arch_idx + 1 :]
+    result["gpu_chip_id"] = _detect_gpu_chip_id(rocminfo_lines)
 
     return result
 
 
-@kw_only
+@_kw_only
 @dataclass
 class MachineSpecs:
-    ##########################################
-    ## A. Workload / Spec info
-    ##########################################
+    """Base class for machine specifications.
 
-    # these three fields are special in that they're not included
-    # when you use (e.g.,) --specs to view the machinespecs, but they
-    # _are_ included in profiling/analysis, so we mark them as 'optional'
-    # in the metadata to avoid erroring out on missing fields on
-    # serialization
+    Contains fields common to all GPU families (CDNA and RDNA).
+    Subclasses add family-specific fields.
+    """
+
+    # Workload / Spec info
     workload_path: Optional[str] = field(
         default=None,
         metadata={
@@ -414,20 +525,11 @@ class MachineSpecs:
             "show_in_table": True,
         },
     )
-    timestamp: Optional[str] = field(
-        default=None,
-        metadata={
-            "doc": "The time (in local system time) when data was collected",
-            "name": "Timestamp",
-            "show_in_table": True,
-        },
-    )
     rocminfo_lines: Optional[list] = field(
         default=None, metadata={"show_in_table": False}
     )
-    ##########################################
-    ## A. Machine Specs
-    ##########################################
+
+    # Machine specs
     hostname: Optional[str] = field(
         default=None,
         metadata={
@@ -471,7 +573,7 @@ class MachineSpecs:
     amd_gpu_kernel_version: Optional[str] = field(
         default=None,
         metadata={
-            "doc": ("The version of the AMDGPU driver installed on the machine."),
+            "doc": "The version of the AMDGPU driver installed on the machine.",
             "name": "AMD GPU Kernel Version",
             "show_in_table": True,
         },
@@ -513,32 +615,8 @@ class MachineSpecs:
             "show_in_table": True,
         },
     )
-    compute_partition: Optional[str] = field(
-        default=None,
-        metadata={
-            "doc": (
-                "The compute partitioning mode active on the accelerators/GPUs in the "
-                "system (MI300 only)."
-            ),
-            "name": "Compute Partition",
-            "show_in_table": True,
-        },
-    )
-    memory_partition: Optional[str] = field(
-        default=None,
-        metadata={
-            "doc": (
-                "The memory partitioning mode active on the accelerators/GPUs in the "
-                "system (MI300 only)."
-            ),
-            "name": "Memory Partition",
-            "show_in_table": True,
-        },
-    )
 
-    ##########################################
-    ## B. SoC Specs
-    ##########################################
+    # SoC specs
     gpu_series: Optional[str] = field(
         default=None,
         metadata={
@@ -588,10 +666,7 @@ class MachineSpecs:
     gpu_l2: Optional[str] = field(
         default=None,
         metadata={
-            "doc": (
-                "The size of the vL1D cache (per compute-unit) on the "
-                "accelerators/GPUs."
-            ),
+            "doc": ("The size of the L2 cache (total) on the accelerators/GPUs."),
             "name": "GPU L2",
             "unit": "KiB",
             "show_in_table": True,
@@ -629,6 +704,17 @@ class MachineSpecs:
                 "the total number of shader engines in a partition."
             ),
             "name": "SE per GPU",
+            "show_in_table": True,
+        },
+    )
+    sa_per_se: Optional[str] = field(
+        default=None,
+        metadata={
+            "doc": (
+                "The number of shader arrays per shader engine on the accelerators/GPUs"
+                " in the system."
+            ),
+            "name": "SA per SE",
             "show_in_table": True,
         },
     )
@@ -714,9 +800,7 @@ class MachineSpecs:
     )
     l2_banks: Optional[str] = field(
         default=None,
-        metadata={
-            "show_in_table": True,
-        },
+        metadata={"show_in_table": True},
     )
     total_l2_chan: Optional[str] = field(
         default=None,
@@ -764,24 +848,11 @@ class MachineSpecs:
             "show_in_table": True,
         },
     )
-    num_xcd: Optional[str] = field(
+    num_memory_channels: Optional[str] = field(
         default=None,
         metadata={
-            "doc": (
-                "The total number of accelerator complex dies in a compute partition "
-                "on the accelerators/GPUs in the system. For accelerators without "
-                "partitioning (i.e., pre-MI300), this is considered to be one."
-            ),
-            "name": "Num XCDs",
-            "unit": "XCDs",
-            "show_in_table": True,
-        },
-    )
-    num_hbm_channels: Optional[str] = field(
-        default=None,
-        metadata={
-            "doc": "Number of HBM channels",
-            "name": "HBM channels",
+            "doc": "Number of memory channels (HBM for CDNA, LPDDR for RDNA 3.5)",
+            "name": "Memory Channels",
             "show_in_table": True,
         },
     )
@@ -804,16 +875,23 @@ class MachineSpecs:
         },
     )
 
-    def get_hbm_channels(self) -> Optional[str]:
-        if self.memory_partition and self.memory_partition.lower().startswith("nps"):
-            hbmchannels = 128
-            if self.memory_partition.lower() == "nps4":
-                hbmchannels //= 4
-            elif self.memory_partition.lower() == "nps8":
-                hbmchannels //= 8
-            return str(hbmchannels)
-        else:
-            return self.total_l2_chan
+    def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
+        """Derive shared SoC-dependent fields. Subclasses override and call super()."""
+        self.total_l2_chan = totall2_banks(
+            self.gpu_arch,
+            self.gpu_model,
+            self.l2_banks,
+            getattr(self, "compute_partition", None),
+        )
+        self.num_dies = mi_gpu_specs.get_num_dies(self.gpu_arch, self.gpu_model)
+        self.cache_sizes = set_cache_sizes(
+            self.gpu_model,
+            gpu_info["num_compute_units"],
+            gpu_info["gpu_cache_info"],
+            self.num_dies,
+            self.se_per_gpu,
+            self.sa_per_se,
+        )
 
     def get_class_members(self) -> dict[str, Any]:
         """Return class members as a dictionary."""
@@ -828,11 +906,9 @@ class MachineSpecs:
             value = getattr(self, name)
             data[name] = value
 
-            # Check for missing required fields
             if value is None and not class_field.metadata.get("optional", False):
                 missing_required_fields.append(name)
 
-        # Handle warnings after processing all fields
         if missing_required_fields:
             for field_name in missing_required_fields:
                 console_warning(
@@ -858,7 +934,6 @@ class MachineSpecs:
                 _data: dict[str, Any] = {}
                 value = getattr(self, name)
                 if class_field.metadata:
-                    # check out of table before any re-naming for pretty-printing
                     if (
                         "intable" in class_field.metadata
                         and not class_field.metadata["intable"]
@@ -882,7 +957,6 @@ class MachineSpecs:
                 _data["Value"] = value if value is not None else ""
                 data.append(_data)
 
-        # Build columns list based on what data is present
         columns = ["Spec", "Value"]
         if has_description:
             columns.append("Description")
@@ -892,88 +966,101 @@ class MachineSpecs:
         return topstr + format_table_ascii(data, columns, decimal=2)
 
 
-def get_rocm_ver() -> str:
-    # Check for version files in ROCm installation
-    rocm_base_path = path(os.getenv("ROCM_PATH", "/opt/rocm"))
+@_kw_only
+@dataclass(repr=False)
+class MachineSpecsCDNA(MachineSpecs):
+    """CDNA specs: adds compute/memory partition and XCD fields."""
 
-    for version_file_name in VERSION_LOC:
-        version_file_path = rocm_base_path / ".info" / version_file_name
-        if version_file_path.exists():
-            return version_file_path.read_text().strip()
-
-    # Fallback to environment variable
-    ROCM_VER_USER = os.getenv("ROCM_VER")
-    if ROCM_VER_USER:
-        console_log(
-            "profiling",
-            "Overriding missing ROCm version detection with "
-            f"ROCM_VER = {ROCM_VER_USER}",
-        )
-        return ROCM_VER_USER
-
-    # No version found - log error and return empty string
-    console_warning("Unable to detect a complete local ROCm installation.")
-    console_warning(
-        f"The expected {rocm_base_path}/.info/ versioning directory is missing."
+    compute_partition: Optional[str] = field(
+        default=None,
+        metadata={
+            "doc": (
+                "The compute partitioning mode active on the accelerators/GPUs in the "
+                "system (MI300 only)."
+            ),
+            "name": "Compute Partition",
+            "show_in_table": True,
+        },
     )
-    console_error("Ensure you have valid ROCm installation.", exit=False)
-    return ""
+    memory_partition: Optional[str] = field(
+        default=None,
+        metadata={
+            "doc": (
+                "The memory partitioning mode active on the accelerators/GPUs in the "
+                "system (MI300 only)."
+            ),
+            "name": "Memory Partition",
+            "show_in_table": True,
+        },
+    )
+    num_xcd: Optional[str] = field(
+        default=None,
+        metadata={
+            "doc": (
+                "The total number of accelerator complex dies in a compute partition "
+                "on the accelerators/GPUs in the system. For accelerators without "
+                "partitioning (i.e., pre-MI300), this is considered to be one."
+            ),
+            "name": "Num XCDs",
+            "unit": "XCDs",
+            "show_in_table": True,
+        },
+    )
+
+    def _get_hbm_channels(self) -> Optional[str]:
+        """HBM channel count, adjusted for the MI300 NPS memory partition."""
+        partition = self.memory_partition or ""
+        if partition.lower().startswith("nps"):
+            channels = 128
+            if partition.lower() == "nps4":
+                channels //= 4
+            elif partition.lower() == "nps8":
+                channels //= 8
+            return str(channels)
+        return self.total_l2_chan
+
+    def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
+        self.compute_partition = gpu_info["compute_partition"]
+        self.memory_partition = gpu_info["memory_partition"]
+        self.num_xcd = str(
+            mi_gpu_specs.get_num_xcds(
+                self.gpu_arch, self.gpu_model or None, self.compute_partition
+            )
+        )
+        super().finalize_soc_fields(gpu_info)
+        self.num_memory_channels = self._get_hbm_channels()
 
 
-def total_sqc(archname: str, num_compute_units: str, num_shader_engines: str) -> int:
-    cu_per_se = float(num_compute_units) / float(num_shader_engines)
-    sq_per_se = cu_per_se / 2.0
-    if archname.lower() in ["mi50", "mi100"]:
-        sq_per_se = cu_per_se / 3
-    sq_per_se = ceil(sq_per_se)
-    return int(sq_per_se) * int(num_shader_engines)
+@_kw_only
+@dataclass(repr=False)
+class MachineSpecsRDNA35(MachineSpecs):
+    """RDNA 3.5 specs: adds GL1 cache count field."""
 
+    num_gl1c: Optional[str] = field(
+        default=None,
+        metadata={
+            "doc": (
+                "The number of GL1 caches (one per Shader Array) on the GPU. "
+                "Used for GL1 bandwidth-ceiling calculations in analysis configs."
+            ),
+            "name": "Num GL1 Caches",
+            "show_in_table": True,
+        },
+    )
 
-def totall2_banks(
-    gpu_arch: Optional[str] = None,
-    gpu_model: Optional[str] = None,
-    L2banks: Optional[str] = None,
-    compute_partition: Optional[str] = None,
-) -> Optional[str]:
-    xcd_count = mi_gpu_specs.get_num_xcds(gpu_arch, gpu_model, compute_partition)
+    def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
+        if self.se_per_gpu is None or self.sa_per_se is None:
+            self.num_gl1c = None
+        else:
+            self.num_gl1c = str(int(self.se_per_gpu) * int(self.sa_per_se))
 
-    # TODO: MachineSpecs and OmniSoC mspec should converge...
-    if L2banks is not None and xcd_count is not None:
-        return str(int(L2banks) * int(xcd_count))
-    return None
+        super().finalize_soc_fields(gpu_info)
 
-
-def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> dict[str, int]:
-    """
-    Extrapolate the cache sizes for AMD-SMI cache info output
-    """
-    if num_cu == 0:
-        console_error("Failed to determine GPU compute unit count from AMD-SMI.")
-    if not cache_info:
-        console_error("Failed to retrieve GPU cache information from AMD-SMI.")
-
-    cache_sizes = {}
-
-    # vL1D is the level-1 data cache with the most instances (one per CU).
-    # Match by instance count, not num_cu, to stay correct on harvested parts.
-    l1_data_caches = [
-        cache_values
-        for cache_values in cache_info["cache"]
-        if cache_values["cache_level"] == 1
-        and "DATA_CACHE" in cache_values["cache_properties"]
-    ]
-    if l1_data_caches:
-        vl1d = max(l1_data_caches, key=lambda cache: cache["num_cache_instance"])
-        cache_sizes["L1"] = vl1d["cache_size"] * 1024
-
-    # L2 and L3/MALL cache sizes
-    for cache_values in cache_info["cache"]:
-        if cache_values["cache_level"] == 2:
-            cache_sizes["L2"] = cache_values["cache_size"] * 1024
-        elif cache_values["cache_level"] == 3 and num_dies > 0:
-            cache_sizes["MALL"] = int(cache_values["cache_size"] * 1024 / num_dies)
-
-    return cache_sizes
+        bit_width = gpu_info.get("vram_bit_width")
+        if bit_width:
+            self.num_memory_channels = str(int(bit_width) // 32)
+        else:
+            self.num_memory_channels = self.total_l2_chan
 
 
 if __name__ == "__main__":

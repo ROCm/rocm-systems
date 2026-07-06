@@ -76,7 +76,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
                 "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * "
                 "$max_sclk)), 0)"
             ),
-            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
+            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_memory_channels)",
         },
         "rdna35": {
             "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
@@ -87,7 +87,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
 
     if gpu_series.startswith("MI"):
         return build_in_vars["cdna"]
-    elif gpu_series.startswith("NAVI"):
+    elif gpu_series.startswith("RDNA"):
         return build_in_vars["rdna35"]
     else:
         console_error(

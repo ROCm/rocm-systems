@@ -24,6 +24,7 @@ from utils.metrics.aggregation import (
 )
 from utils.metrics.evaluation_pipeline import (
     compute_pct_of_peak,
+    create_sys_vars,
     eval_metric,
     validate_dual_issue_metrics,
 )
@@ -274,6 +275,27 @@ class TestExpression:
 class TestEvaluationPipeline:
     """Tests for utils.metrics.evaluation_pipeline."""
 
+    sys_info_fields = {
+        "ip_blocks": "standard",
+        "gpu_arch": "gfx90a",
+        "se_per_gpu": 4,
+        "sa_per_se": 2,
+        "pipes_per_gpu": 4,
+        "cu_per_gpu": 64,
+        "simd_per_cu": 4,
+        "sqc_per_gpu": 16,
+        "lds_banks_per_cu": 32,
+        "cur_sclk": 1800.0,
+        "cur_mclk": 1200.0,
+        "max_sclk": 2100.0,
+        "max_mclk": 1600.0,
+        "max_waves_per_cu": 40,
+        "num_memory_channels": 4,
+        "total_l2_chan": 32,
+        "num_xcd": 1,
+        "wave_size": 64,
+    }
+
     def _build_eval_metric_inputs(self, metric_fields=None):
         """Build the dfs/sys_info/raw_pmc_df fixture used by eval_metric tests.
 
@@ -307,25 +329,7 @@ class TestEvaluationPipeline:
                 if isinstance(v, str) and v and v != "None"
             ]
         }
-        sys_info = pd.Series({
-            "ip_blocks": "standard",
-            "gpu_arch": "gfx90a",
-            "se_per_gpu": 4,
-            "pipes_per_gpu": 4,
-            "cu_per_gpu": 64,
-            "simd_per_cu": 4,
-            "sqc_per_gpu": 16,
-            "lds_banks_per_cu": 32,
-            "cur_sclk": 1800.0,
-            "cur_mclk": 1200.0,
-            "max_sclk": 2100.0,
-            "max_mclk": 1600.0,
-            "max_waves_per_cu": 40,
-            "num_hbm_channels": 4,
-            "total_l2_chan": 32,
-            "num_xcd": 1,
-            "wave_size": 64,
-        })
+        sys_info = pd.Series(self.sys_info_fields)
         raw_pmc_df = pd.DataFrame({
             "SQ_WAVES": [100, 200, 150],
             "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
@@ -340,15 +344,12 @@ class TestEvaluationPipeline:
             }
         )
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
-        with (
-            patch(
-                "utils.metrics.evaluation_pipeline.get_build_in_vars",
-                return_value={},
-            ),
-            patch(
-                "utils.metrics.evaluation_pipeline.debug_row_tracker"
-            ) as mock_debug_row_tracker,
-        ):
+        with patch(
+            "utils.metrics.evaluation_pipeline.get_build_in_vars",
+            return_value={},
+        ), patch(
+            "utils.metrics.evaluation_pipeline.debug_row_tracker"
+        ) as mock_debug_row_tracker:
             eval_metric(
                 dfs,
                 dfs_type,
@@ -458,17 +459,13 @@ class TestEvaluationPipeline:
         })
 
         clear_noise_clamp_warnings()
-        with (
-            patch(
-                "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
-            ),
-            patch(
-                "utils.metrics.evaluation_pipeline.console_warning"
-            ) as mock_console_warning,
-            patch(
-                "utils.metrics.evaluation_pipeline.print_noise_clamp_summary"
-            ) as mock_print_summary,
-        ):
+        with patch(
+            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
+        ), patch(
+            "utils.metrics.evaluation_pipeline.console_warning"
+        ) as mock_console_warning, patch(
+            "utils.metrics.evaluation_pipeline.print_noise_clamp_summary"
+        ) as mock_print_summary:
             eval_metric(
                 dfs,
                 dfs_type,
@@ -579,9 +576,9 @@ class TestEvaluationPipeline:
         msg = mock_warning.call_args.args[0]
         assert "VALU Utilization can go up to 200%" in msg
 
-    def make_pop_dfs(
+    def make_pct_of_peak_dfs(
         self,
-        pop_flags: list,
+        pct_of_peak_flags: list,
         avg_values: list,
         peak_values: list,
         value_col: str = "Avg",
@@ -589,50 +586,51 @@ class TestEvaluationPipeline:
     ):
         """Build (dfs, dfs_type) fixture for compute_pct_of_peak tests."""
         df = pd.DataFrame({
-            "Metric": [f"M{i}" for i in range(len(pop_flags))],
+            "Metric": [f"M{i}" for i in range(len(pct_of_peak_flags))],
             value_col: avg_values,
             peak_col: peak_values,
-            "Pct of Peak": pop_flags,
+            "Percent of Peak": pct_of_peak_flags,
         })
         return {1: df}, {1: "metric_table"}
 
-    def test_compute_pct_of_peak_pop_true_writes_correct_value(self):
-        """A pop=True row gets 100 * value / peak written into Pct of Peak."""
-        dfs, dfs_type = self.make_pop_dfs(
-            pop_flags=[True], avg_values=[50.0], peak_values=[200.0]
+    def test_compute_pct_of_peak_true_writes_correct_value(self):
+        """A pct_of_peak=True row writes 100 * value / peak into Percent of Peak."""
+        dfs, dfs_type = self.make_pct_of_peak_dfs(
+            pct_of_peak_flags=[True], avg_values=[50.0], peak_values=[200.0]
         )
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == pytest.approx(25.0)
+        assert dfs[1].loc[0, "Percent of Peak"] == pytest.approx(25.0)
 
-    def test_compute_pct_of_peak_pop_false_writes_empty_string(self):
-        """A pop=False row gets an empty string in Pct of Peak."""
-        dfs, dfs_type = self.make_pop_dfs(
-            pop_flags=[False], avg_values=[50.0], peak_values=[200.0]
+    def test_compute_pct_of_peak_false_writes_empty_string(self):
+        """A pct_of_peak=False row gets an empty string in Percent of Peak."""
+        dfs, dfs_type = self.make_pct_of_peak_dfs(
+            pct_of_peak_flags=[False], avg_values=[50.0], peak_values=[200.0]
         )
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == ""
+        assert dfs[1].loc[0, "Percent of Peak"] == ""
 
     def test_compute_pct_of_peak_zero_peak_writes_empty_string(self):
-        """A pop=True row with zero peak gets an empty string (division undefined)."""
-        dfs, dfs_type = self.make_pop_dfs(
-            pop_flags=[True], avg_values=[50.0], peak_values=[0.0]
+        """A pct_of_peak=True row with zero peak gets an empty
+        string (division undefined)."""
+        dfs, dfs_type = self.make_pct_of_peak_dfs(
+            pct_of_peak_flags=[True], avg_values=[50.0], peak_values=[0.0]
         )
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == ""
+        assert dfs[1].loc[0, "Percent of Peak"] == ""
 
-    def test_compute_pct_of_peak_skips_df_without_pop_column(self):
-        """A metric_table with no Pct of Peak column is left untouched."""
+    def test_compute_pct_of_peak_skips_df_without_pct_of_peak_column(self):
+        """A metric_table with no Percent of Peak column is left untouched."""
         df = pd.DataFrame({"Metric": ["M1"], "Avg": [50.0], "Peak": [200.0]})
         dfs, dfs_type = {1: df}, {1: "metric_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert "Pct of Peak" not in dfs[1].columns
+        assert "Percent of Peak" not in dfs[1].columns
 
     def test_compute_pct_of_peak_skips_non_metric_table(self):
-        """A non-metric_table df is skipped even if it has a Pct of Peak column."""
-        df = pd.DataFrame({"Pct of Peak": [True], "Avg": [50.0], "Peak": [200.0]})
+        """A non-metric_table df is skipped even if it has a Percent of Peak column."""
+        df = pd.DataFrame({"Percent of Peak": [True], "Avg": [50.0], "Peak": [200.0]})
         dfs, dfs_type = {1: df}, {1: "raw_csv_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert bool(dfs[1].loc[0, "Pct of Peak"]) is True
+        assert bool(dfs[1].loc[0, "Percent of Peak"]) is True
 
     def test_compute_pct_of_peak_prefers_avg_over_value_column(self):
         """Avg is preferred over Value when both columns are present."""
@@ -641,11 +639,11 @@ class TestEvaluationPipeline:
             "Avg": [50.0],
             "Value": [999.0],
             "Peak": [200.0],
-            "Pct of Peak": [True],
+            "Percent of Peak": [True],
         })
         dfs, dfs_type = {1: df}, {1: "metric_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == pytest.approx(25.0)
+        assert dfs[1].loc[0, "Percent of Peak"] == pytest.approx(25.0)
 
     def test_compute_pct_of_peak_prefers_peak_over_peak_empirical(self):
         """When both Peak and Peak (Empirical) are present, Peak is used."""
@@ -654,22 +652,71 @@ class TestEvaluationPipeline:
             "Avg": [50.0],
             "Peak": [200.0],
             "Peak (Empirical)": [500.0],
-            "Pct of Peak": [True],
+            "Percent of Peak": [True],
         })
         dfs, dfs_type = {1: df}, {1: "metric_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == pytest.approx(25.0)
+        assert dfs[1].loc[0, "Percent of Peak"] == pytest.approx(25.0)
 
     def test_compute_pct_of_peak_skips_when_no_value_column(self):
         """A metric_table with no recognised value column is left untouched."""
         df = pd.DataFrame({
             "Metric": ["M1"],
             "Peak": [200.0],
-            "Pct of Peak": [True],
+            "Percent of Peak": [True],
         })
         dfs, dfs_type = {1: df}, {1: "metric_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert bool(dfs[1].loc[0, "Pct of Peak"]) is True
+        assert bool(dfs[1].loc[0, "Percent of Peak"]) is True
+
+    def test_create_sys_vars_maps_required_and_optional_fields(self):
+        """Required and present optional fields are prefixed and type-coerced."""
+        result = create_sys_vars(pd.Series(self.sys_info_fields))
+        assert result["ammolite__total_l2_chan"] == 32
+        assert isinstance(result["ammolite__total_l2_chan"], int)
+        assert result["ammolite__num_memory_channels"] == 4.0
+        assert result["ammolite__num_xcd"] == 1
+
+    @pytest.mark.parametrize(
+        "override, missing_field",
+        [
+            ({"cu_per_gpu": np.nan}, "cu_per_gpu"),
+            ({"total_l2_chan": 0}, "total_l2_chan"),
+        ],
+        ids=["nan", "zero"],
+    )
+    def test_create_sys_vars_warns_and_zeroes_missing_required(
+        self, override, missing_field
+    ):
+        """Missing or zero required fields warn and fall back to 0."""
+        sys_info = pd.Series({**self.sys_info_fields, **override})
+        with patch(
+            "utils.metrics.evaluation_pipeline.console_warning"
+        ) as console_warning_mock:
+            result = create_sys_vars(sys_info)
+        assert result[f"ammolite__{missing_field}"] == 0
+        assert any(
+            missing_field in warning_call.args[0]
+            for warning_call in console_warning_mock.call_args_list
+        )
+
+    def test_create_sys_vars_skips_absent_optional_fields(self):
+        """Absent optional fields are omitted; num_xcd defaults to 1 for RDNA."""
+        sys_info = pd.Series({
+            key: value
+            for key, value in self.sys_info_fields.items()
+            if key not in {"num_memory_channels", "num_gl1c", "num_xcd"}
+        })
+        result = create_sys_vars(sys_info)
+        assert "ammolite__num_memory_channels" not in result
+        assert "ammolite__num_gl1c" not in result
+        assert result["ammolite__num_xcd"] == 1
+
+    def test_create_sys_vars_includes_num_gl1c_when_present(self):
+        """num_gl1c is mapped when the RDNA sysinfo column is present."""
+        sys_info = pd.Series({**self.sys_info_fields, "num_gl1c": 8})
+        result = create_sys_vars(sys_info)
+        assert result["ammolite__num_gl1c"] == 8
 
 
 # =============================================================================
@@ -720,10 +767,8 @@ class TestMetricEvaluator:
     def test_eval_expression_returns_na_when_eval_raises_attribute_error(self):
         """eval_expression returns 'N/A' for a generic AttributeError."""
         metric_evaluator = MetricEvaluator({}, {}, {})
-        with (
-            patch("builtins.eval") as mock_eval,
-            patch("builtins.compile"),
-            patch("sys.exit"),
+        with patch("builtins.eval") as mock_eval, patch("builtins.compile"), patch(
+            "sys.exit"
         ):
             mock_eval.side_effect = AttributeError("Some AttributeError")
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
@@ -855,10 +900,11 @@ class TestMetricEvaluator:
         for columns, equation in cases:
             evaluator = self._make_evaluator(columns)
             eval_str = self._to_eval_str(equation)
-            with (
-                patch("utils.metrics.metric_evaluator.console_warning") as mock_warning,
-                patch("utils.metrics.metric_evaluator.console_debug") as mock_debug,
-            ):
+            with patch(
+                "utils.metrics.metric_evaluator.console_warning"
+            ) as mock_warning, patch(
+                "utils.metrics.metric_evaluator.console_debug"
+            ) as mock_debug:
                 result = evaluator.eval_expression(eval_str)
 
             assert result == "N/A", (
