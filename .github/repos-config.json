@@ -127,6 +127,15 @@
       "monorepo_source_of_truth": true
     },
     {
+      "name": "rocprof-trace-decoder",
+      "url": "ROCm/rocprof-trace-decoder",
+      "branch": "amd-mainline",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
       "name": "rocprofiler-systems",
       "url": "ROCm/rocprofiler-systems",
       "branch": "amd-staging",
