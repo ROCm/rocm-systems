@@ -15,11 +15,7 @@
 #endif
 
 /// @brief Marks a libc entry point interposed by the LD_PRELOAD shim for export.
-#if defined(_WIN32) || defined(__CYGWIN__)
-#define RJ_INTERPOSER_EXPORT __declspec(dllexport)
-#else
-#define RJ_INTERPOSER_EXPORT __attribute__((visibility("default")))
-#endif
+#define RJ_INTERPOSER_EXPORT RJ_API_EXPORT
 
 /// @brief Suppress specific compiler warnings around third-party headers.
 ///
