@@ -16,6 +16,7 @@
 
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/simd.h"
@@ -687,27 +688,22 @@ template <typename T, typename Inst, typename BinOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  // Resolve each operand's `VgprStorage*` ONCE (a single virtual
-  // simd_vgpr_storage dispatch -> resolved_vgpr_offset -> the localized
-  // raw_vgpr_reg<64> cast). The resolved register object is chunk-independent, so the
-  // per-chunk loop issues a value-semantic `r->simd_load<T>(base)` off it instead
-  // of re-dispatching the resolution every chunk — and no raw base pointer
-  // escapes the kernel body. Operands that aren't contiguous VGPR storage
-  // (SGPR/imm/inline-const) resolve to null and broadcast a single scalar read; a
-  // null dst falls back to write_lane_chunk.
-  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
-  const VgprStorage *r1 = simd_src_reg(inst.vsrc1, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
-  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
-  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.vsrc1.read_scalar(wf));
+  // Resolve operand views once. Read-view acquisition observes plugin-visible
+  // VGPR reads; write-view acquisition is write-only. Operands that are not
+  // contiguous VGPR storage carry their scalar broadcast/fallback behavior in
+  // the view object.
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand(inst.src0, wf, exec);
+  auto src1 = regs.read_operand(inst.vsrc1, wf, exec);
+  auto dst = regs.write_operand(inst.vdst, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = simd_load_or<T>(r0, base, a_bcast);
-    const auto b = simd_load_or<T>(r1, base, b_bcast);
+    const auto a = src0.template load_native<T>(base);
+    const auto b = src1.template load_native<T>(base);
     const auto r = bin_op(a, b);
-    write_simd_at<T>(rd, inst.vdst, wf, base, r, chunk);
+    dst.template store_native<T>(base, r, chunk);
   }
   return true;
 }

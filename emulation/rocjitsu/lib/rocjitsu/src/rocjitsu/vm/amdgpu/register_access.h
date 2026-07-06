@@ -7,9 +7,15 @@
 #ifndef ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 #define ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 
+#include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "simdojo/components/vector_reg.h"
+#include "util/simd.h"
 
+#include <bit>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -30,6 +36,89 @@ namespace rocjitsu::amdgpu {
 /// here.
 class RegisterAccess {
 public:
+  class OperandReadView {
+  public:
+    OperandReadView() = default;
+
+    bool has_storage() const { return storage_ != nullptr; }
+
+    uint32_t lane(uint32_t lane) const {
+      assert(op_ && "OperandReadView is empty");
+      return storage_ ? (*storage_)[lane] : scalar_;
+    }
+
+    template <typename T> util::native<T> load_native(uint32_t lane_base) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "load_native expects 32-bit lanes");
+      assert(op_ && "OperandReadView is empty");
+      return storage_ ? storage_->template simd_load<T>(lane_base) : util::broadcast<T>(scalar_);
+    }
+
+    template <typename T> util::narrow32<T> load_narrow(uint32_t lane_base) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "load_narrow expects 32-bit lanes");
+      assert(op_ && "OperandReadView is empty");
+      return storage_ ? storage_->template simd_load_narrow<T>(lane_base)
+                      : util::broadcast_narrow<T>(scalar_);
+    }
+
+  private:
+    friend class RegisterAccess;
+
+    OperandReadView(const Operand &op, const Wavefront &wf, const VgprStorage *storage)
+        : op_(&op), storage_(storage), scalar_(storage ? 0u : op.read_scalar(wf)) {}
+
+    const Operand *op_ = nullptr;
+    const VgprStorage *storage_ = nullptr;
+    uint32_t scalar_ = 0;
+  };
+
+  class OperandWriteView {
+  public:
+    OperandWriteView() = default;
+
+    bool has_storage() const { return storage_ != nullptr; }
+
+    template <typename T>
+    void store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "store_native expects 32-bit lanes");
+      assert(op_ && wf_ && "OperandWriteView is empty");
+      if (storage_) {
+        storage_->template simd_store<T>(lane_base, value, lane_mask);
+        return;
+      }
+      constexpr std::size_t W = util::native_width_v<T>;
+      alignas(util::native<T>) uint32_t buf[W];
+      util::blit_to_buffer<T>(buf, value);
+      op_->write_lane_chunk(*wf_, lane_base, static_cast<uint32_t>(W), buf, lane_mask);
+    }
+
+    template <typename T>
+    void store_narrow(uint32_t lane_base, util::narrow32<T> value, uint64_t lane_mask) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "store_narrow expects 32-bit lanes");
+      assert(op_ && wf_ && "OperandWriteView is empty");
+      if (storage_) {
+        storage_->template simd_store_narrow<T>(lane_base, value, lane_mask);
+        return;
+      }
+      constexpr std::size_t W = util::native_width64;
+      alignas(util::narrow32<T>) T vals[W];
+      value.copy_to(vals, util::stdx::vector_aligned);
+      uint32_t buf[W];
+      for (std::size_t i = 0; i < W; ++i)
+        buf[i] = std::bit_cast<uint32_t>(vals[i]);
+      op_->write_lane_chunk(*wf_, lane_base, static_cast<uint32_t>(W), buf, lane_mask);
+    }
+
+  private:
+    friend class RegisterAccess;
+
+    OperandWriteView(const Operand &op, Wavefront &wf, VgprStorage *storage)
+        : op_(&op), wf_(&wf), storage_(storage) {}
+
+    const Operand *op_ = nullptr;
+    Wavefront *wf_ = nullptr;
+    VgprStorage *storage_ = nullptr;
+  };
+
   class VgprReadRegion {
   public:
     VgprReadRegion() = default;
@@ -147,6 +236,18 @@ public:
   };
 
   explicit RegisterAccess(ComputeUnitCore &cu) : cu_(cu) {}
+
+  OperandReadView read_operand(const Operand &op, const Wavefront &wf, uint64_t lane_mask,
+                               uint8_t byte_mask = 0xF) const {
+    const VgprStorage *storage = SimdAccess::vgpr_storage(op, wf);
+    if (storage)
+      SimdAccess::notify_read(op, wf, lane_mask, byte_mask);
+    return OperandReadView(op, wf, storage);
+  }
+
+  OperandWriteView write_operand(const Operand &op, Wavefront &wf, uint64_t /*lane_mask*/) const {
+    return OperandWriteView(op, wf, SimdAccess::vgpr_storage_mut(op, wf));
+  }
 
   uint32_t read_vgpr(uint32_t physical_reg, uint32_t lane, uint8_t byte_mask = 0xF) const {
     return read_vgpr_region(physical_reg, 1, uint64_t{1} << lane, byte_mask).lane(0, lane);
