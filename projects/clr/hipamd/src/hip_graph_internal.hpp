@@ -958,6 +958,12 @@ class Graph {
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
+
+    // Approach B (same-queue any-order overlap): when true, this segment's head
+    // dispatch packet has its AQL barrier bit cleared so capable HW overlaps it
+    // with the first segment on the same oversubscribed queue. Decided once in
+    // RoundRobinStreamAssignment(); false unless overlap is enabled.
+    bool clear_head_barrier = false;
   };
 
   //! Segment information for batch scheduling
@@ -1293,6 +1299,27 @@ class GraphExecSegmented : public GraphExecBase {
   bool collapsed_to_single_stream_ = false;
 
   void BuildSyncPlan();
+
+  // ---- Same-queue any-order overlap (Approach B: oversubscription) --------
+  // Multi-queue scheduling is preserved. When more parallel same-level segments
+  // exist than streams in a device's pool, round-robin assignment lands several
+  // segments on the same queue. RoundRobinStreamAssignment() decides per segment
+  // (in dispatch order) whether its head may drop the AQL barrier bit
+  // (Segment::clear_head_barrier); BuildSyncPlan() stamps that bit so capable
+  // hardware overlaps the colliding segments on that queue instead of
+  // serializing. Set once in Init(); guards every mutation so it is a no-op
+  // otherwise. The optimization targets round-robin oversubscription only, so
+  // SelectStreamAssignment() forces round-robin when this is enabled.
+  bool anyorder_enabled_ = false;
+  // Stamp the precomputed head-barrier decision onto one segment's head dispatch
+  // packet (idempotent; re-applied per segment after a node update re-capture).
+  void SetSegmentHeadBarrier(const Segment& seg, SegmentBatch& sb);
+
+ public:
+  // True for ISAs whose CP honors out-of-order same-queue dispatch when the
+  // barrier bit is clear (gfx1250 / gfx12.5+). Public so SelectStreamAssignment
+  // and the complexity heuristic can gate on capable HW.
+  static bool DeviceHonorsSameQueueAnyOrder(int dev_id);
 };
 
 
