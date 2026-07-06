@@ -13,9 +13,10 @@ on:
       - 'projects/amdsmi/**'
   workflow_dispatch:
 
+# Untrusted build: no write permissions. Results are uploaded as artifacts and
+# consumed by abi-compliance-report.yml which runs with a trusted token.
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   major_abi_check:
@@ -38,6 +39,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Fetch base branch for PR
         if: github.event_name == 'pull_request'
@@ -68,25 +70,18 @@ jobs:
             --mode major
         continue-on-error: true
 
-      - name: Label PR on Major ABI Breakage
-        if: always() && github.event_name == 'pull_request'
-        run: |
-          if [[ "${{ steps.run_major.outcome }}" == "failure" ]]; then
-            echo "Major ABI check failed, adding MAJOR ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
-            gh pr edit ${{ github.event.pull_request.number }} --add-label "MAJOR ABI BREAKAGE"
-          else
-            echo "Major ABI check passed, removing MAJOR ABI BREAKAGE label if present"
-            gh pr edit ${{ github.event.pull_request.number }} --remove-label "MAJOR ABI BREAKAGE" || true
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Save major ABI check outcome
+        if: always()
+        run: echo "${{ steps.run_major.outcome }}" > major_outcome.txt
 
       - name: Upload Major ABI Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: major-abi-report
-          path: abi_report.html
+          path: |
+            abi_report.html
+            major_outcome.txt
           if-no-files-found: warn
 
       - name: Report Major ABI Check Results
@@ -121,6 +116,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Fetch base branch for PR
         if: github.event_name == 'pull_request'
@@ -151,25 +147,18 @@ jobs:
             --mode minor
         continue-on-error: true
 
-      - name: Label PR on Minor ABI Breakage
-        if: always() && github.event_name == 'pull_request'
-        run: |
-          if [[ "${{ steps.run_minor.outcome }}" == "failure" ]]; then
-            echo "Minor ABI check failed, adding MINOR ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
-            gh pr edit ${{ github.event.pull_request.number }} --add-label "MINOR ABI BREAKAGE"
-          else
-            echo "Minor ABI check passed, removing MINOR ABI BREAKAGE label if present"
-            gh pr edit ${{ github.event.pull_request.number }} --remove-label "MINOR ABI BREAKAGE" || true
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Save minor ABI check outcome
+        if: always()
+        run: echo "${{ steps.run_minor.outcome }}" > minor_outcome.txt
 
       - name: Upload Minor ABI Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: minor-abi-report
-          path: abi_report.html
+          path: |
+            abi_report.html
+            minor_outcome.txt
           if-no-files-found: warn
 
       - name: Report Minor ABI Check Results

@@ -1,0 +1,74 @@
+name: ABI Compliance Report
+
+# Trusted companion to abi-compliance-check.yml.
+# Runs on the base branch (not fork code) with write permissions, downloads
+# artifacts produced by the untrusted build, and applies PR labels.
+on:
+  workflow_run:
+    workflows: ["ABI Compliance Check"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label_pr:
+    name: Apply ABI Labels
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download major ABI report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: major-abi-report
+          path: major-abi-report
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+        continue-on-error: true
+
+      - name: Download minor ABI report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: minor-abi-report
+          path: minor-abi-report
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+        continue-on-error: true
+
+      - name: Resolve PR number
+        id: pr
+        run: |
+          PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
+          echo "number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+
+      - name: Apply MAJOR ABI BREAKAGE label
+        if: steps.pr.outputs.number != ''
+        run: |
+          OUTCOME=$(cat major-abi-report/major_outcome.txt 2>/dev/null || echo "skipped")
+          PR="${{ steps.pr.outputs.number }}"
+          if [[ "$OUTCOME" == "failure" ]]; then
+            echo "Major ABI check failed — adding label to PR #${PR}"
+            gh pr edit "$PR" --add-label "MAJOR ABI BREAKAGE"
+          else
+            echo "Major ABI check passed — removing label if present"
+            gh pr edit "$PR" --remove-label "MAJOR ABI BREAKAGE" || true
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply MINOR ABI BREAKAGE label
+        if: steps.pr.outputs.number != ''
+        run: |
+          OUTCOME=$(cat minor-abi-report/minor_outcome.txt 2>/dev/null || echo "skipped")
+          PR="${{ steps.pr.outputs.number }}"
+          if [[ "$OUTCOME" == "failure" ]]; then
+            echo "Minor ABI check failed — adding label to PR #${PR}"
+            gh pr edit "$PR" --add-label "MINOR ABI BREAKAGE"
+          else
+            echo "Minor ABI check passed — removing label if present"
+            gh pr edit "$PR" --remove-label "MINOR ABI BREAKAGE" || true
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
