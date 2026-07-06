@@ -41,6 +41,9 @@ done
 : "${ROCSHMEM_INSTALL_DIR:?run-gin-ci.sh: ROCSHMEM_INSTALL_DIR unset (run build-rocshmem.sh)}"
 : "${RCCL_INSTALL_PREFIX:?run-gin-ci.sh: RCCL_INSTALL_PREFIX unset (set by gin.sbatch)}"
 : "${RCCL_TESTS_BIN_DIR:?run-gin-ci.sh: RCCL_TESTS_BIN_DIR unset (set by gin.sbatch)}"
+# build-rocshmem.sh records where the test binary landed (bin/ vs share/rocshmem/);
+# fall back to bin/ for older env fragments.
+ROCSHMEM_TESTS_BIN_DIR="${ROCSHMEM_TESTS_BIN_DIR:-${ROCSHMEM_INSTALL_DIR}/bin}"
 
 [[ -f "${CONFIG}" ]] || { echo "ERROR: test-matrix config not found: ${CONFIG}" >&2; exit 1; }
 [[ -f "${PARSER}" ]] || { echo "ERROR: config parser not found: ${PARSER}" >&2; exit 1; }
@@ -88,7 +91,7 @@ run_test() {
   local name="$1" kind="$2" bin="$3" env_flags="$4" args="$5"
   local bin_path
   case "${kind}" in
-    rocshmem)   bin_path="${ROCSHMEM_INSTALL_DIR}/bin/${bin}" ;;
+    rocshmem)   bin_path="${ROCSHMEM_TESTS_BIN_DIR}/${bin}" ;;
     rccl-tests) bin_path="${RCCL_TESTS_BIN_DIR}/${bin}" ;;
     *) echo "  SKIP ${name}: unknown kind '${kind}'"; FAILED_RUNS+=("${name} (unknown kind)"); return ;;
   esac

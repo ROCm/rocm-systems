@@ -69,11 +69,24 @@ EOF
       -DUSE_IPC=ON -DUSE_SDMA=ON
 )
 
-if [[ ! -x "${install_dir}/bin/rocshmem_functional_tests" ]]; then
-  echo "ERROR: rocSHMEM install at ${install_dir} has no bin/rocshmem_functional_tests" >&2
-  ls -la "${install_dir}" "${install_dir}/bin" 2>/dev/null >&2 || true
+# rocSHMEM's install location for the functional-tests binary moves between
+# versions (bin/ -> share/rocshmem/); locate it instead of assuming a path.
+tests_bin=""
+for d in "${install_dir}/share/rocshmem" "${install_dir}/bin"; do
+  if [[ -x "${d}/rocshmem_functional_tests" ]]; then
+    tests_bin="${d}/rocshmem_functional_tests"
+    break
+  fi
+done
+if [[ -z "${tests_bin}" ]]; then
+  echo "ERROR: rocSHMEM install at ${install_dir} has no rocshmem_functional_tests" >&2
+  ls -la "${install_dir}"/{share/rocshmem,bin} 2>/dev/null >&2 || true
   exit 1
 fi
+tests_bin_dir="$(dirname "${tests_bin}")"
 
-printf 'export ROCSHMEM_INSTALL_DIR=%q\n' "${install_dir}" > "${env_out}"
-echo "==> Wrote ${env_out}"
+{
+  printf 'export ROCSHMEM_INSTALL_DIR=%q\n' "${install_dir}"
+  printf 'export ROCSHMEM_TESTS_BIN_DIR=%q\n' "${tests_bin_dir}"
+} > "${env_out}"
+echo "==> Wrote ${env_out} (tests bin dir: ${tests_bin_dir})"
