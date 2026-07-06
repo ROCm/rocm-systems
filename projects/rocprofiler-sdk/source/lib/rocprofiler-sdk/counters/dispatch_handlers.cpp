@@ -99,19 +99,46 @@ queue_cb(const context::context*                                  ctx,
     dispatch_data.correlation_id = _corr_id_v;
     {
         auto dispatch_info = common::init_public_api_struct(rocprofiler_kernel_dispatch_info_t{});
-        dispatch_info.kernel_id            = kernel_id;
-        dispatch_info.dispatch_id          = dispatch_id;
-        dispatch_info.agent_id             = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
-        dispatch_info.queue_id             = queue.get_id();
-        dispatch_info.private_segment_size = pkt.kernel_dispatch.private_segment_size;
-        dispatch_info.group_segment_size   = pkt.kernel_dispatch.group_segment_size;
-        dispatch_info.workgroup_size       = {pkt.kernel_dispatch.workgroup_size_x,
-                                        pkt.kernel_dispatch.workgroup_size_y,
-                                        pkt.kernel_dispatch.workgroup_size_z};
-        dispatch_info.grid_size            = {pkt.kernel_dispatch.grid_size_x,
-                                   pkt.kernel_dispatch.grid_size_y,
-                                   pkt.kernel_dispatch.grid_size_z};
-        dispatch_data.dispatch_info        = dispatch_info;
+        dispatch_info.kernel_id   = kernel_id;
+        dispatch_info.dispatch_id = dispatch_id;
+        dispatch_info.agent_id    = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
+        dispatch_info.queue_id    = queue.get_id();
+        bool _is_ext_dispatch     = false;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+        {
+            auto _pkt_type = (pkt.kernel_dispatch.header >> HSA_PACKET_HEADER_TYPE) &
+                             ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
+            if(_pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+               pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                _is_ext_dispatch = true;
+        }
+#endif
+        if(_is_ext_dispatch)
+        {
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            const auto& e                      = pkt.ext_kernel_dispatch;
+            dispatch_info.private_segment_size = e.private_segment_size;
+            dispatch_info.group_segment_size   = e.group_segment_size;
+            dispatch_info.workgroup_size       = {
+                e.workgroup_size_x, e.workgroup_size_y, e.workgroup_size_z};
+            dispatch_info.grid_size = {
+                static_cast<uint32_t>(e.cluster_count_x) * e.cluster_size_x * e.workgroup_size_x,
+                static_cast<uint32_t>(e.cluster_count_y) * e.cluster_size_y * e.workgroup_size_y,
+                static_cast<uint32_t>(e.cluster_count_z) * e.cluster_size_z * e.workgroup_size_z};
+#endif
+        }
+        else
+        {
+            dispatch_info.private_segment_size = pkt.kernel_dispatch.private_segment_size;
+            dispatch_info.group_segment_size   = pkt.kernel_dispatch.group_segment_size;
+            dispatch_info.workgroup_size       = {pkt.kernel_dispatch.workgroup_size_x,
+                                            pkt.kernel_dispatch.workgroup_size_y,
+                                            pkt.kernel_dispatch.workgroup_size_z};
+            dispatch_info.grid_size            = {pkt.kernel_dispatch.grid_size_x,
+                                       pkt.kernel_dispatch.grid_size_y,
+                                       pkt.kernel_dispatch.grid_size_z};
+        }
+        dispatch_data.dispatch_info = dispatch_info;
     }
 
     info->user_cb(dispatch_data, &req_profile, user_data, info->callback_args);
