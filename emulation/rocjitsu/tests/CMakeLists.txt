@@ -416,7 +416,7 @@ target_compile_definitions(
 target_link_libraries(interposer_test PRIVATE GTest::gtest_main)
 rj_configure_target(interposer_test TEST)
 add_dependencies(interposer_test rocjitsu_shared)
-gtest_discover_tests(interposer_test)
+rj_add_gtest_tests(interposer_test)
 
 # --- Scaling test (standalone executable) ---
 
