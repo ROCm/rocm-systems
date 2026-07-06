@@ -7,21 +7,21 @@
  * the dynamic symbol table stays limited to the intended surface.
  *
  * This complements the project-wide hidden visibility (CMAKE_CXX_VISIBILITY_PRESET
- * hidden). Visibility alone cannot make the surface fully pristine because:
- *   - the interposer wraps its libc overrides in `#pragma GCC visibility
- *     push(default)`, which also promotes the std:: template instantiations,
- *     typeinfos and vtables generated inside that region, and
- *   - libstdc++ marks `namespace std` as _GLIBCXX_VISIBILITY(default), so some
- *     std:: typeinfos stay default-visible even under -fvisibility=hidden.
+ * hidden) plus the explicit per-symbol export markers on the intended surface
+ * (RJ_API_EXPORT on the rj_* C API, RJ_INTERPOSER_EXPORT on the interposed libc
+ * overrides). Visibility alone still cannot make the surface fully pristine
+ * because libstdc++ marks `namespace std` as _GLIBCXX_VISIBILITY(default), so
+ * some std:: typeinfos stay default-visible even under -fvisibility=hidden.
  * The `local: *` rule below overrides ELF visibility at link time and drops all
  * of that, leaving only the two intended groups.
  *
  * Public groups:
  *   1. The rj_* C API (rj_vm_*, rj_code_*, rj_kfd_*), marked RJ_API_EXPORT.
  *   2. The libc functions interposed by the LD_PRELOAD shim in
- *      lib/rocjitsu/src/rocjitsu/kmd/linux/interposer.cpp. These MUST remain
- *      exported so the preload can intercept the amdgpu/KFD syscall surface.
- *      When adding or removing an interposed libc function, update this list.
+ *      lib/rocjitsu/src/rocjitsu/kmd/linux/interposer.cpp, each marked
+ *      RJ_INTERPOSER_EXPORT. These MUST remain exported so the preload can
+ *      intercept the amdgpu/KFD syscall surface. When adding or removing an
+ *      interposed libc function, update both that marker and this list.
  */
 {
   global:
