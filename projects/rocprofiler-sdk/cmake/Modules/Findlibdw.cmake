@@ -10,6 +10,8 @@
 #  libdw_ROOT         Set this variable to the root installation of
 #                     libdw if the module has problems finding the
 #                     proper installation path.
+#                     By default, ROCm's rocm_sysdeps libdw is preferred
+#                     when it is available under ROCM_PATH or /opt/rocm.
 #
 # Variables defined by this module:
 #
@@ -22,9 +24,23 @@
 #   libdw::libdw
 #
 
+if(NOT libdw_ROOT)
+    foreach(_libdw_ROCM_ROOT
+            IN
+            ITEMS "${ROCM_PATH}" "$ENV{ROCM_PATH}" "${rocm_version_DIR}"
+                  "${ROCPROFILER_DEFAULT_ROCM_PATH}" "/opt/rocm")
+        set(_libdw_ROCM_SYSDEPS "${_libdw_ROCM_ROOT}/lib/rocm_sysdeps")
+        if(EXISTS "${_libdw_ROCM_SYSDEPS}/include/elfutils/libdw.h"
+           AND EXISTS "${_libdw_ROCM_SYSDEPS}/lib/libdw.so")
+            set(libdw_ROOT "${_libdw_ROCM_SYSDEPS}")
+            break()
+        endif()
+    endforeach()
+endif()
+
 find_package(PkgConfig)
 
-if(PkgConfig_FOUND)
+if(PkgConfig_FOUND AND NOT libdw_ROOT)
     set(ENV{PKG_CONFIG_SYSTEM_INCLUDE_PATH} "")
     pkg_check_modules(DW libdw)
 
