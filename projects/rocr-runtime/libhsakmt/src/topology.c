@@ -1098,13 +1098,23 @@ static int topology_get_node_props_from_drm(HsaNodeProperties *props)
 	props->Integrated = !!(gpu_info.ids_flags & AMDGPU_IDS_FLAGS_FUSION);
 	props->WallClockKHz = gpu_info.gpu_counter_freq;
 
-	snprintf(fabric_handle_supported_path, 256, "/sys/class/drm/renderD%d/device/ualink", props->DrmRenderMinor);
+	/*
+	 * Fabric (UALink) handle support must mirror the driver's readiness gate:
+	 * the DRM_AMDGPU_UALINK_HANDLE ioctl returns -EOPNOTSUPP unless the fabric
+	 * accel_state == "ready". Merely opening the ualink directory is not enough
+	 * (the node exists whenever the ASIC has UALink HW, even with the fabric
+	 * down), so this is relying on the "ready" state provided by the driver via
+	 * ualink/accel_state before advertising FabricHandleSupported.
+	 */
+	snprintf(fabric_handle_supported_path, 256, "/sys/class/drm/renderD%d/device/ualink/accel_state", props->DrmRenderMinor);
 	FILE *file = fopen(fabric_handle_supported_path, "r");
+	props->FabricHandleSupported = 0;
 	if (file) {
-		props->FabricHandleSupported = 1;
+		char accel_state[16] = {0};
+		if (fgets(accel_state, sizeof(accel_state), file) &&
+		    strncmp(accel_state, "ready", sizeof("ready") - 1) == 0)
+			props->FabricHandleSupported = 1;
 		fclose(file);
-	} else {
-		props->FabricHandleSupported = 0;
 	}
 
 err_query_gpu_info:
