@@ -364,6 +364,23 @@ inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_
   return apply_vop3_dst_mod<float>(v, omod, clamp);
 }
 
+// Transitional observed-storage helpers.
+//
+// SIMD instruction bodies need zero-copy access to resolved VGPR storage, but
+// the long-term invariant should be "acquire a register read/read-write view
+// and the view acquisition observes the read." Until that register-access facade
+// exists, keep all SIMD plugin notifications centralized here rather than
+// sprinkling `notify_vgpr_read` through individual execute helpers.
+//
+// The distinction between source and mutable-destination helpers is deliberate:
+// AMDGPU GPR indexing uses different role bits for read operands and write
+// operands. Dst-accumulate forms read the destination through the same
+// write-role resolution that is later used for the store, so they need the
+// `_dst_` helpers below to observe the actual register being loaded.
+//
+// These helpers should shrink away when SIMD glue is migrated to the unified
+// register-access facade.
+
 /// Resolve an operand's read-side VGPR storage and notify plugins for the lanes
 /// being read. Returns null for non-VGPR operands (SGPR / immediate /
 /// inline-const / DPP delegate). This is the observed-read bottleneck for SIMD
@@ -391,6 +408,17 @@ template <typename Op> VgprStorage *simd_dst_reg(const Op &op, Wavefront &wf) {
   return SimdAccess::vgpr_storage_mut(op, wf);
 }
 
+/// Mutable counterpart used only by dst-accumulate operations, where the
+/// destination register is also an instruction-visible source operand.
+template <typename Op>
+VgprStorage *observed_simd_dst_reg(const Op &op, Wavefront &wf, uint64_t lane_mask,
+                                   uint8_t byte_mask = 0xF) {
+  VgprStorage *r = SimdAccess::vgpr_storage_mut(op, wf);
+  if (r)
+    SimdAccess::notify_read_mut(op, wf, lane_mask, byte_mask);
+  return r;
+}
+
 /// Resolve a 64-bit-lane source operand's lo/hi VGPR pair and notify plugins
 /// for the lanes being read.
 template <typename Op>
@@ -398,7 +426,7 @@ ConstVgprStoragePair64 observed_simd_src_reg64(const Op &op, const Wavefront &wf
                                                uint64_t lane_mask, uint8_t byte_mask = 0xF) {
   ConstVgprStoragePair64 p = SimdAccess::vgpr_storage64(op, wf);
   if (p.lo)
-    SimdAccess::notify_read(op, wf, lane_mask, byte_mask);
+    SimdAccess::notify_read64(op, wf, lane_mask, byte_mask);
   return p;
 }
 
@@ -415,6 +443,16 @@ template <typename Op> ConstVgprStoragePair64 simd_src_reg64(const Op &op, const
 /// (single `simd_vgpr_storage64_mut` dispatch).
 template <typename Op> VgprStoragePair64 simd_dst_reg64(const Op &op, Wavefront &wf) {
   return SimdAccess::vgpr_storage64_mut(op, wf);
+}
+
+/// Mutable 64-bit counterpart for dst-accumulate operations.
+template <typename Op>
+VgprStoragePair64 observed_simd_dst_reg64(const Op &op, Wavefront &wf, uint64_t lane_mask,
+                                          uint8_t byte_mask = 0xF) {
+  VgprStoragePair64 p = SimdAccess::vgpr_storage64_mut(op, wf);
+  if (p.lo)
+    SimdAccess::notify_read64_mut(op, wf, lane_mask, byte_mask);
+  return p;
 }
 
 /// Value-semantic 32-bit load of a resolved source register at `base`: a
@@ -929,7 +967,7 @@ template <typename T, typename Inst, typename FmaOp>
   // is both the dst-accumulate source and the destination — one lo/hi pair.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
   const ConstVgprStoragePair64 rs1 = simd_src_reg64(inst.vsrc1, wf);
-  const VgprStoragePair64 rd64 = simd_dst_reg64(inst.vdst, wf);
+  const VgprStoragePair64 rd64 = observed_simd_dst_reg64(inst.vdst, wf, exec);
   const auto a_bcast =
       rs0.lo ? util::native<T>{} : util::broadcast64<T>(inst.src0.read_scalar64(wf));
   const auto b_bcast =
@@ -2258,7 +2296,7 @@ template <typename Inst, typename FmaOp>
   // is both the third (accumulator) source and the destination — one pointer.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
+  VgprStorage *rd = observed_simd_dst_reg(inst.vdst, wf, exec);
   const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
   const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
   const auto c_bcast = rd ? util::native<T>{} : util::broadcast<T>(inst.vdst.read_scalar(wf));
@@ -2303,7 +2341,7 @@ template <typename Inst, typename FmaOp>
   // is both the third (accumulate) source and the destination — one pointer.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
+  VgprStorage *rd = observed_simd_dst_reg(inst.vdst, wf, exec);
   const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
   const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
   const auto c_bcast = rd ? util::native<T>{} : util::broadcast<T>(inst.vdst.read_scalar(wf));
@@ -2348,7 +2386,7 @@ template <typename Inst, typename FmaOp>
   // is both the accumulator source and the destination — one lo/hi pair.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
   const ConstVgprStoragePair64 rs1 = simd_src_reg64(inst.src1, wf);
-  const VgprStoragePair64 rd64 = simd_dst_reg64(inst.vdst, wf);
+  const VgprStoragePair64 rd64 = observed_simd_dst_reg64(inst.vdst, wf, exec);
   const auto a_bcast =
       rs0.lo ? util::native<T>{} : util::broadcast64<T>(inst.src0.read_scalar64(wf));
   const auto b_bcast =

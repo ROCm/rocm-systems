@@ -210,6 +210,20 @@ public:
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 private:
+  // Transitional SIMD fast-path escape hatches.
+  //
+  // These private hooks exist because today's SIMD glue needs zero-copy access
+  // to resolved VGPR storage, while plugin observation is still fired outside
+  // operand resolution. The four `simd_notify_*` hooks are not a desired
+  // long-term public contract: they are the smallest bridge that lets source
+  // operands, dst-accumulate operands, and 64-bit VGPR pairs report the same
+  // physical registers that their matching storage hooks resolve.
+  //
+  // The intended cleanup is to replace this family with a single
+  // instruction-facing register access facade that returns observed read views
+  // and write views directly. Once that exists, `simd_vgpr_storage*` and
+  // `simd_notify_*` should disappear from `Operand`.
+
   /// @brief If this operand resolves to per-lane VGPR storage, return its
   /// physical register index (`wf.vgpr_alloc().base + offset`). Otherwise
   /// nullopt (SGPR/imm/inline-const/DPP) — the caller broadcasts a scalar. The
@@ -248,6 +262,23 @@ private:
   /// by lanes in `lane_mask`. No-op for non-VGPR operands.
   virtual void simd_notify_read(const amdgpu::Wavefront & /*wf*/, uint64_t /*lane_mask*/,
                                 uint8_t /*byte_mask*/) const {}
+
+  /// @brief Notify a read through a mutable destination operand, used by
+  /// dst-accumulate forms where vdst is both source and destination.
+  virtual void simd_notify_read_mut(amdgpu::Wavefront & /*wf*/, uint64_t /*lane_mask*/,
+                                    uint8_t /*byte_mask*/) const {}
+
+  /// @brief 64-bit counterpart of `simd_notify_read`; a per-lane f64/i64 read
+  /// consumes two consecutive VGPRs, so VGPR operands notify both halves.
+  virtual void simd_notify_read64(const amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                  uint8_t byte_mask) const {
+    if (delegate_)
+      delegate_->simd_notify_read64(wf, lane_mask, byte_mask);
+  }
+
+  /// @brief 64-bit counterpart of `simd_notify_read_mut`.
+  virtual void simd_notify_read64_mut(amdgpu::Wavefront & /*wf*/, uint64_t /*lane_mask*/,
+                                      uint8_t /*byte_mask*/) const {}
 
   /// @brief 64-bit-lane counterpart of `simd_vgpr_storage`. A per-lane f64/i64
   /// value occupies two consecutive VGPRs (reg N + reg N+1), so this returns a
@@ -325,6 +356,12 @@ private:
   amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut(amdgpu::Wavefront &wf) const override;
   void simd_notify_read(const amdgpu::Wavefront &wf, uint64_t lane_mask,
                         uint8_t byte_mask) const override;
+  void simd_notify_read_mut(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                            uint8_t byte_mask) const override;
+  void simd_notify_read64(const amdgpu::Wavefront &wf, uint64_t lane_mask,
+                          uint8_t byte_mask) const override;
+  void simd_notify_read64_mut(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                              uint8_t byte_mask) const override;
 };
 
 /// @brief DPP-aware operand proxy that applies lane permutation on read.
@@ -424,6 +461,20 @@ struct SimdAccess {
   static void notify_read(const Op &op, const Wavefront &wf, uint64_t lane_mask,
                           uint8_t byte_mask) {
     op.simd_notify_read(wf, lane_mask, byte_mask);
+  }
+  template <typename Op>
+  static void notify_read_mut(const Op &op, Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) {
+    op.simd_notify_read_mut(wf, lane_mask, byte_mask);
+  }
+  template <typename Op>
+  static void notify_read64(const Op &op, const Wavefront &wf, uint64_t lane_mask,
+                            uint8_t byte_mask) {
+    op.simd_notify_read64(wf, lane_mask, byte_mask);
+  }
+  template <typename Op>
+  static void notify_read64_mut(const Op &op, Wavefront &wf, uint64_t lane_mask,
+                                uint8_t byte_mask) {
+    op.simd_notify_read64_mut(wf, lane_mask, byte_mask);
   }
 };
 } // namespace amdgpu

@@ -121,6 +121,42 @@ void AmdgpuIsaOperand<Isa>::simd_notify_read(const amdgpu::Wavefront &wf, uint64
 }
 
 template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_read_mut(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                                 uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().notify_vgpr_read(&wf, physical_reg, lane_mask, byte_mask);
+  }
+}
+
+template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_read64(const amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                               uint8_t byte_mask) const {
+  if (this->delegate()) {
+    amdgpu::SimdAccess::notify_read64(*this->delegate(), wf, lane_mask, byte_mask);
+    return;
+  }
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().notify_vgpr_read(&wf, physical_reg, lane_mask, byte_mask);
+    wf.cu().notify_vgpr_read(&wf, physical_reg + 1, lane_mask, byte_mask);
+  }
+}
+
+template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_read64_mut(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                                   uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().notify_vgpr_read(&wf, physical_reg, lane_mask, byte_mask);
+    wf.cu().notify_vgpr_read(&wf, physical_reg + 1, lane_mask, byte_mask);
+  }
+}
+
+template <typename Isa>
 amdgpu::ConstVgprStoragePair64
 AmdgpuIsaOperand<Isa>::simd_vgpr_storage64(const amdgpu::Wavefront &wf) const {
   if (this->delegate())
