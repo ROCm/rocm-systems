@@ -967,17 +967,17 @@ inline uint32_t mfma_dense_reg_count(uint64_t element_count, uint32_t element_bi
   return static_cast<uint32_t>((element_count * element_bits + bits_per_reg - 1) / bits_per_reg);
 }
 
-// Transitional matrix fast-path observation helpers.
+// Matrix fast-path register access helpers.
 //
-// MFMA/WMMA specializations below deliberately read dense source regions through
-// raw VGPR storage for performance. The correct long-term shape is not
-// "observe here, raw-read later"; it is a register-access facade that returns an
-// observed `VgprReadRegion` view. Until that facade exists, these helpers keep
-// the matrix fast-path observation in one place and prevent every specialization
-// from open-coding plugin notifications.
+// MFMA/WMMA specializations below read dense source regions through
+// RegisterAccess views. Acquiring a read view observes the whole physical VGPR
+// region, then the fast path can use zero-copy lane spans/pointers for the math.
+// Keep the matrix-specific size calculations here so individual specializations
+// do not open-code plugin notification or raw region sizing.
 //
-// Delete these helpers when the matrix fast paths acquire their source and
-// accumulator regions through the unified register-access facade.
+// This is still only the physical-register-region layer. The broader cleanup is
+// to move operand-based SIMD paths onto the same facade and then make direct raw
+// VGPR storage unavailable to instruction emulators.
 
 inline void observe_contiguous_vgpr_reads(amdgpu::ComputeUnitCore &cu, uint32_t base,
                                           uint32_t reg_count, uint32_t wf_size,
@@ -1044,17 +1044,39 @@ inline void observe_mfma_fast_path_reads(amdgpu::ComputeUnitCore &cu, uint32_t s
   (void)read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, data_bits, const_acc, wf_size);
 }
 
+inline MatrixReadRegions read_wmma_fast_path_regions(amdgpu::ComputeUnitCore &cu, uint32_t s0,
+                                                     uint32_t s1, uint32_t s2, uint32_t M,
+                                                     uint32_t N, uint32_t K, uint32_t data_bits,
+                                                     uint32_t acc_bits, uint32_t const_acc,
+                                                     uint32_t wf_size) {
+  RegisterAccess regs(cu);
+  uint64_t lane_mask = mfma_full_lane_mask(wf_size);
+  uint32_t a_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * K, data_bits, wf_size);
+  uint32_t b_regs = mfma_dense_reg_count(static_cast<uint64_t>(N) * K, data_bits, wf_size);
+  RegisterAccess::VgprReadRegion acc_region;
+  if (const_acc == ACC_FROM_VGPR) {
+    uint32_t acc_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * N, acc_bits, wf_size);
+    acc_region = regs.read_vgpr_region(s2, acc_regs, lane_mask);
+  }
+  return {regs.read_vgpr_region(s0, a_regs, lane_mask),
+          regs.read_vgpr_region(s1, b_regs, lane_mask), acc_region};
+}
+
 inline void observe_wmma_fast_path_reads(amdgpu::ComputeUnitCore &cu, uint32_t s0, uint32_t s1,
                                          uint32_t s2, uint32_t M, uint32_t N, uint32_t K,
                                          uint32_t data_bits, uint32_t acc_bits, uint32_t const_acc,
                                          uint32_t wf_size) {
-  observe_mfma_input_reads(cu, s0, M, K, /*B=*/1, data_bits, wf_size);
-  observe_mfma_input_reads(cu, s1, N, K, /*B=*/1, data_bits, wf_size);
-  if (const_acc == ACC_FROM_VGPR) {
-    uint64_t element_count = static_cast<uint64_t>(M) * N;
-    observe_contiguous_vgpr_reads(cu, s2, mfma_dense_reg_count(element_count, acc_bits, wf_size),
-                                  wf_size);
-  }
+  (void)read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, data_bits, acc_bits, const_acc,
+                                    wf_size);
+}
+
+inline RegisterAccess::VgprWriteRegion write_wmma_output_region(amdgpu::ComputeUnitCore &cu,
+                                                                uint32_t base, uint32_t M,
+                                                                uint32_t N, uint32_t output_bits,
+                                                                uint32_t wf_size) {
+  RegisterAccess regs(cu);
+  uint32_t reg_count = mfma_dense_reg_count(static_cast<uint64_t>(M) * N, output_bits, wf_size);
+  return regs.write_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size));
 }
 
 /// Map f32 output position to packed 16-bit output position using GFX9 layout.
@@ -1736,8 +1758,8 @@ void exec_wmma_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
 /// of exec_f32_mfma_16x16x32_f16. Compile-time M/N/K let the compiler fully
 /// unroll the 16-row x 32-K matmul into straight-line AVX-512 FMAs; the f16
 /// inputs are bulk-converted once with F16C (one vector op per 16 halves)
-/// instead of branchy per-element extract_f16; VGPRs are accessed through one
-/// raw_vgpr_data base pointer per operand and the result scatters directly (no
+/// instead of branchy per-element extract_f16; VGPRs are accessed through
+/// observed register-access regions and the result scatters directly (no
 /// Result staging vector). Falls back to the generic exec_wmma_f32 without
 /// AVX-512 / under force-scalar.
 inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
@@ -1756,10 +1778,12 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
-    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -1803,7 +1827,7 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
     }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
+    uint32_t *d_words = writes.reg_data();
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -1833,10 +1857,12 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
-    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -1880,7 +1906,7 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
     }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
+    uint32_t *d_words = writes.reg_data();
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -1948,11 +1974,13 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
+    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -2003,7 +2031,8 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
 }
 
 /// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
-/// F16C convert — the hoist reads each operand word straight through raw_vgpr_data.
+/// F16C convert — the hoist reads each operand word straight through observed
+/// register-access regions.
 /// Compile-time M/N/K fully unroll the matmul, looped over N in zmm-width chunks
 /// (N a multiple of 16). Falls back to generic exec_wmma_f32 without AVX-512 /
 /// under force-scalar.
@@ -2026,11 +2055,13 @@ void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
+    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2466,11 +2497,13 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16, const_acc, wf);
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
+    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2481,11 +2514,13 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
-        uint32_t raw = c_words[out.reg * wf + out.lane];
-        C_buf[row * N + col] =
-            (const_acc != ACC_FROM_VGPR)
-                ? std::bit_cast<float>(const_acc)
-                : util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        if (const_acc != ACC_FROM_VGPR) {
+          C_buf[row * N + col] = std::bit_cast<float>(const_acc);
+        } else {
+          uint32_t raw = c_words[out.reg * wf + out.lane];
+          C_buf[row * N + col] =
+              util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        }
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
@@ -2591,11 +2626,13 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16, const_acc, wf);
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
+    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2606,11 +2643,13 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
-        uint32_t raw = c_words[out.reg * wf + out.lane];
-        C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
-                                   ? std::bit_cast<float>(const_acc)
-                                   : util::bf16_to_f32(static_cast<uint16_t>(
-                                         (raw >> (out.sub_element * 16)) & 0xFFFF));
+        if (const_acc != ACC_FROM_VGPR) {
+          C_buf[row * N + col] = std::bit_cast<float>(const_acc);
+        } else {
+          uint32_t raw = c_words[out.reg * wf + out.lane];
+          C_buf[row * N + col] =
+              util::bf16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        }
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
@@ -2690,11 +2729,13 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16, const_acc, wf);
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
+    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2705,11 +2746,13 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
-        uint32_t raw = c_words[out.reg * wf + out.lane];
-        C_buf[row * N + col] =
-            (const_acc != ACC_FROM_VGPR)
-                ? std::bit_cast<float>(const_acc)
-                : util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        if (const_acc != ACC_FROM_VGPR) {
+          C_buf[row * N + col] = std::bit_cast<float>(const_acc);
+        } else {
+          uint32_t raw = c_words[out.reg * wf + out.lane];
+          C_buf[row * N + col] =
+              util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        }
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
@@ -3211,7 +3254,7 @@ inline void exec_wmma_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N
 /// Fast path for v_wmma_i32_16x16x64_iu8 (gfx1250, wave32, dense). Same recipe
 /// as the f16/bf16 specializations: bulk sign-/zero-extend the packed i8
 /// inputs (per the A/B sign selects from the neg bits) to int32 once, then run
-/// a constexpr-unrolled int32 matmul with direct raw_vgpr_data access. The K-sum
+/// a constexpr-unrolled int32 matmul over observed register-access regions. The K-sum
 /// of products is exact in int32 (|sum| <= 64 * 16384) and is added to the
 /// int32 accumulator in 64-bit at pack time, so clamp saturation matches the
 /// scalar int64 reference bit for bit; with clamp off both wrap mod 2^32.
@@ -3235,10 +3278,11 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
-    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
     // Accumulate in unsigned 32-bit (wrap is well-defined; identical mod 2^32
     // to the intended signed wrap), sign-restore via int32 cast at pack time.
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-/zero-extended bits)
@@ -3280,7 +3324,8 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     // Add the accumulator in 64-bit and pack (saturating when clamp is set),
     // scattering directly back to VGPRs.
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(dst));
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
+    uint32_t *d_words = writes.reg_data();
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -3902,16 +3947,16 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
 /// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
 /// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA), and scatters
 /// directly back to VGPRs (no Result staging vector). VGPR access is batched
-/// through raw_vgpr_data (one base pointer per operand, no per-element virtual
-/// read_vgpr/write_vgpr). Falls back to the generic exec_f32 when:
+/// through observed register-access regions (one view per operand, no
+/// per-element virtual read_vgpr/write_vgpr). Falls back to the generic exec_f32 when:
 ///   - <experimental/simd> is unavailable
 ///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
 ///   - cbsz/blgp lane permutation is non-default
 ///   - RJ_FORCE_SCALAR is set
 /// Fast path for the f32-input MFMA shapes (v_mfma_f32_*_f32). Like the f16
 /// specialization but the inputs are already f32, so there is no F16C convert —
-/// the hoist reads each operand word straight through raw_vgpr_data. BATCH covers
-/// the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
+/// the hoist reads each operand word straight through observed register-access
+/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
 /// the matmul; it loops over N in zmm-width chunks (N must be a multiple of 16,
 /// so the 4x4 shape stays on the generic path). Falls back to the generic
 /// exec_f32 without AVX-512 / under force-scalar / with cbsz|blgp.
