@@ -374,7 +374,7 @@ class Runtime {
                                      hsa_amd_signal_handler handler, void* arg);
 
   hsa_status_t InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
-                          hsa_interop_map_flag_t flags, size_t* size, void** ptr,
+                          hsa_interop_map_flag_t flags, size_t size_hint, size_t* size, void** ptr,
                           size_t* metadata_size, const void** metadata);
 
   hsa_status_t InteropUnmap(void* ptr);
@@ -594,7 +594,8 @@ class Runtime {
           size_requested(0),
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
-          thunk_bo(nullptr) {}
+          thunk_bo(nullptr),
+          thunk_node_id(-1) {}
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags)
         : region(region_arg),
@@ -602,7 +603,8 @@ class Runtime {
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
-          thunk_bo(nullptr) {}
+          thunk_bo(nullptr),
+          thunk_node_id(-1) {}
 
     struct notifier_t {
       void* ptr;
@@ -617,6 +619,7 @@ class Runtime {
     void* user_ptr;
     std::unique_ptr<std::vector<notifier_t>> notifiers;
     HsaMemoryObjectHandle thunk_bo;
+    HSAuint32 thunk_node_id;
   };
 
   struct AsyncEventsInfo;
@@ -626,7 +629,7 @@ class Runtime {
     void Shutdown();
 
     hsa_signal_t wake;
-    bool exit;
+    std::atomic<bool> exit;
 
     private:
     AsyncEventsInfo* info_;
@@ -985,6 +988,7 @@ class Runtime {
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
+  bool ipc_sock_server_shutdown_in_progress_;
 
   lazy_ptr<AsyncEventsInfo> asyncSignals_;
   lazy_ptr<AsyncEventsInfo> asyncExceptions_;
@@ -1028,6 +1032,14 @@ class Runtime {
 
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
 
+    /** 
+     * @brief For host owned memory, resolve to the GPU agent that imported the memory. 
+     * For device owned memory, return the agent that owns the memory.
+     */
+    __forceinline core::Agent* drmAgent() const {
+      return drm_owner ? drm_owner : agentOwner();
+    }
+
     const MemoryRegion* region;
     int ref_count;
     int use_count;
@@ -1035,6 +1047,7 @@ class Runtime {
     bool imported; // True if this BO was imported from another process
     bool is_fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
+    core::Agent* drm_owner; // Gpu agent used for import of host memory, NULL for device memory/imported handles 
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
@@ -1059,6 +1072,8 @@ class Runtime {
     hsa_access_permission_t permissions;
     MappedHandle* mappedHandle;
     DriverMemoryHandle driver_handle;
+    // False when driver_handle is borrowed from MemoryHandle::driver_handle (drm_owner reuse path)
+    bool owns_driver_handle = true;
   };
 
   struct MappedHandle {

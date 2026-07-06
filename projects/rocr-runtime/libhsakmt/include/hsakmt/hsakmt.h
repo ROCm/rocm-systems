@@ -601,6 +601,37 @@ hsaKmtDestroyExternalSemaphore(
     );
 
 /**
+  Enqueues a GPU-side signal of an imported external semaphore on
+  QueueId, ordered behind prior submissions. Handle must come from
+  hsaKmtImportExternalSemaphore on the same node as QueueId's device;
+  cross-adapter use returns HSAKMT_STATUS_INVALID_NODE_UNIT.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueSignalExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
+    );
+
+/**
+  Posts a GPU-side wait on an imported external semaphore. The wait
+  blocks any subsequent submissions on QueueId until the syncobj
+  reaches Value. The semaphore must have been imported via
+  hsaKmtImportExternalSemaphore on the same node as QueueId's device;
+  cross-adapter use returns HSAKMT_STATUS_INVALID_NODE_UNIT.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueWaitExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
+    );
+
+/**
  * Export a dmabuf handle and offset for a given memory address
  *
  * Validates that @MemoryAddress belongs to a valid allocation and that the
@@ -1380,7 +1411,8 @@ hsaKmtMemoryVaMap(
     HSAuint64 offset,
     HSAuint64 size,
     HSAuint64 addr,
-    HsaMemoryMapFlags flags
+    HsaMemoryMapFlags flags,
+    HSAuint32 NodeId
 );
 
 HSAKMT_STATUS
@@ -1389,7 +1421,8 @@ hsaKmtMemoryVaUnmap(
     HsaMemoryObjectHandle Handle,
     HSAuint64 offset,
     HSAuint64 size,
-    HSAuint64 addr
+    HSAuint64 addr,
+    HSAuint32 NodeId
 );
 
 HSAKMT_STATUS
@@ -1405,12 +1438,23 @@ hsaKmtMemHandleFree(
     HsaMemoryObjectHandle Handle
 );
 
+/**
+  Free a memory object handle without clearing its metadata.
+  Used for IPC exporter handles where we need to release the extra kernel
+  reference but preserve metadata for later IPC attach operations.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemHandleFreePreserveMetadata(
+    HsaMemoryObjectHandle Handle
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtMemoryGetCpuAddr(
   HsaAMDGPUDeviceHandle DeviceHandle,
   HsaMemoryObjectHandle MemoryHandle,
-  HSAuint64* cpu_addr // OUT
+  HSAuint64* cpu_addr // OUT for newer ROCr; legacy ROCr passes HSAint32* fd here
 );
 
 HSAKMT_STATUS

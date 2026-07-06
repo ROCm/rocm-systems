@@ -158,15 +158,6 @@ static void capture___hipRegisterVar(void** modules, void* var, char* hostVar, c
   }
 }
 
-// Generated shim
-static void capture___hipUnregisterFatBinary(void** modules) {
-  g_real_compiler_table.__hipUnregisterFatBinary_fn(modules);
-  {
-    hrr_args___hipUnregisterFatBinary a{};
-    if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPUNREGISTERFATBINARY, &a.hdr, sizeof(a));
-  }
-}
 
 // Generated shim
 static const char* capture_hipApiName(uint32_t id) {
@@ -3547,6 +3538,76 @@ static hipError_t capture_hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* size
 }
 
 // Generated shim
+static hipError_t capture_hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemDiscardBatchAsync_fn(dev_ptrs, sizes, count, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemDiscardBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    if (dev_ptrs) a.dev_ptrs = reinterpret_cast<uint64_t>(*dev_ptrs);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMDISCARDBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipDrvMemDiscardBatchAsync_fn(dptrs, sizes, count, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipDrvMemDiscardBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.dptrs = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptrs));
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVMEMDISCARDBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemDiscardAndPrefetchBatchAsync_fn(dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemDiscardAndPrefetchBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.prefetchLocs = 0;  // non-castable type skipped
+    a.prefetchLocIdxs = reinterpret_cast<uint64_t>(prefetchLocIdxs);
+    a.numPrefetchLocs = static_cast<decltype(a.numPrefetchLocs)>(numPrefetchLocs);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    if (dptrs) a.dptrs = reinterpret_cast<uint64_t>(*dptrs);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMDISCARDANDPREFETCHBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipDrvMemDiscardAndPrefetchBatchAsync_fn(dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipDrvMemDiscardAndPrefetchBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.dptrs = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptrs));
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.prefetchLocs = 0;  // non-castable type skipped
+    a.prefetchLocIdxs = reinterpret_cast<uint64_t>(prefetchLocIdxs);
+    a.numPrefetchLocs = static_cast<decltype(a.numPrefetchLocs)>(numPrefetchLocs);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVMEMDISCARDANDPREFETCHBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture_hipMemPtrGetInfo(void* ptr, size_t* size) {
   hipError_t r = g_real_table.hipMemPtrGetInfo_fn(ptr, size);
   if (r == hipSuccess) {
@@ -3632,42 +3693,7 @@ static hipError_t capture_hipMemUnmap(void* ptr, size_t size) {
 }
 
 
-// Generated shim
-static hipError_t capture_hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind) {
-  hipError_t r = g_real_table.hipMemcpy2D_fn(dst, dpitch, src, spitch, width, height, kind);
-  if (r == hipSuccess) {
-    hrr_args_hipMemcpy2D a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dst = reinterpret_cast<uint64_t>(dst);
-    a.dpitch = static_cast<decltype(a.dpitch)>(dpitch);
-    a.src = reinterpret_cast<uint64_t>(src);
-    a.spitch = static_cast<decltype(a.spitch)>(spitch);
-    a.width = static_cast<decltype(a.width)>(width);
-    a.height = static_cast<decltype(a.height)>(height);
-    a.kind = static_cast<decltype(a.kind)>(kind);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY2D, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind, hipStream_t stream) {
-  hipError_t r = g_real_table.hipMemcpy2DAsync_fn(dst, dpitch, src, spitch, width, height, kind, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipMemcpy2DAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dst = reinterpret_cast<uint64_t>(dst);
-    a.dpitch = static_cast<decltype(a.dpitch)>(dpitch);
-    a.src = reinterpret_cast<uint64_t>(src);
-    a.spitch = static_cast<decltype(a.spitch)>(spitch);
-    a.width = static_cast<decltype(a.width)>(width);
-    a.height = static_cast<decltype(a.height)>(height);
-    a.kind = static_cast<decltype(a.kind)>(kind);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY2DASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipMemcpy2DFromArray(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset, size_t hOffset, size_t width, size_t height, hipMemcpyKind kind) {
@@ -5382,13 +5408,14 @@ static hipError_t capture_hipTexRefSetMipmappedArray(textureReference* texRef, s
   return r;
 }
 
-// Generated shim
+// Generated shim (custom: record input capture-mode VALUE, not the pointer)
 static hipError_t capture_hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
+  hipStreamCaptureMode desired = mode ? *mode : hipStreamCaptureModeGlobal;
   hipError_t r = g_real_table.hipThreadExchangeStreamCaptureMode_fn(mode);
   if (r == hipSuccess) {
     hrr_args_hipThreadExchangeStreamCaptureMode a{};
     a.ret         = static_cast<int32_t>(r);
-    a.mode = reinterpret_cast<uint64_t>(mode);
+    a.mode = static_cast<uint64_t>(desired);
     hrr_cap::writer::write_event_raw(HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -7416,6 +7443,8 @@ extern hipError_t capture_hipMemPoolSetAccess(hipMemPool_t mem_pool, const hipMe
 extern hipError_t capture_hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value);
 extern hipError_t capture_hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc, size_t count);
 extern hipError_t capture_hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
+extern hipError_t capture_hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind);
+extern hipError_t capture_hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind, hipStream_t stream);
 extern hipError_t capture_hipMemcpy3D(const struct hipMemcpy3DParms* p);
 extern hipError_t capture_hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream);
 extern hipError_t capture_hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream);
@@ -7434,6 +7463,7 @@ extern hipError_t capture_hipExtModuleLaunchKernel(hipFunction_t f, uint32_t glo
 extern hipError_t capture_hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr, const hipStreamAttrValue* value);
 extern hipError_t capture___hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
 extern void** capture___hipRegisterFatBinary(const void* data);
+extern void capture___hipUnregisterFatBinary(void** modules);
 
 void hip_capture_build_table() {
   // Guard: safe to call only once. A second call after shims are installed
@@ -7699,6 +7729,10 @@ void hip_capture_build_table() {
   g_cap_table.hipMemPrefetchAsync_fn = capture_hipMemPrefetchAsync;
   g_cap_table.hipMemPrefetchAsync_v2_fn = capture_hipMemPrefetchAsync_v2;
   g_cap_table.hipMemPrefetchBatchAsync_fn = capture_hipMemPrefetchBatchAsync;
+  g_cap_table.hipMemDiscardBatchAsync_fn = capture_hipMemDiscardBatchAsync;
+  g_cap_table.hipDrvMemDiscardBatchAsync_fn = capture_hipDrvMemDiscardBatchAsync;
+  g_cap_table.hipMemDiscardAndPrefetchBatchAsync_fn = capture_hipMemDiscardAndPrefetchBatchAsync;
+  g_cap_table.hipDrvMemDiscardAndPrefetchBatchAsync_fn = capture_hipDrvMemDiscardAndPrefetchBatchAsync;
   g_cap_table.hipMemPtrGetInfo_fn = capture_hipMemPtrGetInfo;
   g_cap_table.hipMemRangeGetAttribute_fn = capture_hipMemRangeGetAttribute;
   g_cap_table.hipMemRangeGetAttributes_fn = capture_hipMemRangeGetAttributes;

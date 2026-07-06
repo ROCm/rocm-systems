@@ -8,6 +8,7 @@
 //
 #include "api.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -213,7 +214,7 @@ ensure_finalization(bool _static_init = false)
         }
     }
 
-    if(common::get_env("ROCPROFSYS_MONOCHROME", false)) tim::log::monochrome() = true;
+    if(common::get_env(env_vars::MONOCHROME, false)) tim::log::monochrome() = true;
 
     timeout::setup();
 
@@ -233,7 +234,7 @@ ensure_finalization(bool _static_init = false)
         auto _verbose =
             get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
         auto _search_paths = fmt::format(
-            "{}:{}:{}:{}:{}", rocprofsys::get_env<std::string>("ROCPROFSYS_PATH", ""),
+            "{}:{}:{}:{}:{}", rocprofsys::get_env<std::string>(env_vars::PATH, ""),
             rocprofsys::get_env<std::string>("PWD"), ".",
             rocprofsys::get_env<std::string>("LD_LIBRARY_PATH", ""),
             rocprofsys::get_env<std::string>("LIBRARY_PATH", ""),
@@ -456,7 +457,7 @@ rocprofsys_set_mpi_hidden(bool use, bool attached)
 
     if(use && !attached && get_state() == State::PreInit)
     {
-        rocprofsys::set_env("ROCPROFSYS_USE_PID", "ON", 1);
+        rocprofsys::set_env(env_vars::USE_PID, "ON", 1);
     }
     else if(!use)
     {
@@ -559,9 +560,10 @@ rocprofsys_init_library_hidden()
     }
 
     auto _debug_value = get_debug();
-    if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", true);
+    if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
     scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
-        if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", _debug_value);
+        if(_debug_init)
+            config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
     } };
 }
 
@@ -570,9 +572,9 @@ rocprofsys_init_library_hidden()
 extern "C" bool
 rocprofsys_init_tooling_hidden(void)
 {
-    if(get_env("ROCPROFSYS_MONOCHROME", false)) tim::log::monochrome() = true;
+    if(get_env(env_vars::MONOCHROME, false)) tim::log::monochrome() = true;
 
-    if(!rocprofsys::get_env("ROCPROFSYS_INIT_TOOLING", true))
+    if(!rocprofsys::get_env(env_vars::INIT_TOOLING, true))
     {
         rocprofsys_init_library_hidden();
         return false;
@@ -865,7 +867,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
                   (_is_binary_rewrite) ? "y" : "n", _argv0);
     }
 
-    rocprofsys::set_env("ROCPROFSYS_MODE", _mode, 0);
+    rocprofsys::set_env(env_vars::MODE, _mode, 0);
     config::is_binary_rewrite() = _is_binary_rewrite;
 
     if(_set_mpi_called)
@@ -879,7 +881,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
 extern "C" void
 rocprofsys_reset_preload_hidden(void)
 {
-    rocprofsys::set_env("ROCPROFSYS_PRELOAD", "0", 1);
+    rocprofsys::set_env(env_vars::PRELOAD, "0", 1);
     auto&& _preload_libs = common::get_env("LD_PRELOAD", std::string{});
     if(_preload_libs.find("librocprof-sys") != std::string::npos)
     {
@@ -982,9 +984,10 @@ rocprofsys_finalize_hidden(void)
 
     auto _debug_init  = get_debug_finalize();
     auto _debug_value = get_debug();
-    if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", true);
+    if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
     scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
-        if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", _debug_value);
+        if(_debug_init)
+            config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
     } };
 
     auto& _thread_bundle = thread_data<thread_bundle_t>::instance();
@@ -995,7 +998,7 @@ rocprofsys_finalize_hidden(void)
         if(dmp::rank() == 0)
         {
             config::print_settings(
-                rocprofsys::get_env<bool>("ROCPROFSYS_PRINT_ENV", get_debug()));
+                rocprofsys::get_env<bool>(env_vars::PRINT_ENV, get_debug()));
         }
     }
 
@@ -1216,7 +1219,7 @@ rocprofsys_finalize_hidden(void)
                tim::cereal::make_nvp("memory_maps", _maps));
         });
 
-        static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
+        static auto* attach_add_session_id = getenv(env_vars::REATTACH_ADD_SESSION_ID);
         static auto  session_id            = 0;
 
         if(attach_add_session_id)
@@ -1245,9 +1248,9 @@ rocprofsys_finalize_hidden(void)
 
         if(config::get_use_timemory())
         {
-            auto _components =
-                config::get_setting_value<std::string>("ROCPROFSYS_TIMEMORY_COMPONENTS")
-                    .value_or("wall_clock");
+            auto _components = config::get_setting_value<std::string>(
+                                   std::string{ env_vars::TIMEMORY_COMPONENTS })
+                                   .value_or("wall_clock");
 
             for(auto&& _comp_name : tim::delimit(_components, ",; "))
             {

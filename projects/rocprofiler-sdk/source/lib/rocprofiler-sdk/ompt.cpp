@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/ompt/details/format.hpp"  // NOLINT(unused-includes)
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/ompt.h>
@@ -50,8 +51,22 @@ get_start_tool_result()
 
 namespace
 {
+// These three values are atomic because they are written by the OMPT runtime tool
+// entry points (which the OpenMP runtime invokes on its own threads during startup/
+// shutdown) and read concurrently by the public query APIs that any user thread may
+// call:
+//   - init_status:       written in initialize() (-1 on entry, 1 once callbacks are
+//                        registered); read in rocprofiler_ompt_is_initialized() and in
+//                        rocprofiler_ompt_start_tool() (to reject double-initialization).
+//   - fini_status:       written in finalize() (-1 on entry, 1 when done); read in
+//                        rocprofiler_ompt_is_finalized().
+//   - omp_version_value: written in rocprofiler_ompt_start_tool(); read in initialize()
+//                        (forwarded to runtime_init::initialize), which can run on a
+//                        different thread than start_tool.
+// Using atomics prevents a data race between those writers and readers.
 auto                                  init_status            = std::atomic<int>{0};
 auto                                  fini_status            = std::atomic<int>{0};
+auto                                  omp_version_value      = std::atomic<uint64_t>{0};
 ompt_finalize_tool_t                  tool_finalize          = nullptr;
 ompt_set_callback_t                   set_callback           = nullptr;
 rocprofiler_ompt_callback_functions_t ompt_callback_table    = {};
@@ -176,6 +191,9 @@ initialize(ompt_function_lookup_t lookup, int /*initial_device_num*/, ompt_data_
     set_ompt_callbacks();
     init_status.store(1);
 
+    ::rocprofiler::runtime_init::initialize(
+        ROCPROFILER_RUNTIME_INITIALIZATION_OMPT, omp_version_value.load(), 0);
+
     return 1;  // bizarre aberration in the OMPT spec, not 0
 }
 #undef SETCB
@@ -216,7 +234,7 @@ rocprofiler_ompt_is_finalized(int* status)
 }
 
 ompt_start_tool_result_t*
-rocprofiler_ompt_start_tool(unsigned int /*omp_version*/, const char* /*runtime_version*/)
+rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_version*/)
 {
     // log to clog since logging probably won't be initialized here
     auto _init_status = ::rocprofiler::ompt::init_status.load();
@@ -226,6 +244,8 @@ rocprofiler_ompt_start_tool(unsigned int /*omp_version*/, const char* /*runtime_
                   << _init_status << '\n';
         return nullptr;
     }
+
+    ::rocprofiler::ompt::omp_version_value.store(static_cast<uint64_t>(omp_version));
 
     // don't check contexts here, client tool may not be initialized
     auto* _result = ::rocprofiler::ompt::get_start_tool_result();

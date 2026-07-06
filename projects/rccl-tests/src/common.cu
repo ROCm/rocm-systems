@@ -1111,12 +1111,14 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           const char* algoName = NULL;
           const char* protoName = NULL;
           bool fromSymk = false;
-          if (test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER && rcclTestsGetSymkInfo) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+          if (test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
             if (args->collTest->getSymkInfo) {
               TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
               fromSymk = true;
             }
           }
+#endif
           if (!fromSymk) {
             TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
           }
@@ -1430,6 +1432,11 @@ testResult_t threadInit(struct threadArgs* args) {
       if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], args->sendRegHandles[i]));
       if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], args->recvRegHandles[i]));
       if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(args->comms[i], args->biasRegHandles[i]));
+    }
+#endif
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+    if (deviceImpl) {
+      NCCLCHECK(ncclDevCommDestroy(args->comms[i], args->devComms+i));
     }
 #endif
     NCCLCHECK(ncclCommDestroy(args->comms[i]));
@@ -2294,6 +2301,11 @@ testResult_t run() {
         if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], sendRegHandles[i]));
         if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], recvRegHandles[i]));
         if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(comms[i], biasRegHandles[i]));
+      }
+#endif
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+      if (deviceImpl) {
+        NCCLCHECK(ncclDevCommDestroy(comms[i], devComms.data()+i));
       }
 #endif
       NCCLCHECK(ncclCommDestroy(comms[i]));

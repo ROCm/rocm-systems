@@ -232,9 +232,10 @@ wave_t::wave_t(
     bool exbarw,
     uint8_t me,
     uint8_t pipe,
-    uint8_t wg
+    uint8_t wg,
+    uint8_t cluster
 ) :
-WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg)
+WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg, cluster)
 {
     this->last_state_cycle = token.time;
     this->cur_state = WaveslotState::WS_IDLE;
@@ -325,11 +326,6 @@ void wave_t::apply_immediate(int64_t token_time)
     update_state(WaveslotState::WS_WAIT, time);
     update_state(WaveslotState::WS_EXEC, token_time + 1);
 }
-
-#ifdef SQTT_LOGGING
-static std::vector<const char*> INST_CATEGORIES = {
-    "NONE", "SMEM", "SALU", "VMEM", "FLAT", "LDS", "VALU", "JUMP", "NEXT", "IMMED", "MESSAGE", "CONTEXT", "BVH"};
-#endif
 
 void wave_t::update_barrier_gfx11(int64_t token_time)
 {
