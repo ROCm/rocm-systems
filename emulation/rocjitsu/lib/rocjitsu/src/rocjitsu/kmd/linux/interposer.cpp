@@ -798,7 +798,7 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   return static_cast<int>(InterposerContext::real.close(fd));
 }
 
-RJ_INTERPOSER_EXPORT __attribute__((destructor(101))) void rj_interposer_shutdown() {}
+__attribute__((destructor(101))) void rj_interposer_shutdown() {}
 
 RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   assert(InterposerContext::real.ready());
