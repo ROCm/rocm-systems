@@ -23,12 +23,11 @@ namespace rocjitsu::amdgpu {
 
 /// @brief Facade for instruction-visible register reads and writes.
 ///
-/// @details This is the first step toward making register access non-social:
-/// instruction emulators should acquire values or lane spans through this class
-/// instead of pairing raw storage access with separate plugin notifications.
-/// Read and read-write VGPR region acquisition fires the plugin read hook once
-/// per physical register in the region. Write-only views deliberately do not
-/// report reads.
+/// @details Instruction emulators acquire values and lane spans through this
+/// class instead of pairing raw storage access with separate plugin
+/// notifications. Read and read-write VGPR region acquisition fires the plugin
+/// read hook once per physical register in the region. Write-only views
+/// deliberately do not report reads.
 ///
 /// The view objects are intentionally lightweight and instruction-scoped. They
 /// expose spans over the underlying VGPR lane storage so hot paths can keep the

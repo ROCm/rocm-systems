@@ -215,8 +215,7 @@ private:
   // Instruction emulators should not call these hooks directly. They acquire
   // read/write/read-write views from `amdgpu::RegisterAccess`, which centralizes
   // plugin read observation and destination write resolution. These hooks remain
-  // as the operand-specific storage/notification backend for that facade until
-  // the VGPR resolution machinery itself moves behind a tighter abstraction.
+  // as the operand-specific storage/notification backend for that facade.
 
   /// @brief If this operand resolves to per-lane VGPR storage, return its
   /// physical register index (`wf.vgpr_alloc().base + offset`). Otherwise
