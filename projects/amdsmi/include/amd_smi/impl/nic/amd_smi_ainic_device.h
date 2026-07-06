@@ -51,9 +51,7 @@ class AMDSmiAINICDevice : public AMDSmiProcessor {
   };
 
   explicit AMDSmiAINICDevice(const AINICInfo& ai_nic_info)
-      : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_NIC),
-        ai_nic_info_(ai_nic_info) {
-  }
+      : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_NIC), ai_nic_info_(ai_nic_info) {}
   ~AMDSmiAINICDevice() = default;
   amdsmi_status_t amd_query_nic_info(AINICInfo& info) const;
 
