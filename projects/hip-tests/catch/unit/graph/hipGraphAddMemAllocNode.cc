@@ -10,6 +10,7 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 #include <chrono>
+#include <limits>
 #include <thread>
 
 /**
