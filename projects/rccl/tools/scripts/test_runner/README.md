@@ -459,9 +459,22 @@ Optional:
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
+  --system NAME             Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')
+  --mpi-args "ARGS"         Extra mpirun arguments appended after the config's base/suite/test mpi_args (MPI tests only). Also reads RCCL_TEST_MPI_ARGS env var.
+  --mpich                   Use MPICH syntax (-env) instead of OpenMPI (-x) for passing env vars to mpirun
   --overwrite               Overwrite previous workspace directories
   --report-suffix SUFFIX    Suffix for report directory (default: blank)
+  --emit-results            Emit structured results (JSON/JSONL + tarball) for the dashboard
+  --results-dir DIR         Directory for emitted results + tarballs (default: <workspace>/results)
+  --run-label LABEL         Optional label stored with the emitted run (e.g. 'nightly', a PR number)
+  --tag TAG                 Tag to attach to the emitted run for dashboard filtering (repeatable)
+  --tags A,B,C              Comma-separated tags to attach to the emitted run (merged with --tag)
+  --db-push                 Also push results to PostgreSQL (DSN from RCCL_RESULTS_DSN); implies --emit-results
+  --db-timeout SECONDS      PostgreSQL connect + statement timeout for --db-push (default: 10)
   -h, --help                Show help message and exit
+
+Environment variables:
+  RCCL_TEST_MPI_ARGS        Extra mpirun arguments appended after --mpi-args (same effect as --mpi-args)
 ```
 
 ## Code Coverage Reports
@@ -497,6 +510,58 @@ When `--coverage-report` is specified, the runner generates:
 - Merges profiles with `llvm-profdata`
 - Generates reports with `llvm-cov show` and `llvm-cov report`
 - Filters out irrelevant files (test/, gtest, external dependencies)
+
+## Result Emission & Dashboard
+
+The runner can emit structured, machine-readable results, either as local files
+(picked up by the dashboard's periodic sweep) or pushed directly to PostgreSQL.
+
+### Emitting results
+
+```bash
+# Local files only (durable; feeds the dashboard sweep):
+python test_runner.py -c configs/rccl_perf_tests.json --emit-results --results-dir /path/to/results
+
+# Local files + best-effort direct DB push:
+export RCCL_RESULTS_DSN='postgresql://<user>:<pass>@<host>:5432/<db>'
+python test_runner.py -c configs/rccl_perf_tests.json --db-push
+```
+
+- `--db-push` implies `--emit-results`. If the DB push fails or times out, the
+  run still succeeds and the local tarball is retained for the sweep.
+- The DSN is read only from `RCCL_RESULTS_DSN`; it is never hardcoded or written
+  into the emitted files.
+- Enabling emission also turns on per-test log capture so `busbw`/`algbw` can be
+  parsed from rccl-tests output. Default behaviour (no capture) is unchanged when
+  emission is off.
+
+### What is emitted
+
+Per invocation, under `--results-dir` (default `<workspace>/results`):
+
+- `run.json` - run manifest: RCCL SHA, host/telemetry metadata, config, env, summary, tags.
+- `tests.jsonl` - one line per test (status PASSED/FAILED/SKIPPED/TIMEOUT, exec mode, dtype, duration).
+- `perf.jsonl` - one line per (size, place) perf row (latency, algbw, busbw).
+- `coverage.json` - llvm-cov totals (only when `--coverage-report` produced a report).
+- `<run_id>.tar.gz` and `latest.tar.gz` - self-contained snapshots the sweep pulls.
+
+Coverage is emitted only where the host has an instrumented build plus
+`llvm-profdata`/`llvm-cov`; perf and per-test results do not require them.
+
+### Tagging runs
+
+Attach tags at emit time for later filtering in the dashboard:
+
+```bash
+python test_runner.py -c <config> --emit-results --tag nightly --tag mi300x
+# or: --tags nightly,mi300x
+```
+
+Tags set here are the run's initial tags. Once a run is ingested, its tags are
+mutable only by dashboard admins.
+
+See [`db/README.md`](db/README.md) for the database schema and the full
+emission and scrape/sweep contract.
 
 ## Examples
 
@@ -759,11 +824,25 @@ There are two categories of `mpi_args`:
    `--system`:
    - Test-suite-level `mpi_args`
    - Individual test-level `mpi_args`
+   - The `--mpi-args` CLI flag (applies to every MPI test in the run)
+   - The `RCCL_TEST_MPI_ARGS` environment variable (same effect as `--mpi-args`)
 
 Final command arguments are:
 
 ```
-<base args>  <suite mpi_args>  <test mpi_args>
+<base args>  <suite mpi_args>  <test mpi_args>  <--mpi-args>  <RCCL_TEST_MPI_ARGS>
+```
+
+The `--mpi-args` flag and `RCCL_TEST_MPI_ARGS` env var let you inject extra
+`mpirun`/MCA arguments without editing the config (both accept a single string;
+the CLI flag is appended before the env var). Example:
+
+```bash
+# via CLI flag
+./run_tests.py -c config.json --mpi-args "--mca btl_tcp_if_include eth0 --oversubscribe"
+
+# via environment variable
+RCCL_TEST_MPI_ARGS="--oversubscribe" ./run_tests.py -c config.json
 ```
 
 > **Note:** Because base arguments *replace* the defaults, a top-level

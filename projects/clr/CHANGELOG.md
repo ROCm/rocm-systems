@@ -4,6 +4,17 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.14 for ROCm 7.14
 
+### Optimizations
+
+* `hipMemcpy2D`/`hipMemcpy2DAsync`: avoid a severe slowdown for copies that have a small row width but a large number of rows (for example a `width` of 1 byte with a row count in the millions). When the row/slice pitch is not 4-byte aligned, `KernelBlitManager::copyBufferRect` previously fell back to issuing a separate copy for every row, so a 1&nbsp;MB transfer of 1,048,576 rows &times; 1 byte on MI300 took several seconds, while the equivalent NVIDIA/CUDA path completes in a few milliseconds. Such copies are now performed in a single shader-based copy. Measured before/after on MI300 / ROCm 7.2 (1,048,576 rows):
+    - width=1, H2D pinned: 8615.79 ms &rarr; 0.283 ms
+    - width=1, H2D pageable: 8627.17 ms &rarr; 0.284 ms
+    - width=1, D2H pinned: 7908.23 ms &rarr; 0.334 ms
+    - width=1, D2H pageable: 7912.22 ms &rarr; 0.335 ms
+    - dword-aligned widths (4 / 8 / 128 bytes) &rarr; unchanged
+
+  Copies at or below the 256-row threshold are unaffected.
+
 ### Added
 * New HIP APIs
     - Execution Context Management: Support for the following APIs for parity with corresponding CUDA APIs.

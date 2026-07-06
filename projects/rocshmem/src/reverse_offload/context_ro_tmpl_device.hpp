@@ -307,6 +307,26 @@ __device__ void ROContext::amo_xor(void *dst, T value, int pe) {
   [[maybe_unused]] T ret{amo_fetch_xor(dst, value, pe)};
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__device__ int ROContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                            const T *source, int nreduce) {
+  if (!is_thread_zero_in_block()) {
+    __syncthreads();
+    return ROCSHMEM_SUCCESS;
+  }
+
+  ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+
+  build_queue_element(RO_NET_TEAM_REDUCE_SCATTER, dest, const_cast<T *>(source),
+                      nreduce, 0, 0, 0, 0, nullptr, nullptr,
+                      (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
+                      true, get_status_flag(), is_default_ctx, Op,
+                      GetROType<T>::Type);
+
+  __syncthreads();
+  return ROCSHMEM_SUCCESS;
+}
+
 template <typename T>
 __device__ void ROContext::broadcast(rocshmem_team_t team, T *dest,
                                      const T *source, int nelems, int pe_root) {

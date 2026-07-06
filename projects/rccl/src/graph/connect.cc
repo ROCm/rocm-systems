@@ -1214,7 +1214,9 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     // If user didn't override, use requested channels; otherwise keep capped max.
     if (!userUpdatedMaxChannels) {
       maxNchannels = nc * comm->nChannels * channelMultiplier;
-      nc = singleNode? maxNchannels : std::min(maxNchannels, maxChannels);
+      // Cap the single-node count at MAXCHANNELS/2, the maximum WarpSpeed supports. Left unbounded it
+      // overruns the fixed comm->channels[MAXCHANNELS] array (for example nc reaches 1760 in CPX mode at 64 ranks).
+      nc = singleNode? std::min(maxNchannels, MAXCHANNELS/2) : std::min(maxNchannels, maxChannels);
     } else {
       nc = maxNchannels = std::min(adjustedMaxNchannels * channelMultiplier, MAXCHANNELS);
     }

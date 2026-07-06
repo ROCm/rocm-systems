@@ -115,10 +115,17 @@ void GDABackend::init() {
                                                      &heap);
 
   setup_wrk_sync_buffer();
-  setup_fence_buffer();
   setup_collectives();
 
   setup_teams();
+
+  /*
+   * Carve the fence region last. Its size (sizeof(int) * num_pes) is not a
+   * multiple of wrk_sync_pool_alignment for odd num_pes, so allocating it after
+   * every 64-bit-atomic region keeps those regions aligned.
+   */
+  setup_fence_buffer();
+
   setup_team_world();
   rte_barrier();
 
@@ -614,6 +621,15 @@ int GDABackend::buffer_unregister(void *addr) {
   return err;
 }
 
+void GDABackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
+}
+
 void GDABackend::buffer_unregister_all() {
   /* Deregister all buffers with QPs */
   for (size_t i = 0; i < num_qps; i++) {
@@ -624,13 +640,17 @@ void GDABackend::buffer_unregister_all() {
   Backend::buffer_unregister_all();
 }
 
-void GDABackend::reset_backend_stats() {
-  assert(false);
+void GDABackend::accumulate_default_host_ctx_stats() {
+  globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
 }
 
-void GDABackend::dump_backend_stats() {
-  assert(false);
+void GDABackend::reset_backend_stats() {
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemset(&ctx_array[i].ctxStats, 0, sizeof(ROCStats)));
+  }
+  default_host_ctx->ctxHostStats.resetStats();
 }
+
 
 __host__ void GDABackend::global_exit(int status) {
   if (backend_comm != MPI_COMM_NULL)
@@ -657,7 +677,7 @@ void GDABackend::setup_wrk_sync_buffer() {
 
   /**
    * Size of sync arrays for the teams
-  */
+   */
   wrk_sync_pool_size_ += sizeof(long) * max_num_teams *
                            (ROCSHMEM_BARRIER_SYNC_SIZE +
                             ROCSHMEM_REDUCE_SYNC_SIZE +
@@ -667,7 +687,7 @@ void GDABackend::setup_wrk_sync_buffer() {
   /**
    * Size of work arrays for the teams
    * Accommodate largest possible data type for pWrk
-  */
+   */
   wrk_sync_pool_size_ += sizeof(double) * max_num_teams *
                            ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
 
@@ -676,10 +696,14 @@ void GDABackend::setup_wrk_sync_buffer() {
    */
   wrk_sync_pool_size_ += sizeof(int) * num_pes; //TODO: do we need a fence array?
 
+  /* Round up so the alignment guards in the carve functions cannot overflow it. */
+  wrk_sync_pool_size_ =
+      __builtin_align_up(wrk_sync_pool_size_, wrk_sync_pool_alignment);
+
   /**
    * Allocate a buffer of size wrk_sync_pool_size_, using heap memory
    * (should be uncached fine-grained ideally)
-  */
+   */
   heap.malloc((void**)&wrk_sync_pool_, wrk_sync_pool_size_);
   assert(wrk_sync_pool_);
   wrk_sync_pool_top_ = wrk_sync_pool_;
@@ -690,9 +714,7 @@ void GDABackend::cleanup_wrk_sync_buffer() {
 }
 
 void GDABackend::setup_fence_buffer() { //TODO is this used?
-  /*
-   * Reserve memory for fence
-   */
+  /* Must be carved last (see init()); do not add pool regions after this. */
   fence_pool = reinterpret_cast<int *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(int) * num_pes;
 }
@@ -704,6 +726,9 @@ void GDABackend::setup_collectives() {
   size_t one_sync_size_bytes {sizeof(*barrier_sync)};
   size_t sync_size_bytes {one_sync_size_bytes * ROCSHMEM_BARRIER_SYNC_SIZE};
 
+  /* Guard: barrier_sync is accessed with 64-bit atomics; keep it 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_sync = reinterpret_cast<int64_t*>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sync_size_bytes;
 
@@ -727,6 +752,9 @@ void GDABackend::setup_teams() {
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
+  /* Guard: the pSync pools are accessed with 64-bit atomics; keep them 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE
                             * max_num_teams;
@@ -936,12 +964,6 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
 int GDABackend::backend_can_run() {
   void *handle{nullptr};
   GDAProvider requested = requested_provider();
-
-  /* Libnuma ? */
-  if (!numa.is_available()) {
-    LOG_WARN("GDA backend unavailable: libnuma support is missing");
-    return ROCSHMEM_ERROR;
-  }
 
   /* Basic verbs? */
   if (!ibv.is_initialized) return ROCSHMEM_ERROR;

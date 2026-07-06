@@ -690,6 +690,11 @@ __device__ void build_queue_element(
     queue_element->datatype = datatype;
     queue_element->team_comm = team_comm;
   }
+  if (type == RO_NET_TEAM_REDUCE_SCATTER) {
+    queue_element->op = op;
+    queue_element->datatype = datatype;
+    queue_element->team_comm = team_comm;
+  }
   if (type == RO_NET_TEAM_BROADCAST) {
     queue_element->PE_root = PE_root;
     queue_element->datatype = datatype;
