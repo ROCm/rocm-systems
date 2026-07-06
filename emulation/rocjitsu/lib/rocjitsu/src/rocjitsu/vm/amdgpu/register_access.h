@@ -158,6 +158,115 @@ public:
     VgprStoragePair64 storage_{};
   };
 
+  class OperandReadWriteView {
+  public:
+    OperandReadWriteView() = default;
+
+    bool has_storage() const { return storage_ != nullptr; }
+
+    template <typename T> util::native<T> load_native(uint32_t lane_base) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "load_native expects 32-bit lanes");
+      assert(op_ && wf_ && "OperandReadWriteView is empty");
+      return storage_ ? storage_->template simd_load<T>(lane_base) : util::broadcast<T>(scalar_);
+    }
+
+    template <typename T> util::narrow32<T> load_narrow(uint32_t lane_base) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "load_narrow expects 32-bit lanes");
+      assert(op_ && wf_ && "OperandReadWriteView is empty");
+      return storage_ ? storage_->template simd_load_narrow<T>(lane_base)
+                      : util::broadcast_narrow<T>(scalar_);
+    }
+
+    template <typename T>
+    void store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "store_native expects 32-bit lanes");
+      assert(op_ && wf_ && "OperandReadWriteView is empty");
+      if (storage_) {
+        storage_->template simd_store<T>(lane_base, value, lane_mask);
+        return;
+      }
+      constexpr std::size_t W = util::native_width_v<T>;
+      alignas(util::native<T>) uint32_t buf[W];
+      util::blit_to_buffer<T>(buf, value);
+      op_->write_lane_chunk(*wf_, lane_base, static_cast<uint32_t>(W), buf, lane_mask);
+    }
+
+    template <typename T>
+    void store_narrow(uint32_t lane_base, util::narrow32<T> value, uint64_t lane_mask) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "store_narrow expects 32-bit lanes");
+      assert(op_ && wf_ && "OperandReadWriteView is empty");
+      if (storage_) {
+        storage_->template simd_store_narrow<T>(lane_base, value, lane_mask);
+        return;
+      }
+      constexpr std::size_t W = util::native_width64;
+      alignas(util::narrow32<T>) T vals[W];
+      value.copy_to(vals, util::stdx::vector_aligned);
+      uint32_t buf[W];
+      for (std::size_t i = 0; i < W; ++i)
+        buf[i] = std::bit_cast<uint32_t>(vals[i]);
+      op_->write_lane_chunk(*wf_, lane_base, static_cast<uint32_t>(W), buf, lane_mask);
+    }
+
+  private:
+    friend class RegisterAccess;
+
+    OperandReadWriteView(const Operand &op, Wavefront &wf, VgprStorage *storage)
+        : op_(&op), wf_(&wf), storage_(storage), scalar_(storage ? 0u : op.read_scalar(wf)) {}
+
+    const Operand *op_ = nullptr;
+    Wavefront *wf_ = nullptr;
+    VgprStorage *storage_ = nullptr;
+    uint32_t scalar_ = 0;
+  };
+
+  class OperandReadWrite64View {
+  public:
+    OperandReadWrite64View() = default;
+
+    bool has_storage() const { return storage_.lo != nullptr; }
+
+    template <typename T> util::native<T> load_native(uint32_t lane_base) const {
+      static_assert(sizeof(T) == sizeof(uint64_t), "load_native expects 64-bit lanes");
+      assert(op_ && wf_ && "OperandReadWrite64View is empty");
+      return storage_.lo ? storage_.lo->template simd_load64<T>(*storage_.hi, lane_base)
+                         : util::broadcast64<T>(scalar_);
+    }
+
+    template <typename T>
+    void store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
+      static_assert(sizeof(T) == sizeof(uint64_t), "store_native expects 64-bit lanes");
+      assert(op_ && wf_ && "OperandReadWrite64View is empty");
+      if (storage_.lo) {
+        storage_.lo->template simd_store64<T>(*storage_.hi, lane_base, value, lane_mask);
+        return;
+      }
+      constexpr std::size_t W = util::native_width64;
+      alignas(util::native<T>) uint64_t buf[W];
+      util::stdx::native_simd<uint64_t> bits = [&] {
+        if constexpr (std::is_same_v<T, uint64_t>)
+          return value;
+        else
+          return std::bit_cast<util::stdx::native_simd<uint64_t>>(value);
+      }();
+      bits.copy_to(buf, util::stdx::vector_aligned);
+      for (std::size_t i = 0; i < W; ++i)
+        if (lane_mask & (1ULL << i))
+          op_->write_lane64(*wf_, lane_base + static_cast<uint32_t>(i), buf[i]);
+    }
+
+  private:
+    friend class RegisterAccess;
+
+    OperandReadWrite64View(const Operand &op, Wavefront &wf, VgprStoragePair64 storage)
+        : op_(&op), wf_(&wf), storage_(storage), scalar_(storage.lo ? 0u : op.read_scalar64(wf)) {}
+
+    const Operand *op_ = nullptr;
+    Wavefront *wf_ = nullptr;
+    VgprStoragePair64 storage_{};
+    uint64_t scalar_ = 0;
+  };
+
   class OperandRead64View {
   public:
     OperandRead64View() = default;
@@ -323,6 +432,22 @@ public:
   OperandWrite64View write_operand64(const Operand &op, Wavefront &wf,
                                      uint64_t /*lane_mask*/) const {
     return OperandWrite64View(op, wf, SimdAccess::vgpr_storage64_mut(op, wf));
+  }
+
+  OperandReadWriteView readwrite_operand(const Operand &op, Wavefront &wf, uint64_t lane_mask,
+                                         uint8_t byte_mask = 0xF) const {
+    VgprStorage *storage = SimdAccess::vgpr_storage_mut(op, wf);
+    if (storage)
+      SimdAccess::notify_read_mut(op, wf, lane_mask, byte_mask);
+    return OperandReadWriteView(op, wf, storage);
+  }
+
+  OperandReadWrite64View readwrite_operand64(const Operand &op, Wavefront &wf, uint64_t lane_mask,
+                                             uint8_t byte_mask = 0xF) const {
+    VgprStoragePair64 storage = SimdAccess::vgpr_storage64_mut(op, wf);
+    if (storage.lo)
+      SimdAccess::notify_read64_mut(op, wf, lane_mask, byte_mask);
+    return OperandReadWrite64View(op, wf, storage);
   }
 
   uint32_t read_vgpr(uint32_t physical_reg, uint32_t lane, uint8_t byte_mask = 0xF) const {
