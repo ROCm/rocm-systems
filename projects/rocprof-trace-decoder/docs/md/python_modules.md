@@ -9,11 +9,17 @@ The Python API wraps the handle-based decoder functions from
 The quick-scan and standalone trace extraction APIs are intentionally not
 wrapped here.
 
-The API can be installed with Python packaging (`python3 -m pip install .`) or
-with CMake when `BUILD_PYTHON=ON`. The CMake install path defaults to the
-ROCm-prefix-relative Python site-packages directory
-`lib/pythonX.Y/site-packages`, matching the Python version found at configure
-time. Packagers can override `ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR`.
+The API can be installed as a normal Python package (`python3 -m pip install .`)
+or with CMake when `BUILD_PYTHON=ON`. The CMake install path defaults to the
+ROCm-prefix-relative Python site-packages directory `lib/python3/site-packages`.
+This package is pure Python over `ctypes`, so the CMake install is shared by
+supported Python 3 minor versions. Packagers can override
+`ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR`. Users running directly from a ROCm
+prefix need that directory on `PYTHONPATH`; ROCm environment setup such as the
+rocprofiler-sdk setup script/modulefile already prepends the matching ROCm
+Python directory. TheRock wheel packaging exposes this package as a top-level
+Python package from the profiler wheel instead of relying on a nested
+ROCm-prefix path being present on `sys.path`.
 
 ## Module Overview
 
@@ -139,8 +145,9 @@ the decoder callback.
 
 Shared-library lookup is ordered so user overrides win before ROCm defaults:
 explicit `lib_path`, `ROCPROF_TRACE_DECODER_LIB`, non-empty `LD_LIBRARY_PATH`
-entries, `ROCM_HOME/lib`, `ROCM_PATH/lib`, `/opt/rocm/lib`, then the platform
-loader fallback.
+entries, `ROCM_HOME/lib`, `ROCM_PATH/lib`, TheRock package library roots,
+`/opt/rocm/lib`, then the platform loader fallback. The lookup accepts both the
+unversioned library name and the decoder SONAME used by TheRock runtime wheels.
 
 ## `rocprof_trace_decoder.code_index`
 

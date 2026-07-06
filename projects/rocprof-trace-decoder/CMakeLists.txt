@@ -74,7 +74,7 @@ if(BUILD_PYTHON)
 
     if(Python3_FOUND)
         set(ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
-            "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+            "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}/site-packages"
             CACHE PATH "Install directory for the rocprof-trace-decoder Python API")
 
         install(

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import ctypes
+import importlib
+import importlib.util
 import os
 from pathlib import Path
 from typing import Callable, Iterable, Protocol, Union
 
+from ._version import __version__ as _PACKAGE_VERSION
 from .records import (
     DecoderStatus,
     Dispatch,
@@ -217,15 +220,26 @@ def _find_library(explicit: str | os.PathLike[str] | None = None) -> str:
     if env:
         return env
 
-    names = ["librocprof-trace-decoder.so", "librocprof-trace-decoder.dylib"]
+    names = _library_names()
     for root in _library_roots():
         for name in names:
             candidate = root / name
             if candidate.exists():
                 return str(candidate)
+        for candidate in sorted(root.glob("librocprof-trace-decoder.so.*"), reverse=True):
+            if candidate.is_file():
+                return str(candidate)
 
     # Let the platform loader try its normal search path.
     return "librocprof-trace-decoder.so"
+
+
+def _library_names() -> list[str]:
+    names = ["librocprof-trace-decoder.so", "librocprof-trace-decoder.dylib"]
+    version_parts = _PACKAGE_VERSION.split(".")
+    if len(version_parts) >= 2:
+        names.append(f"librocprof-trace-decoder.so.{version_parts[0]}.{version_parts[1]}")
+    return names
 
 
 def _library_roots() -> list[Path]:
@@ -246,7 +260,47 @@ def _library_roots() -> list[Path]:
         if value:
             add(Path(value).expanduser() / "lib")
 
+    for root in _therock_package_roots():
+        add(root / "lib")
+
     add(Path("/opt/rocm/lib"))
+    return roots
+
+
+def _therock_package_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[Path] = set()
+
+    def add_package_root(package_name: str) -> None:
+        spec = importlib.util.find_spec(package_name)
+        if spec is None or spec.origin is None:
+            return
+        root = Path(spec.origin).resolve().parent
+        if root not in seen:
+            roots.append(root)
+            seen.add(root)
+
+    for dist_info_name in (
+        "rocm_sdk_core._dist_info",
+        "rocm_profiler._dist_info",
+        "rocm_sdk._dist_info",
+    ):
+        try:
+            dist_info = importlib.import_module(dist_info_name)
+        except Exception:
+            continue
+        for logical_name in ("core", "devel", "profiler"):
+            entry = getattr(dist_info, "ALL_PACKAGES", {}).get(logical_name)
+            if entry is None or getattr(entry, "is_target_specific", False):
+                continue
+            try:
+                add_package_root(entry.get_py_package_name())
+            except Exception:
+                continue
+
+    for package_name in ("_rocm_sdk_core", "_rocm_sdk_devel", "_rocm_profiler"):
+        add_package_root(package_name)
+
     return roots
 
 

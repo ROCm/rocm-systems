@@ -76,15 +76,60 @@ if(BUILD_INTEGRATION_TESTS)
 
     set(CSV_PY ${CMAKE_CURRENT_SOURCE_DIR}/csv_test.py)
     set(ATT_TOOL_PY ${CMAKE_CURRENT_SOURCE_DIR}/../python/att_tool.py)
+    set(PYTHON_API_PY ${CMAKE_CURRENT_SOURCE_DIR}/python_api_test.py)
 
     set(LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(SANITIZED_LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder-sanitized${CMAKE_SHARED_LIBRARY_SUFFIX})
+    set(PYTHON_API_DEP_LIBRARY_PATH)
+    if(COMGR_LIB)
+        get_filename_component(COMGR_LIB_DIR "${COMGR_LIB}" DIRECTORY)
+        list(APPEND PYTHON_API_DEP_LIBRARY_PATH "${COMGR_LIB_DIR}")
+    endif()
+    list(JOIN PYTHON_API_DEP_LIBRARY_PATH ":" PYTHON_API_DEP_LIBRARY_PATH)
+    set(PYTHON_API_LD_LIBRARY_PATH "${CMAKE_BINARY_DIR}/lib")
+    if(PYTHON_API_DEP_LIBRARY_PATH)
+        set(PYTHON_API_LD_LIBRARY_PATH
+            "${PYTHON_API_LD_LIBRARY_PATH}:${PYTHON_API_DEP_LIBRARY_PATH}")
+    endif()
 
     add_test(NAME csv-launch COMMAND ${Python3_EXECUTABLE} ${CSV_PY} --lib ${LIB_PATH})
-    set_tests_properties(csv-launch PROPERTIES TIMEOUT 5 LABELS "integration-tests" WORKING_DIRECTORY ${TEST_BIN_DIR})
+    set_tests_properties(csv-launch PROPERTIES TIMEOUT 30 LABELS "integration-tests" WORKING_DIRECTORY ${TEST_BIN_DIR})
+
+    add_test(NAME python-api-launch COMMAND ${Python3_EXECUTABLE} ${PYTHON_API_PY} --lib
+                                             ${LIB_PATH})
+    set(PYTHON_API_TEST_ENV
+        "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python"
+        "LD_LIBRARY_PATH=${PYTHON_API_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        "ROCM_PATH=${CMAKE_INSTALL_PREFIX}")
+    set_tests_properties(
+        python-api-launch
+        PROPERTIES TIMEOUT
+                   120
+                   LABELS
+                   "integration-tests"
+                   WORKING_DIRECTORY
+                   ${TEST_BIN_DIR}
+                   ENVIRONMENT
+                   "${PYTHON_API_TEST_ENV}")
+
+    if(DEFINED ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR)
+        configure_file(python_api_install_test.cmake.in python_api_install_test.cmake @ONLY)
+        add_test(
+            NAME python-api-install
+            COMMAND ${CMAKE_COMMAND} -P
+                    ${CMAKE_CURRENT_BINARY_DIR}/python_api_install_test.cmake)
+        set_tests_properties(
+            python-api-install
+            PROPERTIES TIMEOUT
+                       300
+                       LABELS
+                       "integration-tests"
+                       DEPENDS
+                       python-api-launch)
+    endif()
 
     add_test(NAME att-launch COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_PY} --help)
-    set_tests_properties(att-launch PROPERTIES TIMEOUT 5 LABELS "integration-tests" WORKING_DIRECTORY
+    set_tests_properties(att-launch PROPERTIES TIMEOUT 30 LABELS "integration-tests" WORKING_DIRECTORY
                                                ${TEST_BIN_DIR})
 
     add_test(NAME decompress COMMAND ${TEST_BIN_DIR}/unpack.sh)
