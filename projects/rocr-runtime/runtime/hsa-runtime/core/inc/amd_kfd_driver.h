@@ -149,6 +149,11 @@ public:
                                        hsa_amd_external_semaphore_t* out_sem) const override;
   hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const override;
 
+  hsa_status_t SignalExternalSemaphore(uint64_t queue_id, hsa_amd_external_semaphore_t sem,
+                                       uint64_t value) const override;
+  hsa_status_t WaitExternalSemaphore(uint64_t queue_id, hsa_amd_external_semaphore_t sem,
+                                     uint64_t value) const override;
+
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;

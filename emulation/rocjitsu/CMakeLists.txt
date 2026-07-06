@@ -66,6 +66,9 @@ set(DRM_INCLUDE_DIR
 
 include(rj_log)
 
+# Install directory variables are used by subdirectories that add install rules.
+include(GNUInstallDirs)
+
 # Sanitizer and static analysis options.
 option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
@@ -77,6 +80,7 @@ option(
     "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
     OFF
 )
+option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
@@ -282,7 +286,23 @@ target_link_libraries(
         flatbuffers
         Threads::Threads
 )
-target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
+target_include_directories(
+    rocjitsu_shared
+    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
+)
+target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+
+# Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(
+        rocjitsu_shared
+        PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
+    )
+    target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
+    target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
+    target_link_libraries(rocjitsu_shared PRIVATE dl)
+endif()
+
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
@@ -300,8 +320,6 @@ endif()
 # Install rules.
 # ---------------------------------------------------------------------------
 
-include(GNUInstallDirs)
-
 # Public headers: include/rocjitsu/
 install(
     DIRECTORY lib/rocjitsu/include/rocjitsu
@@ -317,10 +335,6 @@ install(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    install(
-        TARGETS rocjitsu_kmd_shim
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    )
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 

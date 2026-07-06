@@ -21,7 +21,7 @@
   },
   "rccl_tests_build_configuration": {
     "enabled": true,
-    "source_dir": "${RCCL_TESTS_DIR:-$HOME/code/rocm-sparse/projects/rccl-tests}",
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
     "install_script": "install.sh",
     "install_flags": [
       "--mpi",
@@ -35,7 +35,6 @@
   "test_configurations": {
     "default": {
       "env_variables": {
-        "NCCL_LAUNCH_MODE": "GROUP"
       },
       "rerun_env_variables": {
         "NCCL_DEBUG": "INFO"
@@ -302,7 +301,7 @@
     "net_ib_coverage_env": {
       "extends": "net_ib_base",
       "timeout": 300,
-      "_comment": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
+      "description": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
       "env_variables": {
         "NCCL_IB_GID_INDEX": "-1",
         "NCCL_IB_PCI_RELAXED_ORDERING": "0",
@@ -338,7 +337,7 @@
     "net_ib_merge_disabled": {
       "extends": "net_ib_base",
       "timeout": 60,
-      "_comment": "Exercises the makeVDevice merge-disabled guard, which only runs with NCCL_IB_MERGE_NICS=0 (the rest of the suite uses 1). Without this entry MakeVirtualDeviceMergeDisabled always GTEST_SKIPs in CI.",
+      "description": "Exercises the makeVDevice merge-disabled guard, which only runs with NCCL_IB_MERGE_NICS=0 (the rest of the suite uses 1). Without this entry MakeVirtualDeviceMergeDisabled always GTEST_SKIPs in CI.",
       "env_variables": {
         "NCCL_IB_MERGE_NICS": "0"
       },
@@ -353,7 +352,7 @@
     "net_ib_vnic_validation": {
       "extends": "net_ib_base",
       "timeout": 120,
-      "_comment": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
+      "description": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
       "env_variables": {
         "NCCL_IB_WARN_RAIL_LOCAL": "1"
       },
@@ -591,6 +590,40 @@
         {"name": "AllReduce.PreMultScalar", "description": "AllReduce pre-mult scalar", "test_filter": "AllReduce.PreMultScalar"},
         {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user buffer registration", "test_filter": "AllReduce.UserBufferRegistration"},
         {"name": "AllReduce.ManagedMemUserBufferRegistration", "description": "AllReduce managed mem user buffer", "test_filter": "AllReduce.ManagedMemUserBufferRegistration"},
+        {"name": "AllReduce.ROCTX", "description": "AllReduce with ROCTX markers", "test_filter": "AllReduce.ROCTX"},
+        {"name": "AllReduce.BiasInt8_Sum", "description": "AllReduce BiasInt8_Sum", "test_filter": "AllReduce.BiasInt8_Sum"},
+        {"name": "AllReduce.BiasInt8_Max", "description": "AllReduce BiasInt8_Max", "test_filter": "AllReduce.BiasInt8_Max"},
+        {"name": "AllReduce.BiasInt8_Min", "description": "AllReduce BiasInt8_Min", "test_filter": "AllReduce.BiasInt8_Min"},
+        {"name": "AllReduce.BiasInt8_Prod", "description": "AllReduce BiasInt8_Prod", "test_filter": "AllReduce.BiasInt8_Prod"},
+        {"name": "AllReduce.BiasUint8_Sum", "description": "AllReduce BiasUint8_Sum", "test_filter": "AllReduce.BiasUint8_Sum"},
+        {"name": "AllReduce.BiasUint8_Max", "description": "AllReduce BiasUint8_Max", "test_filter": "AllReduce.BiasUint8_Max"},
+        {"name": "AllReduce.BiasUint8_Min", "description": "AllReduce BiasUint8_Min", "test_filter": "AllReduce.BiasUint8_Min"},
+        {"name": "AllReduce.BiasUint8_Prod", "description": "AllReduce BiasUint8_Prod", "test_filter": "AllReduce.BiasUint8_Prod"},
+        {"name": "AllReduce.BiasInt32_Sum", "description": "AllReduce BiasInt32_Sum", "test_filter": "AllReduce.BiasInt32_Sum"},
+        {"name": "AllReduce.BiasInt32_Max", "description": "AllReduce BiasInt32_Max", "test_filter": "AllReduce.BiasInt32_Max"},
+        {"name": "AllReduce.BiasInt32_Min", "description": "AllReduce BiasInt32_Min", "test_filter": "AllReduce.BiasInt32_Min"},
+        {"name": "AllReduce.BiasInt32_Prod", "description": "AllReduce BiasInt32_Prod", "test_filter": "AllReduce.BiasInt32_Prod"},
+        {"name": "AllReduce.BiasUint32_Sum", "description": "AllReduce BiasUint32_Sum", "test_filter": "AllReduce.BiasUint32_Sum"},
+        {"name": "AllReduce.BiasUint32_Max", "description": "AllReduce BiasUint32_Max", "test_filter": "AllReduce.BiasUint32_Max"},
+        {"name": "AllReduce.BiasUint32_Min", "description": "AllReduce BiasUint32_Min", "test_filter": "AllReduce.BiasUint32_Min"},
+        {"name": "AllReduce.BiasUint32_Prod", "description": "AllReduce BiasUint32_Prod", "test_filter": "AllReduce.BiasUint32_Prod"},
+        {"name": "AllReduce.BiasInt64_Sum", "description": "AllReduce BiasInt64_Sum", "test_filter": "AllReduce.BiasInt64_Sum"},
+        {"name": "AllReduce.BiasInt64_Max", "description": "AllReduce BiasInt64_Max", "test_filter": "AllReduce.BiasInt64_Max"},
+        {"name": "AllReduce.BiasInt64_Min", "description": "AllReduce BiasInt64_Min", "test_filter": "AllReduce.BiasInt64_Min"},
+        {"name": "AllReduce.BiasInt64_Prod", "description": "AllReduce BiasInt64_Prod", "test_filter": "AllReduce.BiasInt64_Prod"},
+        {"name": "AllReduce.BiasUint64_Sum", "description": "AllReduce BiasUint64_Sum", "test_filter": "AllReduce.BiasUint64_Sum"},
+        {"name": "AllReduce.BiasUint64_Max", "description": "AllReduce BiasUint64_Max", "test_filter": "AllReduce.BiasUint64_Max"},
+        {"name": "AllReduce.BiasUint64_Min", "description": "AllReduce BiasUint64_Min", "test_filter": "AllReduce.BiasUint64_Min"},
+        {"name": "AllReduce.BiasUint64_Prod", "description": "AllReduce BiasUint64_Prod", "test_filter": "AllReduce.BiasUint64_Prod"},
+        {"name": "AllReduce.BiasFloat32_Sum", "description": "AllReduce BiasFloat32_Sum", "test_filter": "AllReduce.BiasFloat32_Sum"},
+        {"name": "AllReduce.BiasFloat32_Max", "description": "AllReduce BiasFloat32_Max", "test_filter": "AllReduce.BiasFloat32_Max"},
+        {"name": "AllReduce.BiasFloat32_Min", "description": "AllReduce BiasFloat32_Min", "test_filter": "AllReduce.BiasFloat32_Min"},
+        {"name": "AllReduce.BiasFloat32_Prod", "description": "AllReduce BiasFloat32_Prod", "test_filter": "AllReduce.BiasFloat32_Prod"},
+        {"name": "AllReduce.BiasFloat64_Sum", "description": "AllReduce BiasFloat64_Sum", "test_filter": "AllReduce.BiasFloat64_Sum"},
+        {"name": "AllReduce.BiasFloat64_Max", "description": "AllReduce BiasFloat64_Max", "test_filter": "AllReduce.BiasFloat64_Max"},
+        {"name": "AllReduce.BiasFloat64_Min", "description": "AllReduce BiasFloat64_Min", "test_filter": "AllReduce.BiasFloat64_Min"},
+        {"name": "AllReduce.BiasFloat64_Prod", "description": "AllReduce BiasFloat64_Prod", "test_filter": "AllReduce.BiasFloat64_Prod"},
+        {"name": "AllReduce.BiasNotAvailable", "description": "AllReduce BiasNotAvailable", "test_filter": "AllReduce.BiasNotAvailable"},
         {"name": "AllGather.OutOfPlace", "description": "AllGather out-of-place", "test_filter": "AllGather.OutOfPlace"},
         {"name": "AllGather.OutOfPlaceGraph", "description": "AllGather out-of-place graph", "test_filter": "AllGather.OutOfPlaceGraph"},
         {"name": "AllGather.InPlace", "description": "AllGather in-place", "test_filter": "AllGather.InPlace"},
@@ -599,12 +632,13 @@
         {"name": "AllGather.ManagedMemGraph", "description": "AllGather managed memory graph", "test_filter": "AllGather.ManagedMemGraph"},
         {"name": "AllGather.UserBufferRegistration", "description": "AllGather user buffer registration", "test_filter": "AllGather.UserBufferRegistration"},
         {"name": "AllGather.ManagedMemUserBufferRegistration", "description": "AllGather managed mem user buffer", "test_filter": "AllGather.ManagedMemUserBufferRegistration"},
-        {"name": "AllToAll.OutOfPlace", "description": "AllToAll out-of-place", "test_filter": "AllToAll.OutOfPlace"},
-        {"name": "AllToAll.OutOfPlaceGraph", "description": "AllToAll out-of-place graph", "test_filter": "AllToAll.OutOfPlaceGraph"},
-        {"name": "AllToAll.ManagedMem", "description": "AllToAll managed memory", "test_filter": "AllToAll.ManagedMem"},
-        {"name": "AllToAll.ManagedMemGraph", "description": "AllToAll managed memory graph", "test_filter": "AllToAll.ManagedMemGraph"},
-        {"name": "AllToAllv.OutOfPlace", "description": "AllToAllv out-of-place", "test_filter": "AllToAllv.OutOfPlace"},
-        {"name": "AllToAllv.OutOfPlaceGraph", "description": "AllToAllv out-of-place graph", "test_filter": "AllToAllv.OutOfPlaceGraph"},
+        {"name": "AlltoAll.OutOfPlace", "description": "AlltoAll out-of-place", "test_filter": "AlltoAll.OutOfPlace"},
+        {"name": "AlltoAll.OutOfPlaceGraph", "description": "AlltoAll out-of-place graph", "test_filter": "AlltoAll.OutOfPlaceGraph"},
+        {"name": "AlltoAll.ManagedMem", "description": "AlltoAll managed memory", "test_filter": "AlltoAll.ManagedMem"},
+        {"name": "AlltoAll.ManagedMemGraph", "description": "AlltoAll managed memory graph", "test_filter": "AlltoAll.ManagedMemGraph"},
+        {"name": "AlltoAll.Channels", "description": "AlltoAll channels", "test_filter": "AlltoAll.Channels"},
+        {"name": "AlltoAllv.OutOfPlace", "description": "AlltoAllv out-of-place", "test_filter": "AlltoAllv.OutOfPlace"},
+        {"name": "AlltoAllv.OutOfPlaceGraph", "description": "AlltoAllv out-of-place graph", "test_filter": "AlltoAllv.OutOfPlaceGraph"},
         {"name": "Broadcast.OutOfPlace", "description": "Broadcast out-of-place", "test_filter": "Broadcast.OutOfPlace"},
         {"name": "Broadcast.OutOfPlaceGraph", "description": "Broadcast out-of-place graph", "test_filter": "Broadcast.OutOfPlaceGraph"},
         {"name": "Broadcast.InPlace", "description": "Broadcast in-place", "test_filter": "Broadcast.InPlace"},
@@ -650,7 +684,19 @@
         {"name": "Standalone.RegressionTiming", "description": "Verify no timing regression for protocols (LL, LL128, Simple)", "test_filter": "Standalone.RegressionTiming"},
         {"name": "Standalone.StackSize", "description": "Verify RCCL kernel stack size for each gfx architecture", "test_filter": "Standalone.StackSize"},
         {"name": "Standalone.CommCuDevice_Check", "description": "Verify device associated with communicator in single/multi-device scenarios", "test_filter": "Standalone.CommCuDevice_Check"},
-        {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"}
+        {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"},
+        {"name": "Recorder.ParseBinary", "description": "Recorder parse binary trace", "test_filter": "Recorder.ParseBinary"},
+        {"name": "Recorder.ParseJson", "description": "Recorder parse JSON trace", "test_filter": "Recorder.ParseJson"},
+        {"name": "Recorder.VerifyMultithread", "description": "Recorder multithreaded verification", "test_filter": "Recorder.VerifyMultithread"},
+        {"name": "ProxyTrace.nonEmptySingleton", "description": "Proxy trace non-empty singleton", "test_filter": "ProxyTraceTestFixture.nonEmptySingleton"},
+        {"name": "ProxyTrace.addTraceOp", "description": "Proxy trace add op", "test_filter": "ProxyTraceTestFixture.addTraceOp"},
+        {"name": "ProxyTrace.getMapSizeMB", "description": "Proxy trace map size", "test_filter": "ProxyTraceTestFixture.getMapSizeMB"},
+        {"name": "ProxyTrace.updateTraceOp", "description": "Proxy trace update op", "test_filter": "ProxyTraceTestFixture.updateTraceOp"},
+        {"name": "ProxyTrace.updateTraceOp2", "description": "Proxy trace update op 2", "test_filter": "ProxyTraceTestFixture.updateTraceOp2"},
+        {"name": "CollTraceUtils.aggregateResults", "description": "CollTrace utils aggregate results", "test_filter": "CollTraceUtilsTest.aggregateResultsTest"},
+        {"name": "CollTraceUtils.EventQueueOperation", "description": "CollTrace utils event queue operation", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest"},
+        {"name": "CollTraceUtils.EventQueueMultiThread", "description": "CollTrace utils event queue multithread", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest"},
+        {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"}
       ]
     },
     "debug_tests": {
@@ -667,8 +713,8 @@
       "tests": [
         {
           "name": "Debug_ThreadName",
-          "description": "Test thread naming functionality with AllToAll operation",
-          "test_filter": "AllToAll.OutOfPlaceGraph*",
+          "description": "Test thread naming functionality with AlltoAll operation",
+          "test_filter": "AlltoAll.OutOfPlaceGraph*",
           "env_variables": {
             "NCCL_SET_THREAD_NAME": "1"
           }
@@ -676,7 +722,7 @@
         {
           "name": "Debug_AllSubsystems",
           "description": "Test debug logging for all RCCL subsystems with trace-level output",
-          "test_filter": "AllToAll.OutOfPlaceGraph*",
+          "test_filter": "AlltoAll.OutOfPlaceGraph*",
           "env_variables": {
             "NCCL_DEBUG": "TRACE",
             "NCCL_DEBUG_FILE": "cdcvg.dbg",
@@ -779,9 +825,9 @@
           "test_filter": "UBR_Broadcast.NonZeroRoot_MultiNode"
         },
         {
-          "name": "UBR_AllToAll_OutOfPlace_MultiNode",
-          "description": "AllToAll out-of-place with UBR on multi-node",
-          "test_filter": "UBR_AllToAll.OutOfPlace_MultiNode"
+          "name": "UBR_AlltoAll_OutOfPlace_MultiNode",
+          "description": "AlltoAll out-of-place with UBR on multi-node",
+          "test_filter": "UBR_AlltoAll.OutOfPlace_MultiNode"
         },
         {
           "name": "UBR_SendRecv_RingPattern_MultiNode",
@@ -789,21 +835,21 @@
           "test_filter": "UBR_SendRecv.RingPattern_MultiNode"
         },
         {
-          "name": "UBR_AllToAllStress_InterleavedMultiSize",
-          "description": "Stress test with interleaved AllToAll/AllToAllv across small/medium/large sizes",
-          "test_filter": "UBR_AllToAllStress.InterleavedMultiSize_MultiNode",
+          "name": "UBR_AlltoAllStress_InterleavedMultiSize",
+          "description": "Stress test with interleaved AlltoAll/AlltoAllv across small/medium/large sizes",
+          "test_filter": "UBR_AlltoAllStress.InterleavedMultiSize_MultiNode",
           "timeout": 300
         },
         {
-          "name": "UBR_AllToAllStress_SplitComm",
-          "description": "Stress test with interleaved AllToAll/AllToAllv using split communicators",
-          "test_filter": "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode",
+          "name": "UBR_AlltoAllStress_SplitComm",
+          "description": "Stress test with interleaved AlltoAll/AlltoAllv using split communicators",
+          "test_filter": "UBR_AlltoAllStress.InterleavedWithSplitComm_MultiNode",
           "timeout": 300
         },
         {
-          "name": "UBR_AllToAllStress_ConcurrentMultiComm",
-          "description": "Concurrent AllToAll on multiple communicators with separate streams",
-          "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
+          "name": "UBR_AlltoAllStress_ConcurrentMultiComm",
+          "description": "Concurrent AlltoAll on multiple communicators with separate streams",
+          "test_filter": "UBR_AlltoAllStress.ConcurrentMultiComm_MultiNode",
           "timeout": 300
         },
         {
@@ -812,14 +858,14 @@
           "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
         },
         {
-          "name": "UBR_ConcurrentRegHang_AllToAll_Contiguous",
-          "description": "ncclAllToAll with contiguous registered buffers (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
+          "name": "UBR_ConcurrentRegHang_AlltoAll_Contiguous",
+          "description": "ncclAlltoAll with contiguous registered buffers (should pass)",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
-          "name": "UBR_ConcurrentRegHang_AllToAll_Stress",
-          "description": "Stress test: 50 iterations of ncclAllToAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "name": "UBR_ConcurrentRegHang_AlltoAll_Stress",
+          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -862,14 +908,14 @@
           "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
         },
         {
-          "name": "UBR_AllToAll_Contiguous_Success",
-          "description": "ncclAllToAll with contiguous registered buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
+          "name": "UBR_AlltoAll_Contiguous_Success",
+          "description": "ncclAlltoAll with contiguous registered buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
-          "name": "UBR_AllToAll_Stress_Success",
-          "description": "Stress test: 50 iterations of ncclAllToAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "name": "UBR_AlltoAll_Stress_Success",
+          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -1257,9 +1303,9 @@
       },
       "tests": [
         {
-          "name": "GraphCapture_AllToAll_MultiNode",
-          "description": "AllToAll graph capture with IPC registration on multi-node",
-          "test_filter": "GraphCapture_AllToAll.MultiNode"
+          "name": "GraphCapture_AlltoAll_MultiNode",
+          "description": "AlltoAll graph capture with IPC registration on multi-node",
+          "test_filter": "GraphCapture_AlltoAll.MultiNode"
         },
         {
           "name": "GraphCapture_AllReduce_MultiNode",
@@ -1307,7 +1353,7 @@
       "tests": [
         { "name": "NetIB_Stress_FanIn",                 "description": "Fan-in 3->1, 100 iterations",            "test_filter": "NetIbMPITest.FanInStress" },
         { "name": "NetIB_Stress_FanOut",                "description": "Fan-out 1->3, 100 iterations",           "test_filter": "NetIbMPITest.FanOutStress" },
-        { "name": "NetIB_Stress_AllToAll",              "description": "Full mesh, 50 iterations",               "test_filter": "NetIbMPITest.AllToAllStress" },
+        { "name": "NetIB_Stress_AlltoAll",              "description": "Full mesh, 50 iterations",               "test_filter": "NetIbMPITest.AlltoAllStress" },
         { "name": "NetIB_Stress_BidirectionalMultiRank","description": "All pairs bidirectional, 50 iterations",  "test_filter": "NetIbMPITest.BidirectionalMultiRank" },
         { "name": "NetIB_Stress_LongRunningMultiRank",  "description": "Fan-in 3->1, 1000 iterations",           "test_filter": "NetIbMPITest.LongRunningMultiRank" }
       ]
@@ -2280,13 +2326,13 @@
       "num_ranks": 8,
       "num_nodes": 1,
       "num_gpus": 8,
-      "timeout": 1500,
+      "timeout": 300,
       "command_args": "-b 8 -e 1G -f 2 -g 1 -n 3 -w 2 -c 1 -d all -o all",
       "env_variables": {}
     },
     "perf_bf16_base": {
       "extends": "perf_base",
-      "timeout": 1500,
+      "timeout": 300,
       "command_args": "-b 1K -e 1G -f 1024 -g 1 -n 5 -w 2 -c 1 -d bfloat16"
     },
     "default_collectives": {
@@ -2308,9 +2354,9 @@
         { "name": "Broadcast_1KiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/broadcast_perf",      "command_args": "-b 1K -e 1K" },
         { "name": "Broadcast_64MiB",     "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/broadcast_perf",      "command_args": "-b 64M -e 64M" },
         { "name": "Broadcast_1GiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/broadcast_perf",      "command_args": "-b 1G -e 1G" },
-        { "name": "AllToAll_1KiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",       "command_args": "-b 1K -e 1K" },
-        { "name": "AllToAll_64MiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",       "command_args": "-b 64M -e 64M" },
-        { "name": "AllToAll_1GiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",       "command_args": "-b 1G -e 1G" },
+        { "name": "AlltoAll_1KiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",       "command_args": "-b 1K -e 1K" },
+        { "name": "AlltoAll_64MiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",       "command_args": "-b 64M -e 64M" },
+        { "name": "AlltoAll_1GiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",       "command_args": "-b 1G -e 1G" },
         { "name": "Scatter_1KiB",        "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/scatter_perf",        "command_args": "-b 1K -e 1K" },
         { "name": "Scatter_64MiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/scatter_perf",        "command_args": "-b 64M -e 64M" },
         { "name": "Scatter_1GiB",        "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/scatter_perf",        "command_args": "-b 1G -e 1G" },
@@ -2575,7 +2621,7 @@
           "description": "Combined NCCL_P2P_DIRECT_DISABLE + NCCL_P2P_USE_CUDA_MEMCPY + NCCL_P2P_LEVEL",
           "env_variables": {
             "NCCL_P2P_DIRECT_DISABLE": "1",
-            "NCCL_P2P_USE_CUDA_MEMCPY": "1",
+            "NCCL_P2P_USE_CUDA_MEMCPY": "0",
             "NCCL_P2P_LEVEL": "SYS"
           }
         }

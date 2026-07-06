@@ -1,18 +1,17 @@
 //! Optional runtime-load test for `rocjitsu_sys`.
 //!
-//! Resolving the `rj_vm_*` symbols requires a real `librocjitsu_kmd.so`
-//! (or `librocjitsu.so`). The test probes the conventional ROCm install
-//! locations (`$ROCM_HOME/lib`, `/opt/rocm/lib`) for one; otherwise it
-//! skips so the suite stays green on machines without rocjitsu.
+//! Resolving the `rj_vm_*` symbols requires a real `librocjitsu.so`.
+//! The test probes the conventional ROCm install locations
+//! (`$ROCM_HOME/lib`, `/opt/rocm/lib`) for one; otherwise it skips so
+//! the suite stays green on machines without rocjitsu.
 
 use std::path::PathBuf;
 
 use rocjitsu_sys::Lib;
 
-/// Locate a rocjitsu library to load, preferring the dedicated KMD
-/// interposer and falling back to the combined `librocjitsu.so`.
+/// Locate the rocjitsu library to load (the combined `librocjitsu.so`).
 fn locate_lib() -> Option<PathBuf> {
-    const LIBS: &[&str] = &["librocjitsu_kmd.so", "librocjitsu.so"];
+    const LIBS: &[&str] = &["librocjitsu.so"];
 
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(root) = std::env::var_os("ROCM_HOME").filter(|v| !v.is_empty()) {
