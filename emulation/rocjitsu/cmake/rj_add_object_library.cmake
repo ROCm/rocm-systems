@@ -16,13 +16,12 @@ function(rj_add_object_library name)
     target_link_libraries(${name} PRIVATE util simdojo)
     # NOTE: we intentionally do *not* set -fvisibility=hidden here. These
     # object libraries are aggregated into the single shared simulator
-    # library (librocjitsu.so), and the KMD shim (librocjitsu_kmd.so) and
-    # the plugin modules dynamically link against it instead of statically
-    # bundling the simulator. For that to work librocjitsu.so must export
-    # the simulator's C++ symbols, so the object code is compiled with the
-    # default (visible) symbol visibility. Plugins still restrict their own
-    # exported ABI to the three plugin entry points via a linker version
-    # script (plugin_export.map).
+    # library (librocjitsu.so), and the plugin modules dynamically link
+    # against it instead of statically bundling the simulator. For that to
+    # work librocjitsu.so must export the simulator's C++ symbols, so the
+    # object code is compiled with the default (visible) symbol visibility.
+    # Plugins still restrict their own exported ABI to the three plugin
+    # entry points via a linker version script (plugin_export.map).
     if(MSVC)
         target_compile_options(${name} PRIVATE /W4 /WX)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")

@@ -91,8 +91,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             APPEND
             PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/plugin_export.map
         )
-        # The interposer must exist alongside the plugins at runtime.
-        add_dependencies(rocjitsu_kmd_shim ${target})
         install(TARGETS ${target} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
     endfunction()
 
