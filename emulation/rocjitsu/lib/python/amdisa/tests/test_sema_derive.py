@@ -117,6 +117,39 @@ class TestDeriveScalarUnary:
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
 
+    @pytest.mark.parametrize(
+        'name,operation',
+        [
+            ('S_CVT_F32_I32', 'cvt_f32_i32'),
+            ('S_CVT_F32_U32', 'cvt_f32_u32'),
+            ('S_CVT_I32_F32', 'cvt_i32_f32'),
+            ('S_CVT_U32_F32', 'cvt_u32_f32'),
+            ('S_CVT_F16_F32', 'cvt_f16_f32'),
+            ('S_CVT_F32_F16', 'cvt_f32_f16'),
+            ('S_CVT_HI_F32_F16', 'cvt_hi_f32_f16'),
+        ],
+    )
+    def test_scalar_cvt_preserves_scc(self, name, operation):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_unary'
+        assert sem.operation == operation
+        assert sem.sets_scc == 'none'
+
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'write_scc' not in cpp
+
+    @pytest.mark.parametrize('name', ['S_CLZ_I32_U32', 'S_CLZ_I32_U64'])
+    def test_clz_zero_returns_all_ones(self, name):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem.semantic_class == 'scalar_unary'
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'static_cast<uint32_t>(-1)' in cpp
+        assert '? 32u' not in cpp
+        assert '? 64u' not in cpp
+
     def test_lowers_without_error(self):
         for op in ['not', 'brev', 'sext8', 'sext16', 'floor', 'trunc']:
             sem = _FakeSem(f'S_{op.upper()}', 'scalar_unary', op, 'b32')
@@ -185,32 +218,37 @@ class TestDeriveScalarBinop:
         assert 'uint32_t result' in cpp
         assert re.search(r'\bint32_t\s+result\b', cpp) is None
 
-    def test_signed_co_uses_unsigned_carry(self):
+    def test_signed_co_uses_unsigned_overflow(self):
+        # Signed s_add_co_i32 / s_sub_co_i32 must emulate the hardware's
+        # wrap-around add/sub entirely in unsigned (signed overflow is undefined
+        # behavior and unnecessary).
         sem = derive_semantics('S_ADD_CO_I32', 'ENC_SOP2')
-        assert sem.sets_scc == 'carry'
+        assert sem.sets_scc == 'overflow'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
 
-        assert 'uint32_t' in cpp
-        assert 'uint64_t' in cpp
-        assert 'write_scc' in cpp
-        assert 'static_cast<int64_t>' not in cpp
+        assert 'uint32_t result = (s0 + s1)' in cpp
+        assert re.search(r'\bint32_t\b', cpp) is None
+        assert re.search(r'\bint64_t\b', cpp) is None
+        # SCC overflow is detected by the unsigned helper (simd_glue.h).
+        assert 'wf.write_scc(signed_add_overflows(s0, s1))' in cpp
 
         sem = derive_semantics('S_SUB_CO_I32', 'ENC_SOP2')
-        assert sem.sets_scc == 'borrow'
+        assert sem.sets_scc == 'overflow'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'uint32_t' in cpp
-        assert 'write_scc' in cpp
-        assert 'static_cast<int64_t>' not in cpp
+        assert 'uint32_t result = (s0 - s1)' in cpp
+        assert re.search(r'\bint32_t\b', cpp) is None
+        assert re.search(r'\bint64_t\b', cpp) is None
+        assert 'wf.write_scc(signed_sub_overflows(s0, s1))' in cpp
 
     @pytest.mark.parametrize(
         'name,operation,dtype,scc',
         [
             ('S_ADD_CO_U32', 'add', 'u32', 'carry'),
             ('S_SUB_CO_U32', 'sub', 'u32', 'borrow'),
-            ('S_ADD_CO_I32', 'add', 'i32', 'carry'),
-            ('S_SUB_CO_I32', 'sub', 'i32', 'borrow'),
+            ('S_ADD_CO_I32', 'add', 'i32', 'overflow'),
+            ('S_SUB_CO_I32', 'sub', 'i32', 'overflow'),
             ('S_ADD_CO_CI_U32', 'addc', 'u32', 'carry'),
             ('S_SUB_CO_CI_U32', 'subb', 'u32', 'borrow'),
             ('S_ADD_NC_U64', 'add', 'u64', 'none'),
@@ -553,6 +591,12 @@ class TestDeriveScalarMovrel:
 
 
 class TestDeriveScalarSplitBarrier:
+    def test_barrier_wait_derives_current_workgroup_barrier_model(self):
+        sem = derive_semantics('S_BARRIER_WAIT', 'ENC_SOPP')
+        assert sem is not None
+        assert sem.semantic_class == 'barrier'
+        assert sem.sets_scc is None
+
     def test_get_barrier_state_derives_idle_state_read(self):
         sem = derive_semantics('S_GET_BARRIER_STATE', 'ENC_SOP1')
         assert sem is not None
@@ -563,6 +607,8 @@ class TestDeriveScalarSplitBarrier:
     @pytest.mark.parametrize(
         'name',
         [
+            'S_BARRIER_SIGNAL',
+            'S_BARRIER_SIGNAL_ISFIRST',
             'S_BARRIER_INIT',
             'S_BARRIER_JOIN',
             'S_WAKEUP_BARRIER',
@@ -1879,6 +1925,23 @@ class TestDerivePacked:
 
 
 class TestDeriveDot:
+    def test_rdna3_dot2acc_vop2_is_functional_dot2c(self):
+        sem = derive_semantics('V_DOT2ACC_F32_F16', 'ENC_VOP2')
+        assert sem is not None
+        assert sem.semantic_class == 'vector_dot'
+        assert sem.operation == 'dot2c'
+        assert sem.data_type == 'f32'
+
+    def test_vop3_dot2_true16_semantics(self):
+        cases = {
+            'V_DOT2_F16_F16': 'dot2_f16_f16',
+            'V_DOT2_BF16_BF16': 'dot2_bf16_bf16',
+        }
+        for name, semantic_class in cases.items():
+            sem = derive_semantics(name, 'ENC_VOP3')
+            assert sem is not None
+            assert sem.semantic_class == semantic_class
+
     def test_vector_dot(self):
         sem = _FakeSem('V_DOT2_F32_F16', 'vector_dot', 'dot2_f32_f16', 'f32')
         block = derive_sema_block(sem)
@@ -1942,12 +2005,17 @@ class TestDeriveWaitCounters:
     @pytest.mark.parametrize(
         ('name', 'operation'),
         [
+            ('S_WAITCNT_VSCNT', 'waitcnt_vscnt'),
+            ('S_WAITCNT_VMCNT', 'waitcnt_vmcnt'),
+            ('S_WAITCNT_LGKMCNT', 'waitcnt_lgkmcnt'),
+            ('S_WAITCNT_EXPCNT', 'waitcnt_expcnt'),
             ('S_WAIT_TENSORCNT', 'wait_tensorcnt'),
             ('S_WAIT_ASYNCCNT', 'wait_asynccnt'),
         ],
     )
-    def test_gfx1250_named_counter_is_split_wait(self, name, operation):
-        sem = derive_semantics(name, 'ENC_SOPP')
+    def test_named_counter_is_split_wait(self, name, operation):
+        enc_name = 'ENC_SOPK' if name.startswith('S_WAITCNT_') else 'ENC_SOPP'
+        sem = derive_semantics(name, enc_name)
         assert sem is not None
         assert sem.semantic_class == 'wait_counter'
         assert sem.operation == operation
@@ -2019,6 +2087,11 @@ class TestDeriveControlFlow:
         sem = _FakeSem('S_ENDPGM', 'endpgm')
         block = derive_sema_block(sem)
         assert block is not None
+
+    def test_trap_is_classified_as_control_flow_terminator(self):
+        sem = derive_semantics('S_TRAP', 'ENC_SOPP')
+        assert sem is not None
+        assert sem.semantic_class == 'trap'
 
     def test_nop(self):
         sem = _FakeSem('S_NOP', 'nop')

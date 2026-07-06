@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from amdisa.codegen.execute.vector_special import gen_vector_bitop3, gen_vector_permlane
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
+from amdisa.isa_profile import Gfx1250Profile, Rdna3Profile, Rdna4Profile
 
 
 def test_permlane_uses_opsel_fi_and_bound_ctrl_bits():
@@ -71,7 +72,7 @@ def test_gfx1250_true16_execute_bodies_are_arch_local():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='gfx1250',
-        profile=SimpleNamespace(vop3p_opsel_fields=('opsel', 'opsel_hi')),
+        profile=Gfx1250Profile(),
     )
     mov_b16 = Instruction(
         'V_MOV_B16',
@@ -135,7 +136,7 @@ def test_gfx1250_non_true16_simd_probe_can_still_be_shared():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='gfx1250',
-        profile=SimpleNamespace(vop3p_opsel_fields=('opsel', 'opsel_hi')),
+        profile=Gfx1250Profile(),
     )
     mov_b32 = Instruction(
         'V_MOV_B32',
@@ -153,7 +154,7 @@ def test_gfx1250_non_true16_simd_probe_can_still_be_shared():
 
 def test_gfx1250_true16_e32_dst_reg_uses_physical_vgpr():
     codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(arch_name='gfx1250')
+    codegen.isa_spec = SimpleNamespace(arch_name='gfx1250', profile=Gfx1250Profile())
     fmac_f16 = Instruction(
         'V_FMAC_F16',
         'ENC_VOP2',
@@ -179,6 +180,78 @@ def test_gfx1250_true16_e32_dst_reg_uses_physical_vgpr():
         '(inst_.vdst & 0x7fu)'
     )
     assert codegen._e32_true16_dst_reg_expr(add_f32, 'ENC_VOP2') == 'inst_.vdst'
+
+
+def test_rdna4_true16_execute_bodies_are_arch_local():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='rdna4', profile=Rdna4Profile())
+    add_f16 = Instruction(
+        'V_ADD_F16',
+        'ENC_VOP2',
+        0,
+        [
+            Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('src0', 16, 'OPR_SRC', True, False, False, False, 1),
+            Operand('vsrc1', 16, 'OPR_VGPR', True, False, False, False, 2),
+        ],
+    )
+    cndmask_b16 = Instruction(
+        'V_CNDMASK_B16',
+        'ENC_VOP3',
+        0,
+        [
+            Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('src0', 16, 'OPR_SRC', True, False, False, False, 1),
+            Operand('src1', 16, 'OPR_SRC', True, False, False, False, 2),
+            Operand('src2', 64, 'OPR_SREG', True, False, False, False, 3),
+        ],
+    )
+
+    assert codegen._requires_arch_local_execute(add_f16, 'ENC_VOP2')
+    assert codegen._requires_arch_local_execute(cndmask_b16, 'ENC_VOP3')
+    assert codegen._e32_true16_dst_reg_expr(add_f16, 'ENC_VOP2') == (
+        '(inst_.vdst & 0x7fu)'
+    )
+
+
+def test_rdna3_vop3_true16_execute_bodies_are_arch_local():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='rdna3', profile=Rdna3Profile())
+    cndmask_b16 = Instruction(
+        'V_CNDMASK_B16',
+        'ENC_VOP3',
+        0,
+        [
+            Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('src0', 16, 'OPR_SRC', True, False, False, False, 1),
+            Operand('src1', 16, 'OPR_SRC', True, False, False, False, 2),
+            Operand('src2', 64, 'OPR_SREG', True, False, False, False, 3),
+        ],
+    )
+    or_b16 = Instruction(
+        'V_OR_B16',
+        'ENC_VOP3',
+        0,
+        [
+            Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('src0', 16, 'OPR_SRC', True, False, False, False, 1),
+            Operand('src1', 16, 'OPR_SRC', True, False, False, False, 2),
+        ],
+    )
+    add_f16 = Instruction(
+        'V_ADD_F16',
+        'ENC_VOP2',
+        0,
+        [
+            Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('src0', 16, 'OPR_SRC', True, False, False, False, 1),
+            Operand('vsrc1', 16, 'OPR_VGPR', True, False, False, False, 2),
+        ],
+    )
+
+    assert codegen._requires_arch_local_execute(cndmask_b16, 'ENC_VOP3')
+    assert codegen._requires_arch_local_execute(or_b16, 'ENC_VOP3')
+    assert codegen._requires_arch_local_execute(add_f16, 'ENC_VOP2')
 
 
 def test_gfx1250_bitop3_b16_uses_true16_helpers():

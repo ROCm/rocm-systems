@@ -97,6 +97,7 @@ public:
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
+  uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
   std::unique_ptr<DppOperand> dpp_src1_;
@@ -127,6 +128,7 @@ public:
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
+  uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
   std::unique_ptr<DppOperand> dpp_src1_;
@@ -158,6 +160,7 @@ public:
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
+  uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
   std::unique_ptr<DppOperand> dpp_src1_;
@@ -188,6 +191,14 @@ public:
   bool has_dpp16();
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
+  uint32_t dpp_ctrl_ = 0;
+  uint32_t dpp_row_mask_ = 0xF;
+  uint32_t dpp_bank_mask_ = 0xF;
+  uint32_t dpp_bound_ctrl_ = 0;
+  uint32_t dpp_fi_ = 1;
+  uint32_t dpp8_lane_sel_ = 0;
+  std::unique_ptr<DppOperand> dpp_src0_;
+  std::unique_ptr<DppOperand> dpp_src1_;
 };
 
 class Vop3p : public IsaInstruction<Isa> {
@@ -204,6 +215,14 @@ public:
   bool has_dpp16();
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
+  uint32_t dpp_ctrl_ = 0;
+  uint32_t dpp_row_mask_ = 0xF;
+  uint32_t dpp_bank_mask_ = 0xF;
+  uint32_t dpp_bound_ctrl_ = 0;
+  uint32_t dpp_fi_ = 1;
+  uint32_t dpp8_lane_sel_ = 0;
+  std::unique_ptr<DppOperand> dpp_src0_;
+  std::unique_ptr<DppOperand> dpp_src1_;
 };
 
 class Vds : public IsaInstruction<Isa> {
@@ -266,6 +285,14 @@ public:
   bool has_dpp16();
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
+  uint32_t dpp_ctrl_ = 0;
+  uint32_t dpp_row_mask_ = 0xF;
+  uint32_t dpp_bank_mask_ = 0xF;
+  uint32_t dpp_bound_ctrl_ = 0;
+  uint32_t dpp_fi_ = 1;
+  uint32_t dpp8_lane_sel_ = 0;
+  std::unique_ptr<DppOperand> dpp_src0_;
+  std::unique_ptr<DppOperand> dpp_src1_;
 };
 
 } // namespace gfx1250

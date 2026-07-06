@@ -113,7 +113,6 @@ public:
   hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
                                   core::ShareType type, void* import_handle,
                                   void* mem = nullptr) override;
-  hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                    size_t size, hsa_access_permission_t perms,uint32_t node_id) override;
   hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
@@ -149,6 +148,11 @@ public:
                                        hsa_amd_external_semaphore_handle_type_t type,
                                        hsa_amd_external_semaphore_t* out_sem) const override;
   hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const override;
+
+  hsa_status_t SignalExternalSemaphore(uint64_t queue_id, hsa_amd_external_semaphore_t sem,
+                                       uint64_t value) const override;
+  hsa_status_t WaitExternalSemaphore(uint64_t queue_id, hsa_amd_external_semaphore_t sem,
+                                     uint64_t value) const override;
 
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
