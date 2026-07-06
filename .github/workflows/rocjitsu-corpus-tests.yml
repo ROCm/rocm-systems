@@ -249,16 +249,20 @@ jobs:
 
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
+          corpus_status=0
           for target in "${targets[@]}"; do
             read -r name rocjitsu_config skip_tests_config <<< "${target}"
             echo "::group::pytest (${name})"
-            rocjitsu \
+            if ! rocjitsu \
               --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
               -- pytest \
               tests/test_corpus.py \
               --target "${name}" \
               --suite iree,kernels,cts \
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
-              --timeout 15
+              --timeout 15; then
+              corpus_status=1
+            fi
             echo "::endgroup::"
           done
+          exit "${corpus_status}"
