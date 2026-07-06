@@ -9,6 +9,7 @@
 
 #include "data_storage/backends/sqlite_backend.hpp"
 #include "data_storage/read_statements.hpp"
+#include "data_storage/read_statements_v4.hpp"
 #include "entity_utility.hpp"
 
 #include <memory>
@@ -151,19 +152,22 @@ private:
     // Synthesize gpu_queue + dma tracks (no rocpd_track rows exist for them in v3).
     void synthesize_derived_tracks();
 
+    // Build tracks from real rocpd_track rows (v4.0: every swimlane is a track row).
+    void build_v4_tracks();
+
     // Resolve event metadata from event-specific table by db_id and type.
     // Returns event_id_result containing event_id + stack_id + call_stack JSON etc.
-    [[nodiscard]] std::optional<data_storage::schema_v3::event_id_result>
-    resolve_event_metadata(const reader_types::timeline_event_t& event);
+    [[nodiscard]] std::optional<data_storage::event_id_result> resolve_event_metadata(
+        const reader_types::timeline_event_t& event);
 
     // Build event_data_t from event_id (queries rocpd_event, parses JSON)
     [[nodiscard]] reader_types::event_data_ptr_t build_event_data(
-        const data_storage::schema_v3::event_id_result& event_meta);
+        const data_storage::event_id_result& event_meta);
 
     // Converts raw SQL results to timeline_event_t, resolving FKs
     [[nodiscard]] reader_types::timeline_event_list_t build_timeline_events(
-        const std::vector<data_storage::schema_v3::timeline_event_result>& results,
-        reader_types::event_type_t                                         type);
+        const std::vector<data_storage::timeline_event_result>& results,
+        reader_types::event_type_t                              type);
 
     // Applies limit/offset to merged event list
     void apply_pagination(reader_types::timeline_event_list_t& events,
@@ -172,11 +176,16 @@ private:
     // Build combined pmc_event_data_t (value + sample timestamp/track + event) from a
     // resolved scalar detail row.
     [[nodiscard]] reader_types::pmc_event_data_t build_pmc_event_data(
-        const data_storage::schema_v3::scalar_detail_result& row);
+        const data_storage::scalar_detail_result& row);
 
-    std::unique_ptr<profiler_hub::storage_t>                  m_storage;
-    std::shared_ptr<data_storage::sqlite_backend>             m_backend;
-    std::shared_ptr<data_storage::schema_v3::read_statements> m_read_statements;
+    std::unique_ptr<profiler_hub::storage_t>            m_storage;
+    std::shared_ptr<data_storage::sqlite_backend>       m_backend;
+    std::shared_ptr<data_storage::read_statements_base> m_read_statements;
+
+    // True when the opened database is a v4.0 rocpd schema (rocpd_timestamp spine
+    // present). Selected once at construction; drives the v4 read paths and guards
+    // the legacy v3-only reader surface (which returns empty/nullopt on v4).
+    bool m_is_v4{ false };
 
     reader_types::node_info_list_t          m_node_info_list;
     reader_types::process_info_list_t       m_process_info_list;

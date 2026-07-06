@@ -24,15 +24,38 @@ reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
                     : throw std::invalid_argument(
                           "Provided pointer to a non-existing storage!"))
 , m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
-// VERSION-DISPATCH SEAM (task 002B): m_read_statements is hardwired to schema_v3 here.
-// The v4.0 backend slots in by detecting the schema version off m_backend and selecting
-// schema_v4::read_statements instead. That requires a common read_statements interface
-// (or std::variant) so the public reader surface stays schema-agnostic; the member type
-// on reader_impl.hpp (m_read_statements) is the other half of the seam.
-, m_read_statements(
-      std::make_shared<data_storage::schema_v3::read_statements>(m_backend,
-                                                                 m_backend->get_uuid()))
 {
+    // VERSION DISPATCH (task 002B): the read backend is selected ONCE here, off the
+    // physical schema, so every m_read_statements->foo() call site downstream stays
+    // schema-agnostic and there is no per-call schema sniffing. v4.0 normalizes all
+    // timestamps into the rocpd_timestamp spine; the presence of the
+    // rocpd_timestamp_{uuid} table (absent in v3) is the detection key. Because the
+    // executors PREPARE their SQL at construction, only the matching backend is ever
+    // built — the v4 backend never prepares v3-only SQL and vice versa.
+    const auto uuid = m_backend->get_uuid();
+
+    {
+        auto detect =
+            m_backend->create_read_statement_executor<data_storage::count_result>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rocpd_"
+                "timestamp_" +
+                    uuid + "';",
+                &data_storage::count_result::count);
+        auto rows = detect().to_vector();
+        m_is_v4   = !rows.empty() && rows.front().count > 0;
+    }
+
+    if(m_is_v4)
+    {
+        m_read_statements =
+            std::make_shared<data_storage::schema_v4::read_statements>(m_backend, uuid);
+    }
+    else
+    {
+        m_read_statements =
+            std::make_shared<data_storage::schema_v3::read_statements>(m_backend, uuid);
+    }
+
     initialize_all_info_lists();
 }
 
@@ -226,6 +249,12 @@ reader_t::impl::get_all_tracks()
 {
     if(m_track_info_list.empty())
     {
+        if(m_is_v4)
+        {
+            build_v4_tracks();
+            return m_track_info_list;
+        }
+
         // v3 rocpd_track holds cpu_thread and counter tracks. A track is a counter
         // track iff at least one rocpd_sample references it. Classify up front.
         std::unordered_set<size_t> counter_track_ids;
@@ -436,6 +465,170 @@ reader_t::impl::synthesize_derived_tracks()
         qi.queue_id  = d.queue_id;
         qi.stream_id = d.stream_id;
         m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
+}
+
+// v4.0: every swimlane is a real rocpd_track row carrying the full identity tuple
+// (nid, pid, tid, agent_id, queue_id, stream_id). There is nothing to synthesize —
+// tracks are read directly and classified from which identity columns are populated,
+// with counter tracks identified by being referenced from rocpd_sample.track_id.
+void
+reader_t::impl::build_v4_tracks()
+{
+    // Counter tracks: any rocpd_track referenced by a rocpd_sample row.
+    std::unordered_set<size_t> counter_track_ids;
+    for(const auto& r : m_read_statements->distinct_sample_track_ids()().to_vector())
+    {
+        counter_track_ids.insert(r.track_id);
+    }
+
+    // Counter display name = PMC name (Q9), keyed by track id.
+    std::unordered_map<size_t, std::string> counter_track_names;
+    for(const auto& r : m_read_statements->counter_track_names()().to_vector())
+    {
+        counter_track_names.emplace(r.track_id, r.name);
+    }
+
+    const auto& statement       = m_read_statements->track_info_statement();
+    const auto  track_info_list = statement().to_vector();
+
+    m_track_info_list.reserve(track_info_list.size());
+    for(const auto& track_info : track_info_list)
+    {
+        auto track_info_ptr     = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id      = track_info.id;
+        track_info_ptr->extdata = track_info.extdata;
+
+        // Resolve the rocpd_track name_id to a display name up front.
+        std::string track_name;
+        if(track_info.name_id.has_value())
+        {
+            auto sit = m_string_info_utility.find(track_info.name_id.value());
+            if(sit != m_string_info_utility.end()) track_name = sit->second;
+        }
+
+        // Classify the track from its identity columns. A track referenced by a
+        // sample is a counter regardless of other columns; otherwise queue_id marks a
+        // GPU queue, stream_id a memory-copy (dma) lane, and a bare tid a CPU thread.
+        const bool is_counter =
+            counter_track_ids.find(track_info.id) != counter_track_ids.end();
+        if(is_counter)
+        {
+            track_info_ptr->type = reader_types::track_type_t::counter;
+        }
+        else if(track_info.queue_id.has_value())
+        {
+            track_info_ptr->type = reader_types::track_type_t::gpu_queue;
+        }
+        else if(track_info.stream_id.has_value())
+        {
+            track_info_ptr->type = reader_types::track_type_t::dma;
+        }
+        else
+        {
+            track_info_ptr->type = reader_types::track_type_t::cpu_thread;
+        }
+
+        auto node_it = m_node_info_utility.find(track_info.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+
+        if(track_info.pid.has_value())
+        {
+            auto process_it = m_process_info_utility.find(track_info.pid.value());
+            if(process_it != m_process_info_utility.end() && process_it->second)
+            {
+                track_info_ptr->process_info = process_it->second;
+            }
+        }
+
+        if(track_info.tid.has_value())
+        {
+            auto thread_it = m_thread_info_utility.find(track_info.tid.value());
+            if(thread_it != m_thread_info_utility.end() && thread_it->second)
+            {
+                track_info_ptr->thread_info = thread_it->second;
+            }
+        }
+
+        // Q10: v4 rocpd_track carries agent_id directly, so counter (and queue) tracks
+        // get agent_info — the anchor rocpd_sample.track_id -> rocpd_track.agent_id ->
+        // rocpd_info_agent resolves here for every track that names an agent.
+        if(track_info.agent_id.has_value())
+        {
+            auto agent_it = m_agent_info_utility.find(track_info.agent_id.value());
+            if(agent_it != m_agent_info_utility.end() && agent_it->second)
+            {
+                track_info_ptr->agent_info = agent_it->second;
+            }
+        }
+
+        if(track_info.queue_id.has_value())
+        {
+            auto queue_it = m_queue_info_utility.find(track_info.queue_id.value());
+            if(queue_it != m_queue_info_utility.end() && queue_it->second)
+            {
+                track_info_ptr->queue_info = queue_it->second;
+            }
+        }
+
+        if(track_info.stream_id.has_value())
+        {
+            auto stream_it = m_stream_info_utility.find(track_info.stream_id.value());
+            if(stream_it != m_stream_info_utility.end() && stream_it->second)
+            {
+                track_info_ptr->stream_info = stream_it->second;
+            }
+        }
+
+        // Q9 display-name resolution: prefer the track's own name; fall back to the
+        // per-type identity label so a swimlane is never nameless.
+        track_info_ptr->name = track_name;
+        if(is_counter)
+        {
+            auto nit = counter_track_names.find(track_info.id);
+            if(nit != counter_track_names.end() && !nit->second.empty())
+            {
+                track_info_ptr->name = nit->second;
+            }
+        }
+        else if(track_info_ptr->name.empty())
+        {
+            if(track_info_ptr->type == reader_types::track_type_t::gpu_queue &&
+               track_info_ptr->queue_info)
+            {
+                track_info_ptr->name = track_info_ptr->queue_info->name;
+            }
+            else if(track_info_ptr->type == reader_types::track_type_t::dma)
+            {
+                track_info_ptr->name = "Memory copy";
+            }
+        }
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info.id, track_info_ptr);
+        m_track_ptr_to_db_id.emplace(track_info_ptr, track_info.id);
+
+        topology_key_t topo{ track_info.nid,
+                             track_info.pid.value_or(0),
+                             track_info.tid.value_or(0) };
+        m_track_ptr_to_topology.emplace(track_info_ptr, topo);
+        m_topology_to_track_ptr.emplace(topo, track_info_ptr);
+
+        // Routing for track-scoped queries: v4 anchors everything on the real
+        // rocpd_track id, so real_track_id == the track's own id.
+        track_query_info_t qi;
+        qi.type          = track_info_ptr->type;
+        qi.nid           = track_info.nid;
+        qi.pid           = track_info.pid.value_or(0);
+        qi.tid           = track_info.tid;
+        qi.agent_id      = track_info.agent_id;
+        qi.queue_id      = track_info.queue_id;
+        qi.stream_id     = track_info.stream_id;
+        qi.real_track_id = track_info.id;
+        m_track_query_info.emplace(track_info.id, qi);
     }
 }
 
@@ -684,8 +877,8 @@ reader_t::impl::get_all_pmc_infos()
 
 reader_types::timeline_event_list_t
 reader_t::impl::build_timeline_events(
-    const std::vector<data_storage::schema_v3::timeline_event_result>& results,
-    reader_types::event_type_t                                         type)
+    const std::vector<data_storage::timeline_event_result>& results,
+    reader_types::event_type_t                              type)
 {
     reader_types::timeline_event_list_t events;
     events.reserve(results.size());
@@ -771,6 +964,11 @@ reader_t::impl::apply_pagination(reader_types::timeline_event_list_t& events,
 reader_types::timeline_event_list_t
 reader_t::impl::get_events(const reader_types::event_filter_t& filter)
 {
+    // Legacy timeline surface is unsupported on v4.0 (deferred to task 002C); the v4
+    // backend inherits only default-empty stubs for these statements, so the reader
+    // guards every legacy path and returns an empty/nullopt result on a v4 database.
+    if(m_is_v4) return {};
+
     reader_types::timeline_event_list_t all_events;
 
     bool query_all    = filter.types.empty();
@@ -783,10 +981,9 @@ reader_t::impl::get_events(const reader_types::event_filter_t& filter)
         filter.time_window.start.has_value() && filter.time_window.end.has_value();
 
     auto query_event_type =
-        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
-                                       stmts,
+        [&](const data_storage::read_statements_base::timeline_event_statement_set& stmts,
             reader_types::event_type_t type) {
-            std::vector<data_storage::schema_v3::timeline_event_result> results;
+            std::vector<data_storage::timeline_event_result> results;
             if(has_time)
             {
                 results = stmts
@@ -837,6 +1034,7 @@ reader_types::timeline_event_list_t
 reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
                                      const reader_types::event_filter_t& filter)
 {
+    if(m_is_v4) return {};  // legacy timeline surface unsupported on v4.0 (task 002C)
     if(!track) return {};
 
     auto topo_it = m_track_ptr_to_topology.find(track);
@@ -860,10 +1058,9 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
         filter.time_window.start.has_value() && filter.time_window.end.has_value();
 
     auto query_event_type =
-        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
-                                       stmts,
+        [&](const data_storage::read_statements_base::timeline_event_statement_set& stmts,
             reader_types::event_type_t type) {
-            std::vector<data_storage::schema_v3::timeline_event_result> results;
+            std::vector<data_storage::timeline_event_result> results;
             if(has_time)
             {
                 results = stmts
@@ -918,6 +1115,8 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
 size_t
 reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
 {
+    if(m_is_v4) return 0;  // legacy timeline surface unsupported on v4.0 (task 002C)
+
     const bool query_all    = filter.types.empty();
     auto       should_count = [&](reader_types::event_type_t t) {
         return query_all || std::find(filter.types.begin(), filter.types.end(), t) !=
@@ -963,12 +1162,17 @@ reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
 // Event metadata resolution helpers
 // ============================================================================
 
-std::optional<data_storage::schema_v3::event_id_result>
+std::optional<data_storage::event_id_result>
 reader_t::impl::resolve_event_metadata(const reader_types::timeline_event_t& event)
 {
+    // Guards the event-based detail/property surface (region/kernel/memory details,
+    // call stack, source context, arguments) and their size_t overloads on v4.0: the
+    // *_event_id statements are default-empty stubs there (task 002C).
+    if(m_is_v4) return std::nullopt;
+
     auto db_id = event.unique_identifier.id;
 
-    std::vector<data_storage::schema_v3::event_id_result> results;
+    std::vector<data_storage::event_id_result> results;
     switch(event.unique_identifier.type)
     {
         case reader_types::event_type_t::region:
@@ -991,8 +1195,7 @@ reader_t::impl::resolve_event_metadata(const reader_types::timeline_event_t& eve
 }
 
 reader_types::event_data_ptr_t
-reader_t::impl::build_event_data(
-    const data_storage::schema_v3::event_id_result& event_meta)
+reader_t::impl::build_event_data(const data_storage::event_id_result& event_meta)
 {
     auto event_data             = std::make_shared<reader_types::event_data_t>();
     event_data->stack_id        = event_meta.stack_id.value_or(0);
@@ -1024,6 +1227,10 @@ reader_t::impl::build_event_data(
 std::optional<reader_types::region_data_t>
 reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
 {
+    // Legacy per-event detail is unsupported on v4.0 (task 002C): region_detail() is a
+    // default-empty stub on the v4 backend. Guards this overload and its size_t form.
+    if(m_is_v4) return std::nullopt;
+
     if(event.unique_identifier.type != reader_types::event_type_t::region)
     {
         return std::nullopt;
@@ -1067,6 +1274,8 @@ reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
 std::optional<reader_types::kernel_dispatch_data_t>
 reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t& event)
 {
+    if(m_is_v4) return std::nullopt;  // legacy per-event detail unsupported on v4 (002C)
+
     if(event.unique_identifier.type != reader_types::event_type_t::kernel_dispatch)
         return std::nullopt;
 
@@ -1134,6 +1343,8 @@ reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t
 std::optional<reader_types::memory_copy_data_t>
 reader_t::impl::get_memory_copy_details(const reader_types::timeline_event_t& event)
 {
+    if(m_is_v4) return std::nullopt;  // legacy per-event detail unsupported on v4 (002C)
+
     if(event.unique_identifier.type != reader_types::event_type_t::memory_copy)
         return std::nullopt;
 
@@ -1202,6 +1413,8 @@ reader_t::impl::get_memory_copy_details(const reader_types::timeline_event_t& ev
 std::optional<reader_types::memory_alloc_data_t>
 reader_t::impl::get_memory_alloc_details(const reader_types::timeline_event_t& event)
 {
+    if(m_is_v4) return std::nullopt;  // legacy per-event detail unsupported on v4 (002C)
+
     if(event.unique_identifier.type != reader_types::event_type_t::memory_allocate)
         return std::nullopt;
 
@@ -1326,6 +1539,8 @@ reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& even
 reader_types::time_window_t
 reader_t::impl::get_data_time_range()
 {
+    if(m_is_v4) return {};  // legacy time-range surface unsupported on v4.0 (task 002C)
+
     size_t global_min = std::numeric_limits<size_t>::max();
     size_t global_max = 0;
 
@@ -1361,6 +1576,8 @@ reader_t::impl::get_data_time_range()
 reader_types::event_counts_t
 reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
 {
+    if(m_is_v4) return {};  // legacy count surface unsupported on v4.0 (task 002C)
+
     const bool has_time = window.start.has_value() && window.end.has_value();
 
     auto get_count = [&](const auto& base_stmt, const auto& time_stmt) -> size_t {
@@ -1453,60 +1670,94 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     if(qit == m_track_query_info.end()) return {};
     const auto& qi = qit->second;
 
-    std::vector<data_storage::schema_v3::interval_row_result> rows;
-    bool name_from_kernel_symbol = false;
+    std::vector<data_storage::interval_row_result> rows;
+    bool                                           name_from_kernel_symbol = false;
 
-    switch(qi.type)
+    if(m_is_v4)
     {
-        case reader_types::track_type_t::cpu_thread:
-            rows = m_read_statements
-                       ->region_interval_track()(qi.nid, qi.pid, qi.tid.value_or(0))
-                       .to_vector();
-            break;
-        case reader_types::track_type_t::gpu_queue:
-            rows =
-                m_read_statements
-                    ->kernel_dispatch_interval_track()(
-                        qi.nid, qi.pid, qi.agent_id.value_or(0), qi.queue_id.value_or(0))
-                    .to_vector();
-            name_from_kernel_symbol = true;
-            break;
-        case reader_types::track_type_t::dma:
+        // v4.0: every track is a real rocpd_track row, so track-scoped interval reads
+        // reduce to WHERE <table>.track_id = real_track_id (start/end resolved through
+        // the rocpd_timestamp spine inside the statement).
+        switch(qi.type)
         {
-            const bool has_q = qi.queue_id.has_value();
-            const bool has_s = qi.stream_id.has_value();
-            if(has_q && has_s)
-            {
+            case reader_types::track_type_t::cpu_thread:
+                rows = m_read_statements->region_interval_track_v4()(qi.real_track_id)
+                           .to_vector();
+                break;
+            case reader_types::track_type_t::gpu_queue:
                 rows = m_read_statements
-                           ->memory_copy_interval_qs()(
-                               qi.nid, qi.pid, qi.queue_id.value(), qi.stream_id.value())
+                           ->kernel_dispatch_interval_track_v4()(qi.real_track_id)
                            .to_vector();
-            }
-            else if(has_q)
-            {
-                rows = m_read_statements
-                           ->memory_copy_interval_q_only()(
-                               qi.nid, qi.pid, qi.queue_id.value())
-                           .to_vector();
-            }
-            else if(has_s)
-            {
-                rows = m_read_statements
-                           ->memory_copy_interval_s_only()(
-                               qi.nid, qi.pid, qi.stream_id.value())
-                           .to_vector();
-            }
-            else
-            {
-                rows = m_read_statements->memory_copy_interval_neither()(qi.nid, qi.pid)
-                           .to_vector();
-            }
-            break;
+                name_from_kernel_symbol = true;
+                break;
+            case reader_types::track_type_t::dma:
+                rows =
+                    m_read_statements->memory_copy_interval_track_v4()(qi.real_track_id)
+                        .to_vector();
+                break;
+            case reader_types::track_type_t::counter:
+            default:
+                // A counter track is scalar-only; an interval query returns nothing (Q7).
+                return {};
         }
-        case reader_types::track_type_t::counter:
-        default:
-            // A counter track is scalar-only; an interval query returns nothing (Q7).
-            return {};
+    }
+    else
+    {
+        switch(qi.type)
+        {
+            case reader_types::track_type_t::cpu_thread:
+                rows = m_read_statements
+                           ->region_interval_track()(qi.nid, qi.pid, qi.tid.value_or(0))
+                           .to_vector();
+                break;
+            case reader_types::track_type_t::gpu_queue:
+                rows = m_read_statements
+                           ->kernel_dispatch_interval_track()(qi.nid,
+                                                              qi.pid,
+                                                              qi.agent_id.value_or(0),
+                                                              qi.queue_id.value_or(0))
+                           .to_vector();
+                name_from_kernel_symbol = true;
+                break;
+            case reader_types::track_type_t::dma:
+            {
+                const bool has_q = qi.queue_id.has_value();
+                const bool has_s = qi.stream_id.has_value();
+                if(has_q && has_s)
+                {
+                    rows =
+                        m_read_statements
+                            ->memory_copy_interval_qs()(
+                                qi.nid, qi.pid, qi.queue_id.value(), qi.stream_id.value())
+                            .to_vector();
+                }
+                else if(has_q)
+                {
+                    rows = m_read_statements
+                               ->memory_copy_interval_q_only()(
+                                   qi.nid, qi.pid, qi.queue_id.value())
+                               .to_vector();
+                }
+                else if(has_s)
+                {
+                    rows = m_read_statements
+                               ->memory_copy_interval_s_only()(
+                                   qi.nid, qi.pid, qi.stream_id.value())
+                               .to_vector();
+                }
+                else
+                {
+                    rows =
+                        m_read_statements->memory_copy_interval_neither()(qi.nid, qi.pid)
+                            .to_vector();
+                }
+                break;
+            }
+            case reader_types::track_type_t::counter:
+            default:
+                // A counter track is scalar-only; an interval query returns nothing (Q7).
+                return {};
+        }
     }
 
     reader_types::interval_event_list_t events;
@@ -1609,16 +1860,15 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
     const size_t lo = filter.time_window.start.value_or(0);
     const size_t hi = filter.time_window.end.value_or(std::numeric_limits<size_t>::max());
 
-    auto run =
-        [&](const data_storage::schema_v3::read_statements::flow_statement_set& set) {
-            auto rows = has_window ? set.time_filtered(lo, hi).to_vector()
-                                   : set.base().to_vector();
-            flows.reserve(flows.size() + rows.size());
-            for(const auto& r : rows)
-            {
-                flows.push_back(reader_types::flow_t{ r.source_id, r.dest_id });
-            }
-        };
+    auto run = [&](const data_storage::read_statements_base::flow_statement_set& set) {
+        auto rows =
+            has_window ? set.time_filtered(lo, hi).to_vector() : set.base().to_vector();
+        flows.reserve(flows.size() + rows.size());
+        for(const auto& r : rows)
+        {
+            flows.push_back(reader_types::flow_t{ r.source_id, r.dest_id });
+        }
+    };
 
     run(m_read_statements->region_to_kernel_dispatch_flows());
     run(m_read_statements->region_to_memory_copy_flows());
@@ -1632,8 +1882,7 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
 // ============================================================================
 
 reader_types::pmc_event_data_t
-reader_t::impl::build_pmc_event_data(
-    const data_storage::schema_v3::scalar_detail_result& row)
+reader_t::impl::build_pmc_event_data(const data_storage::scalar_detail_result& row)
 {
     reader_types::pmc_event_data_t data;
     data.value            = row.value;
