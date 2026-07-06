@@ -496,6 +496,16 @@ write_interceptor(Queue*                                queue,
         {
             ++num_dispatch_packets;
         }
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+        else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+        {
+            const auto& ext_packet = packets_arr[i].ext_kernel_dispatch;
+            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+            {
+                ++num_dispatch_packets;
+            }
+        }
+#endif
     }
 
     if(num_dispatch_packets == 0)
@@ -572,7 +582,17 @@ write_interceptor(Queue*                                queue,
                 bit_extract(original_packet.header,
                             HSA_PACKET_HEADER_TYPE,
                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
-            if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+            bool is_kernel_dispatch     = (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
+            bool is_ext_kernel_dispatch = false;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+            {
+                const auto& ext_packet = _packets[i].ext_kernel_dispatch;
+                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                    is_ext_kernel_dispatch = true;
+            }
+#endif
+            if(!is_kernel_dispatch && !is_ext_kernel_dispatch)
             {
                 transformed_packets.emplace_back(_packets[i]);
                 continue;
@@ -595,15 +615,67 @@ write_interceptor(Queue*                                queue,
                 ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
                 internal_corr_id);
 
-            const uint64_t kernel_id = code_object::get_kernel_id(original_packet.kernel_object);
-            const auto     original_completion_signal = original_packet.completion_signal;
+            // Lambda to extract packet info regardless of packet type
+            auto extract_packet_info = [](const rocprofiler_packet& pkt, bool is_ext) {
+                struct packet_info
+                {
+                    hsa_signal_t       completion_signal;
+                    uint64_t           kernel_object;
+                    uint32_t           private_segment_size;
+                    uint32_t           group_segment_size;
+                    rocprofiler_dim3_t workgroup_size;
+                    rocprofiler_dim3_t grid_size;
+                };
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+                if(is_ext)
+                {
+                    const auto& e = pkt.ext_kernel_dispatch;
+                    return packet_info{e.completion_signal,
+                                       e.kernel_object,
+                                       e.private_segment_size,
+                                       e.group_segment_size,
+                                       {e.workgroup_size_x, e.workgroup_size_y, e.workgroup_size_z},
+                                       {static_cast<uint32_t>(e.cluster_count_x) *
+                                            static_cast<uint32_t>(e.cluster_size_x) *
+                                            static_cast<uint32_t>(e.workgroup_size_x),
+                                        static_cast<uint32_t>(e.cluster_count_y) *
+                                            static_cast<uint32_t>(e.cluster_size_y) *
+                                            static_cast<uint32_t>(e.workgroup_size_y),
+                                        static_cast<uint32_t>(e.cluster_count_z) *
+                                            static_cast<uint32_t>(e.cluster_size_z) *
+                                            static_cast<uint32_t>(e.workgroup_size_z)}};
+                }
+#else
+                (void) is_ext;
+#endif
+                {
+                    const auto& s = pkt.kernel_dispatch;
+                    return packet_info{s.completion_signal,
+                                       s.kernel_object,
+                                       s.private_segment_size,
+                                       s.group_segment_size,
+                                       {s.workgroup_size_x, s.workgroup_size_y, s.workgroup_size_z},
+                                       {s.grid_size_x, s.grid_size_y, s.grid_size_z}};
+                }
+            };
+
+            const auto     pkt_info = extract_packet_info(_packets[i], is_ext_kernel_dispatch);
+            const auto     original_completion_signal = pkt_info.completion_signal;
+            const uint64_t kernel_id = code_object::get_kernel_id(pkt_info.kernel_object);
             const auto     existing_completion_signal = (original_completion_signal != null_signal);
 
             // Copy kernel pkt, copy is to allow for signal to be modified
             _packet_data.kernel_packet = _packets[i];
             // create a reference for short hand access
-            auto& kernel_packet     = _packet_data.kernel_packet;
+            auto& kernel_packet = _packet_data.kernel_packet;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            auto& completion_signal =
+                is_ext_kernel_dispatch
+                    ? _packet_data.kernel_packet.ext_kernel_dispatch.completion_signal
+                    : _packet_data.kernel_packet.kernel_dispatch.completion_signal;
+#else
             auto& completion_signal = _packet_data.kernel_packet.kernel_dispatch.completion_signal;
+#endif
 
             auto create_signal = [](auto* signal) -> common::container::pool_object<signal_t>* {
                 if(auto* pool = get_signal_pool(); pool && signal->handle == 0)
@@ -635,27 +707,22 @@ write_interceptor(Queue*                                queue,
             static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
                           "failed to compute size field based on offset of reserved_padding field");
 
-            auto dispatch_id             = ++sequence_counter;
-            _packet_data.callback_record = callback_record_t{
-                sizeof(callback_record_t),
-                rocprofiler_timestamp_t{0},
-                rocprofiler_timestamp_t{0},
-                rocprofiler_kernel_dispatch_info_t{
-                    .size                 = kernel_dispatch_info_rt_size,
-                    .agent_id             = queue->get_agent().get_rocp_agent()->id,
-                    .queue_id             = queue->get_id(),
-                    .kernel_id            = kernel_id,
-                    .dispatch_id          = dispatch_id,
-                    .private_segment_size = kernel_packet.kernel_dispatch.private_segment_size,
-                    .group_segment_size   = kernel_packet.kernel_dispatch.group_segment_size,
-                    .workgroup_size =
-                        rocprofiler_dim3_t{kernel_packet.kernel_dispatch.workgroup_size_x,
-                                           kernel_packet.kernel_dispatch.workgroup_size_y,
-                                           kernel_packet.kernel_dispatch.workgroup_size_z},
-                    .grid_size = rocprofiler_dim3_t{kernel_packet.kernel_dispatch.grid_size_x,
-                                                    kernel_packet.kernel_dispatch.grid_size_y,
-                                                    kernel_packet.kernel_dispatch.grid_size_z},
-                    .reserved_padding = {0}}};
+            auto dispatch_id = ++sequence_counter;
+            _packet_data.callback_record =
+                callback_record_t{sizeof(callback_record_t),
+                                  rocprofiler_timestamp_t{0},
+                                  rocprofiler_timestamp_t{0},
+                                  rocprofiler_kernel_dispatch_info_t{
+                                      .size        = kernel_dispatch_info_rt_size,
+                                      .agent_id    = queue->get_agent().get_rocp_agent()->id,
+                                      .queue_id    = queue->get_id(),
+                                      .kernel_id   = kernel_id,
+                                      .dispatch_id = dispatch_id,
+                                      .private_segment_size = pkt_info.private_segment_size,
+                                      .group_segment_size   = pkt_info.group_segment_size,
+                                      .workgroup_size       = pkt_info.workgroup_size,
+                                      .grid_size            = pkt_info.grid_size,
+                                      .reserved_padding     = {0}}};
 
             {
                 auto tracer_data = _packet_data.callback_record;
@@ -684,7 +751,7 @@ write_interceptor(Queue*                                queue,
             // emplace the kernel packet
             transformed_packets.emplace_back(kernel_packet);
 
-            ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+            ROCP_FATAL_IF(!is_kernel_dispatch && !is_ext_kernel_dispatch)
                 << "get_kernel_id below might need to be updated";
 
             {
