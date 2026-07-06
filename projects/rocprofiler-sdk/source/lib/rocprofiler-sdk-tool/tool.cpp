@@ -133,15 +133,14 @@ void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 }
  
-struct hip_event_api_record_t
-{
-    rocprofiler_hip_runtime_api_id_t operation;
-    hipEvent_t event;
-    uint64_t event_id;
-};
-
 extern "C" {
-    ROCPROFILER_API void SetHipEventRecordTag(void* record);
+    ROCPROFILER_API void
+    hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
+                          uint64_t                      lib_version,
+                          uint64_t                      lib_instance,
+                          void**                        tables,
+                          uint64_t                      num_tables,
+                          void*                         user_data);
 }
 
 namespace
@@ -2535,208 +2534,6 @@ assign_attach_output_session_suffix()
                   << ". Base file name is " << cfg.output_file;
     }
 }
- 
-struct EventMap
-{
-    std::map<hipEvent_t, uint64_t> event_ids;
-    std::mutex event_mutex;
-    uint64_t event_index = 0;
-};
-
-static EventMap event_map;
-
-static t_hipEventCreate baseEventCreate = nullptr;
-hipError_t 	hipEventCreateWrapper(hipEvent_t *event)
-{
-    hipError_t err = baseEventCreate(event);
-
-    if (event && *event && err == hipSuccess)
-    {
-        event_map.event_mutex.lock();
-        event_map.event_ids.insert(std::make_pair(*event, ++event_map.event_index));
-        printf("hipEventCreate: %p:%llu\n", *event, event_map.event_index);
-        event_map.event_mutex.unlock();
-    }
-
-    return err;
-}
-
-static t_hipEventCreateWithFlags baseEventCreateWithFlags = nullptr;
-hipError_t 	hipEventCreateWithFlagsWrapper(hipEvent_t *event, unsigned flags)
-{
-    hipError_t err = baseEventCreateWithFlags(event, flags);
-
-    if (event && *event && err == hipSuccess)
-    {
-        event_map.event_mutex.lock();
-        event_map.event_ids.insert(std::make_pair(*event, ++event_map.event_index));
-        printf("hipEventCreateWithFlags: %p:%llu\n", *event, event_map.event_index);
-        event_map.event_mutex.unlock();
-    }
-
-    return err;
-}
-
-static t_hipStreamWaitEvent baseStreamWaitEvent = nullptr;
-hipError_t hipStreamWaitEventWrapper(hipStream_t stream, hipEvent_t event,
-                                           unsigned int flags)
-{
-    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
-    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent;
-    hip_record->event = event;
-    hip_record->event_id = 0;
-
-    event_map.event_mutex.lock();
-    auto it = event_map.event_ids.find(hip_record->event);
-    if (it != event_map.event_ids.end())
-    {
-        hip_record->event_id = it->second;
-    }
-    printf("EventOp: %p:%llu\n", hip_record->event, hip_record->event_id);
-    event_map.event_mutex.unlock();
-
-    SetHipEventRecordTag(hip_record);
-
-    hipError_t err = baseStreamWaitEvent(stream, event, flags);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-static t_hipStreamWaitEvent_spt baseStreamWaitEventSpt = nullptr;
-hipError_t hipStreamWaitEventSptWrapper(hipStream_t stream, hipEvent_t event,
-                                           unsigned int flags)
-{
-    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
-    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt;
-    hip_record->event = event;
-    hip_record->event_id = 0;
-
-    event_map.event_mutex.lock();
-    auto it = event_map.event_ids.find(hip_record->event);
-    if (it != event_map.event_ids.end())
-    {
-        hip_record->event_id = it->second;
-    }
-    printf("EventOp: %p:%llu\n", hip_record->event, hip_record->event_id);
-    event_map.event_mutex.unlock();
-
-    SetHipEventRecordTag(hip_record);
-
-    hipError_t err = baseStreamWaitEventSpt(stream, event, flags);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-static t_hipEventRecord baseEventRecord = nullptr;
-hipError_t hipEventRecordWrapper(hipEvent_t event, hipStream_t stream)
-{
-    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
-    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt;
-    hip_record->event = event;
-    hip_record->event_id = 0;
-
-    event_map.event_mutex.lock();
-    auto it = event_map.event_ids.find(hip_record->event);
-    if (it != event_map.event_ids.end())
-    {
-        hip_record->event_id = it->second;
-    }
-    printf("hipEventRecord: %p:%llu\n", hip_record->event, hip_record->event_id);
-    event_map.event_mutex.unlock();
-
-    SetHipEventRecordTag(hip_record);
-
-    hipError_t err = baseEventRecord(event, stream);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-static t_hipEventRecord_spt baseEventRecordSpt = nullptr;
-hipError_t hipEventRecordSptWrapper(hipEvent_t event, hipStream_t stream)
-{
-    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
-    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt;
-    hip_record->event = event;
-    hip_record->event_id = 0;
-
-    event_map.event_mutex.lock();
-    auto it = event_map.event_ids.find(hip_record->event);
-    if (it != event_map.event_ids.end())
-    {
-        hip_record->event_id = it->second;
-    }
-    printf("hipEventRecordSpt: %p:%llu\n", hip_record->event, hip_record->event_id);
-    event_map.event_mutex.unlock();
-
-    SetHipEventRecordTag(hip_record);
-
-    hipError_t err = baseEventRecordSpt(event, stream);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-static t_hipEventRecordWithFlags baseEventRecordWithFlags = nullptr;
-hipError_t hipEventRecordWithFlagsWrapper(hipEvent_t event, hipStream_t stream,
-                                                unsigned int flags)
-{
-    hip_event_api_record_t* hip_record = new hip_event_api_record_t;
-    hip_record->operation = (rocprofiler_hip_runtime_api_id_t)ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt;
-    hip_record->event = event;
-    hip_record->event_id = 0;
-
-    event_map.event_mutex.lock();
-    auto it = event_map.event_ids.find(hip_record->event);
-    if (it != event_map.event_ids.end())
-    {
-        hip_record->event_id = it->second;
-    }
-    printf("hipEventRecordWithFlags: %p:%llu\n", hip_record->event, hip_record->event_id);
-    event_map.event_mutex.unlock();
-
-    SetHipEventRecordTag(hip_record);
-
-    hipError_t err = baseEventRecordWithFlags(event, stream, flags);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-void
-api_registration_callback(rocprofiler_intercept_table_t type,
-                          uint64_t                      lib_version,
-                          uint64_t                      lib_instance,
-                          void**                        tables,
-                          uint64_t                      num_tables,
-                          void*                         user_data)
-{
-
-    auto* hip_api_table = static_cast<HipDispatchTable*>(tables[0]);
-
-    baseEventCreate = hip_api_table->hipEventCreate_fn;
-    baseEventCreateWithFlags = hip_api_table->hipEventCreateWithFlags_fn;
-    baseStreamWaitEvent = hip_api_table->hipStreamWaitEvent_fn;
-    baseStreamWaitEventSpt = hip_api_table->hipStreamWaitEvent_spt_fn;
-    baseEventRecord = hip_api_table->hipEventRecord_fn;
-    baseEventRecordSpt = hip_api_table->hipEventRecord_spt_fn;
-    baseEventRecordWithFlags = hip_api_table->hipEventRecordWithFlags_fn;
-
-    hip_api_table->hipEventCreate_fn = &hipEventCreateWrapper;
-    hip_api_table->hipEventCreateWithFlags_fn = &hipEventCreateWithFlagsWrapper;
-    hip_api_table->hipStreamWaitEvent_fn = &hipStreamWaitEventWrapper;
-    hip_api_table->hipStreamWaitEvent_spt_fn = &hipStreamWaitEventSptWrapper;
-    hip_api_table->hipEventRecord_fn = &hipEventRecordWrapper;
-    hip_api_table->hipEventRecord_spt_fn = &hipEventRecordSptWrapper;
-    hip_api_table->hipEventRecordWithFlags_fn = &hipEventRecordWithFlagsWrapper;
-}
 
 int
 tool_attach(rocprofiler_client_detach_t /*detach_func*/,
@@ -3394,7 +3191,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         "hip stream tracing configure failed");
 
     ROCPROFILER_CALL(
-        rocprofiler_at_intercept_table_registration(api_registration_callback,
+        rocprofiler_at_intercept_table_registration(hip_gpu_event_registration_callback,
                                                     ROCPROFILER_HIP_RUNTIME_TABLE,
                                                     nullptr),
         "runtime api registration");
