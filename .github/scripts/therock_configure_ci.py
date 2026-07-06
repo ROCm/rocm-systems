@@ -162,6 +162,24 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
     return any(not is_path_skippable(p) for p in paths)
 
 
+GFX125X_TEST_SUBTREES = {
+    "projects/hip",
+    "projects/clr",
+    "projects/hip-tests",
+    "projects/rocr-runtime",
+}
+
+
+def check_gfx125x_test_changes(modified_paths: Optional[Iterable[str]]) -> bool:
+    """Returns true if any files under the runtime subtrees that gate gfx125x tests were modified."""
+    if modified_paths is None:
+        return False
+    return any(
+        any(path.startswith(subtree + "/") or path == subtree for subtree in GFX125X_TEST_SUBTREES)
+        for path in modified_paths
+    )
+
+
 def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
     """Returns true if any files under projects/rccl/ were modified."""
     if modified_paths is None:
@@ -403,6 +421,18 @@ def run(args):
                 outputs["run_linux_rccl_ci"] = "true"
             else:
                 outputs["run_linux_rccl_ci"] = "false"
+
+        # Determine if gfx125x tests should run: only when runtime subtrees are touched.
+        # On nightly or workflow_dispatch (all subtrees), always enable tests.
+        if args.get("is_nightly") or args.get("is_workflow_dispatch"):
+            outputs["run_gfx125x_tests"] = "true"
+        else:
+            base_ref = args.get("base_ref")
+            modified_paths = get_modified_paths(base_ref)
+            if check_gfx125x_test_changes(modified_paths):
+                outputs["run_gfx125x_tests"] = "true"
+            else:
+                outputs["run_gfx125x_tests"] = "false"
 
     set_github_output(outputs)
     return outputs

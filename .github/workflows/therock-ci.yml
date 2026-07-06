@@ -47,6 +47,7 @@ jobs:
       linux_projects: ${{ steps.linux_projects.outputs.projects }}
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
+      run_gfx125x_tests: ${{ steps.linux_projects.outputs.run_gfx125x_tests }}
       package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
@@ -156,6 +157,7 @@ jobs:
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
+      run_gfx125x_tests: ${{ needs.setup.outputs.run_gfx125x_tests == 'true' }}
 
   therock-rccl-ci-linux:
     name: TheRock RCCL CI Linux
