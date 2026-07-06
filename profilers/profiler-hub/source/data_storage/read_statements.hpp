@@ -6,6 +6,7 @@
 #include "backends/sqlite_backend.hpp"
 #include "read_statements_base.hpp"
 
+#include "../json_serializers.hpp"
 #include "profiler-hub/reader_types.hpp"
 
 #include <cstddef>
@@ -13,6 +14,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "queries/select/table_select_query.hpp"
 
@@ -999,7 +1002,10 @@ private:
 
     void initialize_event_id_statements()
     {
-        auto make_event_id_stmt = [&](const std::string& table) {
+        // v3 stores call_stack / line_info as JSON blob strings on rocpd_event. The
+        // raw executor reads those strings; the wrapper deserializes them into the
+        // version-neutral event_id_result the reader consumes.
+        auto make_event_id_stmt = [&](const std::string& table) -> event_id_func_t {
             auto q =
                 fmt::format("SELECT E.id, E.category_id, E.stack_id, E.parent_stack_id, "
                             "E.correlation_id, E.call_stack, E.line_info, E.extdata "
@@ -1008,17 +1014,38 @@ private:
                             fmt::format("{}_{}", table, m_uuid),
                             m_uuid);
 
-            return m_backend
-                ->create_read_statement_executor<event_id_result, bind_types<size_t>>(
-                    q,
-                    &event_id_result::event_id,
-                    &event_id_result::category_id,
-                    &event_id_result::stack_id,
-                    &event_id_result::parent_stack_id,
-                    &event_id_result::correlation_id,
-                    &event_id_result::call_stack,
-                    &event_id_result::line_info,
-                    &event_id_result::event_extdata);
+            auto raw_exec = m_backend->create_read_statement_executor<event_id_raw_result,
+                                                                      bind_types<size_t>>(
+                q,
+                &event_id_raw_result::event_id,
+                &event_id_raw_result::category_id,
+                &event_id_raw_result::stack_id,
+                &event_id_raw_result::parent_stack_id,
+                &event_id_raw_result::correlation_id,
+                &event_id_raw_result::call_stack,
+                &event_id_raw_result::line_info,
+                &event_id_raw_result::event_extdata);
+
+            return [raw_exec](size_t id) -> std::vector<event_id_result> {
+                auto                         raws = raw_exec(id).to_vector();
+                std::vector<event_id_result> out;
+                out.reserve(raws.size());
+                for(auto& r : raws)
+                {
+                    event_id_result e;
+                    e.event_id        = r.event_id;
+                    e.category_id     = r.category_id;
+                    e.stack_id        = r.stack_id;
+                    e.parent_stack_id = r.parent_stack_id;
+                    e.correlation_id  = r.correlation_id;
+                    e.call_stack = json_serializers::deserialize_call_stack(r.call_stack);
+                    e.line_info =
+                        json_serializers::deserialize_source_context(r.line_info);
+                    e.event_extdata = std::move(r.event_extdata);
+                    out.push_back(std::move(e));
+                }
+                return out;
+            };
         };
 
         m_region_event_id          = make_event_id_stmt("rocpd_region");

@@ -8,11 +8,15 @@
 
 #include "profiler-hub/reader_types.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace profiler_hub::data_storage::schema_v4
 {
@@ -65,6 +69,10 @@ struct read_statements : public read_statements_base
 
         initialize_timeline_event_statements();
         initialize_count_statements();
+
+        initialize_event_id_statements();
+        initialize_arg_detail_statement();
+        initialize_correlated_event_statements();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -232,6 +240,35 @@ struct read_statements : public read_statements_base
         const override
     {
         return m_memory_alloc_count_time_filtered;
+    }
+
+    // ----- legacy event-metadata / property accessors (task 002C) -----
+    [[nodiscard]] const event_id_func_t& region_event_id() const override
+    {
+        return m_region_event_id;
+    }
+    [[nodiscard]] const event_id_func_t& kernel_dispatch_event_id() const override
+    {
+        return m_kernel_dispatch_event_id;
+    }
+    [[nodiscard]] const event_id_func_t& memory_copy_event_id() const override
+    {
+        return m_memory_copy_event_id;
+    }
+    [[nodiscard]] const event_id_func_t& memory_alloc_event_id() const override
+    {
+        return m_memory_alloc_event_id;
+    }
+
+    [[nodiscard]] const arg_detail_func_t& arg_detail() const override
+    {
+        return m_arg_detail;
+    }
+
+    [[nodiscard]] const correlated_event_statement_set& correlated_event_statements()
+        const override
+    {
+        return m_correlated_event_statements;
     }
 
 private:
@@ -778,6 +815,288 @@ private:
             make_count_time_filtered_stmt("rocpd_memory_allocate");
     }
 
+    // Parse a JSONB array-of-strings column (rocpd_info_source_code.lines /
+    // .instructions) into a vector<string>. Matches v3 deserialize_source_context:
+    // only string elements are kept; malformed JSON yields an empty vector.
+    static std::vector<std::string> parse_json_string_array(const std::string& s)
+    {
+        std::vector<std::string> out;
+        if(s.empty()) return out;
+        auto j = nlohmann::json::parse(s, nullptr, /*allow_exceptions=*/false);
+        if(j.is_array())
+        {
+            for(const auto& el : j)
+            {
+                if(el.is_string()) out.push_back(el.get<std::string>());
+            }
+        }
+        return out;
+    }
+
+    void initialize_event_id_statements()
+    {
+        const auto& u = m_uuid;
+
+        // v4.0 has no JSON blobs on rocpd_event: call stack and line info are
+        // relational. For each event we run three queries and assemble the
+        // version-neutral event_id_result the reader consumes:
+        //   * meta   — the scalar event row (category/stack/correlation/extdata)
+        //   * frames — rocpd_call_stack -> rocpd_info_pc -> rocpd_info_address_range
+        //   * lines  — rocpd_line_info  -> rocpd_info_source_code / rocpd_info_pc /
+        //              rocpd_info_address_range
+        // A single lazy result_set cannot express the one-to-many frame/line fan-out,
+        // so the accessor materializes and returns a fully-built vector.
+        struct meta_row
+        {
+            std::optional<size_t> event_id;
+            std::optional<size_t> category_id;
+            std::optional<size_t> stack_id;
+            std::optional<size_t> parent_stack_id;
+            std::optional<size_t> correlation_id;
+            std::string           extdata;
+        };
+        struct frame_row
+        {
+            std::optional<std::string> function;
+            std::optional<std::string> file;
+            std::optional<size_t>      line;
+            std::optional<size_t>      address_base;
+            std::optional<size_t>      address_low;
+            std::optional<size_t>      address_high;
+        };
+        struct line_row
+        {
+            std::optional<std::string> sc_file;
+            std::optional<size_t>      sc_line_number;
+            std::string                sc_lines;
+            std::string                sc_instructions;
+            std::optional<std::string> pc_function;
+            std::optional<std::string> pc_file;
+            std::optional<size_t>      pc_line;
+            std::optional<size_t>      address_base;
+            std::optional<size_t>      address_low;
+            std::optional<size_t>      address_high;
+        };
+
+        auto make_event_id_stmt = [&](const std::string& table) -> event_id_func_t {
+            auto meta_exec =
+                m_backend->create_read_statement_executor<meta_row, bind_types<size_t>>(
+                    fmt::format("SELECT E.id, E.category_id, E.stack_id, "
+                                "E.parent_stack_id, E.correlation_id, E.extdata "
+                                "FROM {tbl}_{u} T "
+                                "INNER JOIN rocpd_event_{u} E ON E.id = T.event_id "
+                                "WHERE T.id = ?",
+                                fmt::arg("tbl", table),
+                                fmt::arg("u", u)),
+                    &meta_row::event_id,
+                    &meta_row::category_id,
+                    &meta_row::stack_id,
+                    &meta_row::parent_stack_id,
+                    &meta_row::correlation_id,
+                    &meta_row::extdata);
+
+            auto frame_exec =
+                m_backend->create_read_statement_executor<frame_row, bind_types<size_t>>(
+                    fmt::format("SELECT pc.function, pc.file, pc.line, "
+                                "ar.address_base, ar.address_low, ar.address_high "
+                                "FROM rocpd_call_stack_{u} cs "
+                                "LEFT JOIN rocpd_info_pc_{u} pc ON pc.id = cs.pc_id "
+                                "LEFT JOIN rocpd_info_address_range_{u} ar "
+                                "  ON ar.id = pc.address_id "
+                                "WHERE cs.event_id = ? ORDER BY cs.depth",
+                                fmt::arg("u", u)),
+                    &frame_row::function,
+                    &frame_row::file,
+                    &frame_row::line,
+                    &frame_row::address_base,
+                    &frame_row::address_low,
+                    &frame_row::address_high);
+
+            auto line_exec =
+                m_backend->create_read_statement_executor<line_row, bind_types<size_t>>(
+                    fmt::format(
+                        "SELECT sc.file, sc.line_number, sc.lines, sc.instructions, "
+                        "pc.function, pc.file, pc.line, "
+                        "ar.address_base, ar.address_low, ar.address_high "
+                        "FROM rocpd_line_info_{u} li "
+                        "LEFT JOIN rocpd_info_source_code_{u} sc "
+                        "  ON sc.id = li.source_code_id "
+                        "LEFT JOIN rocpd_info_pc_{u} pc ON pc.id = li.pc_id "
+                        "LEFT JOIN rocpd_info_address_range_{u} ar "
+                        "  ON ar.id = COALESCE(pc.address_id, sc.address_id) "
+                        "WHERE li.event_id = ?",
+                        fmt::arg("u", u)),
+                    &line_row::sc_file,
+                    &line_row::sc_line_number,
+                    &line_row::sc_lines,
+                    &line_row::sc_instructions,
+                    &line_row::pc_function,
+                    &line_row::pc_file,
+                    &line_row::pc_line,
+                    &line_row::address_base,
+                    &line_row::address_low,
+                    &line_row::address_high);
+
+            return [meta_exec, frame_exec, line_exec](
+                       size_t id) -> std::vector<event_id_result> {
+                auto                         metas = meta_exec(id).to_vector();
+                std::vector<event_id_result> out;
+                out.reserve(metas.size());
+                for(auto& m : metas)
+                {
+                    event_id_result e;
+                    e.event_id        = m.event_id;
+                    e.category_id     = m.category_id;
+                    e.stack_id        = m.stack_id;
+                    e.parent_stack_id = m.parent_stack_id;
+                    e.correlation_id  = m.correlation_id;
+                    e.event_extdata   = std::move(m.extdata);
+
+                    if(m.event_id)
+                    {
+                        const auto eid = *m.event_id;
+
+                        for(auto& f : frame_exec(eid).to_vector())
+                        {
+                            reader_types::stack_frame_t frame;
+                            if(f.function || f.file || f.line)
+                            {
+                                reader_types::program_counter_info_t pc;
+                                pc.function           = f.function.value_or("");
+                                pc.filename           = f.file.value_or("");
+                                pc.line_number        = f.line;
+                                frame.program_counter = std::move(pc);
+                            }
+                            if(f.address_base)
+                            {
+                                reader_types::address_range_info_t ar;
+                                ar.address_base     = f.address_base.value_or(0);
+                                ar.address_low      = f.address_low.value_or(0);
+                                ar.address_high     = f.address_high.value_or(0);
+                                frame.address_range = std::move(ar);
+                            }
+                            e.call_stack.push_back(std::move(frame));
+                        }
+
+                        for(auto& l : line_exec(eid).to_vector())
+                        {
+                            reader_types::line_info_entry_t entry;
+                            if(l.sc_file || l.sc_line_number || l.sc_lines != "[]" ||
+                               l.sc_instructions != "[]")
+                            {
+                                reader_types::source_code_info_t sc;
+                                sc.filename             = l.sc_file;
+                                sc.starting_line_number = l.sc_line_number;
+                                sc.source_code_lines =
+                                    parse_json_string_array(l.sc_lines);
+                                sc.assembly_instruction_lines =
+                                    parse_json_string_array(l.sc_instructions);
+                                entry.source_code = std::move(sc);
+                            }
+                            if(l.pc_function || l.pc_file || l.pc_line)
+                            {
+                                reader_types::program_counter_info_t pc;
+                                pc.function           = l.pc_function.value_or("");
+                                pc.filename           = l.pc_file.value_or("");
+                                pc.line_number        = l.pc_line;
+                                entry.program_counter = std::move(pc);
+                            }
+                            if(l.address_base)
+                            {
+                                reader_types::address_range_info_t ar;
+                                ar.address_base     = l.address_base.value_or(0);
+                                ar.address_low      = l.address_low.value_or(0);
+                                ar.address_high     = l.address_high.value_or(0);
+                                entry.address_range = std::move(ar);
+                            }
+                            e.line_info.push_back(std::move(entry));
+                        }
+                    }
+
+                    out.push_back(std::move(e));
+                }
+                return out;
+            };
+        };
+
+        m_region_event_id          = make_event_id_stmt("rocpd_region");
+        m_kernel_dispatch_event_id = make_event_id_stmt("rocpd_kernel_dispatch");
+        m_memory_copy_event_id     = make_event_id_stmt("rocpd_memory_copy");
+        m_memory_alloc_event_id    = make_event_id_stmt("rocpd_memory_allocate");
+    }
+
+    void initialize_arg_detail_statement()
+    {
+        const auto& u = m_uuid;
+
+        // rocpd_arg is structurally identical to v3 (event_id/position/type/name/
+        // value/extdata); the only difference is the uuid-suffixed table name.
+        m_arg_detail =
+            m_backend
+                ->create_read_statement_executor<arg_detail_result, bind_types<size_t>>(
+                    fmt::format("SELECT position, type, name, value, extdata "
+                                "FROM rocpd_arg_{} WHERE event_id = ? ORDER BY position",
+                                u),
+                    &arg_detail_result::position,
+                    &arg_detail_result::type,
+                    &arg_detail_result::name,
+                    &arg_detail_result::value,
+                    &arg_detail_result::extdata);
+    }
+
+    void initialize_correlated_event_statements()
+    {
+        const auto& u = m_uuid;
+
+        // Correlated events share the same stack_id as the queried event. The row
+        // shape matches the v4 timeline set (spine JOINs + rocpd_track identity +
+        // rocpd_info_category display string); the only difference is the WHERE
+        // clause selecting siblings by stack_id, excluding the event itself.
+        auto make_correlated_stmt =
+            [&](const std::string& table,
+                const std::string& alias,
+                const std::string& display_col) -> correlated_event_func_t {
+            const auto a = alias;
+            auto       q = fmt::format(
+                "SELECT {a}.id, ts_s.value, ts_e.value, {dn}, IC.name, "
+                      "TR.nid, TR.pid, TR.tid, {a}.track_id "
+                      "FROM {tbl}_{u} {a} "
+                      "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = {a}.start_id "
+                      "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = {a}.end_id "
+                      "JOIN rocpd_track_{u} TR ON TR.id = {a}.track_id "
+                      "INNER JOIN rocpd_event_{u} E ON E.id = {a}.event_id "
+                      "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
+                      "WHERE E.stack_id = ? AND E.id != ?",
+                fmt::arg("a", a),
+                fmt::arg("dn", display_col),
+                fmt::arg("tbl", table),
+                fmt::arg("u", u));
+
+            return m_backend->create_read_statement_executor<timeline_event_result,
+                                                             bind_types<size_t, size_t>>(
+                q,
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_name,
+                &timeline_event_result::nid,
+                &timeline_event_result::pid,
+                &timeline_event_result::tid,
+                &timeline_event_result::track_id);
+        };
+
+        m_correlated_event_statements.region =
+            make_correlated_stmt("rocpd_region", "R", "R.name_id");
+        m_correlated_event_statements.kernel_dispatch =
+            make_correlated_stmt("rocpd_kernel_dispatch", "K", "K.region_name_id");
+        m_correlated_event_statements.memory_copy =
+            make_correlated_stmt("rocpd_memory_copy", "MC", "MC.region_name_id");
+        // v4.0 memory_allocate has a native NOT NULL name_id (see timeline set).
+        m_correlated_event_statements.memory_allocate =
+            make_correlated_stmt("rocpd_memory_allocate", "MA", "MA.name_id");
+    }
+
     std::shared_ptr<sqlite_backend> m_backend;
     std::string                     m_uuid;
 
@@ -822,6 +1141,15 @@ private:
     count_time_filtered_func_t m_kernel_dispatch_count_time_filtered;
     count_time_filtered_func_t m_memory_copy_count_time_filtered;
     count_time_filtered_func_t m_memory_alloc_count_time_filtered;
+
+    event_id_func_t m_region_event_id;
+    event_id_func_t m_kernel_dispatch_event_id;
+    event_id_func_t m_memory_copy_event_id;
+    event_id_func_t m_memory_alloc_event_id;
+
+    arg_detail_func_t m_arg_detail;
+
+    correlated_event_statement_set m_correlated_event_statements;
 };
 
 }  // namespace profiler_hub::data_storage::schema_v4

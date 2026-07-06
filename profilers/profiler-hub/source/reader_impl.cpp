@@ -1153,27 +1153,24 @@ reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
 std::optional<data_storage::event_id_result>
 reader_t::impl::resolve_event_metadata(const reader_types::timeline_event_t& event)
 {
-    // Guards the event-based detail/property surface (region/kernel/memory details,
-    // call stack, source context, arguments) and their size_t overloads on v4.0: the
-    // *_event_id statements are default-empty stubs there (task 002C).
-    if(m_is_v4) return std::nullopt;
-
     auto db_id = event.unique_identifier.id;
 
+    // The backend materializes and decodes call_stack / line_info into the
+    // version-neutral event_id_result, so this path is identical for v3 and v4.
     std::vector<data_storage::event_id_result> results;
     switch(event.unique_identifier.type)
     {
         case reader_types::event_type_t::region:
-            results = m_read_statements->region_event_id()(db_id).to_vector();
+            results = m_read_statements->region_event_id()(db_id);
             break;
         case reader_types::event_type_t::kernel_dispatch:
-            results = m_read_statements->kernel_dispatch_event_id()(db_id).to_vector();
+            results = m_read_statements->kernel_dispatch_event_id()(db_id);
             break;
         case reader_types::event_type_t::memory_copy:
-            results = m_read_statements->memory_copy_event_id()(db_id).to_vector();
+            results = m_read_statements->memory_copy_event_id()(db_id);
             break;
         case reader_types::event_type_t::memory_allocate:
-            results = m_read_statements->memory_alloc_event_id()(db_id).to_vector();
+            results = m_read_statements->memory_alloc_event_id()(db_id);
             break;
         default: return std::nullopt;
     }
@@ -1200,10 +1197,8 @@ reader_t::impl::build_event_data(const data_storage::event_id_result& event_meta
         }
     }
 
-    event_data->call_stack =
-        json_serializers::deserialize_call_stack(event_meta.call_stack);
-    event_data->line_info_list =
-        json_serializers::deserialize_source_context(event_meta.line_info);
+    event_data->call_stack     = event_meta.call_stack;
+    event_data->line_info_list = event_meta.line_info;
 
     return event_data;
 }
@@ -1455,7 +1450,7 @@ reader_t::impl::get_call_stack(const reader_types::timeline_event_t& event)
     auto event_meta = resolve_event_metadata(event);
     if(!event_meta.has_value()) return {};
 
-    return json_serializers::deserialize_call_stack(event_meta->call_stack);
+    return event_meta->call_stack;
 }
 
 reader_types::source_context_list_t
@@ -1464,7 +1459,7 @@ reader_t::impl::get_source_context(const reader_types::timeline_event_t& event)
     auto event_meta = resolve_event_metadata(event);
     if(!event_meta.has_value()) return {};
 
-    return json_serializers::deserialize_source_context(event_meta->line_info);
+    return event_meta->line_info;
 }
 
 reader_types::arg_data_list_t

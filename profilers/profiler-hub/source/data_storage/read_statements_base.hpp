@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace profiler_hub::data_storage
 {
@@ -297,9 +298,12 @@ struct arg_detail_result
     std::string extdata;
 };
 
-/// Lightweight result for resolving event metadata from event-specific tables.
-/// JOINs event-specific table with rocpd_event to get both event_id and event metadata.
-struct event_id_result
+/// Raw row shape read straight out of the event tables. call_stack / line_info are
+/// the schema-native encodings (v3: JSON blob strings on rocpd_event). The backend
+/// decodes these into event_id_result before the reader sees them, so the reader
+/// stays version-agnostic. v4 has no direct raw analogue (call stack / line info are
+/// relational) and assembles event_id_result without this struct.
+struct event_id_raw_result
 {
     std::optional<size_t> event_id;
     std::optional<size_t> category_id;
@@ -309,6 +313,22 @@ struct event_id_result
     std::string           call_stack;
     std::string           line_info;
     std::string           event_extdata;
+};
+
+/// Lightweight result for resolving event metadata from event-specific tables.
+/// call_stack / line_info are decoded into version-neutral reader structures by the
+/// backend (v3: deserialized from JSON; v4: assembled from rocpd_call_stack /
+/// rocpd_line_info + the pc/source-code/address-range info tables).
+struct event_id_result
+{
+    std::optional<size_t>               event_id;
+    std::optional<size_t>               category_id;
+    std::optional<size_t>               stack_id;
+    std::optional<size_t>               parent_stack_id;
+    std::optional<size_t>               correlation_id;
+    reader_types::call_stack_t          call_stack;
+    reader_types::source_context_list_t line_info;
+    std::string                         event_extdata;
 };
 
 struct count_result
@@ -473,9 +493,12 @@ struct read_statements_base
         std::function<sqlite_backend::result_set<event_detail_result>(size_t)>;
     using arg_detail_func_t =
         std::function<sqlite_backend::result_set<arg_detail_result>(size_t)>;
-    using event_id_func_t =
-        std::function<sqlite_backend::result_set<event_id_result>(size_t)>;
-    using count_func_t = std::function<sqlite_backend::result_set<count_result>()>;
+    // Materialized (not a lazy result_set): the backend runs the query and decodes
+    // call_stack / line_info into event_id_result before returning. v4 assembles the
+    // call stack / line info from multiple relational rows, which a single lazy
+    // result_set cannot express, so both backends return a fully-built vector.
+    using event_id_func_t = std::function<std::vector<event_id_result>(size_t)>;
+    using count_func_t    = std::function<sqlite_backend::result_set<count_result>()>;
     using count_time_filtered_func_t =
         std::function<sqlite_backend::result_set<count_result>(size_t, size_t)>;
     using time_range_func_t =
