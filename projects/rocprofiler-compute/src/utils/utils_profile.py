@@ -580,12 +580,14 @@ def v3_counter_csv_to_v2_csv(
         {"Node_Id": row.get("Node_Id"), "Wave_Front_Size": row.get("Wave_Front_Size")}
         for row in agent_info
     ]
-    result = csv_ops.merge_rows(
-        result,
-        agent_info_subset,
-        left_on="Agent_Id",
-        right_on="Node_Id",
-        how="left",
+    result = list(
+        csv_ops.merge_rows(
+            result,
+            agent_info_subset,
+            left_on="Agent_Id",
+            right_on="Node_Id",
+            how="left",
+        )
     )
 
     # Create GPU ID mapping from agent info
