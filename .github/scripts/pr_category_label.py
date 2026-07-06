@@ -31,6 +31,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -106,13 +107,17 @@ def main(argv=None) -> None:
             "REST API failed or returned no changed files. Falling back to SHA-based Git diff..."
         )
         try:
-            pr_data = os.popen(f"gh api repos/{args.repo}/pulls/{args.pr}").read()
+            pr_data = subprocess.check_output(
+                ["gh", "api", f"repos/{args.repo}/pulls/{args.pr}"], text=True
+            )
             pr = json.loads(pr_data)
             base_sha = pr["base"]["sha"]
             head_sha = pr["head"]["sha"]
             logger.debug(f"Base SHA: {base_sha}, Head SHA: {head_sha}")
-            os.system(f"git fetch origin {base_sha} {head_sha}")
-            result = os.popen(f"git diff --name-only {base_sha} {head_sha}").read()
+            subprocess.check_call(["git", "fetch", "origin", base_sha, head_sha])
+            result = subprocess.check_output(
+                ["git", "diff", "--name-only", base_sha, head_sha], text=True
+            )
             changed_files = result.strip().splitlines()
             logger.info(f"Fallback changed files (SHA-based): {changed_files}")
         except Exception as e:
