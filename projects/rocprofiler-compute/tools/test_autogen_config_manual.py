@@ -32,16 +32,18 @@ def md5(path: Path) -> str:
 
 
 def check_config_hashes_match_files() -> None:
-    assert HASH_DB.exists(), f"Missing hash DB: {HASH_DB}"
-    assert ANALYSIS_CONFIGS.exists(), (
-        f"Missing analysis configs dir: {ANALYSIS_CONFIGS}"
-    )
+    if not HASH_DB.exists():
+        raise RuntimeError(f"Missing hash DB: {HASH_DB}")
+    if not ANALYSIS_CONFIGS.exists():
+        raise RuntimeError(f"Missing analysis configs dir: {ANALYSIS_CONFIGS}")
 
-    with HASH_DB.open() as f:
+    with HASH_DB.open(encoding="utf-8") as f:
         data = json.load(f)
 
-    assert "archs" in data, "Hash DB missing 'archs' key"
-    assert isinstance(data["archs"], dict)
+    if "archs" not in data:
+        raise RuntimeError("Hash DB missing 'archs' key")
+    if not isinstance(data["archs"], dict):
+        raise RuntimeError("Hash DB 'archs' is not a dict")
 
     failures: list[str] = []
 
@@ -70,9 +72,8 @@ def check_config_hashes_match_files() -> None:
                     f"  actual:   {actual_hash}"
                 )
 
-    assert not failures, (
-        "Hash consistency failures:\n\n" + "\n".join(failures)
-    )
+    if failures:
+        raise RuntimeError("Hash consistency failures:\n\n" + "\n".join(failures))
 
 
 def main() -> None:
@@ -83,6 +84,6 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except AssertionError as err:
+    except RuntimeError as err:
         print(f"FAILED: {err}", file=sys.stderr)
         sys.exit(1)
