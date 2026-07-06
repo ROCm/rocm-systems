@@ -315,6 +315,10 @@ amdsmi_status_t amdsmi_shut_down() {
 }
 
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string) {
+  if (status_string == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
   switch (status) {
     case AMDSMI_STATUS_SUCCESS:
       *status_string = "AMDSMI_STATUS_SUCCESS: Call succeeded.";
