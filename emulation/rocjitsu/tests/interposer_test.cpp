@@ -8,18 +8,18 @@
 /// of libc entry points (open/ioctl/mmap/stat/...) so an LD_PRELOAD of
 /// librocjitsu.so can redirect the amdgpu/KFD syscall surface to the simulated
 /// driver. Those overrides only take effect while they remain *exported*
-/// dynamic symbols: project-wide -fvisibility=hidden plus the
-/// rocjitsu_exports.map version script deliberately strip almost everything, so
-/// a mistake there silently turns the preload into a no-op (the library loads
-/// but never redirects a single syscall).
+/// dynamic symbols: the project-wide -fvisibility=hidden preset plus
+/// --exclude-libs (see the rocjitsu_shared link options in CMakeLists.txt) strip
+/// almost everything, so a mistake there silently turns the preload into a
+/// no-op (the library loads but never redirects a single syscall).
 ///
 /// This test parses the ELF dynamic symbol table of the freshly built
-/// librocjitsu.so and asserts every interposed libc symbol listed in
-/// rocjitsu_exports.map is present as a defined, globally-bound export, that the
-/// internal fcntl helpers stay hidden, and that the surface is not
-/// over-exposed. It intentionally inspects the ELF image directly rather than
-/// dlopen()-ing the library so the interposer's constructors (which install a
-/// SIGSEGV handler and may contact the daemon) never run in the test process.
+/// librocjitsu.so and asserts every interposed libc symbol is present as a
+/// defined, globally-bound export, that the internal fcntl helpers stay hidden,
+/// and that the extern "C" surface is not over-exposed. It intentionally
+/// inspects the ELF image directly rather than dlopen()-ing the library so the
+/// interposer's constructors (which install a SIGSEGV handler and may contact
+/// the daemon) never run in the test process.
 
 #include <gtest/gtest.h>
 
@@ -37,10 +37,9 @@
 namespace {
 
 // The complete set of libc entry points the interposer overrides. This MUST be
-// kept in sync with the second `global:` group of
-// emulation/rocjitsu/rocjitsu_exports.map and the extern "C" definitions in
+// kept in sync with the extern "C" definitions in
 // lib/rocjitsu/src/rocjitsu/kmd/linux/interposer.cpp. When you add or remove an
-// interposed libc function, update all three.
+// interposed libc function, update both.
 constexpr const char *kInterposedLibcSymbols[] = {
     "access",     "close",      "dup",      "dup2",       "dup3",         "fcntl",    "fcntl64",
     "fopen",      "fopen64",    "fork",     "freopen",    "freopen64",    "fstat",    "fstat64",
@@ -202,8 +201,8 @@ TEST_F(InterposerExportsTest, AllInterposedLibcSymbolsExported) {
     EXPECT_TRUE(symbols_.is_exported(name))
         << "librocjitsu.so must export interposed libc symbol '" << name
         << "'. Without it the LD_PRELOAD shim cannot intercept that part of "
-           "the amdgpu/KFD syscall surface. Check rocjitsu_exports.map and the "
-           "visibility(default) pragma in interposer.cpp.";
+           "the amdgpu/KFD syscall surface. Check the RJ_INTERPOSER_EXPORT "
+           "marker on its definition in interposer.cpp.";
   }
 }
 
@@ -229,9 +228,14 @@ TEST_F(InterposerExportsTest, PublicCApiIsExported) {
                       << " (sanity check that the correct library was inspected).";
 }
 
-// The dynamic surface should be exactly the rj_* C API plus the interposed libc
-// entry points. Anything else is an accidental leak (e.g. a broken version
-// script or a stray visibility(default)), which this test flags for review.
+// The library's real ABI is entirely extern "C": the rj_* C API plus the
+// interposed libc entry points. Without a linker version script the dynamic
+// table cannot be made perfectly pristine -- libstdc++ marks namespace std as
+// _GLIBCXX_VISIBILITY(default), so std::/__gnu_cxx:: template instantiations
+// emitted into our own objects stay exported even under -fvisibility=hidden.
+// Those residuals are all Itanium-C++-mangled (_Z...) and never live in our own
+// namespace, so we tolerate them while still flagging any unmangled (extern
+// "C") leak or any accidentally exported rocjitsu:: C++ symbol.
 TEST_F(InterposerExportsTest, ExportSurfaceIsNotOverExposed) {
   const std::set<std::string> allowed(std::begin(kInterposedLibcSymbols),
                                       std::end(kInterposedLibcSymbols));
@@ -241,6 +245,13 @@ TEST_F(InterposerExportsTest, ExportSurfaceIsNotOverExposed) {
       continue; // public C API
     if (allowed.count(name) != 0)
       continue; // interposed libc entry point
+    // Tolerate C++ standard-library runtime instantiations: they are mangled
+    // (_Z...) and never in our own namespace. Anything else -- an unmangled
+    // extern "C" symbol or a mangled rocjitsu:: symbol -- is a real leak.
+    const bool cxx_mangled = name.rfind("_Z", 0) == 0;
+    const bool ours = name.find("rocjitsu") != std::string::npos;
+    if (cxx_mangled && !ours)
+      continue;
     unexpected.push_back(name);
   }
 
@@ -250,9 +261,9 @@ TEST_F(InterposerExportsTest, ExportSurfaceIsNotOverExposed) {
 
   EXPECT_TRUE(unexpected.empty())
       << "librocjitsu.so exports " << unexpected.size()
-      << " unexpected dynamic symbol(s); the surface should be exactly the "
-         "rj_* C API plus the interposed libc entry points listed in "
-         "rocjitsu_exports.map. Sample: "
+      << " unexpected dynamic symbol(s); the extern \"C\" surface should be "
+         "exactly the rj_* C API plus the interposed libc entry points (C++ "
+         "standard-library runtime instantiations excepted). Sample: "
       << sample;
 }
 

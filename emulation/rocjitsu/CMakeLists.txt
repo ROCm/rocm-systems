@@ -310,16 +310,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(_rj_export_map ${CMAKE_CURRENT_SOURCE_DIR}/rocjitsu_exports.map)
     target_link_options(
         rocjitsu_shared
-        PRIVATE "LINKER:--version-script=${_rj_export_map}"
-    )
-    # Relink when the export map changes.
-    set_property(
-        TARGET rocjitsu_shared
-        APPEND
-        PROPERTY LINK_DEPENDS ${_rj_export_map}
+        PRIVATE "LINKER:--exclude-libs,ALL"
     )
 endif()
 
