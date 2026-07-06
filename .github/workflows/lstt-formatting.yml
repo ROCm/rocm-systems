@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  pre-commit:
+  format:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -50,3 +50,19 @@ jobs:
           --color=always
           --from-ref origin/${{ github.event.pull_request.base.ref || 'develop' }}
           --to-ref HEAD
+
+  # Emit a single check named "pre-commit" so systems-pr-bot's required check
+  # (required_check_runs: [pre-commit]) is satisfied for these projects, whose
+  # per-project legs above are named amdsmi/rdc/rocm-smi-lib, not "pre-commit".
+  pre-commit:
+    needs: format
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm all project pre-commit runs passed
+        run: |
+          if [ "${{ needs.format.result }}" != "success" ]; then
+            echo "A project pre-commit leg did not pass: ${{ needs.format.result }}"
+            exit 1
+          fi
+          echo "All project pre-commit legs passed."
