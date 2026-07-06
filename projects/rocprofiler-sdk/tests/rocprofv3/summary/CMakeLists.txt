@@ -20,8 +20,8 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 # WSL2/DXG has no /dev/kfd and schedules GPU work through the slower dxg path, so the
-# transpose workload needs more headroom than real-KFD hardware; scale timeouts only there.
-# Non-WSL keeps the develop baseline (45); WSL scales it up.
+# transpose workload needs more headroom than real-KFD hardware; scale timeouts only
+# there. Non-WSL keeps the develop baseline (45); WSL scales it up.
 if(EXISTS "/dev/kfd")
     set(_WSL_TIMEOUT_SCALE 1)
 else()

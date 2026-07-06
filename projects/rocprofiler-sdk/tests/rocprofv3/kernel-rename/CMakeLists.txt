@@ -23,8 +23,8 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/input-kernel-rename.yml.in
                ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml @ONLY)
 
 # WSL2/DXG has no /dev/kfd and schedules GPU work through the slower dxg path, so the
-# yaml-input kernel-rename workload needs more headroom than real-KFD hardware; scale
-# the timeout only there.
+# yaml-input kernel-rename workload needs more headroom than real-KFD hardware; scale the
+# timeout only there.
 if(EXISTS "/dev/kfd")
     set(_WSL_TIMEOUT_SCALE 1)
 else()

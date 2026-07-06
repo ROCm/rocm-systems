@@ -437,8 +437,7 @@ get_bdf_info(const rocprofiler_agent_t* agent)
 std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles_storage()
 {
-    static auto*& _v =
-        common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct();
+    static auto*& _v = common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct();
     return *CHECK_NOTNULL(_v);
 }
 
@@ -471,11 +470,12 @@ register_aql_handles()
             "Registering agent {} with external aqlprofile (libhsa-amd-aqlprofile64.so)",
             agent->name);
 
-        aqlprofile_agent_info_t agent_info = {.agent_gfxip          = agent->name,
-                                              .xcc_num              = agent->num_xcc,
-                                              .se_num               = agent->num_shader_banks,
-                                              .cu_num               = agent->cu_count,
-                                              .shader_arrays_per_se = agent->simd_arrays_per_engine};
+        aqlprofile_agent_info_t agent_info = {
+            .agent_gfxip          = agent->name,
+            .xcc_num              = agent->num_xcc,
+            .se_num               = agent->num_shader_banks,
+            .cu_num               = agent->cu_count,
+            .shader_arrays_per_se = agent->simd_arrays_per_engine};
 
         if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
         {
@@ -501,8 +501,8 @@ register_aql_handles()
             .location_id          = agent->location_id,
         };
 
-        if(aqlprofile_register_agent_info(
-               &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
+        if(aqlprofile_register_agent_info(&handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) !=
+           HSA_STATUS_SUCCESS)
         {
             ROCP_WARNING << fmt::format("Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
                                         bdf.domain,
