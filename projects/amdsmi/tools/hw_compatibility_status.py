@@ -340,19 +340,19 @@ def run_tests():
     # Get socket handles
     try:
         socket_handles = amdsmi.amdsmi_get_socket_handles()
-    except:
+    except Exception:
         socket_handles = []
 
     # Get CPU socket handles (for CPU APIs)
     try:
         cpu_socket_handles = amdsmi.amdsmi_get_cpu_handles()
-    except:
+    except Exception:
         cpu_socket_handles = []
 
     # Get CPU core handles
     try:
         cpu_core_handles = amdsmi.amdsmi_get_cpucore_handles()
-    except:
+    except Exception:
         cpu_core_handles = []
 
     # Get GPU info for display

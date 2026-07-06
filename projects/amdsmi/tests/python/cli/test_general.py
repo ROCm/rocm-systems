@@ -70,6 +70,8 @@ class TestGeneral(TestCliBase):
             ("amd-smi version --invalid", self.FAIL),
             ("amd-smi list --invalid", self.FAIL),
             ("amd-smi static --invalid", self.FAIL),
+            # Invalid clock type must raise a clean parameter error, not a NameError
+            ("amd-smi static --clock not_a_clock", self.FAIL),
             ("amd-smi firmware --invalid", self.FAIL),
             ("amd-smi bad_pages --invalid", self.FAIL),
             ("amd-smi metric --invalid", self.FAIL),
