@@ -73,6 +73,7 @@ struct read_statements : public read_statements_base
         initialize_event_id_statements();
         initialize_arg_detail_statement();
         initialize_correlated_event_statements();
+        initialize_detail_statements();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -269,6 +270,25 @@ struct read_statements : public read_statements_base
         const override
     {
         return m_correlated_event_statements;
+    }
+
+    // ----- legacy per-event detail accessors (task 002C) -----
+    [[nodiscard]] const region_detail_func_t& region_detail() const override
+    {
+        return m_region_detail;
+    }
+    [[nodiscard]] const kernel_dispatch_detail_func_t& kernel_dispatch_detail()
+        const override
+    {
+        return m_kernel_dispatch_detail;
+    }
+    [[nodiscard]] const memory_copy_detail_func_t& memory_copy_detail() const override
+    {
+        return m_memory_copy_detail;
+    }
+    [[nodiscard]] const memory_alloc_detail_func_t& memory_alloc_detail() const override
+    {
+        return m_memory_alloc_detail;
     }
 
 private:
@@ -848,12 +868,12 @@ private:
         // so the accessor materializes and returns a fully-built vector.
         struct meta_row
         {
-            std::optional<size_t> event_id;
-            std::optional<size_t> category_id;
-            std::optional<size_t> stack_id;
-            std::optional<size_t> parent_stack_id;
-            std::optional<size_t> correlation_id;
-            std::string           extdata;
+            std::optional<size_t>      event_id;
+            std::optional<std::string> category_name;
+            std::optional<size_t>      stack_id;
+            std::optional<size_t>      parent_stack_id;
+            std::optional<size_t>      correlation_id;
+            std::string                extdata;
         };
         struct frame_row
         {
@@ -881,15 +901,17 @@ private:
         auto make_event_id_stmt = [&](const std::string& table) -> event_id_func_t {
             auto meta_exec =
                 m_backend->create_read_statement_executor<meta_row, bind_types<size_t>>(
-                    fmt::format("SELECT E.id, E.category_id, E.stack_id, "
-                                "E.parent_stack_id, E.correlation_id, E.extdata "
-                                "FROM {tbl}_{u} T "
-                                "INNER JOIN rocpd_event_{u} E ON E.id = T.event_id "
-                                "WHERE T.id = ?",
-                                fmt::arg("tbl", table),
-                                fmt::arg("u", u)),
+                    fmt::format(
+                        "SELECT E.id, IC.name, E.stack_id, "
+                        "E.parent_stack_id, E.correlation_id, E.extdata "
+                        "FROM {tbl}_{u} T "
+                        "INNER JOIN rocpd_event_{u} E ON E.id = T.event_id "
+                        "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
+                        "WHERE T.id = ?",
+                        fmt::arg("tbl", table),
+                        fmt::arg("u", u)),
                     &meta_row::event_id,
-                    &meta_row::category_id,
+                    &meta_row::category_name,
                     &meta_row::stack_id,
                     &meta_row::parent_stack_id,
                     &meta_row::correlation_id,
@@ -946,7 +968,7 @@ private:
                 {
                     event_id_result e;
                     e.event_id        = m.event_id;
-                    e.category_id     = m.category_id;
+                    e.category_name   = std::move(m.category_name);
                     e.stack_id        = m.stack_id;
                     e.parent_stack_id = m.parent_stack_id;
                     e.correlation_id  = m.correlation_id;
@@ -1097,6 +1119,124 @@ private:
             make_correlated_stmt("rocpd_memory_allocate", "MA", "MA.name_id");
     }
 
+    void initialize_detail_statements()
+    {
+        const auto& u = m_uuid;
+
+        // Per-event detail keyed on the event-table primary key. v4.0 resolves
+        // start/end through the rocpd_timestamp spine and nid/pid/tid through the
+        // rocpd_track identity anchor; all other columns come straight off the
+        // event table, matching the *_detail_result shapes the reader consumes.
+        m_region_detail = m_backend->create_read_statement_executor<region_detail_result,
+                                                                    bind_types<size_t>>(
+            fmt::format("SELECT r.id, ts_s.value, ts_e.value, r.name_id, r.event_id, "
+                        "TR.nid, TR.pid, TR.tid, r.extdata "
+                        "FROM rocpd_region_{u} r "
+                        "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = r.start_id "
+                        "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = r.end_id "
+                        "JOIN rocpd_track_{u} TR ON TR.id = r.track_id "
+                        "WHERE r.id = ?",
+                        fmt::arg("u", u)),
+            &region_detail_result::id,
+            &region_detail_result::start,
+            &region_detail_result::end,
+            &region_detail_result::name_id,
+            &region_detail_result::event_id,
+            &region_detail_result::nid,
+            &region_detail_result::pid,
+            &region_detail_result::tid,
+            &region_detail_result::extdata);
+
+        m_kernel_dispatch_detail =
+            m_backend->create_read_statement_executor<kernel_dispatch_detail_result,
+                                                      bind_types<size_t>>(
+                fmt::format(
+                    "SELECT k.id, k.dispatch_id, ts_s.value, ts_e.value, k.kernel_id, "
+                    "k.private_segment_size, k.group_segment_size, k.workgroup_size_x, "
+                    "k.workgroup_size_y, k.workgroup_size_z, k.grid_size_x, "
+                    "k.grid_size_y, k.grid_size_z, k.region_name_id, k.event_id, "
+                    "TR.nid, TR.pid, TR.tid, k.extdata "
+                    "FROM rocpd_kernel_dispatch_{u} k "
+                    "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = k.start_id "
+                    "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = k.end_id "
+                    "JOIN rocpd_track_{u} TR ON TR.id = k.track_id "
+                    "WHERE k.id = ?",
+                    fmt::arg("u", u)),
+                &kernel_dispatch_detail_result::id,
+                &kernel_dispatch_detail_result::dispatch_id,
+                &kernel_dispatch_detail_result::start,
+                &kernel_dispatch_detail_result::end,
+                &kernel_dispatch_detail_result::kernel_id,
+                &kernel_dispatch_detail_result::private_segment_size,
+                &kernel_dispatch_detail_result::group_segment_size,
+                &kernel_dispatch_detail_result::workgroup_size_x,
+                &kernel_dispatch_detail_result::workgroup_size_y,
+                &kernel_dispatch_detail_result::workgroup_size_z,
+                &kernel_dispatch_detail_result::grid_size_x,
+                &kernel_dispatch_detail_result::grid_size_y,
+                &kernel_dispatch_detail_result::grid_size_z,
+                &kernel_dispatch_detail_result::region_name_id,
+                &kernel_dispatch_detail_result::event_id,
+                &kernel_dispatch_detail_result::nid,
+                &kernel_dispatch_detail_result::pid,
+                &kernel_dispatch_detail_result::tid,
+                &kernel_dispatch_detail_result::extdata);
+
+        m_memory_copy_detail =
+            m_backend->create_read_statement_executor<memory_copy_detail_result,
+                                                      bind_types<size_t>>(
+                fmt::format(
+                    "SELECT mc.id, ts_s.value, ts_e.value, mc.name_id, mc.dst_agent_id, "
+                    "mc.dst_address, mc.src_agent_id, mc.src_address, mc.size, "
+                    "mc.region_name_id, mc.event_id, TR.nid, TR.pid, TR.tid, mc.extdata "
+                    "FROM rocpd_memory_copy_{u} mc "
+                    "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = mc.start_id "
+                    "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = mc.end_id "
+                    "JOIN rocpd_track_{u} TR ON TR.id = mc.track_id "
+                    "WHERE mc.id = ?",
+                    fmt::arg("u", u)),
+                &memory_copy_detail_result::id,
+                &memory_copy_detail_result::start,
+                &memory_copy_detail_result::end,
+                &memory_copy_detail_result::name_id,
+                &memory_copy_detail_result::dst_agent_id,
+                &memory_copy_detail_result::dst_address,
+                &memory_copy_detail_result::src_agent_id,
+                &memory_copy_detail_result::src_address,
+                &memory_copy_detail_result::size,
+                &memory_copy_detail_result::region_name_id,
+                &memory_copy_detail_result::event_id,
+                &memory_copy_detail_result::nid,
+                &memory_copy_detail_result::pid,
+                &memory_copy_detail_result::tid,
+                &memory_copy_detail_result::extdata);
+
+        m_memory_alloc_detail = m_backend->create_read_statement_executor<
+            memory_alloc_detail_result,
+            bind_types<size_t>>(
+            fmt::format(
+                "SELECT ma.id, ma.type, ma.level, ts_s.value, ts_e.value, "
+                "ma.address, ma.size, ma.event_id, TR.nid, TR.pid, TR.tid, ma.extdata "
+                "FROM rocpd_memory_allocate_{u} ma "
+                "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = ma.start_id "
+                "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = ma.end_id "
+                "JOIN rocpd_track_{u} TR ON TR.id = ma.track_id "
+                "WHERE ma.id = ?",
+                fmt::arg("u", u)),
+            &memory_alloc_detail_result::id,
+            &memory_alloc_detail_result::type,
+            &memory_alloc_detail_result::level,
+            &memory_alloc_detail_result::start,
+            &memory_alloc_detail_result::end,
+            &memory_alloc_detail_result::address,
+            &memory_alloc_detail_result::size,
+            &memory_alloc_detail_result::event_id,
+            &memory_alloc_detail_result::nid,
+            &memory_alloc_detail_result::pid,
+            &memory_alloc_detail_result::tid,
+            &memory_alloc_detail_result::extdata);
+    }
+
     std::shared_ptr<sqlite_backend> m_backend;
     std::string                     m_uuid;
 
@@ -1150,6 +1290,11 @@ private:
     arg_detail_func_t m_arg_detail;
 
     correlated_event_statement_set m_correlated_event_statements;
+
+    region_detail_func_t          m_region_detail;
+    kernel_dispatch_detail_func_t m_kernel_dispatch_detail;
+    memory_copy_detail_func_t     m_memory_copy_detail;
+    memory_alloc_detail_func_t    m_memory_alloc_detail;
 };
 
 }  // namespace profiler_hub::data_storage::schema_v4

@@ -305,14 +305,14 @@ struct arg_detail_result
 /// relational) and assembles event_id_result without this struct.
 struct event_id_raw_result
 {
-    std::optional<size_t> event_id;
-    std::optional<size_t> category_id;
-    std::optional<size_t> stack_id;
-    std::optional<size_t> parent_stack_id;
-    std::optional<size_t> correlation_id;
-    std::string           call_stack;
-    std::string           line_info;
-    std::string           event_extdata;
+    std::optional<size_t>      event_id;
+    std::optional<std::string> category_name;
+    std::optional<size_t>      stack_id;
+    std::optional<size_t>      parent_stack_id;
+    std::optional<size_t>      correlation_id;
+    std::string                call_stack;
+    std::string                line_info;
+    std::string                event_extdata;
 };
 
 /// Lightweight result for resolving event metadata from event-specific tables.
@@ -321,8 +321,10 @@ struct event_id_raw_result
 /// rocpd_line_info + the pc/source-code/address-range info tables).
 struct event_id_result
 {
-    std::optional<size_t>               event_id;
-    std::optional<size_t>               category_id;
+    std::optional<size_t> event_id;
+    // Category decoded to its display string by the backend (v3: rocpd_string,
+    // v4: rocpd_info_category), so the reader stays version-agnostic.
+    std::optional<std::string>          category_name;
     std::optional<size_t>               stack_id;
     std::optional<size_t>               parent_stack_id;
     std::optional<size_t>               correlation_id;

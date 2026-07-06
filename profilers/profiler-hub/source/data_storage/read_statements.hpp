@@ -1006,19 +1006,20 @@ private:
         // raw executor reads those strings; the wrapper deserializes them into the
         // version-neutral event_id_result the reader consumes.
         auto make_event_id_stmt = [&](const std::string& table) -> event_id_func_t {
-            auto q =
-                fmt::format("SELECT E.id, E.category_id, E.stack_id, E.parent_stack_id, "
-                            "E.correlation_id, E.call_stack, E.line_info, E.extdata "
-                            "FROM {} T INNER JOIN rocpd_event_{} E ON T.event_id = E.id "
-                            "WHERE T.id = ?",
-                            fmt::format("{}_{}", table, m_uuid),
-                            m_uuid);
+            auto q = fmt::format(
+                "SELECT E.id, CS.string, E.stack_id, E.parent_stack_id, "
+                "E.correlation_id, E.call_stack, E.line_info, E.extdata "
+                "FROM {t} T INNER JOIN rocpd_event_{u} E ON T.event_id = E.id "
+                "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
+                "WHERE T.id = ?",
+                fmt::arg("t", fmt::format("{}_{}", table, m_uuid)),
+                fmt::arg("u", m_uuid));
 
             auto raw_exec = m_backend->create_read_statement_executor<event_id_raw_result,
                                                                       bind_types<size_t>>(
                 q,
                 &event_id_raw_result::event_id,
-                &event_id_raw_result::category_id,
+                &event_id_raw_result::category_name,
                 &event_id_raw_result::stack_id,
                 &event_id_raw_result::parent_stack_id,
                 &event_id_raw_result::correlation_id,
@@ -1034,7 +1035,7 @@ private:
                 {
                     event_id_result e;
                     e.event_id        = r.event_id;
-                    e.category_id     = r.category_id;
+                    e.category_name   = std::move(r.category_name);
                     e.stack_id        = r.stack_id;
                     e.parent_stack_id = r.parent_stack_id;
                     e.correlation_id  = r.correlation_id;

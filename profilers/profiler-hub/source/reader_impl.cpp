@@ -1188,13 +1188,9 @@ reader_t::impl::build_event_data(const data_storage::event_id_result& event_meta
     event_data->correlation_id  = event_meta.correlation_id.value_or(0);
     event_data->extdata         = event_meta.event_extdata;
 
-    if(event_meta.category_id.has_value())
+    if(event_meta.category_name.has_value())
     {
-        auto it = m_string_info_utility.find(event_meta.category_id.value());
-        if(it != m_string_info_utility.end())
-        {
-            event_data->event_category = it->second;
-        }
+        event_data->event_category = event_meta.category_name.value();
     }
 
     event_data->call_stack     = event_meta.call_stack;
@@ -1210,10 +1206,6 @@ reader_t::impl::build_event_data(const data_storage::event_id_result& event_meta
 std::optional<reader_types::region_data_t>
 reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
 {
-    // Legacy per-event detail is unsupported on v4.0 (task 002C): region_detail() is a
-    // default-empty stub on the v4 backend. Guards this overload and its size_t form.
-    if(m_is_v4) return std::nullopt;
-
     if(event.unique_identifier.type != reader_types::event_type_t::region)
     {
         return std::nullopt;
@@ -1257,8 +1249,6 @@ reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
 std::optional<reader_types::kernel_dispatch_data_t>
 reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t& event)
 {
-    if(m_is_v4) return std::nullopt;  // legacy per-event detail unsupported on v4 (002C)
-
     if(event.unique_identifier.type != reader_types::event_type_t::kernel_dispatch)
         return std::nullopt;
 
@@ -1326,8 +1316,6 @@ reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t
 std::optional<reader_types::memory_copy_data_t>
 reader_t::impl::get_memory_copy_details(const reader_types::timeline_event_t& event)
 {
-    if(m_is_v4) return std::nullopt;  // legacy per-event detail unsupported on v4 (002C)
-
     if(event.unique_identifier.type != reader_types::event_type_t::memory_copy)
         return std::nullopt;
 
@@ -1396,8 +1384,6 @@ reader_t::impl::get_memory_copy_details(const reader_types::timeline_event_t& ev
 std::optional<reader_types::memory_alloc_data_t>
 reader_t::impl::get_memory_alloc_details(const reader_types::timeline_event_t& event)
 {
-    if(m_is_v4) return std::nullopt;  // legacy per-event detail unsupported on v4 (002C)
-
     if(event.unique_identifier.type != reader_types::event_type_t::memory_allocate)
         return std::nullopt;
 
