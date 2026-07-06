@@ -274,6 +274,57 @@ TEST_F(RmaMultiSegmentMPITest, IGetMultiSegment)
     Barrier();
 }
 
+// IGet starting/ending mid-segment so the read WR builder splits on a non-zero
+// per-segment offset on both the remote (source) and local (dest) sides. Mirrors
+// IPutCrossSegmentBoundaryAtOffset for the read opcode (only whole-buffer IGet
+// was covered before).
+TEST_F(GinMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* sb = AllocSym(kNumSegments, kSegRequestBytes); // remote source (rank 1)
+    MultiSegmentVmmBuffer* rb = AllocSym(kNumSegments, kSegRequestBytes); // local dest   (rank 0)
+
+    if (SyncSkip(sb == nullptr || rb == nullptr))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t      segSize   = sb->segSize;
+    const size_t      off       = segSize / 2;              // start mid-first-segment
+    const size_t      kSize     = sb->totalSize - segSize;  // end mid-last-segment
+    constexpr uint8_t kSentinel = 0xD4;
+
+    if (worldRank_ == 1)
+        FillBuf(static_cast<uint8_t*>(sb->ptr) + off, kSize, /*seed=*/0x6E);
+    if (worldRank_ == 0)
+        FillSentinel(rb->ptr, rb->totalSize, kSentinel);
+
+    void *srcMh, *srcGh, *dstMh, *dstGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &srcMh, &srcGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &dstMh, &dstGh));
+
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  gin_->iget(ginCtx_, 0, /*remoteOff=*/off, srcMh, kSize,
+                             /*localOff=*/off, dstMh, /*peerRank=*/1, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+
+        EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(rb->ptr) + off, kSize, /*seed=*/0x6E))
+            << "iget payload wrong after multi-segment split at offset " << off;
+        EXPECT_TRUE(AllSentinel(rb->ptr, off, kSentinel))
+            << "bytes before localOff were overwritten by iget";
+        EXPECT_TRUE(AllSentinel(static_cast<uint8_t*>(rb->ptr) + off + kSize,
+                                rb->totalSize - (off + kSize), kSentinel))
+            << "bytes after the iget were overwritten";
+    }
+    Barrier();
+}
+
 // Receiver-side flush over a multi-segment buffer: after a plain iput, rank 1
 // must fence EVERY physical segment via iflush (one loopback read per segment)
 // before reading. Exercises the multi-segment flush path; a segment-0-only
@@ -317,6 +368,112 @@ TEST_F(GinMultiSegmentMPITest, IFlushMultiSegment)
         EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
         EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x3C))
             << "data corrupted across segment boundaries after flush";
+    }
+    Barrier();
+}
+
+// Flush after a PARTIAL, offset multi-segment iput: only a sub-range straddling
+// an interior boundary is written, then rank 1 flushes the whole handle. Since
+// iflush fences EVERY physical segment (no offset/size args), it must fence the
+// touched segments and leave the untouched sentinel bytes intact. Complements
+// IFlushMultiSegment (which flushes after a full-window iput).
+TEST_F(GinMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* sb = AllocSym(kNumSegments, kSegRequestBytes);
+    MultiSegmentVmmBuffer* rb = AllocSym(kNumSegments, kSegRequestBytes);
+
+    if (SyncSkip(sb == nullptr || rb == nullptr))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t      segSize   = sb->segSize;
+    const size_t      off       = segSize / 2;              // start mid-first-segment
+    const size_t      kSize     = sb->totalSize - segSize;  // end mid-last-segment
+    constexpr uint8_t kSentinel = 0x71;
+
+    if (worldRank_ == 0)
+        FillBuf(static_cast<uint8_t*>(sb->ptr) + off, kSize, /*seed=*/0x4F);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, rb->totalSize, kSentinel);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
+
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  gin_->iput(ginCtx_, 0, /*srcOff=*/off, sendMh, kSize,
+                             /*dstOff=*/off, recvMh, /*peerRank=*/1, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        void* freq = nullptr;
+        EXPECT_EQ(ncclSuccess, gin_->iflush(ginCtx_, 0, recvMh, /*peerRank=*/0, &freq))
+            << "multi-segment iflush post failed after partial put";
+        EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+
+        EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(rb->ptr) + off, kSize, /*seed=*/0x4F))
+            << "partial payload wrong after flush across segment boundaries";
+        EXPECT_TRUE(AllSentinel(rb->ptr, off, kSentinel))
+            << "bytes before dstOff were overwritten";
+        EXPECT_TRUE(AllSentinel(static_cast<uint8_t*>(rb->ptr) + off + kSize,
+                                rb->totalSize - (off + kSize), kSentinel))
+            << "bytes after the transfer were overwritten";
+    }
+    Barrier();
+}
+
+// REGRESSION (flush fast path): iflush on an ordinary single-allocation buffer
+// must still fence and verify. IFlushMultiSegment only covers the multi-segment
+// handle and SingleSegmentRegression never flushes, so the nSeg==1 flush path --
+// which the multi-segment change must not regress -- is otherwise untested. No
+// AllTookMultiSegPath gate: a single-segment buffer intentionally does NOT take
+// the per-segment path.
+TEST_F(GinMultiSegmentMPITest, IFlushSingleSegmentRegression)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    const size_t kSize = 1u << 20; // 1 MiB, plain hipMalloc => single segment
+    void* sendBuf = AllocBuf(kSize);
+    void* recvBuf = AllocBuf(kSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if (worldRank_ == 0)
+        FillBuf(sendBuf, kSize, /*seed=*/0x2D);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kSize, &recvMh, &recvGh));
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  gin_->iput(ginCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        void* freq = nullptr;
+        EXPECT_EQ(ncclSuccess, gin_->iflush(ginCtx_, 0, recvMh, /*peerRank=*/0, &freq))
+            << "single-segment iflush post failed";
+        EXPECT_TRUE(PollUntilDone(freq)) << "single-segment flush did not complete";
+        EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x2D))
+            << "data corrupted after single-segment flush";
     }
     Barrier();
 }
