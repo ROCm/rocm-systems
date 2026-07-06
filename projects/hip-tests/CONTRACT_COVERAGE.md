@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 267
+- Contract tests: 272
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 494
-- Declared HIP runtime APIs directly exercised by contract tests: 215
-- Approximate declared API-name coverage: 43.5%
+- Declared HIP runtime APIs directly exercised by contract tests: 222
+- Approximate declared API-name coverage: 44.9%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcGetProgramLogSize`, `hiprtcGetProgramLog`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -63,6 +63,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `array3d` | 3 |
 | `texture` | 7 |
 | `context` | 6 |
+| `context_mutation` | 5 |
 | `ipc` | 5 |
 | `module` | 7 |
 | `module_exec` | 8 |
@@ -84,7 +85,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Other runtime APIs | 1 | 56 | 1.8% |
 | Module / library loading | 17 | 29 | 58.6% |
 | Texture / surface | 7 | 44 | 15.9% |
-| Context / driver | 2 | 16 | 12.5% |
+| Context / driver | 9 | 16 | 56.2% |
 | Extension / proc address | 4 | 13 | 30.8% |
 | IPC | 5 | 5 | 100.0% |
 
@@ -183,6 +184,13 @@ hipDeviceGetStreamPriorityRange
 ```text
 hipCtxGetCurrent
 hipCtxGetDevice
+hipCtxCreate
+hipCtxDestroy
+hipCtxSetCurrent
+hipCtxPushCurrent
+hipCtxPopCurrent
+hipCtxSynchronize
+hipCtxGetApiVersion
 ```
 
 ### Texture / surface
@@ -376,7 +384,7 @@ hipIpcOpenEventHandle
 1. Memory surface beyond current basics: peer copies, advanced VMM operations (multi-device access descriptors, export/import handles, and protection-mode matrices), and remaining advanced memory-pool operations (pool export/import handles and multi-device access descriptors). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, 3D pitched allocation with host-device 3D copies, 3D array allocation with 3D copy-to/from-array, managed allocation with prefetch, default memory pools with stream-ordered allocation, basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access), explicit memory-pool lifecycle (create/destroy, release-threshold, trim, and pool-specific async allocation), and current-device memory-pool access control are now covered.
 2. Texture and surface APIs beyond current basics: texture/surface object create/destroy with resource and texture descriptor round-trips and channel-descriptor queries are now covered; texture reference APIs, mipmapped arrays, and bound/linear texture variants remain.
 3. Module, library, and code-loading APIs: HIPRTC-backed module load-from-data, load-from-data-with-options (`hipModuleLoadDataEx`, including JIT option handling), unload, function and global lookup, module kernel launch (with `hipFuncGetAttribute`), function-count queries, cooperative module launch, and module occupancy helpers (max potential block size and max active blocks per multiprocessor, including both with-flags variants) are now covered; the HIPRTC-backed library-loading family is now covered too (library load-from-data, unload, kernel lookup, kernel count, kernel enumeration, global lookup, and the `hipKernel*` accessors for function/library/name). Module load from file/fat-binary, tex-ref queries, and multi-device cooperative module launch remain.
-4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; context create/destroy, push/pop/set-current, shared-memory config setter, and context peer access remain.
+4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; driver-style context lifecycle and current-context mutation are now covered too (context create/destroy, set-current, push/pop-current, context synchronize, and API-version query). Remaining context APIs are the per-context cache-config get/set (`hipCtxGetCacheConfig`, `hipCtxSetCacheConfig`), the shared-memory-config get/set (`hipCtxGetSharedMemConfig`, `hipCtxSetSharedMemConfig`), the context flag query (`hipCtxGetFlags`), and context peer access (`hipCtxEnablePeerAccess`, `hipCtxDisablePeerAccess`).
 5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection, and executable-graph update paths (whole-graph `hipGraphExecUpdate` with topology-change reporting plus per-node exec setters for host, child-graph, event-record, and event-wait nodes) are now covered; remaining node attribute variants and debug dot export remain.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch and CU-mask stream variants, logging controls, and link-type queries remain.
