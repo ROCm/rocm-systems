@@ -829,8 +829,8 @@ TEST(Memory, VMemGetAccess) {
   constexpr std::size_t buffer_size = 1024;
   constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
   hsa_amd_vmem_alloc_handle_t memory_handle = {};
-  ASSERT_EQ(hsa_amd_vmem_handle_create(global_memory_pool, allocation_size, MEMORY_TYPE_PINNED,
-                                       0, &memory_handle),
+  ASSERT_EQ(hsa_amd_vmem_handle_create(global_memory_pool, allocation_size, MEMORY_TYPE_PINNED, 0,
+                                       &memory_handle),
             HSA_STATUS_SUCCESS);
 
   void* buffer = nullptr;
@@ -1081,23 +1081,22 @@ TEST(Memory, VMemMapWithOffset) {
       HSA_STATUS_INFO_BREAK);
 
   std::size_t alloc_granule = 0;
-  ASSERT_EQ(hsa_amd_memory_pool_get_info(global_memory_pool,
-                                         HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
-                                         &alloc_granule),
+  ASSERT_EQ(hsa_amd_memory_pool_get_info(
+                global_memory_pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, &alloc_granule),
             HSA_STATUS_SUCCESS);
   ASSERT_GT(alloc_granule, 0u);
 
   const std::size_t allocation_size = alloc_granule * 2;
   hsa_amd_vmem_alloc_handle_t memory_handle = {};
-  ASSERT_EQ(hsa_amd_vmem_handle_create(global_memory_pool, allocation_size, MEMORY_TYPE_PINNED,
-                                       0, &memory_handle),
+  ASSERT_EQ(hsa_amd_vmem_handle_create(global_memory_pool, allocation_size, MEMORY_TYPE_PINNED, 0,
+                                       &memory_handle),
             HSA_STATUS_SUCCESS);
 
   const std::size_t map_size = alloc_granule;
   void* buffer = nullptr;
-  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&buffer, map_size, 0, 0,
-                                               HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      hsa_amd_vmem_address_reserve_align(&buffer, map_size, 0, 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
+      HSA_STATUS_SUCCESS);
 
   const std::uint64_t offset = alloc_granule;
   EXPECT_EQ(hsa_amd_vmem_map(buffer, map_size, offset, memory_handle, 0), HSA_STATUS_SUCCESS);
