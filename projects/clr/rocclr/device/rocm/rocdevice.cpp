@@ -731,7 +731,7 @@ bool Device::create() {
     return false;
   }
 
-  if (AMD_LOG_LEVEL >= LOG_EXTRA_DEBUG) {
+  if (AMD_LOG_LEVEL >= LOG_EXTRA_EXTRA_DEBUG) {
     uint8_t logMask[8] = {0};
     hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_AQL);
     hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_SDMA);
