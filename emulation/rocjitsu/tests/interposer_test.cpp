@@ -20,9 +20,17 @@
 /// inspects the ELF image directly rather than dlopen()-ing the library so the
 /// interposer's constructors (which install a SIGSEGV handler and may contact
 /// the daemon) never run in the test process.
+///
+/// The expected set of interposed libc symbols is not hand-maintained: it is
+/// auto-detected at run time by scanning the interposer source
+/// (kmd/linux/interposer.cpp, whose path is baked in via
+/// RJ_INTERPOSER_SOURCE_PATH) for the RJ_INTERPOSER_EXPORT marker, so adding or
+/// removing an override needs no change here.
 
 #include <gtest/gtest.h>
 
+#include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -36,24 +44,69 @@
 
 namespace {
 
-// The complete set of libc entry points the interposer overrides. This MUST be
-// kept in sync with the extern "C" definitions in
-// lib/rocjitsu/src/rocjitsu/kmd/linux/interposer.cpp. When you add or remove an
-// interposed libc function, update both.
-constexpr const char *kInterposedLibcSymbols[] = {
-    "access",     "close",      "dup",      "dup2",       "dup3",         "fcntl",    "fcntl64",
-    "fopen",      "fopen64",    "fork",     "freopen",    "freopen64",    "fstat",    "fstat64",
-    "__fxstat",   "__fxstat64", "ioctl",    "lstat",      "lstat64",      "__lxstat", "__lxstat64",
-    "madvise",    "mmap",       "mprotect", "munmap",     "open",         "open64",   "__open_2",
-    "__open64_2", "openat",     "openat64", "__openat_2", "__openat64_2", "opendir",  "readlink",
-    "stat",       "stat64",     "__xstat",  "__xstat64",
-};
-
 // Internal interposer helpers that must NOT leak into the dynamic symbol table.
 constexpr const char *kInternalHelpers[] = {
     "fcntl_impl",
     "fcntl_arg_kind",
 };
+
+// Auto-detect the libc entry points the interposer overrides straight from the
+// interposer source, so the expected export set is never hand-maintained. Each
+// override in kmd/linux/interposer.cpp is written as:
+//
+//     RJ_INTERPOSER_EXPORT <return type> <name>(<args>) { ... }
+//
+// so the interposed symbol is the identifier immediately preceding the '(' that
+// follows the RJ_INTERPOSER_EXPORT marker. Scanning for that marker keeps this
+// test in lock-step with interposer.cpp: add or remove an override there and the
+// expectations below follow automatically.
+bool ParseInterposedSymbols(const std::string &source, std::set<std::string> &out,
+                            std::string &err) {
+  static constexpr char kMarker[] = "RJ_INTERPOSER_EXPORT";
+  const size_t marker_len = std::strlen(kMarker);
+  auto is_ident = [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
+  };
+
+  for (size_t pos = 0; (pos = source.find(kMarker, pos)) != std::string::npos;) {
+    const size_t marker_begin = pos;
+    pos += marker_len;
+    // Match RJ_INTERPOSER_EXPORT as a whole token so we never pick up a longer
+    // identifier that merely contains the marker text: the preceding character
+    // must not be part of an identifier and the next must be whitespace.
+    const bool boundary_before = marker_begin == 0 || !is_ident(source[marker_begin - 1]);
+    const bool boundary_after =
+        pos < source.size() && std::isspace(static_cast<unsigned char>(source[pos])) != 0;
+    if (!boundary_before || !boundary_after)
+      continue;
+
+    // The parameter list opens at the first '(' after the marker.
+    const size_t paren = source.find('(', pos);
+    if (paren == std::string::npos)
+      break;
+    // A real definition has only "<return type> <name>" on the marker line
+    // between the marker and '('. A statement terminator or line break there
+    // means this is not an interposer definition (e.g. a mention in a comment).
+    if (source.substr(pos, paren - pos).find_first_of(";{}#\n") != std::string::npos)
+      continue;
+
+    // The function name is the last identifier token before '('.
+    size_t name_end = paren;
+    while (name_end > pos && std::isspace(static_cast<unsigned char>(source[name_end - 1])) != 0)
+      --name_end;
+    size_t name_begin = name_end;
+    while (name_begin > pos && is_ident(source[name_begin - 1]))
+      --name_begin;
+    if (name_begin < name_end)
+      out.insert(source.substr(name_begin, name_end - name_begin));
+  }
+
+  if (out.empty()) {
+    err = "found no RJ_INTERPOSER_EXPORT definitions in the interposer source";
+    return false;
+  }
+  return true;
+}
 
 // Defined, globally-visible dynamic symbols of an ELF object, i.e. the set that
 // `nm --dynamic --defined-only` reports as `T`/`W`.
@@ -168,6 +221,20 @@ const char *LibrocjitsuPath() {
 #endif
 }
 
+// Resolve the path to the interposer source whose RJ_INTERPOSER_EXPORT markers
+// define the expected export set. The build bakes in RJ_INTERPOSER_SOURCE_PATH;
+// RJ_INTERPOSER_SOURCE can override it (e.g. to point at a different checkout).
+const char *InterposerSourcePath() {
+  if (const char *env = std::getenv("RJ_INTERPOSER_SOURCE"))
+    if (env[0] != '\0')
+      return env;
+#ifdef RJ_INTERPOSER_SOURCE_PATH
+  return RJ_INTERPOSER_SOURCE_PATH;
+#else
+  return nullptr;
+#endif
+}
+
 class InterposerExportsTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
@@ -185,19 +252,32 @@ protected:
     ASSERT_TRUE(ParseExportedSymbols(buf, symbols_, err))
         << "failed to parse ELF " << path << ": " << err;
     path_ = path;
+
+    // Auto-detect the interposed libc entry points from the interposer source.
+    const char *src = InterposerSourcePath();
+    ASSERT_NE(src, nullptr) << "interposer source path not configured (set RJ_INTERPOSER_SOURCE or "
+                               "the RJ_INTERPOSER_SOURCE_PATH compile definition).";
+    std::ifstream src_file(src, std::ios::binary);
+    ASSERT_TRUE(src_file.good()) << "cannot open interposer source at: " << src;
+    const std::string source((std::istreambuf_iterator<char>(src_file)),
+                             std::istreambuf_iterator<char>());
+    ASSERT_TRUE(ParseInterposedSymbols(source, interposed_, err))
+        << "failed to auto-detect interposed symbols from " << src << ": " << err;
   }
 
   static DynamicSymbols symbols_;
+  static std::set<std::string> interposed_;
   static std::string path_;
 };
 
 DynamicSymbols InterposerExportsTest::symbols_;
+std::set<std::string> InterposerExportsTest::interposed_;
 std::string InterposerExportsTest::path_;
 
 // Every libc entry point the LD_PRELOAD shim overrides must be an exported,
 // defined dynamic symbol, otherwise the preload cannot intercept that syscall.
 TEST_F(InterposerExportsTest, AllInterposedLibcSymbolsExported) {
-  for (const char *name : kInterposedLibcSymbols) {
+  for (const std::string &name : interposed_) {
     EXPECT_TRUE(symbols_.is_exported(name))
         << "librocjitsu.so must export interposed libc symbol '" << name
         << "'. Without it the LD_PRELOAD shim cannot intercept that part of "
@@ -228,6 +308,21 @@ TEST_F(InterposerExportsTest, PublicCApiIsExported) {
                       << " (sanity check that the correct library was inspected).";
 }
 
+// The auto-detection itself must find the interposer surface: a broken scan
+// (e.g. the marker spelling or the source layout changed) would otherwise
+// silently turn the expectations above into a vacuous pass over an empty set.
+TEST_F(InterposerExportsTest, AutoDetectedInterposerSurfaceLooksSane) {
+  ASSERT_FALSE(interposed_.empty())
+      << "no interposed symbols were auto-detected from the interposer source; the "
+         "RJ_INTERPOSER_EXPORT scan in ParseInterposedSymbols is likely broken.";
+  // A few core entry points that must always be part of the redirected surface.
+  for (const char *anchor : {"open", "close", "ioctl", "mmap", "munmap"}) {
+    EXPECT_TRUE(interposed_.count(anchor) != 0)
+        << "expected core libc entry point '" << anchor
+        << "' among the auto-detected interposed symbols.";
+  }
+}
+
 // The library's real ABI is entirely extern "C": the rj_* C API plus the
 // interposed libc entry points. Without a linker version script the dynamic
 // table cannot be made perfectly pristine -- libstdc++ marks namespace std as
@@ -237,13 +332,11 @@ TEST_F(InterposerExportsTest, PublicCApiIsExported) {
 // namespace, so we tolerate them while still flagging any unmangled (extern
 // "C") leak or any accidentally exported rocjitsu:: C++ symbol.
 TEST_F(InterposerExportsTest, ExportSurfaceIsNotOverExposed) {
-  const std::set<std::string> allowed(std::begin(kInterposedLibcSymbols),
-                                      std::end(kInterposedLibcSymbols));
   std::vector<std::string> unexpected;
   for (const std::string &name : symbols_.exported()) {
     if (name.rfind("rj_", 0) == 0)
       continue; // public C API
-    if (allowed.count(name) != 0)
+    if (interposed_.count(name) != 0)
       continue; // interposed libc entry point
     // Tolerate C++ standard-library runtime instantiations: they are mangled
     // (_Z...) and never in our own namespace. Anything else -- an unmangled

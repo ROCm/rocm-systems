@@ -411,7 +411,9 @@ rj_add_test(
 add_executable(interposer_test interposer_test.cpp)
 target_compile_definitions(
     interposer_test
-    PRIVATE RJ_LIBROCJITSU_SO_PATH="$<TARGET_FILE:rocjitsu_shared>"
+    PRIVATE
+        RJ_LIBROCJITSU_SO_PATH="$<TARGET_FILE:rocjitsu_shared>"
+        RJ_INTERPOSER_SOURCE_PATH="${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/kmd/linux/interposer.cpp"
 )
 target_link_libraries(interposer_test PRIVATE GTest::gtest_main)
 rj_configure_target(interposer_test TEST)
