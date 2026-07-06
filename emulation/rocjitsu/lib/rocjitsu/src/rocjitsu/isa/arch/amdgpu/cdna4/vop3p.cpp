@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -2296,7 +2297,7 @@ void VMfmaF6416x16x4F64Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                     [&] { return src2.read_scalar(wf); });
   amdgpu::exec_f64(cu, 16, 16, 4, 1, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                   amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc);
+                   amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.blgp);
 }
 
 VMfmaF644x4x44bF64Vop3pMfma::VMfmaF644x4x44bF64Vop3pMfma(const MachineInst *inst)
@@ -2326,7 +2327,7 @@ void VMfmaF644x4x44bF64Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                     [&] { return src2.read_scalar(wf); });
   amdgpu::exec_f64(cu, 4, 4, 4, 4, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                   amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc);
+                   amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.blgp);
 }
 
 VMfmaF3216x16x32Bf8Bf8Vop3pMfma::VMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineInst *inst)

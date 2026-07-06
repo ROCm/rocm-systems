@@ -1,0 +1,9 @@
+{
+  "config_name": "rdna3",
+  "hip_architectures": [
+    "gfx1100"
+  ],
+  "tests": [
+    "fpsan_wmma_gfx11_test"
+  ]
+}

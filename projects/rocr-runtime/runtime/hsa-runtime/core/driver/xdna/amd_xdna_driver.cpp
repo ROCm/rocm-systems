@@ -860,7 +860,7 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
 
     drm_prime_handle import_params = {};
     import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
@@ -879,11 +879,6 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-}
-
-hsa_status_t XdnaDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Nothing to do for XDNA since we have a single, non-ref counted handle.
-  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,

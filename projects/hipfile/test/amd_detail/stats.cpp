@@ -303,6 +303,7 @@ TEST_F(HipFileStatsPerGpuStatsV1, GetHistograms)
     auto [readSize, readCount, readTime, readError]     = stats.getHistograms(IoType::Read);
     auto [writeSize, writeCount, writeTime, writeError] = stats.getHistograms(IoType::Write);
     auto [invalidSize, invalidCount, invalidTime, invalidError] =
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange): invalid value tests rejection
         stats.getHistograms(static_cast<IoType>(-1));
     ASSERT_EQ(&stats.ioSizeBytes[0], readSize);
     ASSERT_EQ(&stats.ioCount[0], readCount);
@@ -324,6 +325,7 @@ TEST_F(HipFileStatsV1, getPerGpuStats)
 {
     StatsV1 stats{};
     ASSERT_EQ(nullptr, stats.getPerGpuStats(StatsV1::MaxGpus, StatsBackend::Fastpath));
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange): invalid value tests rejection
     ASSERT_EQ(nullptr, stats.getPerGpuStats(0, static_cast<StatsBackend>(-1)));
 }
 

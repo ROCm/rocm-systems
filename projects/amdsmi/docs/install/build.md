@@ -32,6 +32,10 @@ required:
 * Python (3.6.8 or later)
 * virtualenv -- `python3 -m pip install virtualenv`
 
+Users that wish to also build the AMD SMI Rust interface will also need the following components:
+
+* Rust (1.56 or later)
+
 ## Build steps
 
 1. Clone the rocm-systems repository to your local Linux machine

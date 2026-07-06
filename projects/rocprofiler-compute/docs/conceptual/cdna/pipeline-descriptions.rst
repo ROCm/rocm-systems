@@ -1,7 +1,6 @@
 .. meta::
    :description: ROCm Compute Profiler performance model: Shader engine (SE)
-   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, pipeline, VALU, SALU, VMEM, SMEM, LDS, branch,
-              scheduler, MFMA, AGPRs
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, GPUs pipeline, VALU, SALU, VMEM, SMEM, LDS, branch, scheduler, MFMA, AGPRs
 
 *********************
 Pipeline descriptions
@@ -19,8 +18,7 @@ Vector arithmetic logic unit (VALU)
 
 The vector arithmetic logic unit (VALU) executes vector instructions
 over an entire wavefront, each :ref:`work-item <desc-work-item>` (or,
-vector-lane) potentially operating on distinct data. The VALU of a CDNA™
-accelerator or GCN™ GPU typically consists of:
+vector-lane) potentially operating on distinct data. The VALU of a CDNA-CDNA4 architecture-based GPUs or GCN™ GPU typically consists of:
 
 *  Four 16-wide SIMD processors (see :hip-training-pdf:`24` for more details).
 
@@ -34,7 +32,7 @@ accelerator or GCN™ GPU typically consists of:
    memory; each work-item supplies its own memory address and supplies
    or receives unique data.
 
-*  CDNA accelerators, such as the MI100 and :ref:`MI2XX <mixxx-note>`, contain
+*  CDNA-CDNA4 architecture-based GPUs (such as the MI100 and :ref:`MI2XX <mixxx-note>`), contain
    additional
    :amd-lab-note:`Matrix Fused Multiply-Add (MFMA) <amd-lab-notes-matrix-cores-readme>`
    units.
@@ -48,10 +46,10 @@ and are treated as no-ops.
 
 .. note::
 
-   On GCN GPUs and the CDNA MI100 accelerator, there are slots for up to 10
+   On GCN GPUs and the CDNA architecture-based AMD Instinct MI100 GPUs, there are slots for up to 10
    wavefronts in the instruction buffer, but generally occupancy is limited by
    other factors to 32 waves per :doc:`compute unit <compute-unit>`.
-   On the CDNA2 :ref:`MI2XX <mixxx-note>` series accelerators, there are only 8
+   On the CDNA2 architecture-based AMD Instinct :ref:`MI2XX <mixxx-note>` Series GPUs, there are only 8
    waveslots per-SIMD.
 
 .. _desc-salu:
@@ -95,18 +93,18 @@ coordinate between wavefronts in a workgroup.
 .. figure:: ../../data/performance-model/lds.*
    :align: center
    :alt: Performance model of the local data share (LDS) on AMD Instinct
-         accelerators
+         GPUs
    :width: 800
 
    Performance model of the local data share (LDS) on AMD Instinct MI-series
-   accelerators.
+   GPUs.
 
-Above is ROCm Compute Profiler's performance model of the LDS on CDNA accelerators (adapted
+This image is the performance model of the LDS on CDNA architecture-based GPUs (adapted
 from  :mantor-gcn-pdf:`20`). The SIMDs in the :ref:`VALU <desc-valu>` are
 connected to the LDS in pairs (see above). Only one SIMD per pair may issue an
 LDS instruction at a time, but both pairs may issue concurrently.
 
-On CDNA accelerators, the LDS contains 32 banks and each bank is 4B wide.
+On CDNA architecture-based GPUs, the LDS contains 32 banks and each bank is 4B wide.
 The LDS is designed such that each bank can be read from, written to, or
 atomically updated every cycle, for a total throughput of 128B/clock
 (:gcn-crash-course:`40`).
@@ -178,8 +176,7 @@ clock cycle, the scheduler:
 
 This gives a maximum of five issued Instructions Per Cycle (IPC), per-SIMD,
 per-CU (:hip-training-pdf:`Introduction to AMD GPU Programming with HIP <>`,
-:gcn-crash-course:`The AMD GCN Architecture - A Crash Course <>`). On CDNA
-accelerators with :ref:`MFMA <desc-mfma>` instructions, these are issued via the
+:gcn-crash-course:`The AMD GCN Architecture - A Crash Course <>`). On CDNA architecture-based GPUs with :ref:`MFMA <desc-mfma>` instructions, these are issued via the
 :ref:`VALU <desc-valu>`. Some of them will execute on a separate functional unit
 and typically allow other :ref:`VALU <desc-valu>` operations to execute in their
 shadow (see the :ref:`MFMA <desc-mfma>` section for more detail).
@@ -187,7 +184,7 @@ shadow (see the :ref:`MFMA <desc-mfma>` section for more detail).
 .. note::
 
    The IPC model used by ROCm Compute Profiler omits the following two complications for
-   clarity. First, CDNA accelerators contain other execution units on the CU
+   clarity. First, CDNA architecture-based GPUs contain other execution units on the CU
    that are unused for compute applications. Second, so-called "internal"
    instructions (see :gcn-crash-course:`29`) are not issued to a functional
    unit, and can technically cause the maximum IPC to *exceed* 5 instructions
@@ -200,14 +197,14 @@ shadow (see the :ref:`MFMA <desc-mfma>` section for more detail).
 Matrix fused multiply-add (MFMA)
 --------------------------------
 
-CDNA accelerators, such as the MI100 and :ref:`MI2XX <mixxx-note>`, contain
+CDNA architecture-based GPUs, such as the MI100 and :ref:`MI2XX <mixxx-note>`, contain
 specialized hardware to accelerate matrix-matrix multiplications, also
 known as Matrix Fused Multiply-Add (MFMA) operations. The exact
-operation types and supported formats may vary by accelerator. Refer to the
+operation types and supported formats may vary for different GPUs. For a general discussion of these hardware units, see the
 :amd-lab-note:`AMD matrix cores <amd-lab-notes-matrix-cores-readme>`
-blog post on GPUOpen for a general discussion of these hardware units.
+blog post on GPUOpen .
 In addition, to explore the available MFMA instructions in-depth on
-various AMD accelerators (including the CDNA line), we recommend the
+various AMD GPUs (including the CDNA line), see the
 `AMD Matrix Instruction Calculator <https://github.com/ROCm/amd_matrix_instruction_calculator>`_:
 
 .. code-block:: shell
@@ -259,14 +256,14 @@ Non-pipeline resources
 
 In this section, we describe a few resources that are not standalone
 pipelines but are important for understanding performance optimization
-on CDNA accelerators.
+on CDNA architecture-based GPUs.
 
 .. _desc-barrier:
 
 Barrier
 ^^^^^^^
 
-Barriers are resources on the compute-unit of a CDNA accelerator that
+Barriers are resources on the compute-unit of a CDNA architecture-based GPU that
 are used to implement synchronization primitives (for example, HIP’s
 ``__syncthreads``). Barriers are allocated to any workgroup that
 consists of more than a single wavefront.
@@ -288,7 +285,7 @@ instructions (``v_accvgpr_*``). These data movement instructions may be
 used by the compiler to implement lower-cost register-spill/fills on
 architectures with AGPRs.
 
-AGPRs are not available on all AMD Instinct™ accelerators. The AMD
+AGPRs are not available on all AMD Instinct GPUs. The AMD
 Instinct MI100 (CDNA) has a 2x256 KiB register file, where one half
 is available as general-purpose VGPRs, and the other half is for matrix
 math accumulation VGPRs (AGPRs). The AMD Instinct :ref:`MI2XX <mixxx-note>`
