@@ -1372,6 +1372,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   int* nvbPeers = NULL;
   struct ncclProxyConnector proxyConn;
   int* pxnPeers = NULL;
+  int64_t* localBusIds = NULL;
   int *topParentLocalRanks = NULL;
   int p2pLevel = -1;
   bool globalNicFused = false;
@@ -1637,7 +1638,22 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allXgmi = true;
   hasPeerAccess = true;
 
-  if (cudaGetDeviceCount(&localDevCount) != cudaSuccess) localDevCount = 0;
+  if (CUDACLEARERROR(cudaGetDeviceCount(&localDevCount)) != cudaSuccess) {
+    WARN("cudaGetDeviceCount failed; treating all peers as non-accessible for "
+         "clique setup");
+    localDevCount = 0;
+  }
+
+  // RCCL: HIP_VISIBLE_DEVICES may differ per rank, so precompute each rank's
+  // busId so we compare them later.
+  NCCLCHECKGOTO(ncclCalloc(&localBusIds, nranks), ret, fail);
+  for (int j = 0; j < nranks; j++) {
+    int cudaDevJ = comm->peerInfo[j].cudaDev;
+    if (cudaDevJ < 0 || cudaDevJ >= localDevCount ||
+        getBusId(cudaDevJ, &localBusIds[j]) != ncclSuccess) {
+      localBusIds[j] = -1;
+    }
+  }
 
   // Check that all the GPUs have peer access to one another and are XGMI connected
   for (int i = 0; i < nranks && hasPeerAccess; i++) {
@@ -1647,17 +1663,21 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       int cudaDev2 = comm->peerInfo[j].cudaDev;
       int p2p;
 
-      // RCCL: under asymmetric HIP_VISIBLE_DEVICES a peer ordinal may be out
-      // of range here; hipDeviceCanAccessPeer would return hipErrorInvalidDevice
-      // and leave a sticky error. Treat such a pair as no peer access.
+      // RCCL: HIP_VISIBLE_DEVICES may differ per rank, so check that the peer
+      // device is visible in this process and that its busId matches.
       if (cudaDev1 < 0 || cudaDev1 >= localDevCount || cudaDev2 < 0 ||
           cudaDev2 >= localDevCount) {
         hasPeerAccess = false;
         break;
       }
 
-      if (hipDeviceCanAccessPeer(&p2p, cudaDev1, cudaDev2) != hipSuccess || !p2p)
-      {
+      if (localBusIds[j] == -1 || localBusIds[j] != comm->peerInfo[j].busId) {
+        hasPeerAccess = false;
+        break;
+      }
+
+      if (hipDeviceCanAccessPeer(&p2p, cudaDev1, cudaDev2) != hipSuccess ||
+          !p2p) {
         hasPeerAccess = false;
         break;
       }
@@ -2263,6 +2283,7 @@ exit:
   free(rings);
   free(nvbPeers);
   free(pxnPeers);
+  free(localBusIds);
   return ret;
 fail:
   goto exit;
