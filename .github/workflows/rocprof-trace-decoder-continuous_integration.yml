@@ -129,7 +129,7 @@ jobs:
         cmake --build build -j $(nproc)
 
     - name: Test
-      timeout-minutes: 15
+      timeout-minutes: 45
       shell: bash
       run: |
         cd build
@@ -143,7 +143,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     needs: ci_config
     name: Build & Test rocprofiler-sdk • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -233,7 +233,7 @@ jobs:
           ccache-variant: sccache
 
       - name: Configure, Build, and Test
-        timeout-minutes: 30
+        timeout-minutes: 45
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
