@@ -172,14 +172,16 @@ runs:
       run: |
         export ROCM_PATH=${{ inputs.rocm-path }}
         export HIP_PLATFORM=amd
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
+        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
         export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install hipFILE..."
         cmake -B build-hipfile \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/amdclang++ \
           -DCMAKE_HIP_PLATFORM=amd \
-          -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
+          -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm;${{ inputs.rocm-path }}/lib/rocm_sysdeps' \
+          -DCMAKE_LIBRARY_PATH=${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib \
+          -DCMAKE_INCLUDE_PATH=${{ inputs.rocm-path }}/lib/rocm_sysdeps/include \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
