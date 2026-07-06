@@ -330,13 +330,13 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
 
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
-  StreamGuard stream_guard(Streams::created);
-  hipStream_t stream = stream_guard.stream();
 
   createOversizedMemAllocGraph(&graph, &graph_exec);
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
 
   SECTION("hipStreamSynchronize") {
+    StreamGuard stream_guard(Streams::created);
+    hipStream_t stream = stream_guard.stream();
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
     hipError_t ret = hipStreamSynchronize(stream);
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
@@ -344,7 +344,19 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     REQUIRE(ret == hipErrorOutOfMemory);
   }
 
+  SECTION("hipStreamSynchronize nullptr") {
+    HIP_CHECK(hipGraphLaunch(graph_exec, nullptr));
+    hipError_t ret = hipStreamSynchronize(nullptr);
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipDeviceGraphMemTrim(0));
+    REQUIRE(ret == hipErrorOutOfMemory);
+  }
+
   SECTION("hipStreamQuery") {
+    StreamGuard stream_guard(Streams::created);
+    hipStream_t stream = stream_guard.stream();
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
     hipError_t ret = queryUntilComplete(stream);
     hipError_t second_query = hipStreamQuery(stream);
     HIP_CHECK(hipGraphExecDestroy(graph_exec));

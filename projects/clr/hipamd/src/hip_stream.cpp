@@ -379,8 +379,10 @@ hipError_t hipStreamSynchronize_common(hipStream_t stream) {
   if (stream == nullptr) {
     // Sync blocking streams only on the null stream
     constexpr bool kBlockingOnly = true;
-    getCurrentDevice()->SyncAllStreams(false, kBlockingOnly);
-    return hipSuccess;
+    auto* device = getCurrentDevice();
+    device->SyncAllStreams(false, kBlockingOnly);
+    auto* null_stream = device->GetNullStream();
+    return null_stream ? null_stream->GetAndClearAsyncError() : hipSuccess;
   }
 
   CHECK_STREAM_DETACHED(stream);
