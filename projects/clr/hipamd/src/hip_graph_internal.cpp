@@ -435,10 +435,19 @@ bool GraphExecSegmented::DeviceHonorsSameQueueAnyOrder(int dev_id) {
   const amd::Device* device = g_devices[dev_id]->devices()[0];
   const uint32_t major = device->isa().versionMajor();
   const uint32_t minor = device->isa().versionMinor();
-  // gfx1250 (gfx12.5+) retires same-queue dispatches out-of-order
-  // when the barrier bit is clear; other ISAs serialize regardless and keep it.
-  // gfx950 is intentionally excluded until its support is confirmed.
-  return major == 12 && minor >= 5;
+  const uint32_t stepping = device->isa().versionStepping();
+  // Same-queue any-order retirement (dispatches launch out-of-order when the
+  // barrier bit is clear) is a per-ISA hardware property, not a "newer HW =
+  // supported" one. It is enabled only on ISAs where it has been validated;
+  // every other ISA serializes same-queue packets regardless and must keep the
+  // barrier bit set.
+  if (major != 12) {
+    return false;
+  }
+  if (minor >= 5) {
+    return true;  // gfx125x and later
+  }
+  return minor == 0 && stepping == 1;  // gfx1201
 }
 
 // ================================================================================================
@@ -452,7 +461,10 @@ bool GraphExecSegmented::DeviceHonorsSameQueueAnyOrder(int dev_id) {
 // never fires once the barrier-ROI pass collapsed the graph onto one stream
 // (all segments serialize on a single in-order queue by design).
 void GraphExecSegmented::SetSegmentHeadBarrier(const Segment& seg, SegmentBatch& sb) {
-  if (!anyorder_enabled_ || collapsed_to_single_stream_) {
+  // Only round-robin assignment ever sets clear_head_barrier (see BuildSyncPlan).
+  // Skip under DFS/collapsed configs so the feature stays truly inactive and we
+  // never rewrite (and thus never force barrier=1 onto) head packets there.
+  if (!anyorder_enabled_ || !assignment_is_round_robin_ || collapsed_to_single_stream_) {
     return;
   }
   for (auto& batch : sb.packet_batches) {
@@ -460,7 +472,7 @@ void GraphExecSegmented::SetSegmentHeadBarrier(const Segment& seg, SegmentBatch&
       if (packetIsDispatch(pkt)) {
         writeDispatchBarrierBit(pkt, !seg.clear_head_barrier);
         if (seg.clear_head_barrier) {
-          ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
                   "[hipGraph] Approach B: CLEARED head barrier bit for segment %d "
                   "(dev %d, stream %d, level %d) -> overlaps on oversubscribed queue",
                   seg.id, seg.dev_id, seg.stream_id, seg.dependency_level);
@@ -620,15 +632,20 @@ void GraphExecSegmented::BuildSyncPlan() {
     for (const auto& seg : segments_) {
       if (seg.clear_head_barrier) ++cleared;
     }
+    // Report the effective per-device pool size actually used for assignment (the
+    // capture device reserves one slot for the launch stream), not the raw cap.
+    auto poolIt = max_streams_dev_.find(captureDeviceId_);
+    const int effective_pool =
+        (poolIt != max_streams_dev_.end() && poolIt->second > 0) ? poolIt->second : 1;
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
             "[hipGraph] Approach B: %zu segments, %zu head(s) marked for any-order "
-            "overlap on oversubscribed queues (queue pool = %u)",
-            segments_.size(), cleared, DEBUG_HIP_FORCE_GRAPH_QUEUES);
+            "overlap on oversubscribed queues (queue pool = %d)",
+            segments_.size(), cleared, effective_pool);
     if (cleared == 0) {
       ClPrint(amd::LOG_INFO, amd::LOG_CODE,
               "[hipGraph] Approach B: no oversubscription detected -> nothing to "
-              "overlap (need > %u parallel segments at some level)",
-              DEBUG_HIP_FORCE_GRAPH_QUEUES);
+              "overlap (need > %d parallel segments at some level)",
+              effective_pool);
     }
   }
 
