@@ -43,7 +43,7 @@ namespace {
 // Real enumerators render as names, whereas unused values render as numbers or casts.
 //
 // Normal status codes are discovered by scanning a low numeric range. The two
-// high sentinels, AMDSMI_STATUS_MAP_ERROR and AMDSMI_STATUS_UNKNOWN_ERROR, are
+// high-value codes, AMDSMI_STATUS_MAP_ERROR and AMDSMI_STATUS_UNKNOWN_ERROR, are
 // appended explicitly because their values are near UINT_MAX.
 // ---------------------------------------------------------------------------
 
@@ -111,14 +111,15 @@ void Collect(std::vector<std::pair<amdsmi_status_t, std::string>>& out,
    ...);
 }
 
-// Scan beyond the current normal status-code range for future additions.
-constexpr uint32_t kScanLimit = 128;
+// Scan the full range status codes can occupy (normal codes stay well below
+// this; the two high-value codes near UINT_MAX are appended separately).
+constexpr uint32_t kScanLimit = 256;
 
 // {value, "AMDSMI_STATUS_..."} for every amdsmi_status_t enumerator.
 std::vector<std::pair<amdsmi_status_t, std::string>> AllStatusCodes() {
   std::vector<std::pair<amdsmi_status_t, std::string>> out;
   Collect(out, std::make_integer_sequence<uint32_t, kScanLimit>{});
-  // Append the two high-value sentinels the scan cannot reach.
+  // Append the two high-value codes the scan cannot reach.
   out.push_back({AMDSMI_STATUS_MAP_ERROR, std::string(EnumName<AMDSMI_STATUS_MAP_ERROR>())});
   out.push_back(
       {AMDSMI_STATUS_UNKNOWN_ERROR, std::string(EnumName<AMDSMI_STATUS_UNKNOWN_ERROR>())});
@@ -144,8 +145,9 @@ bool StartsWith(const std::string& s, const std::string& prefix) {
 
 }  // namespace
 
-// Every status code should resolve to a string that starts with its enum name.
-// Missing cases fall through to AMDSMI_STATUS_UNKNOWN_ERROR and fail below.
+// The Python unit test (test_status_code_to_string) covers the same ground, but
+// it needs an initialized library and drivers; this C++ test is driver-free and
+// runs in CI without a GPU.
 TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
   if (!enum_reflect::kAvailable) {
     GTEST_SKIP() << "enum reflection unavailable on this compiler (" << enum_reflect::CompilerId()
@@ -156,12 +158,16 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
 
   const auto all_status_codes = enum_reflect::AllStatusCodes();
 
-  // Keep this from passing with an empty or incomplete reflection result. We
-  // check a small set of required codes instead of asserting the full enum
-  // count, so adding a new status code does not require updating this test.
-  // The required set covers the regression cases (TIMEOUT, MORE_DATA) and both
-  // sentinels. If any are absent, the reflection parser or scan limit is broken;
-  // the failure is in the test harness, not the amdsmi status-string code.
+  // Guard against an empty or incomplete reflection result: if these known
+  // codes aren't discovered, the __PRETTY_FUNCTION__ parser or kScanLimit broke.
+  // The floor is a loose lower bound (well below the current enumerator count)
+  // to catch a broken parser without needing an update for every new code.
+  ASSERT_GE(all_status_codes.size(), 40u)
+      << "enum reflection discovered only " << all_status_codes.size()
+      << " status codes; the __PRETTY_FUNCTION__ parser or kScanLimit is broken. "
+      << "Compiler: " << enum_reflect::CompilerId() << "; sample signature: \""
+      << enum_reflect::SampleSignature() << "\".";
+
   auto contains = [&](amdsmi_status_t code) {
     for (const auto& [value, name] : all_status_codes) {
       if (value == code) return true;
@@ -202,7 +208,7 @@ TEST(AmdSmiStatusStringTest, KnownStatusCodesResolveToTheirOwnName) {
       // The two codes whose missing cases prompted this fix.
       {AMDSMI_STATUS_TIMEOUT, "AMDSMI_STATUS_TIMEOUT"},
       {AMDSMI_STATUS_MORE_DATA, "AMDSMI_STATUS_MORE_DATA"},
-      // Controls that were already handled, including both sentinels.
+      // Controls that were already handled, including both catch-all codes.
       {AMDSMI_STATUS_SUCCESS, "AMDSMI_STATUS_SUCCESS"},
       {AMDSMI_STATUS_INVAL, "AMDSMI_STATUS_INVAL"},
       {AMDSMI_STATUS_MAP_ERROR, "AMDSMI_STATUS_MAP_ERROR"},
@@ -238,4 +244,21 @@ TEST(AmdSmiStatusStringTest, UnmappedLowerLevelStatusYieldsMapError) {
   EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_INVALID_ARGS), AMDSMI_STATUS_INVAL);
   EXPECT_NE(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_NOT_SUPPORTED), AMDSMI_STATUS_MAP_ERROR);
+}
+
+// A value that is not a defined status code (an enum gap) must hit the default
+// path and report AMDSMI_STATUS_UNKNOWN_ERROR rather than a stale string.
+TEST(AmdSmiStatusStringTest, UndefinedStatusCodeYieldsUnknownError) {
+  const char* status_string = nullptr;
+  // 100 sits in an enum gap (above the highest normal code, below the two
+  // high-value error codes).
+  const auto undefined_code = static_cast<amdsmi_status_t>(100);
+  EXPECT_EQ(amdsmi_status_code_to_string(undefined_code, &status_string),
+            AMDSMI_STATUS_UNKNOWN_ERROR);
+  ASSERT_NE(status_string, nullptr);
+}
+
+// A null output pointer must be rejected, not dereferenced.
+TEST(AmdSmiStatusStringTest, NullOutputPointerYieldsInval) {
+  EXPECT_EQ(amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, nullptr), AMDSMI_STATUS_INVAL);
 }

@@ -79,11 +79,9 @@ const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
 };
 
 inline amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status) {
+  // Unmapped rsmi codes fall back to AMDSMI_STATUS_MAP_ERROR.
   amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
 
-  // Look for it in the map
-  // If found: use the mapped value
-  // If not found: return the map error established above
   auto search = rsmi_status_map.find(status);
   if (search != rsmi_status_map.end()) {
     amdsmi_status = search->second;

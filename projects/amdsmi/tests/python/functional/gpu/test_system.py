@@ -91,20 +91,45 @@ class TestGpuSystem(unittest.TestCase):
     def test_status_code_to_string(self):
         self.common.print_func_name("")
 
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_status_code_to_string as it fails (Unhashable type)."
-            self.common.print(msg)
-            self.skipTest(msg)
+        # Every status code must resolve to a description starting with its own
+        # enum name. Skip the two catch-all error codes: a real code resolving to
+        # one of them is a library bug this test is meant to catch.
+        #   * AMDSMI_STATUS_UNKNOWN_ERROR -> a `case` is missing from
+        #     amdsmi_status_code_to_string() (e.g. TIMEOUT / MORE_DATA).
+        #   * AMDSMI_STATUS_MAP_ERROR -> a lower-level rsmi/esmi/nic status has
+        #     no amdsmi mapping.
+        fallback_descs = ("AMDSMI_STATUS_UNKNOWN_ERROR", "AMDSMI_STATUS_MAP_ERROR")
+        for status in amdsmi.AmdSmiStatus:
+            error_name = f"AMDSMI_STATUS_{status.name}"
+            if error_name in fallback_descs:
+                continue
+            msg = f"\t### amdsmi_status_code_to_string({error_name}={status.value}):"
 
-        for error_num, _ in self.common.error_map.items():
-            msg = f"\t### amdsmi_status_code_to_string(error_num={error_num}):"
+            ret = None
+            library_error = None
             try:
-                ret = amdsmi.amdsmi_status_code_to_string(ctypes.c_uint32(int(error_num, 0)))
-                self.common.print(msg, ret)
+                ret = amdsmi.amdsmi_status_code_to_string(ctypes.c_uint32(status.value))
             except amdsmi.AmdSmiLibraryException as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
+                library_error = e
+
+            if library_error is not None:
+                self.fail(
+                    f"{msg} Missing status code string - please update amdsmi_status_code_to_string() "
+                    f"\n(Returned: "
+                    f"'{library_error.get_error_info(detailed=False)}')."
+                )
+
+            self.common.print(msg, ret)
+
+            # string_cast may return bytes; normalize for comparison.
+            ret_str = ret.decode("utf-8") if isinstance(ret, bytes) else str(ret)
+
+            # Every code's description must begin with its own enum name.
+            # e.g. Some code fallbacks provide an RSMI_STATUS_* string,
+            # but that is not a valid AMDSMI_STATUS_* string.
+            self.assertTrue(
+                ret_str.startswith(error_name),
+                f"{msg} expected description to start with '{error_name}', got '{ret_str}'.",
+            )
             self.common.print("")
-        if self.raise_exception:
-            raise self.raise_exception
         return
