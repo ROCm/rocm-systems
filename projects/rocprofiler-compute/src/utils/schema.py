@@ -41,6 +41,7 @@ class Workload:
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
     filter_kernel_ids: list[int] = field(default_factory=list)
+    filter_kernel_names: list[str] = field(default_factory=list)
     filter_gpu_ids: list[int] = field(default_factory=list)
     filter_dispatch_ids: list[int] = field(default_factory=list)
     avail_ips: list[int] = field(default_factory=list)

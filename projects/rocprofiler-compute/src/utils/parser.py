@@ -297,7 +297,7 @@ def apply_filters(
     # Kernel id is unique!
     # We pick up kernel names from kerne ids first.
     # Then filter valid entries with kernel names.
-    if workload.filter_kernel_ids:
+    if workload.filter_kernel_ids or workload.filter_kernel_names:
         filtered_df = apply_kernel_filter(filtered_df, workload)
 
     # Apply dispatch filter
@@ -313,52 +313,75 @@ def apply_filters(
     return filtered_df
 
 
-def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
-    """Apply kernel ID or name filters."""
-    if all(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
-        # Handle integer kernel IDs
-        kernel_top_dataframe = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
-        if kernel_top_dataframe is None:
+def resolve_kernel_ids_to_names(
+    filter_kernel_ids: list,
+    kernel_top_df: Optional[pd.DataFrame],
+    mark_selected: bool = False,
+) -> set[str]:
+    """Resolve a -k filter to a set of stripped kernel names.
+    """
+    if all(isinstance(kernel_id, int) for kernel_id in filter_kernel_ids):
+        if kernel_top_df is None:
             console_error(
                 "Kernel top stats table not loaded. "
                 "Ensure create_df_kernel_top_stats() "
                 "is called before applying kernel filters."
             )
 
-        # Validate kernel IDs
-        for kernel_id in workload.filter_kernel_ids:
-            if kernel_id >= len(kernel_top_dataframe["Kernel_Name"]):
+        num_kernels = len(kernel_top_df["Kernel_Name"])
+        for kernel_id in filter_kernel_ids:
+            if not 0 <= kernel_id < num_kernels:
                 console_error(
                     f"{kernel_id} is an invalid kernel id. "
-                    "Please enter an id between 0-"
-                    f"{len(kernel_top_dataframe['Kernel_Name']) - 1}"
+                    f"Please enter an id between 0-{num_kernels - 1}"
                 )
 
-        # Extract kernel names and mark selected kernels with "*"
-        # TODO: fix it for unaligned comparison
-        selected_kernels = []
-        kernel_top_dataframe["Selected"] = ""
+        if mark_selected:
+            kernel_top_df["Selected"] = ""
+            for kernel_id in filter_kernel_ids:
+                kernel_top_df.loc[kernel_id, "Selected"] = "*"
 
-        for kernel_id in workload.filter_kernel_ids:
-            selected_kernels.append(kernel_top_dataframe.loc[kernel_id, "Kernel_Name"])
-            kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
+        return {
+            str(kernel_top_df.loc[kernel_id, "Kernel_Name"]).strip()
+            for kernel_id in filter_kernel_ids
+        }
 
+    if all(isinstance(kernel_id, str) for kernel_id in filter_kernel_ids):
+        return {kernel_id.strip() for kernel_id in filter_kernel_ids}
+
+    console_error(
+        "analyze",
+        "Mixing kernel indices and string filters is not supported",
+    )
+    return set()
+
+
+def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
+    """Apply the -k kernel filter and/or the operator kernel-name filter.
+    """
+    stripped_names = df["Kernel_Name"].apply(
+        lambda kernel_name: (
+            kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
+        )
+    )
+
+    if workload.filter_kernel_ids:
+        # The Top Stats table is only needed to resolve integer -k indices.
+        kernel_top_df = None
+        if any(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
+            kernel_top_df = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
+        selected_kernels = resolve_kernel_ids_to_names(
+            workload.filter_kernel_ids,
+            kernel_top_df,
+            mark_selected=True,
+        )
         if selected_kernels:
-            df = df.loc[df["Kernel_Name"].isin(selected_kernels)]
+            df = df.loc[stripped_names.isin(selected_kernels)]
+            stripped_names = stripped_names.loc[df.index]
 
-    elif all(isinstance(kernel_id, str) for kernel_id in workload.filter_kernel_ids):
-        # Handle string kernel names
-        cleaned_dataframe = df["Kernel_Name"].apply(
-            lambda kernel_name: (
-                kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
-            )
-        )
-        df = df.loc[cleaned_dataframe.isin(workload.filter_kernel_ids)]
-    else:
-        console_error(
-            "analyze",
-            "Mixing kernel indices and string filters is not currently supported",
-        )
+    if workload.filter_kernel_names:
+        operator_kernel_names = {name.strip() for name in workload.filter_kernel_names}
+        df = df.loc[stripped_names.isin(operator_kernel_names)]
 
     return df
 

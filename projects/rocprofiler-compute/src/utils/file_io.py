@@ -78,6 +78,11 @@ def create_df_kernel_top_stats(
     """
     Create top stats info by grouping kernels with user's filters.
 
+    Args:
+        filter_kernel_names: When set, only kernels whose (stripped) name is in
+            this list are kept, scoping the Top Stats tables to a selected
+            operator's kernels. Names are compared after stripping whitespace.
+
     Returns:
         A tuple of (kernel_top_df, dispatch_info_df).
     """

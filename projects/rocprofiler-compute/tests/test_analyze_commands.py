@@ -976,6 +976,7 @@ def test_apply_filters_direct():
 
         filter_gpu_ids = None
         filter_kernel_ids = None
+        filter_kernel_names = None
         filter_dispatch_ids = None
 
     workload = MockWorkload()
@@ -1511,6 +1512,7 @@ def mock_workload_for_filter():
         }),
     }
     workload.filter_kernel_ids = []
+    workload.filter_kernel_names = []
     return workload
 
 
@@ -1782,6 +1784,103 @@ def test_apply_kernel_filter_string_names(mock_workload_for_filter):
     result_df = apply_kernel_filter(raw_df_with_whitespace, mock_workload_for_filter)
     # Should match both " kernel_a " (stripped) and "kernel_a"
     assert len(result_df) == 2
+
+
+@pytest.mark.misc
+def test_resolve_kernel_ids_to_names_integer_and_string():
+    """resolve_kernel_ids_to_names maps int indices and passes through names."""
+    from utils.parser import resolve_kernel_ids_to_names
+
+    kernel_top_df = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", " kernel_b ", "kernel_c"],
+    })
+
+    assert resolve_kernel_ids_to_names([0, 2], kernel_top_df) == {
+        "kernel_a",
+        "kernel_c",
+    }
+    # Names are returned stripped.
+    assert resolve_kernel_ids_to_names([1], kernel_top_df) == {"kernel_b"}
+    assert resolve_kernel_ids_to_names(["kernel_a", " kernel_c "], None) == {
+        "kernel_a",
+        "kernel_c",
+    }
+
+
+@pytest.mark.misc
+def test_resolve_kernel_ids_to_names_mark_selected():
+    """mark_selected marks matched rows with '*' in the Top Stats table."""
+    from utils.parser import resolve_kernel_ids_to_names
+
+    kernel_top_df = pd.DataFrame({"Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"]})
+    resolve_kernel_ids_to_names([0, 2], kernel_top_df, mark_selected=True)
+    assert kernel_top_df.loc[0, "Selected"] == "*"
+    assert kernel_top_df.loc[2, "Selected"] == "*"
+    assert kernel_top_df.loc[1, "Selected"] == ""
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize("invalid_id", [99, -1])
+def test_resolve_kernel_ids_to_names_invalid_id(invalid_id):
+    """Out-of-range and negative integer ids are rejected."""
+    from utils.parser import resolve_kernel_ids_to_names
+
+    kernel_top_df = pd.DataFrame({"Kernel_Name": ["kernel_a", "kernel_b"]})
+    with patch("utils.parser.console_error") as mock_error:
+        mock_error.side_effect = SystemExit(1)
+        with pytest.raises(SystemExit):
+            resolve_kernel_ids_to_names([invalid_id], kernel_top_df)
+        mock_error.assert_called_once()
+
+
+@pytest.mark.misc
+def test_resolve_kernel_ids_to_names_mixed_types_rejected():
+    """Mixing integer indices and kernel-name strings is not supported."""
+    from utils.parser import resolve_kernel_ids_to_names
+
+    kernel_top_df = pd.DataFrame({"Kernel_Name": ["kernel_a", "kernel_b"]})
+    with patch("utils.parser.console_error") as mock_error:
+        mock_error.side_effect = SystemExit(1)
+        with pytest.raises(SystemExit):
+            resolve_kernel_ids_to_names([0, "kernel_b"], kernel_top_df)
+        mock_error.assert_called_once()
+
+
+@pytest.mark.misc
+def test_apply_kernel_filter_operator_and_kernel_intersection(mock_workload_for_filter):
+    """filter_kernel_names (operator) intersects with filter_kernel_ids (-k)."""
+    from utils.parser import apply_kernel_filter
+
+    raw_df = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
+        "GPU_ID": [0, 0, 0],
+        "Dispatch_ID": [1, 2, 3],
+    })
+
+    # -k selects a,b; operator selects b,c => intersection is b.
+    mock_workload_for_filter.filter_kernel_ids = [0, 1]
+    mock_workload_for_filter.filter_kernel_names = ["kernel_b", "kernel_c"]
+    result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
+    assert set(result_df["Kernel_Name"]) == {"kernel_b"}
+
+
+@pytest.mark.misc
+def test_pc_sampling_with_operator_filter_does_not_crash():
+    """Operator filters store kernel names in filter_kernel_names, leaving
+    filter_kernel_ids empty, so index-based PC sampling stays safe (no crash)."""
+    workload = Mock()
+    workload.dfs = {
+        1: pd.DataFrame({"Kernel_Name": ["kernel_a", "kernel_b"]}),
+    }
+    workload.filter_kernel_ids = []
+    workload.filter_kernel_names = ["kernel_a", "kernel_b"]
+    tool_data = {
+        "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
+    }
+    with patch("utils.parser.load_pc_sampling_data_per_kernel") as mock_per_kernel:
+        mock_per_kernel.return_value = pd.DataFrame()
+        # Must not raise TypeError from comparing str >= int.
+        load_pc_sampling_data(workload, "test", "count", tool_data)
 
 
 @pytest.mark.misc
