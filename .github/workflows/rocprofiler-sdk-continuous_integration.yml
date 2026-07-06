@@ -431,6 +431,13 @@ jobs:
         run: |
           dnf install -y curl
           ln -s /usr/local/bin/curl /usr/bin/curl
+          for repo in \
+            codeready-builder-for-rhel-8-$(uname -m)-rpms \
+            ubi-8-codeready-builder-rpms \
+            powertools \
+            crb; do
+            dnf install -y --enablerepo="${repo}" libmount-devel && exit 0
+          done
           dnf install -y libmount-devel
 
       - name: Build ROCProfiler SDK Dependencies

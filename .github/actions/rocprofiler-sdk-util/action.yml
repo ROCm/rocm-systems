@@ -186,6 +186,7 @@ runs:
           -DBUILD_TESTING=OFF \
           -DAIS_INSTALL_EXAMPLES=OFF \
           -DAIS_INSTALL_TOOLS=OFF \
+          -DHIPFILE_ROCPROFILER_REGISTER=ON \
           .
         cmake --build build-hipfile --target hipfile --parallel ${{ inputs.build-jobs }}
         cmake --build build-hipfile --target install
