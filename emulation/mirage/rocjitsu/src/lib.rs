@@ -190,7 +190,17 @@ impl EmulatorBackend for Rocjitsu {
         // configuration. Without it the in-container host fails to locate
         // the library and the exec can never start.
         let libraries = if profile.containerize.is_some() {
-            vec![ld_preload.display().to_string()]
+            // `librocjitsu.so` links the split simulator libraries
+            // (`librocjitsu_core.so` + `libsimdojo.so`) at load time, so
+            // they must be bind-mounted alongside it or the in-container
+            // loader cannot resolve the interposer's dependencies.
+            let mut libs = vec![ld_preload.display().to_string()];
+            libs.extend(
+                runtime_sibling_libs(&ld_preload)
+                    .into_iter()
+                    .map(|path| path.display().to_string()),
+            );
+            libs
         } else {
             Default::default()
         };
@@ -262,10 +272,38 @@ pub const RUNTIME_SUBDIR: &str = "rocjitsu";
 /// this directory (see [`kmd_search_dirs`]).
 pub const CONTAINER_LIB_DIR: &str = "/mnt/mirage/lib";
 
-/// Name used for the rocjitsu library on disk. A single combined
-/// `librocjitsu.so` exports both the KMD interposer (LD_PRELOAD) and the
-/// HSA tools hooks (`HSA_TOOLS_LIB`).
+/// Name used for the rocjitsu library on disk. `librocjitsu.so` is the
+/// LD_PRELOAD KMD interposer. On a split build it dynamically links the
+/// simulator shared libraries in [`RUNTIME_SIBLING_LIB_NAMES`] rather
+/// than bundling them, so those siblings must be co-located with it.
 pub const LIB_NAME: &str = "librocjitsu.so";
+
+/// Shared libraries `librocjitsu.so` links at load time on a split
+/// build: `librocjitsu_core.so` holds the simulator runtime and
+/// `libsimdojo.so` the simulation engine. The interposer no longer
+/// bundles the simulator, so wherever `librocjitsu.so` is staged away
+/// from its install directory — e.g. bind-mounted into a container — its
+/// siblings must travel with it. A combined build ships a self-contained
+/// `librocjitsu.so`; each sibling is therefore included only when it
+/// actually sits next to the interposer on disk.
+pub const RUNTIME_SIBLING_LIB_NAMES: &[&str] = &["librocjitsu_core.so", "libsimdojo.so"];
+
+/// The runtime sibling libraries (see [`RUNTIME_SIBLING_LIB_NAMES`]) that
+/// exist next to the resolved `librocjitsu.so` at `preload`. Empty for a
+/// self-contained (combined) build where the interposer has no split
+/// siblings.
+pub fn runtime_sibling_libs(preload: &std::path::Path) -> Vec<PathBuf> {
+    preload
+        .parent()
+        .map(|dir| {
+            RUNTIME_SIBLING_LIB_NAMES
+                .iter()
+                .map(|name| dir.join(name))
+                .filter(|path| path.is_file())
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 /// Name of the synthesised rocjitsu `SimulationConfig` written into the
 /// per-session directory (`<session>/rj_config.json`).
@@ -466,6 +504,31 @@ pub fn is_installed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_siblings_collected_only_when_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let preload = dir.join(LIB_NAME);
+        std::fs::write(&preload, b"").unwrap();
+
+        // A self-contained interposer has no split siblings on disk.
+        assert!(runtime_sibling_libs(&preload).is_empty());
+
+        // A split build co-locates the simulator libraries next to it.
+        for name in RUNTIME_SIBLING_LIB_NAMES {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        let libs = runtime_sibling_libs(&preload);
+        assert_eq!(libs.len(), RUNTIME_SIBLING_LIB_NAMES.len());
+        for name in RUNTIME_SIBLING_LIB_NAMES {
+            assert!(
+                libs.iter()
+                    .any(|p| p.file_name().and_then(|n| n.to_str()) == Some(name)),
+                "missing sibling {name}"
+            );
+        }
+    }
 
     #[test]
     fn kmd_config_requires_resolvable_topology() {

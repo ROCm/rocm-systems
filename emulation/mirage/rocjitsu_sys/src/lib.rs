@@ -11,9 +11,12 @@
 //! a ROCm wheel / system install and is never present when mirage is
 //! built, so we cannot link it at build time. Instead we `dlopen` it
 //! (via [`libloading`]) and resolve the handful of `rj_vm_*` symbols we
-//! need. The single self-contained `librocjitsu.so` exports the full
-//! VM API in addition to the LD_PRELOAD interposer, so loading that one
-//! library is enough to both interpose a workload *and* host the daemon.
+//! need. `librocjitsu.so` is the LD_PRELOAD interposer; on a split build
+//! it links the simulator shared libraries (`librocjitsu_core.so` +
+//! `libsimdojo.so`) that actually export the VM API, which the loader
+//! pulls in from alongside it. `dlopen`ing that one library therefore
+//! still resolves the full `rj_vm_*` API — enough to both interpose a
+//! workload *and* host the daemon.
 //!
 //! # Safety
 //!
