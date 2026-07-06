@@ -962,7 +962,7 @@ class Graph {
     // Approach B (same-queue any-order overlap): when true, this segment's head
     // dispatch packet has its AQL barrier bit cleared so capable HW overlaps it
     // with the first segment on the same oversubscribed queue. Decided once in
-    // RoundRobinStreamAssignment(); false unless overlap is enabled.
+    // BuildSyncPlan()'s dispatch-order walk; false unless overlap is enabled.
     bool clear_head_barrier = false;
   };
 
@@ -1303,14 +1303,22 @@ class GraphExecSegmented : public GraphExecBase {
   // ---- Same-queue any-order overlap (Approach B: oversubscription) --------
   // Multi-queue scheduling is preserved. When more parallel same-level segments
   // exist than streams in a device's pool, round-robin assignment lands several
-  // segments on the same queue. RoundRobinStreamAssignment() decides per segment
-  // (in dispatch order) whether its head may drop the AQL barrier bit
-  // (Segment::clear_head_barrier); BuildSyncPlan() stamps that bit so capable
-  // hardware overlaps the colliding segments on that queue instead of
-  // serializing. Set once in Init(); guards every mutation so it is a no-op
-  // otherwise. The optimization targets round-robin oversubscription only, so
-  // SelectStreamAssignment() forces round-robin when this is enabled.
+  // segments on the same queue. BuildSyncPlan()'s dispatch-order walk both decides
+  // per segment whether its head may drop the AQL barrier bit
+  // (Segment::clear_head_barrier) and stamps it (PASS 3), so capable hardware
+  // overlaps the colliding segments on that queue instead of serializing. Set once
+  // in Init(); guards every mutation so it is a no-op otherwise. The optimization
+  // targets round-robin oversubscription only, so SelectStreamAssignment() forces
+  // round-robin when this is enabled.
   bool anyorder_enabled_ = false;
+  // True when the active stream assignment is round-robin (set by
+  // RoundRobinStreamAssignment, cleared by DFSStreamAssignment). Approach B's
+  // head-barrier clearing is only safe under round-robin, where same-queue
+  // collisions are independent same-level siblings; under DFS same-stream
+  // segments form dependency chains. BuildSyncPlan's decision consults this so a
+  // forced-DFS + any-order config (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2) never
+  // clears a chained head.
+  bool assignment_is_round_robin_ = false;
   // Stamp the precomputed head-barrier decision onto one segment's head dispatch
   // packet (idempotent; re-applied per segment after a node update re-capture).
   void SetSegmentHeadBarrier(const Segment& seg, SegmentBatch& sb);

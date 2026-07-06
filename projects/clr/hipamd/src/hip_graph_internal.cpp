@@ -534,9 +534,12 @@ void GraphExecSegmented::BuildSyncPlan() {
   // effective_barrier_deps by segment.id consistently below.
   std::vector<std::vector<int>> effective_barrier_deps(segments_.size());
   for (size_t i = 0; i < segments_.size(); ++i) {
-    const auto& seg = segments_[i];
+    auto& seg = segments_[i];
     assert(seg.id == static_cast<int>(i) &&
            "segment.id must equal its index in segments_");
+    // Approach B: reset the per-segment head-barrier decision on every
+    // (re-runnable) BuildSyncPlan pass before the dispatch-order walk recomputes it.
+    seg.clear_head_barrier = false;
     for (int dep_id : seg.segment_ids_dependencies) {
       if (dep_id < 0 || dep_id >= static_cast<int>(segments_.size())) continue;
       const auto& dep_seg = segments_[dep_id];
@@ -559,13 +562,20 @@ void GraphExecSegmented::BuildSyncPlan() {
       auto level_it = segments_per_level_.find(level);
       if (level_it == segments_per_level_.end()) continue;
 
+      // Approach B: the first segment to land on each (device, stream) at this
+      // level keeps barrier=1 to fence prior-level work; later same-queue
+      // collisions may drop it. Reset per level; the loop below walks the real
+      // dispatch order (the same vector EnqueueSegmentedGraph uses).
+      std::unordered_set<uint64_t> occupiedQueuesThisLevel;
+
       for (int seg_id : level_it->second) {
         if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
-        const auto& seg = segments_[seg_id];
+        auto& seg = segments_[seg_id];
         auto& waited = stream_waited_deps[stream_key(seg.dev_id, seg.stream_id)];
 
         std::vector<int>& reduced = effective_barrier_deps[seg_id];
         reduced.clear();
+        bool dependsOffQueue = false;
         for (int dep_id : seg.segment_ids_dependencies) {
           if (dep_id < 0 || dep_id >= static_cast<int>(segments_.size())) continue;
           const auto& dep_seg = segments_[dep_id];
@@ -573,13 +583,52 @@ void GraphExecSegmented::BuildSyncPlan() {
           if (dep_seg.dev_id == seg.dev_id && dep_seg.stream_id == seg.stream_id) {
             continue;
           }
-          // Cross-stream dep: emit a wait only if no earlier same-stream segment
-          // has waited for this producer yet. insert() returns true on first add.
+          // Cross-stream dep: this head is gated by a prepended BARRIER_AND /
+          // embedded dep_signal (materialized in PASS 3) and must keep barrier=1.
+          dependsOffQueue = true;
+          // Emit a wait only if no earlier same-stream segment has waited for this
+          // producer yet. insert() returns true on first add.
           if (waited.insert(dep_id).second) {
             reduced.push_back(dep_id);
           }
         }
+
+        // Approach B decision (moved here from RoundRobinStreamAssignment so the
+        // whole feature lives in BuildSyncPlan). A later same-queue collision whose
+        // deps are all on this same queue may drop its head barrier bit to overlap
+        // on the oversubscribed queue. Never when the graph was collapsed onto a
+        // single stream (that path intends full serialization; PASS 0 runs first).
+        // NOTE: the condition is intentionally (!isFirstOnQueue && !dependsOffQueue),
+        // NOT reduced.empty(): the cross-stream dedup above is only valid because
+        // same-queue segments run in order (barrier=1); clearing the bit on a head
+        // whose off-queue dep was deduped would let it run before that producer.
+        // Guarded by assignment_is_round_robin_: under DFS same-stream segments
+        // are dependency chains and must never clear their head barrier.
+        if (anyorder_enabled_ && assignment_is_round_robin_ &&
+            !collapsed_to_single_stream_) {
+          const uint64_t queueKey = stream_key(seg.dev_id, seg.stream_id);
+          const bool isFirstOnQueue = occupiedQueuesThisLevel.insert(queueKey).second;
+          seg.clear_head_barrier = !isFirstOnQueue && !dependsOffQueue;
+        }
       }
+    }
+  }
+
+  if (anyorder_enabled_ && assignment_is_round_robin_ &&
+      !collapsed_to_single_stream_) {
+    size_t cleared = 0;
+    for (const auto& seg : segments_) {
+      if (seg.clear_head_barrier) ++cleared;
+    }
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] Approach B: %zu segments, %zu head(s) marked for any-order "
+            "overlap on oversubscribed queues (queue pool = %u)",
+            segments_.size(), cleared, DEBUG_HIP_FORCE_GRAPH_QUEUES);
+    if (cleared == 0) {
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[hipGraph] Approach B: no oversubscription detected -> nothing to "
+              "overlap (need > %u parallel segments at some level)",
+              DEBUG_HIP_FORCE_GRAPH_QUEUES);
     }
   }
 
@@ -1297,6 +1346,10 @@ void GraphExecSegmented::FindStreamsReqPerDevForSegments() {
 
 // ================================================================================================
 void GraphExecSegmented::RoundRobinStreamAssignment() {
+  // Record that round-robin is the active assignment: Approach B's head-barrier
+  // clearing in BuildSyncPlan is only valid here (same-queue collisions are
+  // independent same-level siblings, not dependency chains as under DFS).
+  assignment_is_round_robin_ = true;
   // max_streams_dev_ holds the raw parallelism count per device as computed by
   // FindStreamsReqPerDevForSegments() and capped in Init(). CreateStreams() handles
   // the -1 adjustment for the instantiation device internally, so the value here
@@ -1315,64 +1368,18 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
     // the same device spread evenly across that device's stream pool.
     std::unordered_map<int, size_t> dev_idx;
 
-    // Approach B: track the first segment to land on each (device, stream) at
-    // this level. Iteration order here is the dispatch order (same vector drives
-    // EnqueueSegmentedGraph), so "first on queue" is genuinely enqueued first --
-    // its kept barrier=1 fences all prior-level work on that queue.
-    std::unordered_set<uint64_t> occupiedQueues;
-
     for (int seg_id : it->second) {
       if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
         auto& seg = segments_[seg_id];
         seg.stream_id = static_cast<int>(dev_idx[seg.dev_id]++ % getPoolSize(seg.dev_id));
-
-        // Decide whether this head may drop its AQL barrier bit for same-queue
-        // overlap. Deps are always at a strictly lower level (topological sort)
-        // and lower levels are assigned first, so dep stream_ids are final here.
-        seg.clear_head_barrier = false;
-        if (anyorder_enabled_) {
-          const uint64_t queueKey =
-              (static_cast<uint64_t>(static_cast<uint32_t>(seg.dev_id)) << 32) |
-              static_cast<uint32_t>(seg.stream_id);
-          const bool isFirstOnQueue = occupiedQueues.insert(queueKey).second;
-
-          // A head with a cross-queue dependency is gated by a prepended
-          // BARRIER_AND / embedded dep_signal and must keep barrier=1.
-          bool dependsOffQueue = false;
-          for (int dep : seg.segment_ids_dependencies) {
-            if (dep >= 0 && dep < static_cast<int>(segments_.size())) {
-              const Segment& prev = segments_[dep];
-              if (prev.dev_id != seg.dev_id || prev.stream_id != seg.stream_id) {
-                dependsOffQueue = true;
-                break;
-              }
-            }
-          }
-
-          // Clear only on a later same-queue collision whose deps are all on
-          // this same queue; first-on-queue and cross-queue heads keep barrier=1.
-          seg.clear_head_barrier = !isFirstOnQueue && !dependsOffQueue;
-        }
       }
     }
   }
 
-  if (anyorder_enabled_) {
-    size_t cleared = 0;
-    for (const auto& seg : segments_) {
-      if (seg.clear_head_barrier) ++cleared;
-    }
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] Approach B: round-robin assigned %zu segments, %zu head(s) "
-            "marked for any-order overlap on oversubscribed queues (queue pool = %u)",
-            segments_.size(), cleared, DEBUG_HIP_FORCE_GRAPH_QUEUES);
-    if (cleared == 0) {
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] Approach B: no oversubscription detected -> nothing to overlap "
-              "(need > %u parallel segments at some level)", DEBUG_HIP_FORCE_GRAPH_QUEUES);
-    }
-  }
-
+  // Approach B's per-segment head-barrier decision (seg.clear_head_barrier) is no
+  // longer made here: it now lives entirely in BuildSyncPlan's dispatch-order walk
+  // (PASS 2), where the post-collapse stream assignment is final. This function
+  // only assigns streams.
   ComputeCompletionSignalFlags();
 }
 
@@ -1407,6 +1414,9 @@ void GraphExecSegmented::ComputeCompletionSignalFlags() {
 // DFS-based stream assignment for segment DAG.
 // Linear chains of segments stay on the same stream; branches rotate to a new stream at each leaf.
 void GraphExecSegmented::DFSStreamAssignment() {
+  // Under DFS, same-stream segments form dependency chains, so Approach B's
+  // head-barrier clearing must never apply (see RoundRobinStreamAssignment).
+  assignment_is_round_robin_ = false;
   auto getPoolSize = [&](int dev_id) -> int {
     auto it = max_streams_dev_.find(dev_id);
     return (it != max_streams_dev_.end() && it->second > 0) ? it->second : 1;
