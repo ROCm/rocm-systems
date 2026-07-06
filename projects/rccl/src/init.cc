@@ -1013,7 +1013,7 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   // detect if fine grained memory is available on this GPU
   int *ptr;
 #if defined(HIP_UNCACHED_MEMORY)
-  if (hipExtMallocWithFlags((void**)&ptr, sizeof(int), hipDeviceMallocUncached) == hipSuccess) {
+  if (hipExtMallocWithFlags((void**)&ptr, sizeof(int), rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained) == hipSuccess) {
 #else
   if (hipExtMallocWithFlags((void**)&ptr, sizeof(int), hipDeviceMallocFinegrained) == hipSuccess) {
 #endif

@@ -410,7 +410,7 @@ static ncclResult_t sharedBuffersInit(struct ncclCollNetSharedRes* collNet, int 
 
   if (cuda && collNet->cudaBuff == NULL) {
 #if defined(HIP_UNCACHED_MEMORY)
-    NCCLCHECK(ncclCudaCalloc(&collNet->cudaBuff, *size, manager, ncclMemPersist, cuda ? hipDeviceMallocUncached : hipDeviceMallocDefault));
+    NCCLCHECK(ncclCudaCalloc(&collNet->cudaBuff, *size, manager, ncclMemPersist, cuda ? (rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained) : hipDeviceMallocDefault));
 #else
     NCCLCHECK(ncclCudaCalloc(&collNet->cudaBuff, *size, manager, ncclMemPersist, cuda ? hipDeviceMallocFinegrained : hipDeviceMallocDefault));
 #endif

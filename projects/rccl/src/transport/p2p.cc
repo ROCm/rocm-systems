@@ -274,7 +274,7 @@ ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int refcount, ncclIpcDe
   } else {
     // Allocate a CUDA buffer and generate an IPC handle for it
 #if defined(HIP_UNCACHED_MEMORY)
-    NCCLCHECK(ncclCudaCalloc((char **)ptr, size, manager, memtype, hipDeviceMallocUncached));
+    NCCLCHECK(ncclCudaCalloc((char **)ptr, size, manager, memtype, rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained));
 #else
     NCCLCHECK(ncclCudaCalloc((char **)ptr, size, manager, memtype, hipDeviceMallocFinegrained));
 #endif
@@ -732,7 +732,7 @@ static ncclResult_t p2pSendProxySetup(struct ncclProxyConnection* connection, st
     connection->transportResources = proxyInfo;
 
 #if defined(HIP_UNCACHED_MEMORY)
-    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, proxyState->buffSizes[NCCL_PROTO_SIMPLE], proxyState->memManager, ncclMemPersist, hipDeviceMallocUncached));
+    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, proxyState->buffSizes[NCCL_PROTO_SIMPLE], proxyState->memManager, ncclMemPersist, rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained));
 #else
     NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, proxyState->buffSizes[NCCL_PROTO_SIMPLE], proxyState->memManager, ncclMemPersist, hipDeviceMallocFinegrained));
 #endif

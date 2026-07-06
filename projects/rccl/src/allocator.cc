@@ -10,6 +10,10 @@
 #include "group.h"
 #include "nvtx.h"
 #include "utils.h"
+#include "rccl_vars.h"
+
+// -1 = auto (arch-based), 0 = force fine-grain, 1 = force uncached
+RCCL_PARAM(UncachedMemory, "UNCACHED_MEMORY", 1);
 
 NCCL_API(ncclResult_t, ncclMemAlloc, void **ptr, size_t size);
 ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {

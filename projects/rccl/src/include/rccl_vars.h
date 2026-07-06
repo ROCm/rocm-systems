@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "param.h"
 
 RCCL_PARAM_DECLARE(EnableHipGraph);  // Opt-in environment variable for enabling hipGraph
+RCCL_PARAM_DECLARE(UncachedMemory);
 
 /* Expose needed static functions for rccl-tests (or unit-testing in future). */
 #ifndef RCCL_EXPOSE_STATIC

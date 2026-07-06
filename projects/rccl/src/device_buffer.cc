@@ -31,7 +31,7 @@ namespace meta::comms {
 DeviceBuffer::DeviceBuffer(std::size_t size) : size_(size) {
   
 #if defined(HIP_UNCACHED_MEMORY)  
-  HIP_CALL(hipExtMallocWithFlags((void**)&ptr_, size, hipDeviceMallocUncached));
+  HIP_CALL(hipExtMallocWithFlags((void**)&ptr_, size, rcclParamUncachedMemory()?hipDeviceMallocUncached : hipDeviceMallocFinegrained));
 #else
   HIP_CALL(hipExtMallocWithFlags((void**)&ptr_, size, hipDeviceMallocFinegrained));
 #endif

@@ -864,10 +864,10 @@ static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int 
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
       NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size, proxyState->memManager, ncclMemPersist,
-        cuda ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : hipDeviceMallocUncached) : hipDeviceMallocDefault));
+        cuda ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : (rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained)) : hipDeviceMallocDefault));
 #else
       NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size, proxyState->memManager, ncclMemPersist,
-        cuda ? hipDeviceMallocUncached : hipDeviceMallocDefault));
+        cuda ? (rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained) : hipDeviceMallocDefault));
 #endif
 #else
       NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size, proxyState->memManager, ncclMemPersist,
@@ -1212,10 +1212,10 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
         NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
-          resources->useGdr ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : hipDeviceMallocUncached) : hipDeviceMallocDefault));
+          resources->useGdr ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : (rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained)) : hipDeviceMallocDefault));
 #else
         NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
-          resources->useGdr ? hipDeviceMallocUncached : hipDeviceMallocDefault));
+          resources->useGdr ? (rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained) : hipDeviceMallocDefault));
 #endif
 #else
         NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
@@ -1436,10 +1436,10 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
         NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
-          resources->useGdr ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : hipDeviceMallocUncached) : hipDeviceMallocDefault));
+          resources->useGdr ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : (rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained)) : hipDeviceMallocDefault));
 #else
         NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
-          resources->useGdr ? hipDeviceMallocUncached : hipDeviceMallocDefault));
+          resources->useGdr ? (rcclParamUncachedMemory() ? hipDeviceMallocUncached : hipDeviceMallocFinegrained) : hipDeviceMallocDefault));
 #endif
 #else
         NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
