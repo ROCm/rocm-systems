@@ -980,20 +980,17 @@ template <typename Inst, typename BinOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
-  const ConstVgprStoragePair64 rs1 = simd_src_reg64(inst.vsrc1, wf);
-  const VgprStoragePair64 rd64 = simd_dst_reg64(inst.vdst, wf);
-  const auto a_bcast =
-      rs0.lo ? util::native<T>{} : util::broadcast64<T>(inst.src0.read_scalar64(wf));
-  const auto b_bcast =
-      rs1.lo ? util::native<T>{} : util::broadcast64<T>(inst.vsrc1.read_scalar64(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand64(inst.src0, wf, exec);
+  auto src1 = regs.read_operand64(inst.vsrc1, wf, exec);
+  auto dst = regs.write_operand64(inst.vdst, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = simd_load64_or<T>(rs0, base, a_bcast);
-    const auto b = simd_load64_or<T>(rs1, base, b_bcast);
-    write_simd64_at<T>(rd64, inst.vdst, wf, base, bin_op(a, b), chunk);
+    const auto a = src0.template load_native<T>(base);
+    const auto b = src1.template load_native<T>(base);
+    dst.template store_native<T>(base, bin_op(a, b), chunk);
   }
   return true;
 }
@@ -1026,17 +1023,15 @@ template <typename T, typename Inst, typename UnOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  // Resolve operand base pointers once; see try_execute_binary_vop2_simd.
-  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
-  const VgprStoragePair64 rd64 = simd_dst_reg64(inst.vdst, wf);
-  const auto a_bcast =
-      rs0.lo ? util::native<T>{} : util::broadcast64<T>(inst.src0.read_scalar64(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand64(inst.src0, wf, exec);
+  auto dst = regs.write_operand64(inst.vdst, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = simd_load64_or<T>(rs0, base, a_bcast);
-    write_simd64_at<T>(rd64, inst.vdst, wf, base, un_op(a), chunk);
+    const auto a = src0.template load_native<T>(base);
+    dst.template store_native<T>(base, un_op(a), chunk);
   }
   return true;
 }
@@ -1080,21 +1075,16 @@ template <typename Tout, typename Inst, typename CvtOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  // Resolve operand base pointers once; see try_execute_binary_vop2_simd. The
-  // dst is 32-bit (native_width64 narrow lanes) while the source is 64-bit.
-  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
-  const auto s_bcast =
-      rs0.lo ? util::native<double>{} : util::broadcast64<double>(inst.src0.read_scalar64(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand64(inst.src0, wf, exec);
+  auto dst = regs.write_operand(inst.vdst, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto s = simd_load64_or<double>(rs0, base, s_bcast);
+    const auto s = src0.template load_native<double>(base);
     const util::narrow32<Tout> r = cvt_op(s);
-    // Value-semantic narrow store (per-lane bit_cast spill + write_lane_chunk
-    // fallback for a non-VGPR dst lives inside write_simd_narrow_at).
-    write_simd_narrow_at<Tout>(rd, inst.vdst, wf, base, r, chunk);
+    dst.template store_narrow<Tout>(base, r, chunk);
   }
   return true;
 }
@@ -1120,18 +1110,15 @@ template <typename Tin, typename Inst, typename CvtOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  // Resolve operand base pointers once; see try_execute_binary_vop2_simd. The
-  // source is 32-bit (native_width64 narrow lanes) while the dst is 64-bit.
-  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
-  const VgprStoragePair64 rd64 = simd_dst_reg64(inst.vdst, wf);
-  const auto in_bcast =
-      r0 ? util::narrow32<Tin>{} : util::broadcast_narrow<Tin>(inst.src0.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand(inst.src0, wf, exec);
+  auto dst = regs.write_operand64(inst.vdst, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto in = simd_load_narrow_or<Tin>(r0, base, in_bcast);
-    write_simd64_at<double>(rd64, inst.vdst, wf, base, cvt_op(in), chunk);
+    const auto in = src0.template load_narrow<Tin>(base);
+    dst.template store_native<double>(base, cvt_op(in), chunk);
   }
   return true;
 }
@@ -1168,15 +1155,14 @@ template <typename Inst, typename CvtOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
-  const auto s_bcast =
-      rs0.lo ? util::native<double>{} : util::broadcast64<double>(inst.src0.read_scalar64(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand64(inst.src0, wf, exec);
+  auto dst = regs.write_operand(inst.vdst, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto s = apply_vop3_src_mod_f64<0>(simd_load64_or<double>(rs0, base, s_bcast), abs, neg);
+    const auto s = apply_vop3_src_mod_f64<0>(src0.template load_native<double>(base), abs, neg);
     util::narrow32<float> v = cvt_op(s);
     // Inline omod/clamp at narrow32<float> width (mirrors apply_vop3_dst_mod):
     // IEEE-exact power-of-two scale, ordered-compare saturation to [0,1].
@@ -1190,7 +1176,7 @@ template <typename Inst, typename CvtOp>
       util::stdx::where(v < 0.0f, v) = 0.0f;
       util::stdx::where(v > 1.0f, v) = 1.0f;
     }
-    write_simd_narrow_at<float>(rd, inst.vdst, wf, base, v, chunk);
+    dst.template store_narrow<float>(base, v, chunk);
   }
   return true;
 }
