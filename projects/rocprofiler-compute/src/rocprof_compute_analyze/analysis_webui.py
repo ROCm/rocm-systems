@@ -27,6 +27,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.roofline_calc import calc_ai_analyze
+from utils.utils_analysis import get_matrix_ops_type
 from utils.utils_common import validate_roofline_csv
 
 
@@ -128,23 +129,15 @@ class webui_analysis(OmniAnalyze_Base):
                     self.dest_dir,
                     args,
                     pc_sampling_data,
-                    filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 )
             else:
                 # Generate original raw df
                 run_workload.raw_pmc = file_io.create_df_pmc(
                     self.dest_dir,
-                    args.nodes,
-                    args.spatial_multiplexing,
                     args.kernel_verbose,
                     args.verbose,
                     self._profiling_config,
                 )
-
-                if args.spatial_multiplexing:
-                    run_workload.raw_pmc = self.spatial_multiplex_merge_counters(
-                        run_workload.raw_pmc
-                    )
 
                 if self._profiling_config.get("iteration_multiplexing") is not None:
                     run_workload.raw_pmc = self.iteration_multiplex_impute_counters(
@@ -176,7 +169,6 @@ class webui_analysis(OmniAnalyze_Base):
                     raw_data_dir=str(self.dest_dir),
                     filter_gpu_ids=run_workload.filter_gpu_ids,
                     filter_dispatch_ids=run_workload.filter_dispatch_ids,
-                    filter_nodes=self._runs[self.dest_dir].filter_nodes,
                     time_unit=args.time_unit,
                     kernel_verbose=args.kernel_verbose,
                 )
@@ -243,24 +235,19 @@ class webui_analysis(OmniAnalyze_Base):
             soc = self.get_socs()
             if soc and self.arch in soc:
                 if is_roofline_valid:
-                    # Normalize user-facing "vL1D" to CSV column name "L1"
-                    mem_level = (
-                        args.mem_level
-                        if isinstance(args.mem_level, list)
-                        else [args.mem_level]
+                    matrix_ops_type = get_matrix_ops_type(
+                        getattr(soc[self.arch]._mspec, "gpu_series", "unknown_series")
                     )
-                    mem_level = [("L1" if m == "vL1D" else m) for m in mem_level]
-
                     roof_obj = Roofline(
                         args=soc[self.arch].get_args(),
                         mspec=soc[self.arch]._mspec,
                         run_parameters={
                             "workload_dir": self.dest_dir,
                             "device_id": 0,
+                            "gpu_arch": self.arch,
                             "sort_type": str(args.sort),
-                            "mem_level": mem_level,
+                            "mem_level": args.mem_level,
                             "include_kernel_names": True,
-                            "is_standalone": False,
                             "roofline_data_type": self.__roofline_data_type,
                             # WebUI handles kernel filtering
                             # client-side via Dash/Plotly
@@ -268,6 +255,7 @@ class webui_analysis(OmniAnalyze_Base):
                             "iteration_multiplexing": self._profiling_config[
                                 "iteration_multiplexing"
                             ],
+                            "matrix_ops_type": matrix_ops_type,
                         },
                     )
 
@@ -421,15 +409,10 @@ class webui_analysis(OmniAnalyze_Base):
 
         workload.raw_pmc = file_io.create_df_pmc(
             self.dest_dir,
-            args.nodes,
-            args.spatial_multiplexing,
             args.kernel_verbose,
             args.verbose,
             self._profiling_config,
         )
-
-        if args.spatial_multiplexing:
-            workload.raw_pmc = self.spatial_multiplex_merge_counters(workload.raw_pmc)
 
         if self._profiling_config.get("iteration_multiplexing") is not None:
             workload.raw_pmc = self.iteration_multiplex_impute_counters(
@@ -443,7 +426,6 @@ class webui_analysis(OmniAnalyze_Base):
             raw_data_dir=self.dest_dir,
             filter_gpu_ids=workload.filter_gpu_ids,
             filter_dispatch_ids=workload.filter_dispatch_ids,
-            filter_nodes=workload.filter_nodes,
             time_unit=args.time_unit,
             kernel_verbose=args.kernel_verbose,
         )

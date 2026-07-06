@@ -35,6 +35,10 @@ if(NOT GTest_FOUND)
         GIT_TAG v1.14.0
     )
     FetchContent_MakeAvailable(googletest)
+elseif(TARGET GTest::GTest AND NOT TARGET GTest::gtest)
+    # MODULE mode found GTest::GTest — create the canonical aliases expected below.
+    add_library(GTest::gtest ALIAS GTest::GTest)
+    add_library(GTest::gtest_main ALIAS GTest::Main)
 endif()
 
 set(AMDCUID_TST_EXECUTABLE amdcuid_test)
@@ -55,8 +59,8 @@ target_include_directories(amdcuid_test PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 target_link_libraries(
     ${AMDCUID_TST_EXECUTABLE}
     amdcuid_static
-    GTest::GTest
-    GTest::Main
+    GTest::gtest
+    GTest::gtest_main
 )
 
 # Register tests with CTest
