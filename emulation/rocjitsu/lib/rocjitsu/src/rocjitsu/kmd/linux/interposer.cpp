@@ -552,6 +552,8 @@ __attribute__((constructor)) static void init_interposer() { InterposerContext::
 
 extern "C" {
 
+#pragma GCC visibility push(default)
+
 static std::string redirect_sysfs_path(const char *path);
 static std::string redirect_sys_dev_char(const char *path);
 static const Sysfs::GpuInfo *interposer_gpu_info();
@@ -1220,9 +1222,11 @@ int munmap(void *addr, size_t length) {
   return InterposerContext::real.munmap(addr, length);
 }
 
+#pragma GCC visibility pop
 } // extern "C"
 
 extern "C" {
+#pragma GCC visibility push(default)
 
 // -- fopen / freopen interposition (sysfs redirect) --
 
@@ -1664,4 +1668,5 @@ pid_t fork() {
   return pid;
 }
 
+#pragma GCC visibility pop
 } // extern "C"

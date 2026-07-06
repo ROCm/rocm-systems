@@ -39,6 +39,12 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Hide symbols by default so the shared library (librocjitsu.so) exports only its
+# intended ABI.
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 find_package(Threads REQUIRED)
 
 # GCC 14+ emits false-positive -Wuninitialized on reinterpret_cast<uint32_t*>
@@ -304,7 +310,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
+    set(_rj_export_map ${CMAKE_CURRENT_SOURCE_DIR}/rocjitsu_exports.map)
+    target_link_options(
+        rocjitsu_shared
+        PRIVATE "LINKER:--version-script=${_rj_export_map}"
+    )
+    # Relink when the export map changes.
+    set_property(
+        TARGET rocjitsu_shared
+        APPEND
+        PROPERTY LINK_DEPENDS ${_rj_export_map}
+    )
 endif()
 
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
