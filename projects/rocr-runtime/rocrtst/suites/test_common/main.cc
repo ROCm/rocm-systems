@@ -527,6 +527,13 @@ TEST(rocrtstFunc, SvmMemory_Negative_Test) {
     RunCustomTestEpilog(&smt);
 }
 
+TEST(rocrtstFunc, SvmMemory_AccessedBy_All_Devices_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestAccessedByAllDevices();
+    RunCustomTestEpilog(&smt);
+}
+
 TEST(rocrtstFunc, VirtMemory_Basic_Test) {
     VirtMemoryTestBasic vmt;
 
@@ -563,8 +570,30 @@ TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
     RunCustomTestEpilog(&vmt);
 }
 
-TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
-    VirtMemoryTestInterProcess vmt;
+TEST(rocrtstFunc, VirtMemory_NonContiguousChunks_Test) {
+  VirtMemoryTestBasic vmt;
+
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.NonContiguousChunks();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_GPUtoHostAccess_Test) {
+  VirtMemoryTestBasic vmt;
+
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestGpuAccessToHostMemoryAllocation();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Interprocess_DevicePool_Test) {
+    VirtMemoryTestInterProcess vmt(PoolType::kDevicePool);
+    if (!RunCustomTestProlog(&vmt)) return;
+    RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
+    VirtMemoryTestInterProcess vmt(PoolType::kCpuPool);
     if (!RunCustomTestProlog(&vmt)) return;
     RunCustomTestEpilog(&vmt);
 }

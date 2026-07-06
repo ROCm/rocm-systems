@@ -36,7 +36,7 @@ void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
 // management before dispatch N+1 begins execution, so no blanket invalidation
 // at dispatch boundaries is needed.
 void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
-                               bool non_temporal, uint32_t vmid) {
+                               bool non_temporal, bool request_l1_bypass, uint32_t vmid) {
   Mtype inst_mtype = mtype;
   Mtype effective = mtype;
   if (memory_)
@@ -65,7 +65,7 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
     if (memory_)
       chunk_mtype = effective_mtype(inst_mtype, memory_->pte_mtype(ea, vmid));
 
-    if (chunk_mtype == Mtype::UC || non_temporal) {
+    if (chunk_mtype == Mtype::UC || non_temporal || request_l1_bypass) {
       l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
       copied += chunk;
       continue;
@@ -145,7 +145,7 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
 
 void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                          uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
-                         uint32_t vmid) {
+                         bool request_l1_bypass, uint32_t vmid) {
   uint32_t stride = num_elems * elem_size;
   uint64_t remaining = lane_mask;
   while (remaining) {
@@ -154,7 +154,8 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
     uint64_t base = addrs[lane];
     for (uint32_t e = 0; e < num_elems; ++e) {
       uint64_t ea = base + e * elem_size;
-      read_bytes(ea, dst + lane * stride + e * elem_size, elem_size, mtype, non_temporal, vmid);
+      read_bytes(ea, dst + lane * stride + e * elem_size, elem_size, mtype, non_temporal,
+                 request_l1_bypass, vmid);
     }
   }
 }

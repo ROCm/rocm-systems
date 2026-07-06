@@ -82,11 +82,13 @@ struct StreamWaitEventEvent {
   uint32_t flags;
 };
 
-// Kernel argument (value_kind: 0=scalar, 1=gpu-pointer)
+// Kernel argument (value_kind: 0=scalar, 1=gpu-pointer, 2=hidden,
+// 3=scalar/struct with embedded gpu pointer(s) at ptr_offsets)
 struct KernelArg {
   uint8_t  value_kind;
   uint16_t size;
   std::vector<uint8_t> data;
+  std::vector<uint16_t> ptr_offsets;  // only for value_kind == 3
 };
 
 // Buffer snapshot (always empty in in-tree captures)
@@ -160,6 +162,16 @@ struct Archive {
   std::string path;
   uint16_t    version = 0;        // format version from hrr_file_header
   std::vector<Event> events;
+
+  // Crash-resilience status, set by load_archive:
+  //   complete  — the clean-shutdown trailer (hrr_eof_record) was found, so the
+  //               capturing process exited normally and the archive is whole.
+  //   truncated — a torn trailing record was detected and discarded; all
+  //               complete records before it were recovered. Replay still works.
+  // A capture interrupted by a crash typically has complete=false; it may also
+  // have truncated=true if the final record was only partially written.
+  bool complete  = false;
+  bool truncated = false;
 
   // Content-addressed blobs: hash_hex -> file path
   std::unordered_map<std::string, std::string> blobs;

@@ -36,7 +36,6 @@ jobs:
             ${{ github.event.inputs.subrepo-prefix }}
           sparse-checkout-cone-mode: true
           token: ${{ steps.generate-token.outputs.token }}
-          fetch-depth: 0  #for subtree operations
 
       - name: Get open PR numbers
         env:

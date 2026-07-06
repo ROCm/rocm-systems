@@ -1,8 +1,8 @@
 //! Strongly-typed builtin [`AgentDef`]s.
 //!
 //! Each agent mirrors one of the rocjitsu `configs/*.json` files:
-//! `MI300X` follows `amdgpu_cdna3.json`, `MI350X` follows
-//! `amdgpu_cdna4.json`, and `MI450X` follows `amdgpu_gfx1250.json`.
+//! `MI300X` follows `gfx942_cdna3.json`, `MI350X` follows
+//! `gfx950_cdna4.json`, and `MI450X` follows `gfx1250.json`.
 //! All three share the same `soc -> {vram, iod, xcd -> {l2, cp,
 //! se -> cu}}` component tree and six link patterns; they differ
 //! only in their device identity, the IOD fan-out, and the per-CU
@@ -26,7 +26,7 @@ pub fn agents() -> Vec<(&'static str, AgentDef)> {
 }
 
 /// `MI300X` builtin agent (registry key `MI300X`), mirroring the
-/// rocjitsu `amdgpu_cdna3.json` config: `arch = cdna3`, marketing
+/// rocjitsu `gfx942_cdna3.json` config: `arch = cdna3`, marketing
 /// name "AMD Instinct MI300X", and an 8-XCD / 4-SE / 8-CU shader
 /// fabric over a 4-IOD memory tier.
 pub fn mi300x() -> AgentDef {
@@ -76,7 +76,7 @@ pub fn mi300x() -> AgentDef {
 }
 
 /// `MI350X` builtin agent (registry key `MI350X`), mirroring the
-/// rocjitsu `amdgpu_cdna4.json` config: `arch = cdna4`, marketing
+/// rocjitsu `gfx950_cdna4.json` config: `arch = cdna4`, marketing
 /// name "AMD Instinct MI350X", and an 8-XCD / 4-SE / 8-CU shader
 /// fabric over a 2-IOD memory tier.
 pub fn mi350x() -> AgentDef {
@@ -126,7 +126,7 @@ pub fn mi350x() -> AgentDef {
 }
 
 /// `MI450X` builtin agent (registry key `MI450X`), mirroring the
-/// rocjitsu `amdgpu_gfx1250.json` config: `arch = gfx1250`, an
+/// rocjitsu `gfx1250.json` config: `arch = gfx1250`, an
 /// 8-XCD / 4-SE / 8-CU shader fabric and a 2-IOD memory tier.
 pub fn mi450x() -> AgentDef {
     AgentDef {

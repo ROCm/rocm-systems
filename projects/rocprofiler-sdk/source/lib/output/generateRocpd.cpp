@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -1034,7 +1034,8 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen,
-    const generator<tool_spm_counter_record_t>& /** spm_collection_gen*/)
+    const generator<tool_spm_counter_record_t>& /** spm_collection_gen*/,
+    const generator<rocprofiler_buffer_tracing_ompt_record_t>& ompt_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -1883,8 +1884,12 @@ write_rocpd(
                 }
                 else
                 {
+                    // OMPT instant samples are named by operation (not the "OMPT"
+                    // category) so each event keeps its identity on its own track.
+                    const auto& track_name =
+                        (itr.kind == ROCPROFILER_BUFFER_TRACING_OMPT) ? name : category;
                     auto track_id = get_track_id(
-                        db, node_id, this_pid, itr.thread_id, string_entries.at(category), "{}");
+                        db, node_id, this_pid, itr.thread_id, string_entries.at(track_name), "{}");
 
                     get_insert_statement(db,
                                          "rocpd_sample{{uuid}}",
@@ -2034,6 +2039,7 @@ write_rocpd(
         insert_api_data(hsa_api_gen);
         insert_api_data(marker_api_gen);
         insert_api_data(rccl_api_gen);
+        insert_api_data(ompt_gen);
         insert_api_data(rocdecode_api_gen);
     }
 

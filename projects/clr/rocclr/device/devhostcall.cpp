@@ -261,6 +261,8 @@ class HostcallListener {
 
 HostcallListener* hostcallListener = nullptr;
 extern amd::Monitor listenerLock;
+
+static bool listenerTerminating = false;
 constexpr static uint64_t kTimeoutFloor = K * K * 4;
 constexpr static uint64_t kTimeoutCeil = K * K * 16;
 static struct Init {
@@ -399,6 +401,11 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
   buffer->setDevice(&dev);
 
   amd::ScopedLock lock(listenerLock);
+  
+  // Don't start a new listener until any previous one is fully terminated.
+  while (listenerTerminating) {
+    listenerLock.wait();
+  }
   if (!hostcallListener) {
     hostcallListener = new HostcallListener();
     if (!hostcallListener->initSignal(dev)) {
@@ -428,20 +435,28 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
 }
 
 void disableHostcalls(void* bfr) {
+  HostcallListener* listenerToTerminate = nullptr;
   {
     amd::ScopedLock lock(listenerLock);
-    if (!hostcallListener) {
-      return;
-    }
+    if (!hostcallListener) return;
     assert(bfr && "expected a hostcall buffer");
     auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
     hostcallListener->removeBuffer(buffer);
+    if (hostcallListener->idle()) {
+      listenerToTerminate = hostcallListener;
+      hostcallListener = nullptr;
+      listenerTerminating = true;
+    }
   }
-  if (hostcallListener->idle()) {
-    hostcallListener->terminate();
-    delete hostcallListener;
-    hostcallListener = nullptr;
+  if (listenerToTerminate) {
+    listenerToTerminate->terminate();
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Terminated hostcall listener");
+    delete listenerToTerminate;
+    {
+      amd::ScopedLock lock(listenerLock);
+      listenerTerminating = false;
+      listenerLock.notifyAll();
+    }
   }
 }
 }  // namespace amd
