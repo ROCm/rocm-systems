@@ -88,6 +88,9 @@ struct KfdDeviceConfig {
   uint32_t location_id = 0x0300;
   uint64_t hive_id = 0;
   uint32_t domain = 0;
+  uint32_t capability = 0;
+  uint32_t capability2 = 0;
+  uint64_t debug_prop = 0;
   bool present = false; ///< True if device section existed in config.
 };
 
