@@ -478,6 +478,11 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (IsCodeObjectElf(image_, readable_size)) {
       // Load the binary directly
       auto elf_size = amd::Elf::getElfSize(image_);
+      if (readable_size != 0 && (elf_size == 0 || elf_size > readable_size)) {
+        LogPrintfError("ELF size out of bounds: elf_size=%zu mapped=%zu",
+                       static_cast<size_t>(elf_size), readable_size);
+        return hipErrorInvalidImage;
+      }
       for (auto* device : devices) {
         if (hipSuccess != AddDevProgram(device, image_, elf_size, fdesc))
           return hipErrorInvalidImage;
