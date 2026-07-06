@@ -41,6 +41,16 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the slower dxg path, so the
+# agent-index workloads need more headroom than real-KFD hardware; scale timeouts only there.
+# Non-WSL keeps the develop baseline (45); WSL scales it up.
+if(EXISTS "/dev/kfd")
+    set(_WSL_TIMEOUT_SCALE 1)
+else()
+    set(_WSL_TIMEOUT_SCALE 4)
+endif()
+math(EXPR _AGENT_INDEX_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-agent-index-json-absolute
     COMMAND
@@ -49,7 +59,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-agent-index-absolute --log-level ${LOG_LEVEL}
         -- $<TARGET_FILE:transpose>
     DEPENDS transpose
-    TIMEOUT 120
+    TIMEOUT ${_AGENT_INDEX_TIMEOUT}
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-absolute)
@@ -62,7 +72,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-agent-index-type-relative --log-level
         ${LOG_LEVEL} -- $<TARGET_FILE:transpose>
     DEPENDS transpose
-    TIMEOUT 120
+    TIMEOUT ${_AGENT_INDEX_TIMEOUT}
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-type-relative)
@@ -75,7 +85,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-agent-index-relative --log-level ${LOG_LEVEL}
         -- $<TARGET_FILE:transpose>
     DEPENDS transpose
-    TIMEOUT 120
+    TIMEOUT ${_AGENT_INDEX_TIMEOUT}
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-relative)
@@ -86,7 +96,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input_absolute_agent_index.yaml input_type_relative_agent_index.yaml
          input_relative_agent_index.yaml
     CONFIG pytest.ini
-    TIMEOUT 120
+    TIMEOUT ${_AGENT_INDEX_TIMEOUT}
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-absolute
     ARGS --agent-index
@@ -107,7 +117,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input_absolute_agent_index.yaml input_type_relative_agent_index.yaml
          input_relative_agent_index.yaml
     CONFIG pytest.ini
-    TIMEOUT 120
+    TIMEOUT ${_AGENT_INDEX_TIMEOUT}
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-relative
                       rocprofv3-test-agent-index-json-absolute
@@ -129,7 +139,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input_absolute_agent_index.yaml input_type_relative_agent_index.yaml
          input_relative_agent_index.yaml
     CONFIG pytest.ini
-    TIMEOUT 120
+    TIMEOUT ${_AGENT_INDEX_TIMEOUT}
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-type-relative
                       rocprofv3-test-agent-index-json-absolute

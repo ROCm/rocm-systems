@@ -19,6 +19,16 @@ endif()
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the slower dxg path, so the
+# transpose workload needs more headroom than real-KFD hardware; scale timeouts only there.
+# Non-WSL keeps the develop baseline (45); WSL scales it up.
+if(EXISTS "/dev/kfd")
+    set(_WSL_TIMEOUT_SCALE 1)
+else()
+    set(_WSL_TIMEOUT_SCALE 4)
+endif()
+math(EXPR _SUMMARY_CMD_LINE_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/input-summary.yml.in
                ${CMAKE_CURRENT_BINARY_DIR}/input-summary.yml @ONLY)
 
@@ -37,7 +47,7 @@ rocprofiler_add_integration_execute_test(
         --summary-output-file summary --summary-per-domain --summary-groups
         "KERNEL_DISPATCH|MEMORY_COPY" ".*_API" -- $<TARGET_FILE:transpose> 2 500 10
     DEPENDS transpose
-    TIMEOUT 45
+    TIMEOUT ${_SUMMARY_CMD_LINE_TIMEOUT}
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}" "ARBITRARY_ENV_VARIABLE=%tag%-trace-cmd-line"
     FIXTURES_SETUP rocprofv3-test-summary-cmd-line)

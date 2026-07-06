@@ -24,6 +24,16 @@ else()
     set(TRANSPOSE_ROCTRACER_ROCTX_DISABLED ON)
 endif()
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the slower dxg path, so the
+# transpose workload needs more headroom than real-KFD hardware; scale timeouts only there.
+# Non-WSL keeps the develop baseline (45); WSL scales it up.
+if(EXISTS "/dev/kfd")
+    set(_WSL_TIMEOUT_SCALE 1)
+else()
+    set(_WSL_TIMEOUT_SCALE 4)
+endif()
+math(EXPR _ROCTRACER_ROCTX_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-roctracer-roctx-trace
     COMMAND
@@ -31,7 +41,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-input.yml --
         ${TRANSPOSE_ROCTRACER_ROCTX_EXE}
     DEPENDS transpose-roctracer-roctx
-    TIMEOUT 45
+    TIMEOUT ${_ROCTRACER_ROCTX_TIMEOUT}
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"

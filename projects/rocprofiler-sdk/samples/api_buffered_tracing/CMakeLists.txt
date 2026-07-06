@@ -49,9 +49,20 @@ rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 
 set(buffered-api-tracing-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the slower dxg path, so this
+# sample needs more headroom than real-KFD hardware; scale the timeout only there.
+# Non-WSL keeps the develop baseline (45); WSL scales it up.
+if(EXISTS "/dev/kfd")
+    set(_WSL_TIMEOUT_SCALE 1)
+else()
+    set(_WSL_TIMEOUT_SCALE 4)
+endif()
+math(EXPR _BUFFERED_API_TRACING_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+
 add_test(NAME buffered-api-tracing COMMAND $<TARGET_FILE:buffered-api-tracing>)
 
 set_tests_properties(
     buffered-api-tracing
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${buffered-api-tracing-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT ${_BUFFERED_API_TRACING_TIMEOUT} LABELS "samples" ENVIRONMENT
+               "${buffered-api-tracing-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

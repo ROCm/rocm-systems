@@ -18,6 +18,16 @@ else()
     set(PRELOAD_ARGS)
 endif()
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the slower dxg path, so these
+# trace workloads need more headroom than real-KFD hardware; scale the timeout only there.
+if(EXISTS "/dev/kfd")
+    set(_WSL_TIMEOUT_SCALE 1)
+else()
+    set(_WSL_TIMEOUT_SCALE 4)
+endif()
+math(EXPR _TRACE_HIP_IN_LIBRARIES_TIMEOUT "120 * ${_WSL_TIMEOUT_SCALE}")
+math(EXPR _TRACE_HIP_IN_LIBRARIES_VALIDATE_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+
 foreach(_OUTPUT_FORMAT csv json pftrace otf2)
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-trace-hip-in-libraries-${_OUTPUT_FORMAT}
@@ -27,7 +37,7 @@ foreach(_OUTPUT_FORMAT csv json pftrace otf2)
             --output-format ${_OUTPUT_FORMAT} -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace
             -o out ${PRELOAD_ARGS} -- $<TARGET_FILE:hip-in-libraries>
         DEPENDS hip-in-libraries
-        TIMEOUT 120
+        TIMEOUT ${_TRACE_HIP_IN_LIBRARIES_TIMEOUT}
         LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries)
@@ -64,6 +74,6 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.pftrace
          --otf2-input
          ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.otf2
-    TIMEOUT 45
+    TIMEOUT ${_TRACE_HIP_IN_LIBRARIES_VALIDATE_TIMEOUT}
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries)
