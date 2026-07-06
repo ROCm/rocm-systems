@@ -408,6 +408,16 @@ rj_add_test(
         "bin/rj_dbt_translate"
 )
 
+add_executable(interposer_test interposer_test.cpp)
+target_compile_definitions(
+    interposer_test
+    PRIVATE RJ_LIBROCJITSU_SO_PATH="$<TARGET_FILE:rocjitsu_shared>"
+)
+target_link_libraries(interposer_test PRIVATE GTest::gtest_main)
+rj_configure_target(interposer_test TEST)
+add_dependencies(interposer_test rocjitsu_shared)
+gtest_discover_tests(interposer_test)
+
 # --- Scaling test (standalone executable) ---
 
 add_executable(scaling_test scaling_test.cpp)
