@@ -131,7 +131,13 @@ public:
     virtual uint32_t Read(CmdBuffer*             cmd_buffer,
                           const counters_vector& counters_vec,
                           void*                  data_buffer) = 0;
-    virtual int      GetNumWGPs()            = 0;
+    // Emit on-device commands that zero @p num_dwords of the result buffer at
+    // @p data_buffer. Default no-op; overridden where supported (see GpuPmcBuilder).
+    virtual void ZeroOutput(CmdBuffer* /*cmd_buffer*/,
+                            void* /*data_buffer*/,
+                            uint32_t /*num_dwords*/)
+    {}
+    virtual int GetNumWGPs() = 0;
 };
 
 // PMC PM4 commands builder template
@@ -305,6 +311,14 @@ public:
         if(Primitives::GFXIP_LEVEL >= 11) return wgp_per_sa_;
         return 1;
     };
+
+    // Zero the result buffer on-device. See PmcBuilder::ZeroOutput and
+    // CmdBuilder::BuildZeroMemoryPacket. Delegates to the per-arch command builder,
+    // which is a no-op on architectures that do not implement it.
+    void ZeroOutput(CmdBuffer* cmd_buffer, void* data_buffer, uint32_t num_dwords) override
+    {
+        builder.BuildZeroMemoryPacket(cmd_buffer, data_buffer, num_dwords);
+    }
 
     // Build PMC enable PM4 commands - enable CP counting for a specific queue
     void Enable(CmdBuffer* cmd_buffer)
