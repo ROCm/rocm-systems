@@ -621,6 +621,21 @@ contract:
   Contract_Context_CtxGetCurrentAndDevice_AreConsistent:
     <<: *level_0
     tags: [context]
+  Contract_ContextMutation_CreateDestroy_Succeeds:
+    <<: *level_0
+    tags: [context_mutation]
+  Contract_ContextMutation_SetCurrent_RoundTripsThroughGetCurrent:
+    <<: *level_0
+    tags: [context_mutation]
+  Contract_ContextMutation_PushPop_RestoresPreviousCurrent:
+    <<: *level_0
+    tags: [context_mutation]
+  Contract_ContextMutation_Synchronize_ReportsSupportedOrNotSupported:
+    <<: *level_0
+    tags: [context_mutation]
+  Contract_ContextMutation_GetApiVersion_ReportsVersionOrNotSupported:
+    <<: *level_0
+    tags: [context_mutation]
   Contract_DeviceConfig_GetCacheConfig_ReturnsEnumValue:
     <<: *level_0
     tags: [device_config]
