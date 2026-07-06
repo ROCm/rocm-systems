@@ -58,7 +58,7 @@ void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *sr
       }
 
       if (mtype == Mtype::CC) {
-        cache_.invalidate(chunk_addr, vmid);
+        flush_line(chunk_addr, vmid);
         l2_->write(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
         copied += chunk;
         continue;
@@ -123,7 +123,7 @@ void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint
         flush_line(chunk_addr, vmid);
         l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
       } else if (mtype == Mtype::CC) {
-        cache_.invalidate(chunk_addr, vmid);
+        flush_line(chunk_addr, vmid);
         l2_->read(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
       } else {
         ensure_line(chunk_addr, vmid);
@@ -150,7 +150,7 @@ void L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, 
       flush_line(ea, vmid);
       l2_->read(ea, dst + copied, chunk, Mtype::UC, vmid);
     } else if (mtype == Mtype::CC) {
-      cache_.invalidate(ea, vmid);
+      flush_line(ea, vmid);
       l2_->read(ea, dst + copied, chunk, Mtype::CC, vmid);
     } else {
       ensure_line(ea, vmid);
