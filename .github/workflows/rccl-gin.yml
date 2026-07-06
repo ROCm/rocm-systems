@@ -73,39 +73,44 @@ jobs:
       # empty ROCM_RELEASE => latest for the channel
       ROCM_RELEASE: ${{ inputs.rocm_release }}
       ROCM_RELEASE_CHANNEL: ${{ inputs.rocm_release_channel || 'release' }}
+      # Per-(run, attempt) checkout+build dir so parallel legs sharing the NFS
+      # _work never collide.
+      CI_SUBDIR: _ci/gin-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: ${{ env.CI_SUBDIR }}
 
       - name: Provision ROCm (TheRock ${{ inputs.rocm_release_channel || 'release' }}) on the head node
-        env:
-          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
         run: |
           set -euo pipefail
+          export RCCL_DEVICE_API_WORKDIR="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
+          # Shared, version-keyed ROCm/OpenMPI cache on /apps NFS (safe to share).
           export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
+          echo "Workdir: ${RCCL_DEVICE_API_WORKDIR}"
           echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
           if ! mkdir -p "${RCCL_DEVICE_API_CACHE}"/{rocm,ompi,downloads}; then
             echo "ERROR: cannot create ${RCCL_DEVICE_API_CACHE} (is /apps writable by $(id -un)?)" >&2
             exit 1
           fi
-          "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+          "${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
 
       - name: Submit GIN build+test to SLURM
-        env:
-          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
         run: |
           set -euo pipefail
+          export RCCL_DEVICE_API_WORKDIR="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
           export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
           echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
-          python3 "${{ github.workspace }}/projects/rccl/tools/ci/lib/submit_slurm_job.py" \
-            --script "${{ github.workspace }}/projects/rccl/tools/ci/lib/gin.sbatch" \
-            --chdir "${{ github.workspace }}/.ci-out/gin-logs" \
+          python3 "${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib/submit_slurm_job.py" \
+            --script "${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib/gin.sbatch" \
+            --chdir "${RCCL_DEVICE_API_WORKDIR}/.ci-out/gin-logs" \
             --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_RELEASE_CHANNEL,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS"
 
       - name: Dump compute-node logs
         if: always()
         run: |
-          logs_dir="${{ github.workspace }}/.ci-out/gin-logs"
+          logs_dir="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/gin-logs"
           shopt -s nullglob
           # One collapsible group per log; rccl-gin-* is SLURM's whole-job stream,
           # kept last as a fallback for early/killed jobs.
@@ -120,3 +125,7 @@ jobs:
           dump "build"     "${logs_dir}"/build-*.out "${logs_dir}"/build-*.err
           dump "test"      "${logs_dir}"/test-*.out  "${logs_dir}"/test-*.err
           dump "scheduler" "${logs_dir}"/rccl-gin-*.out "${logs_dir}"/rccl-gin-*.err
+
+      - name: Clean up per-job workdir
+        if: always()
+        run: rm -rf "${GITHUB_WORKSPACE:?}/${CI_SUBDIR:?}"
