@@ -1,17 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 //
-// The University of Illinois/NCSA
-// Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
-//
-// Developed by:
-//
-//                 AMD Research and AMD HSA Software Development
-//
-//                 Advanced Micro Devices, Inc.
-//
-//                 www.amd.com
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+/// SPDX-License-Identifier: MIT
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
