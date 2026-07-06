@@ -122,7 +122,7 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950' }}
+          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx125x' }}
           CI_CONFIG_PATH: ci-config
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
