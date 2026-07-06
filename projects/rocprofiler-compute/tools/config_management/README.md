@@ -57,7 +57,7 @@ tools/config_management/.config_hashes.json
 ```
 - Records md5 hashes of panel YAMLs per arch
 - Machine-generated only
-- Enforced in CI and pytest
+- Enforced by the pre-commit `hash-check` hook (see [Automated Testing](#automated-testing))
 
 ## Architecture Diagram (End-to-End Flow)
 ```text
