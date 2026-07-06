@@ -1347,6 +1347,9 @@ class TestAmdSmiCli(unittest.TestCase):
                 else:
                     vram_key = "vram"
             for key in data[i]:
+                # monitor1 and monitor2 come from the same source amd-smi monitor
+                # Meaning if monitor1 is N/A, then monitor2 will be N/A and by extension
+                # the  units for both will always be the same
                 if isinstance(monitor1[i][key], str) and monitor1[i][key] == "N/A":
                     unit = "N/A"
                     data1 = 0
@@ -1355,7 +1358,11 @@ class TestAmdSmiCli(unittest.TestCase):
                     unit = monitor1[i][key]["unit"]
                     data1 = int(monitor1[i][key]["value"])
                     if monitor2 is not None:
-                        data2 = int(monitor2[i][key]["value"])
+                        if isinstance(monitor2[i][key], str) and monitor2[i][key] == "N/A":
+                            unit = "N/A"
+                            data2 = 0
+                        else:
+                            data2 = int(monitor2[i][key]["value"])
                     else:
                         if key == "power_usage":
                             data2 = int(metric["gpu_data"][i]["power"]["socket_power"]["value"])
@@ -1440,22 +1447,6 @@ class TestAmdSmiCli(unittest.TestCase):
                 self.fail(f"Fail:\n\n{msg}")
         return
 
-    def _process(self, q, cmd):
-        # Receive timestamp
-        if self.Debug:
-            time_stamp = q.get()
-            print(f"{time_stamp} _process pid={os.getpid()} Receiving rvs")
-            time_stamp2a = time.monotonic()
-
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        time_stamp2b = time.monotonic()
-        if self.Debug:
-            print(f"{time_stamp2a} _process pid={os.getpid()} Before rvs")
-            print(f"{time_stamp2b} _process pid={os.getpid()} After rvs")
-        q.put(data)
-        q.put(time_stamp2b)
-        return
-
     def test_monitor(self):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi monitor"
@@ -1471,102 +1462,144 @@ class TestAmdSmiCli(unittest.TestCase):
         self.RunCmds(cmds)
         return
 
-    def test_monitor_serial(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi monitor serial"
-        self.common.print(msg)
+    def _worker(self, q, start_time: multiprocessing.Value, name: str, cmd: str, timeout: int):
+        pid = os.getpid()
+        if self.Debug:
+            print(f"[{name}] PID={pid} ready, waiting for start time... {start_time.value}")
 
-        cmd = f"amd-smi monitor {self.monitor_args} --json"
-        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
-        (rc, data2, std_err) = self.util.RunCmdSync(cmd)
-        cmd = "amd-smi metric --json"
-        (rc, data3, std_err) = self.util.RunCmdSync(cmd)
+        # Busy-wait until the shared start time is reached
+        while True:
+            now = time.perf_counter()
+            if now >= start_time.value:
+                break
+            time.sleep(max(0, start_time.value - now))
 
-        # Data from monitor and metric should be the same
-        monitor1 = json.loads(data1)
-        monitor2 = json.loads(data2)
-        metric3 = json.loads(data3)
-        data = self._get_monitor_metric_data(monitor1, monitor2, None)
-        monitor_failures, monitor_successes = self._compare_monitor_metric_data("Monitor", data)
+        # Record actual start time
+        actual_start = time.perf_counter()
+        if self.Debug:
+            print(
+                f"[{name}] Started at {actual_start:.9f} (Δ={actual_start - start_time.value:.9f}s)"
+            )
 
-        data = self._get_monitor_metric_data(monitor2, None, metric3)
-        metric_failures, metric_successes = self._compare_monitor_metric_data("Metric", data)
+        (rc, std_out, std_err) = self.util.RunCmdSync(cmd, time_out=timeout)
 
-        results = monitor_successes + metric_successes
-        self._print_monitor_results(results)
-        results = monitor_failures + metric_failures
-        self._print_monitor_results(results, fail_on_results=True)
+        now = time.perf_counter()
+        q.put((name, pid, now, std_out))
+        if self.Debug:
+            print(f"[{name}] Finished work at {now:.9f}")
         return
 
-    def test_monitor_parallel(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi monitor parallel"
-        self.common.print(msg)
-
+    def _multiprocess_commands(self, cmds):
         # Setup queue between processes
         q = multiprocessing.Queue()
 
-        # Monitor to Monitor
-        cmd = f"amd-smi monitor {self.monitor_args} --json"
-        p1 = multiprocessing.Process(target=self._process, args=(q, cmd))
-        p1.start()
-        # Send time_stamp
-        time_stamp = time.monotonic()
+        max_timeout = 0
+        processes = []
+        for name, cmd, time_start_delta, time_out in cmds:
+            # Set start time slightly in the future
+            future_time = time.perf_counter() + time_start_delta
+            # Shared start time (high precision)
+            start_time = multiprocessing.Value("d", future_time)
+            processes.append(
+                multiprocessing.Process(
+                    target=self._worker, args=(q, start_time, name, cmd, time_out)
+                )
+            )
+            max_timeout = max(max_timeout, time_out)
+            if self.Debug:
+                print(
+                    f"[Main] Process {name} will start at {future_time:.9f} and time out in {time_out}"
+                )
+
+        # Start all processes
+        for p in processes:
+            p.start()
+
+        # Give processes time to initialize
+        time.sleep(1.0)
+
+        # Wait for all to finish
+        worker_datas = []
+        for p in processes:
+            worker_datas.append(q.get(timeout=max_time_out))
+            p.join(timeout=max_time_out)
+
         if self.Debug:
-            print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
-            q.put(time_stamp)
+            for worker_data in worker_datas:
+                name, pid, time_stamp, data = worker_data
+                print(f"name={name} pid={pid} time_stamp={time_stamp}")
+            print("[Main] All processes completed.")
 
-        # Get monitor data
+        return worker_datas
+
+    def test_monitor_monitor(self):
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi monitor monitor"
+        self.common.print(msg)
+
+        # Ensure start time delta is adequate for process to initialize and start
+        # and adequate time for time_out to complete process
+        time_out = 5.0
+        time_start_delta = 2.0
         cmd = f"amd-smi monitor {self.monitor_args} --json"
-        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
-        time_stamp = time.monotonic()
+        cmds = [
+            ("monitor1", cmd, time_start_delta, time_out),
+            ("monitor2", cmd, time_start_delta, time_out),
+        ]
+        worker_datas = self._multiprocess_commands(cmds)
 
-        # Receive process data and time_stamp
-        data2 = q.get()
-        time_stamp_process = q.get()
-        p1.join()
-
-        # Data from monitor and metric should be the same
-        monitor1 = json.loads(data1)
-        monitor2 = json.loads(data2)
+        # Data from monitor1 and monitor2 should be the same
+        name, pid, time_stamp, data = worker_datas[0]
+        monitor1 = json.loads(data)
+        name, pid, time_stamp, data = worker_datas[1]
+        monitor2 = json.loads(data)
         data = self._get_monitor_metric_data(monitor1, monitor2, None)
         monitor_failures, monitor_successes = self._compare_monitor_metric_data("Monitor", data)
 
-        # Monitor to Metric
-        cmd = f"amd-smi monitor {self.monitor_args} --json"
-        p1 = multiprocessing.Process(target=self._process, args=(q, cmd))
-        p1.start()
-        # Send time_stamp
-        time_stamp = time.monotonic()
-        if self.Debug:
-            print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
-            q.put(time_stamp)
+        # Report results
+        self._print_monitor_results(monitor_successes)
+        self._print_monitor_results(monitor_failures, fail_on_results=True)
+        return
 
-        # Get metric data
-        cmd = "amd-smi metric --json"
-        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
-        time_stamp = time.monotonic()
+    def test_monitor_metric(self):
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi monitor metric"
+        self.common.print(msg)
 
-        # Receive process data and time_stamp
-        data2 = q.get()
-        time_stamp_process = q.get()
-        p1.join()
+        # Ensure start time delta is adequate for process to initialize and start
+        # and adequate time for time_out to complete process
+        time_out = 5.0
+        time_start_delta = 2.0
+        cmd_monitor = f"amd-smi monitor {self.monitor_args} --json"
+        cmd_metric = "amd-smi metric --json"
+        cmds = [
+            ("monitor", cmd_monitor, time_start_delta, time_out),
+            ("metric", cmd_metric, time_start_delta, time_out),
+        ]
+        worker_datas = self._multiprocess_commands(cmds)
 
-        monitor = json.loads(data2)
-        metric3 = json.loads(data1)
-        data = self._get_monitor_metric_data(monitor, None, metric3)
-        metric_failures, metric_successes = self._compare_monitor_metric_data("Metric", data)
+        # Data from monitor1 and metric1 should be the same
+        if worker_datas[0][0] == "metric":
+            name, pid, time_stamp, data = worker_datas[0]
+            metric1 = json.loads(data)
+            name, pid, time_stamp, data = worker_datas[1]
+            monitor1 = json.loads(data)
+        else:
+            name, pid, time_stamp, data = worker_datas[0]
+            monitor1 = json.loads(data)
+            name, pid, time_stamp, data = worker_datas[1]
+            metric1 = json.loads(data)
+        data = self._get_monitor_metric_data(monitor1, None, metric1)
+        monitor_failures, monitor_successes = self._compare_monitor_metric_data("Monitor", data)
 
         # Report results
-        results = monitor_successes + metric_successes
-        self._print_monitor_results(results)
-        results = monitor_failures + metric_failures
-        self._print_monitor_results(results, fail_on_results=True)
+        self._print_monitor_results(monitor_successes)
+        self._print_monitor_results(monitor_failures, fail_on_results=True)
         return
 
     def test_monitor_with_workload(self):
         self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi monitor workload"
+        msg = f"{self.tab}### amd-smi monitor with workload"
         self.common.print(msg)
 
         # Check for workload generator, skip test if not found
@@ -1577,45 +1610,33 @@ class TestAmdSmiCli(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        # Setup queue between processes
-        q = multiprocessing.Queue()
-
-        # Get baseline monitor data
-        cmd = f"amd-smi monitor {self.monitor_args} --json"
-        (rc, data_baseline, std_err) = self.util.RunCmdSync(cmd)
-
-        # Monitor to Monitor
-        cmd = "rvs --json"
-        if self.Debug:
-            cmd = "stress-ng --vm 2 --vm-bytes 75% --timeout 8s"
-        p1 = multiprocessing.Process(target=self._process, args=(q, cmd))
-        p1.start()
-        # Send time_stamp
-        time_stamp = time.monotonic()
-        if self.Debug:
-            print(f"{time_stamp} Producer pid={os.getpid()} Sending rvs")
-            q.put(time_stamp)
-
-        # Get monitor data under workload
-        time.sleep(2)
-        cmd = f"amd-smi monitor {self.monitor_args} --json"
-        time_stamp2a = time.monotonic()
-        (rc, data_workload, std_err) = self.util.RunCmdSync(cmd)
-        if self.Debug:
-            time_stamp2b = time.monotonic()
-            print(f"{time_stamp2a} Producer pid={os.getpid()} Before monitor")
-            print(f"{time_stamp2b} Producer pid={os.getpid()} After monitor ")
-
-        # Receive process data and time_stamp
-        process_data = q.get()
-        process_time_stamp = q.get()
-        if verbose == common.VERBOSITY_VERBOSE:
-            print(process_data)
-            print(f"Producer pid={os.getpid()}  _process: {process_time_stamp}")
-        p1.join()
-
+        # Get baseline results
+        cmd_monitor = f"amd-smi monitor {self.monitor_args} --json"
+        (rc, data_baseline, std_err) = self.util.RunCmdSync(cmd_monitor)
+        if rc != 0:
+            msg = f"{self.tab}Monitor with workload test failed, rc={rc}, std_err={std_err}"
+            self.common.print(msg)
+            self.fail(msg)
         monitor_baseline = json.loads(data_baseline)
-        monitor_workload = json.loads(data_workload)
+
+        # Monitor has a delayed start that allows the workload time to initialize and start running.
+        # Workload is started immediately and times out after workload has had time to finish
+        time_out = 5.0
+        time_start_delta = 2.0
+        cmd_workload = "rvs --json"
+        cmds = [
+            ("monitor", cmd_monitor, time_start_delta, time_out),
+            ("workload", cmd_workload, 0.0, time_start_delta + time_out + 1.0),
+        ]
+        worker_datas = self._multiprocess_commands(cmds)
+
+        # Data from monitor_baseline and monitor_workload should not be the same
+        if worker_datas[0][0] == "monitor":
+            name, pid, time_stamp, data = worker_datas[0]
+        else:
+            name, pid, time_stamp, data = worker_datas[1]
+        monitor_workload = json.loads(data)
+
         data = self._get_monitor_metric_data(monitor_baseline, monitor_workload, None, exclude=True)
         monitor_failures, monitor_successes = self._compare_monitor_metric_data("Workload", data)
         # Results are opposite, want differences in values
