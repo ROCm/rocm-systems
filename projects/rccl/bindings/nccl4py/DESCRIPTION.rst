@@ -2,7 +2,7 @@
 nccl4py: Pythonic RCCL Communication for GPU Clusters
 **************************************************
 
-`nccl4py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl>`_ provides a Pythonic interface to the
+`nccl4py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/bindings/nccl4py>`_ provides a Pythonic interface to the
 ROCm Communication Collectives Library (RCCL), AMD's drop-in replacement for
 NVIDIA NCCL on ROCm. It bridges Python's simplicity with RCCL's GPU-accelerated
 multi-GPU and multi-node communication primitives, so distributed Python
