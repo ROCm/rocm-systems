@@ -16,7 +16,7 @@ NCCL_PARAM(IbCastTimeout, "IB_TIMEOUT", 20);
 NCCL_PARAM(IbCastRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbCastPkey, "IB_PKEY", 0);
 NCCL_PARAM(IbCastUseInline, "IB_USE_INLINE", 0);
-NCCL_PARAM(IbCastGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
+NCCL_PARAM(IbCastGdrFlushDisable, "GDR_FLUSH_DISABLE", 1);
 NCCL_PARAM(IbCastSl, "IB_SL", -1);
 NCCL_PARAM(IbCastTc, "IB_TC", -1);
 NCCL_PARAM(IbCastFifoTc, "IB_FIFO_TC", -1);
@@ -1499,10 +1499,21 @@ ib_recv:
     if (rComm->flushEnabled) {
       if (rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering()) {
 #if defined(HIP_UNCACHED_MEMORY)
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocUncached), ret, fail);
+        const unsigned int gpuFlushFlags = hipDeviceMallocUncached;
 #else
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocFinegrained), ret, fail);
+        const unsigned int gpuFlushFlags = hipDeviceMallocFinegrained;
 #endif
+        // RCCL: allocate the GDR flush buffer directly via HIP (never cuMem/VMM)
+        // so hsa_amd_portable_export_dmabuf can export it. cuMem/VMM allocations
+        // fail to export through the HSA portable exporter on some ROCm/NIC stacks.
+        CUDACHECKGOTO(
+          hipExtMallocWithFlags((void**)&rCommDev->gpuFlush.gpuFlushGpuMem,
+                                sizeof(int), gpuFlushFlags),
+          ret, fail);
+        CUDACHECKGOTO(hipMemset(rCommDev->gpuFlush.gpuFlushGpuMem, 0,
+                                sizeof(int)),
+                      ret, fail);
+
         if (useDmaBuf) {
           uint64_t exportOffset = 0;
           void *aligned_ptr = NULL;
@@ -1626,7 +1637,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {
         if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr));
+          CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
           commDev->gpuFlush.gpuFlushGpuMem = nullptr;
           if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
           commDev->gpuFlush.gpuMr = nullptr;

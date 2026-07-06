@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/rdna1/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -14,13 +15,24 @@
 namespace rocjitsu {
 namespace rdna1 {
 
+namespace {
+
+uint32_t read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf) {
+  if (soffset == OPR_SMEM_OFFSET_NULL || soffset == 0x7F)
+    return 0;
+  if (soffset == OPR_SMEM_OFFSET_M0)
+    return wf.m0();
+  return wf.cu().read_sgpr(wf.sgpr_alloc().base + soffset);
+}
+
+} // namespace
+
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
   uint64_t base = (static_cast<uint64_t>(cu.read_sgpr(sbase + 1)) << 32) | cu.read_sgpr(sbase);
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
-  if (inst.soffset != 0x7F)
-    off += cu.read_sgpr(wf.sgpr_alloc().base + inst.soffset);
+  off += read_smem_offset(inst.soffset, wf);
   return (base + off) & ~0x3ULL;
 }
 

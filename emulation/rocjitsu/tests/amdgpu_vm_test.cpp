@@ -5,7 +5,8 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/mfma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -22,6 +23,8 @@ RJ_DIAGNOSTIC_POP
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -38,7 +41,8 @@ struct VmFixture {
   SoC *soc_ptr = nullptr;
   amdgpu::GpuMemory *gpu_mem = nullptr;
 
-  VmFixture(const std::string &arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10) {
+  VmFixture(const std::string &arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
+            uint32_t lds_size_kb = 64) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -66,7 +70,9 @@ struct VmFixture {
                        R"("},)"
                        R"({"key":"sgprs_per_wf","value":"104"},)"
                        R"({"key":"vgprs_per_wf","value":"256"},)"
-                       R"({"key":"lds_size_kb","value":"64"})"
+                       R"({"key":"lds_size_kb","value":")" +
+                       std::to_string(lds_size_kb) +
+                       R"("})"
                        R"(]}]}]}]},"links":[)" +
                        links + R"(]}})";
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
@@ -221,13 +227,13 @@ TEST(VmLifecycleTest, CreateAndDestroy) {
 TEST(VmLifecycleTest, MissingArchFails) {
   const char *json = R"({"vm":{"gpu":{"num_shader_engines":1}}})";
   rj_vm_t *handle = nullptr;
-  EXPECT_NE(rj_vm_create_from_string(json, &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_NE(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
 }
 
 TEST(VmLifecycleTest, InvalidArchFails) {
   const char *json = R"({"vm":{"arch":"bogus"}})";
   rj_vm_t *handle = nullptr;
-  EXPECT_NE(rj_vm_create_from_string(json, &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_NE(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
 }
 
 class IsaTest : public ::testing::TestWithParam<std::string> {
@@ -321,6 +327,192 @@ TEST_P(IsaTest, DispatchAndCapacity) {
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
 }
 
+TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
+  VmFixture f(arch(), 1, 8);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 64;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 2;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.kernel_object = ko;
+
+  hsa_kernel_dispatch_packet_t raw{};
+  std::memcpy(&raw, &ext, sizeof(ext));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(raw);
+  f.engine->run();
+
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+  EXPECT_GE(f.cu()->num_wfs(), 1u);
+}
+
+TEST_P(IsaTest, VendorSpecificExtKernelDispatchReadsDependencySignalFromGpuMemory) {
+  VmFixture f(arch(), 1, 8);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint64_t kDepSignal = 0x7000;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kDepSignal + kSignalValueOffset, 1);
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 64;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 1;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 1;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.dep_signal.handle = kDepSignal;
+  ext.kernel_object = ko;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+  (void)f.engine->step();
+  EXPECT_EQ(f.cp()->dispatched_count(), 0u);
+
+  f.mem()->write64(kDepSignal + kSignalValueOffset, 0);
+  f.engine->run();
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+}
+
+TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
+  VmFixture f("gfx1250", 1, 1);
+
+  const uint32_t code[] = {0xBFB00000u}; // s_endpgm
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch_clustered(ko, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/32);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+  EXPECT_FALSE(f.cu()->has_active_wfs());
+  EXPECT_TRUE(f.cp()
+                  ->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
+                                        /*mcast_mask=*/0x3)
+                  .empty());
+}
+
+TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster) {
+  VmFixture f("gfx1250", 1, 3, /*lds_size_kb=*/1);
+
+  const uint32_t code[] = {0xBFB00000u}; // s_endpgm
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch_clustered(ko, /*cluster_count_x=*/1, /*cluster_size_x=*/3,
+                           /*workgroup_size_x=*/32, /*kernarg_addr=*/0,
+                           /*group_segment_size=*/257);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+  EXPECT_FALSE(f.cu()->has_active_wfs());
+}
+
+TEST(ClusterDispatchTest, ReclaimsLdsBetweenClusterWaves) {
+  VmFixture f("cdna3", 2, 1, /*lds_size_kb=*/1);
+
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint64_t kSignal = 0x7000;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kSignal + kSignalValueOffset, 1);
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 32;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 2;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.group_segment_size = 769;
+  ext.kernel_object = ko;
+  ext.completion_signal.handle = kSignal;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+
+  EXPECT_NO_THROW(f.engine->run());
+  EXPECT_EQ(f.mem()->read64(kSignal + kSignalValueOffset), 0u);
+  EXPECT_FALSE(f.cu(0)->has_active_wfs());
+  EXPECT_FALSE(f.cu(1)->has_active_wfs());
+}
+
+TEST(ClusterDispatchTest, RejectsExtKernelDispatchWithZeroClusterShape) {
+  VmFixture f("cdna3", 1, 8);
+
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 32;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 0;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.kernel_object = ko;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+}
+
+TEST(ClusterDispatchTest, RejectsExtKernelDispatchGridOverflow) {
+  VmFixture f("cdna3", 1, 8);
+
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 64;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = std::numeric_limits<uint32_t>::max();
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.kernel_object = ko;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+}
+
 TEST_P(IsaTest, DispatchCreatesWavefronts) {
   VmFixture f(arch(), 2);
 
@@ -379,7 +571,8 @@ TEST_P(IsaTest, RunToCompletion) {
                      R"(]}})";
 
   rj_vm_t *handle = nullptr;
-  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), &handle), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &handle),
+            ROCJITSU_STATUS_SUCCESS);
 
   uint64_t ticks = 0;
   EXPECT_EQ(rj_vm_run(handle, &ticks), ROCJITSU_STATUS_SUCCESS);
@@ -456,8 +649,9 @@ constexpr uint32_t v_cmp_eq_f32(uint32_t s0, uint32_t vs1) { return vopc(66, s0,
 // DS: 64-bit instruction.
 // dword0: offset0[7:0], offset1[15:8], gds[16], op[24:17], acc[25], encoding[31:26]=0x36
 // dword1: addr[7:0], data0[15:8], data1[23:16], vdst[31:24]
-constexpr uint32_t ds_lo(uint32_t op, uint8_t offset0 = 0, uint8_t offset1 = 0) {
-  return (0x36u << 26) | (op << 17) | (static_cast<uint32_t>(offset1) << 8) | offset0;
+constexpr uint32_t ds_lo(uint32_t op, uint8_t offset0 = 0, uint8_t offset1 = 0, uint8_t acc = 0) {
+  return (0x36u << 26) | (static_cast<uint32_t>(acc) << 25) | (op << 17) |
+         (static_cast<uint32_t>(offset1) << 8) | offset0;
 }
 constexpr uint32_t ds_hi(uint32_t vdst, uint32_t data0, uint32_t addr, uint32_t data1 = 0) {
   return (vdst << 24) | (data1 << 16) | (data0 << 8) | addr;
@@ -962,6 +1156,123 @@ TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
   EXPECT_EQ(mismatches, 0u);
 }
 
+void init_mfma_f64_neg_inputs(amdgpu::ComputeUnitCore *cu, uint32_t s0, uint32_t s1, uint32_t s2,
+                              double a = 1.0, double b = 1.0, double c = 1.0) {
+  uint64_t a_bits = std::bit_cast<uint64_t>(a);
+  uint64_t b_bits = std::bit_cast<uint64_t>(b);
+  uint64_t c_bits = std::bit_cast<uint64_t>(c);
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    cu->write_vgpr(s0, lane, static_cast<uint32_t>(a_bits));
+    cu->write_vgpr(s0 + 1, lane, static_cast<uint32_t>(a_bits >> 32));
+    cu->write_vgpr(s1, lane, static_cast<uint32_t>(b_bits));
+    cu->write_vgpr(s1 + 1, lane, static_cast<uint32_t>(b_bits >> 32));
+    cu->write_vgpr(s2, lane, static_cast<uint32_t>(c_bits));
+    cu->write_vgpr(s2 + 1, lane, static_cast<uint32_t>(c_bits >> 32));
+  }
+}
+
+void expect_mfma_f64_outputs(amdgpu::ComputeUnitCore *cu, uint32_t dst, double expected) {
+  uint64_t expected_bits = std::bit_cast<uint64_t>(expected);
+  uint32_t mismatches = 0;
+  for (uint32_t b = 0; b < 4; ++b) {
+    for (uint32_t row = 0; row < 4; ++row) {
+      for (uint32_t col = 0; col < 4; ++col) {
+        auto out = amdgpu::output_loc_64(4, 4, row, col, b);
+        uint32_t lo = cu->read_vgpr(dst + out.reg, out.lane);
+        uint32_t hi = cu->read_vgpr(dst + out.reg + 1, out.lane);
+        uint64_t got_bits = static_cast<uint64_t>(hi) << 32 | lo;
+        if (got_bits != expected_bits) {
+          if (mismatches < 5)
+            ADD_FAILURE() << "F64 output mismatch b=" << b << " row=" << row << " col=" << col
+                          << " expected=" << expected << " got=" << std::bit_cast<double>(got_bits);
+          ++mismatches;
+        }
+      }
+    }
+  }
+  EXPECT_EQ(mismatches, 0u);
+}
+
+void expect_mfma_f64_neg_modifier(const std::string &arch) {
+  VmFixture f(arch);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64);
+  step_until_halted(*f.engine, {f.cu()});
+
+  auto *cu = f.cu();
+  auto *wf = cu->wf(0);
+  uint32_t vb = wf->vgpr_alloc().base;
+  uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET;
+  uint32_t s0 = vb + 10;
+  uint32_t s1 = vb + 20;
+  uint32_t s2 = dst;
+
+  init_mfma_f64_neg_inputs(cu, s0, s1, s2);
+
+  // CDNA f64 MFMA uses the BLGP bit range as NEG[2:0]. NEG=5 negates A and C:
+  // D = -C + (-A * B) * K = -1 + (-1 * 1) * 4 = -5.
+  amdgpu::exec_f64(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR, 5);
+  expect_mfma_f64_outputs(cu, dst, -5.0);
+
+  init_mfma_f64_neg_inputs(cu, s0, s1, s2);
+
+  // NEG=2 isolates the B operand negate bit:
+  // D = C + (A * -B) * K = 1 + (1 * -1) * 4 = -3.
+  amdgpu::exec_f64(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR, 2);
+  expect_mfma_f64_outputs(cu, dst, -3.0);
+}
+
+TEST(MfmaF64Cdna3Test, NegModifier) { expect_mfma_f64_neg_modifier("cdna3"); }
+
+TEST(MfmaF64Cdna4Test, NegModifier) { expect_mfma_f64_neg_modifier("cdna4"); }
+
+TEST(MfmaF64Cdna4Test, GeneratedInstructionUsesBlgpNegModifier) {
+  VmFixture f("cdna4");
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64);
+  step_until_halted(*f.engine, {f.cu()});
+
+  auto *cu = f.cu();
+  auto *wf = cu->wf(0);
+  uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kSrc0 = 10;
+  constexpr uint32_t kSrc1 = 20;
+  constexpr uint32_t kDst = 0;
+  uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET + kDst;
+
+  cdna4::Vop3pMfmaMachineInst raw{};
+  raw.vdst = kDst;
+  raw.acc_cd = 1;
+  raw.src0 = 256 + kSrc0;
+  raw.src1 = 256 + kSrc1;
+  raw.src2 = 256 + kDst;
+
+  const struct {
+    uint32_t blgp;
+    double expected;
+  } cases[] = {
+      {0, 29.0},
+      {2, -19.0},
+      {5, -29.0},
+  };
+
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.blgp);
+    init_mfma_f64_neg_inputs(cu, vb + kSrc0, vb + kSrc1, dst, 2.0, 3.0, 5.0);
+    raw.blgp = test.blgp;
+    cdna4::VMfmaF644x4x44bF64Vop3pMfma inst(reinterpret_cast<const cdna4::MachineInst *>(&raw));
+    inst.execute_impl(*wf);
+
+    expect_mfma_f64_outputs(cu, dst, test.expected);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Atomic stress tests
 // ---------------------------------------------------------------------------
@@ -1126,6 +1437,59 @@ TEST(AtomicStressTest, GlobalAtomicAdd_MultiWorkgroup) {
 
   uint32_t final_val = f.mem()->read32(TARGET_ADDR);
   EXPECT_EQ(final_val, 1256u) << "1000 + 256 global atomic adds = 1256";
+}
+
+// Verify that ds_read_b64_tr_b16 with acc=1 writes to AccVGPR (vb+256+vdst),
+// not to VGPR (vb+vdst).
+TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
+  VmFixture f("cdna4", 1, 10);
+
+  constexpr uint32_t VDST = 4;
+  constexpr uint32_t ADDR_REG = 0;
+  constexpr uint32_t DS_OP = 227; // ds_read_b64_tr_b16
+
+  // Kernel:
+  //   v_mov_b32 v0, 0          ; addr = LDS offset 0
+  //   v_mov_b32 v4, 0x42       ; sentinel in VGPR v4
+  //   v_mov_b32 v5, 0x42       ; sentinel in VGPR v5
+  //   ds_read_b64_tr_b16 a[4:5], v0  ; acc=1: write to AccVGPR
+  //   s_waitcnt lgkmcnt(0)
+  //   s_endpgm
+  using namespace enc;
+  const uint32_t code[] = {
+      v_mov_b32(ADDR_REG, INLINE_CONST(0)),
+      v_mov_b32(VDST, INLINE_CONST(42)),
+      v_mov_b32(VDST + 1, INLINE_CONST(42)),
+      ds_lo(DS_OP, /*offset0=*/0, /*offset1=*/0, /*acc=*/1),
+      ds_hi(VDST, /*data0=*/0, ADDR_REG),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  auto *cu = f.cu();
+
+  // Write a known non-zero pattern to LDS.
+  for (uint32_t i = 0; i < 256; ++i)
+    cu->lds().write32(i * 4, 0xDEADBEEF);
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64);
+  f.engine->run();
+
+  auto *wf = cu->wf(0);
+  ASSERT_NE(wf, nullptr);
+  uint32_t vb = wf->vgpr_alloc().base;
+
+  // VGPR v4 should still hold the sentinel (42), not overwritten by ds_read.
+  uint32_t vgpr_val = cu->read_vgpr(vb + VDST, 0);
+  EXPECT_EQ(vgpr_val, 42u) << "VGPR v" << VDST << " should NOT have been written when acc=1";
+
+  // AccVGPR a4 should have been written with LDS data (not 42, not 0).
+  uint32_t acc_val = cu->read_vgpr(vb + 256 + VDST, 0);
+  EXPECT_NE(acc_val, 0u) << "AccVGPR a" << VDST << " should have been written by ds_read";
+  EXPECT_NE(acc_val, 42u) << "AccVGPR a" << VDST
+                          << " should contain LDS data, not the VGPR sentinel";
 }
 
 } // namespace

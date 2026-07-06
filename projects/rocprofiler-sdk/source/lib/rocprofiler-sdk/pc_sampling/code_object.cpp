@@ -67,13 +67,6 @@ get_attach_table()
     return table;
 }
 
-auto&
-get_prev_notify_callback()
-{
-    static rocprofiler_attach_notify_new_code_object_t _v = nullptr;
-    return _v;
-}
-
 /**
  * @brief Flush internal PC sampling buffers and generate a marker record
  * for the code object load/unload event.
@@ -102,9 +95,8 @@ flush_pc_sampling_buffers(const rocprofiler::code_object::hsa::code_object& code
     flush_internal_agent_buffers(agent_buffer_id);
 }
 
-// Internal implementation that can be called from both executable_freeze and attach mechanism
 void
-executable_freeze_internal(hsa_executable_t executable, bool flush = true)
+executable_freeze_internal(hsa_executable_t executable)
 {
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
@@ -115,7 +107,7 @@ executable_freeze_internal(hsa_executable_t executable, bool flush = true)
                     address_range_t{code_object_rocp.load_base,
                                     code_object_rocp.load_size,
                                     code_object_rocp.code_object_id});
-                if(flush) flush_pc_sampling_buffers(code_object);
+                flush_pc_sampling_buffers(code_object);
             }
         });
 }
@@ -125,14 +117,17 @@ executable_freeze(hsa_executable_t executable, const char* options)
 {
     // Call underlying function
     hsa_status_t status = CHECK_NOTNULL(get_freeze_function())(executable, options);
-    if(status != HSA_STATUS_SUCCESS) return status;
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        return status;
+    }
 
     executable_freeze_internal(executable);
     return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t
-executable_destroy(hsa_executable_t executable)
+void
+executable_destroy_internal(hsa_executable_t executable)
 {
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
@@ -146,36 +141,36 @@ executable_destroy(hsa_executable_t executable)
                                     code_object_rocp.code_object_id});
             }
         });
+}
 
+hsa_status_t
+executable_destroy(hsa_executable_t executable)
+{
+    executable_destroy_internal(executable);
     // Call underlying function
     return CHECK_NOTNULL(get_destroy_function())(executable);
 }
 
 void
-iterate_attach_code_object(hsa_executable_t executable, void*)
+attach_code_object_event(hsa_executable_t                       executable,
+                         rocprofiler_attach_code_object_phase_t phase,
+                         void* /*data*/)
 {
-    // No need to flush when iterating over already loaded code objects during attach,
-    // as the PC sampling service might not be started yet, so there's nothing to flush.
-    executable_freeze_internal(executable, /*flush=*/false);
-}
-
-void
-chained_notify_new_code_object(hsa_executable_t executable, void* data)
-{
-    if(get_prev_notify_callback())
+    if(phase == ROCPROFILER_ATTACH_CODE_OBJECT_CREATED)
     {
-        get_prev_notify_callback()(executable, data);
+        executable_freeze_internal(executable);
     }
-    executable_freeze_internal(executable);
+    else
+    {
+        executable_destroy_internal(executable);
+    }
 }
 
 void
 load_attach_code_objects()
 {
     auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
-    attach_table->rocprofiler_attach_iterate_all_code_objects(iterate_attach_code_object, nullptr);
-    get_prev_notify_callback() = attach_table->rocprofiler_attach_notify_new_code_object;
-    attach_table->rocprofiler_attach_notify_new_code_object = chained_notify_new_code_object;
+    attach_table->rocprofiler_attach_add_code_object_cb(attach_code_object_event, nullptr);
 }
 }  // namespace
 

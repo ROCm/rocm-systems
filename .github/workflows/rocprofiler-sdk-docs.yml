@@ -13,6 +13,8 @@ on:
       - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
       - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
       - '.github/workflows/rocprofiler-sdk-docs.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/*.md'
@@ -22,6 +24,8 @@ on:
       - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
       - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
       - '.github/workflows/rocprofiler-sdk-docs.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -34,9 +38,29 @@ env:
   ENABLE_HIP_CLR_BUILD: "true"
   ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
   ENABLE_AQLPROFILE_BUILD: "false"
-  INSTALL_NIGHTLY_ROCM: "true"
+  SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/rocr-runtime projects/clr projects/hip"
 
 jobs:
+  ci_config:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
   build-docs:
     runs-on: ubuntu-latest
     container: continuumio/miniconda3
@@ -49,8 +73,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-sdk
-          submodules: true
+          submodules: false
           set-safe-directory: true
+      - name: Init/Update submodules
+        run: |
+          git config --global --add safe.directory '*'
+          git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
       - name: Create Docs Directory
         run: |
           git config --global --add safe.directory '*'
@@ -77,7 +105,9 @@ jobs:
           ../scripts/update-docs.sh
 
   build-docs-from-source:
-    runs-on: linux-gfx942-1gpu-ossci-rocm
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
@@ -119,7 +149,7 @@ jobs:
           git config --system --add safe.directory '*'
 
       - name: Init/Update submodules
-        run: git submodule update --init --recursive --jobs 16
+        run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
       - name: Setup
         shell: bash
@@ -157,7 +187,6 @@ jobs:
           enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
           enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
-          install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
           ccache-key: ccache-docs-ubuntu-22.04-gfx94X
           ccache-variant: ccache
 

@@ -1,11 +1,12 @@
 /*************************************************************************
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
- * Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
-#include <dlfcn.h>
+#include "os.h"
 #include "debug.h"
 #include "checks.h"
 #include "nccl_tuner.h"
@@ -54,12 +55,13 @@ static ncclResult_t ncclTuner_init(void** ctx, uint64_t commId, size_t nRanks, s
                                    ncclNvlDomainInfo_v5_t* nvlDomainInfo, ncclTunerConstants_t* /*constants*/) {
   NCCLCHECK(ncclTuner_v2->init(nRanks, nNodes, logfn, ctx));
   ncclTuner.getCollInfo = ncclTuner_getCollInfo;
+  ncclTuner.getChunkSize = NULL;
   ncclTuner.finalize = ncclTuner_finalize;
   return ncclSuccess;
 }
 
 ncclTuner_t* getNcclTuner_v2(void* lib) {
-  ncclTuner_v2 = (ncclTuner_v2_t*)dlsym(lib, "ncclTunerPlugin_v2");
+  ncclTuner_v2 = (ncclTuner_v2_t*)ncclOsDlsym(lib, "ncclTunerPlugin_v2");
   if (ncclTuner_v2) {
     ncclTuner.name = ncclTuner_v2->name;
     ncclTuner.init = ncclTuner_init;

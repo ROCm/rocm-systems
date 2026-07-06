@@ -1,6 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// Must be first: defines AINIC_SUPPORTED based on the installed AMD SMI version
+// and ROCPROFSYS_USE_AINIC before any header gates code on that macro.
+#include "backends/amd_smi/ainic_feature.hpp"
+
 #include "library/pmc/collectors/common/collector_slice.hpp"
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
@@ -25,13 +29,15 @@
 #include "library/pmc/collectors/cpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/procfs/provider.hpp"
 
+#include "backends/amd_smi/backend.hpp"
+#include "backends/amd_smi/device.hpp"
+#include "backends/amd_smi/wrapper.hpp"
 #include "core/agent.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/state.hpp"
-#include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
 #if ROCPROFILER_VERSION >= 600
-#    include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
+#    include "backends/rocprofiler_sdk/backend.hpp"
 #endif
 #include "library/runtime.hpp"
 
@@ -39,11 +45,9 @@
 
 #include "logger/debug.hpp"
 
-#include <amd_smi/amdsmi.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/mpl/type_traits.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/locking.hpp>
 
@@ -100,24 +104,31 @@ struct cpu_production_config
     using CacheApi    = collectors::cpu::cache_policy;
 };
 
-using provider_factory_t =
-    device_providers::amd_smi::provider_factory<drivers::amd_smi::driver_factory>;
-using provider_t      = provider_factory_t::provider_t;
-using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
+using provider_factory_t = device_providers::amd_smi::provider_factory<
+    backends::amd_smi::backend_factory<backends::amd_smi::wrapper>>;
+using provider_t = provider_factory_t::provider_t;
+
+using backend_session_t = provider_factory_t::provider_t::backend_t;
+using amd_smi_device_t  = backends::amd_smi::device<backend_session_t>;
+using gpu_device_t      = collectors::gpu::device<amd_smi_device_t>;
+using gpu_collector_t =
+    collectors::gpu::collector<provider_t, gpu_device_t, gpu_production_config>;
 
 #if ROCPROFILER_VERSION >= 600
-using gpu_perf_counter_provider_t =
-    device_providers::rocprofiler_sdk::provider<drivers::rocprofiler_sdk::driver_factory>;
+using gpu_perf_counter_provider_t = device_providers::rocprofiler_sdk::provider<
+    backends::rocprofiler_sdk::backend_factory>;
 using gpu_perf_counter_collector_t =
     collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
 #endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
-using nic_collector_t = collectors::nic::collector<provider_t, nic_production_config>;
+using nic_device_t = collectors::nic::device<amd_smi_device_t>;
+using nic_collector_t =
+    collectors::nic::collector<provider_t, nic_device_t, nic_production_config>;
 #endif
 
 using cpu_provider_factory_t =
-    device_providers::procfs::provider_factory<drivers::procfs::driver_factory>;
+    device_providers::procfs::provider_factory<backends::procfs::backend_factory>;
 using cpu_provider_t  = cpu_provider_factory_t::provider_t;
 using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_production_config>;
 
@@ -139,6 +150,55 @@ std::vector<collectors::collector_slice> g_collector_slices;
 
 std::atomic<bool> g_reinit_pending{ false };
 
+// Tears down the AMD SMI collector slices and marks the sampler uninitialized.
+// This is the only teardown performed on the post-fork reinit path: that reinit
+// exists solely to refresh AMD SMI device handles in the child.
+void
+shutdown_amd_smi_collectors()
+{
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    if(!is_initialized())
+    {
+        return;
+    }
+
+    LOG_DEBUG("Shutting down AMD-SMI PMC sampler.");
+
+    try
+    {
+        for(auto& slice : g_collector_slices)
+        {
+            slice.shutdown();
+        }
+    } catch(const std::runtime_error& _e)
+    {
+        LOG_ERROR("Exception thrown when shutting down AMD-SMI PMC sampler: {}",
+                  _e.what());
+    }
+
+    is_initialized() = false;
+}
+
+// Tears down the rocprofiler-sdk GPU hardware perf-counter collector. This must
+// NOT run on the post-fork reinit path: the collector is registered once (from
+// sdk_tool_configure) and is never recreated by setup(); its SDK contexts are
+// owned by the parent and survive fork(), so tearing it down would permanently
+// disable GPU hardware-counter sampling. Only the real finalize resets it.
+void
+shutdown_gpu_hw_collector()
+{
+#if ROCPROFILER_VERSION >= 600
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    LOG_DEBUG("Shutting down rocprofiler-sdk GPU hardware counter collector.");
+
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
+    g_gpu_perf_counter_collector.reset();
+    g_gpu_perf_counter_provider.reset();
+#endif
+}
+
 void
 reinit_if_pending()
 {
@@ -146,7 +206,7 @@ reinit_if_pending()
     if(!g_reinit_pending.compare_exchange_strong(_expected, false)) return;
 
     LOG_DEBUG("Performing deferred PMC reinit after fork.");
-    shutdown();
+    shutdown_amd_smi_collectors();
     setup();
 }
 
@@ -244,32 +304,8 @@ setup()
 void
 shutdown()
 {
-    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
-
-    if(!is_initialized())
-    {
-        return;
-    }
-
-    LOG_DEBUG("Shutting down PMC sampler.");
-
-    try
-    {
-        for(auto& slice : g_collector_slices)
-        {
-            slice.shutdown();
-        }
-    } catch(const std::runtime_error& _e)
-    {
-        LOG_ERROR("Exception thrown when shutting down PMC sampler: {}", _e.what());
-    }
-
-    is_initialized() = false;
-#if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
-    g_gpu_perf_counter_collector.reset();
-    g_gpu_perf_counter_provider.reset();
-#endif
+    shutdown_amd_smi_collectors();
+    shutdown_gpu_hw_collector();
 }
 
 void

@@ -242,7 +242,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
-  add_dependencies(${_dev_target} hipify_all)
+  add_dependencies(${_dev_target} hipify_all copy_nccl_device_headers)
   if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
     # rocSHMEM headers land in ext/rocshmem/include only after ExternalProject
     # completes; ensure they are installed before device kernels start compiling.
@@ -535,6 +535,9 @@ endif()
 # main rccl target or __hip_fatbin_* stays undefined in librccl.so.
 # ===========================================================================
 set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
+set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_ipc.o")
+set(DDA_ALL_GATHER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_ipc.o")
+set(DDA_ALLTOALL_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_ipc.o")
 
 add_custom_command(
   OUTPUT  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
@@ -552,6 +555,63 @@ add_custom_command(
     ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
   COMMENT "DL compile: dda_all_reduce_ipc.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_reduce_scatter_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_reduce_scatter_ipc.cu.cpp
+  COMMENT "DL compile: dda_reduce_scatter_ipc.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_ALL_GATHER_IPC_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_all_gather_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_all_gather_ipc.cu.cpp
+  COMMENT "DL compile: dda_all_gather_ipc.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_ALLTOALL_IPC_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_alltoall_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_ipc.cu.cpp
+  COMMENT "DL compile: dda_alltoall_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
 
@@ -606,15 +666,18 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${SYM_FAT_OBJS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${SYM_FAT_OBJS}
 )
-add_dependencies(device_linker_build hipify_all)
+add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
 
 set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
   ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
+  ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
+  ${DDA_ALL_GATHER_IPC_FAT_OBJ}
+  ${DDA_ALLTOALL_IPC_FAT_OBJ}
   ${SYM_FAT_OBJS}
 )
 
@@ -622,4 +685,4 @@ set(DEVICE_LINKER_OBJECTS
 # Optional: emit LLVM IR (ninja device_ir)
 # ===========================================================================
 add_custom_target(device_ir DEPENDS ${ALL_IR_FILES})
-add_dependencies(device_ir hipify_all)
+add_dependencies(device_ir hipify_all copy_nccl_device_headers)

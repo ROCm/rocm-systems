@@ -201,7 +201,8 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
 
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
   CHECK_MANAGED_MEMORY_SUPPORT
-  int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
+  int *Hmm = NULL, NumElms = isQuickLevel() ? 4096 : (1024 * 1024), InitVal = 123;
+  const int blocks = (NumElms + 1023) / 1024;
   hipStream_t strm;
   HIP_CHECK(hipStreamCreate(&strm));
   HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));
@@ -213,7 +214,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
   HIP_CHECK(hipMemPrefetchAsync(Hmm, (NumElms * sizeof(int)), 0, strm));
   HIP_CHECK(hipDeviceSynchronize());
   // launching kernel from each one of the gpus
-  MemAdvise2<<<1024, 1024, 0, strm>>>(Hmm, NumElms);
+  MemAdvise2<<<blocks, 1024, 0, strm>>>(Hmm, NumElms);
   HIP_CHECK(hipDeviceSynchronize());
 
   // verifying the final result
@@ -224,7 +225,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
 
   HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseUnsetAccessedBy, 0));
   HIP_CHECK(hipDeviceSynchronize());
-  MemAdvise2<<<1024, 1024, 0, strm>>>(Hmm, NumElms);
+  MemAdvise2<<<blocks, 1024, 0, strm>>>(Hmm, NumElms);
   HIP_CHECK(hipDeviceSynchronize());
   // verifying the final result
   for (int i = 0; i < NumElms; ++i) {

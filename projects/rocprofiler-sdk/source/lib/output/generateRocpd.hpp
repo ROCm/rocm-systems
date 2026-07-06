@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,9 @@ write_rocpd(
     const generator<tool_buffer_tracing_kfd_record_t>&                      kfd_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
-    const generator<tool_counter_record_t>&                                 counter_collection_gen);
+    const generator<tool_counter_record_t>&                                 counter_collection_gen,
+    const generator<tool_spm_counter_record_t>&                             spm_collection_gen,
+    const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen);
 
 // used in schema generation
 struct argument_info

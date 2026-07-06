@@ -87,6 +87,24 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_QUEUE_FAULT_MESSAGE");
     enable_queue_fault_message_ = (var == "0") ? false : true;
 
+    // RAS poison-consumption SIGBUS opt-in (forwarded to the amdgpu KFD driver
+    // via DRM_IOCTL_AMDGPU_PROC_OPTIONS).  Lets the registered system-event
+    // handler observe the poison-consumed event before (or instead of) the
+    // process being killed by SIGBUS.
+    //   unset / empty       - do not call ioctl, kernel default (immediate SIGBUS)
+    //   "off" / "disable"   - suppress SIGBUS entirely (UINT32_MAX)
+    //   numeric value (ms)  - safety timeout: deliver SIGBUS after N ms if the
+    //                         app does not handle the error in time
+    var = os::GetEnvVar("HSA_SIGBUS_DELAY_MS");
+    poison_sigbus_delay_set_ = !var.empty();
+    if (!poison_sigbus_delay_set_) {
+      poison_sigbus_delay_ms_ = 0;
+    } else if (var == "off" || var == "disable" || var == "disabled") {
+      poison_sigbus_delay_ms_ = UINT32_MAX;
+    } else {
+      poison_sigbus_delay_ms_ = static_cast<uint32_t>(strtoul(var.c_str(), nullptr, 0));
+    }
+
     var = os::GetEnvVar("HSA_ENABLE_INTERRUPT");
     enable_interrupt_ = (var == "0") ? false : true;
 
@@ -314,12 +332,12 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_LIGHTWEIGHT_COREDUMP");
     lightweight_core_dump_enable_ = (var == "1");
 
-    // This limits the maximum number of hardware queues that can be created per 
+    // This limits the maximum number of hardware queues that can be created per
     // priority level for counted queues on every GPU agent. By default, the limit is set to 4.
     var = os::GetEnvVar("GPU_MAX_HW_QUEUES");
     cp_queues_limit_ = var.empty() ? DEFAULT_GPU_HW_QUEUES_MAX : atoi(var.c_str());
 
-    // This allows configuring the size of counted queues created through 
+    // This allows configuring the size of counted queues created through
     // hsa_amd_counted_queue_acquire API. If not set, default queue size is set to 16384.
     var = os::GetEnvVar("HSA_COUNTED_QUEUE_SIZE");
     counted_queue_size_ = var.empty() ? DEFAULT_COUNTED_QUEUE_SIZE : atoi(var.c_str());
@@ -327,6 +345,11 @@ class Flag {
     // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto (size threshold)
     var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
     sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
+    // HSA_SDMA_MULTICAST: 1=force multicast at any size, 0=force off (fan-out),
+    // unset=auto (use multicast up to kMulticastMaxSize, fan-out above).
+    var = os::GetEnvVar("HSA_SDMA_MULTICAST");
+    sdma_multicast_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
   }
 
@@ -342,6 +365,10 @@ class Flag {
   bool enable_vm_fault_message() const { return enable_vm_fault_message_; }
 
   bool enable_queue_fault_message() const { return enable_queue_fault_message_; }
+
+  bool poison_sigbus_delay_set() const { return poison_sigbus_delay_set_; }
+
+  uint32_t poison_sigbus_delay_ms() const { return poison_sigbus_delay_ms_; }
 
   bool enable_interrupt() const { return enable_interrupt_; }
 
@@ -466,6 +493,8 @@ class Flag {
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
 
+  SDMA_OVERRIDE sdma_multicast() const { return sdma_multicast_; }
+
   [[nodiscard]]
   bool core_dump_disable() const { return core_dump_disable_; }
 
@@ -478,9 +507,9 @@ class Flag {
                                          return core_dump_pattern_; }
 
   [[nodiscard]]
-  bool lightweight_core_dump_enable() const { 
-    return lightweight_core_dump_enable_; 
-  } 
+  bool lightweight_core_dump_enable() const {
+    return lightweight_core_dump_enable_;
+  }
 
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
@@ -516,6 +545,8 @@ class Flag {
   bool running_valgrind_;
   bool sdma_wait_idle_;
   bool enable_queue_fault_message_;
+  bool poison_sigbus_delay_set_ = false;
+  uint32_t poison_sigbus_delay_ms_ = 0;
   bool report_tool_load_failures_;
   bool report_tool_register_failures_ = false;
   bool disable_tool_register_ = false;
@@ -544,6 +575,8 @@ class Flag {
   bool enable_dtif_;
   bool enable_dxg_detection_;
   SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
+
+  SDMA_OVERRIDE sdma_multicast_ = SDMA_DEFAULT;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;

@@ -352,6 +352,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 }
 
 AqlQueue::~AqlQueue() {
+  agent_->UnregisterAqlQueue(this);
+
   // Remove error handler synchronously.
   // Sequences error handler callbacks with queue destroy.
   dynamicScratchState |= ERROR_HANDLER_TERMINATE;
@@ -604,9 +606,11 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
                                 "Trying to allocate an AQL ring buffer in device memory without "
                                 "large BAR PCIe enabled.");
     }
+    // Device-memory ring buffers use the region's default CPU mapping; callers
+    // that select this path are responsible for the required packet-store ordering.
     ring_buf_ = agent_->coarsegrain_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_,
-        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
+        core::MemoryRegion::AllocateExecutable);
   } else {
     ring_buf_ = agent_->system_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_, 0x1000,
@@ -1440,15 +1444,15 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   if (errorCode == static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_FAULT)) {
     queue->MarkVMFaulted();
     core::Runtime::runtime_singleton_->SignalVMFault();
-    debug_print("Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
+    log_warning_n(1,"Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
     return exceptionHandlerDone();
   }
 
   const char* errorMsg = nullptr;
   if (HSA::hsa_status_string(errorCode, &errorMsg) == HSA_STATUS_SUCCESS && errorMsg) {
-    fprintf(stderr, "Queue error: %s\n", errorMsg);
+    log_warning_n(1, "Queue error: %s\n", errorMsg);
   } else {
-    fprintf(stderr, "Queue error: code 0x%lx\n", (unsigned long)error_code);
+    log_warning_n(1, "Queue error: code 0x%lx\n", (unsigned long)error_code);
   }
 
   // Fallback if KFD does not support GPU core dump. In this case, the core

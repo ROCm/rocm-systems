@@ -9,10 +9,32 @@
 
 using namespace rocprofiler_compute_tool;
 
-TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_Throws)
+TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_UsesDefault)
 {
     m_input_parameters->set_output_path("");
-    EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
+    EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->output_filename.find(EnvInputParameters::kDefaultOutputPath) !=
+                std::string::npos);
+    EXPECT_TRUE(tool_data->output_filename.find(
+                    std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedPcSamplingMethod_EnablesPcSampling)
+{
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->pc_sampling.enabled());
+    EXPECT_EQ(tool_data->pc_sampling.mode(), PcSamplingMode::HostTrap);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedNoPcSamplingMethod_DoesNotEnablePcSampling)
+{
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_FALSE(tool_data->pc_sampling.enabled());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNoRequestedCounters_Throws)
@@ -37,6 +59,53 @@ TEST_F(TestRocprofilerComputeTool, ProvidedEmptyKernelFilterRange_DoesntThrow)
 {
     m_input_parameters->set_kernel_filter_range("");
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetOutputPath_UsesDefault)
+{
+    m_input_parameters->unset_output_path();
+    EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->output_filename.find(EnvInputParameters::kDefaultOutputPath) !=
+                std::string::npos);
+    EXPECT_TRUE(tool_data->output_filename.find(
+                    std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetRequestedCounters_UsesDefault)
+{
+    m_input_parameters->unset_requested_counters();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->requested_counters, EnvInputParameters::kDefaultRequestedCounters);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetIterationMultiplexingMode_UsesDefault)
+{
+    m_input_parameters->unset_iteration_multiplexing_mode();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->iteration_multiplexing_mode,
+              iteration_multiplexing_mode(EnvInputParameters::kDefaultIterationMultiplexingMode));
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetKernelFilterIncludeRegex_UsesDefault)
+{
+    m_input_parameters->unset_kernel_filter_include_regex();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->kernel_filter_include_regex,
+              EnvInputParameters::kDefaultKernelFilterIncludeRegex);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetKernelFilterRange_UsesDefault)
+{
+    m_input_parameters->unset_kernel_filter_range();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(EnvInputParameters::kDefaultKernelFilterRange.empty());
+    EXPECT_TRUE(tool_data->kernel_filter_ranges.empty());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)
@@ -152,19 +221,18 @@ TEST_F(TestRocprofilerComputeTool, DISABLED_ProvidedIntersectingRanges_Throws)
     EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
 }
 
-TEST_F(TestRocprofilerComputeTool, OnToolInit_CreatesAndStartsContext)
+TEST_F(TestRocprofilerComputeTool, OnToolInit_CreatesContext)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
     cfg->initialize(nullptr, cfg->tool_data);
-    compare_counter_config_ids(m_sdk_wrapper->get_created_contexts(),
-                               m_sdk_wrapper->get_started_contexts());
+    EXPECT_EQ(m_sdk_wrapper->get_created_contexts().size(), 1u);
 }
 
 TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
-    cfg->initialize(nullptr, cfg->tool_data);
-    EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    ASSERT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
     const auto& args = m_sdk_wrapper->get_dispatch_counting_service_info()[0];
     EXPECT_EQ(args.context, m_sdk_wrapper->get_created_contexts()[0]);
     EXPECT_TRUE(args.dispatch_callback != nullptr);
@@ -206,6 +274,75 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_
     EXPECT_EQ(m_counters_writer->get_write_counters_info().size(), 1);
     EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].counter_ids, std::vector{counter_id});
     EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].kernel_id, std::vector{kernel_id0});
+}
+
+// Counter intent is declared in tool_init so the SDK queue-interposition gate
+// sees it before HSA loads. The HSA-touching start_context must stay deferred
+// to the intercept callback (regression guard for the fork deadlock when the
+// tool is preloaded into non-GPU processes).
+TEST_F(TestRocprofilerComputeTool, ToolInit_ConfiguresCountingServiceButDoesNotStartContext)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
+    EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
+}
+
+// Without requested counters there is nothing to collect, so tool_init must not
+// configure the counting service.
+TEST_F(TestRocprofilerComputeTool, ToolInit_WithoutRequestedCounters_DoesNotConfigureCountingService)
+{
+    m_input_parameters->set_requested_counters("");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    EXPECT_TRUE(m_sdk_wrapper->get_dispatch_counting_service_info().empty());
+    EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
+}
+
+TEST_F(TestRocprofilerComputeTool, RocprofilerConfigure_RegistersHsaInterceptCallback)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
+    EXPECT_NE(m_sdk_wrapper->get_hsa_intercept_registration_info()[0].callback, nullptr);
+    EXPECT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info()[0].user_data, cfg->tool_data);
+}
+
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_StartsContext)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+    EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
+    compare_counter_config_ids(m_sdk_wrapper->get_created_contexts(),
+                               m_sdk_wrapper->get_started_contexts());
+}
+
+// The SDK may fire the HSA intercept callback more than once. Context start
+// must run exactly once per process.
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_IsIdempotent)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+    EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
+}
+
+// If HSA loads after tool_fini has run, the callback must not start a context
+// or dereference the freed tool_data pointer it captured at registration time.
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_AfterToolFini_IsNoOp)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
+    cfg->finalize(cfg->tool_data);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+    EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
 }
 
 //////////////////////////////////////////////////////////////////////////

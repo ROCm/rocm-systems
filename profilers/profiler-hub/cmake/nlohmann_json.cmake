@@ -3,17 +3,9 @@
 
 include_guard(DIRECTORY)
 
-option(
-    PROFILER_HUB_USE_SYSTEM_NLOHMANN_JSON
-    "Use system-installed nlohmann_json if available"
-    ON
-)
-
 set(NLOHMANN_JSON_VERSION "3.11.3" CACHE STRING "nlohmann_json version")
 
-if(PROFILER_HUB_USE_SYSTEM_NLOHMANN_JSON)
-    find_package(nlohmann_json ${NLOHMANN_JSON_VERSION} QUIET)
-endif()
+find_package(nlohmann_json QUIET)
 
 if(nlohmann_json_FOUND)
     message(

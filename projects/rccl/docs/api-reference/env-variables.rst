@@ -34,6 +34,22 @@ in the following table.
       - | String value for host identification
         | Used for host hash generation
 
+    * - | ``NCCL_BOOTSTRAP_BIDIR_ALLGATHER``
+        | Enables the bidirectional ring AllGather (N/2 steps) on the socket OOB path
+          during bootstrap. The unidirectional ring (N-1 steps) is kept as a fallback.
+          Has no effect when net OOB is in use.
+      - | ``0``: Force unidirectional ring.
+        | ``1``: Force bidirectional ring (default).
+
+    * - | ``NCCL_CUMEM_ENABLE``
+        | Enables cuMem virtual memory management (VMM) for RCCL allocations,
+          which is required for ``ncclCommSuspend`` and ``ncclCommResume`` to
+          release the physical GPU memory of a suspended communicator. See
+          :ref:`suspend-resume` for the full prerequisites.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+        | ``-2``: Auto-detect; enable when the platform supports VMM.
+
 Logging and debugging
 =====================
 
@@ -145,6 +161,13 @@ in the following table.
       - | Integer value (default: ``-1``)
         | See InfiniBand ``show_gids`` command for valid values
 
+    * - | ``NCCL_PXN_C2C``
+        | Allows PXN routing through a C2C link to reach a NIC attached to a
+          peer GPU. The C2C path is NVIDIA-specific and is not currently
+          applicable on AMD hardware.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
       - | Interface prefix string or list
@@ -166,6 +189,19 @@ in the following table.
     * - | ``NCCL_NET_FORCE_MERGE``
         | Forces merging of network devices.
       - | String specifying forced merge configuration
+
+    * - | ``NCCL_NETDEVS_POLICY``
+        | Controls how many of a GPU's locally reachable NICs are used on the
+        | network path for ``send``, ``recv``, and ``all-to-all``. The policy
+        | governs per-channel NIC selection (``ncclTopoGetLocalNet``); the
+        | per-peer network channel count is still bounded by available NIC
+        | bandwidth.
+        | Any unset, malformed, or out-of-range value falls back to ``AUTO``.
+      - | ``AUTO`` (default): use ``ceil(localNetCount / localGpuCount)`` NICs,
+        | dividing the local NICs across the GPUs that share them.
+        | ``ALL``: use every locally reachable NIC.
+        | ``MAX:N``: use at most ``N`` NICs (clamped to the number reachable);
+        | ``N`` must be a positive integer.
 
     * - | ``RCCL_IB_SPLIT_DATA_THRESHOLD``
         | Minimum message size (in bytes) before the payload is split across
@@ -213,6 +249,14 @@ intended for debugging and development purposes.
         | Enables multi-process mode in test applications.
       - | Any non-empty value enables multi-process mode
         | Used with test executables for distributed testing
+
+    * - | ``NCCL_DISABLE_MEM_MANAGER``
+        | Disables the internal RCCL memory manager. This is an internal
+          parameter intended for testing and debugging only. When the memory
+          manager is disabled, ``ncclCommSuspend``, ``ncclCommResume``, and
+          ``ncclCommMemStats`` return ``ncclInvalidUsage``.
+      - | ``0``: Memory manager enabled (default).
+        | ``1``: Memory manager disabled.
 
 Multi-communicator ordering
 ===========================

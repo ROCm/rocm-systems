@@ -55,6 +55,8 @@ export function SessionsPage() {
   const [stopTarget, setStopTarget] = useState<string | null>(null);
   const [readyTimeout, setReadyTimeout] = useState(10);
   const [workdir, setWorkdir] = useState("");
+  const [name, setName] = useState("");
+  const [nameError, setNameError] = useState("");
 
   async function refresh() {
     try {
@@ -91,21 +93,42 @@ export function SessionsPage() {
       toast.error(msg);
       return;
     }
+    const trimmed = name.trim();
+    const localNameError = validateSessionName(trimmed);
+    if (localNameError) {
+      setNameError(localNameError);
+      return;
+    }
     setBusy(true);
     setError("");
+    setNameError("");
     try {
-      await api.createSession({
+      const created = await api.createSession({
         profile: newProfile,
+        id: trimmed || undefined,
         workdir: workdir || undefined,
         ready_timeout: readyTimeout,
       });
-      toast.success(`Session starting from "${newProfile}"`);
+      toast.success(`Session "${created.id}" starting from "${newProfile}"`);
       setStartOpen(false);
+      setName("");
       await refresh();
     } catch (err) {
-      const msg = String(err);
-      setError(msg);
-      toast.error(msg);
+      // A 409 means the chosen name is already taken. Surface that on
+      // the name field directly instead of as a generic error banner.
+      if (err instanceof api.ApiError && err.status === 409) {
+        const msg = `A session named "${trimmed}" already exists. Choose a different name.`;
+        setNameError(msg);
+        toast.error(msg);
+      } else if (err instanceof api.ApiError && err.status === 400 && trimmed) {
+        const msg = err.detail || "Invalid session name.";
+        setNameError(msg);
+        toast.error(msg);
+      } else {
+        const msg = err instanceof api.ApiError ? err.detail || String(err) : String(err);
+        setError(msg);
+        toast.error(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -165,7 +188,10 @@ export function SessionsPage() {
             type="button"
             className="btn-primary"
             disabled={profiles.length === 0}
-            onClick={() => setStartOpen(true)}
+            onClick={() => {
+              setNameError("");
+              setStartOpen(true);
+            }}
             data-testid="open-start-session"
           >
             + New session
@@ -229,6 +255,15 @@ export function SessionsPage() {
                       </dd>
                     </div>
                   </dl>
+                  {s.health.message ? (
+                    <p
+                      className="session-card-message"
+                      data-testid={`session-message-${s.def.id}`}
+                      title={s.health.message}
+                    >
+                      {s.health.message}
+                    </p>
+                  ) : null}
                 </div>
                 <footer className="session-card-actions">
                   <Link
@@ -326,6 +361,24 @@ export function SessionsPage() {
           className="form-grid"
           onSubmit={onStart}
         >
+          <label className="form-field span-2">
+            <span>Session name (optional)</span>
+            <input
+              value={name}
+              data-testid="start-modal-name"
+              onChange={(e) => {
+                setName(e.target.value);
+                if (nameError) setNameError("");
+              }}
+              placeholder="(auto-generated)"
+              aria-invalid={nameError ? true : undefined}
+            />
+            {nameError && (
+              <span className="form-field-error" role="alert" data-testid="start-modal-name-error">
+                {nameError}
+              </span>
+            )}
+          </label>
           <div className="form-field span-2">
             <span>Profile</span>
             <Dropdown
@@ -392,6 +445,21 @@ export function SessionsPage() {
       </Modal>
     </div>
   );
+}
+
+/// Validate a session name against the same rules the daemon enforces
+/// (`mirage_core::session::SessionId`). Returns an error message, or an
+/// empty string if valid. An empty name is allowed — the daemon then
+/// auto-generates an id.
+function validateSessionName(name: string): string {
+  if (name === "") return "";
+  if (name.length > 64) return "Name must be at most 64 characters.";
+  if (name.startsWith(".")) return "Name may not start with '.'.";
+  if (name.includes("..")) return "Name may not contain '..'.";
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+    return "Use only letters, numbers, '-', '_', and '.'.";
+  }
+  return "";
 }
 
 function profileName(p: unknown): string {

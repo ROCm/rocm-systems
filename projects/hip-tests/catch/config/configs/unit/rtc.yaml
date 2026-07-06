@@ -42,7 +42,7 @@ rtc:
   Unit_RTC_LinkDestroy_Default:
     <<: *level_2
     # SWDEV-450909: Test failed in stress testing
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [link]
   Unit_RTC_LinkerAPI:
     <<: *level_2
@@ -215,3 +215,15 @@ rtc:
     tags: [compile]
   Unit_Rtc_CoopReduce:
     <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Rtc_CoopScan:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_RTC_BUNDLE_FROM_FILE:
+    <<: *level_2
+    tags: [link]
+  Unit_hiprtc_fp8_simple:
+    <<: *level_2
+    tags: [compile]

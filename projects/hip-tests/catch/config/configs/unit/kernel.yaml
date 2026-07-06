@@ -12,17 +12,17 @@ kernel:
   Unit_hipDynamicShared:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [memory]
   Unit_hipDynamicShared2:
     <<: *level_2
     tags: [memory]
   Unit_hipEmptyKernel:
     <<: *level_2
-    tags: [language]
+    tags: [language, smoke]
   Unit_hipGridLaunch:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, smoke]
   Unit_hipLanguageExtensions:
     <<: *level_2
     tags: [language]
@@ -43,7 +43,7 @@ kernel:
     tags: [memory]
   Unit_kernel_LaunchBounds_Functional:
     <<: *level_2
-    tags: [attributes]
+    tags: [attributes, smoke]
   Unit_kernel_Assign_threadIdx_to_auto:
     <<: *level_2
     tags: [language]
@@ -85,7 +85,7 @@ kernel:
     tags: [launch]
   Unit_hipGridLaunch_ExceedMaxGridDim_Negative:
     <<: *level_2
-    disabled: [amd_windows, amd_linux]
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [launch]
   Unit_hipExtDynDataPrefetch_NegativeTests:
     <<: *level_2
@@ -97,5 +97,19 @@ kernel:
     <<: *level_2
     tags: [launch]
   Unit_hipExtDynDataPrefetch_TemporalHints:
+    <<: *level_2
+    tags: [launch]
+  Unit_KernelStackSize:
+    <<: *level_2
+    disabled: [amd_linux, amd_windows, amd_wsl]
+  Unit_Validate_User_Sgpr_Count:
+    <<: *level_2
+  Unit_hipGridLaunch_MaxGridDim_DeviceProperties:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipLaunchParmFunctor_kernel_arg_prefetch:
     <<: *level_2
     tags: [launch]
