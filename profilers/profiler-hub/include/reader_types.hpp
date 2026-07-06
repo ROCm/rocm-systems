@@ -262,14 +262,36 @@ struct kernel_symbol_info_t
 using kernel_symbol_info_ptr_t  = std::shared_ptr<kernel_symbol_info_t>;
 using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
 
+/**
+ * @brief Classifies a track by the identity shape of its contents.
+ *
+ * Determines which identity shared_ptrs in track_info_t are populated, whether
+ * the caller calls get_interval_track() or get_scalar_track(), and which
+ * get_*_details() method applies to opaque_ids drawn from that track.
+ */
+enum class track_type_t
+{
+    cpu_thread,  ///< thread_info populated. Interval track of region events.
+    gpu_queue,   ///< agent_info + queue_info populated. Interval track of kernel dispatches.
+    dma,         ///< agent_info + stream_info populated. Interval track of memory copies.
+    counter      ///< thread_info + (optional) agent_info. Scalar track of counter samples.
+};
+
 struct track_info_t
 {
-    std::string name{};
-    std::string extdata{};
+    size_t       id{};    ///< Track identifier. Pass to get_interval_track()/get_scalar_track().
+                          ///< Opaque and stable for the reader's lifetime; never a topology tuple.
+    track_type_t type{};  ///< Determines which identity fields below are populated and which
+                          ///< event-fetch / detail method applies.
+    std::string  name{};
+    std::string  extdata{};
 
-    std::shared_ptr<node_info_t>    node_info;
-    std::shared_ptr<process_info_t> process_info;
-    std::shared_ptr<thread_info_t>  thread_info;
+    std::shared_ptr<node_info_t>    node_info;     ///< Always populated.
+    std::shared_ptr<process_info_t> process_info;  ///< Always populated.
+    std::shared_ptr<thread_info_t>  thread_info;   ///< cpu_thread, counter.
+    std::shared_ptr<agent_info_t>   agent_info;    ///< gpu_queue, dma; optionally counter.
+    std::shared_ptr<queue_info_t>   queue_info;    ///< gpu_queue.
+    std::shared_ptr<stream_info_t>  stream_info;   ///< dma.
 };
 
 using track_info_ptr_t  = std::shared_ptr<track_info_t>;
@@ -499,5 +521,39 @@ struct counter_timeline_event_t
 };
 
 using counter_timeline_event_list_t = std::vector<counter_timeline_event_t>;
+
+// --------------------- Track event types (track-scoped queries) ----------
+
+struct interval_event_t
+{
+    size_t                opaque_id{};   ///< SQLite row id of the event in its per-type table
+                                         ///< (region / kernel_dispatch / memory_copy). Pass to the
+                                         ///< get_*_details() method selected by the track's type.
+    timestamp_ns_t        start{};       ///< Event start (nanoseconds).
+    timestamp_ns_t        end{};         ///< Event end (nanoseconds).
+    std::string           display_name;  ///< Human-readable label for the bar.
+    int                   level{};       ///< Nesting depth; 0 = outermost. Computed in-reader.
+    std::optional<size_t> parent_id{};   ///< opaque_id of the enclosing event when truly nested;
+                                         ///< nullopt when overlapping-but-not-nested.
+};
+
+using interval_event_list_t = std::vector<interval_event_t>;
+
+struct scalar_event_t
+{
+    size_t         opaque_id{};  ///< rocpd_sample.id; pass to get_scalar_details().
+    timestamp_ns_t timestamp{};  ///< Sample time (nanoseconds).
+    double         value{};      ///< Counter value (REAL).
+};
+
+using scalar_event_list_t = std::vector<scalar_event_t>;
+
+struct flow_t
+{
+    size_t source_opaque_id{};  ///< opaque_id of the originating event (e.g. CPU region).
+    size_t dest_opaque_id{};    ///< opaque_id of the destination event (e.g. GPU kernel dispatch).
+};
+
+using flow_list_t = std::vector<flow_t>;
 
 }  // namespace profiler_hub::reader_types

@@ -13,6 +13,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 
 namespace profiler_hub
@@ -23,6 +24,11 @@ reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
                     : throw std::invalid_argument(
                           "Provided pointer to a non-existing storage!"))
 , m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
+// VERSION-DISPATCH SEAM (task 002B): m_read_statements is hardwired to schema_v3 here.
+// The v4.0 backend slots in by detecting the schema version off m_backend and selecting
+// schema_v4::read_statements instead. That requires a common read_statements interface
+// (or std::variant) so the public reader surface stays schema-agnostic; the member type
+// on reader_impl.hpp (m_read_statements) is the other half of the seam.
 , m_read_statements(
       std::make_shared<data_storage::schema_v3::read_statements>(m_backend,
                                                                  m_backend->get_uuid()))
@@ -220,6 +226,20 @@ reader_t::impl::get_all_tracks()
 {
     if(m_track_info_list.empty())
     {
+        // v3 rocpd_track holds cpu_thread and counter tracks. A track is a counter
+        // track iff at least one rocpd_sample references it. Classify up front.
+        std::unordered_set<size_t> counter_track_ids;
+        for(const auto& r : m_read_statements->distinct_sample_track_ids()().to_vector())
+        {
+            counter_track_ids.insert(r.track_id);
+        }
+
+        std::unordered_map<size_t, std::string> counter_track_names;
+        for(const auto& r : m_read_statements->counter_track_names()().to_vector())
+        {
+            counter_track_names.emplace(r.track_id, r.name);
+        }
+
         const auto& statement       = m_read_statements->track_info_statement();
         const auto  track_info_list = statement().to_vector();
 
@@ -245,8 +265,24 @@ reader_t::impl::get_all_tracks()
             }
 
             auto track_info_ptr     = std::make_shared<reader_types::track_info_t>();
+            track_info_ptr->id      = track_info.id;
             track_info_ptr->name    = track_name != nullptr ? track_name : "";
             track_info_ptr->extdata = track_info.extdata;
+
+            const bool is_counter =
+                counter_track_ids.find(track_info.id) != counter_track_ids.end();
+            track_info_ptr->type = is_counter ? reader_types::track_type_t::counter
+                                              : reader_types::track_type_t::cpu_thread;
+
+            // counter track display name = PMC name (Q9); fall back to rocpd_track name.
+            if(is_counter)
+            {
+                auto nit = counter_track_names.find(track_info.id);
+                if(nit != counter_track_names.end() && !nit->second.empty())
+                {
+                    track_info_ptr->name = nit->second;
+                }
+            }
 
             auto node_it = m_node_info_utility.find(track_info.nid);
             if(node_it != m_node_info_utility.end() && node_it->second)
@@ -271,6 +307,7 @@ reader_t::impl::get_all_tracks()
                     track_info_ptr->thread_info = thread_it->second;
                 }
             }
+            // Q10: v3 rocpd_track has no agent_id, so counter tracks get no agent_info.
 
             m_track_info_list.push_back(track_info_ptr);
             m_track_info_utility.emplace(track_info.id, track_info_ptr);
@@ -281,10 +318,125 @@ reader_t::impl::get_all_tracks()
                                  track_info.tid.value_or(0) };
             m_track_ptr_to_topology.emplace(track_info_ptr, topo);
             m_topology_to_track_ptr.emplace(topo, track_info_ptr);
+
+            // Routing for track-scoped queries.
+            track_query_info_t qi;
+            qi.type          = track_info_ptr->type;
+            qi.nid           = track_info.nid;
+            qi.pid           = track_info.pid.value_or(0);
+            qi.tid           = track_info.tid;
+            qi.real_track_id = track_info.id;
+            m_track_query_info.emplace(track_info.id, qi);
         }
+
+        synthesize_derived_tracks();
     }
 
     return m_track_info_list;
+}
+
+// gpu_queue and dma tracks do not exist as rocpd_track rows in v3; synthesize them
+// from the distinct topology of rocpd_kernel_dispatch and rocpd_memory_copy. Synthetic
+// ids are allocated above MAX(rocpd_track.id) so they never collide with real ids.
+void
+reader_t::impl::synthesize_derived_tracks()
+{
+    size_t next_id = 1;
+    {
+        const auto max_rows = m_read_statements->max_track_id()().to_vector();
+        if(!max_rows.empty() && max_rows.front().max_id.has_value())
+        {
+            next_id = max_rows.front().max_id.value() + 1;
+        }
+    }
+
+    // gpu_queue: one track per distinct (nid, pid, agent_id, queue_id).
+    for(const auto& g : m_read_statements->distinct_gpu_queue_tracks()().to_vector())
+    {
+        auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id   = next_id++;
+        track_info_ptr->type = reader_types::track_type_t::gpu_queue;
+
+        auto node_it = m_node_info_utility.find(g.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(g.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        auto agent_it = m_agent_info_utility.find(g.agent_id);
+        if(agent_it != m_agent_info_utility.end() && agent_it->second)
+        {
+            track_info_ptr->agent_info = agent_it->second;
+        }
+        auto queue_it = m_queue_info_utility.find(g.queue_id);
+        if(queue_it != m_queue_info_utility.end() && queue_it->second)
+        {
+            track_info_ptr->queue_info = queue_it->second;
+        }
+
+        // Q9: gpu_queue display name = queue identity.
+        if(track_info_ptr->queue_info)
+        {
+            track_info_ptr->name = track_info_ptr->queue_info->name;
+        }
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        track_query_info_t qi;
+        qi.type     = reader_types::track_type_t::gpu_queue;
+        qi.nid      = g.nid;
+        qi.pid      = g.pid;
+        qi.agent_id = g.agent_id;
+        qi.queue_id = g.queue_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
+
+    // dma: one track per distinct (nid, pid, queue_id, stream_id); NULL is a distinct
+    // group value (Q2). v3 memory_copy has no single agent, so agent_info stays nullopt.
+    for(const auto& d : m_read_statements->distinct_dma_tracks()().to_vector())
+    {
+        auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id   = next_id++;
+        track_info_ptr->type = reader_types::track_type_t::dma;
+
+        auto node_it = m_node_info_utility.find(d.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(d.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        if(d.stream_id.has_value())
+        {
+            auto stream_it = m_stream_info_utility.find(d.stream_id.value());
+            if(stream_it != m_stream_info_utility.end() && stream_it->second)
+            {
+                track_info_ptr->stream_info = stream_it->second;
+            }
+        }
+
+        // Q9: dma-style track display name = category label.
+        track_info_ptr->name = "Memory copy";
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        track_query_info_t qi;
+        qi.type      = reader_types::track_type_t::dma;
+        qi.nid       = d.nid;
+        qi.pid       = d.pid;
+        qi.queue_id  = d.queue_id;
+        qi.stream_id = d.stream_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
 }
 
 reader_types::kernel_symbol_info_list_t
@@ -1232,6 +1384,331 @@ reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
         get_count(m_read_statements->memory_alloc_count(),
                   m_read_statements->memory_alloc_count_time_filtered());
     return counts;
+}
+
+// ============================================================================
+// Track-scoped queries (interval / scalar / flow)
+// ============================================================================
+
+namespace
+{
+// Assigns level + parent_id over a start-ordered interval list using a containment
+// stack. "Strictly contains" = parent.start <= child.start (guaranteed by sort) AND
+// parent.end >= child.end; overlapping-but-not-nested events get level 0 / no parent.
+void
+compute_interval_nesting(reader_types::interval_event_list_t& events)
+{
+    std::stable_sort(events.begin(), events.end(), [](const auto& a, const auto& b) {
+        if(a.start != b.start) return a.start < b.start;
+        return a.end > b.end;
+    });
+
+    std::vector<size_t> stack;
+    for(size_t i = 0; i < events.size(); ++i)
+    {
+        while(!stack.empty() && events[stack.back()].end <= events[i].start)
+        {
+            stack.pop_back();
+        }
+        if(!stack.empty() && events[stack.back()].end >= events[i].end)
+        {
+            events[i].level     = events[stack.back()].level + 1;
+            events[i].parent_id = events[stack.back()].opaque_id;
+        }
+        else
+        {
+            events[i].level     = 0;
+            events[i].parent_id = std::nullopt;
+        }
+        stack.push_back(i);
+    }
+}
+
+template <typename T>
+void
+paginate(std::vector<T>& v, const reader_types::pagination_t& pagination)
+{
+    if(pagination.offset.has_value())
+    {
+        auto off = pagination.offset.value();
+        if(off >= v.size())
+        {
+            v.clear();
+            return;
+        }
+        v.erase(v.begin(), v.begin() + static_cast<ptrdiff_t>(off));
+    }
+    if(pagination.limit.has_value() && pagination.limit.value() < v.size())
+    {
+        v.resize(pagination.limit.value());
+    }
+}
+}  // namespace
+
+reader_types::interval_event_list_t
+reader_t::impl::get_interval_track(size_t                              track_id,
+                                   const reader_types::event_filter_t& filter)
+{
+    auto qit = m_track_query_info.find(track_id);
+    if(qit == m_track_query_info.end()) return {};
+    const auto& qi = qit->second;
+
+    std::vector<data_storage::schema_v3::interval_row_result> rows;
+    bool name_from_kernel_symbol = false;
+
+    switch(qi.type)
+    {
+        case reader_types::track_type_t::cpu_thread:
+            rows = m_read_statements->region_interval_track()(qi.nid,
+                                                              qi.pid,
+                                                              qi.tid.value_or(0))
+                       .to_vector();
+            break;
+        case reader_types::track_type_t::gpu_queue:
+            rows = m_read_statements->kernel_dispatch_interval_track()(
+                                        qi.nid,
+                                        qi.pid,
+                                        qi.agent_id.value_or(0),
+                                        qi.queue_id.value_or(0))
+                       .to_vector();
+            name_from_kernel_symbol = true;
+            break;
+        case reader_types::track_type_t::dma:
+        {
+            const bool has_q = qi.queue_id.has_value();
+            const bool has_s = qi.stream_id.has_value();
+            if(has_q && has_s)
+            {
+                rows = m_read_statements->memory_copy_interval_qs()(qi.nid,
+                                                                    qi.pid,
+                                                                    qi.queue_id.value(),
+                                                                    qi.stream_id.value())
+                           .to_vector();
+            }
+            else if(has_q)
+            {
+                rows = m_read_statements->memory_copy_interval_q_only()(
+                                            qi.nid, qi.pid, qi.queue_id.value())
+                           .to_vector();
+            }
+            else if(has_s)
+            {
+                rows = m_read_statements->memory_copy_interval_s_only()(
+                                            qi.nid, qi.pid, qi.stream_id.value())
+                           .to_vector();
+            }
+            else
+            {
+                rows = m_read_statements->memory_copy_interval_neither()(qi.nid, qi.pid)
+                           .to_vector();
+            }
+            break;
+        }
+        case reader_types::track_type_t::counter:
+        default:
+            // A counter track is scalar-only; an interval query returns nothing (Q7).
+            return {};
+    }
+
+    reader_types::interval_event_list_t events;
+    events.reserve(rows.size());
+    for(const auto& r : rows)
+    {
+        reader_types::interval_event_t ev;
+        ev.opaque_id = r.id;
+        ev.start     = r.start;
+        ev.end       = r.end;
+
+        if(r.name_ref.has_value())
+        {
+            if(name_from_kernel_symbol)
+            {
+                // Q9: gpu_queue per-event label = kernel symbol display name.
+                auto kit = m_kernel_symbol_info_utility.find(r.name_ref.value());
+                if(kit != m_kernel_symbol_info_utility.end() && kit->second)
+                {
+                    ev.display_name = !kit->second->display_name.empty()
+                                          ? kit->second->display_name
+                                          : kit->second->name;
+                }
+            }
+            else
+            {
+                auto sit = m_string_info_utility.find(r.name_ref.value());
+                if(sit != m_string_info_utility.end()) ev.display_name = sit->second;
+            }
+        }
+
+        events.push_back(std::move(ev));
+    }
+
+    // Rows arrive ORDER BY start ascending. Compute nesting over the full track so the
+    // levels are stable regardless of any time-window filter applied afterwards.
+    compute_interval_nesting(events);
+
+    // Optional time-window filter (containment: start >= window.start, end <= window.end).
+    if(filter.time_window.start.has_value() || filter.time_window.end.has_value())
+    {
+        const auto& lo = filter.time_window.start;
+        const auto& hi = filter.time_window.end;
+        reader_types::interval_event_list_t filtered;
+        filtered.reserve(events.size());
+        for(auto& ev : events)
+        {
+            if(lo.has_value() && ev.start < lo.value()) continue;
+            if(hi.has_value() && ev.end > hi.value()) continue;
+            filtered.push_back(std::move(ev));
+        }
+        events = std::move(filtered);
+    }
+
+    paginate(events, filter.pagination);
+    return events;
+}
+
+reader_types::scalar_event_list_t
+reader_t::impl::get_scalar_track(size_t                              track_id,
+                                 const reader_types::event_filter_t& filter)
+{
+    auto qit = m_track_query_info.find(track_id);
+    if(qit == m_track_query_info.end()) return {};
+    const auto& qi = qit->second;
+    if(qi.type != reader_types::track_type_t::counter) return {};  // Q7
+
+    auto rows = m_read_statements->scalar_track()(qi.real_track_id).to_vector();
+
+    reader_types::scalar_event_list_t events;
+    events.reserve(rows.size());
+    for(const auto& r : rows)
+    {
+        if(filter.time_window.start.has_value() &&
+           r.timestamp < filter.time_window.start.value())
+            continue;
+        if(filter.time_window.end.has_value() &&
+           r.timestamp > filter.time_window.end.value())
+            continue;
+
+        reader_types::scalar_event_t ev;
+        ev.opaque_id = r.id;
+        ev.timestamp = r.timestamp;
+        ev.value     = r.value;
+        events.push_back(ev);
+    }
+
+    paginate(events, filter.pagination);
+    return events;
+}
+
+reader_types::flow_list_t
+reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
+{
+    reader_types::flow_list_t flows;
+
+    const bool has_window =
+        filter.time_window.start.has_value() || filter.time_window.end.has_value();
+    const size_t lo = filter.time_window.start.value_or(0);
+    const size_t hi =
+        filter.time_window.end.value_or(std::numeric_limits<size_t>::max());
+
+    auto run = [&](const data_storage::schema_v3::read_statements::flow_statement_set&
+                       set) {
+        auto rows = has_window ? set.time_filtered(lo, hi).to_vector()
+                               : set.base().to_vector();
+        flows.reserve(flows.size() + rows.size());
+        for(const auto& r : rows)
+        {
+            flows.push_back(reader_types::flow_t{ r.source_id, r.dest_id });
+        }
+    };
+
+    run(m_read_statements->region_to_kernel_dispatch_flows());
+    run(m_read_statements->region_to_memory_copy_flows());
+    run(m_read_statements->region_to_memory_allocate_flows());
+
+    return flows;
+}
+
+// ============================================================================
+// Detail methods by opaque id
+// ============================================================================
+
+reader_types::pmc_event_data_t
+reader_t::impl::build_pmc_event_data(
+    const data_storage::schema_v3::scalar_detail_result& row)
+{
+    reader_types::pmc_event_data_t data;
+    data.value            = row.value;
+    data.sample.timestamp = row.timestamp;
+
+    auto tit = m_track_info_utility.find(row.track_id);
+    if(tit != m_track_info_utility.end()) data.sample.track = tit->second;
+
+    // NOTE(v3): no event-by-event_id read statement exists, so the common event
+    // metadata (data.event) is left null here. Flagged as an open question.
+    return data;
+}
+
+std::optional<reader_types::pmc_event_data_t>
+reader_t::impl::get_scalar_details(size_t opaque_id)
+{
+    auto rows = m_read_statements->scalar_detail()(opaque_id).to_vector();
+    if(rows.empty()) return std::nullopt;
+    return build_pmc_event_data(rows.front());
+}
+
+std::optional<reader_types::pmc_event_data_t>
+reader_t::impl::get_pmc_event_details(size_t opaque_id)
+{
+    auto rows = m_read_statements->pmc_event_detail()(opaque_id).to_vector();
+    if(rows.empty()) return std::nullopt;
+    return build_pmc_event_data(rows.front());
+}
+
+std::optional<reader_types::sample_data_t>
+reader_t::impl::get_sample_details(size_t opaque_id)
+{
+    auto rows = m_read_statements->scalar_detail()(opaque_id).to_vector();
+    if(rows.empty()) return std::nullopt;
+
+    const auto& r = rows.front();
+    reader_types::sample_data_t data;
+    data.timestamp = r.timestamp;
+
+    auto tit = m_track_info_utility.find(r.track_id);
+    if(tit != m_track_info_utility.end()) data.track = tit->second;
+    return data;
+}
+
+std::optional<reader_types::region_data_t>
+reader_t::impl::get_region_details(size_t opaque_id)
+{
+    reader_types::timeline_event_t event{};
+    event.unique_identifier = { opaque_id, reader_types::event_type_t::region };
+    return get_region_details(event);
+}
+
+std::optional<reader_types::kernel_dispatch_data_t>
+reader_t::impl::get_kernel_dispatch_details(size_t opaque_id)
+{
+    reader_types::timeline_event_t event{};
+    event.unique_identifier = { opaque_id, reader_types::event_type_t::kernel_dispatch };
+    return get_kernel_dispatch_details(event);
+}
+
+std::optional<reader_types::memory_copy_data_t>
+reader_t::impl::get_memory_copy_details(size_t opaque_id)
+{
+    reader_types::timeline_event_t event{};
+    event.unique_identifier = { opaque_id, reader_types::event_type_t::memory_copy };
+    return get_memory_copy_details(event);
+}
+
+std::optional<reader_types::memory_alloc_data_t>
+reader_t::impl::get_memory_alloc_details(size_t opaque_id)
+{
+    reader_types::timeline_event_t event{};
+    event.unique_identifier = { opaque_id, reader_types::event_type_t::memory_allocate };
+    return get_memory_alloc_details(event);
 }
 
 }  // namespace profiler_hub

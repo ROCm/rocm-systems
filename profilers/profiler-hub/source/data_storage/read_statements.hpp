@@ -310,6 +310,83 @@ struct time_range_result
     std::optional<size_t> max_end;
 };
 
+// ----- Track-scoped query result structs (interval / scalar / flow) -----
+
+/// One interval row on a track. name_ref is a string id for region/memory_copy
+/// tracks and a kernel_symbol id for kernel_dispatch tracks; the reader resolves
+/// it to a display_name based on the track type.
+struct interval_row_result
+{
+    size_t                id{};
+    size_t                start{};
+    size_t                end{};
+    std::optional<size_t> name_ref;
+};
+
+/// One scalar (counter) sample on a counter track.
+struct scalar_row_result
+{
+    size_t id{};
+    size_t timestamp{};
+    double value{};
+};
+
+/// A single causal link (source event id -> destination event id).
+struct flow_row_result
+{
+    size_t source_id{};
+    size_t dest_id{};
+};
+
+/// Distinct gpu_queue topology context synthesized from rocpd_kernel_dispatch.
+struct distinct_gpu_queue_result
+{
+    size_t nid{};
+    size_t pid{};
+    size_t agent_id{};
+    size_t queue_id{};
+};
+
+/// Distinct dma topology context synthesized from rocpd_memory_copy.
+/// queue_id / stream_id are kept as distinct group values, NULL included.
+struct distinct_dma_result
+{
+    size_t                nid{};
+    size_t                pid{};
+    std::optional<size_t> queue_id;
+    std::optional<size_t> stream_id;
+};
+
+/// A track_id referenced by at least one rocpd_sample row (=> counter track).
+struct sample_track_id_result
+{
+    size_t track_id{};
+};
+
+/// MAX(id) of rocpd_track, used as the base for synthetic track ids.
+struct max_track_id_result
+{
+    std::optional<size_t> max_id;
+};
+
+/// Maps a counter track_id to its PMC name (rocpd_info_pmc.name). One row per
+/// counter track.
+struct counter_track_name_result
+{
+    size_t      track_id{};
+    std::string name;
+};
+
+/// Combined scalar detail (sample + counter value) resolved by rocpd_sample.id.
+struct scalar_detail_result
+{
+    size_t                id{};
+    size_t                track_id{};
+    size_t                timestamp{};
+    double                value{};
+    std::optional<size_t> event_id;
+};
+
 struct read_statements
 {
     explicit read_statements(std::shared_ptr<sqlite_backend> backend, std::string uuid)
@@ -338,6 +415,12 @@ struct read_statements
         initialize_correlated_event_statements();
         initialize_count_statements();
         initialize_time_range_statements();
+
+        initialize_track_synthesis_statements();
+        initialize_interval_track_statements();
+        initialize_scalar_track_statements();
+        initialize_scalar_detail_statement();
+        initialize_flow_statements();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -416,6 +499,35 @@ struct read_statements
     // Correlated events: bind (stack_id, excluded_event_id)
     using correlated_event_func_t =
         std::function<sqlite_backend::result_set<timeline_event_result>(size_t, size_t)>;
+
+    // Track-scoped query func types
+    using interval_track_2_func_t =
+        std::function<sqlite_backend::result_set<interval_row_result>(size_t, size_t)>;
+    using interval_track_3_func_t = std::function<
+        sqlite_backend::result_set<interval_row_result>(size_t, size_t, size_t)>;
+    using interval_track_4_func_t = std::function<
+        sqlite_backend::result_set<interval_row_result>(size_t, size_t, size_t, size_t)>;
+
+    using scalar_track_func_t =
+        std::function<sqlite_backend::result_set<scalar_row_result>(size_t)>;
+
+    using flow_func_t = std::function<sqlite_backend::result_set<flow_row_result>()>;
+    using flow_time_filtered_func_t =
+        std::function<sqlite_backend::result_set<flow_row_result>(size_t, size_t)>;
+
+    using distinct_gpu_queue_func_t =
+        std::function<sqlite_backend::result_set<distinct_gpu_queue_result>()>;
+    using distinct_dma_func_t =
+        std::function<sqlite_backend::result_set<distinct_dma_result>()>;
+    using sample_track_id_func_t =
+        std::function<sqlite_backend::result_set<sample_track_id_result>()>;
+    using max_track_id_func_t =
+        std::function<sqlite_backend::result_set<max_track_id_result>()>;
+    using counter_track_name_func_t =
+        std::function<sqlite_backend::result_set<counter_track_name_result>()>;
+
+    using scalar_detail_func_t =
+        std::function<sqlite_backend::result_set<scalar_detail_result>(size_t)>;
 
     [[nodiscard]] string_statement_func_t string_statement() const
     {
@@ -604,6 +716,88 @@ struct read_statements
     [[nodiscard]] const time_range_func_t& memory_alloc_time_range() const
     {
         return m_memory_alloc_time_range;
+    }
+
+    // Track synthesis accessors
+    [[nodiscard]] const distinct_gpu_queue_func_t& distinct_gpu_queue_tracks() const
+    {
+        return m_distinct_gpu_queue_tracks;
+    }
+    [[nodiscard]] const distinct_dma_func_t& distinct_dma_tracks() const
+    {
+        return m_distinct_dma_tracks;
+    }
+    [[nodiscard]] const sample_track_id_func_t& distinct_sample_track_ids() const
+    {
+        return m_distinct_sample_track_ids;
+    }
+    [[nodiscard]] const max_track_id_func_t& max_track_id() const
+    {
+        return m_max_track_id;
+    }
+    [[nodiscard]] const counter_track_name_func_t& counter_track_names() const
+    {
+        return m_counter_track_names;
+    }
+
+    // Interval-track accessors
+    [[nodiscard]] const interval_track_3_func_t& region_interval_track() const
+    {
+        return m_region_interval_track;
+    }
+    [[nodiscard]] const interval_track_4_func_t& kernel_dispatch_interval_track() const
+    {
+        return m_kernel_dispatch_interval_track;
+    }
+    [[nodiscard]] const interval_track_4_func_t& memory_copy_interval_qs() const
+    {
+        return m_memory_copy_interval_qs;
+    }
+    [[nodiscard]] const interval_track_3_func_t& memory_copy_interval_q_only() const
+    {
+        return m_memory_copy_interval_q_only;
+    }
+    [[nodiscard]] const interval_track_3_func_t& memory_copy_interval_s_only() const
+    {
+        return m_memory_copy_interval_s_only;
+    }
+    [[nodiscard]] const interval_track_2_func_t& memory_copy_interval_neither() const
+    {
+        return m_memory_copy_interval_neither;
+    }
+
+    // Scalar-track accessors
+    [[nodiscard]] const scalar_track_func_t& scalar_track() const
+    {
+        return m_scalar_track;
+    }
+    [[nodiscard]] const scalar_detail_func_t& scalar_detail() const
+    {
+        return m_scalar_detail;
+    }
+    [[nodiscard]] const scalar_detail_func_t& pmc_event_detail() const
+    {
+        return m_pmc_event_detail;
+    }
+
+    // Flow accessors
+    struct flow_statement_set
+    {
+        flow_func_t               base;
+        flow_time_filtered_func_t time_filtered;
+    };
+
+    [[nodiscard]] const flow_statement_set& region_to_kernel_dispatch_flows() const
+    {
+        return m_region_to_kernel_dispatch_flows;
+    }
+    [[nodiscard]] const flow_statement_set& region_to_memory_copy_flows() const
+    {
+        return m_region_to_memory_copy_flows;
+    }
+    [[nodiscard]] const flow_statement_set& region_to_memory_allocate_flows() const
+    {
+        return m_region_to_memory_allocate_flows;
     }
 
 private:
@@ -1383,6 +1577,201 @@ private:
         m_memory_alloc_time_range    = make_time_range_stmt("rocpd_memory_allocate");
     }
 
+    void initialize_track_synthesis_statements()
+    {
+        const auto& u = m_uuid;
+
+        m_distinct_gpu_queue_tracks =
+            m_backend->create_read_statement_executor<distinct_gpu_queue_result>(
+                fmt::format("SELECT DISTINCT nid, pid, agent_id, queue_id "
+                            "FROM rocpd_kernel_dispatch_{}",
+                            u),
+                &distinct_gpu_queue_result::nid,
+                &distinct_gpu_queue_result::pid,
+                &distinct_gpu_queue_result::agent_id,
+                &distinct_gpu_queue_result::queue_id);
+
+        m_distinct_dma_tracks =
+            m_backend->create_read_statement_executor<distinct_dma_result>(
+                fmt::format("SELECT DISTINCT nid, pid, queue_id, stream_id "
+                            "FROM rocpd_memory_copy_{}",
+                            u),
+                &distinct_dma_result::nid,
+                &distinct_dma_result::pid,
+                &distinct_dma_result::queue_id,
+                &distinct_dma_result::stream_id);
+
+        m_distinct_sample_track_ids =
+            m_backend->create_read_statement_executor<sample_track_id_result>(
+                fmt::format("SELECT DISTINCT track_id FROM rocpd_sample_{}", u),
+                &sample_track_id_result::track_id);
+
+        m_max_track_id =
+            m_backend->create_read_statement_executor<max_track_id_result>(
+                fmt::format("SELECT MAX(id) FROM rocpd_track_{}", u),
+                &max_track_id_result::max_id);
+
+        m_counter_track_names =
+            m_backend->create_read_statement_executor<counter_track_name_result>(
+                fmt::format("SELECT s.track_id, ip.name "
+                            "FROM rocpd_sample_{u} s "
+                            "JOIN rocpd_pmc_event_{u} pe ON pe.event_id = s.event_id "
+                            "JOIN rocpd_info_pmc_{u} ip ON ip.id = pe.pmc_id "
+                            "GROUP BY s.track_id",
+                            fmt::arg("u", u)),
+                &counter_track_name_result::track_id,
+                &counter_track_name_result::name);
+    }
+
+    void initialize_interval_track_statements()
+    {
+        const auto& u = m_uuid;
+
+        // cpu_thread: region events keyed on (nid, pid, tid)
+        m_region_interval_track =
+            m_backend->create_read_statement_executor<interval_row_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                fmt::format("SELECT id, start, \"end\", name_id FROM rocpd_region_{} "
+                            "WHERE nid = ? AND pid = ? AND tid = ? ORDER BY start",
+                            u),
+                &interval_row_result::id,
+                &interval_row_result::start,
+                &interval_row_result::end,
+                &interval_row_result::name_ref);
+
+        // gpu_queue: kernel dispatches keyed on (nid, pid, agent_id, queue_id)
+        m_kernel_dispatch_interval_track = m_backend->create_read_statement_executor<
+            interval_row_result,
+            bind_types<size_t, size_t, size_t, size_t>>(
+            fmt::format("SELECT id, start, \"end\", kernel_id "
+                        "FROM rocpd_kernel_dispatch_{} "
+                        "WHERE nid = ? AND pid = ? AND agent_id = ? AND queue_id = ? "
+                        "ORDER BY start",
+                        u),
+            &interval_row_result::id,
+            &interval_row_result::start,
+            &interval_row_result::end,
+            &interval_row_result::name_ref);
+
+        // dma: memory copies keyed on (nid, pid, queue_id, stream_id). NULL queue_id /
+        // stream_id are distinct group values, so prepare one variant per NULL pattern.
+        auto make_mc_interval = [&](const char* qs_clause, auto bind_tag) {
+            using bt = decltype(bind_tag);
+            return m_backend->create_read_statement_executor<interval_row_result, bt>(
+                fmt::format("SELECT id, start, \"end\", name_id FROM rocpd_memory_copy_{} "
+                            "WHERE nid = ? AND pid = ? AND {} ORDER BY start",
+                            u,
+                            qs_clause),
+                &interval_row_result::id,
+                &interval_row_result::start,
+                &interval_row_result::end,
+                &interval_row_result::name_ref);
+        };
+
+        m_memory_copy_interval_qs =
+            make_mc_interval("queue_id = ? AND stream_id = ?",
+                             bind_types<size_t, size_t, size_t, size_t>{});
+        m_memory_copy_interval_q_only =
+            make_mc_interval("queue_id = ? AND stream_id IS NULL",
+                             bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_interval_s_only =
+            make_mc_interval("queue_id IS NULL AND stream_id = ?",
+                             bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_interval_neither =
+            make_mc_interval("queue_id IS NULL AND stream_id IS NULL",
+                             bind_types<size_t, size_t>{});
+    }
+
+    void initialize_scalar_track_statements()
+    {
+        const auto& u = m_uuid;
+
+        m_scalar_track = m_backend->create_read_statement_executor<scalar_row_result,
+                                                                   bind_types<size_t>>(
+            fmt::format("SELECT s.id, s.timestamp, p.value "
+                        "FROM rocpd_sample_{u} s "
+                        "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id "
+                        "WHERE s.track_id = ? ORDER BY s.timestamp",
+                        fmt::arg("u", u)),
+            &scalar_row_result::id,
+            &scalar_row_result::timestamp,
+            &scalar_row_result::value);
+    }
+
+    void initialize_scalar_detail_statement()
+    {
+        const auto& u = m_uuid;
+
+        // Keyed on rocpd_sample.id (scalar_event_t::opaque_id).
+        m_scalar_detail = m_backend->create_read_statement_executor<scalar_detail_result,
+                                                                    bind_types<size_t>>(
+            fmt::format("SELECT s.id, s.track_id, s.timestamp, p.value, s.event_id "
+                        "FROM rocpd_sample_{u} s "
+                        "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id "
+                        "WHERE s.id = ?",
+                        fmt::arg("u", u)),
+            &scalar_detail_result::id,
+            &scalar_detail_result::track_id,
+            &scalar_detail_result::timestamp,
+            &scalar_detail_result::value,
+            &scalar_detail_result::event_id);
+
+        // Keyed on rocpd_pmc_event.id.
+        m_pmc_event_detail = m_backend->create_read_statement_executor<
+            scalar_detail_result,
+            bind_types<size_t>>(
+            fmt::format("SELECT s.id, s.track_id, s.timestamp, p.value, s.event_id "
+                        "FROM rocpd_pmc_event_{u} p "
+                        "JOIN rocpd_sample_{u} s ON s.event_id = p.event_id "
+                        "WHERE p.id = ?",
+                        fmt::arg("u", u)),
+            &scalar_detail_result::id,
+            &scalar_detail_result::track_id,
+            &scalar_detail_result::timestamp,
+            &scalar_detail_result::value,
+            &scalar_detail_result::event_id);
+    }
+
+    void initialize_flow_statements()
+    {
+        const auto& u = m_uuid;
+
+        // source = CPU region; dest = a GPU-side event sharing the same stack_id.
+        auto make_flow_set = [&](const std::string& dest_table,
+                                 const std::string& dest_alias) -> flow_statement_set {
+            const auto base_sql =
+                fmt::format("SELECT R.id, {d}.id "
+                            "FROM rocpd_region_{u} R "
+                            "JOIN rocpd_event_{u} ER ON R.event_id = ER.id "
+                            "JOIN rocpd_event_{u} E{d} "
+                            "  ON E{d}.stack_id = ER.stack_id AND E{d}.id != ER.id "
+                            "JOIN {dt}_{u} {d} ON {d}.event_id = E{d}.id "
+                            "WHERE ER.stack_id IS NOT NULL AND ER.stack_id != 0",
+                            fmt::arg("u", u),
+                            fmt::arg("d", dest_alias),
+                            fmt::arg("dt", dest_table));
+
+            flow_statement_set out;
+            out.base = m_backend->create_read_statement_executor<flow_row_result>(
+                base_sql, &flow_row_result::source_id, &flow_row_result::dest_id);
+
+            // Optional time window applied to the SOURCE event's start timestamp.
+            out.time_filtered =
+                m_backend->create_read_statement_executor<flow_row_result,
+                                                          bind_types<size_t, size_t>>(
+                    base_sql + " AND R.start >= ? AND R.start <= ?",
+                    &flow_row_result::source_id,
+                    &flow_row_result::dest_id);
+            return out;
+        };
+
+        m_region_to_kernel_dispatch_flows =
+            make_flow_set("rocpd_kernel_dispatch", "K");
+        m_region_to_memory_copy_flows  = make_flow_set("rocpd_memory_copy", "MC");
+        m_region_to_memory_allocate_flows =
+            make_flow_set("rocpd_memory_allocate", "MA");
+    }
+
     std::shared_ptr<sqlite_backend> m_backend;
     std::string                     m_uuid;
 
@@ -1436,5 +1825,30 @@ private:
     time_range_func_t m_kernel_dispatch_time_range;
     time_range_func_t m_memory_copy_time_range;
     time_range_func_t m_memory_alloc_time_range;
+
+    // Track synthesis statements
+    distinct_gpu_queue_func_t m_distinct_gpu_queue_tracks;
+    distinct_dma_func_t       m_distinct_dma_tracks;
+    sample_track_id_func_t    m_distinct_sample_track_ids;
+    max_track_id_func_t       m_max_track_id;
+    counter_track_name_func_t m_counter_track_names;
+
+    // Interval-track statements
+    interval_track_3_func_t m_region_interval_track;
+    interval_track_4_func_t m_kernel_dispatch_interval_track;
+    interval_track_4_func_t m_memory_copy_interval_qs;
+    interval_track_3_func_t m_memory_copy_interval_q_only;
+    interval_track_3_func_t m_memory_copy_interval_s_only;
+    interval_track_2_func_t m_memory_copy_interval_neither;
+
+    // Scalar-track statements
+    scalar_track_func_t  m_scalar_track;
+    scalar_detail_func_t m_scalar_detail;
+    scalar_detail_func_t m_pmc_event_detail;
+
+    // Flow statements
+    flow_statement_set m_region_to_kernel_dispatch_flows;
+    flow_statement_set m_region_to_memory_copy_flows;
+    flow_statement_set m_region_to_memory_allocate_flows;
 };
 }  // namespace profiler_hub::data_storage::schema_v3

@@ -40,6 +40,20 @@ struct topology_key_hash_t
     }
 };
 
+// Per-track routing info used to scope get_interval_track / get_scalar_track to a
+// track's identity. Keyed by track_info_t::id (real rocpd_track id or synthetic id).
+struct track_query_info_t
+{
+    reader_types::track_type_t type{};
+    size_t                     nid{};
+    size_t                     pid{};
+    std::optional<size_t>      tid;            // cpu_thread
+    std::optional<size_t>      agent_id;       // gpu_queue
+    std::optional<size_t>      queue_id;       // gpu_queue, dma
+    std::optional<size_t>      stream_id;      // dma
+    size_t                     real_track_id{};  // counter: rocpd_track id for sample.track_id
+};
+
 struct reader_t::impl
 {
     explicit impl(std::unique_ptr<profiler_hub::storage_t> storage);
@@ -66,6 +80,24 @@ struct reader_t::impl
 
     [[nodiscard]] size_t get_event_count(const reader_types::event_filter_t& filter);
 
+    // Track-scoped event queries
+    [[nodiscard]] reader_types::interval_event_list_t get_interval_track(
+        size_t track_id, const reader_types::event_filter_t& filter);
+
+    [[nodiscard]] reader_types::scalar_event_list_t get_scalar_track(
+        size_t track_id, const reader_types::event_filter_t& filter);
+
+    [[nodiscard]] reader_types::flow_list_t get_flows(
+        const reader_types::event_filter_t& filter);
+
+    // Scalar / pmc detail queries (by opaque id)
+    [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_scalar_details(
+        size_t opaque_id);
+    [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_pmc_event_details(
+        size_t opaque_id);
+    [[nodiscard]] std::optional<reader_types::sample_data_t> get_sample_details(
+        size_t opaque_id);
+
     // Event detail queries
     [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
         const reader_types::timeline_event_t& event);
@@ -78,6 +110,19 @@ struct reader_t::impl
 
     [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
     get_memory_alloc_details(const reader_types::timeline_event_t& event);
+
+    // Event detail queries (by opaque id)
+    [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
+        size_t opaque_id);
+
+    [[nodiscard]] std::optional<reader_types::kernel_dispatch_data_t>
+    get_kernel_dispatch_details(size_t opaque_id);
+
+    [[nodiscard]] std::optional<reader_types::memory_copy_data_t> get_memory_copy_details(
+        size_t opaque_id);
+
+    [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
+    get_memory_alloc_details(size_t opaque_id);
 
     // Event property queries
     [[nodiscard]] reader_types::call_stack_t get_call_stack(
@@ -101,6 +146,9 @@ private:
     void initialize_string_list();
     void initialize_all_info_lists();
 
+    // Synthesize gpu_queue + dma tracks (no rocpd_track rows exist for them in v3).
+    void synthesize_derived_tracks();
+
     // Resolve event metadata from event-specific table by db_id and type.
     // Returns event_id_result containing event_id + stack_id + call_stack JSON etc.
     [[nodiscard]] std::optional<data_storage::schema_v3::event_id_result>
@@ -118,6 +166,11 @@ private:
     // Applies limit/offset to merged event list
     void apply_pagination(reader_types::timeline_event_list_t& events,
                           const reader_types::pagination_t&    pagination);
+
+    // Build combined pmc_event_data_t (value + sample timestamp/track + event) from a
+    // resolved scalar detail row.
+    [[nodiscard]] reader_types::pmc_event_data_t build_pmc_event_data(
+        const data_storage::schema_v3::scalar_detail_result& row);
 
     std::unique_ptr<profiler_hub::storage_t>                  m_storage;
     std::shared_ptr<data_storage::sqlite_backend>             m_backend;
@@ -158,6 +211,9 @@ private:
         m_track_ptr_to_topology;
 
     std::unordered_map<reader_types::track_info_ptr_t, size_t> m_track_ptr_to_db_id;
+
+    // Routing info for track-scoped queries, keyed by track_info_t::id.
+    std::unordered_map<size_t, track_query_info_t> m_track_query_info;
 };
 
 }  // namespace profiler_hub
