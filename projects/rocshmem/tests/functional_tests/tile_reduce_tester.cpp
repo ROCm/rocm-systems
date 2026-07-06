@@ -45,17 +45,31 @@ struct Tuple2D {
 
 template <typename T>
 __device__ T expected_sum_value(int idx, int n_pes) {
-  return static_cast<T>(100 * (n_pes * (n_pes - 1) / 2) + n_pes * idx);
+  T result = static_cast<T>(0);
+  for (int pe = 0; pe < n_pes; pe++) {
+    result += static_cast<T>(pe * 100 + idx);
+  }
+  return result;
 }
 
 template <typename T>
 __device__ T expected_max_value(int idx, int n_pes) {
-  return static_cast<T>((n_pes - 1) * 100 + idx);
+  T result = static_cast<T>(idx);
+  for (int pe = 1; pe < n_pes; pe++) {
+    T value = static_cast<T>(pe * 100 + idx);
+    result = max(result, value);
+  }
+  return result;
 }
 
 template <typename T>
-__device__ T expected_min_value(int idx) {
-  return static_cast<T>(idx);
+__device__ T expected_min_value(int idx, int n_pes) {
+  T result = static_cast<T>(idx);
+  for (int pe = 1; pe < n_pes; pe++) {
+    T value = static_cast<T>(pe * 100 + idx);
+    result = min(result, value);
+  }
+  return result;
 }
 
 template <typename T>
@@ -68,7 +82,7 @@ __device__ void verify_reduce_results(const char *label, const char *type_name,
   for (int idx = 0; idx < matrix_size; idx++) {
     T expected_sum = expected_sum_value<T>(idx, n_pes);
     T expected_max = expected_max_value<T>(idx, n_pes);
-    T expected_min = expected_min_value<T>(idx);
+    T expected_min = expected_min_value<T>(idx, n_pes);
 
     if (sum_dest[idx] != expected_sum || max_dest[idx] != expected_max ||
         min_dest[idx] != expected_min) {
@@ -331,6 +345,13 @@ TileReduceTester::TileReduceTester(TesterArguments args) : Tester(args) {
 
   tile_extent_0 = 8;
   tile_extent_1 = 8;
+  if (args.max_msg_size_set &&
+      args.max_msg_size > tile_extent_0 * tile_extent_1 * sizeof(float)) {
+    tile_extent_1 = args.max_msg_size / (tile_extent_0 * sizeof(float));
+    if (tile_extent_1 < 1) {
+      tile_extent_1 = 1;
+    }
+  }
   int tile_size = tile_extent_0 * tile_extent_1;
   int total_size = tile_size * num_teams;
 

@@ -1735,12 +1735,6 @@ __device__ inline int IPCContext::tile_broadcast_wg(rocshmem_team_t team,
   return ROCSHMEM_SUCCESS;
 }
 
-enum IPCTileReduceGranularity {
-  IPC_TILE_REDUCE_THREAD,
-  IPC_TILE_REDUCE_WAVE,
-  IPC_TILE_REDUCE_WG,
-};
-
 __device__ inline size_t ipc_tile_num_elements(const size_t* start_coord,
                                                const size_t* boundary,
                                                int ndim) {
@@ -1781,6 +1775,296 @@ __device__ inline size_t ipc_tile_src_offset(size_t flat_idx,
   return offset;
 }
 
+__device__ inline bool ipc_tile_is_contiguous(const size_t* strides,
+                                              const size_t* start_coord,
+                                              const size_t* boundary,
+                                              int ndim) {
+  size_t expected_stride = 1;
+  for (int dim = ndim - 1; dim >= 0; dim--) {
+    if (strides[dim] != expected_stride) {
+      return false;
+    }
+    expected_stride *= boundary[dim] - start_coord[dim];
+  }
+  return true;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int IPCContext::tile_reduce_typed_impl(
+    rocshmem_team_t team, const void* src_data, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root,
+    size_t segment_start, size_t segment_elems, size_t segment_capacity,
+    int worker_id, int worker_count) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  const int team_size = team_obj->num_pes;
+  const int my_pe_in_team = team_obj->my_pe;
+  const int root_pe_world = team_obj->get_pe_in_world(root);
+
+  if (root < 0 || root >= team_size || ndim <= 0) {
+    LOGD_WARN("Invalid tile reduce arguments for IPC backend");
+    return ROCSHMEM_ERROR;
+  }
+
+  if (segment_elems > segment_capacity) {
+    LOGD_WARN("Tile reduce segment exceeds IPC pWrk capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+  T *my_pWrk = &pWrk[my_pe_in_team * segment_capacity];
+
+  const bool src_contiguous =
+      ipc_tile_is_contiguous(src_strides, start_coord, boundary, ndim);
+  const size_t first_src_offset = ipc_tile_src_offset(
+      segment_start, src_strides, start_coord, boundary, ndim);
+  const char *src_base = static_cast<const char *>(src_data) +
+                         first_src_offset * sizeof(T);
+
+  if (src_contiguous && my_pe_in_team != root) {
+    if (worker_count == 1) {
+      internal_putmem(my_pWrk, src_base, segment_elems * sizeof(T),
+                      root_pe_world);
+    } else if (worker_count == WF_SIZE) {
+      internal_putmem_wave(my_pWrk, src_base, segment_elems * sizeof(T),
+                           root_pe_world);
+    } else {
+      internal_putmem_wg(my_pWrk, src_base, segment_elems * sizeof(T),
+                         root_pe_world);
+    }
+  } else {
+    for (size_t elem = worker_id; elem < segment_elems; elem += worker_count) {
+      const size_t tile_elem = segment_start + elem;
+      const size_t src_offset =
+          ipc_tile_src_offset(tile_elem, src_strides, start_coord, boundary, ndim);
+      const T src_value =
+          *reinterpret_cast<const T *>(static_cast<const char *>(src_data) +
+                                       src_offset * sizeof(T));
+
+      if (my_pe_in_team == root) {
+        my_pWrk[elem] = src_value;
+      } else {
+        internal_putmem(&my_pWrk[elem], &src_value, sizeof(T), root_pe_world);
+      }
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline void ipc_tile_reduce_root_compute(
+    rocshmem_team_t team, void* dst_data, const size_t* dst_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root,
+    size_t segment_start, size_t segment_elems, size_t segment_capacity,
+    int worker_id, int worker_count) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  const int team_size = team_obj->num_pes;
+  if (team_obj->my_pe != root) {
+    return;
+  }
+
+  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+
+  for (size_t elem = worker_id; elem < segment_elems; elem += worker_count) {
+    T reduced_value = pWrk[elem];
+    for (int src_pe_in_team = 1; src_pe_in_team < team_size; src_pe_in_team++) {
+      T src_value = pWrk[src_pe_in_team * segment_capacity + elem];
+      OpWrap<Op>::Calc(&src_value, &reduced_value, 0);
+    }
+
+    const size_t tile_elem = segment_start + elem;
+    const size_t dst_offset =
+        ipc_tile_dst_offset(tile_elem, dst_strides, start_coord, boundary, ndim);
+    char *dst_base = static_cast<char *>(dst_data);
+    *reinterpret_cast<T *>(dst_base + dst_offset * sizeof(T)) = reduced_value;
+  }
+}
+
+__device__ inline void ipc_tile_reduce_reset_psync(rocshmem_team_t team,
+                                                   int root,
+                                                   int worker_id,
+                                                   int worker_count) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  if (team_obj->my_pe != root) {
+    return;
+  }
+
+  long *pSync = team_obj->reduce_pSync;
+  for (int i = worker_id; i < team_obj->num_pes; i += worker_count) {
+    pSync[i] = ROCSHMEM_SYNC_VALUE;
+  }
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int IPCContext::tile_reduce_typed(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  long *pSync = team_obj->reduce_pSync;
+  const int root_pe_world = team_obj->get_pe_in_world(root);
+  const size_t tile_elements =
+      ipc_tile_num_elements(start_coord, boundary, ndim);
+  const size_t pwrk_capacity =
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
+  const size_t segment_capacity = pwrk_capacity / team_obj->num_pes;
+
+  if (segment_capacity == 0) {
+    LOGD_WARN("Tile reduce type exceeds IPC pWrk capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  long flag_val = 1;
+  for (size_t segment_start = 0; segment_start < tile_elements;
+       segment_start += segment_capacity, flag_val++) {
+    const size_t segment_elems =
+        min(segment_capacity, tile_elements - segment_start);
+    int result = tile_reduce_typed_impl<T, Op>(
+        team, src_data, src_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, 0, 1);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+
+    if (team_obj->my_pe == root) {
+      pSync[team_obj->my_pe] = flag_val;
+      for (int i = 0; i < team_obj->num_pes; i++) {
+        wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
+      }
+    } else {
+      fence(root_pe_world);
+      internal_putmem(&pSync[team_obj->my_pe], &flag_val, sizeof(flag_val),
+                      root_pe_world);
+    }
+
+    ipc_tile_reduce_root_compute<T, Op>(
+        team, dst_data, dst_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, 0, 1);
+    sync(team);
+  }
+
+  ipc_tile_reduce_reset_psync(team, root, 0, 1);
+  sync(team);
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int IPCContext::tile_reduce_typed_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root) {
+  const int wave_id = get_flat_block_id() % WF_SIZE;
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  long *pSync = team_obj->reduce_pSync;
+  const int root_pe_world = team_obj->get_pe_in_world(root);
+  const size_t tile_elements =
+      ipc_tile_num_elements(start_coord, boundary, ndim);
+  const size_t pwrk_capacity =
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
+  const size_t segment_capacity = pwrk_capacity / team_obj->num_pes;
+
+  if (segment_capacity == 0) {
+    LOGD_WARN("Tile reduce type exceeds IPC pWrk capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  long flag_val = 1;
+  for (size_t segment_start = 0; segment_start < tile_elements;
+       segment_start += segment_capacity, flag_val++) {
+    const size_t segment_elems =
+        min(segment_capacity, tile_elements - segment_start);
+    int result = tile_reduce_typed_impl<T, Op>(
+        team, src_data, src_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, wave_id, WF_SIZE);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+
+    __builtin_amdgcn_wave_barrier();
+    if (is_thread_zero_in_wave()) {
+      if (team_obj->my_pe == root) {
+        pSync[team_obj->my_pe] = flag_val;
+        for (int i = 0; i < team_obj->num_pes; i++) {
+          wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
+        }
+      } else {
+        fence(root_pe_world);
+        internal_putmem(&pSync[team_obj->my_pe], &flag_val, sizeof(flag_val),
+                        root_pe_world);
+      }
+    }
+
+    __builtin_amdgcn_wave_barrier();
+    ipc_tile_reduce_root_compute<T, Op>(
+        team, dst_data, dst_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, wave_id, WF_SIZE);
+    sync_wave(team);
+  }
+
+  ipc_tile_reduce_reset_psync(team, root, wave_id, WF_SIZE);
+  sync_wave(team);
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int IPCContext::tile_reduce_typed_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root) {
+  const int thread_id = get_flat_block_id();
+  const int block_size = get_flat_block_size();
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  long *pSync = team_obj->reduce_pSync;
+  const int root_pe_world = team_obj->get_pe_in_world(root);
+  const size_t tile_elements =
+      ipc_tile_num_elements(start_coord, boundary, ndim);
+  const size_t pwrk_capacity =
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
+  const size_t segment_capacity = pwrk_capacity / team_obj->num_pes;
+
+  if (segment_capacity == 0) {
+    LOGD_WARN("Tile reduce type exceeds IPC pWrk capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  long flag_val = 1;
+  for (size_t segment_start = 0; segment_start < tile_elements;
+       segment_start += segment_capacity, flag_val++) {
+    const size_t segment_elems =
+        min(segment_capacity, tile_elements - segment_start);
+    int result = tile_reduce_typed_impl<T, Op>(
+        team, src_data, src_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, thread_id, block_size);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+
+    __syncthreads();
+    if (is_thread_zero_in_block()) {
+      if (team_obj->my_pe == root) {
+        pSync[team_obj->my_pe] = flag_val;
+        for (int i = 0; i < team_obj->num_pes; i++) {
+          wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
+        }
+      } else {
+        fence(root_pe_world);
+        internal_putmem(&pSync[team_obj->my_pe], &flag_val, sizeof(flag_val),
+                        root_pe_world);
+      }
+    }
+
+    __syncthreads();
+    ipc_tile_reduce_root_compute<T, Op>(
+        team, dst_data, dst_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, thread_id, block_size);
+    sync_wg(team);
+  }
+
+  ipc_tile_reduce_reset_psync(team, root, thread_id, block_size);
+  sync_wg(team);
+  return ROCSHMEM_SUCCESS;
+}
+
 template <typename T, ROCSHMEM_OP Op>
 __device__ inline int ipc_tile_reduce_typed(IPCContext* ctx,
                                             rocshmem_team_t team,
@@ -1791,77 +2075,30 @@ __device__ inline int ipc_tile_reduce_typed(IPCContext* ctx,
                                             const size_t* start_coord,
                                             const size_t* boundary,
                                             int ndim,
-                                            int root,
-                                            IPCTileReduceGranularity granularity) {
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-  const int team_size = team_obj->num_pes;
-  const int my_pe_in_team = team_obj->my_pe;
-
-  if (root < 0 || root >= team_size || ndim <= 0) {
-    LOGD_WARN("Invalid tile reduce arguments for IPC backend");
-    return ROCSHMEM_ERROR;
-  }
-
-  int worker_id = 0;
-  int worker_count = 1;
-  if (granularity == IPC_TILE_REDUCE_WAVE) {
-    worker_id = get_flat_block_id() % WF_SIZE;
-    worker_count = WF_SIZE;
-  } else if (granularity == IPC_TILE_REDUCE_WG) {
-    worker_id = get_flat_block_id();
-    worker_count = get_flat_block_size();
-  }
-
-  if (my_pe_in_team == root) {
-    const size_t tile_elements =
-        ipc_tile_num_elements(start_coord, boundary, ndim);
-
-    for (size_t elem = worker_id; elem < tile_elements; elem += worker_count) {
-      T reduced_value{};
-      bool initialized = false;
-
-      const size_t src_offset =
-          ipc_tile_src_offset(elem, src_strides, start_coord, boundary, ndim);
-
-      for (int src_pe_in_team = 0; src_pe_in_team < team_size; src_pe_in_team++) {
-        const int src_pe_world = team_obj->get_pe_in_world(src_pe_in_team);
-        void* remote_base = ctx->shmem_ptr(src_data, src_pe_world);
-        if (!remote_base) {
-          return ROCSHMEM_ERROR;
-        }
-
-        const char* remote_src = static_cast<const char*>(remote_base);
-        T src_value =
-            *reinterpret_cast<const T*>(remote_src + src_offset * sizeof(T));
-
-        if (!initialized) {
-          reduced_value = src_value;
-          initialized = true;
-        } else {
-          OpWrap<Op>::Calc(&src_value, &reduced_value, 0);
-        }
-      }
-
-      const size_t dst_offset =
-          ipc_tile_dst_offset(elem, dst_strides, start_coord, boundary, ndim);
-      char* dst_base = static_cast<char*>(dst_data);
-      *reinterpret_cast<T*>(dst_base + dst_offset * sizeof(T)) = reduced_value;
-    }
-  }
-
-  if (granularity == IPC_TILE_REDUCE_WAVE) {
-    ctx->sync_wave(team);
-  } else if (granularity == IPC_TILE_REDUCE_WG) {
-    ctx->sync_wg(team);
-  } else {
-    ctx->sync(team);
-  }
-
-  return ROCSHMEM_SUCCESS;
+                                            int root) {
+  return ctx->tile_reduce_typed<T, Op>(
+      team, dst_data, src_data, dst_strides, src_strides, start_coord,
+      boundary, ndim, root);
 }
 
-template <ROCSHMEM_OP Op>
-__device__ inline int ipc_tile_reduce_dispatch(IPCContext* ctx,
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int ipc_tile_reduce_typed_wave(IPCContext* ctx,
+                                                 rocshmem_team_t team,
+                                                 void* dst_data,
+                                                 const void* src_data,
+                                                 const size_t* dst_strides,
+                                                 const size_t* src_strides,
+                                                 const size_t* start_coord,
+                                                 const size_t* boundary,
+                                                 int ndim,
+                                                 int root) {
+  return ctx->tile_reduce_typed_wave<T, Op>(
+      team, dst_data, src_data, dst_strides, src_strides, start_coord,
+      boundary, ndim, root);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int ipc_tile_reduce_typed_wg(IPCContext* ctx,
                                                rocshmem_team_t team,
                                                void* dst_data,
                                                const void* src_data,
@@ -1870,74 +2107,94 @@ __device__ inline int ipc_tile_reduce_dispatch(IPCContext* ctx,
                                                const size_t* start_coord,
                                                const size_t* boundary,
                                                int ndim,
-                                               [[maybe_unused]] size_t element_size,
-                                               int root,
-                                               uint64_t flags,
-                                               IPCTileReduceGranularity granularity) {
-  const auto element_type = static_cast<ROCSHMEM_TILE_ELEMENT_TYPE>(
-      (flags & ROCSHMEM_TILE_ELEMENT_TYPE_MASK) >>
-      ROCSHMEM_TILE_ELEMENT_TYPE_SHIFT);
-
-  switch (element_type) {
-    case ROCSHMEM_TILE_ELEMENT_INT8:
-      return ipc_tile_reduce_typed<signed char, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_UINT8:
-      return ipc_tile_reduce_typed<unsigned char, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_INT16:
-    case ROCSHMEM_TILE_ELEMENT_SHORT:
-      return ipc_tile_reduce_typed<short, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_UINT16:
-    case ROCSHMEM_TILE_ELEMENT_USHORT:
-      return ipc_tile_reduce_typed<unsigned short, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_INT32:
-    case ROCSHMEM_TILE_ELEMENT_INT:
-      return ipc_tile_reduce_typed<int, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_UINT32:
-    case ROCSHMEM_TILE_ELEMENT_UINT:
-      return ipc_tile_reduce_typed<unsigned int, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_LONG:
-      return ipc_tile_reduce_typed<long, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_ULONG:
-      return ipc_tile_reduce_typed<unsigned long, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_INT64:
-    case ROCSHMEM_TILE_ELEMENT_LONGLONG:
-      return ipc_tile_reduce_typed<long long, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_UINT64:
-    case ROCSHMEM_TILE_ELEMENT_ULONGLONG:
-      return ipc_tile_reduce_typed<unsigned long long, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_FLOAT:
-      return ipc_tile_reduce_typed<float, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    case ROCSHMEM_TILE_ELEMENT_DOUBLE:
-      return ipc_tile_reduce_typed<double, Op>(
-          ctx, team, dst_data, src_data, dst_strides, src_strides,
-          start_coord, boundary, ndim, root, granularity);
-    default:
-      LOGD_WARN("Tile reduce element type not specified for IPC backend");
-      return ROCSHMEM_ERROR;
-  }
+                                               int root) {
+  return ctx->tile_reduce_typed_wg<T, Op>(
+      team, dst_data, src_data, dst_strides, src_strides, start_coord,
+      boundary, ndim, root);
 }
+
+#define IPC_TILE_REDUCE_DISPATCH_CASES(TYPED_FN)                              \
+  case ROCSHMEM_TILE_ELEMENT_INT8:                                            \
+    return TYPED_FN<signed char, Op>(ctx, team, dst_data, src_data,            \
+                                     dst_strides, src_strides, start_coord,    \
+                                     boundary, ndim, root);                   \
+  case ROCSHMEM_TILE_ELEMENT_UINT8:                                           \
+    return TYPED_FN<unsigned char, Op>(ctx, team, dst_data, src_data,          \
+                                       dst_strides, src_strides, start_coord,  \
+                                       boundary, ndim, root);                 \
+  case ROCSHMEM_TILE_ELEMENT_INT16:                                           \
+  case ROCSHMEM_TILE_ELEMENT_SHORT:                                           \
+    return TYPED_FN<short, Op>(ctx, team, dst_data, src_data, dst_strides,     \
+                               src_strides, start_coord, boundary, ndim,       \
+                               root);                                         \
+  case ROCSHMEM_TILE_ELEMENT_UINT16:                                          \
+  case ROCSHMEM_TILE_ELEMENT_USHORT:                                          \
+    return TYPED_FN<unsigned short, Op>(                                      \
+        ctx, team, dst_data, src_data, dst_strides, src_strides, start_coord,  \
+        boundary, ndim, root);                                                \
+  case ROCSHMEM_TILE_ELEMENT_INT32:                                           \
+  case ROCSHMEM_TILE_ELEMENT_INT:                                             \
+    return TYPED_FN<int, Op>(ctx, team, dst_data, src_data, dst_strides,       \
+                             src_strides, start_coord, boundary, ndim, root);  \
+  case ROCSHMEM_TILE_ELEMENT_UINT32:                                          \
+  case ROCSHMEM_TILE_ELEMENT_UINT:                                            \
+    return TYPED_FN<unsigned int, Op>(                                        \
+        ctx, team, dst_data, src_data, dst_strides, src_strides, start_coord,  \
+        boundary, ndim, root);                                                \
+  case ROCSHMEM_TILE_ELEMENT_LONG:                                            \
+    return TYPED_FN<long, Op>(ctx, team, dst_data, src_data, dst_strides,      \
+                              src_strides, start_coord, boundary, ndim,        \
+                              root);                                          \
+  case ROCSHMEM_TILE_ELEMENT_ULONG:                                           \
+    return TYPED_FN<unsigned long, Op>(                                       \
+        ctx, team, dst_data, src_data, dst_strides, src_strides, start_coord,  \
+        boundary, ndim, root);                                                \
+  case ROCSHMEM_TILE_ELEMENT_INT64:                                           \
+  case ROCSHMEM_TILE_ELEMENT_LONGLONG:                                        \
+    return TYPED_FN<long long, Op>(ctx, team, dst_data, src_data, dst_strides, \
+                                   src_strides, start_coord, boundary, ndim,   \
+                                   root);                                     \
+  case ROCSHMEM_TILE_ELEMENT_UINT64:                                          \
+  case ROCSHMEM_TILE_ELEMENT_ULONGLONG:                                       \
+    return TYPED_FN<unsigned long long, Op>(                                  \
+        ctx, team, dst_data, src_data, dst_strides, src_strides, start_coord,  \
+        boundary, ndim, root);                                                \
+  case ROCSHMEM_TILE_ELEMENT_FLOAT:                                           \
+    return TYPED_FN<float, Op>(ctx, team, dst_data, src_data, dst_strides,     \
+                               src_strides, start_coord, boundary, ndim,       \
+                               root);                                         \
+  case ROCSHMEM_TILE_ELEMENT_DOUBLE:                                          \
+    return TYPED_FN<double, Op>(ctx, team, dst_data, src_data, dst_strides,    \
+                                src_strides, start_coord, boundary, ndim, root)
+
+#define IPC_TILE_REDUCE_DISPATCH_DEF(DISPATCH_FN, TYPED_FN)                   \
+  template <ROCSHMEM_OP Op>                                                   \
+  __device__ inline int DISPATCH_FN(                                          \
+      IPCContext* ctx, rocshmem_team_t team, void* dst_data,                  \
+      const void* src_data, const size_t* dst_strides,                        \
+      const size_t* src_strides, const size_t* start_coord,                   \
+      const size_t* boundary, int ndim,                                       \
+      [[maybe_unused]] size_t element_size, int root, uint64_t flags) {       \
+    const auto element_type = static_cast<ROCSHMEM_TILE_ELEMENT_TYPE>(        \
+        (flags & ROCSHMEM_TILE_ELEMENT_TYPE_MASK) >>                          \
+        ROCSHMEM_TILE_ELEMENT_TYPE_SHIFT);                                    \
+                                                                               \
+    switch (element_type) {                                                   \
+      IPC_TILE_REDUCE_DISPATCH_CASES(TYPED_FN);                               \
+      default:                                                                \
+        LOGD_WARN("Tile reduce element type not specified for IPC backend");   \
+        return ROCSHMEM_ERROR;                                                \
+    }                                                                         \
+  }
+
+IPC_TILE_REDUCE_DISPATCH_DEF(ipc_tile_reduce_dispatch, ipc_tile_reduce_typed)
+IPC_TILE_REDUCE_DISPATCH_DEF(ipc_tile_reduce_wave_dispatch,
+                             ipc_tile_reduce_typed_wave)
+IPC_TILE_REDUCE_DISPATCH_DEF(ipc_tile_reduce_wg_dispatch,
+                             ipc_tile_reduce_typed_wg)
+
+#undef IPC_TILE_REDUCE_DISPATCH_DEF
+#undef IPC_TILE_REDUCE_DISPATCH_CASES
 
 // SUM Reductions - Type-erased implementations
 __device__ inline int IPCContext::tile_sum_reduce(rocshmem_team_t team,
@@ -1953,8 +2210,7 @@ __device__ inline int IPCContext::tile_sum_reduce(rocshmem_team_t team,
                                                   uint64_t flags) {
   return ipc_tile_reduce_dispatch<ROCSHMEM_SUM>(
       this, team, dst_data, src_data, dst_strides, src_strides,
-      start_coord, boundary, ndim, element_size, root, flags,
-      IPC_TILE_REDUCE_THREAD);
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ inline int IPCContext::tile_sum_reduce_wave(rocshmem_team_t team,
@@ -1968,10 +2224,9 @@ __device__ inline int IPCContext::tile_sum_reduce_wave(rocshmem_team_t team,
                                                        size_t element_size,
                                                        int root,
                                                        uint64_t flags) {
-  return ipc_tile_reduce_dispatch<ROCSHMEM_SUM>(
+  return ipc_tile_reduce_wave_dispatch<ROCSHMEM_SUM>(
       this, team, dst_data, src_data, dst_strides, src_strides,
-      start_coord, boundary, ndim, element_size, root, flags,
-      IPC_TILE_REDUCE_WAVE);
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ inline int IPCContext::tile_sum_reduce_wg(rocshmem_team_t team,
@@ -1985,10 +2240,9 @@ __device__ inline int IPCContext::tile_sum_reduce_wg(rocshmem_team_t team,
                                                      size_t element_size,
                                                      int root,
                                                      uint64_t flags) {
-  return ipc_tile_reduce_dispatch<ROCSHMEM_SUM>(
+  return ipc_tile_reduce_wg_dispatch<ROCSHMEM_SUM>(
       this, team, dst_data, src_data, dst_strides, src_strides,
-      start_coord, boundary, ndim, element_size, root, flags,
-      IPC_TILE_REDUCE_WG);
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 // MAX Reductions - Type-erased interface
@@ -2005,8 +2259,7 @@ __device__ inline int IPCContext::tile_max_reduce(rocshmem_team_t team,
                                                    uint64_t flags) {
   return ipc_tile_reduce_dispatch<ROCSHMEM_MAX>(
       this, team, dst_data, src_data, dst_strides, src_strides,
-      start_coord, boundary, ndim, element_size, root, flags,
-      IPC_TILE_REDUCE_THREAD);
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ inline int IPCContext::tile_max_reduce_wave(rocshmem_team_t team,
@@ -2020,10 +2273,9 @@ __device__ inline int IPCContext::tile_max_reduce_wave(rocshmem_team_t team,
                                                         size_t element_size,
                                                         int root,
                                                         uint64_t flags) {
-  return ipc_tile_reduce_dispatch<ROCSHMEM_MAX>(
+  return ipc_tile_reduce_wave_dispatch<ROCSHMEM_MAX>(
       this, team, dst_data, src_data, dst_strides, src_strides,
-      start_coord, boundary, ndim, element_size, root, flags,
-      IPC_TILE_REDUCE_WAVE);
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ inline int IPCContext::tile_max_reduce_wg(rocshmem_team_t team,
@@ -2037,10 +2289,9 @@ __device__ inline int IPCContext::tile_max_reduce_wg(rocshmem_team_t team,
                                                       size_t element_size,
                                                       int root,
                                                       uint64_t flags) {
-  return ipc_tile_reduce_dispatch<ROCSHMEM_MAX>(
+  return ipc_tile_reduce_wg_dispatch<ROCSHMEM_MAX>(
       this, team, dst_data, src_data, dst_strides, src_strides,
-      start_coord, boundary, ndim, element_size, root, flags,
-      IPC_TILE_REDUCE_WG);
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 // MIN Reductions - Type-erased interface
@@ -2057,8 +2308,7 @@ __device__ inline int IPCContext::tile_min_reduce(rocshmem_team_t team,
                                                    uint64_t flags) {
   return ipc_tile_reduce_dispatch<ROCSHMEM_MIN>(
       this, team, dst_data, src_data, dst_strides, src_strides,
-      start_coord, boundary, ndim, element_size, root, flags,
-      IPC_TILE_REDUCE_THREAD);
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ inline int IPCContext::tile_min_reduce_wave(rocshmem_team_t team,
@@ -2072,10 +2322,9 @@ __device__ inline int IPCContext::tile_min_reduce_wave(rocshmem_team_t team,
                                                         size_t element_size,
                                                         int root,
                                                         uint64_t flags) {
-  return ipc_tile_reduce_dispatch<ROCSHMEM_MIN>(
+  return ipc_tile_reduce_wave_dispatch<ROCSHMEM_MIN>(
       this, team, dst_data, src_data, dst_strides, src_strides,
-      start_coord, boundary, ndim, element_size, root, flags,
-      IPC_TILE_REDUCE_WAVE);
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ inline int IPCContext::tile_min_reduce_wg(rocshmem_team_t team,
@@ -2089,10 +2338,9 @@ __device__ inline int IPCContext::tile_min_reduce_wg(rocshmem_team_t team,
                                                       size_t element_size,
                                                       int root,
                                                       uint64_t flags) {
-  return ipc_tile_reduce_dispatch<ROCSHMEM_MIN>(
+  return ipc_tile_reduce_wg_dispatch<ROCSHMEM_MIN>(
       this, team, dst_data, src_data, dst_strides, src_strides,
-      start_coord, boundary, ndim, element_size, root, flags,
-      IPC_TILE_REDUCE_WG);
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 }  // namespace rocshmem

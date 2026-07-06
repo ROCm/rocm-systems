@@ -1326,10 +1326,13 @@ function(add_tile_tests)
         # Each tile_reduce test exercises sum, max, and min reductions.
         add_rocshmem_functional_test(NAME tile_reduce RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_reduce RANKS 4 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_reduce RANKS 4 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 262144)
         add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 2 WORKGROUPS 1 THREADS 64)
         add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 1 THREADS 64)
+        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 2048)
         add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 2 WORKGROUPS 1 THREADS 1024)
         add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 2048)
     end_test_group()
 endfunction()
 
