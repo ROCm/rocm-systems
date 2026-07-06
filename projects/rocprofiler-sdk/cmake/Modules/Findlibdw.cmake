@@ -25,8 +25,7 @@
 #
 
 if(NOT libdw_ROOT)
-    foreach(_libdw_ROCM_ROOT
-            IN
+    foreach(_libdw_ROCM_ROOT IN
             ITEMS "${ROCM_PATH}" "$ENV{ROCM_PATH}" "${rocm_version_DIR}"
                   "${ROCPROFILER_DEFAULT_ROCM_PATH}" "/opt/rocm")
         set(_libdw_ROCM_SYSDEPS "${_libdw_ROCM_ROOT}/lib/rocm_sysdeps")
