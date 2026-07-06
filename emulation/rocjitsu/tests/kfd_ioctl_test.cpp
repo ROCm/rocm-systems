@@ -25,7 +25,7 @@
 
 namespace {
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
 constexpr uint32_t kGpuId = 38144;
 
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
@@ -215,12 +215,10 @@ TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
 }
 
 TEST(KfdIoctlStandaloneTest, GetTileConfigReportsRdnaGbAddrConfig) {
-  EXPECT_EQ(
-      query_gb_addr_config(std::string(CONFIG_DIR) + "/amdgpu_rdna3_gfx1100_w7900_kmd.json", 7019),
-      rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3));
-  EXPECT_EQ(
-      query_gb_addr_config(std::string(CONFIG_DIR) + "/amdgpu_rdna4_gfx1201_r9700_kmd.json", 8716),
-      rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(query_gb_addr_config(std::string(CONFIG_DIR) + "/gfx1100_w7900.json", 7019),
+            rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3));
+  EXPECT_EQ(query_gb_addr_config(std::string(CONFIG_DIR) + "/gfx1201_r9700.json", 8716),
+            rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {

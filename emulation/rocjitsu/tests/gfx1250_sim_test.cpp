@@ -61,7 +61,7 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/amdgpu_gfx1250.json";
+const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250.json";
 
 constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
 constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;
@@ -2524,6 +2524,67 @@ TEST(Gfx1250ExecutionTest, TensorDmaAtomicBarrierArrivesAfterCopy) {
   const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
   EXPECT_EQ(state, 0xffffull << 16);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
+}
+
+TEST(Gfx1250ExecutionTest, SBarrierWaitEntersBarrierState) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const std::array<uint32_t, 2> wait_words = {0xBF940000u, 0u};
+  std::unique_ptr<Instruction> wait_inst(decoder->decode(wait_words.data()));
+  ASSERT_NE(wait_inst, nullptr);
+  ASSERT_EQ(std::string_view(wait_inst->mnemonic()), "s_barrier_wait");
+
+  cu->execute_instruction(wait_inst.get(), *wf);
+
+  EXPECT_EQ(wf->state(), amdgpu::WfState::BARRIER);
+}
+
+TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterAllSiblingsWait) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  constexpr uint64_t kEndPgmPc = 0x150000;
+  const std::array<uint32_t, 1> endpgm_words = {S_ENDPGM_GFX12};
+  sim.memory->load_image(reinterpret_cast<const uint8_t *>(endpgm_words.data()), sizeof(uint32_t),
+                         kEndPgmPc);
+
+  auto *wf0 = cu->dispatch_wf(0, kEndPgmPc, kGfx1250ScalarSlots, 32);
+  auto *wf1 = cu->dispatch_wf(0, kEndPgmPc, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  cu->begin_workgroup(0, 0, 2);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const std::array<uint32_t, 2> wait_words = {0xBF940000u, 0u};
+  std::unique_ptr<Instruction> wait_inst(decoder->decode(wait_words.data()));
+  ASSERT_NE(wait_inst, nullptr);
+  ASSERT_EQ(std::string_view(wait_inst->mnemonic()), "s_barrier_wait");
+
+  cu->execute_instruction(wait_inst.get(), *wf0);
+  wf1->wait_counters().increment(amdgpu::WaitCounterType::TENSORCNT);
+  wf1->set_wait_target_tensorcnt(0);
+  wf1->set_state(amdgpu::WfState::WAITCNT);
+
+  ASSERT_TRUE(cu->step());
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::WAITCNT);
+
+  wf1->release_wait_counter(amdgpu::WaitCounterType::TENSORCNT);
+  ASSERT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
+  cu->execute_instruction(wait_inst.get(), *wf1);
+  ASSERT_EQ(wf1->state(), amdgpu::WfState::BARRIER);
+
+  EXPECT_FALSE(cu->step());
+  EXPECT_TRUE(wf0->is_halted());
+  EXPECT_TRUE(wf1->is_halted());
 }
 
 TEST(Gfx1250ExecutionTest, ReleaseWaitCounterWakesWaitcntWhenTargetIsSatisfied) {

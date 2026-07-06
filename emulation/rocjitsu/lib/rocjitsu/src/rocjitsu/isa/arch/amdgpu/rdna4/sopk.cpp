@@ -217,6 +217,11 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   flags_ |= INDIRECT_CALL;
 }
 
+std::optional<int64_t> SCallB64Sopk::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {
   sdst.write_scalar64(wf, wf.pc + size_);
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);

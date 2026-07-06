@@ -100,7 +100,7 @@ jobs:
           apt-get autoclean
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ github.workspace }}/.ccache
         key: ccache-ubuntu-jammy-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
@@ -179,6 +179,7 @@ jobs:
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
+          -DROCPROFSYS_BUILD_EXAMPLES=ON \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
@@ -324,7 +325,7 @@ jobs:
           apt-get autoclean
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ github.workspace }}/.ccache
         key: ccache-ubuntu-jammy-system-deps-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
@@ -375,6 +376,7 @@ jobs:
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
+          -DROCPROFSYS_BUILD_EXAMPLES=ON \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_BUILD_DYNINST=ON \

@@ -236,10 +236,6 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
     kmt_alloc_flags.ui32.NonPaged = 1;
   }
 
-  if (!m_region.IsLocalMemory() && (alloc_flags & core::MemoryRegion::AllocateMemoryOnly)) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   // Allocating a memory handle for virtual memory
   kmt_alloc_flags.ui32.NoAddress = !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);
 
@@ -525,11 +521,6 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-}
-
-hsa_status_t KfdVirtioDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Calls DestroyMemoryHandle, as an amdgpu_bo_handle object is created during import.
-  return DestroyMemoryHandle(handle);
 }
 
 hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
