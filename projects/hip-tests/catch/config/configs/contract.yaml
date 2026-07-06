@@ -135,6 +135,21 @@ contract:
   Contract_StreamCallbacks_LaunchHostFunc_OrdersBeforeLaterWork:
     <<: *level_0
     tags: [stream_callbacks]
+  Contract_StreamAttributes_Priority_RoundTrips:
+    <<: *level_0
+    tags: [stream_attributes]
+  Contract_StreamAttributes_SyncPolicy_RoundTrips:
+    <<: *level_0
+    tags: [stream_attributes]
+  Contract_StreamAttributes_AccessPolicyWindow_RoundTrips:
+    <<: *level_0
+    tags: [stream_attributes]
+  Contract_StreamAttributes_CopyAttributes_PropagatesToDestination:
+    <<: *level_0
+    tags: [stream_attributes]
+  Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs:
+    <<: *level_0
+    tags: [stream_attributes]
   Contract_AsyncTransfer_HostToDeviceToHost_RoundTripsAfterStreamSynchronize:
     <<: *level_0
     tags: [async_transfer]
