@@ -310,10 +310,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(
-        rocjitsu_shared
-        PRIVATE "LINKER:--exclude-libs,ALL"
-    )
+    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
 
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
