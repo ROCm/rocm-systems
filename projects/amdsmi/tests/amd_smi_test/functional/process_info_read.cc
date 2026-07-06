@@ -114,6 +114,7 @@ void TestProcInfoRead::Run(void) {
           dumpProcess(&procs[i]);
         }
 
+        delete[] procs;
         return;
       }
     } else {

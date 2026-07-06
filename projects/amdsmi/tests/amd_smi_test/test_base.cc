@@ -26,6 +26,7 @@
 
 #include <cassert>
 #include <iomanip>
+#include <stdexcept>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
@@ -421,7 +422,17 @@ uint32_t TestBase::promptNumDevicesToTest(uint32_t current_num_devices) {
     }
   } while (true);
 
-  return_value = std::stoi(devices_to_test);
+  if (devices_to_test.empty()) {
+    return 0;
+  }
+
+  try {
+    return_value = std::stoi(devices_to_test);
+  } catch (const std::exception&) {
+    std::cout << "Invalid input. Please enter a number between 0 and " << current_num_devices
+              << std::endl;
+    return 0;
+  }
   if (return_value > current_num_devices) {
     std::cout << "Invalid input. Please enter a number between 0 and " << current_num_devices
               << std::endl;

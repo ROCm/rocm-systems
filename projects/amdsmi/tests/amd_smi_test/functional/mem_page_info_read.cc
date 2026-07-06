@@ -109,6 +109,7 @@ void TestMemPageInfoRead::Run(void) {
       err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], &num_pages, records);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+        delete[] records;
         continue;
       } else {
         CHK_ERR_ASRT(err)
