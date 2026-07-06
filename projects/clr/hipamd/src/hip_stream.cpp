@@ -381,8 +381,7 @@ hipError_t hipStreamSynchronize_common(hipStream_t stream) {
     constexpr bool kBlockingOnly = true;
     auto* device = getCurrentDevice();
     device->SyncAllStreams(false, kBlockingOnly);
-    auto* null_stream = device->GetNullStream();
-    return null_stream ? null_stream->GetAndClearAsyncError() : hipSuccess;
+    return device->GetAndClearBlockingStreamsAsyncError();
   }
 
   CHECK_STREAM_DETACHED(stream);

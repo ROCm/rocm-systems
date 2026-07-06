@@ -355,6 +355,17 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     REQUIRE(ret == hipErrorOutOfMemory);
   }
 
+  SECTION("hipStreamSynchronize nullptr observes blocking stream error") {
+    StreamGuard stream_guard(Streams::created);
+    hipStream_t stream = stream_guard.stream();
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    hipError_t ret = hipStreamSynchronize(nullptr);
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipDeviceGraphMemTrim(0));
+    REQUIRE(ret == hipErrorOutOfMemory);
+  }
+
   SECTION("hipStreamQuery") {
     StreamGuard stream_guard(Streams::created);
     hipStream_t stream = stream_guard.stream();

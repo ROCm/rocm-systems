@@ -612,6 +612,8 @@ namespace hip {
     bool StreamExists(const Stream* stream);
     /// Synchronize all streams (optionally only blocking ones)
     void SyncAllStreams(bool cpu_wait = true, bool wait_blocking_streams_only = false);
+    /// Returns and clears the first async error from blocking streams on this device
+    hipError_t GetAndClearBlockingStreamsAsyncError();
     /// Returns true if any stream on this device is in capture mode
     bool StreamCaptureBlocking();
     /// Wait all active streams on the blocking queue. The method enqueues a wait command and
