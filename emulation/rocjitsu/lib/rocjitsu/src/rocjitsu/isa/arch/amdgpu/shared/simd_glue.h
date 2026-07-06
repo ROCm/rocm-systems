@@ -498,14 +498,13 @@ util::native<T> simd_load64_or(const VgprStoragePair64 &p, uint32_t base, util::
 /// remove this overload from the candidate set entirely.
 template <typename T, typename Op>
   requires(util::has_stdx_simd)
-inline util::native<T> read_simd(const Op &op, const Wavefront &wf, uint32_t lane_base) {
+inline util::native<T> read_simd(const Op &op, Wavefront &wf, uint32_t lane_base) {
   static_assert(sizeof(T) == sizeof(uint32_t), "read_simd: T must be a 32-bit lane type");
   constexpr auto W = static_cast<uint32_t>(util::native_width_v<T>);
   const uint64_t lane_mask = ((wf.exec() >> lane_base) & util::mask<uint64_t>(static_cast<int>(W)))
                              << lane_base;
-  if (const VgprStorage *r = observed_simd_src_reg(op, wf, lane_mask))
-    return r->template simd_load<T>(lane_base);
-  return util::broadcast<T>(op.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  return regs.read_operand(op, wf, lane_mask).template load_native<T>(lane_base);
 }
 
 /// SIMD store of `v` into an operand at `lane_base`, blending in only
@@ -1079,14 +1078,13 @@ template <typename T, typename Inst, typename UnOp>
 /// storage, else broadcasts the operand's scalar value.
 template <typename T, typename Op>
   requires(util::has_stdx_simd)
-inline util::narrow32<T> read_narrow(const Op &op, const Wavefront &wf, uint32_t lane_base) {
+inline util::narrow32<T> read_narrow(const Op &op, Wavefront &wf, uint32_t lane_base) {
   static_assert(sizeof(T) == sizeof(uint32_t), "read_narrow: T must be a 32-bit lane type");
   constexpr auto W = static_cast<uint32_t>(util::native_width64);
   const uint64_t lane_mask = ((wf.exec() >> lane_base) & util::mask<uint64_t>(static_cast<int>(W)))
                              << lane_base;
-  if (const VgprStorage *r = observed_simd_src_reg(op, wf, lane_mask))
-    return r->template simd_load_narrow<T>(lane_base);
-  return util::broadcast_narrow<T>(op.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  return regs.read_operand(op, wf, lane_mask).template load_narrow<T>(lane_base);
 }
 
 /// Mixed-width VOP1 conversion SIMD fast path, f64 source -> 32-bit dst
