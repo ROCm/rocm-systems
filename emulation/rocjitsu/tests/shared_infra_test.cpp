@@ -29,9 +29,11 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna1/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna2/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -1188,6 +1190,28 @@ struct Cdna4DppTraits {
   using VCmpxEqU32Vopc = cdna4::VCmpxEqU32Vopc;
 };
 
+struct Rdna1DppTraits {
+  static constexpr const char *name = "rdna1";
+  static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA1;
+  using MachineInst = rdna1::MachineInst;
+  using VopcMachineInst = rdna1::VopcMachineInst;
+  using Vop1VopDpp16MachineInst = rdna1::Vop1VopDpp16MachineInst;
+  using Vop1VopDpp8MachineInst = rdna1::Vop1VopDpp8MachineInst;
+  using VMovB32Vop1 = rdna1::VMovB32Vop1;
+  using VCmpEqU32Vopc = rdna1::VCmpEqU32Vopc;
+};
+
+struct Rdna2DppTraits {
+  static constexpr const char *name = "rdna2";
+  static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA2;
+  using MachineInst = rdna2::MachineInst;
+  using VopcMachineInst = rdna2::VopcMachineInst;
+  using Vop1VopDpp16MachineInst = rdna2::Vop1VopDpp16MachineInst;
+  using Vop1VopDpp8MachineInst = rdna2::Vop1VopDpp8MachineInst;
+  using VMovB32Vop1 = rdna2::VMovB32Vop1;
+  using VCmpEqU32Vopc = rdna2::VCmpEqU32Vopc;
+};
+
 struct Rdna4DppTraits {
   static constexpr const char *name = "rdna4";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
@@ -1236,21 +1260,14 @@ struct Gfx1250DppTraits {
   using VCmpxEqU32Vopc = gfx1250::VCmpxEqU32Vopc;
 };
 
-struct Rdna1UnsupportedVopcDppTraits {
-  static constexpr const char *name = "rdna1";
-  using MachineInst = rdna1::MachineInst;
-  using VopcMachineInst = rdna1::VopcMachineInst;
-  using Vop1VopDpp16MachineInst = rdna1::Vop1VopDpp16MachineInst;
-  using VCmpEqU32Vopc = rdna1::VCmpEqU32Vopc;
+// Test-only RDNA4 trait for exercising 64-bit EXEC handling. The production
+// RDNA factory still constructs the ISA default Wave32 form.
+struct Rdna4Wave64DppTestIsa : rdna4::Isa {
+  static constexpr uint32_t WF_SIZE = 64;
+  static constexpr uint32_t WF_SIZE_MAX = 64;
 };
 
-struct Rdna2UnsupportedVopcDppTraits {
-  static constexpr const char *name = "rdna2";
-  using MachineInst = rdna2::MachineInst;
-  using VopcMachineInst = rdna2::VopcMachineInst;
-  using Vop1VopDpp16MachineInst = rdna2::Vop1VopDpp16MachineInst;
-  using VCmpEqU32Vopc = rdna2::VCmpEqU32Vopc;
-};
+static_assert(GpuIsa<Rdna4Wave64DppTestIsa>);
 
 template <typename Traits> void cdna_generated_vop1_uses_shared_row_broadcast() {
   SCOPED_TRACE(Traits::name);
@@ -1566,6 +1583,191 @@ template <typename Traits> void wave32_generated_vop1_dpp16_fetch_inactive_uses_
   EXPECT_EQ(run(1), kSrcLane0Value);
 }
 
+template <typename Traits> void wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl() {
+  SCOPED_TRACE(Traits::name);
+  amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp16_fi_bound_mem");
+  amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp16_fi_bound_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = Traits::arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_dpp16_fi_bound_cu", cfg,
+                                            &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec(0xFFFFFFFEULL);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  constexpr uint32_t kSrcLane0Value = 0xA5A50000u;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vbase + kSrc, lane, kSrcLane0Value + lane);
+    cu->write_vgpr(vbase + kDst, lane, 0xDEAD0000u + lane);
+  }
+
+  typename Traits::Vop1VopDpp16MachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  raw.fi = 0;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+
+  typename Traits::VMovB32Vop1 inst(reinterpret_cast<const typename Traits::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0xDEAD0000u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 1), 0u);
+}
+
+void rdna4_wave64_generated_vop1_dpp16_fetch_inactive_uses_upper_exec_bit() {
+  amdgpu::GpuMemory mem("rdna4_wave64_dpp16_fi_mem");
+  amdgpu::L2Cache l2("rdna4_wave64_dpp16_fi_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = rdna4::Isa::MAX_SGPRS_PER_WF;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = std::make_unique<
+      amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Rdna4Wave64DppTestIsa>>(
+      "rdna4_wave64_dpp16_fi_cu", cfg, &mem, &l2);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  constexpr uint32_t kSrcLane32Value = 0x5A5A0020u;
+  uint32_t vbase = wf->vgpr_alloc().base;
+
+  auto run = [&](uint32_t fi) {
+    wf->set_exec(~(1ULL << 32u));
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vbase + kSrc, lane, 0x5A5A0000u + lane);
+      cu->write_vgpr(vbase + kDst, lane, 0xDEAD0000u + lane);
+    }
+
+    rdna4::Vop1VopDpp16MachineInst raw{};
+    raw.src0 = amdgpu::SRC_DPP;
+    raw.vsrc0 = kSrc;
+    raw.vdst = kDst;
+    raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+    raw.fi = fi;
+    raw.bound_ctrl = 0;
+    raw.bank_mask = 0xF;
+    raw.row_mask = 0xF;
+
+    rdna4::VMovB32Vop1 inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+    inst.execute_impl(*wf);
+    return cu->read_vgpr(vbase + kDst, 33);
+  };
+
+  EXPECT_EQ(run(0), 0u);
+  EXPECT_EQ(run(1), kSrcLane32Value);
+}
+
+void rdna4_wave64_generated_vop1_dpp8_fetch_inactive_uses_upper_exec_bit() {
+  amdgpu::GpuMemory mem("rdna4_wave64_dpp8_fi_mem");
+  amdgpu::L2Cache l2("rdna4_wave64_dpp8_fi_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = rdna4::Isa::MAX_SGPRS_PER_WF;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = std::make_unique<
+      amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Rdna4Wave64DppTestIsa>>(
+      "rdna4_wave64_dpp8_fi_cu", cfg, &mem, &l2);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+
+  struct Dpp8Case {
+    uint32_t dst_lane;
+    uint32_t src_lane;
+  };
+  constexpr std::array<Dpp8Case, 2> cases{{
+      {33, 32},
+      {35, 37},
+  }};
+
+  auto set_lane_sel = [](rdna4::Vop1VopDpp8MachineInst &raw, uint32_t dst_lane, uint32_t src_lane) {
+    uint32_t selector = src_lane & 7u;
+    switch (dst_lane & 7u) {
+    case 0:
+      raw.lane_sel_0 = selector;
+      break;
+    case 1:
+      raw.lane_sel_1 = selector;
+      break;
+    case 2:
+      raw.lane_sel_2 = selector;
+      break;
+    case 3:
+      raw.lane_sel_3 = selector;
+      break;
+    case 4:
+      raw.lane_sel_4 = selector;
+      break;
+    case 5:
+      raw.lane_sel_5 = selector;
+      break;
+    case 6:
+      raw.lane_sel_6 = selector;
+      break;
+    case 7:
+      raw.lane_sel_7 = selector;
+      break;
+    }
+  };
+
+  auto run = [&](const Dpp8Case &test_case, uint32_t src0_marker) {
+    wf->set_exec(~(1ULL << test_case.src_lane));
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vbase + kSrc, lane, 0x6B6B0000u + lane);
+      cu->write_vgpr(vbase + kDst, lane, 0xDEAD0000u + lane);
+    }
+
+    rdna4::Vop1VopDpp8MachineInst raw{};
+    raw.src0 = src0_marker;
+    raw.vsrc0 = kSrc;
+    raw.vdst = kDst;
+    set_lane_sel(raw, test_case.dst_lane, test_case.src_lane);
+
+    rdna4::VMovB32Vop1 inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+    inst.execute_impl(*wf);
+    return cu->read_vgpr(vbase + kDst, test_case.dst_lane);
+  };
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE("dst lane " + std::to_string(test_case.dst_lane) + " src lane " +
+                 std::to_string(test_case.src_lane));
+    EXPECT_EQ(run(test_case, amdgpu::SRC_DPP8_FI_0), 0u);
+    EXPECT_EQ(run(test_case, amdgpu::SRC_DPP8_FI_1), 0x6B6B0000u + test_case.src_lane);
+  }
+}
+
 template <typename Traits> void wave32_generated_vop1_dpp8_fetch_inactive_uses_fi() {
   SCOPED_TRACE(Traits::name);
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp8_fi_mem");
@@ -1765,6 +1967,8 @@ TEST(DppPermuteTest, CdnaGeneratedVcmpxDppWriteMaskPreservesExec) {
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
+  wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Rdna1DppTraits>();
+  wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Rdna2DppTraits>();
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Rdna3DppTraits>();
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Rdna3_5DppTraits>();
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Rdna4DppTraits>();
@@ -1775,6 +1979,8 @@ TEST(DppPermuteTest, Gfx1250GeneratedVop1DppWriteMaskHonorsBoundCtrl) {
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1Dpp16FetchInactiveUsesFi) {
+  wave32_generated_vop1_dpp16_fetch_inactive_uses_fi<Rdna1DppTraits>();
+  wave32_generated_vop1_dpp16_fetch_inactive_uses_fi<Rdna2DppTraits>();
   wave32_generated_vop1_dpp16_fetch_inactive_uses_fi<Rdna3DppTraits>();
   wave32_generated_vop1_dpp16_fetch_inactive_uses_fi<Rdna3_5DppTraits>();
   wave32_generated_vop1_dpp16_fetch_inactive_uses_fi<Rdna4DppTraits>();
@@ -1784,7 +1990,29 @@ TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp16FetchInactiveUsesFi) {
   wave32_generated_vop1_dpp16_fetch_inactive_uses_fi<Gfx1250DppTraits>();
 }
 
+TEST(DppPermuteTest, RdnaGeneratedVop1Dpp16FiZeroPrecedesBoundCtrl) {
+  wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl<Rdna1DppTraits>();
+  wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl<Rdna2DppTraits>();
+  wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl<Rdna3DppTraits>();
+  wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl<Rdna3_5DppTraits>();
+  wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl<Rdna4DppTraits>();
+}
+
+TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp16FiZeroPrecedesBoundCtrl) {
+  wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl<Gfx1250DppTraits>();
+}
+
+TEST(DppPermuteTest, Rdna4GeneratedVop1Dpp16Wave64FetchInactiveUsesUpperExecBit) {
+  rdna4_wave64_generated_vop1_dpp16_fetch_inactive_uses_upper_exec_bit();
+}
+
+TEST(DppPermuteTest, Rdna4GeneratedVop1Dpp8Wave64FetchInactiveUsesUpperExecBit) {
+  rdna4_wave64_generated_vop1_dpp8_fetch_inactive_uses_upper_exec_bit();
+}
+
 TEST(DppPermuteTest, RdnaGeneratedVop1Dpp8FetchInactiveUsesFi) {
+  wave32_generated_vop1_dpp8_fetch_inactive_uses_fi<Rdna1DppTraits>();
+  wave32_generated_vop1_dpp8_fetch_inactive_uses_fi<Rdna2DppTraits>();
   wave32_generated_vop1_dpp8_fetch_inactive_uses_fi<Rdna3DppTraits>();
   wave32_generated_vop1_dpp8_fetch_inactive_uses_fi<Rdna3_5DppTraits>();
   wave32_generated_vop1_dpp8_fetch_inactive_uses_fi<Rdna4DppTraits>();
@@ -1815,11 +2043,11 @@ TEST(DppPermuteTest, Gfx1250GeneratedVcmpxDppWave32WriteMaskPreservesExec) {
 }
 
 TEST(DppPermuteTest, Rdna1VopcDppThrowsUnsupported) {
-  unsupported_rdna_vopc_dpp_throws<Rdna1UnsupportedVopcDppTraits>();
+  unsupported_rdna_vopc_dpp_throws<Rdna1DppTraits>();
 }
 
 TEST(DppPermuteTest, Rdna2VopcDppThrowsUnsupported) {
-  unsupported_rdna_vopc_dpp_throws<Rdna2UnsupportedVopcDppTraits>();
+  unsupported_rdna_vopc_dpp_throws<Rdna2DppTraits>();
 }
 
 // ---------------------------------------------------------------------------
