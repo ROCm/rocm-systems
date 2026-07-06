@@ -2585,7 +2585,15 @@ class CodeGenerator:
                     if is_vop3 and len(src_ops) >= 3:
                         lctx.vcc_read = f'{src_ops[2]}.read_scalar64(wf)'
                     lctx.vcc_dst = dst_ops[1] if len(dst_ops) > 1 else '__vcc__'
-                return lower_sema_block(sema_block, lctx)
+                body = lower_sema_block(sema_block, lctx)
+                if (
+                    cls == 'scalar_unary'
+                    and op is not None
+                    and op.startswith('cvt_')
+                    and scc == 'none'
+                ):
+                    body = '  // SOP1 scalar conversions preserve SCC.\n' + body
+                return body
 
         # Try the registry (covers all extracted gen_ functions).
         from amdisa.codegen.execute import ExecuteContext, DISPATCH
@@ -2649,6 +2657,14 @@ class CodeGenerator:
             # pipeline drain handles the final halt.
             L.append('  wf.end();')
             return '\n'.join(L)
+
+        if cls == 'trap':
+            # S_TRAP is an exceptional control-flow terminator for CFG and DBT
+            # purposes, but rocjitsu does not currently model trap-handler
+            # execution in the wavefront simulator. Make dynamic execution fail
+            # explicitly while the generated PROGRAM_TERMINATOR flag carries the
+            # static-control-flow meaning for CFG construction.
+            return '  (void)wf;\n  throw util::UnimplementedInst(mnemonic());'
 
         if cls == 'waitcnt':
             L.append(
@@ -4943,6 +4959,16 @@ class CodeGenerator:
             return '(inst_.vdst & 0x7fu)'
         return 'inst_.vdst'
 
+    def _shared_execute_key_denied(
+        self, mnemonic: str, inst: Instruction | None, enc_name: str | None = None
+    ) -> bool:
+        enc_key = enc_name or (inst.enc_name if inst else None)
+        if enc_key is None:
+            return False
+        config = getattr(self, 'config', None)
+        denied = getattr(config, 'unshared_execute_keys', frozenset())
+        return (mnemonic, enc_key) in denied
+
     def _can_share_execute(
         self,
         mnemonic: str,
@@ -4960,6 +4986,8 @@ class CodeGenerator:
         if self.shared_plan is None:
             return False
         if self._requires_arch_local_execute(inst, enc_name):
+            return False
+        if self._shared_execute_key_denied(mnemonic, inst, enc_name):
             return False
         if mnemonic in self._NON_SHAREABLE_MNEMONICS:
             return False
@@ -4988,6 +5016,8 @@ class CodeGenerator:
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> bool:
         if inst is None or self._requires_arch_local_execute(inst, enc_name):
+            return False
+        if self._shared_execute_key_denied(inst.mnemonic, inst, enc_name):
             return False
 
         from amdisa.codegen.execute.simd_codegen import simd_probe_arch_portable
@@ -5223,11 +5253,14 @@ class CodeGenerator:
                         ),
                         None,
                     )
-                    if (
-                        inst_sem
-                        and inst_sem.semantic_class in ('branch', 'cbranch')
-                        and label_operand
+                    branch_offset_operand = None
+                    if inst_sem and inst_sem.semantic_class in (
+                        'branch',
+                        'cbranch',
+                        'scalar_call',
                     ):
+                        branch_offset_operand = label_operand
+                    if branch_offset_operand:
                         public_members.append(
                             cgen.Statement(
                                 'std::optional<int64_t> branch_offset_bytes() const override'
@@ -5481,7 +5514,11 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class == 'cbranch':
                         ctor_body_parts.append('flags_ |= COND_BRANCH;')
-                    if _mem_sem and _mem_sem.semantic_class == 'endpgm':
+                    if _mem_sem and _mem_sem.semantic_class in ('endpgm', 'trap'):
+                        # BasicBlock splitting treats PROGRAM_TERMINATOR as a
+                        # hard stop. S_TRAP needs the same metadata as S_ENDPGM:
+                        # without it, CFG recovery can add a bogus fallthrough
+                        # edge into padding or a following ELF FUNC symbol.
                         ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
                     if _mem_sem and _mem_sem.semantic_class in (
                         'scalar_setpc',
@@ -5951,19 +5988,15 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    if (
-                        inst_sem
-                        and inst_sem.semantic_class in ('branch', 'cbranch')
-                        and label_operand
-                    ):
+                    if branch_offset_operand:
                         inst_impls.append(
                             cgen.Line(
                                 f'std::optional<int64_t> '
                                 f'{inst.fmt_name}::branch_offset_bytes() const {{\n'
-                                f'  // AMDGPU direct branch labels are signed '
+                                f'  // AMDGPU PC-relative branch immediates are signed '
                                 f'instruction-count deltas.\n'
                                 f'  return static_cast<int64_t>('
-                                f'static_cast<int16_t>({label_operand}.encoding_value_)) * 4;\n'
+                                f'static_cast<int16_t>({branch_offset_operand}.encoding_value_)) * 4;\n'
                                 f'}}'
                             )
                         )

@@ -97,6 +97,20 @@ __device__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
   DISPATCH_RET(reduce<PAIR(T, Op)>(team, dest, source, nreduce));
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__device__ int Context::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                          const T *source, int nreduce) {
+  if (nreduce == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_REDUCE_SCATTER);
+  }
+
+  DISPATCH_RET(reduce_scatter_wg<PAIR(T, Op)>(team, dest, source, nreduce));
+}
+
 template <typename T>
 __device__ void Context::put(T *dest, const T *source, size_t nelems, int pe) {
   if (nelems == 0) {

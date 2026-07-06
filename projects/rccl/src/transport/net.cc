@@ -452,7 +452,7 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
 // Returns the flags to be used by a call to cuMemGetHandleForAddressRange.
 static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
   int flags = 0;
-#if CUDA_VERSION >= 12080 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 12080 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   // Force mapping on PCIe on systems with both PCI and C2C attachments.
   if (useGdr == ncclTopoGdrModePci) flags = CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE;
 #endif
@@ -1195,7 +1195,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
         ALIGN_SIZE(map->mems[NCCL_NET_MAP_DEVMEM].size, CUDA_IPC_MIN);
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
                                                 (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, /*peerRank=*/-1, proxyState->memManager));
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
         // Get DMA-BUF fd for cuMem VMM allocations via cuMemGetHandleForAddressRange.
         // Required even when DMA-BUF is globally disabled: ibv_reg_mr on cuMem RDMA
         // memory fails ("Bad address") and corrupts VMM state, so ibv_reg_dmabuf_mr
@@ -1257,7 +1257,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
@@ -1421,7 +1421,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       if (ncclCuMemEnable()) {
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
                                                 (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, /*peerRank=*/-1, proxyState->memManager));
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
         // Get DMA-BUF fd for cuMem VMM allocations. Required even when DMA-BUF is
         // globally disabled to avoid ibv_reg_mr on VMM memory.
         {
@@ -1474,7 +1474,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
@@ -2260,7 +2260,7 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(reqSize == sizeof(struct netRegInfo));
   assert(respSize == sizeof(void*));
 
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
     int dmabuf_fd;
@@ -2318,7 +2318,7 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(reqSize == sizeof(struct netRegInfo));
   assert(respSize == sizeof(void*));
 
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
     int dmabuf_fd;

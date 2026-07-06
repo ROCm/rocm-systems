@@ -118,6 +118,11 @@ def main():
             print("\nSKIP: Coverage report not requested (use --coverage-report to enable)")
         executor.generate_coverage_report()
 
+        # Emit structured results for the dashboard (no-op unless
+        # --emit-results / --db-push was passed). Coverage is emitted too when a
+        # report was generated above.
+        executor.emit_results()
+
         # Return based on results
         if executor.test_results:
             from lib.test_executor import TestResult
