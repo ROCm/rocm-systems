@@ -306,9 +306,8 @@ TEST_F(InterposerExportsTest, AutoDetectedInterposerSurfaceLooksSane) {
          "RJ_INTERPOSER_EXPORT scan in ParseInterposedSymbols is likely broken.";
   // A few core entry points that must always be part of the redirected surface.
   for (const char *anchor : {"open", "close", "ioctl", "mmap", "munmap"}) {
-    EXPECT_TRUE(interposed_.count(anchor) != 0)
-        << "expected core libc entry point '" << anchor
-        << "' among the auto-detected interposed symbols.";
+    EXPECT_TRUE(interposed_.count(anchor) != 0) << "expected core libc entry point '" << anchor
+                                                << "' among the auto-detected interposed symbols.";
   }
 }
 
