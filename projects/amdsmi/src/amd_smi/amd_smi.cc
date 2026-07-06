@@ -413,8 +413,8 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
       break;
     case AMDSMI_STATUS_MORE_DATA:
       *status_string =
-          "AMDSMI_STATUS_MORE_DATA: There is more data than the buffer"
-          " size the user passed.";
+          "AMDSMI_STATUS_MORE_DATA: More data is available than fits in the"
+          " caller-supplied buffer.";
       break;
     case AMDSMI_STATUS_NO_DATA:
       *status_string = "AMDSMI_STATUS_NO_DATA: No data was found for a given input.";

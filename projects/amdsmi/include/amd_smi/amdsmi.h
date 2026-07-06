@@ -389,7 +389,7 @@ typedef enum {
   AMDSMI_STATUS_NO_SLOT = 33,            //!< No more free slot
   AMDSMI_STATUS_DRIVER_NOT_LOADED = 34,  //!< Processor driver not loaded
   // Data and size errors
-  AMDSMI_STATUS_MORE_DATA = 39,  //!< There is more data than the buffer size the user passed
+  AMDSMI_STATUS_MORE_DATA = 39,  //!< More data is available than fits in the caller-supplied buffer
   AMDSMI_STATUS_NO_DATA = 40,    //!< No data was found for a given input
   AMDSMI_STATUS_INSUFFICIENT_SIZE = 41,  //!< Not enough resources were available for the operation
   AMDSMI_STATUS_UNEXPECTED_SIZE = 42,    //!< An unexpected amount of data was read
