@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -33,6 +34,9 @@
 
 #include <pthread.h>
 
+#include <atomic>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <stdexcept>
@@ -57,14 +61,14 @@ auto affinity_functor(intmax_t)
 }
 
 auto
-get_thread_pool_config()
+get_thread_pool_config(size_t pool_size = 1)
 {
     return thread_pool_config_t{.init         = true,
                                 .use_tbb      = false,
                                 .use_affinity = false,
                                 .verbose      = 0,
                                 .priority     = 0,
-                                .pool_size    = 1,
+                                .pool_size    = pool_size,
                                 .task_queue   = nullptr,
                                 .set_affinity = affinity_functor,
                                 .initializer  = []() {},
@@ -72,8 +76,8 @@ get_thread_pool_config()
 }
 }  // namespace
 
-TaskGroup::TaskGroup()
-: parent_type{new thread_pool_t{get_thread_pool_config()}, false}
+TaskGroup::TaskGroup(size_t pool_size)
+: parent_type{new thread_pool_t{get_thread_pool_config(pool_size)}, false}
 , m_pool{parent_type::thread_pool()}
 {}
 
@@ -87,12 +91,33 @@ void
 TaskGroup::exec(std::function<void()>&& _func)
 {
     auto lk = std::unique_lock<std::mutex>{m_mutex};
+    m_async_only.store(false, std::memory_order_release);
     m_tasks.emplace_back(parent_type::async(std::move(_func)));
 }
 
 void
-TaskGroup::wait()
+TaskGroup::async(std::function<void()>&& _func)
 {
+    ++m_tasks_count;
+    auto _async_func = [func = std::move(_func)](std::atomic<uint64_t>* tasks_count) {
+        // ensure m_tasks_count is decremented even if func throws
+        auto _dtor = common::scope_destructor{[tasks_count]() { --(*tasks_count); }};
+        func();
+    };
+    parent_type::async(std::move(_async_func), &m_tasks_count);
+}
+
+void
+TaskGroup::wait(bool async_only)
+{
+    while(m_tasks_count.load(std::memory_order_relaxed) > 0)
+    {
+        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::microseconds{100});
+    }
+
+    if(async_only || m_async_only.load(std::memory_order_acquire)) return;
+
     auto lk = std::unique_lock<std::mutex>{m_mutex};
     for(auto& itr : m_tasks)
         itr->wait();
@@ -105,9 +130,9 @@ TaskGroup::wait()
 }
 
 void
-TaskGroup::join()
+TaskGroup::join(bool async_only)
 {
-    wait();
+    wait(async_only);
 }
 
 namespace
@@ -123,7 +148,8 @@ constexpr auto creation_notifier_library_seq = library_sequence_t<ROCPROFILER_LI
                                                                   ROCPROFILER_MARKER_LIBRARY,
                                                                   ROCPROFILER_RCCL_LIBRARY,
                                                                   ROCPROFILER_ROCDECODE_LIBRARY,
-                                                                  ROCPROFILER_ROCJPEG_LIBRARY>{};
+                                                                  ROCPROFILER_ROCJPEG_LIBRARY,
+                                                                  ROCPROFILER_OMPT_LIBRARY>{};
 
 // check that creation_notifier_library_seq is up to date
 static_assert((1 << (creation_notifier_library_seq.size() - 1)) == ROCPROFILER_LIBRARY_LAST,
@@ -283,7 +309,7 @@ notify_post_internal_thread_create(rocprofiler_runtime_library_t libs)
 rocprofiler_callback_thread_t
 create_callback_thread()
 {
-    // notify that rocprofiler library is about to create an inernal thread
+    // notify that rocprofiler library is about to create an internal thread
     notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
 
     // this will be index after emplace_back
@@ -304,6 +330,36 @@ get_task_group(rocprofiler_callback_thread_t cb_tid)
 {
     if(!get_task_groups() || get_task_groups()->empty()) return nullptr;
     return get_task_groups()->at(cb_tid.handle);
+}
+
+std::unique_ptr<task_group_t>
+create_task_group(size_t pool_size)
+{
+    // notify that rocprofiler library is about to create an internal thread
+    notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
+
+    // construct the task group to use the newly created thread pool
+    auto _tg = std::make_unique<task_group_t>(pool_size);
+
+    // notify that rocprofiler library finished creating an internal thread
+    notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+
+    return _tg;
+}
+
+task_group_t*
+create_task_group(void* addr, size_t pool_size)
+{
+    // notify that rocprofiler library is about to create an internal thread
+    notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
+
+    // placement new to construct task group at provided address
+    auto* _tg = new(addr) task_group_t{pool_size};
+
+    // notify that rocprofiler library finished creating an internal thread
+    notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+
+    return _tg;
 }
 }  // namespace internal_threading
 }  // namespace rocprofiler

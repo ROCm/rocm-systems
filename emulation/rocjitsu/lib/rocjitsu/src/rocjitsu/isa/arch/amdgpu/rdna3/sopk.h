@@ -176,6 +176,7 @@ class SCallB64Sopk : public Sopk {
 public:
   SCallB64Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  std::optional<int64_t> branch_offset_bytes() const override;
   Operand sdst;
   Operand simm16;
 };

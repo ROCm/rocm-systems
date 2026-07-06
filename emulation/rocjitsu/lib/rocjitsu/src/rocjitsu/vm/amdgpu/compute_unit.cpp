@@ -45,6 +45,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
+  sgpr_to_wave_.resize(config.num_wf_slots * config.sgprs_per_wf, nullptr);
 
   // Completer port: CP sends dispatch activation messages here.
   cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
@@ -124,7 +125,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   // values from previous kernel runs.
   std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
   std::memset(vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
-              config_.vgprs_per_wf * wf_size_ * sizeof(uint32_t));
+              vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
 
   // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
   // arguments from L2/memory rather than stale lines from a prior kernel.
@@ -146,6 +147,10 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   wf->state_ = WfState::RUNNING;
   wf->set_ready_cycle(cycle_counter_);
   wf->trace_inst_count_ = 0;
+
+  std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + sgprs, wf);
+  fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
+
   util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", slot,
                    " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
   return wf;
@@ -160,6 +165,7 @@ size_t ComputeUnitCore::num_wfs() const {
 }
 
 void ComputeUnitCore::reset_all_wf() {
+  lds_pinned_clusters_.clear();
   for (auto &w : wfs_) {
     if (w->sgpr_alloc().count > 0) {
       sgpr_file_.free(w->sgpr_alloc().base);
@@ -189,7 +195,7 @@ void ComputeUnitCore::retire_halted_wfs() {
       w->reset();
     }
   }
-  if (!has_active_wfs()) {
+  if (!has_active_wfs() && !lds_allocation_pinned()) {
     reset_lds_alloc();
   }
 }
@@ -198,6 +204,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
   auto key = wg_key(dispatch_id, wg_id);
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
+    plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
     if (cp_)
       cp_->notify_wg_complete(dispatch_id, wg_id);
@@ -250,7 +257,7 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst);
+  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
 
   if (inst->data()->tag() == GLOBAL_MEM && shared_aperture_base_ != 0) {
     auto &d = *inst->data_as<VectorMemState>();
@@ -316,12 +323,14 @@ void ComputeUnitCore::update_wf_states() {
       }
     }
     if (all_at_barrier) {
-      plugin_group_->onAmdgpuBarrierResolved(wg);
-      for (auto &w2 : wfs_) {
-        if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER) {
-          w2->set_state(WfState::RUNNING);
-          w2->set_ready_cycle(cycle_counter_);
-        }
+      std::vector<Wavefront *> barrier_wfs;
+      for (auto &w2 : wfs_)
+        if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER)
+          barrier_wfs.push_back(w2.get());
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
+      for (auto *bwf : barrier_wfs) {
+        bwf->set_state(WfState::RUNNING);
+        bwf->set_ready_cycle(cycle_counter_);
       }
     }
   }
@@ -380,7 +389,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     }
   }
 
-  plugin_group_->onAmdgpuExecuteInstruction(active->pc, *inst);
+  plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
 
   {
     auto mn = std::string_view(inst->mnemonic());
@@ -399,6 +408,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   execute_instruction(inst, *active);
+  plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {

@@ -8,6 +8,7 @@
 //
 #include "api.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -40,7 +41,7 @@
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
-#include "library/components/ucx_gotcha.hpp"
+#include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
 #include "library/kokkosp.hpp"
@@ -66,7 +67,6 @@
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/signals/types.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
@@ -214,7 +214,7 @@ ensure_finalization(bool _static_init = false)
         }
     }
 
-    if(common::get_env("ROCPROFSYS_MONOCHROME", false)) tim::log::monochrome() = true;
+    if(common::get_env(env_vars::MONOCHROME, false)) tim::log::monochrome() = true;
 
     timeout::setup();
 
@@ -234,7 +234,7 @@ ensure_finalization(bool _static_init = false)
         auto _verbose =
             get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
         auto _search_paths = fmt::format(
-            "{}:{}:{}:{}:{}", rocprofsys::get_env<std::string>("ROCPROFSYS_PATH", ""),
+            "{}:{}:{}:{}:{}", rocprofsys::get_env<std::string>(env_vars::PATH, ""),
             rocprofsys::get_env<std::string>("PWD"), ".",
             rocprofsys::get_env<std::string>("LD_LIBRARY_PATH", ""),
             rocprofsys::get_env<std::string>("LIBRARY_PATH", ""),
@@ -457,7 +457,7 @@ rocprofsys_set_mpi_hidden(bool use, bool attached)
 
     if(use && !attached && get_state() == State::PreInit)
     {
-        rocprofsys::set_env("ROCPROFSYS_USE_PID", "ON", 1);
+        rocprofsys::set_env(env_vars::USE_PID, "ON", 1);
     }
     else if(!use)
     {
@@ -560,9 +560,10 @@ rocprofsys_init_library_hidden()
     }
 
     auto _debug_value = get_debug();
-    if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", true);
+    if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
     scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
-        if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", _debug_value);
+        if(_debug_init)
+            config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
     } };
 }
 
@@ -571,9 +572,9 @@ rocprofsys_init_library_hidden()
 extern "C" bool
 rocprofsys_init_tooling_hidden(void)
 {
-    if(get_env("ROCPROFSYS_MONOCHROME", false)) tim::log::monochrome() = true;
+    if(get_env(env_vars::MONOCHROME, false)) tim::log::monochrome() = true;
 
-    if(!rocprofsys::get_env("ROCPROFSYS_INIT_TOOLING", true))
+    if(!rocprofsys::get_env(env_vars::INIT_TOOLING, true))
     {
         rocprofsys_init_library_hidden();
         return false;
@@ -674,7 +675,7 @@ rocprofsys_init_tooling_hidden(void)
                 rocprofiler_sdk::pause();
                 sampling::pause();
                 component::mpi_gotcha::pause();
-                component::ucx_gotcha::pause();
+                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
                 component::vaapi_gotcha::pause();
                 ::rocprofsys::pthread_gotcha::pause();
@@ -688,7 +689,7 @@ rocprofsys_init_tooling_hidden(void)
                 rocprofiler_sdk::resume();
                 sampling::resume();
                 component::mpi_gotcha::resume();
-                component::ucx_gotcha::resume();
+                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
                 component::vaapi_gotcha::resume();
                 ::rocprofsys::pthread_gotcha::resume();
@@ -717,7 +718,7 @@ rocprofsys_init_tooling_hidden(void)
     if(get_use_ucx())
     {
         LOG_DEBUG("Setting up UCX traces...\n");
-        component::ucx_gotcha::start();
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::start();
     }
 
     if(get_use_shmem())
@@ -866,7 +867,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
                   (_is_binary_rewrite) ? "y" : "n", _argv0);
     }
 
-    rocprofsys::set_env("ROCPROFSYS_MODE", _mode, 0);
+    rocprofsys::set_env(env_vars::MODE, _mode, 0);
     config::is_binary_rewrite() = _is_binary_rewrite;
 
     if(_set_mpi_called)
@@ -880,7 +881,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
 extern "C" void
 rocprofsys_reset_preload_hidden(void)
 {
-    rocprofsys::set_env("ROCPROFSYS_PRELOAD", "0", 1);
+    rocprofsys::set_env(env_vars::PRELOAD, "0", 1);
     auto&& _preload_libs = common::get_env("LD_PRELOAD", std::string{});
     if(_preload_libs.find("librocprof-sys") != std::string::npos)
     {
@@ -983,9 +984,10 @@ rocprofsys_finalize_hidden(void)
 
     auto _debug_init  = get_debug_finalize();
     auto _debug_value = get_debug();
-    if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", true);
+    if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
     scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
-        if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", _debug_value);
+        if(_debug_init)
+            config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
     } };
 
     auto& _thread_bundle = thread_data<thread_bundle_t>::instance();
@@ -996,11 +998,12 @@ rocprofsys_finalize_hidden(void)
         if(dmp::rank() == 0)
         {
             config::print_settings(
-                rocprofsys::get_env<bool>("ROCPROFSYS_PRINT_ENV", get_debug()));
+                rocprofsys::get_env<bool>(env_vars::PRINT_ENV, get_debug()));
         }
     }
 
-    LOG_DEBUG("rocprofsys_push_trace :: called {}", _push_count);
+    LOG_DEBUG("rocprofsys_push_trace/rocprofsys_push_trace_with_args :: called {}",
+              _push_count);
     LOG_DEBUG("rocprofsys_pop_trace  :: called {}", _pop_count);
 
     tim::signals::enable_signal_detection({ tim::signals::sys_signal::Interrupt },
@@ -1022,7 +1025,7 @@ rocprofsys_finalize_hidden(void)
     if(get_use_ucx())
     {
         LOG_DEBUG("Shutting down UCX tracing...\n");
-        component::ucx_gotcha::shutdown();
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::shutdown();
     }
 
     if(get_use_shmem())
@@ -1216,7 +1219,7 @@ rocprofsys_finalize_hidden(void)
                tim::cereal::make_nvp("memory_maps", _maps));
         });
 
-        static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
+        static auto* attach_add_session_id = getenv(env_vars::REATTACH_ADD_SESSION_ID);
         static auto  session_id            = 0;
 
         if(attach_add_session_id)
@@ -1245,9 +1248,9 @@ rocprofsys_finalize_hidden(void)
 
         if(config::get_use_timemory())
         {
-            auto _components =
-                config::get_setting_value<std::string>("ROCPROFSYS_TIMEMORY_COMPONENTS")
-                    .value_or("wall_clock");
+            auto _components = config::get_setting_value<std::string>(
+                                   std::string{ env_vars::TIMEMORY_COMPONENTS })
+                                   .value_or("wall_clock");
 
             for(auto&& _comp_name : tim::delimit(_components, ",; "))
             {
@@ -1278,14 +1281,13 @@ rocprofsys_finalize_hidden(void)
                                              get_perfetto_output_filename()));
     }
 
-    if(_push_count > _pop_count &&
-       !get_env<bool>("ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK", false))
+    if(_push_count > _pop_count)
     {
-        throw std::runtime_error(fmt::format(
-            "rocprofsys_push_trace was called more times than "
-            "rocprofsys_pop_trace. The inverse is fine but the current state "
-            "means not every measurement was ended :: pushed: {} vs. popped: {}",
-            _push_count, _pop_count));
+        LOG_WARNING("rocprofsys_push_trace/rocprofsys_push_trace_with_args was called "
+                    "more times than rocprofsys_pop_trace. This is not fatal, but trace "
+                    "output will not include regions that were still open during "
+                    "finalization :: pushed: {} vs. popped: {}.",
+                    _push_count, _pop_count);
     }
 
     // debug::close_file();

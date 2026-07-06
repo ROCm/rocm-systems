@@ -11,11 +11,14 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
 
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -48,6 +51,10 @@ struct RegAllocation {
 /// (wf_id) at construction time. These persist across reset()/dispatch
 /// cycles. Dynamic dispatch state (wg_id, pc, register allocations,
 /// execution masks) is set when the slot is activated and reset by reset().
+///
+/// Plugin state (plugin_states_) is NOT cleared by reset(). Plugins must
+/// set their per-wavefront state in onAmdgpuWorkgroupDispatched, which
+/// fires before the wavefront's first instruction.
 ///
 /// A slot is considered dispatched (active) when it has a nonzero register
 /// allocation (sgpr_alloc_.count > 0). After clear(), the slot is idle.
@@ -160,6 +167,18 @@ public:
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
 
+  /// @brief Return this workgroup's rank within its cluster.
+  uint32_t cluster_rank() const { return cluster_rank_; }
+
+  /// @brief Return the number of workgroups in this workgroup's cluster.
+  uint32_t cluster_size() const { return cluster_size_; }
+
+  /// @brief Set cluster placement metadata computed by the command processor.
+  void set_cluster_info(uint32_t rank, uint32_t size) {
+    cluster_rank_ = rank;
+    cluster_size_ = size == 0 ? 1 : size;
+  }
+
   /// @brief Return the SGPR register file allocation.
   /// @returns Const reference to the SGPR allocation slice.
   const RegAllocation &sgpr_alloc() const { return sgpr_alloc_; }
@@ -183,13 +202,13 @@ public:
   /// @param val New EXEC mask value.
   void set_exec(uint64_t val) { exec_ = val & lane_mask(); }
 
-  /// @brief Return the vector condition code.
-  /// @returns VCC register value.
+  /// @brief Return the VCC scalar register pair.
+  /// @returns Raw VCC register value.
   uint64_t vcc() const { return vcc_; }
 
-  /// @brief Set the vector condition code.
+  /// @brief Set the VCC scalar register pair.
   /// @param val New VCC value.
-  void set_vcc(uint64_t val) { vcc_ = val & lane_mask(); }
+  void set_vcc(uint64_t val) { vcc_ = val; }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
@@ -198,6 +217,11 @@ public:
   /// @brief Set the M0 special register.
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
+
+  static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
+  bool gpr_idx_en() const { return mode_raw_ & GPR_IDX_EN_BIT; }
+  uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
+  uint32_t gpr_idx_mode() const { return (m0_ >> 8) & 0xF; }
 
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
@@ -231,6 +255,9 @@ public:
   /// @returns Const reference to the wait counters.
   const WaitCounters &wait_counters() const { return wait_counters_; }
 
+  /// @brief Retire one outstanding wait-counter operation and wake the wave if ready.
+  void release_wait_counter(WaitCounterType type);
+
   /// @brief Set the s_waitcnt target thresholds and stall if not yet satisfied.
   ///
   /// @details Used by GFX9 (CDNA1-4), GFX10 (RDNA1/2), and GFX11 (RDNA3/3.5)
@@ -240,6 +267,8 @@ public:
   /// @param vmcnt VM counter threshold.
   /// @param lgkmcnt LGKM counter threshold.
   /// @param expcnt Export counter threshold.
+  const WaitTarget &wait_target() const { return wait_target_; }
+
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
     wait_target_.vmcnt = vmcnt;
     wait_target_.lgkmcnt = lgkmcnt;
@@ -410,6 +439,8 @@ public:
     wg_id_ = 0;
     dispatch_id_ = 0;
     process_id_ = 0;
+    cluster_rank_ = 0;
+    cluster_size_ = 1;
     num_sgprs_ = 0;
     num_vgprs_ = 0;
     sgpr_alloc_ = {};
@@ -442,12 +473,14 @@ protected:
             uint32_t max_vgprs)
       : cu_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs), max_vgprs_(max_vgprs) {}
 
-  ComputeUnitCore &cu_;      ///< Parent CU (permanent, set at construction).
-  uint32_t wf_id_ = 0;       ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0;       ///< Workgroup ID (set per dispatch).
-  uint32_t dispatch_id_ = 0; ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t process_id_ = 0;  ///< Owning process ID (PASID analog, set per dispatch).
-  uint32_t lds_base_ = 0;    ///< Per-WG LDS base offset (set per dispatch).
+  ComputeUnitCore &cu_;       ///< Parent CU (permanent, set at construction).
+  uint32_t wf_id_ = 0;        ///< Slot index within the CU (permanent).
+  uint32_t wg_id_ = 0;        ///< Workgroup ID (set per dispatch).
+  uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
+  uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
 
   uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
   uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).
@@ -483,12 +516,34 @@ public:
   uint64_t ready_cycle() const { return ready_cycle_; }
   void set_ready_cycle(uint64_t c) { ready_cycle_ = c; }
 
+  WavefrontState *plugin_state(uint32_t slot) const {
+    assert(slot < plugin_states_.size());
+    return plugin_states_[slot].get();
+  }
+  void set_plugin_state(uint32_t slot, std::unique_ptr<WavefrontState> s) {
+    if (plugin_states_.size() <= slot)
+      plugin_states_.resize(slot + 1);
+    plugin_states_[slot] = std::move(s);
+  }
+
 private:
+  // Mutable: plugin state is externally-attached observer state, not part of
+  // the wavefront's GPU simulation contract. The SIMD register-read path is
+  // const (it doesn't alter GPU state), but plugins need to update their own
+  // tracking during reads.
+  mutable std::vector<std::unique_ptr<WavefrontState>> plugin_states_;
   uint64_t ready_cycle_ = 0;
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
 };
+
+inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, bool is_dst) {
+  uint32_t mode = wf.gpr_idx_mode();
+  if ((!is_dst && (mode & 0x7)) || (is_dst && (mode & 0x8)))
+    return vgpr_off + wf.gpr_idx_offset();
+  return vgpr_off;
+}
 
 /// @brief ISA-parameterized concrete wavefront with ISA-specific status register.
 ///

@@ -17,6 +17,10 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+
+#ifndef NCCL_STEPS
+#define NCCL_STEPS 8
+#endif
 namespace facebook_rccl {
 
 enum class ProxyOpStepStatus {

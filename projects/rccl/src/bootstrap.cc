@@ -430,16 +430,6 @@ struct extInfo {
 #define NET_HANDLE(h, rank)    ((h) + (rank * NCCL_NET_HANDLE_MAXSIZE))
 #define BOOTSTRAP_HANDLE(h, i) ((struct ncclBootstrapHandle*)((char*)h + i * NCCL_UNIQUE_ID_BYTES))
 
-#include <sys/resource.h>
-
-static ncclResult_t setFilesLimit() {
-  struct rlimit filesLimit;
-  SYSCHECK(getrlimit(RLIMIT_NOFILE, &filesLimit), "getrlimit");
-  filesLimit.rlim_cur = filesLimit.rlim_max;
-  SYSCHECK(setrlimit(RLIMIT_NOFILE, &filesLimit), "setrlimit");
-  return ncclSuccess;
-}
-
 // Bootstrap-side accept wrapper. ncclSocketAccept's default behavior
 // (retryOnBadMagic=true) loops internally on bad-magic events, which can
 // monopolize CPU and starve legitimate peer connects when a non-NCCL TCP
@@ -492,7 +482,7 @@ static void* bootstrapRoot(void* rargs) {
   memset(&zeroAddress, 0, sizeof(union ncclSocketAddress));
   memset(&zeroHandle, 0, NCCL_NET_HANDLE_MAXSIZE);
   memset(&zeroInfo, 0, sizeof(struct ringConnectInfo));
-  setFilesLimit();
+  ncclOsSetFilesLimit();
 
   TRACE(NCCL_BOOTSTRAP, "BEGIN");
   BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_ROOT_WAIT]);
@@ -1434,7 +1424,7 @@ static ncclResult_t socketConnect(void* commState, int peer, int tag, struct ncc
   ncclResult_t ret = ncclSuccess;
   struct bootstrapState* state = (struct bootstrapState*)commState;
 
-  struct socketAckInfo ack = (struct socketAckInfo){.rank = state->rank, .tag = tag};
+  struct socketAckInfo ack = (struct socketAckInfo){ state->rank, tag };
   NCCLCHECKGOTO(ncclSocketInit(sock, state->peerP2pAddresses + peer, state->magic, ncclSocketTypeBootstrap, state->abortFlag), ret, fail);
   NCCLCHECKGOTO(ncclSocketConnect(sock), ret, fail);
   NCCLCHECKGOTO(socketSend(sock, &ack, sizeof(struct socketAckInfo)), ret, fail);
@@ -1619,10 +1609,12 @@ static ncclResult_t socketRingAllGather(struct ncclSocket* nextSock, struct nccl
   BOOTSTRAP_PROF_OPEN(tFirst);
   for (int step = 0; step < totalSteps; step++) {
     bool isFinalUnidirectional = (step == totalSteps - 1) && (nranks % 2 == 0);
-    int sendSliceRing0 = (rank - step + nranks) % nranks;
-    int recvSliceRing0 = (rank - step - 1 + nranks) % nranks;
-    int sendSliceRing1 = (rank + step) % nranks;
-    int recvSliceRing1 = (rank + step + 1) % nranks;
+    // Use size_t slice indices so that `slice * size` stays 64-bit. An int multiply overflows
+    // with a large payload (the ~100 MB XML at 64 ranks), giving a bad pointer / EFAULT "Bad address".
+    size_t sendSliceRing0 = (rank - step + nranks) % nranks;
+    size_t recvSliceRing0 = (rank - step - 1 + nranks) % nranks;
+    size_t sendSliceRing1 = (rank + step) % nranks;
+    size_t recvSliceRing1 = (rank + step + 1) % nranks;
     if (isFinalUnidirectional) {
       NCCLCHECKGOTO(socketSendRecv(nextSock, data + sendSliceRing0 * size, size, prevSock, data + recvSliceRing0 * size, size), res, exit);
     } else {
@@ -1690,10 +1682,12 @@ static ncclResult_t netBiDirRingAllGather(ncclNet_t* net,
   BOOTSTRAP_PROF_OPEN(tFirst);
   for (int step = 0; step < totalSteps; step++) {
     bool isFinalUnidirectional = (step == totalSteps - 1) && (nranks % 2 == 0);
-    int sendSliceRing0 = (rank - step + nranks) % nranks;     // Ring0 send to next
-    int recvSliceRing0 = (rank - step - 1 + nranks) % nranks; // Ring0 recv from prev
-    int sendSliceRing1 = (rank + step) % nranks;              // Ring1 send to prev
-    int recvSliceRing1 = (rank + step + 1) % nranks;          // Ring1 recv from next
+    // Use size_t slice indices so that `slice * size` is computed in 64-bit, for the
+    // same overflow reason described in socketRingAllGather.
+    size_t sendSliceRing0 = (rank - step + nranks) % nranks;     // Ring0 send to next
+    size_t recvSliceRing0 = (rank - step - 1 + nranks) % nranks; // Ring0 recv from prev
+    size_t sendSliceRing1 = (rank + step) % nranks;              // Ring1 send to prev
+    size_t recvSliceRing1 = (rank + step + 1) % nranks;          // Ring1 recv from next
     if (isFinalUnidirectional) {
       // Final step on even N: only ring0 over the forward QP pair.
       res = netSendRecv(net, sendComm, data + sendSliceRing0 * size, size, sendH,

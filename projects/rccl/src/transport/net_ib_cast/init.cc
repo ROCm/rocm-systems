@@ -192,9 +192,15 @@ fail:
 }
 
 ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
-  if (ncclParamIbCastMergeNics() == 0 && props->ndevs > 1) {
-    WARN("NET/IB : Skipping makeVDevice, Please set NCCL_IB_MERGE_NICS=1");
-    return ncclInvalidUsage;
+  // On AINIC, NIC fusion (cast) is disabled by default: each NIC runs independently.
+  // User must explicitly set NCCL_IB_MERGE_NICS=1 to override.
+  if (props->ndevs > 1) {
+    if (ncclParamIbCastMergeNics() == 0 ||
+        (rcclUseAinic() && ncclParamIbCastMergeNics() != 1)) {
+      WARN("NET/IB : Skipping makeVDevice%s, Please set NCCL_IB_MERGE_NICS=1",
+           rcclUseAinic() ? " (disabled by default on AINIC)" : "");
+      return ncclInvalidUsage;
+    }
   }
 
   if (props->ndevs == 0) {
@@ -505,15 +511,13 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
 
       // CTS Offload and CTS Inline are mutually dependent — both must be
       // enabled for either to function. Disable both if either is missing.
-      if (IbCastOffloadEnabled && rcclParamIbCastQpSchedEnable()) {
+      if (IbCastOffloadEnabled && rcclUseIbCastQpSched()) {
         INFO(NCCL_INIT|NCCL_NET, "NET/IB : CAST enabled - disabling CTS Inline Data and CTS Offload (not yet supported with CAST)");
         IbCastOffloadEnabled = false;
       }
       // for AINIC IbUseInline is enabled by default always
       IbCastUseInline = true;
-      // for AINIC GDR flush is disabled by default
-      IbCastGdrFlushDisable = 1;
-  
+
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
            "IB Use Inline: enabled; GDR Flush: disabled", IbCastUseInline ? "Enabled": "Disabled",
            IbCastOffloadEnabled ? "Enabled": "Disabled");

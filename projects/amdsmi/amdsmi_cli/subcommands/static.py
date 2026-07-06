@@ -29,6 +29,13 @@ from amdsmi_helpers import AMDSMIHelpers
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
+# Canonical human-readable AMD vendor string, matching `lspci` / pci.ids (vendor 0x1002).
+# The board manufacturer name is reported as the raw AMD PCI vendor ID ("0x1002") when
+# the host pci.ids lookup is unavailable; the CLI translates it to this string for display
+# while the C/Python APIs continue to return the raw value unchanged.
+AMD_VENDOR_DISPLAY_NAME = "Advanced Micro Devices, Inc. [AMD/ATI]"
+
+
 class StaticCommands:
     def static_cpu(self, args, multiple_devices=False, cpu=None, interface_ver=None):
         """Get Static information for target cpu
@@ -715,6 +722,12 @@ class StaticCommands:
                     if isinstance(value, str):
                         if value.strip() == "":
                             board_info[key] = "N/A"
+                # manufacturer_name falls back to the raw AMD PCI vendor ID ("0x1002")
+                # when the host pci.ids lookup is unavailable. Translate it to the
+                # canonical vendor string for display, matching `lspci` / pci.ids.
+                manufacturer_name = board_info.get("manufacturer_name")
+                if isinstance(manufacturer_name, str) and manufacturer_name.strip() == "0x1002":
+                    board_info["manufacturer_name"] = AMD_VENDOR_DISPLAY_NAME
                 static_dict["board"] = board_info
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug(
@@ -844,8 +857,8 @@ class StaticCommands:
             static_dict["partition"] = {
                 "accelerator_partition": compute_partition,
                 "memory_partition": memory_partition,
-                "compute_partition_mem_alloc_mode": mem_alloc_mode,
                 "partition_id": partition_id,
+                "compute_partition_mem_alloc_mode": mem_alloc_mode,
             }
         if "soc_pstate" in current_platform_args:
             if args.soc_pstate:
@@ -1257,9 +1270,14 @@ class StaticCommands:
                                             AMDSMIHelpers.SI_Unit.MICRO,
                                         )
                                     )
-                                    freq_dict["frequency_levels"].update(
-                                        {f"Level {level}": {"value": freq, "unit": "MHz"}}
-                                    )
+                                    if self.logger.is_json_format():
+                                        freq_dict["frequency_levels"].update(
+                                            {f"Level {level}": {"value": freq, "unit": "MHz"}}
+                                        )
+                                    else:
+                                        freq_dict["frequency_levels"].update(
+                                            {f"Level {level}": f"{freq} MHz"}
+                                        )
                                 else:
                                     freq_dict["frequency_levels"].update({f"Level {level}": "N/A"})
                         else:
