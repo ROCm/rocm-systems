@@ -163,6 +163,8 @@ resolve_symbols(int _open_mode = RTLD_LOCAL | RTLD_LAZY)
         hipFileGetVersion_fn = hipFileGetVersion;
         if(!hipFileGetVersion_fn) _resolve_dlopen(hipfile_handle, "libhipfile.so");
         _resolve_dlsym(hipFileGetVersion_fn, hipfile_handle, "hipFileGetVersion");
+    }
+
     if constexpr((Idx & ROCP_REG_TEST_ROCSHMEM) == ROCP_REG_TEST_ROCSHMEM)
     {
         rocshmem_init_mock_fn = rocshmem_init_mock;

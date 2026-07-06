@@ -241,6 +241,7 @@ rocprofiler_set_api_table(const char* name,
         {
             hipfile_table_t* _table          = static_cast<hipfile_table_t*>(tables[0]);
             _table->pfn_hipfile_get_version = &rocprofiler::hipFileGetVersion;
+        }
         else if(std::string_view{ name } == "rocshmem")
         {
             rocshmem_table_t* _table  = static_cast<rocshmem_table_t*>(tables[0]);
