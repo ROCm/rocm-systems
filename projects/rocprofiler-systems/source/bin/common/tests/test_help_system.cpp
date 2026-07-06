@@ -157,6 +157,25 @@ TEST_F(help_system_test, compact_help_uses_tool_name)
     EXPECT_NE(oss_sample.str().find("rocprof-sys-sample"), std::string::npos);
 }
 
+TEST_F(help_system_test, compact_help_lists_tool_specific_topics)
+{
+    std::ostringstream oss_run, oss_sample;
+    print_compact_help("run", oss_run);
+    print_compact_help("sample", oss_sample);
+    const auto run_out    = oss_run.str();
+    const auto sample_out = oss_sample.str();
+
+    // The 'execution' topic ([EXECUTION OPTIONS]) is gated behind --fork and
+    // only exists for rocprof-sys-run.
+    // (Blurb text is matched to avoid colliding with flag names.)
+    EXPECT_NE(run_out.find("Execution control options"), std::string::npos);
+    EXPECT_EQ(sample_out.find("Execution control options"), std::string::npos);
+
+    // A tool-agnostic topic (empty 'tools' list) is advertised for both tools.
+    EXPECT_NE(run_out.find("Output format selection"), std::string::npos);
+    EXPECT_NE(sample_out.find("Output format selection"), std::string::npos);
+}
+
 // ============================================================================
 // Topic-based help extraction tests
 // ============================================================================
