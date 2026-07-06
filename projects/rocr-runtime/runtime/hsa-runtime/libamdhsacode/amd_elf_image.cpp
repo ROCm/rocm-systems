@@ -60,7 +60,6 @@
 #ifndef _WIN32
 #define _open open
 #define _close close
-#define _tempnam tempnam
 #include <fcntl.h>
 #include <unistd.h>
 #endif
