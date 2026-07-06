@@ -20,7 +20,7 @@ import json
 import sys
 from pathlib import Path
 
-DEFAULT_HASH_DB = "src/utils/.config_hashes.json"
+DEFAULT_HASH_DB = "tools/config_management/.config_hashes.json"
 
 
 def compute_file_hash(filepath: Path) -> str:

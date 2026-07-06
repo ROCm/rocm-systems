@@ -29,15 +29,13 @@ rocprofiler-compute/
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
 │       └── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
 │
-├── src/utils/
-│   ├── hash_checker.py
-│   ├── .config_hashes.json
-│
 └── tools/config_management/
     ├── master_config_workflow_script.py
     ├── parse_config_template.py
     ├── verify_against_config_template.py
     ├── hash_manager.py
+    ├── hash_checker.py
+    ├── .config_hashes.json
     └── README.md
 ```
 
@@ -55,7 +53,7 @@ analysis_configs/<arch>/*.yaml
 
 - Stored at:
 ```bash
-src/utils/.config_hashes.json
+tools/config_management/.config_hashes.json
 ```
 - Records md5 hashes of panel YAMLs per arch
 - Machine-generated only

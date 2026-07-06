@@ -21,7 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from tools.config_management import hash_manager  # noqa: E402
 
 CONFIGS_ROOT: Path = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
-HASH_FILE: Path = PROJECT_ROOT / "src" / "utils" / ".config_hashes.json"
+HASH_FILE: Path = PROJECT_ROOT / "tools" / "config_management" / ".config_hashes.json"
 
 
 def main() -> int:
