@@ -16,9 +16,10 @@ by periodically merging `develop` into it, so it accumulates
 
 - Every sync merge on rcd is `develop -> rcd`. Linearizing = replaying only rcd's non-merge
   commits (the sprint work) onto the latest `develop`.
-- The drop PR's base is the merge-base to rebase from. Get it with
-  `gh pr view <PR> --json baseRefOid,headRefOid,commits` (baseRefOid = rebase-from point,
-  headRefOid = current rcd tip). Equivalently `git merge-base origin/develop rocprofiler-compute-develop`.
+- The rebase-from point is the merge-base of `develop` and rcd, NOT `develop`'s current tip.
+  Get it authoritatively with `git merge-base origin/develop rocprofiler-compute-develop`.
+  (`gh pr view <PR> --json baseRefOid` returns `develop`'s tip, which only equals the
+  merge-base when develop has not advanced past rcd's last sync merge, so do not rely on it.)
 - The final rocprofiler-compute tree at the linearized tip MUST byte-match the pre-rebase tip.
   Linearizing changes history shape, not content. This is the oracle that gates the push.
 
