@@ -150,6 +150,21 @@ contract:
   Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs:
     <<: *level_0
     tags: [stream_attributes]
+  Contract_StreamMemoryOps_WriteValue32_BecomesVisibleInStreamOrder:
+    <<: *level_0
+    tags: [stream_memory_ops]
+  Contract_StreamMemoryOps_WriteValue64_BecomesVisibleInStreamOrder:
+    <<: *level_0
+    tags: [stream_memory_ops]
+  Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork:
+    <<: *level_0
+    tags: [stream_memory_ops]
+  Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder:
+    <<: *level_0
+    tags: [stream_memory_ops]
+  Contract_StreamMemoryOps_RejectsInvalidInputs:
+    <<: *level_0
+    tags: [stream_memory_ops]
   Contract_AsyncTransfer_HostToDeviceToHost_RoundTripsAfterStreamSynchronize:
     <<: *level_0
     tags: [async_transfer]
