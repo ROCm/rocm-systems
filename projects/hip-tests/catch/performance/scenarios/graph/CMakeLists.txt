@@ -9,6 +9,7 @@ set(TEST_SRC
     hipGraphTopology.cc
     hipGraphPyFRCouette.cc
     hipGraphCollapseCorrectness.cc
+    hipGraphAnyOrderOverlap.cc
 )
 
 hip_add_exe_to_target(NAME GraphPerformance
