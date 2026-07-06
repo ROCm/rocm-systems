@@ -45,14 +45,16 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
-    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -63,19 +65,14 @@ void VCmpxClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_exec_ = wf.exec();
   uint64_t dpp_write_mask_ = ~0ULL;
   if (inst_.src0 == amdgpu::SRC_DPP) {
-    dpp_write_mask_ = 0;
-    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
-      uint32_t row = ln / 16;
-      uint32_t bank = (ln % 16) / 4;
-      if ((dpp_row_mask_ & (1u << row)) && (dpp_bank_mask_ & (1u << bank)))
-        dpp_write_mask_ |= (1ULL << ln);
-    }
+    dpp_write_mask_ = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
+                                                  dpp_bank_mask_, dpp_bound_ctrl_);
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_src0_, wf);
+                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_src0_, wf);
+    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     auto &cu = wf.cu();
     uint32_t ws = wf.wf_size();
