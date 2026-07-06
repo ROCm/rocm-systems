@@ -84,6 +84,11 @@ rocJpegStreamCreate(RocJpegStreamHandle* jpeg_stream_handle)
 
 hipFileError_t
 hipFileGetVersion(unsigned*, unsigned*, unsigned*)
+{
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    return {};
+}
+
 rocshmem_status_t
 rocshmem_init_mock()
 {
