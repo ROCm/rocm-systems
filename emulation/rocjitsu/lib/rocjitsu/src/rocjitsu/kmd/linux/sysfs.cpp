@@ -3,6 +3,13 @@
 
 #include "rocjitsu/kmd/linux/sysfs.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "linux/uapi/kfd_sysfs.h"
+RJ_DIAGNOSTIC_POP
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -14,6 +21,43 @@
 namespace rocjitsu {
 
 namespace fs = std::filesystem;
+
+uint32_t debug_capability_for(uint32_t gfx_target_version) {
+  // gfx9 (CDNA) supports the base KFD debugger API but not the "precise
+  // memory/ALU operations" bits, which were only added for later firmware on
+  // gfx10+ architectures.
+  const bool is_gfx9 = kmd::decode_gfx_target_version(gfx_target_version).major == 9;
+
+  uint32_t cap = HSA_CAP_TRAP_DEBUG_SUPPORT | HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
+                 HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED | HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
+  if (!is_gfx9) {
+    cap |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED |
+           HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
+  }
+  return cap;
+}
+
+uint32_t default_capability_for(uint32_t gfx_target_version) {
+  return HSA_CAP_ATS_PRESENT | HSA_CAP_QUEUE_IDLE_EVENT | HSA_CAP_WATCH_POINTS_SUPPORTED |
+         ((4u << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) |
+         ((HSA_CAP_DOORBELL_TYPE_2_0 << HSA_CAP_DOORBELL_TYPE_TOTALBITS_SHIFT) &
+          HSA_CAP_DOORBELL_TYPE_TOTALBITS_MASK) |
+         HSA_CAP_AQL_QUEUE_DOUBLE_MAP | HSA_CAP_MEM_EDCSUPPORTED | HSA_CAP_RASEVENTNOTIFY |
+         HSA_CAP_SRAM_EDCSUPPORTED | HSA_CAP_SVMAPI_SUPPORTED | HSA_CAP_FLAGS_COHERENTHOSTACCESS |
+         HSA_CAP_PER_QUEUE_RESET_SUPPORTED | debug_capability_for(gfx_target_version);
+}
+
+uint64_t debug_prop_for(uint32_t /*gfx_target_version*/) {
+  // Same address-watch mask range advertised for all simulated architectures;
+  // ttmps (dispatch info) are always valid in the simulator.
+  constexpr uint32_t kWatchAddrMaskLoBits = 6;
+  constexpr uint32_t kWatchAddrMaskHiBits = 47;
+  return ((kWatchAddrMaskLoBits << HSA_DBG_WATCH_ADDR_MASK_LO_BIT_SHIFT) &
+          HSA_DBG_WATCH_ADDR_MASK_LO_BIT_MASK) |
+         ((kWatchAddrMaskHiBits << HSA_DBG_WATCH_ADDR_MASK_HI_BIT_SHIFT) &
+          HSA_DBG_WATCH_ADDR_MASK_HI_BIT_MASK) |
+         HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
+}
 
 Sysfs::~Sysfs() { cleanup(); }
 
@@ -164,13 +208,15 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   write_file(node_dir + "/name", gpu.marketing_name + "\n");
 
   uint32_t cap = gpu.capability;
-  if (cap == 0) {
-    cap = (1u << 1) | (1u << 5) | (1u << 7) | (4u << 8) | (2u << 12) | (1u << 14) | (1u << 15) |
-          (1u << 16) | (1u << 17) | (1u << 18) | (1u << 20) | (1u << 21) | (1u << 26) | (1u << 27) |
-          (1u << 28) | (1u << 29) | (1u << 30) | (1u << 31);
-  }
+  if (cap == 0)
+    cap = default_capability_for(gpu.gfx_target_version);
   const uint32_t asic_revision = gpu.revision_id;
-  cap = (cap & ~(0xFu << 22)) | ((asic_revision & 0xFu) << 22);
+  cap = (cap & ~HSA_CAP_ASIC_REVISION_MASK) |
+        ((asic_revision << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
+
+  uint64_t debug_prop = gpu.debug_prop;
+  if (debug_prop == 0)
+    debug_prop = debug_prop_for(gpu.gfx_target_version);
 
   uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
 
@@ -210,7 +256,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "fw_version " << gpu.fw_version << "\n"
         << "capability " << cap << "\n"
         << "capability2 " << gpu.capability2 << "\n"
-        << "debug_prop " << gpu.debug_prop << "\n"
+        << "debug_prop " << debug_prop << "\n"
         << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
         << "unique_id " << gpu.unique_id << "\n"
         << "num_xcc " << gpu.num_xcc << "\n"
