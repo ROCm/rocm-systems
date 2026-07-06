@@ -167,8 +167,8 @@ struct category_region
     // Registers the owning thread's instance on first use and removes it on thread exit
     struct registry_handle_t
     {
-        explicit registry_handle_t(category_region* self)
-        : self{ self }
+        explicit registry_handle_t(category_region* owner)
+        : self{ owner }
         {
             auto&                       _reg = registry_t::instance();
             std::lock_guard<std::mutex> _lk{ _reg.mutex };
