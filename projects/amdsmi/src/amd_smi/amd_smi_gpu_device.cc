@@ -466,6 +466,11 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_i
                                                                   uint32_t size) const {
   std::vector<uint64_t> bitmask(size, 0);
 
+  // Guard index 0 access when a zero-size cpu set is requested
+  if (bitmask.empty()) {
+    bitmask.resize(1, 0);
+  }
+
   if (node_id < 0) {
     bitmask[0] = std::numeric_limits<int32_t>::max();
     return bitmask;
@@ -500,6 +505,11 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_i
 std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_local_cpulist(uint32_t drm_card,
                                                                       uint32_t size) const {
   std::vector<uint64_t> bitmask(size, 0);
+
+  // Guard index 0 access when a zero-size cpu set is requested
+  if (bitmask.empty()) {
+    bitmask.resize(1, 0);
+  }
 
   if (drm_card == std::numeric_limits<uint32_t>::max()) {
     bitmask[0] = std::numeric_limits<int32_t>::max();
