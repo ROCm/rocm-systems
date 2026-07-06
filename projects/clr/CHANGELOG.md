@@ -68,8 +68,7 @@ for accurate size validation. Additionally, the exec flag is propagated through 
 * Resolved library loading error messages thrown by `rocminfo` during driver initialization in WSL (Windows Subsystem for Linux) environment due to failure in loading the HSA runtime library `libhsa-runtime64.so`
 since it is not available in the dynamic linker search path. Since `rocminfo` already links against `libhsa-runtime64.so`, the runtime now correctly locates and loads the HSA runtime library using `RTLD_NOLOAD` option,
 enabling successful ROCm initialization, HSA agent discovery, and subsequent ROCm operations.
-* Resolved a segmentation fault in a specific application caused by queue idle detection referencing a stale or recycled completion signal. The HIP runtime now uses active queue-owned signals for idle detection
-instead of cached `hsa_signal_t` handles, improving completion tracking reliability and ensuring safe queue release.
+* Fixed a segmentation fault in HIP queue idle detection caused by referencing a recycled completion signal. Idle state is now derived from a queue-owned signal with a safe lifetime.
 
 ### Optimized
 
