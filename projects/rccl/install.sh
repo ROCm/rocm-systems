@@ -19,7 +19,6 @@ build_static=false
 build_tests=false
 build_verbose=false
 clean_build=true
-collective_trace=true
 dump_asm=false
 enable_code_coverage=false
 enable_ninja=""
@@ -28,7 +27,6 @@ install_library=false
 install_prefix="${ROCM_PATH}"
 log_trace=false
 num_parallel_jobs=$(nproc)
-npkit_enabled=false
 openmp_test_enabled=false
 enable_mpi_tests=false
 kernel_resource_use=false
@@ -36,8 +34,9 @@ roctx_enabled=true
 run_tests=false
 run_tests_all=false
 time_trace=false
+use_ninja=false
 force_reduce_pipeline=false
-generate_sym_kernels=false
+generate_sym_kernels=true
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
@@ -59,16 +58,15 @@ function display_help()
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "    -d|--dependencies          Install RCCL dependencies"
     echo "       --device-linker         Build with assembly-extract device linker (default)"
-    echo "       --disable-colltrace     Build without collective trace"
     echo "       --disable-roctx         Build without ROCTX logging"
+    echo "       --disable-sym-kernels   Disable symmetric memory kernels"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
     echo "    -c|--enable-code-coverage  Enable code coverage"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
-    echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)"
+    echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
-    echo "       --generate-sym-kernels  Generate symmetric memory kernels (default: OFF)"
     echo "    -h|--help                  Prints this help message"
     echo "    -i|--install               Install RCCL library (see --prefix argument below)"
     echo "    -j|--jobs                  Specify how many parallel compilation jobs to run ($num_parallel_jobs by default)"
@@ -77,7 +75,6 @@ function display_help()
     echo "       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)"
     echo "       --no_clean              Don't delete files if they already exist"
     echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc"
-    echo "       --npkit-enable          Compile with npkit enabled"
     echo "       --openmp-test-enable    Enable OpenMP in rccl unit tests"
     echo "    -p|--package_build         Build RCCL package"
     echo "       --prefix                Specify custom directory to install RCCL to (default: \`/opt/rocm\`)"
@@ -88,6 +85,7 @@ function display_help()
     echo "       --static                Build RCCL as a static library instead of shared library"
     echo "    -t|--tests_build           Build rccl unit tests, but do not run"
     echo "       --time-trace            Plot the build time of RCCL (requires \`ninja-build\` package installed on the system)"
+    echo "       --ninja                 Use the Ninja generator instead of Make (requires \`ninja-build\`; recommended for multi-arch builds)"
     echo "       --verbose               Show compile commands"
     echo ""
     echo "  Available RCCL-specific CMake options for --cmake-options:"
@@ -96,7 +94,6 @@ function display_help()
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
-    echo "    -DPROFILE=ON                          Enable profiling (default: OFF)"
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
     echo ""
@@ -119,7 +116,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -141,25 +138,24 @@ while true; do
          --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
          --device-linker)            device_linker=true;                                                                               shift ;;
-         --disable-colltrace)        collective_trace=false;                                                                           shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
+         --disable-sym-kernels)      generate_sym_kernels=false;                                                                       shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
-    -f | --fast)                     build_local_gpu_only=true; collective_trace=false;                                                shift ;;
+    -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
-         --generate-sym-kernels)     generate_sym_kernels=true;                                                                        shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
     -i | --install)                  install_library=true;                                                                             shift ;;
     -j | --jobs)                     num_parallel_jobs=${2};                                                                           shift 2 ;;
          --kernel-resource-use)      kernel_resource_use=true;                                                                         shift ;;
     -l | --local_gpu_only)           build_local_gpu_only=true;                                                                        shift ;;
          --log-trace)                log_trace=true;                                                                                   shift ;;
+         --ninja)                    use_ninja=true;                                                                                   shift ;;
          --no_clean)                 clean_build=false;                                                                                shift ;;
          --no-device-linker)         device_linker=false;                                                                              shift ;;
-         --npkit-enable)             npkit_enabled=true;                                                                               shift ;;
          --openmp-test-enable)       openmp_test_enabled=true;                                                                         shift ;;
     -p | --package_build)            build_package=true;                                                                               shift ;;
          --prefix)                   install_library=true; install_prefix=${2};                                                        shift 2 ;;
@@ -346,11 +342,6 @@ if [[ "${build_static}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_SHARED_LIBS=OFF"
 fi
 
-# Disable collective trace
-if [[ "${collective_trace}" == false ]]; then
-    cmake_common_options="${cmake_common_options} -DCOLLTRACE=OFF"
-fi
-
 # Install dependencies
 if [[ "${install_dependencies}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DINSTALL_DEPENDENCIES=ON"
@@ -399,20 +390,15 @@ if [[ "${force_reduce_pipeline}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DFORCE_REDUCE_PIPELINING=ON"
 fi
 
-# Generate symmetric memory kernels
-if [[ "${generate_sym_kernels}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DGENERATE_SYM_KERNELS=ON"
+# Disable symmetric memory kernels
+if [[ "${generate_sym_kernels}" == false ]]; then
+    cmake_common_options="${cmake_common_options} -DGENERATE_SYM_KERNELS=OFF"
 fi
 
 # Device linker (assembly-extract pipeline, no -fgpu-rdc)
 # Enabled by default; pass -DENABLE_DEVICE_LINKER=OFF when explicitly disabled.
 if [[ "${device_linker}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_LINKER=OFF"
-fi
-
-# Enable NPKit
-if [[ "${npkit_enabled}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DENABLE_NPKIT=ON"
 fi
 
 # Enable WARP_SPEED only on MI350/MI300 platforms
@@ -440,17 +426,30 @@ fi
 
 check_exit_code "$?"
 
-# Build system selection.  Ninja is used only when explicitly requested via
-# --time-trace (which requires it).  Default is Make for broadest compatibility
+# Build system selection.  Default is Make for broadest compatibility
 # (Jenkins CI runs `make package` directly in the build directory).
-if [[ "${time_trace}" == true ]]; then
+# Ninja is enabled when explicitly requested via --ninja or --time-trace
+# (the latter requires it).  Ninja parallelizes the multi-arch device
+# pipeline considerably better than Make, so it's the recommended generator
+# for builds that target many GPU architectures at once.
+if [[ "${time_trace}" == true || "${use_ninja}" == true ]]; then
     if ! hash ninja &>/dev/null ; then
-        echo "ninja could not be found (required for --time-trace)"
-        echo "Use \"${time_trace_ninja_msg}\" to install ninja"
-        exit 1
+        if [[ "${time_trace}" == true ]]; then
+            # Ninja is mandatory for --time-trace (the trace post-processing
+            # consumes Ninja's .ninja_log), so this is a hard error.
+            echo "ninja could not be found (required for --time-trace)"
+            echo "Use \"${time_trace_ninja_msg}\" to install ninja"
+            exit 1
+        fi
+        # --ninja is only a build-speed opt-in, so degrade gracefully to Make
+        # rather than aborting when ninja is unavailable.
+        echo "WARNING: ninja could not be found; falling back to the Make generator for --ninja"
+        echo "         Use \"${time_trace_ninja_msg}\" to install ninja"
+        build_system="make"
+    else
+        build_system="ninja"
+        enable_ninja="-GNinja"
     fi
-    build_system="ninja"
-    enable_ninja="-GNinja"
 else
     build_system="make"
 fi
@@ -477,9 +476,13 @@ fi
 ${cmake_executable} ${cmake_common_options} -DONLY_FUNCS="${ONLY_FUNCS}" ../../.
 check_exit_code "$?"
 
-# Enable verbose output from Makefile
+# Enable verbose output from the build system
 if [[ "${build_verbose}" == true ]]; then
-    build_system="${build_system} VERBOSE=1"
+    if [[ "${build_system}" == "ninja" ]]; then
+        build_system="${build_system} -v"
+    else
+        build_system="${build_system} VERBOSE=1"
+    fi
 fi
 
 # Initiate RCCL build (and install)
@@ -490,9 +493,13 @@ else
 fi
 check_exit_code "$?"
 
-# Initiate package build with `make package`, if enabled
+# Initiate package build (`make package` or `ninja package`), if enabled
 if [[ "${build_package}" == true ]]; then
-    make package
+    if [[ "${build_system}" == "ninja"* ]]; then
+        ninja package
+    else
+        make package
+    fi
     check_exit_code "$?"
 fi
 

@@ -15,8 +15,7 @@ Generate a template from an architecture directory:
 
     python tools/config_management/parse_config_template.py \
         analysis_configs/gfx950 \
-        analysis_configs/config_template.yaml \
-        --latest-arch gfx950
+        analysis_configs/config_template.yaml
 
 Inspect an architecture (no template written):
 
@@ -183,13 +182,6 @@ def main() -> None:
         nargs="?",
         help="Output YAML file (optional). If omitted, only a summary is printed.",
     )
-    parser.add_argument(
-        "--latest-arch",
-        help=(
-            "Specify this architecture as latest (adds 'latest_arch' metadata "
-            "to the generated template). Only used when an output file is given."
-        ),
-    )
     args = parser.parse_args()
 
     directory = Path(args.directory)
@@ -231,10 +223,7 @@ def main() -> None:
 
     # Optionally write a template YAML.
     if args.output:
-        output_data: Any = {"panels": panels}
-        if args.latest_arch:
-            output_data = {"latest_arch": args.latest_arch, "panels": panels}
-        cm_utils.save_yaml(output_data, Path(args.output))
+        cm_utils.save_yaml({"panels": panels}, Path(args.output))
         print(f"\nTemplate saved to: {args.output}")
 
 

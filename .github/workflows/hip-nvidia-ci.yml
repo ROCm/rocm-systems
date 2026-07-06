@@ -1,0 +1,149 @@
+# NVIDIA build is separate from theRock CI due to multiple issues:
+# 1. We do not want to publish any CUDA based artifacts.
+# 2. CLR builds are parallel to the rest of the monorepo: we neither consume anything upstream, nor impact any downstream projects.
+# Hence, the check is independent from the rest of the CI
+name: HIP NVIDIA CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  push:
+    branches:
+      - develop
+      - release/therock-*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  nvidia-clr-build-setup:
+    name: "Setup"
+    runs-on: ubuntu-24.04
+    env:
+      BASE_REF: HEAD^
+    outputs:
+      should_build: ${{ steps.check_paths.outputs.should_build }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2
+
+      - name: Check if relevant paths changed
+        id: check_paths
+        run: |
+          SHOULD_BUILD=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHOULD_BUILD=true;
+          else
+            CHANGED_FILES=$(git diff --name-only "${BASE_REF}")
+            echo "Changed files:"
+            echo "${CHANGED_FILES}"
+            if echo "${CHANGED_FILES}" | grep -qE '^projects/(clr|hip|hip-tests|hipother)/|^\.github/workflows/hip-nvidia-ci\.yml'; then
+              SHOULD_BUILD=true
+            else
+              echo "No changes in clr/hip/hip-tests/hipother — skipping NVIDIA build"
+            fi
+          fi
+          echo "should_build=${SHOULD_BUILD}" >> "${GITHUB_OUTPUT}"
+
+  nvidia-clr-build:
+    name: "Build clr + hip-tests (NVIDIA)"
+    needs: nvidia-clr-build-setup
+    if: ${{ needs.nvidia-clr-build-setup.outputs.should_build == 'true' }}
+    runs-on: azure-linux-scale-rocm
+    container:
+      # CUDA 13.2.0 devel Ubuntu 24.04
+      image: nvidia/cuda@sha256:d266e59b88c295bc5fa0e4cef9064eaff84939381b09e2c3d76a5532a303e42d
+    env:
+      BUILD_DIR: ${{ github.workspace }}/build
+    steps:
+      - name: Checkout rocm-systems
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-systems
+          sparse-checkout: |
+            projects/clr
+            projects/hip
+            projects/hip-tests
+            projects/hipother
+
+      - name: Checkout llvm-project repository # we only need hipcc to build HIP on nvidia platform
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: "ROCm/llvm-project"
+          path: "llvm-project"
+          ref: 43215c73116c407735c85a180d174f718798c328 # 2026-04-14 bump in TheRock
+          sparse-checkout: |
+            amd/hipcc
+
+      - name: Install system dependencies
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends git cmake ninja-build llvm-dev libnuma-dev libelf-dev libdrm-dev python3-dev python3-pip pkg-config
+
+      - name: Build hipconfig
+        run: |
+          cmake -S llvm-project/amd/hipcc -B "${BUILD_DIR}/hipcc" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build "${BUILD_DIR}/hipcc" --target hipconfig --parallel
+          mkdir -p "${BUILD_DIR}/hipcc-install/bin"
+          cp "${BUILD_DIR}/hipcc/hipconfig" "${BUILD_DIR}/hipcc-install/bin/"
+          ln -s "$(which nvcc)" "${BUILD_DIR}/hipcc-install/bin/hipcc"
+
+      - name: Configure clr (NVIDIA platform)
+        run: |
+          cmake -B "${BUILD_DIR}/clr" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHIP_PLATFORM=nvidia \
+            -DCLR_BUILD_HIP=ON \
+            -DCLR_BUILD_OCL=OFF \
+            -DHIP_COMMON_DIR="${GITHUB_WORKSPACE}/rocm-systems/projects/hip" \
+            -DHIPNV_DIR="${GITHUB_WORKSPACE}/rocm-systems/projects/hipother/hipnv" \
+            -DHIPCC_BIN_DIR="${BUILD_DIR}/hipcc-install/bin" \
+            -DCMAKE_INSTALL_PREFIX="${BUILD_DIR}/clr-install" \
+            "${GITHUB_WORKSPACE}/rocm-systems/projects/clr/"
+
+      - name: Build clr
+        run: cmake --build "${BUILD_DIR}/clr" --parallel
+
+      - name: Install clr
+        run: cmake --install "${BUILD_DIR}/clr"
+
+      - name: Configure hip-tests (NVIDIA platform)
+        run: |
+          cmake -B "${BUILD_DIR}/hip-tests" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHIP_PLATFORM=nvidia \
+            -DHIPCC_BIN_DIR="${BUILD_DIR}/clr-install/bin" \
+            -DCMAKE_PREFIX_PATH="${BUILD_DIR}/clr-install" \
+            "${GITHUB_WORKSPACE}/rocm-systems/projects/hip-tests/catch"
+
+      - name: Build hip-tests
+        run: cmake --build "${BUILD_DIR}/hip-tests" --parallel
+
+  nvidia-clr-build-ci-summary:
+    name: "HIP NVIDIA CI Summary"
+    if: always()
+    needs: [nvidia-clr-build-setup, nvidia-clr-build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check results
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result != "success" and .result != "skipped")) | keys | join(",")'
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "The following jobs failed: ${FAILED_JOBS}"
+            exit 1
+          fi

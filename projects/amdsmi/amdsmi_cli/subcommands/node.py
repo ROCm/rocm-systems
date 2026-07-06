@@ -136,6 +136,15 @@ class NodeCommands:
                 gtt_gb = self.helpers.pages_to_gb(gtt_pages)
 
                 gtt_dict = {"size_gb": gtt_gb, "size_pages": gtt_pages}
+
+                # Detect a pending value written by `amd-smi set --gtt` that
+                # will apply on the next boot (modprobe.d snippet baked into
+                # initramfs). Show it so users don't confuse current vs. pending.
+                pending_pages = self.helpers.read_pending_gtt_pages()
+                if pending_pages is not None and pending_pages != gtt_pages:
+                    pending_gb = self.helpers.pages_to_gb(pending_pages)
+                    gtt_dict["pending_size_gb"] = pending_gb
+                    gtt_dict["pending_size_pages"] = pending_pages
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get GTT info | %s", e.get_error_info())
                 gtt_dict = {}
@@ -159,6 +168,12 @@ class NodeCommands:
                 gtt_pages = gtt_dict.get("size_pages", 0)
                 node_output.append("    GTT:")
                 node_output.append(f"        SIZE: {gtt_gb:.2f} GB ({gtt_pages} pages)")
+                if "pending_size_gb" in gtt_dict:
+                    p_gb = gtt_dict["pending_size_gb"]
+                    p_pages = gtt_dict["pending_size_pages"]
+                    node_output.append(
+                        f"        PENDING (after reboot): {p_gb:.2f} GB ({p_pages} pages)"
+                    )
             print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
@@ -172,6 +187,9 @@ class NodeCommands:
                 if args.gtt and gtt_dict:
                     csv_dict["gtt_gb"] = gtt_dict.get("size_gb", "N/A")
                     csv_dict["gtt_pages"] = gtt_dict.get("size_pages", "N/A")
+                    if "pending_size_gb" in gtt_dict:
+                        csv_dict["gtt_pending_gb"] = gtt_dict["pending_size_gb"]
+                        csv_dict["gtt_pending_pages"] = gtt_dict["pending_size_pages"]
                 self.logger.output = csv_dict
             else:
                 # For JSON and human readable format with file output

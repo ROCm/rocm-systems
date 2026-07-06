@@ -413,6 +413,95 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
+/*
+ * Reduce-scatter: PE r receives the element-wise reduction of
+ * source[r*nreduce .. (r+1)*nreduce - 1] across all PEs into dest[0..nreduce-1].
+ *
+ * Only workgroup 0 (is_block_zero_in_grid) runs the algorithm; all other
+ * workgroups wait at the final barrier_wg.  This prevents concurrent
+ * accumulation races when multiple workgroups share the same team
+ * pSync/pWrk/dest buffers.
+ */
+template <typename T, ROCSHMEM_OP Op>
+__device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                             const T *source, int nreduce) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int PE_size   = team_obj->tinfo_wrt_world->size;
+  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
+  int stride    = team_obj->tinfo_wrt_world->stride;
+  int team_rank = (my_pe - PE_start) / stride;
+
+  long  *pSync = team_obj->reduce_pSync;
+  T     *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
+
+  int wg_id   = get_flat_block_id();
+  int wg_size = get_flat_block_size();
+
+  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int chunk_size = max(1, pWrk_elems / PE_size);
+  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+  int64_t flag_val = 1;
+  int finish = PE_start + stride * PE_size;
+
+  // Only workgroup 0 runs the reduction algorithm; other workgroups participate
+  // in the barriers only (same number of barrier_wg calls as WG 0).
+  for (int c = 0; c < n_chunks; c++) {
+    if (is_block_zero_in_grid()) {
+      int offset = c * chunk_size;
+      int count  = min(chunk_size, nreduce - offset);
+
+      // Seed dest[offset..offset+count) from my own contribution.
+      for (int j = wg_id; j < count; j += wg_size) {
+        dest[offset + j] = source[team_rank * nreduce + offset + j];
+      }
+      __syncthreads();
+
+      // Send my contribution for each remote PE's output block, then signal.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          internal_putmem_wg(&pWrk[team_rank * chunk_size],
+                             reinterpret_cast<const void *>(
+                                 source + remote_rank * nreduce + offset),
+                             count * sizeof(T), i);
+          if (is_thread_zero_in_block()) {
+            fence(i);
+            internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i);
+          }
+        }
+      }
+      threadfence_system();
+      __syncthreads();
+
+      // Wait for each remote PE s, then accumulate into dest.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          if (is_thread_zero_in_block()) {
+            wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
+          }
+          __syncthreads();
+          ipc_compute_reduce<T, Op>(&pWrk[remote_rank * chunk_size],
+                                    dest + offset, count, wg_id, wg_size);
+          threadfence_system();
+        }
+      }
+      __syncthreads();
+
+      // Reset pSync before reuse.
+      for (int j = wg_id; j < PE_size; j += wg_size) {
+        pSync[j] = ROCSHMEM_SYNC_VALUE;
+      }
+      __syncthreads();
+      // Sync with workgroup 0 of other PEs
+      barrier_wg(team);
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
 template <typename T>
 __device__ void IPCContext::internal_put_broadcast(
     T *dst, const T *src, int nelems, int pe_root, int pe_start,
@@ -420,9 +509,7 @@ __device__ void IPCContext::internal_put_broadcast(
   if (my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
-      if (i != my_pe) {
         put_nbi_wg(dst, src, nelems, i);
-      }
     }
   }
 }
@@ -430,9 +517,7 @@ __device__ void IPCContext::internal_put_broadcast(
 template <typename T>
 __device__ void IPCContext::internal_get_broadcast(
   T *dst, const T *src, int nelems, int pe_root) {  // NOLINT(runtime/int)
-  if (my_pe != pe_root) {
     get_wg(dst, src, nelems, pe_root);
-  }
 }
 
 template <typename T>
@@ -544,8 +629,8 @@ __device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flag = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flag) != 1) { }
 
     //quiet(dest_pe);// needed to quiet add when it is nbi in gda, it is not nbi in ipc
 
@@ -1180,92 +1265,214 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
 }
 
 // Collective Allgather - Type-erased implementations
-__device__ inline int IPCContext::tile_allgather([[maybe_unused]] rocshmem_team_t team,
-                                                 [[maybe_unused]] void* dst_data,
-                                                 [[maybe_unused]] const void* src_data,
-                                                 [[maybe_unused]] const size_t* dst_strides,
-                                                 [[maybe_unused]] const size_t* src_strides,
-                                                 [[maybe_unused]] const size_t* start_coord,
-                                                 [[maybe_unused]] const size_t* boundary,
-                                                 [[maybe_unused]] int ndim,
-                                                 [[maybe_unused]] size_t element_size,
-                                                 [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_allgather(rocshmem_team_t team,
+                                                 void* dst_data,
+                                                 const void* src_data,
+                                                 const size_t* dst_strides,
+                                                 const size_t* src_strides,
+                                                 const size_t* start_coord,
+                                                 const size_t* boundary,
+                                                 int ndim,
+                                                 size_t element_size,
+                                                 uint64_t flags) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  int team_size = team_obj->num_pes;
+
+  // Calculate tile extent along dimension 0
+  size_t tile_extent_dim0 = boundary[0] - start_coord[0];
+
+  // Each PE gathers tiles from all PEs in the team
+  for (int src_pe_in_team = 0; src_pe_in_team < team_size; src_pe_in_team++) {
+    int src_pe_world = team_obj->get_pe_in_world(src_pe_in_team);
+
+    // Compute destination offset for this PE's tile using dst_strides[0]
+    // Stack tiles along dimension 0: each PE's tile is offset by tile_extent_dim0 * dst_strides[0]
+    // Destination layout: [PE0's tile][PE1's tile]...[PEn's tile]
+    char* dst_offset = static_cast<char*>(dst_data) +
+                       src_pe_in_team * tile_extent_dim0 * dst_strides[0] * element_size;
+
+    // Use tile_get to fetch this PE's tile into the appropriate destination slot
+    int result = tile_get(dst_offset, src_data, dst_strides, src_strides, start_coord,
+                          boundary, ndim, element_size, src_pe_world, flags);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+  }
+
+  // Synchronize to ensure all PEs complete before any can modify buffers
+  sync(team);
+
+  return ROCSHMEM_SUCCESS;
 }
 
-__device__ inline int IPCContext::tile_allgather_wave([[maybe_unused]] rocshmem_team_t team,
-                                                      [[maybe_unused]] void* dst_data,
-                                                      [[maybe_unused]] const void* src_data,
-                                                      [[maybe_unused]] const size_t* dst_strides,
-                                                      [[maybe_unused]] const size_t* src_strides,
-                                                      [[maybe_unused]] const size_t* start_coord,
-                                                      [[maybe_unused]] const size_t* boundary,
-                                                      [[maybe_unused]] int ndim,
-                                                      [[maybe_unused]] size_t element_size,
-                                                      [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_allgather_wave(rocshmem_team_t team,
+                                                      void* dst_data,
+                                                      const void* src_data,
+                                                      const size_t* dst_strides,
+                                                      const size_t* src_strides,
+                                                      const size_t* start_coord,
+                                                      const size_t* boundary,
+                                                      int ndim,
+                                                      size_t element_size,
+                                                      uint64_t flags) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  int team_size = team_obj->num_pes;
+
+  // Calculate tile extent along dimension 0
+  size_t tile_extent_dim0 = boundary[0] - start_coord[0];
+
+  // Each PE gathers tiles from all PEs in the team (wave-collective)
+  for (int src_pe_in_team = 0; src_pe_in_team < team_size; src_pe_in_team++) {
+    int src_pe_world = team_obj->get_pe_in_world(src_pe_in_team);
+
+    // Compute destination offset for this PE's tile using dst_strides[0]
+    // Stack tiles along dimension 0: each PE's tile is offset by tile_extent_dim0 * dst_strides[0]
+    char* dst_offset = static_cast<char*>(dst_data) +
+                       src_pe_in_team * tile_extent_dim0 * dst_strides[0] * element_size;
+
+    // Use tile_get_wave to fetch this PE's tile
+    int result = tile_get_wave(dst_offset, src_data, dst_strides, src_strides, start_coord,
+                                boundary, ndim, element_size, src_pe_world, flags);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+  }
+
+  // Synchronize to ensure all PEs complete
+  sync_wave(team);
+
+  return ROCSHMEM_SUCCESS;
 }
 
-__device__ inline int IPCContext::tile_allgather_wg([[maybe_unused]] rocshmem_team_t team,
-                                                    [[maybe_unused]] void* dst_data,
-                                                    [[maybe_unused]] const void* src_data,
-                                                    [[maybe_unused]] const size_t* dst_strides,
-                                                    [[maybe_unused]] const size_t* src_strides,
-                                                    [[maybe_unused]] const size_t* start_coord,
-                                                    [[maybe_unused]] const size_t* boundary,
-                                                    [[maybe_unused]] int ndim,
-                                                    [[maybe_unused]] size_t element_size,
-                                                    [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_allgather_wg(rocshmem_team_t team,
+                                                    void* dst_data,
+                                                    const void* src_data,
+                                                    const size_t* dst_strides,
+                                                    const size_t* src_strides,
+                                                    const size_t* start_coord,
+                                                    const size_t* boundary,
+                                                    int ndim,
+                                                    size_t element_size,
+                                                    uint64_t flags) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  int team_size = team_obj->num_pes;
+
+  // Calculate tile extent along dimension 0
+  size_t tile_extent_dim0 = boundary[0] - start_coord[0];
+
+  // Each PE gathers tiles from all PEs in the team (workgroup-collective)
+  for (int src_pe_in_team = 0; src_pe_in_team < team_size; src_pe_in_team++) {
+    int src_pe_world = team_obj->get_pe_in_world(src_pe_in_team);
+
+    // Compute destination offset for this PE's tile using dst_strides[0]
+    // Stack tiles along dimension 0: each PE's tile is offset by tile_extent_dim0 * dst_strides[0]
+    char* dst_offset = static_cast<char*>(dst_data) +
+                       src_pe_in_team * tile_extent_dim0 * dst_strides[0] * element_size;
+
+    // Use tile_get_wg to fetch this PE's tile
+    int result = tile_get_wg(dst_offset, src_data, dst_strides, src_strides, start_coord,
+                              boundary, ndim, element_size, src_pe_world, flags);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+  }
+
+  // Synchronize to ensure all PEs complete
+  sync_wg(team);
+
+  return ROCSHMEM_SUCCESS;
 }
 
 // Collective Broadcast - Type-erased implementations
-__device__ inline int IPCContext::tile_broadcast([[maybe_unused]] rocshmem_team_t team,
-                                                 [[maybe_unused]] void* dst_data,
-                                                 [[maybe_unused]] const void* src_data,
-                                                 [[maybe_unused]] const size_t* dst_strides,
-                                                 [[maybe_unused]] const size_t* src_strides,
-                                                 [[maybe_unused]] const size_t* start_coord,
-                                                 [[maybe_unused]] const size_t* boundary,
-                                                 [[maybe_unused]] int ndim,
-                                                 [[maybe_unused]] size_t element_size,
-                                                 [[maybe_unused]] int pe_root,
-                                                 [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_broadcast(rocshmem_team_t team,
+                                                 void* dst_data,
+                                                 const void* src_data,
+                                                 const size_t* dst_strides,
+                                                 const size_t* src_strides,
+                                                 const size_t* start_coord,
+                                                 const size_t* boundary,
+                                                 int ndim,
+                                                 size_t element_size,
+                                                 int pe_root,
+                                                 uint64_t flags) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  int my_pe_in_team = team_obj->my_pe;
+  int root_pe_world = team_obj->get_pe_in_world(pe_root);
+
+  // Non-root PEs fetch tile from root using GET
+  if (my_pe_in_team != pe_root) {
+    int result = tile_get(dst_data, src_data, dst_strides, src_strides, start_coord,
+                          boundary, ndim, element_size, root_pe_world, flags);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+  }
+  // Note: Root PE's data is already in src, no need to copy to dst unless src != dst
+
+  // Synchronize to ensure all PEs complete before root can modify buffer
+  sync(team);
+
+  return ROCSHMEM_SUCCESS;
 }
 
-__device__ inline int IPCContext::tile_broadcast_wave([[maybe_unused]] rocshmem_team_t team,
-                                                      [[maybe_unused]] void* dst_data,
-                                                      [[maybe_unused]] const void* src_data,
-                                                      [[maybe_unused]] const size_t* dst_strides,
-                                                      [[maybe_unused]] const size_t* src_strides,
-                                                      [[maybe_unused]] const size_t* start_coord,
-                                                      [[maybe_unused]] const size_t* boundary,
-                                                      [[maybe_unused]] int ndim,
-                                                      [[maybe_unused]] size_t element_size,
-                                                      [[maybe_unused]] int pe_root,
-                                                      [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_broadcast_wave(rocshmem_team_t team,
+                                                      void* dst_data,
+                                                      const void* src_data,
+                                                      const size_t* dst_strides,
+                                                      const size_t* src_strides,
+                                                      const size_t* start_coord,
+                                                      const size_t* boundary,
+                                                      int ndim,
+                                                      size_t element_size,
+                                                      int pe_root,
+                                                      uint64_t flags) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  int my_pe_in_team = team_obj->my_pe;
+  int root_pe_world = team_obj->get_pe_in_world(pe_root);
+
+  // Non-root PEs fetch tile from root using GET (wave-collective)
+  if (my_pe_in_team != pe_root) {
+    int result = tile_get_wave(dst_data, src_data, dst_strides, src_strides, start_coord,
+                                boundary, ndim, element_size, root_pe_world, flags);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+  }
+
+  // Synchronize to ensure all PEs complete before root can modify buffer
+  sync_wave(team);
+
+  return ROCSHMEM_SUCCESS;
 }
 
-__device__ inline int IPCContext::tile_broadcast_wg([[maybe_unused]] rocshmem_team_t team,
-                                                    [[maybe_unused]] void* dst_data,
-                                                    [[maybe_unused]] const void* src_data,
-                                                    [[maybe_unused]] const size_t* dst_strides,
-                                                    [[maybe_unused]] const size_t* src_strides,
-                                                    [[maybe_unused]] const size_t* start_coord,
-                                                    [[maybe_unused]] const size_t* boundary,
-                                                    [[maybe_unused]] int ndim,
-                                                    [[maybe_unused]] size_t element_size,
-                                                    [[maybe_unused]] int pe_root,
-                                                    [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_broadcast_wg(rocshmem_team_t team,
+                                                    void* dst_data,
+                                                    const void* src_data,
+                                                    const size_t* dst_strides,
+                                                    const size_t* src_strides,
+                                                    const size_t* start_coord,
+                                                    const size_t* boundary,
+                                                    int ndim,
+                                                    size_t element_size,
+                                                    int pe_root,
+                                                    uint64_t flags) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  int my_pe_in_team = team_obj->my_pe;
+  int root_pe_world = team_obj->get_pe_in_world(pe_root);
+
+  // Non-root PEs fetch tile from root using GET (workgroup-collective)
+  if (my_pe_in_team != pe_root) {
+    int result = tile_get_wg(dst_data, src_data, dst_strides, src_strides, start_coord,
+                              boundary, ndim, element_size, root_pe_world, flags);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+  }
+
+  // Synchronize to ensure all PEs complete before root can modify buffer
+  sync_wg(team);
+
+  return ROCSHMEM_SUCCESS;
 }
 
 // SUM Reductions - Type-erased implementations

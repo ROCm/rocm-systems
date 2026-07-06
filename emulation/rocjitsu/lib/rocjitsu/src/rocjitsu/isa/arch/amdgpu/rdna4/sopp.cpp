@@ -59,7 +59,7 @@ SSleepSopp::SSleepSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
 
 SClauseSopp::SClauseSopp(const MachineInst *inst)
     : Sopp("s_clause", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SClauseSopp>()),
@@ -93,7 +93,26 @@ SWaitAluSopp::SWaitAluSopp(const MachineInst *inst)
   flags_ |= WAITCNT;
 }
 
-void SWaitAluSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SWaitAluSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_wait_alu_sopp(*this, wf);
+}
+
+SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
+    : Sopp("s_waitcnt", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWaitcntSopp>()),
+      simm16(16, OperandType::OPR_WAITCNT, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_[0] = &simm16;
+  num_src_ = 1;
+  num_dst_ = 0;
+  flags_ |= WAITCNT;
+}
+
+void SWaitcntSopp::execute_impl(amdgpu::Wavefront &wf) {
+  uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
+  uint8_t exp = imm & 0x7;
+  uint8_t lgkm = (imm >> 4) & 0x3F;
+  uint8_t vm = (imm >> 10) & 0x3F;
+  wf.set_wait_target(vm, lgkm, exp);
+}
 
 SWaitIdleSopp::SWaitIdleSopp(const MachineInst *inst)
     : Sopp("s_wait_idle", reinterpret_cast<const OpEncoding *>(inst),
@@ -127,9 +146,13 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= PROGRAM_TERMINATOR;
 }
 
-void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
+void STrapSopp::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SRoundModeSopp::SRoundModeSopp(const MachineInst *inst)
     : Sopp("s_round_mode", reinterpret_cast<const OpEncoding *>(inst),
@@ -167,7 +190,9 @@ SBarrierWaitSopp::SBarrierWaitSopp(const MachineInst *inst)
   flags_ |= BARRIER;
 }
 
-void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_barrier_wait_sopp(*this, wf);
+}
 
 SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
     : Sopp("s_code_end", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCodeEndSopp>()) {
@@ -189,7 +214,7 @@ SBranchSopp::SBranchSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SBranchSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -209,7 +234,7 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchScc0Sopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -231,7 +256,7 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchScc1Sopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -253,12 +278,14 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
 void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.vcc() == 0) {
+  const uint64_t live_vcc =
+      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  if (live_vcc == 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
   }
@@ -275,12 +302,14 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
 void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.vcc() != 0) {
+  const uint64_t live_vcc =
+      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  if (live_vcc != 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
   }
@@ -297,7 +326,7 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchExeczSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -319,7 +348,7 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchExecnzSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 

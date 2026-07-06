@@ -13,8 +13,6 @@
 #include <timemory/manager/declaration.hpp>
 #include <timemory/mpl/apply.hpp>
 #include <timemory/mpl/types.hpp>
-#include <timemory/units.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/variadic/types.hpp>
 
 #include "logger/debug.hpp"
