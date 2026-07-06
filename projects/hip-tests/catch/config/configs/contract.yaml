@@ -120,6 +120,21 @@ contract:
   Contract_StreamProps_EventRecordWithFlags_RecordsAndTimes:
     <<: *level_0
     tags: [stream_props]
+  Contract_StreamCallbacks_AddCallback_InvokesExactlyOnce:
+    <<: *level_0
+    tags: [stream_callbacks]
+  Contract_StreamCallbacks_AddCallback_RunsAfterPriorWork:
+    <<: *level_0
+    tags: [stream_callbacks]
+  Contract_StreamCallbacks_AddCallback_ReceivesSuccessStatus:
+    <<: *level_0
+    tags: [stream_callbacks]
+  Contract_StreamCallbacks_LaunchHostFunc_InvokesExactlyOnce:
+    <<: *level_0
+    tags: [stream_callbacks]
+  Contract_StreamCallbacks_LaunchHostFunc_OrdersBeforeLaterWork:
+    <<: *level_0
+    tags: [stream_callbacks]
   Contract_AsyncTransfer_HostToDeviceToHost_RoundTripsAfterStreamSynchronize:
     <<: *level_0
     tags: [async_transfer]

@@ -12,6 +12,7 @@ The first domains are:
 - `device`: portable current-device property contracts
 - `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts
 - `stream_props`: stream creation flag, priority, identity, device, and event timing contracts
+- `stream_callbacks`: stream callback and host-function ordering contracts
 - `async_transfer`: async copy visibility and invalid-kind consistency contracts
 - `memset`: byte, word, dword, and async memset contracts
 - `error_api`: error name and string API contracts without backend-specific text assumptions
