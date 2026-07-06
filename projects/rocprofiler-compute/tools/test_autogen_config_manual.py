@@ -14,31 +14,27 @@ manually from the project root:
     python3 tools/test_autogen_config_manual.py
 """
 
-import hashlib
-import json
 import sys
 from pathlib import Path
 
 _TOOLS_DIR = Path(__file__).resolve().parent
-_PROJECT_ROOT = _TOOLS_DIR.parent
-_SRC = _PROJECT_ROOT / "src"
 
-HASH_DB = _TOOLS_DIR / "config_management" / ".config_hashes.json"
-ANALYSIS_CONFIGS = _SRC / "rocprof_compute_soc" / "analysis_configs"
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
 
-
-def md5(path: Path) -> str:
-    return hashlib.md5(path.read_bytes()).hexdigest()
+from config_management import hash_manager  # noqa: E402
 
 
 def check_config_hashes_match_files() -> None:
-    if not HASH_DB.exists():
-        raise RuntimeError(f"Missing hash DB: {HASH_DB}")
-    if not ANALYSIS_CONFIGS.exists():
-        raise RuntimeError(f"Missing analysis configs dir: {ANALYSIS_CONFIGS}")
+    hash_db_path = hash_manager.HASH_DB_PATH
+    analysis_configs = hash_manager.ANALYSIS_CONFIGS_PATH
 
-    with HASH_DB.open(encoding="utf-8") as f:
-        data = json.load(f)
+    if not hash_db_path.exists():
+        raise RuntimeError(f"Missing hash DB: {hash_db_path}")
+    if not analysis_configs.exists():
+        raise RuntimeError(f"Missing analysis configs dir: {analysis_configs}")
+
+    data = hash_manager.load_hash_db(hash_db_path)
 
     if "archs" not in data:
         raise RuntimeError("Hash DB missing 'archs' key")
@@ -48,7 +44,7 @@ def check_config_hashes_match_files() -> None:
     failures: list[str] = []
 
     for arch, arch_data in data["archs"].items():
-        arch_dir = ANALYSIS_CONFIGS / arch
+        arch_dir = analysis_configs / arch
         if not arch_dir.exists():
             failures.append(f"Arch directory missing: {arch_dir}")
             continue
@@ -58,19 +54,17 @@ def check_config_hashes_match_files() -> None:
             failures.append(f"'files' for {arch} is not a dict")
             continue
 
-        for rel_path, expected_hash in files.items():
-            panel_path = arch_dir / rel_path
-            if not panel_path.exists():
-                failures.append(f"Missing panel file: {panel_path}")
-                continue
+        comparison = hash_manager.compare_arch_to_db(arch_dir, files)
 
-            actual_hash = md5(panel_path)
-            if actual_hash != expected_hash:
-                failures.append(
-                    f"[{arch}] Panel hash mismatch: {panel_path}\n"
-                    f"  expected: {expected_hash}\n"
-                    f"  actual:   {actual_hash}"
-                )
+        for name in comparison["missing"]:
+            failures.append(f"Missing panel file: {arch_dir / name}")
+
+        for name, expected_hash, actual_hash in comparison["mismatched"]:
+            failures.append(
+                f"[{arch}] Panel hash mismatch: {arch_dir / name}\n"
+                f"  expected: {expected_hash}\n"
+                f"  actual:   {actual_hash}"
+            )
 
     if failures:
         raise RuntimeError("Hash consistency failures:\n\n" + "\n".join(failures))
