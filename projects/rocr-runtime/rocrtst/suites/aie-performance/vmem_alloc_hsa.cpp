@@ -27,8 +27,7 @@ constexpr std::size_t ALLOC_SIZE = 4096;
 /// @return HSA_STATUS_INFO_BREAK once a match is stored (stops iteration),
 ///         HSA_STATUS_SUCCESS to continue iterating, or the underlying
 ///         error from `hsa_agent_get_info` on failure.
-template <hsa_device_type_t DeviceType>
-hsa_status_t find_agent(hsa_agent_t agent, void* data) {
+template <hsa_device_type_t DeviceType> hsa_status_t find_agent(hsa_agent_t agent, void* data) {
   hsa_device_type_t type{};
   if (auto s = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type); s != HSA_STATUS_SUCCESS) {
     return s;
@@ -59,8 +58,8 @@ hsa_status_t find_vmem_pool(hsa_amd_memory_pool_t pool, void* data) {
   }
 
   std::size_t granule = 0;
-  if (auto s = hsa_amd_memory_pool_get_info(
-          pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, &granule);
+  if (auto s = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
+                                            &granule);
       s != HSA_STATUS_SUCCESS || granule == 0 || granule > ALLOC_SIZE) {
     return s;
   }
@@ -106,8 +105,7 @@ void RunVMemAllocRelease(benchmark::State& state, const char* agent_label) {
   }
 
   hsa_amd_memory_pool_t pool{};
-  if (hsa_amd_agent_iterate_memory_pools(agent, find_vmem_pool, &pool) !=
-      HSA_STATUS_INFO_BREAK) {
+  if (hsa_amd_agent_iterate_memory_pools(agent, find_vmem_pool, &pool) != HSA_STATUS_INFO_BREAK) {
     state.SkipWithError("No suitable memory pool for vmem allocation");
     hsa_shut_down();
     return;
@@ -141,8 +139,7 @@ void RunVMemAllocRelease(benchmark::State& state, const char* agent_label) {
   }
 
   state.SetItemsProcessed(state.iterations() * num_allocs);
-  state.SetBytesProcessed(state.iterations() * num_allocs *
-                          static_cast<std::int64_t>(ALLOC_SIZE));
+  state.SetBytesProcessed(state.iterations() * num_allocs * static_cast<std::int64_t>(ALLOC_SIZE));
 
   hsa_shut_down();
 }
@@ -159,11 +156,5 @@ static void VMemAllocReleaseGPU(benchmark::State& state) {
   RunVMemAllocRelease<HSA_DEVICE_TYPE_GPU>(state, "GPU");
 }
 
-BENCHMARK(VMemAllocReleaseAIE)
-    ->RangeMultiplier(2)
-    ->Range(1, 1024)
-    ->Unit(benchmark::kMicrosecond);
-BENCHMARK(VMemAllocReleaseGPU)
-    ->RangeMultiplier(2)
-    ->Range(1, 1024)
-    ->Unit(benchmark::kMicrosecond);
+BENCHMARK(VMemAllocReleaseAIE)->RangeMultiplier(2)->Range(1, 1024)->Unit(benchmark::kMicrosecond);
+BENCHMARK(VMemAllocReleaseGPU)->RangeMultiplier(2)->Range(1, 1024)->Unit(benchmark::kMicrosecond);
