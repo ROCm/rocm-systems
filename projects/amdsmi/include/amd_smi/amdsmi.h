@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  */
 
-#ifndef __AMDSMI_H__
-#define __AMDSMI_H__
+#ifndef AMDSMI_H_
+#define AMDSMI_H_
 
 /**
  * @file amdsmi.h
@@ -2785,6 +2785,9 @@ typedef enum {
  * "P0", "P1", "P2", "P3", "P4", "G0", "G1", "G2", "G3", "G4"
  * "G5", "G6", "G7"
  * Valid bandwidth types 1(Aggregate_BW), 2 (Read BW), 4 (Write BW).
+ *
+ * @p link_name is a caller-owned, NUL-terminated input string; the library
+ * reads it for the duration of the call and never takes ownership or frees it.
  *
  * @cond @tag{cpu_bm} @endcond
  */
@@ -9781,4 +9784,4 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void);
 }
 #endif  // __cplusplus
 
-#endif  // __AMDSMI_H__
+#endif  // AMDSMI_H_
