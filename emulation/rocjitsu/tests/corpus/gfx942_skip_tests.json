@@ -1,0 +1,9 @@
+{
+  "iree": [],
+  "cts": [
+    "fpsan_mfma_cdna3_test",
+    "fpsan_smfmac_cdna3_test",
+    "fpsan_wave_test"
+  ],
+  "kernels": []
+}
