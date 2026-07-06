@@ -29,10 +29,11 @@ using namespace rocjitsu;
 
 namespace {
 
-void set_cpu_dispatch_threads(SoC *soc, uint32_t threads) {
+void set_cpu_dispatch_threads(SoC *soc, uint32_t threads, uint32_t partition_count,
+                              uint32_t partition_offset = 0) {
   if (!soc)
     return;
-  soc->set_dispatch_threads(threads);
+  soc->set_dispatch_threads(threads, partition_count, partition_offset);
 }
 
 rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle) {
@@ -113,10 +114,12 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
       if (i + 1 < partition_socs.size())
         partition_socs[i + 1]->wire_backing(s->engine->topology());
     }
+    uint32_t partition_offset = 0;
     for (auto *soc : dispatch_socs) {
-      set_cpu_dispatch_threads(soc, cpu_dispatch_threads);
       if (loaded.soc_dispatch)
         soc->set_soc_dispatch(true);
+      set_cpu_dispatch_threads(soc, cpu_dispatch_threads, xcd_partitions, partition_offset);
+      partition_offset += soc ? soc->num_xcds() : 0;
     }
   } else {
     auto root = loaded.take_root();
@@ -127,9 +130,9 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
     partition_socs.push_back(s->soc);
-    set_cpu_dispatch_threads(s->soc, cpu_dispatch_threads);
     if (loaded.soc_dispatch)
       s->soc->set_soc_dispatch(true);
+    set_cpu_dispatch_threads(s->soc, cpu_dispatch_threads, xcd_partitions);
   }
   if (xcd_partitions > 1)
     amdgpu::partition_topology_by_xcds(

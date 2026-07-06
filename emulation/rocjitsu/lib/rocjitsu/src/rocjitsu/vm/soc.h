@@ -176,6 +176,8 @@ public:
 
   /// @brief Set the shared host-thread budget for CU dispatch across all CPs.
   void set_dispatch_threads(uint32_t threads);
+  void set_dispatch_threads(uint32_t threads, uint32_t partition_count,
+                            uint32_t partition_offset = 0);
   uint32_t dispatch_threads() const { return dispatch_threads_; }
 
   void run_to_idle();
@@ -197,7 +199,10 @@ private:
   amdgpu::GpuMemory *memory_ = nullptr;
   std::unique_ptr<amdgpu::HbmController> hbm_standalone_; ///< Used when num_iods == 0.
   std::unique_ptr<amdgpu::CpuDispatchPool> dispatch_pool_;
+  std::vector<std::unique_ptr<amdgpu::CpuDispatchPool>> dispatch_partition_pools_;
   uint32_t dispatch_threads_ = 1;
+  uint32_t dispatch_partition_count_ = 1;
+  uint32_t dispatch_partition_offset_ = 0;
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
   std::vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
 };

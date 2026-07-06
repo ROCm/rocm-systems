@@ -109,29 +109,71 @@ void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
   for (auto *xcd : xcds_)
     xcd->set_plugin_group(plugin_group_);
   if (plugin_group_->requires_serial_execution())
-    set_dispatch_threads(1);
+    set_dispatch_threads(1, dispatch_partition_count_, dispatch_partition_offset_);
   else
-    set_dispatch_threads(dispatch_threads_);
+    set_dispatch_threads(dispatch_threads_, dispatch_partition_count_, dispatch_partition_offset_);
 }
 
-void SoC::set_dispatch_threads(uint32_t threads) {
+void SoC::set_dispatch_threads(uint32_t threads) { set_dispatch_threads(threads, 1, 0); }
+
+void SoC::set_dispatch_threads(uint32_t threads, uint32_t partition_count,
+                               uint32_t partition_offset) {
   threads = std::max(threads, 1u);
+  partition_count = std::max(partition_count, 1u);
   if (plugin_group_ && plugin_group_->requires_serial_execution())
     threads = 1;
 
-  if (threads > 1) {
-    if (!dispatch_pool_ || dispatch_pool_->thread_count() < threads)
-      dispatch_pool_ = std::make_unique<amdgpu::CpuDispatchPool>(threads);
-  } else {
-    dispatch_pool_.reset();
-  }
   dispatch_threads_ = threads;
+  dispatch_partition_count_ = partition_count;
+  dispatch_partition_offset_ = partition_offset % partition_count;
 
-  auto *pool = dispatch_pool_.get();
-  for_each_cp([pool, threads](auto *cp) {
+  if (partition_count <= 1 || soc_dispatch_requested_ || soc_dispatch_) {
+    dispatch_partition_pools_.clear();
+    if (threads > 1) {
+      if (!dispatch_pool_ || dispatch_pool_->thread_count() < threads)
+        dispatch_pool_ = std::make_unique<amdgpu::CpuDispatchPool>(threads);
+    } else {
+      dispatch_pool_.reset();
+    }
+
+    auto *pool = dispatch_pool_.get();
+    for_each_cp([pool, threads](auto *cp) {
+      cp->set_shared_dispatch_pool(pool);
+      cp->set_dispatch_threads(threads);
+    });
+    return;
+  }
+
+  dispatch_pool_.reset();
+  dispatch_partition_pools_.resize(partition_count);
+  for (uint32_t partition = 0; partition < partition_count; ++partition) {
+    uint32_t partition_threads = threads / partition_count;
+    if (partition < threads % partition_count)
+      ++partition_threads;
+    partition_threads = std::max(partition_threads, 1u);
+
+    if (partition_threads > 1) {
+      auto &pool = dispatch_partition_pools_[partition];
+      if (!pool || pool->thread_count() < partition_threads)
+        pool = std::make_unique<amdgpu::CpuDispatchPool>(partition_threads);
+    } else {
+      dispatch_partition_pools_[partition].reset();
+    }
+  }
+
+  for (uint32_t xcd_index = 0; xcd_index < num_xcds(); ++xcd_index) {
+    auto *cp = xcd(xcd_index)->command_processor();
+    if (!cp)
+      continue;
+    uint32_t partition = (dispatch_partition_offset_ + xcd_index) % partition_count;
+    uint32_t partition_threads = threads / partition_count;
+    if (partition < threads % partition_count)
+      ++partition_threads;
+    partition_threads = std::max(partition_threads, 1u);
+    auto *pool = dispatch_partition_pools_[partition].get();
     cp->set_shared_dispatch_pool(pool);
-    cp->set_dispatch_threads(threads);
-  });
+    cp->set_dispatch_threads(partition_threads);
+  }
 }
 
 void SoC::flush_all() {

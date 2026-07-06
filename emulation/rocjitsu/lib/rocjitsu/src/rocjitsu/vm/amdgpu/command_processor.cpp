@@ -767,12 +767,16 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     ComputeUnitCore *cu = nullptr;
     if (!spis_.empty()) {
       // Spreading WGs round-robin across SEs keeps every SE's CUs active at
-      // once, which exposes more parallel work to the dispatch pool — but it
-      // costs locality and only helps when there are more host threads than a
-      // single SE has CUs. Below that threshold, fill SE0 first (fill-first)
-      // so a small pool stays on a cache-warm subset.
+      // once, which exposes more parallel work to the dispatch pool. Keep small
+      // dispatches fill-first for locality, but spread large dispatches once the
+      // host budget can benefit from work outside one SE.
       size_t cus_per_se = cus_.size() / spis_.size();
-      bool spread = dispatch_threads_ > cus_per_se;
+      uint32_t remaining_wgs = entry.total_wgs - entry.dispatched_wgs;
+      bool host_can_use_more_than_one_se = dispatch_threads_ > spis_.size();
+      bool dispatch_can_fill_more_than_one_se = remaining_wgs > cus_per_se;
+      bool large_backlog = remaining_wgs > cus_.size() * spis_.size();
+      bool spread = dispatch_can_fill_more_than_one_se &&
+                    (host_can_use_more_than_one_se || (dispatch_threads_ > 1 && large_backlog));
       if (spread) {
         for (size_t k = 0; k < spis_.size(); ++k) {
           size_t si = (next_spi_ + k) % spis_.size();
