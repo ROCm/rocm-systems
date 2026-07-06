@@ -1111,12 +1111,14 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           const char* algoName = NULL;
           const char* protoName = NULL;
           bool fromSymk = false;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
           if (test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
             if (args->collTest->getSymkInfo) {
               TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
               fromSymk = true;
             }
           }
+#endif
           if (!fromSymk) {
             TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
           }

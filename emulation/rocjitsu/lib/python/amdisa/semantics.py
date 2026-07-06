@@ -239,6 +239,22 @@ _SCC_NONE_OPS = frozenset(
 # Operations where SCC = (result == src0) i.e. "compare" semantics (min/max).
 _SCC_COMPARE_OPS = frozenset({'min', 'max'})
 
+_SOP1_SCC_NONE_OPS = frozenset(
+    {
+        'bitset0',
+        'bitset1',
+        # SOP1 scalar conversions preserve SCC; only count/bit-scan style
+        # scalar unary ops write SCC from the computed result.
+        'cvt_f16_f32',
+        'cvt_f32_f16',
+        'cvt_f32_i32',
+        'cvt_f32_u32',
+        'cvt_hi_f32_f16',
+        'cvt_i32_f32',
+        'cvt_u32_f32',
+    }
+)
+
 
 def _scalar_binop_scc(op: str, dtype: str) -> str:
     """Determine SCC semantics for a scalar binary operation."""
@@ -482,7 +498,7 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
             dtype = entry_dtype
         scc = None
         if cls == 'scalar_unary':
-            if op in ('bitset0', 'bitset1'):
+            if op in _SOP1_SCC_NONE_OPS:
                 scc = 'none'
             else:
                 scc = 'nonzero'
