@@ -58,6 +58,15 @@ repos:
 -   repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.4
     hooks:
+    # Lint for real logic bugs (bare except, redefinition, use-before-assign,
+    # mis-placed return/break, bad string formatting). Curated set kept at zero
+    # violations repo-wide so it never blocks an unrelated edit; expand as the
+    # codebase is cleaned up. Wildcard-import rules (F403/F405) and F821 are
+    # intentionally excluded for now (the public Python API re-exports via `*`).
+    -   id: ruff-check
+        args:
+        - --select=E722,F502,F602,F631,F632,F701,F702,F704,F706,F811,F823
+        exclude: ^py-interface/amdsmi_wrapper\.py$
     -   id: ruff-format
         exclude: ^py-interface/amdsmi_wrapper\.py$
 
