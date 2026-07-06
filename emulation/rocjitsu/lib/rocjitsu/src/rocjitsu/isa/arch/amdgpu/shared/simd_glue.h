@@ -575,12 +575,13 @@ inline void write_simd_narrow_at(VgprStorage *rd, const Op &op, Wavefront &wf, u
 /// scalar value (`read_scalar64`). Constrained on `util::has_stdx_simd`.
 template <typename T, typename Op>
   requires(util::has_stdx_simd)
-inline util::native<T> read_simd64(const Op &op, const Wavefront &wf, uint32_t lane_base) {
+inline util::native<T> read_simd64(const Op &op, Wavefront &wf, uint32_t lane_base) {
   static_assert(sizeof(T) == sizeof(uint64_t), "read_simd64: T must be a 64-bit lane type");
-  ConstVgprStoragePair64 p = simd_src_reg64(op, wf);
-  if (p.lo)
-    return p.lo->template simd_load64<T>(*p.hi, lane_base);
-  return util::broadcast64<T>(op.read_scalar64(wf));
+  constexpr auto W = static_cast<uint32_t>(util::native_width64);
+  const uint64_t lane_mask = ((wf.exec() >> lane_base) & util::mask<uint64_t>(static_cast<int>(W)))
+                             << lane_base;
+  RegisterAccess regs(wf.cu());
+  return regs.read_operand64(op, wf, lane_mask).template load_native<T>(lane_base);
 }
 
 /// Per-half f32 reader for the packed-f32 VOP3P family (v_pk_add/mul/fma_f32).

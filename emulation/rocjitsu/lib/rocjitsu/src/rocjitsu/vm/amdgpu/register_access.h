@@ -119,6 +119,30 @@ public:
     VgprStorage *storage_ = nullptr;
   };
 
+  class OperandRead64View {
+  public:
+    OperandRead64View() = default;
+
+    bool has_storage() const { return storage_.lo != nullptr; }
+
+    template <typename T> util::native<T> load_native(uint32_t lane_base) const {
+      static_assert(sizeof(T) == sizeof(uint64_t), "load_native expects 64-bit lanes");
+      assert(op_ && "OperandRead64View is empty");
+      return storage_.lo ? storage_.lo->template simd_load64<T>(*storage_.hi, lane_base)
+                         : util::broadcast64<T>(scalar_);
+    }
+
+  private:
+    friend class RegisterAccess;
+
+    OperandRead64View(const Operand &op, const Wavefront &wf, ConstVgprStoragePair64 storage)
+        : op_(&op), storage_(storage), scalar_(storage.lo ? 0u : op.read_scalar64(wf)) {}
+
+    const Operand *op_ = nullptr;
+    ConstVgprStoragePair64 storage_{};
+    uint64_t scalar_ = 0;
+  };
+
   class VgprReadRegion {
   public:
     VgprReadRegion() = default;
@@ -243,6 +267,14 @@ public:
     if (storage)
       SimdAccess::notify_read(op, wf, lane_mask, byte_mask);
     return OperandReadView(op, wf, storage);
+  }
+
+  OperandRead64View read_operand64(const Operand &op, const Wavefront &wf, uint64_t lane_mask,
+                                   uint8_t byte_mask = 0xF) const {
+    ConstVgprStoragePair64 storage = SimdAccess::vgpr_storage64(op, wf);
+    if (storage.lo)
+      SimdAccess::notify_read64(op, wf, lane_mask, byte_mask);
+    return OperandRead64View(op, wf, storage);
   }
 
   OperandWriteView write_operand(const Operand &op, Wavefront &wf, uint64_t /*lane_mask*/) const {
