@@ -214,7 +214,7 @@ struct buffer_ids
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 14>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 15>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -226,9 +226,9 @@ struct buffer_ids
                                                        pc_sampling_host_trap,
                                                        rocdecode_api_trace,
                                                        rocjpeg_api_trace,
+                                                       hipfile_api_trace,
                                                        pc_sampling_stochastic,
-                                                       ompt_trace,
-                                                       hipfile_api_trace};
+                                                       ompt_trace};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -2813,6 +2813,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                               dummy_callback_tracing_callback},
                       callback_service_config{tool::get_config().ompt_trace,
                                               ROCPROFILER_CALLBACK_TRACING_OMPT,
+                                              dummy_callback_tracing_callback},
                       callback_service_config{tool::get_config().hipfile_api_trace,
                                               ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
                                               dummy_callback_tracing_callback}})

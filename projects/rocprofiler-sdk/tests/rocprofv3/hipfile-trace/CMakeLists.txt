@@ -34,8 +34,9 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(IS_DISABLED ${ROCPROFILER_SDK_HIPFILE_TRACE_CLIENT_DISABLED})
+set(IS_DISABLED ON)
 if(TARGET hipfile-trace-client)
+    set(IS_DISABLED OFF)
     set(HIPFILE_TRACE_DEPENDS hipfile-trace-client)
 else()
     set(HIPFILE_TRACE_DEPENDS rocprofiler-sdk-tool)
