@@ -131,6 +131,15 @@ __device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__device__ int ROContext::reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                      [[maybe_unused]] T *dest,
+                                      [[maybe_unused]] const T *source,
+                                      [[maybe_unused]] int nreduce) {
+  LOGD_WARN("reduce_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
 template <typename T>
 __device__ void ROContext::put(T *dest, const T *source, size_t nelems,
                                int pe) {

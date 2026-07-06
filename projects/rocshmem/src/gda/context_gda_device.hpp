@@ -148,6 +148,9 @@ class GDAContext : public Context {
   __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
                                    int nreduce);
 
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+
   template <typename T>
   __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
@@ -365,7 +368,16 @@ class GDAContext : public Context {
       GDATeam *team_obj, ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_direct_allreduce_wave(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
   __device__ void internal_ring_allreduce(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
+      ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_wave(T *dst, const T *src, int nelems,
       GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
       ActiveWFInfo &wf_info);
 
