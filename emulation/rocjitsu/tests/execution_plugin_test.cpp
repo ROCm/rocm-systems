@@ -7,9 +7,14 @@
 #include "aql_queue.h"
 
 #include "embedded_schema.h"
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -26,11 +31,11 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <cstdint>
 #include <format>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -47,6 +52,28 @@ constexpr uint32_t sopp(uint32_t op, uint16_t simm16 = 0) {
 constexpr uint32_t S_NOP = sopp(0);
 constexpr uint32_t S_ENDPGM = sopp(1);
 constexpr uint32_t S_BARRIER = sopp(10);
+
+// CDNA4 VOP2: opcode[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]. Bit 31 = 0.
+constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
+  return ((opcode & 0x3F) << 25) | ((vdst & 0xFF) << 17) | ((vsrc1 & 0xFF) << 9) | (src0 & 0x1FF);
+}
+
+constexpr void vop3_encode(uint32_t opcode, uint32_t vdst, uint32_t src0, uint32_t src1,
+                           uint32_t words[2]) {
+  words[0] = (vdst & 0xFF) | ((opcode & 0x3FF) << 16) | (0x34u << 26);
+  words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9);
+}
+
+constexpr uint64_t kPartialExecMask = 0xA5A5'F0F0'1234'8001ULL;
+
+struct ForceScalarOverride {
+  explicit ForceScalarOverride(bool value) : old(util::force_scalar()) {
+    util::set_force_scalar_for_testing(value);
+  }
+  ~ForceScalarOverride() { util::set_force_scalar_for_testing(old); }
+
+  bool old;
+};
 
 struct HookEvent {
   enum Kind {
@@ -246,6 +273,31 @@ private:
   amdgpu::Wavefront *wf_ = nullptr;
   WaveRaceState *state_ = nullptr;
 };
+
+std::vector<HookEvent> vgpr_read_events(const OrderingPlugin &plugin) {
+  std::vector<HookEvent> reads;
+  for (const HookEvent &e : plugin.events)
+    if (e.kind == HookEvent::READ_VGPR)
+      reads.push_back(e);
+  return reads;
+}
+
+void expect_vgpr_read_set(const std::vector<HookEvent> &events, uint32_t physical_base,
+                          std::vector<uint32_t> expected_logical_regs, uint64_t expected_lane_mask,
+                          uint8_t expected_byte_mask = ExecutionPlugin::kFullByteMask) {
+  ASSERT_EQ(events.size(), expected_logical_regs.size());
+  std::vector<uint32_t> actual_logical_regs;
+  actual_logical_regs.reserve(events.size());
+  for (const HookEvent &e : events) {
+    EXPECT_EQ(e.lane_mask, expected_lane_mask);
+    EXPECT_EQ(e.byte_mask, expected_byte_mask);
+    ASSERT_GE(e.physical_reg, physical_base);
+    actual_logical_regs.push_back(e.physical_reg - physical_base);
+  }
+  std::sort(actual_logical_regs.begin(), actual_logical_regs.end());
+  std::sort(expected_logical_regs.begin(), expected_logical_regs.end());
+  EXPECT_EQ(actual_logical_regs, expected_logical_regs);
+}
 
 const char *kindName(HookEvent::Kind k) {
   static const char *names[] = {
@@ -511,10 +563,138 @@ struct PluginFixture {
   }
 };
 
+struct Wave32PluginFixture {
+  std::unique_ptr<amdgpu::GpuMemory> gpu_mem;
+  std::unique_ptr<amdgpu::L2Cache> l2;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  std::shared_ptr<ExecutionPluginGroup> plugin_group;
+
+  Wave32PluginFixture()
+      : gpu_mem(std::make_unique<amdgpu::GpuMemory>("wave32_plugin_mem")),
+        l2(std::make_unique<amdgpu::L2Cache>("wave32_plugin_l2")) {
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 104;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+    cu = amdgpu::ComputeUnitCore::create("wave32_plugin_cu", cfg, gpu_mem.get(), l2.get());
+  }
+
+  OrderingPlugin *attach_ordering_plugin() {
+    plugin_group = std::make_shared<ExecutionPluginGroup>();
+    auto plugin = std::make_unique<OrderingPlugin>();
+    auto *p = plugin.get();
+    plugin_group->add(std::move(plugin));
+    cu->set_plugin_group(plugin_group);
+    plugin_group->onInit();
+    return p;
+  }
+};
+
 TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
+}
+
+TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  } else {
+    ForceScalarOverride force_simd(false);
+    PluginFixture f(/*num_wf_slots=*/1);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(kPartialExecMask);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vb + 0, lane, lane);
+      cu->write_vgpr(vb + 1, lane, lane * 3);
+      cu->write_vgpr(vb + 2, lane, 0);
+    }
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    uint32_t words[4] = {vop2_encode(/*opcode=*/52, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256), 0u, 0u,
+                         0u};
+    Instruction *inst = decoder->decode(words);
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst, *wf);
+    delete inst;
+
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {0, 1}, kPartialExecMask);
+  }
+}
+
+TEST(ExecutionPluginTest, F64SimdSourceReadObservationReportsBothHalves) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  } else {
+    ForceScalarOverride force_simd(false);
+    PluginFixture f(/*num_wf_slots=*/1);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(kPartialExecMask);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vb + 0, lane, 0x0000'0000u);
+      cu->write_vgpr(vb + 1, lane, 0x3ff0'0000u);
+      cu->write_vgpr(vb + 2, lane, 0x0000'0000u);
+      cu->write_vgpr(vb + 3, lane, 0x4000'0000u);
+      cu->write_vgpr(vb + 4, lane, 0x0000'0000u);
+      cu->write_vgpr(vb + 5, lane, 0x0000'0000u);
+    }
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    uint32_t words[4] = {vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/256), 0u, 0u,
+                         0u};
+    Instruction *inst = decoder->decode(words);
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst, *wf);
+    delete inst;
+
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {0, 1, 2, 3, 4, 5}, kPartialExecMask);
+  }
+}
+
+TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  } else {
+    ForceScalarOverride force_simd(false);
+    PluginFixture f(/*num_wf_slots=*/1);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(kPartialExecMask);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vb + 0, lane, 0x3f80'0000u);
+      cu->write_vgpr(vb + 1, lane, 0x4000'0000u);
+      cu->write_vgpr(vb + 4, lane, 0x0000'0000u);
+    }
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(/*opcode=*/315, /*vdst=*/4, /*src0=*/256, /*src1=*/257, words);
+    Instruction *inst = decoder->decode(words);
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst, *wf);
+    delete inst;
+
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {0, 1, 4}, kPartialExecMask);
+  }
 }
 
 TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
@@ -528,25 +708,75 @@ TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_mfma_input_reads(*cu, vb + S0, /*dim=*/16, /*K=*/32, /*B=*/1,
-                                   /*data_bits=*/16, wf->wf_size());
-  amdgpu::observe_mfma_input_reads(*cu, vb + S1, /*dim=*/16, /*K=*/32, /*B=*/1,
-                                   /*data_bits=*/16, wf->wf_size());
-  amdgpu::observe_mfma_acc32_reads(*cu, vb + ACC, /*M=*/16, /*N=*/16, /*B=*/1, wf->wf_size());
+  amdgpu::observe_mfma_fast_path_reads(*cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
+                                       /*K=*/32, /*B=*/1, /*data_bits=*/16, amdgpu::ACC_FROM_VGPR,
+                                       wf->wf_size());
 
-  uint32_t read_hooks = 0;
-  bool saw_multi_lane = false;
-  for (const HookEvent &e : plugin->events) {
-    if (e.kind != HookEvent::READ_VGPR)
-      continue;
-    ++read_hooks;
-    saw_multi_lane |= std::popcount(e.lane_mask) > 1;
-    EXPECT_NE(e.lane_mask, 0u);
-    EXPECT_NE(e.byte_mask, 0u);
-  }
-  EXPECT_GT(read_hooks, 0u);
-  EXPECT_LT(read_hooks, 32u);
-  EXPECT_TRUE(saw_multi_lane);
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                       {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S1 + 0, S1 + 1, S1 + 2, S1 + 3, ACC + 0,
+                        ACC + 1, ACC + 2, ACC + 3},
+                       ~uint64_t{0});
+}
+
+TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
+
+  amdgpu::observe_mfma_fast_path_reads(*cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
+                                       /*K=*/32, /*B=*/1, /*data_bits=*/16,
+                                       /*const_acc=*/0, wf->wf_size());
+
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                       {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S1 + 0, S1 + 1, S1 + 2, S1 + 3},
+                       ~uint64_t{0});
+}
+
+TEST(ExecutionPluginTest, WmmaReadObservationUsesWave32RegisterSet) {
+  Wave32PluginFixture f;
+  auto *plugin = f.attach_ordering_plugin();
+  auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
+
+  amdgpu::observe_wmma_fast_path_reads(*f.cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
+                                       /*K=*/32, /*data_bits=*/16, /*acc_bits=*/32,
+                                       amdgpu::ACC_FROM_VGPR, wf->wf_size());
+
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                       {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
+                        S1 + 0,  S1 + 1,  S1 + 2,  S1 + 3,  S1 + 4,  S1 + 5,  S1 + 6,  S1 + 7,
+                        ACC + 0, ACC + 1, ACC + 2, ACC + 3, ACC + 4, ACC + 5, ACC + 6, ACC + 7},
+                       0xFFFF'FFFFu);
+}
+
+TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
+  Wave32PluginFixture f;
+  auto *plugin = f.attach_ordering_plugin();
+  auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
+
+  amdgpu::observe_wmma_fast_path_reads(*f.cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
+                                       /*K=*/32, /*data_bits=*/16, /*acc_bits=*/32,
+                                       /*const_acc=*/0, wf->wf_size());
+
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                       {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S0 + 4, S0 + 5, S0 + 6, S0 + 7, S1 + 0,
+                        S1 + 1, S1 + 2, S1 + 3, S1 + 4, S1 + 5, S1 + 6, S1 + 7},
+                       0xFFFF'FFFFu);
 }
 
 TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {

@@ -966,6 +966,18 @@ inline uint32_t mfma_dense_reg_count(uint64_t element_count, uint32_t element_bi
   return static_cast<uint32_t>((element_count * element_bits + bits_per_reg - 1) / bits_per_reg);
 }
 
+// Transitional matrix fast-path observation helpers.
+//
+// MFMA/WMMA specializations below deliberately read dense source regions through
+// raw VGPR storage for performance. The correct long-term shape is not
+// "observe here, raw-read later"; it is a register-access facade that returns an
+// observed `VgprReadRegion` view. Until that facade exists, these helpers keep
+// the matrix fast-path observation in one place and prevent every specialization
+// from open-coding plugin notifications.
+//
+// Delete these helpers when the matrix fast paths acquire their source and
+// accumulator regions through the unified register-access facade.
+
 inline void observe_contiguous_vgpr_reads(amdgpu::ComputeUnitCore &cu, uint32_t base,
                                           uint32_t reg_count, uint32_t wf_size,
                                           uint8_t byte_mask = 0xF) {
@@ -988,6 +1000,29 @@ inline void observe_mfma_acc32_reads(amdgpu::ComputeUnitCore &cu, uint32_t base,
   uint64_t element_count = static_cast<uint64_t>(M) * N * B;
   observe_contiguous_vgpr_reads(cu, base, mfma_dense_reg_count(element_count, 32, wf_size),
                                 wf_size);
+}
+
+inline void observe_mfma_fast_path_reads(amdgpu::ComputeUnitCore &cu, uint32_t s0, uint32_t s1,
+                                         uint32_t s2, uint32_t M, uint32_t N, uint32_t K,
+                                         uint32_t B, uint32_t data_bits, uint32_t const_acc,
+                                         uint32_t wf_size) {
+  observe_mfma_input_reads(cu, s0, M, K, B, data_bits, wf_size);
+  observe_mfma_input_reads(cu, s1, N, K, B, data_bits, wf_size);
+  if (const_acc == ACC_FROM_VGPR)
+    observe_mfma_acc32_reads(cu, s2, M, N, B, wf_size);
+}
+
+inline void observe_wmma_fast_path_reads(amdgpu::ComputeUnitCore &cu, uint32_t s0, uint32_t s1,
+                                         uint32_t s2, uint32_t M, uint32_t N, uint32_t K,
+                                         uint32_t data_bits, uint32_t acc_bits, uint32_t const_acc,
+                                         uint32_t wf_size) {
+  observe_mfma_input_reads(cu, s0, M, K, /*B=*/1, data_bits, wf_size);
+  observe_mfma_input_reads(cu, s1, N, K, /*B=*/1, data_bits, wf_size);
+  if (const_acc == ACC_FROM_VGPR) {
+    uint64_t element_count = static_cast<uint64_t>(M) * N;
+    observe_contiguous_vgpr_reads(cu, s2, mfma_dense_reg_count(element_count, acc_bits, wf_size),
+                                  wf_size);
+  }
 }
 
 /// Map f32 output position to packed 16-bit output position using GFX9 layout.
@@ -1689,6 +1724,7 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
+    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -1765,6 +1801,7 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
+    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -1879,6 +1916,7 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
+    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -1956,6 +1994,7 @@ void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
+    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -2395,6 +2434,7 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
+    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -2519,6 +2559,7 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
+    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -2617,6 +2658,7 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
+    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -3161,6 +3203,7 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
+    observe_wmma_fast_path_reads(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -3859,10 +3902,7 @@ void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     }
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    observe_mfma_input_reads(cu, s0, M, K, BATCH, in_bits, wf);
-    observe_mfma_input_reads(cu, s1, N, K, BATCH, in_bits, wf);
-    if (const_acc == ACC_FROM_VGPR)
-      observe_mfma_acc32_reads(cu, s2, M, N, BATCH, wf);
+    observe_mfma_fast_path_reads(cu, s0, s1, s2, M, N, K, BATCH, in_bits, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -3938,10 +3978,7 @@ void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    observe_mfma_input_reads(cu, s0, M, K, B, in_bits, wf);
-    observe_mfma_input_reads(cu, s1, N, K, B, in_bits, wf);
-    if (const_acc == ACC_FROM_VGPR)
-      observe_mfma_acc32_reads(cu, s2, M, N, B, wf);
+    observe_mfma_fast_path_reads(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -4031,10 +4068,7 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    observe_mfma_input_reads(cu, s0, M, K, B, in_bits, wf);
-    observe_mfma_input_reads(cu, s1, N, K, B, in_bits, wf);
-    if (const_acc == ACC_FROM_VGPR)
-      observe_mfma_acc32_reads(cu, s2, M, N, B, wf);
+    observe_mfma_fast_path_reads(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -4124,10 +4158,7 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    observe_mfma_input_reads(cu, s0, M, K, B, in_bits, wf);
-    observe_mfma_input_reads(cu, s1, N, K, B, in_bits, wf);
-    if (const_acc == ACC_FROM_VGPR)
-      observe_mfma_acc32_reads(cu, s2, M, N, B, wf);
+    observe_mfma_fast_path_reads(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
@@ -4215,10 +4246,7 @@ void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    observe_mfma_input_reads(cu, s0, M, K, B, in_bits, wf);
-    observe_mfma_input_reads(cu, s1, N, K, B, in_bits, wf);
-    if (const_acc == ACC_FROM_VGPR)
-      observe_mfma_acc32_reads(cu, s2, M, N, B, wf);
+    observe_mfma_fast_path_reads(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(s2));
