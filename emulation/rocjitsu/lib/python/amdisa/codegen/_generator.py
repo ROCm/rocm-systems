@@ -258,6 +258,21 @@ class CodeGenerator:
             f'{enc.fmt_enc_name}MachineInst' for enc in self.isa_spec.inst_encodings
         }
 
+    def _machine_inst_struct_fields(self, struct_name: str) -> frozenset[str]:
+        for enc in self.isa_spec.inst_encodings:
+            if f'{enc.fmt_enc_name}MachineInst' == struct_name:
+                return frozenset(
+                    field.name for field in getattr(enc, 'ucode_fields', ())
+                )
+        return frozenset()
+
+    def _machine_inst_struct_has_field(
+        self, struct_name: str | None, field: str
+    ) -> bool:
+        if struct_name is None:
+            return False
+        return field in self._machine_inst_struct_fields(struct_name)
+
     def _supports_vop_dpp8(self) -> bool:
         return any(
             self._has_machine_inst_struct(f'{base}VopDpp8MachineInst')
@@ -267,12 +282,12 @@ class CodeGenerator:
     def _vop_dpp_struct_names(self, enc_name: str) -> tuple[str | None, str | None]:
         enc_upper = enc_name.upper()
         dpp_bases = {
-            'ENC_VOP1': 'Vop1',
-            'ENC_VOP2': 'Vop2',
-            'ENC_VOPC': 'Vop1',
-            'ENC_VOP3': 'Vop3',
-            'ENC_VOP3P': 'Vop3p',
-            'VOP3_SDST_ENC': 'Vop3SdstEnc',
+            'ENC_VOP1': ('Vop1',),
+            'ENC_VOP2': ('Vop2',),
+            'ENC_VOPC': ('Vopc', 'Vop1'),
+            'ENC_VOP3': ('Vop3',),
+            'ENC_VOP3P': ('Vop3p',),
+            'VOP3_SDST_ENC': ('Vop3SdstEnc',),
         }
         dpp8_bases = {
             'ENC_VOP1': 'Vop1',
@@ -282,8 +297,8 @@ class CodeGenerator:
             'ENC_VOP3P': 'Vop3p',
             'VOP3_SDST_ENC': 'Vop3SdstEnc',
         }
-        enc_base = dpp_bases.get(enc_upper)
-        if enc_base is None:
+        enc_bases = dpp_bases.get(enc_upper)
+        if enc_bases is None:
             return None, None
 
         is_rdna = any(
@@ -291,9 +306,12 @@ class CodeGenerator:
             for ie in self.isa_spec.inst_encodings
         )
         dpp_suffix = 'VopDpp16' if is_rdna else 'VopDpp'
-        dpp_struct = f'{enc_base}{dpp_suffix}MachineInst'
-        if not self._has_machine_inst_struct(dpp_struct):
-            dpp_struct = None
+        dpp_struct = None
+        for enc_base in enc_bases:
+            candidate = f'{enc_base}{dpp_suffix}MachineInst'
+            if self._has_machine_inst_struct(candidate):
+                dpp_struct = candidate
+                break
 
         dpp8_struct = None
         dpp8_base = dpp8_bases.get(enc_upper)
@@ -306,7 +324,32 @@ class CodeGenerator:
 
     def _supports_vop_dpp_encoding(self, enc_name: str) -> bool:
         dpp_struct, dpp8_struct = self._vop_dpp_struct_names(enc_name)
-        return dpp_struct is not None or dpp8_struct is not None
+        return (
+            dpp_struct is not None and self._supports_dpp_for_encoding(enc_name)
+        ) or dpp8_struct is not None
+
+    def _supports_dpp_for_encoding(self, enc_name: str) -> bool:
+        enc_upper = enc_name.upper()
+        if enc_upper != 'ENC_VOPC':
+            return True
+
+        # RDNA DPP16 uses shared VOP1/VOPC machine-inst layouts. RDNA1/2 have
+        # VOP1/VOP2 DPP16 encodings but their VOPC XML explicitly forbids DPP,
+        # so VOPC needs an encoding-level availability check.
+        has_rdna_dpp16 = any(
+            ie.enc_name.startswith('VOP1_VOP_DPP16')
+            for ie in self.isa_spec.inst_encodings
+        )
+        if not has_rdna_dpp16:
+            return True
+
+        return any(
+            ie.enc_name.startswith('VOPC_VOP_DPP16')
+            for ie in self.isa_spec.inst_encodings
+        )
+
+    def _uses_full_dpp_write_mask(self, enc_name: str) -> bool:
+        return self._supports_dpp_for_encoding(enc_name)
 
     def gen_all(self) -> None:
         """Generate all C++ objects.
@@ -1534,6 +1577,7 @@ class CodeGenerator:
                 class_members.append(cgen.Statement('uint32_t dpp_row_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bank_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bound_ctrl_ = 0'))
+                class_members.append(cgen.Statement('uint32_t dpp_fi_ = 1'))
                 if _dpp8_struct:
                     class_members.append(cgen.Statement('uint32_t dpp8_lane_sel_ = 0'))
                 class_members.append(
@@ -5402,6 +5446,16 @@ class CodeGenerator:
                     }
                     _enc_base = _DPP_ENC_BASES.get(enc.enc_name.upper())
                     _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(enc.enc_name)
+                    _supports_dpp_encoding = (
+                        _dpp_struct is not None
+                        and self._supports_dpp_for_encoding(enc.enc_name)
+                    )
+                    _dpp_struct_has_fi = self._machine_inst_struct_has_field(
+                        _dpp_struct, 'fi'
+                    )
+                    _dpp_fi_ctor_stmt = (
+                        ' dpp_fi_ = dp->fi;' if _dpp_struct_has_fi else ''
+                    )
                     if _enc_base:
                         for opnd in inst.operands:
                             if opnd.name == 'src0' and opnd.name in enc_field_names:
@@ -5414,13 +5468,14 @@ class CodeGenerator:
                                         f' (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) |'
                                         f' (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |'
                                         f' (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);'
+                                        f' dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);'
                                         f'}}'
                                     )
                                 # DPP (src0 == amdgpu::SRC_DPP): read vsrc0 and DPP control
                                 # fields from the ISA-specific extension dword,
                                 # storing them on the Instruction base for
                                 # apply_dpp() to use later.
-                                if _dpp_struct:
+                                if _dpp_struct and _supports_dpp_encoding:
                                     ctor_body_parts.append(
                                         f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
                                         f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
@@ -5429,7 +5484,14 @@ class CodeGenerator:
                                         f' dpp_row_mask_ = dp->row_mask;'
                                         f' dpp_bank_mask_ = dp->bank_mask;'
                                         f' dpp_bound_ctrl_ = dp->bound_ctrl;'
+                                        f'{_dpp_fi_ctor_stmt}'
                                         f'}}'
+                                    )
+                                elif _dpp_struct:
+                                    ctor_body_parts.append(
+                                        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP || '
+                                        'amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) '
+                                        'throw util::UnimplementedInst("VOPC DPP");'
                                     )
                                 # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
                                 _has_sdwa = any(
@@ -5634,11 +5696,15 @@ class CodeGenerator:
                         _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(
                             _enc_upper
                         )
-                        _uses_full_dpp_write_mask = (
-                            self.isa_spec.arch_name in _CDNA_ARCHES
+                        _supports_dpp_encoding = (
+                            _dpp_struct is not None
+                            and self._supports_dpp_for_encoding(_enc_upper)
+                        )
+                        _uses_full_dpp_write_mask = self._uses_full_dpp_write_mask(
+                            _enc_upper
                         )
                         _has_dpp_encoding = (
-                            _dpp_struct is not None
+                            _supports_dpp_encoding
                             or _dpp8_struct is not None
                             or _has_sdwa_encoding
                         )
@@ -5693,17 +5759,25 @@ class CodeGenerator:
                             if _is_vopc:
                                 _dpp_old_exec_line = (
                                     '  uint64_t dpp_old_exec_ = wf.exec();\n'
-                                    if _is_cmpx_vopc
+                                    if _is_cmpx_vopc and _supports_dpp_encoding
                                     else ''
                                 )
                                 _dpp_preamble += (
                                     '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
                                     f'{_dpp_old_exec_line}'
-                                    '  uint64_t dpp_write_mask_ = ~0ULL;\n'
-                                    '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                    f'{_dpp_write_mask_lines("dpp_write_mask_")}'
-                                    '  }\n'
                                 )
+                                if _supports_dpp_encoding:
+                                    _dpp_preamble += (
+                                        '  uint64_t dpp_write_mask_ = ~0ULL;\n'
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                        f'{_dpp_write_mask_lines("dpp_write_mask_")}'
+                                        '  }\n'
+                                    )
+                                elif _dpp_struct:
+                                    _dpp_preamble += (
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
+                                        '    throw util::UnimplementedInst(mnemonic());\n'
+                                    )
                             elif not _is_vopc:
                                 if _has_sdwa_encoding:
                                     _dpp_preamble += (
@@ -5728,17 +5802,17 @@ class CodeGenerator:
                                         f'        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
                                         '  }\n'
                                     )
-                            if _dpp_struct:
+                            if _dpp_struct and _supports_dpp_encoding:
                                 _dpp_preamble += (
                                     '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                     '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
-                                    '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,\n'
+                                    '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_, dpp_fi_,\n'
                                     '        dpp_src0_, wf);\n'
                                 )
                             if _dpp8_struct:
                                 _dpp_preamble += (
                                     '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
-                                    '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_,\n'
+                                    '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_,\n'
                                     '        dpp_src0_, wf);\n'
                                 )
                             if _has_sdwa_encoding:
@@ -5826,44 +5900,49 @@ class CodeGenerator:
                         _dpp_cleanup = ''
                         if _has_dpp_encoding:
                             if _is_vopc:
-                                _dpp_cmpx_exec_merge = (
-                                    '    uint64_t new_exec = wf.exec();\n'
-                                    '    uint64_t merged_exec = (new_exec & dpp_write_mask_) |\n'
-                                    '                           (dpp_old_exec_ & ~dpp_write_mask_);\n'
-                                    '    wf.set_exec(merged_exec);\n'
-                                    if _is_cmpx_vopc
-                                    else ''
-                                )
-                                _dpp_cleanup += (
-                                    '  if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {\n'
-                                    '    uint64_t new_vcc = wf.vcc();\n'
-                                    '    uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);\n'
-                                    '    wf.set_vcc(merged);\n'
-                                    f'{_dpp_cmpx_exec_merge}'
-                                    '  }\n'
-                                    '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {\n'
-                                    '    uint64_t cmp_result = wf.vcc();\n'
-                                    '    uint32_t sb = wf.sgpr_alloc().base;\n'
-                                    '    wf.cu().write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));\n'
-                                    '    wf.cu().write_sgpr(sb + sdwa_sdst_ + 1, static_cast<uint32_t>(cmp_result >> 32));\n'
-                                    '    wf.set_vcc(dpp_old_vcc_);\n'
-                                    '  }\n'
-                                )
+                                if _supports_dpp_encoding:
+                                    _dpp_cmpx_exec_merge = (
+                                        '    uint64_t new_exec = wf.exec();\n'
+                                        '    uint64_t merged_exec = (new_exec & dpp_write_mask_) |\n'
+                                        '                           (dpp_old_exec_ & ~dpp_write_mask_);\n'
+                                        '    wf.set_exec(merged_exec);\n'
+                                        if _is_cmpx_vopc
+                                        else ''
+                                    )
+                                    _dpp_cleanup += (
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {\n'
+                                        '    uint64_t new_vcc = wf.vcc();\n'
+                                        '    uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);\n'
+                                        '    wf.set_vcc(merged);\n'
+                                        f'{_dpp_cmpx_exec_merge}'
+                                        '  }\n'
+                                    )
+                                if _has_sdwa_encoding:
+                                    _dpp_cleanup += (
+                                        '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {\n'
+                                        '    uint64_t cmp_result = wf.vcc();\n'
+                                        '    uint32_t sb = wf.sgpr_alloc().base;\n'
+                                        '    wf.cu().write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));\n'
+                                        '    wf.cu().write_sgpr(sb + sdwa_sdst_ + 1, static_cast<uint32_t>(cmp_result >> 32));\n'
+                                        '    wf.set_vcc(dpp_old_vcc_);\n'
+                                        '  }\n'
+                                    )
                             else:
-                                _dpp_cleanup += (
-                                    '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                    f'{_dpp_write_mask_lines("dpp_write_mask", declare=True)}'
-                                    '    if (dpp_write_mask != ~0ULL) {\n'
-                                    '      uint64_t ex = wf.exec();\n'
-                                    '      uint32_t vb = wf.vgpr_alloc().base;\n'
-                                    '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
-                                    '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
-                                    f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
-                                    '              sdwa_old_dst_[ln]);\n'
-                                    '      }\n'
-                                    '    }\n'
-                                    '  }\n'
-                                )
+                                if _supports_dpp_encoding:
+                                    _dpp_cleanup += (
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP) {\n'
+                                        f'{_dpp_write_mask_lines("dpp_write_mask", declare=True)}'
+                                        '    if (dpp_write_mask != ~0ULL) {\n'
+                                        '      uint64_t ex = wf.exec();\n'
+                                        '      uint32_t vb = wf.vgpr_alloc().base;\n'
+                                        '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                        '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
+                                        f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
+                                        '              sdwa_old_dst_[ln]);\n'
+                                        '      }\n'
+                                        '    }\n'
+                                        '  }\n'
+                                    )
                             if _src0_name:
                                 _dpp_cleanup += f'  {_src0_name}.clear_delegate();\n'
                             if _src1_name:

@@ -93,6 +93,31 @@ def test_vop_dpp8_support_is_detected_from_machine_inst_structs():
     assert codegen._supports_vop_dpp8()
 
 
+def test_machine_inst_struct_has_field_detects_dpp16_fi():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        inst_encodings=[
+            SimpleNamespace(
+                fmt_enc_name='Vop1VopDpp8',
+                ucode_fields=[
+                    SimpleNamespace(name='src0'),
+                    SimpleNamespace(name='lane_sel_0'),
+                ],
+            ),
+            SimpleNamespace(
+                fmt_enc_name='Vop1VopDpp16',
+                ucode_fields=[
+                    SimpleNamespace(name='src0'),
+                    SimpleNamespace(name='fi'),
+                ],
+            ),
+        ]
+    )
+
+    assert not codegen._machine_inst_struct_has_field('Vop1VopDpp8MachineInst', 'fi')
+    assert codegen._machine_inst_struct_has_field('Vop1VopDpp16MachineInst', 'fi')
+
+
 def test_vop3_sdst_dpp_support_is_detected_from_machine_inst_structs():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -112,6 +137,69 @@ def test_vop3_sdst_dpp_support_is_detected_from_machine_inst_structs():
         'Vop3SdstEncVopDpp8MachineInst',
     )
     assert codegen._supports_vop_dpp_encoding('VOP3_SDST_ENC')
+
+
+def test_vopc_dpp16_uses_vopc_layout_when_available():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        inst_encodings=[
+            SimpleNamespace(fmt_enc_name='Vop1VopDpp16', enc_name='VOP1_VOP_DPP16'),
+            SimpleNamespace(fmt_enc_name='VopcVopDpp16', enc_name='VOPC_VOP_DPP16'),
+            SimpleNamespace(fmt_enc_name='VopcVopDpp8', enc_name='VOPC_VOP_DPP8'),
+        ]
+    )
+
+    assert codegen._vop_dpp_struct_names('ENC_VOPC') == (
+        'VopcVopDpp16MachineInst',
+        'VopcVopDpp8MachineInst',
+    )
+
+
+def test_vopc_dpp_falls_back_to_vop1_layout_for_legacy_cdna():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        inst_encodings=[
+            SimpleNamespace(fmt_enc_name='Vop1VopDpp', enc_name='VOP1_VOP_DPP'),
+        ]
+    )
+
+    assert codegen._vop_dpp_struct_names('ENC_VOPC') == (
+        'Vop1VopDppMachineInst',
+        None,
+    )
+
+
+def test_vopc_full_dpp_write_mask_requires_vopc_dpp16_on_rdna():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        inst_encodings=[
+            SimpleNamespace(enc_name='VOP1_VOP_DPP16'),
+            SimpleNamespace(enc_name='VOP2_VOP_DPP16'),
+        ]
+    )
+    assert not codegen._supports_dpp_for_encoding('ENC_VOPC')
+    assert not codegen._uses_full_dpp_write_mask('ENC_VOPC')
+    assert codegen._supports_dpp_for_encoding('ENC_VOP1')
+    assert codegen._uses_full_dpp_write_mask('ENC_VOP1')
+
+    codegen.isa_spec = SimpleNamespace(
+        inst_encodings=[
+            SimpleNamespace(enc_name='VOP1_VOP_DPP16'),
+            SimpleNamespace(enc_name='VOP2_VOP_DPP16'),
+            SimpleNamespace(enc_name='VOPC_VOP_DPP16'),
+        ]
+    )
+    assert codegen._supports_dpp_for_encoding('ENC_VOPC')
+    assert codegen._uses_full_dpp_write_mask('ENC_VOPC')
+
+    codegen.isa_spec = SimpleNamespace(
+        inst_encodings=[
+            SimpleNamespace(enc_name='VOP1_VOP_DPP'),
+            SimpleNamespace(enc_name='VOP2_VOP_DPP'),
+        ]
+    )
+    assert codegen._supports_dpp_for_encoding('ENC_VOPC')
+    assert codegen._uses_full_dpp_write_mask('ENC_VOPC')
 
 
 def test_rdna4_parser_injects_s_waitcnt_compat():
@@ -879,23 +967,57 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp():
         encodings_h.index('class Vop3') : encodings_h.index('class Vop3p')
     ]
     assert 'uint32_t dpp_ctrl_ = 0;' in vop3_base
+    assert 'uint32_t dpp_fi_ = 1;' in vop3_base
 
     start = vop3_alu.index('VAddF16Vop3::VAddF16Vop3')
     end = vop3_alu.index('void VAddF16Vop3::execute_impl', start)
     ctor = vop3_alu[start:end]
     assert 'Vop3VopDpp16MachineInst' in ctor
     assert 'dpp_ctrl_ = dp->dpp_ctrl;' in ctor
+    assert 'dpp_fi_ = dp->fi;' in ctor
+    assert 'src_dpp8_fi' in ctor
 
     start = vop3_alu.index('void VAddF16Vop3::execute_impl')
     end = vop3_alu.index('VAddNcU16Vop3::VAddNcU16Vop3', start)
     body = vop3_alu[start:end]
-    assert 'amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_' in body
+    assert 'dpp_bound_ctrl_, dpp_fi_' in body
+    assert 'apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_' in body
     assert 'if (dpp_src0_)' in body
     assert 'src0.set_delegate(dpp_src0_.get());' in body
     assert 'src0.clear_delegate();' in body
 
 
-def test_cdna_generated_dpp_cleanup_uses_full_write_mask():
+def test_gfx1250_generated_vop1_dpp8_uses_src0_marker_for_fi():
+    import pathlib
+
+    arch_root = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+        / 'gfx1250'
+    )
+    vop1 = (arch_root / 'vop1.cpp').read_text()
+
+    start = vop1.index('VMovB32Vop1::VMovB32Vop1')
+    end = vop1.index('void VMovB32Vop1::execute_impl', start)
+    ctor = vop1[start:end]
+    assert 'src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0)' in ctor
+    assert 'dp8->fi' not in ctor
+    assert 'dpp_fi_ = dp->fi;' in ctor
+
+    start = vop1.index('void VMovB32Vop1::execute_impl')
+    end = vop1.index('VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1', start)
+    body = vop1[start:end]
+    assert 'dpp_bound_ctrl_, dpp_fi_' in body
+    assert 'apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_' in body
+
+
+def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16():
     import pathlib
 
     amdgpu_root = (
@@ -909,22 +1031,86 @@ def test_cdna_generated_dpp_cleanup_uses_full_write_mask():
         / 'amdgpu'
     )
 
-    for arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+    vop1_arches = (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+        'gfx1250',
+    )
+    vopc_names = {
+        'cdna1': 'vopc.cpp',
+        'cdna2': 'vopc.cpp',
+        'cdna3': 'vopc.cpp',
+        'cdna4': 'vopc.cpp',
+        'rdna3': 'vopc.cpp',
+        'rdna3_5': 'vopc.cpp',
+        'rdna4': 'vopc.cpp',
+        'gfx1250': 'vopc_cmp.cpp',
+    }
+
+    for arch in vop1_arches:
         arch_root = amdgpu_root / arch
         vop1 = (arch_root / 'vop1.cpp').read_text()
-        vopc = (arch_root / 'vopc.cpp').read_text()
 
         start = vop1.index('void VMovB32Vop1::execute_impl')
         end = vop1.index('VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1', start)
         body = vop1[start:end]
         assert 'amdgpu::dpp::dpp_write_mask(' in body
         assert 'dpp_bound_ctrl_' in body
+        assert 'dpp_bound_ctrl_, dpp_fi_' in body
+
+    for arch, vopc_name in vopc_names.items():
+        arch_root = amdgpu_root / arch
+        vopc = (arch_root / vopc_name).read_text()
 
         start = vopc.index('void VCmpEqU32Vopc::execute_impl')
         end = vopc.index('VCmpLeU32Vopc::VCmpLeU32Vopc', start)
         body = vopc[start:end]
         assert 'amdgpu::dpp::dpp_write_mask(' in body
         assert 'dpp_bound_ctrl_' in body
+        assert 'dpp_bound_ctrl_, dpp_fi_' in body
+
+
+def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported():
+    import pathlib
+
+    amdgpu_root = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+    )
+
+    for arch in ('rdna1', 'rdna2'):
+        vopc = (amdgpu_root / arch / 'vopc.cpp').read_text()
+        assert 'amdgpu::dpp::apply_dpp' not in vopc, arch
+        assert 'dpp_write_mask' not in vopc, arch
+
+        start = vopc.index('VCmpEqU32Vopc::VCmpEqU32Vopc')
+        end = vopc.index('void VCmpEqU32Vopc::execute_impl', start)
+        ctor = vopc[start:end]
+        assert 'throw util::UnimplementedInst("VOPC DPP");' in ctor, arch
+        assert (
+            'amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)'
+            in ctor
+        ), arch
+        assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor, arch
+
+        start = vopc.index('void VCmpEqU32Vopc::execute_impl')
+        end = vopc.index('VCmpLeU32Vopc::VCmpLeU32Vopc', start)
+        body = vopc[start:end]
+        assert 'throw util::UnimplementedInst(mnemonic());' in body, arch
+        assert 'amdgpu::dpp::is_src_dpp8(inst_.src0)' in body, arch
 
 
 def test_generated_cmpx_dpp_cleanup_preserves_exec():
@@ -946,8 +1132,6 @@ def test_generated_cmpx_dpp_cleanup_preserves_exec():
         'cdna2': amdgpu_root / 'cdna2' / 'vopc.cpp',
         'cdna3': amdgpu_root / 'cdna3' / 'vopc.cpp',
         'cdna4': amdgpu_root / 'cdna4' / 'vopc.cpp',
-        'rdna1': amdgpu_root / 'rdna1' / 'vopc.cpp',
-        'rdna2': amdgpu_root / 'rdna2' / 'vopc.cpp',
         'rdna3': amdgpu_root / 'rdna3' / 'vopc.cpp',
         'rdna3_5': amdgpu_root / 'rdna3_5' / 'vopc.cpp',
         'rdna4': amdgpu_root / 'rdna4' / 'vopc.cpp',
