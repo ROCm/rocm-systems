@@ -253,7 +253,11 @@ class HostInterface {
   __host__ int reduce(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __host__ int reduce_on_stream(rocshmem_team_t team, T* dest, const T* source, 
+  __host__ int reduce_scatter(rocshmem_team_t team, T* dest, const T* source,
+                              int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __host__ int reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
                                 int nreduce, hipStream_t stream);
 
   template <typename T>
@@ -292,6 +296,8 @@ class HostInterface {
 
   template <typename T>
   __host__ int test(T *ivars, int cmp, T val, WindowInfo* window_info);
+
+  __host__ void hdp_flush() { hdp_policy_->hdp_flush(); }
 
 #if defined USE_HDP_FLUSH
   __host__ void create_hdp_window();

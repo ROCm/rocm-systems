@@ -66,6 +66,14 @@ jobs:
             enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 0
+          - name: asan-ubsan-gcc
+            build_type: RelWithDebInfo
+            enable_asan: 1
+            enable_ubsan: 1
+            enable_tsan: 0
+            enable_msan: 0
+            c_compiler: gcc
+            cxx_compiler: g++
 
     steps:
       - name: Install base dependencies
@@ -108,7 +116,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --pre \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-            "rocm[devel,libraries]==7.14.0a20260619"
+            "rocm[devel,libraries]==7.14.0a20260624"
           ROCM_LIB="$(rocm-sdk path --root)"/lib
           echo "LD_LIBRARY_PATH=${ROCM_LIB}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
@@ -172,15 +180,24 @@ jobs:
           )
 
           CMAKE_CONFIG_FLAGS=()
-          if [[ "${{ matrix.name }}" == "asan-ubsan" ]]; then
+          if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
             CMAKE_CONFIG_FLAGS+=(
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
             )
           fi
+          if [[ -n "${{ matrix.c_compiler }}" ]]; then
+            CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
+          fi
+          if [[ -n "${{ matrix.cxx_compiler }}" ]]; then
+            CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${{ matrix.cxx_compiler }}")
+          fi
 
-          CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          CXXFLAGS=""
+          if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
+            CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          fi
           ROCM_PATH=`rocm-sdk path --root` \
             cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \

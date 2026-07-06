@@ -14,45 +14,39 @@ Panel Config:
         unit: Unit
       metric:
         Address Processing Unit Busy:
-          avg: SUM(100 * TA_TA_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          max: MAX(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          avg: 100 * SUM(TA_TA_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TA_TA_BUSY_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TA_TA_BUSY_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Address Stall:
-          avg: SUM(100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)))
-          max: MAX(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)))
+          avg: 100 * SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TA_ADDR_STALLED_BY_TC_CYCLES_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TA_ADDR_STALLED_BY_TC_CYCLES_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Data Stall:
-          avg: SUM(100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)))
-          max: MAX(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)))
+          avg: 100 * SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TA_DATA_STALLED_BY_TC_CYCLES_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TA_DATA_STALLED_BY_TC_CYCLES_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         "Data-Processor \u2192 Address Stall":
-          avg: SUM(100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)))
-          max: MAX(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)))
+          avg: 100 * SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TA_ADDR_STALLED_BY_TD_CYCLES_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TA_ADDR_STALLED_BY_TD_CYCLES_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         "Sequencer \u2192 TA Address Stall":
           avg: SUM(SQ_VMEM_TA_ADDR_FIFO_FULL) / SUM($denom)
-          min: MIN((SQ_VMEM_TA_ADDR_FIFO_FULL / $denom))
-          max: MAX((SQ_VMEM_TA_ADDR_FIFO_FULL / $denom))
+          min: MIN(SQ_VMEM_TA_ADDR_FIFO_FULL / $denom)
+          max: MAX(SQ_VMEM_TA_ADDR_FIFO_FULL / $denom)
           unit: (Cycles + $normUnit)
         "Sequencer \u2192 TA Command Stall":
           avg: SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM($denom)
-          min: MIN((SQ_VMEM_TA_CMD_FIFO_FULL / $denom))
-          max: MAX((SQ_VMEM_TA_CMD_FIFO_FULL / $denom))
+          min: MIN(SQ_VMEM_TA_CMD_FIFO_FULL / $denom)
+          max: MAX(SQ_VMEM_TA_CMD_FIFO_FULL / $denom)
           unit: (Cycles + $normUnit)
         "Sequencer \u2192 TA Data Stall":
           avg: SUM(SQ_VMEM_WR_TA_DATA_FIFO_FULL) / SUM($denom)
-          min: MIN((SQ_VMEM_WR_TA_DATA_FIFO_FULL / $denom))
-          max: MAX((SQ_VMEM_WR_TA_DATA_FIFO_FULL / $denom))
+          min: MIN(SQ_VMEM_WR_TA_DATA_FIFO_FULL / $denom)
+          max: MAX(SQ_VMEM_WR_TA_DATA_FIFO_FULL / $denom)
           unit: (Cycles + $normUnit)
   - metric_table:
       id: 1502
@@ -66,58 +60,58 @@ Panel Config:
       metric:
         Total Instructions:
           avg: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_TOTAL_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_TOTAL_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_TOTAL_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_TOTAL_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Global/Generic Instructions:
           avg: SUM(TA_FLAT_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_FLAT_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_FLAT_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_FLAT_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_FLAT_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Global/Generic Read Instructions:
           avg: SUM(TA_FLAT_READ_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_FLAT_READ_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_FLAT_READ_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Global/Generic Read Instructions for LDS:
           avg: SUM(TA_FLAT_READ_LDS_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Global/Generic Write Instructions:
           avg: SUM(TA_FLAT_WRITE_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_FLAT_WRITE_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_FLAT_WRITE_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Global/Generic Atomic Instructions:
           avg: SUM(TA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Spill/Stack Instructions:
           avg: SUM(TA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_BUFFER_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_BUFFER_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_BUFFER_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_BUFFER_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Spill/Stack Read Instructions:
           avg: SUM(TA_BUFFER_READ_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_BUFFER_READ_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_BUFFER_READ_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Spill/Stack Read Instructions for LDS:
           avg: SUM(TA_BUFFER_READ_LDS_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Spill/Stack Write Instructions:
           avg: SUM(TA_BUFFER_WRITE_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
         Spill/Stack Atomic Instructions:
           avg: SUM(TA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
-          min: MIN((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
-          max: MAX((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
+          min: MIN(TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom)
+          max: MAX(TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom)
           unit: (Instructions + $normUnit)
   - metric_table:
       id: 1503
@@ -131,18 +125,18 @@ Panel Config:
       metric:
         Spill/Stack Total Cycles:
           avg: SUM(TA_BUFFER_TOTAL_CYCLES_sum) / SUM($denom)
-          min: MIN((TA_BUFFER_TOTAL_CYCLES_sum / $denom))
-          max: MAX((TA_BUFFER_TOTAL_CYCLES_sum / $denom))
+          min: MIN(TA_BUFFER_TOTAL_CYCLES_sum / $denom)
+          max: MAX(TA_BUFFER_TOTAL_CYCLES_sum / $denom)
           unit: (Cycles + $normUnit)
         Spill/Stack Coalesced Read:
           avg: SUM(TA_BUFFER_COALESCED_READ_CYCLES_sum) / SUM($denom)
-          min: MIN((TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom))
-          max: MAX((TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom))
+          min: MIN(TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom)
+          max: MAX(TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom)
           unit: (Cycles + $normUnit)
         Spill/Stack Coalesced Write:
           avg: SUM(TA_BUFFER_COALESCED_WRITE_CYCLES_sum) / SUM($denom)
-          min: MIN((TA_BUFFER_COALESCED_WRITE_CYCLES_sum / $denom))
-          max: MAX((TA_BUFFER_COALESCED_WRITE_CYCLES_sum / $denom))
+          min: MIN(TA_BUFFER_COALESCED_WRITE_CYCLES_sum / $denom)
+          max: MAX(TA_BUFFER_COALESCED_WRITE_CYCLES_sum / $denom)
           unit: (Cycles + $normUnit)
   - metric_table:
       id: 1504
@@ -155,46 +149,44 @@ Panel Config:
         unit: Unit
       metric:
         Data-Return Busy:
-          avg: SUM(100 * TD_TD_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          max: MAX(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          avg: 100 * SUM(TD_TD_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TD_TD_BUSY_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TD_TD_BUSY_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         "Cache RAM \u2192 Data-Return Stall":
-          avg: SUM(100 * TD_TC_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          max: MAX(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          avg: 100 * SUM(TD_TC_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TD_TC_STALL_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TD_TC_STALL_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         "Workgroup manager \u2192 Data-Return Stall":
-          avg: SUM(100 * TD_SPI_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          max: MAX(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          avg: 100 * SUM(TD_SPI_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TD_SPI_STALL_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TD_SPI_STALL_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Coalescable Instructions:
           avg: SUM(TD_COALESCABLE_WAVEFRONT_sum) / SUM($denom)
-          min: MIN((TD_COALESCABLE_WAVEFRONT_sum / $denom))
-          max: MAX((TD_COALESCABLE_WAVEFRONT_sum / $denom))
+          min: MIN(TD_COALESCABLE_WAVEFRONT_sum / $denom)
+          max: MAX(TD_COALESCABLE_WAVEFRONT_sum / $denom)
           unit: (Instructions + $normUnit)
         Read Instructions:
           avg: SUM(TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum - TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
-          min: MIN((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
-            / $denom))
-          max: MAX((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
-            / $denom))
+          min: MIN((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum - TD_ATOMIC_WAVEFRONT_sum) / $denom)
+          max: MAX((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum - TD_ATOMIC_WAVEFRONT_sum) / $denom)
           unit: (Instructions + $normUnit)
         Write Instructions:
           avg: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)
-          min: MIN((TD_STORE_WAVEFRONT_sum / $denom))
-          max: MAX((TD_STORE_WAVEFRONT_sum / $denom))
+          min: MIN(TD_STORE_WAVEFRONT_sum / $denom)
+          max: MAX(TD_STORE_WAVEFRONT_sum / $denom)
           unit: (Instructions + $normUnit)
         Atomic Instructions:
           avg: SUM(TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
-          min: MIN((TD_ATOMIC_WAVEFRONT_sum / $denom))
-          max: MAX((TD_ATOMIC_WAVEFRONT_sum / $denom))
+          min: MIN(TD_ATOMIC_WAVEFRONT_sum / $denom)
+          max: MAX(TD_ATOMIC_WAVEFRONT_sum / $denom)
           unit: (Instructions + $normUnit)
         Write Ack Instructions:
           avg: SUM(TD_WRITE_ACKT_WAVEFRONT_sum) / SUM($denom)
-          min: MIN((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
-          max: MAX((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
+          min: MIN(TD_WRITE_ACKT_WAVEFRONT_sum / $denom)
+          max: MAX(TD_WRITE_ACKT_WAVEFRONT_sum / $denom)
           unit: (Instructions + $normUnit)
   metrics_description:
     Address Processing Unit Busy: Percent of the total CU cycles the address processor
