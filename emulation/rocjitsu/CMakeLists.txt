@@ -303,6 +303,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(rocjitsu_shared PRIVATE dl)
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
