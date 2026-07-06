@@ -174,7 +174,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk/
         run: |
           apt-get update
-          apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
+          apt-get install -y cmake gcc g++ libsqlite3-dev rpm
           python3 -m pip install -r requirements.txt
 
       - name: Build ROCProfiler SDK Dependencies
