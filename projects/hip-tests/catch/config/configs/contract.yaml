@@ -252,6 +252,27 @@ contract:
   Contract_FuncAttributes_SetSharedMemConfig_Default_Succeeds:
     <<: *level_0
     tags: [func_attributes]
+  Contract_KernelLaunch_CooperativeKernel_WritesExpectedValue:
+    <<: *level_0
+    tags: [kernel_launch]
+  Contract_KernelLaunch_CooperativeKernel_NullFunction_IsRejected:
+    <<: *level_0
+    tags: [kernel_launch]
+  Contract_KernelLaunch_GetSymbolAddress_ReturnsUsableDevicePointer:
+    <<: *level_0
+    tags: [kernel_launch]
+  Contract_KernelLaunch_GetSymbolSize_MatchesDeclaredSize:
+    <<: *level_0
+    tags: [kernel_launch]
+  Contract_KernelLaunch_GetSymbolAddress_NullSymbol_IsRejected:
+    <<: *level_0
+    tags: [kernel_launch]
+  Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue:
+    <<: *level_0
+    tags: [kernel_launch]
+  Contract_KernelLaunch_ExtLaunchKernel_WritesExpectedValue:
+    <<: *level_0
+    tags: [kernel_launch]
   Contract_Graph_CreateDestroy_Succeeds:
     <<: *level_0
     tags: [graph]
