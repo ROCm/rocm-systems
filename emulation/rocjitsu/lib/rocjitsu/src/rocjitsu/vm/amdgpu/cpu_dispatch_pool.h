@@ -70,11 +70,10 @@ public:
 
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      tasks_.assign(tasks.begin(), tasks.end());
-      task_data_.store(tasks_.data(), std::memory_order_release);
-      task_count_.store(tasks_.size(), std::memory_order_release);
+      task_data_.store(tasks.data(), std::memory_order_release);
+      task_count_.store(tasks.size(), std::memory_order_release);
       next_task_.store(0, std::memory_order_relaxed);
-      remaining_.store(tasks_.size(), std::memory_order_relaxed);
+      remaining_.store(tasks.size(), std::memory_order_relaxed);
       worker_tickets_ = worker_goal;
     }
     for (uint32_t i = 0; i < worker_goal; ++i)
@@ -88,7 +87,6 @@ public:
     done_cv_.wait(lock, [this]() { return worker_tickets_ == 0 && active_workers_ == 0; });
     task_count_.store(0, std::memory_order_release);
     task_data_.store(nullptr, std::memory_order_release);
-    tasks_.clear();
   }
 
 private:
@@ -139,12 +137,12 @@ private:
   std::condition_variable work_cv_;
   std::condition_variable done_cv_;
   std::vector<std::jthread> workers_;
-  std::vector<ComputeUnitCore *> tasks_;
   std::atomic<ComputeUnitCore **> task_data_ = nullptr;
   std::atomic<size_t> task_count_ = 0;
   std::atomic<size_t> next_task_ = 0;
   std::atomic<size_t> remaining_ = 0;
-  // Protected by mutex_; keeps the task vector alive until ticketed workers leave drain_tasks().
+  // Protected by mutex_; run() does not return until ticketed workers leave drain_tasks(),
+  // so the caller-owned task span remains live while workers can read task_data_.
   size_t worker_tickets_ = 0;
   size_t active_workers_ = 0;
   bool stopping_ = false;
