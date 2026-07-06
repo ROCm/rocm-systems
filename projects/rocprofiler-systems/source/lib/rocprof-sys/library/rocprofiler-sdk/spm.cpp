@@ -9,7 +9,9 @@
 #include "logger/debug.hpp"
 
 #if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
+#    include <rocprofiler-sdk/context.h>
 #    include <rocprofiler-sdk/experimental/spm.h>
+#    include <rocprofiler-sdk/rocprofiler.h>
 #endif
 
 #include <algorithm>
