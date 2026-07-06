@@ -102,16 +102,6 @@ runs:
           echo "Warning: Compiler launcher ${{ inputs.compiler-launcher }} not found or not executable"
         fi
 
-    - name: Checkout hipFILE tracing dependency branches
-      if: ${{ inputs.enable-hipfile-build == 'true' }}
-      shell: bash
-      run: |
-        git fetch --no-tags --depth=1 origin \
-          develop:refs/remotes/origin/develop \
-          users/venkat1361/rocprofiler-register-hipfile-trace:refs/remotes/origin/users/venkat1361/rocprofiler-register-hipfile-trace
-        git checkout origin/users/venkat1361/rocprofiler-register-hipfile-trace -- projects/rocprofiler-register
-        git checkout origin/develop -- projects/hipfile
-
     - name: Build and Install ROCR-Runtime
       if: ${{ inputs.enable-rocr-build == 'true' }}
       shell: bash
