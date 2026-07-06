@@ -74,6 +74,7 @@ struct read_statements : public read_statements_base
         initialize_arg_detail_statement();
         initialize_correlated_event_statements();
         initialize_detail_statements();
+        initialize_time_range_statements();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -289,6 +290,24 @@ struct read_statements : public read_statements_base
     [[nodiscard]] const memory_alloc_detail_func_t& memory_alloc_detail() const override
     {
         return m_memory_alloc_detail;
+    }
+
+    // ----- legacy per-event-type time-range accessors (task 002C) -----
+    [[nodiscard]] const time_range_func_t& region_time_range() const override
+    {
+        return m_region_time_range;
+    }
+    [[nodiscard]] const time_range_func_t& kernel_dispatch_time_range() const override
+    {
+        return m_kernel_dispatch_time_range;
+    }
+    [[nodiscard]] const time_range_func_t& memory_copy_time_range() const override
+    {
+        return m_memory_copy_time_range;
+    }
+    [[nodiscard]] const time_range_func_t& memory_alloc_time_range() const override
+    {
+        return m_memory_alloc_time_range;
     }
 
 private:
@@ -835,6 +854,29 @@ private:
             make_count_time_filtered_stmt("rocpd_memory_allocate");
     }
 
+    void initialize_time_range_statements()
+    {
+        const auto& u = m_uuid;
+
+        // v4.0 has no inline start/end column; MIN/MAX are computed over the
+        // rocpd_timestamp spine reached through start_id/end_id.
+        auto make_time_range_stmt = [&](const std::string& table) {
+            return m_backend->create_read_statement_executor<time_range_result>(
+                fmt::format("SELECT MIN(ts_s.value), MAX(ts_e.value) FROM {tbl}_{u} T "
+                            "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = T.start_id "
+                            "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = T.end_id",
+                            fmt::arg("tbl", table),
+                            fmt::arg("u", u)),
+                &time_range_result::min_start,
+                &time_range_result::max_end);
+        };
+
+        m_region_time_range          = make_time_range_stmt("rocpd_region");
+        m_kernel_dispatch_time_range = make_time_range_stmt("rocpd_kernel_dispatch");
+        m_memory_copy_time_range     = make_time_range_stmt("rocpd_memory_copy");
+        m_memory_alloc_time_range    = make_time_range_stmt("rocpd_memory_allocate");
+    }
+
     // Parse a JSONB array-of-strings column (rocpd_info_source_code.lines /
     // .instructions) into a vector<string>. Matches v3 deserialize_source_context:
     // only string elements are kept; malformed JSON yields an empty vector.
@@ -1295,6 +1337,11 @@ private:
     kernel_dispatch_detail_func_t m_kernel_dispatch_detail;
     memory_copy_detail_func_t     m_memory_copy_detail;
     memory_alloc_detail_func_t    m_memory_alloc_detail;
+
+    time_range_func_t m_region_time_range;
+    time_range_func_t m_kernel_dispatch_time_range;
+    time_range_func_t m_memory_copy_time_range;
+    time_range_func_t m_memory_alloc_time_range;
 };
 
 }  // namespace profiler_hub::data_storage::schema_v4

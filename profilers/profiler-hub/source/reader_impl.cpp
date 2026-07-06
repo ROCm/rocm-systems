@@ -1508,8 +1508,6 @@ reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& even
 reader_types::time_window_t
 reader_t::impl::get_data_time_range()
 {
-    if(m_is_v4) return {};  // legacy time-range surface unsupported on v4.0 (task 002C)
-
     size_t global_min = std::numeric_limits<size_t>::max();
     size_t global_max = 0;
 
@@ -1545,8 +1543,6 @@ reader_t::impl::get_data_time_range()
 reader_types::event_counts_t
 reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
 {
-    if(m_is_v4) return {};  // legacy count surface unsupported on v4.0 (task 002C)
-
     const bool has_time = window.start.has_value() && window.end.has_value();
 
     auto get_count = [&](const auto& base_stmt, const auto& time_stmt) -> size_t {
