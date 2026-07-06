@@ -5,8 +5,6 @@
  */
 
 #include <cstddef>
-#include <cstdint>
-#include <cstring>
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -201,13 +199,18 @@ HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
       hipStreamGetAttribute(stream, hipStreamAttributePriority, nullptr);
   REQUIRE(null_out_status == hipErrorInvalidValue);
 
-  // An attribute id that is not a valid stream attribute must be rejected; the
-  // runtime must not report success for an unknown attribute id.
+#ifdef __HIP_PLATFORM_AMD__
+  // An attribute id that is not a valid stream attribute must be rejected with
+  // hipErrorInvalidValue. hipLaunchAttributeMax is the one-past-the-end sentinel
+  // of the launch attribute enum, so it is guaranteed to be an unknown attribute
+  // id. This sentinel is only defined on the AMD backend, so the sub-check is
+  // compiled only there.
   hipStreamAttrValue get_value{};
   const hipStreamAttrID invalid_attr = static_cast<hipStreamAttrID>(hipLaunchAttributeMax);
   const hipError_t invalid_attr_status =
       hipStreamGetAttribute(stream, invalid_attr, &get_value);
-  REQUIRE(invalid_attr_status != hipSuccess);
+  REQUIRE(invalid_attr_status == hipErrorInvalidValue);
+#endif  // __HIP_PLATFORM_AMD__
 
   HIP_CHECK(hipStreamDestroy(stream));
 }
