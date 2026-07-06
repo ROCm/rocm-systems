@@ -39,7 +39,7 @@ from sqlalchemy.sql import Select
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "1.3.0"
+SCHEMA_VERSION = "1.4.0"
 
 
 Base = declarative_base()
@@ -101,9 +101,11 @@ class KernelRooflineData(Base):
         Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
     total_flops = Column(Float)
+    l0_cache_data = Column(Float)
     l1_cache_data = Column(Float)
     l2_cache_data = Column(Float)
     hbm_cache_data = Column(Float)
+    lds_cache_data = Column(Float)
 
     # Roofline data point can have one kernel
     kernel = relationship("Kernel", back_populates="roofline_data_points")
@@ -210,9 +212,11 @@ class WorkloadRooflineData(Base):
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
     total_flops = Column(Float)
+    l0_cache_data = Column(Float)
     l1_cache_data = Column(Float)
     l2_cache_data = Column(Float)
     hbm_cache_data = Column(Float)
+    lds_cache_data = Column(Float)
 
     # Relationships
     workload = relationship("Workload", back_populates="workload_roofline_data_points")
@@ -273,11 +277,9 @@ class Database:
         try:
             # Writing to disk is slow, so we built the database in memory.
             # Now copy the finished database to disk in one step.
-            with (
-                closing(cls._engine.raw_connection()) as memory_conn,
-                closing(sqlite3.connect(cls._db_name)) as disk_conn,
-            ):
-                memory_conn.backup(disk_conn)
+            with closing(cls._engine.raw_connection()) as memory_conn:
+                with closing(sqlite3.connect(cls._db_name)) as disk_conn:
+                    memory_conn.backup(disk_conn)
             console_debug("Completed writing database")
             console_warning(f"Created file: {cls._db_name}")
         except Exception as e:

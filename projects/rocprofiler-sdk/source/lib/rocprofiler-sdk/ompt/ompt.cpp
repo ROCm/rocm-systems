@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -147,7 +147,7 @@ ompt_task_create_callback(ompt_data_t*        encountering_task_data,
                                                                  codeptr_ra);
     if(!corr_id) return;  // During finalization
 
-    auto* state                  = new ompt_task_save_state{corr_id, flags};
+    auto* state = new ompt_task_save_state{.corr_id = corr_id, .task_flags = flags};
     INTERNAL(new_task_data)->ptr = state;
 
     context::pop_latest_correlation_id(corr_id);
@@ -164,32 +164,53 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     context::pop_latest_correlation_id(corr_id);
     corr_id->sub_ref_count();
 
+    // A task's INTERNAL slot may hold an explicit-task ompt_task_save_state (from
+    // ompt_task_create_callback) or, for an implicit task, an ompt_save_state (from
+    // ompt_implicit_task begin). Only explicit-task state participates in the task
+    // correlation push/pop below, so use the kind tag to recover it and treat implicit
+    // tasks as "no explicit-task state" (reinterpreting an ompt_save_state here would
+    // alias corr_id onto ompt_save_state::thr_id and crash push_correlation_id).
+    auto as_task_state = [](ompt_data_t* slot) -> ompt_task_save_state* {
+        if(slot == nullptr || slot->ptr == nullptr) return nullptr;
+        auto* _state = static_cast<ompt_task_save_state*>(slot->ptr);
+        return (_state->kind == ompt_save_state_kind::task) ? _state : nullptr;
+    };
+
     /* Warning: some tasks like early_fulfill may be scheduled
      * out twice. The ordering between early_fulfill and task_complete
      * is not specified.
      *
-     * If early_fulfill is dispatched after task_complete, state_prior
-     * will be nullptr because task_complete deleted it. Return immediately
+     * If early_fulfill is dispatched after task_complete, the prior slot
+     * will be empty because task_complete deleted it. Return immediately
      * to avoid failing on a valid trailing callback.
      */
     auto* pprior = INTERNAL(prior_task_data);
     auto* pnext  = INTERNAL(next_task_data);
     assert(pprior != nullptr);
-    auto* state_prior = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
+    auto* state_prior = as_task_state(pprior);
     if(state_prior == nullptr)
     {
-        if(prior_task_status == ompt_task_early_fulfill) return;
-        ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
+        // An empty slot is only expected for the trailing early_fulfill case; a
+        // non-empty slot here is an implicit task (ompt_save_state), which has no
+        // explicit-task correlation to pop/retire -- fall through to handle next_task.
+        if(pprior->ptr == nullptr)
+        {
+            if(prior_task_status == ompt_task_early_fulfill) return;
+            ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
+        }
+    }
+    else
+    {
+        auto* prior_corrid = context::get_latest_correlation_id();
+        if(state_prior->corr_id == prior_corrid && state_prior->task_flags != 0)
+        {
+            // pop the current correlation ID (for the prior_task)
+            assert((state_prior->task_flags & 0xFF) == ompt_task_explicit);
+            context::pop_latest_correlation_id(prior_corrid);
+        }
     }
 
-    auto* state_next   = pnext ? reinterpret_cast<ompt_task_save_state*>(pnext->ptr) : nullptr;
-    auto* prior_corrid = context::get_latest_correlation_id();
-    if(state_prior->corr_id == prior_corrid && state_prior->task_flags != 0)
-    {
-        // pop the current correlation ID (for the prior_task)
-        assert((state_prior->task_flags & 0xFF) == ompt_task_explicit);
-        context::pop_latest_correlation_id(prior_corrid);
-    }
+    auto* state_next = as_task_state(pnext);
     if(state_next && (state_next->task_flags & 0xFF) == ompt_task_explicit)
     {
         // push the next correlation ID (for the next_task)
@@ -198,13 +219,11 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     if(prior_task_status == ompt_task_yield || prior_task_status == ompt_task_detach ||
        prior_task_status == ompt_task_switch || prior_task_status == ompt_task_early_fulfill)
         return;
-    // the prior task is done
-    assert(state_prior != nullptr);
-    assert(state_prior->task_flags != 0);
-    if(prior_task_status == ompt_task_complete)
+    // the prior (explicit) task is done
+    if(state_prior != nullptr && prior_task_status == ompt_task_complete)
     {
-        // FIXME? do we need to decrement the ref count
-        // state_prior->corr_id->sub_ref_count();
+        assert(state_prior->task_flags != 0);
+        state_prior->corr_id->sub_ref_count();
         delete state_prior;
         pprior->ptr = nullptr;
     }

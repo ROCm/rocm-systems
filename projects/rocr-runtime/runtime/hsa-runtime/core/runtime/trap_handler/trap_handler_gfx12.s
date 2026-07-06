@@ -128,6 +128,10 @@
 
 .set TTMP1_BUF_ID_BIT_POSITION                    , 25           // TTMP1 bit position for buffer ID
 
+// GFX12.5 (multi-XCC) uses MSG_RTN_GET_SE_AID_ID to retrieve XCC_ID (AID_ID) from bits [19:16].
+// GFX12.0 (single-XCC) has per_xcc_size = 0, so multi-XCC path is never taken.
+// Note: HW_ID1 bits [19:16] span SA_ID/SE_ID fields, NOT Virtual_XCC_ID - do not use HW_ID1 for XCC detection.
+
 .set TTMP8_DISPATCH_ID_MASK                        , 0X1FFFFFF
 // Per-sample data layout within the device buffer. Each sample is 64 bytes.
 // These are offsets from the start of a specific sample slot in the device buffer.
@@ -222,25 +226,78 @@
   // To avoid more overhead on the critical sample processing path, we decided to give a priority
   // to host-trap and perf_snapshot trap over the s_trap and halt.
 .check_hosttrap:
-  // ttmp[14:15] points to TMA.
+  // ttmp[14:15] points to TMA2.
   // Scratch registers: ttmp[2:3], ttmp[4:5], ttmp10, ttmp13
   s_getreg_b32      ttmp2, hwreg(HW_REG_EXCP_FLAG_PRIV)     // On gfx12, EXCP_FLAG_PRIV.b7
   s_bitcmp1_b32     ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_HT_SHIFT  // Test Host Trap bit.
   s_cbranch_scc0    .check_stochastic                       // If not HT, check for stochastic sampling
 
   // It's a Host Trap event.
-  s_load_b64        ttmp[14:15], ttmp[14:15], 0x0, scope:SCOPE_CU  // ttmp[14:15]=*host_trap_buffers
-  s_wait_kmcnt      0                                       // Ensure previous load is complete.
-  s_branch          .profile_trap_handlers
+  // TMA2 layout (pcs_tma2_t):
+  //   [0x00] pcs_sampling_data_t* host_trap_buffers;       // Base of hosttrap buffer array
+  //   [0x08] pcs_sampling_data_t* stochastic_trap_buffers; // Base of stochastic buffer array
+  //   [0x10] uint32_t per_xcc_size;                        // Per-XCC stride (32-bit)
+  //   [0x14-0x1F] reserved;                                // Reserved for future use
+  //
+  // Load host_trap_buffers base from TMA2 (per_xcc_size loaded in .calc_xcc_offset)
+  s_load_b64        ttmp[2:3], ttmp[14:15], 0x0, scope:SCOPE_CU  // ttmp[2:3] = host_trap_buffers base
+  s_wait_kmcnt      0                                       // Wait for load to complete
+
+  // ttmp[2:3] = buffer base
+  // Jump to common XCC offset calculation path (loads per_xcc_size there)
+  s_branch          .calc_xcc_offset
 
 .check_stochastic:
   // ttmp2 already contains HW_REG_EXCP_FLAG_PRIV from .check_hosttrap
   s_bitcmp1_b32     ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT // Test Performance Snapshot bit.
 
-  s_cbranch_scc0    .handle_sw_trap                       // If not Stochastic, continue to check trap ID
+  s_cbranch_scc0    .handle_sw_trap                         // If not Stochastic, continue to check trap ID
 
-  s_load_b64        ttmp[14:15], ttmp[14:15], 0x8, scope:SCOPE_CU  // ttmp[14:15]=*stoch_trap_buf
+  // Load stochastic_trap_buffers base from TMA2 (per_xcc_size loaded in .calc_xcc_offset)
+  s_load_b64        ttmp[2:3], ttmp[14:15], 0x8, scope:SCOPE_CU  // ttmp[2:3] = stochastic_trap_buffers base
+  s_wait_kmcnt      0                                       // Wait for load to complete
+
+  // ttmp[2:3] = buffer base
+  // Fall through to common XCC offset calculation
+
+// Common path for calculating per-XCC buffer offset (used by both hosttrap and stochastic)
+// Entry: ttmp[2:3] = buffer base address
+// Exit: ttmp[14:15] = per-XCC buffer address, branches to .profile_trap_handlers
+.calc_xcc_offset:
+  // Load per_xcc_size from TMA2 (consolidated here to avoid duplication)
+  s_load_b32        ttmp4, ttmp[14:15], 0x10, scope:SCOPE_CU     // ttmp4 = per_xcc_size (32-bit)
   s_wait_kmcnt      0
+
+  // Check if per_xcc_size is non-zero (multi-XCC mode)
+  s_cmp_eq_u32      ttmp4, 0
+  s_cbranch_scc1    .single_xcc                              // If per_xcc_size == 0, single XCC mode
+
+.if .amdgcn.gfx_generation_minor >= 5
+  // GFX12.5 (multi-XCC): Use MSG_RTN_GET_SE_AID_ID to get XCC_ID (AID_ID)
+  // AID_ID (chiplet / XCC_ID) resides in MSG_RTN_GET_SE_AID_ID[19:16]
+  s_sendmsg_rtn_b32 ttmp5, sendmsg(MSG_RTN_GET_SE_AID_ID)
+  s_wait_kmcnt      0
+  s_bfe_u32         ttmp5, ttmp5, (16 | (4 << 16))           // Extract XCC_ID from bits [19:16]
+.else
+  // GFX12.0 (single-XCC): Should never reach here since per_xcc_size == 0 on single-XCC.
+  // If we somehow get here, exit trap safely rather than using incorrect HW_ID1 bits.
+  s_branch          .exit_trap
+.endif
+
+  // Calculate offset: xcc_id * per_xcc_size -> ttmp[4:5]
+  // ttmp5 = xcc_id, ttmp4 = per_xcc_size
+  s_mul_hi_u32      ttmp10, ttmp4, ttmp5                     // ttmp10 = offset_hi (for large offsets)
+  s_mul_i32         ttmp4, ttmp4, ttmp5                      // ttmp4 = offset_lo = per_xcc_size * xcc_id
+
+  // Final address: base + offset -> this XCC's pcs_sampling_data_t
+  s_add_u32         ttmp14, ttmp2, ttmp4                     // ttmp14 = base_lo + offset_lo
+  s_addc_u32        ttmp15, ttmp3, ttmp10                    // ttmp15 = base_hi + offset_hi + carry
+  s_branch          .profile_trap_handlers
+
+.single_xcc:
+  // Single XCC (gfx12.0): Simple pointer copy, no per-XCC offset needed
+  s_mov_b32         ttmp14, ttmp2
+  s_mov_b32         ttmp15, ttmp3
   s_branch          .profile_trap_handlers
 
 .handle_sw_trap:
@@ -506,7 +563,11 @@
 
   v_mov_b32         v0, 1
   v_mov_b32         v1, 0
+.if .amdgcn.gfx_generation_minor >= 5
+  global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_DEV th:TH_ATOMIC_RETURN
+.else
   global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_SYS th:TH_ATOMIC_RETURN
+.endif
   s_wait_loadcnt    0                                       // Wait for atomic operation to complete and return value
 
   // At this point, ttmp[4:5] is free. ttmp13 is free
@@ -928,7 +989,11 @@
   v_mov_b32         v1, 1                                   // buf_written_valX
  
   // Perform atomic add and return previous value
+.if .amdgcn.gfx_generation_minor >= 5
+  global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_DEV th:TH_ATOMIC_RETURN
+.else
   global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_SYS th:TH_ATOMIC_RETURN
+.endif
   s_wait_loadcnt    0
 
   // Check Watermark and Signal Host

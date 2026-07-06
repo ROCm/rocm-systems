@@ -109,6 +109,7 @@ The test runner supports the following environment variables to customize behavi
 | `RCCL_BUILD_DIR` | Alternative name for `RCCL_LIB_PATH`. Either variable can be used. | `/path/to/rccl/build` |
 | `RCCL_TEST_MPI_HOSTFILE` | Path to MPI hostfile for multi-node tests. | `~/.mpi_hostfile` |
 | `RCCL_MPI_LOG_ALL_RANKS` | Set to `1` to capture stdout/stderr from every MPI rank into `rccl_test_rank_<N>.log` in the working directory (rank 0 is tee'd to console + file; ranks 1-N go to file only). Useful for debugging failures on non-zero ranks. | `RCCL_MPI_LOG_ALL_RANKS=1` |
+| `RCCL_TEST_GPUS_PER_NODE` | Override the detected number of GPUs per node (used for `"auto"` sizing and GPU-count skipping). See [GPU Count Detection](#gpu-count-detection-and-auto-sizing). | `4` |
 
 ### Configuration Path Variables
 
@@ -329,12 +330,13 @@ Used for custom validation scripts or any non-GTest executables.
 | `binary` | Yes | string | Test binary name (relative to build/test/) |
 | `test_filter` | Optional | string | Test filter (GTest filter syntax for gtest, plain argument for non-gtest) |
 | `command_args` | Optional | string | Additional command-line arguments |
-| `num_ranks` | Optional | integer | Number of MPI ranks (default: 1) |
+| `num_ranks` | Optional | integer or `"auto"` | Number of MPI ranks (default: 1). `"auto"` = detected GPUs/node × `num_nodes` (use all GPUs). See [GPU Count Detection](#gpu-count-detection-and-auto-sizing). |
 | `num_nodes` | Optional | integer | Number of nodes (default: 1) |
-| `num_gpus` | Optional | integer | GPUs per node - controls rank distribution (default: 8) |
+| `num_gpus` | Optional | integer or `"auto"` | GPUs per node - controls rank distribution. `"auto"` (also the default when omitted) = detected GPUs/node. |
 | `timeout` | Optional | integer | Timeout in seconds (0 = unlimited) |
 | `env_variables` | Optional | object | Test-specific environment variables |
 | `rerun_env_variables` | Optional | object | Additional environment variables for failed test reruns (merged with env_variables) |
+| `mpi_args` | Optional | string or list | Extra `mpirun`/MCA arguments appended to the base MPI arguments (MPI tests only). See [Custom MPI Arguments](#custom-mpi-arguments). |
 
 ### Configuration Inheritance
 
@@ -457,9 +459,22 @@ Optional:
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
+  --system NAME             Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')
+  --mpi-args "ARGS"         Extra mpirun arguments appended after the config's base/suite/test mpi_args (MPI tests only). Also reads RCCL_TEST_MPI_ARGS env var.
+  --mpich                   Use MPICH syntax (-env) instead of OpenMPI (-x) for passing env vars to mpirun
   --overwrite               Overwrite previous workspace directories
   --report-suffix SUFFIX    Suffix for report directory (default: blank)
+  --emit-results            Emit structured results (JSON/JSONL + tarball) for the dashboard
+  --results-dir DIR         Directory for emitted results + tarballs (default: <workspace>/results)
+  --run-label LABEL         Optional label stored with the emitted run (e.g. 'nightly', a PR number)
+  --tag TAG                 Tag to attach to the emitted run for dashboard filtering (repeatable)
+  --tags A,B,C              Comma-separated tags to attach to the emitted run (merged with --tag)
+  --db-push                 Also push results to PostgreSQL (DSN from RCCL_RESULTS_DSN); implies --emit-results
+  --db-timeout SECONDS      PostgreSQL connect + statement timeout for --db-push (default: 10)
   -h, --help                Show help message and exit
+
+Environment variables:
+  RCCL_TEST_MPI_ARGS        Extra mpirun arguments appended after --mpi-args (same effect as --mpi-args)
 ```
 
 ## Code Coverage Reports
@@ -495,6 +510,58 @@ When `--coverage-report` is specified, the runner generates:
 - Merges profiles with `llvm-profdata`
 - Generates reports with `llvm-cov show` and `llvm-cov report`
 - Filters out irrelevant files (test/, gtest, external dependencies)
+
+## Result Emission & Dashboard
+
+The runner can emit structured, machine-readable results, either as local files
+(picked up by the dashboard's periodic sweep) or pushed directly to PostgreSQL.
+
+### Emitting results
+
+```bash
+# Local files only (durable; feeds the dashboard sweep):
+python test_runner.py -c configs/rccl_perf_tests.json --emit-results --results-dir /path/to/results
+
+# Local files + best-effort direct DB push:
+export RCCL_RESULTS_DSN='postgresql://<user>:<pass>@<host>:5432/<db>'
+python test_runner.py -c configs/rccl_perf_tests.json --db-push
+```
+
+- `--db-push` implies `--emit-results`. If the DB push fails or times out, the
+  run still succeeds and the local tarball is retained for the sweep.
+- The DSN is read only from `RCCL_RESULTS_DSN`; it is never hardcoded or written
+  into the emitted files.
+- Enabling emission also turns on per-test log capture so `busbw`/`algbw` can be
+  parsed from rccl-tests output. Default behaviour (no capture) is unchanged when
+  emission is off.
+
+### What is emitted
+
+Per invocation, under `--results-dir` (default `<workspace>/results`):
+
+- `run.json` - run manifest: RCCL SHA, host/telemetry metadata, config, env, summary, tags.
+- `tests.jsonl` - one line per test (status PASSED/FAILED/SKIPPED/TIMEOUT, exec mode, dtype, duration).
+- `perf.jsonl` - one line per (size, place) perf row (latency, algbw, busbw).
+- `coverage.json` - llvm-cov totals (only when `--coverage-report` produced a report).
+- `<run_id>.tar.gz` and `latest.tar.gz` - self-contained snapshots the sweep pulls.
+
+Coverage is emitted only where the host has an instrumented build plus
+`llvm-profdata`/`llvm-cov`; perf and per-test results do not require them.
+
+### Tagging runs
+
+Attach tags at emit time for later filtering in the dashboard:
+
+```bash
+python test_runner.py -c <config> --emit-results --tag nightly --tag mi300x
+# or: --tags nightly,mi300x
+```
+
+Tags set here are the run's initial tags. Once a run is ingested, its tags are
+mutable only by dashboard admins.
+
+See [`db/README.md`](db/README.md) for the database schema and the full
+emission and scrape/sweep contract.
 
 ## Examples
 
@@ -678,6 +745,185 @@ Create `~/.mpi_hostfile` with node names (one per line):
 node01 slots=8
 node02 slots=8
 ```
+
+## GPU Count Detection and Auto-Sizing
+
+To make configurations portable across nodes with different GPU counts (e.g. 4-GPU vs 8-GPU nodes), the runner can detect how many GPUs a node has and size/skip tests accordingly.
+
+### Detection
+
+The GPUs-per-node count is detected once, using this priority:
+
+1. `RCCL_TEST_GPUS_PER_NODE` environment variable (explicit override)
+2. Visible-device masks: `HIP_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, or `CUDA_VISIBLE_DEVICES` (counts the listed IDs)
+3. `rocminfo` GPU-agent count
+
+If none of these yield a value, detection returns "unknown" and the runner falls back to defaults (treating `"auto"` as 8) and disables GPU-count-based skipping.
+
+### `"auto"` values
+
+Both `num_gpus` and `num_ranks` accept the literal string `"auto"`:
+
+- `num_gpus: "auto"` → resolves to the detected GPUs per node. **This is also the default when `num_gpus` is omitted.**
+- `num_ranks: "auto"` → resolves to `num_gpus × num_nodes` (i.e. use *all* GPUs across all nodes).
+
+Example — a single-node test that always uses every GPU on the node:
+
+```json
+{
+  "implicit_launch_order": {
+    "is_gtest": true,
+    "binary": "rccl-UnitTestsMPI",
+    "num_ranks": "auto",
+    "num_nodes": 1,
+    "tests": [ { "name": "MultiCommunicatorChain", "test_filter": "..." } ]
+  }
+}
+```
+
+On an 8-GPU node this runs with 8 ranks; on a 4-GPU node, 4 ranks — no config change required.
+
+### Automatic skipping on insufficient GPUs
+
+When the GPU count is known, a test is automatically **SKIPPED** (not failed) if the node does not have enough GPUs:
+
+- **Single-node** tests: skipped when `num_ranks` > detected GPUs/node.
+- **Multi-node** tests: skipped when `num_gpus` (ranks per node) > detected GPUs/node.
+
+This lets fixed-size tests (e.g. an 8-rank test whose gtest filters require exactly 8 ranks) live in one shared config and simply self-skip on smaller nodes, instead of failing. Use `RCCL_TEST_GPUS_PER_NODE` to force a specific value (or to re-enable skipping in environments where detection fails).
+
+## Custom MPI Arguments
+
+For MPI tests (`num_ranks > 1`), the runner builds the `mpirun` command line as:
+
+```
+mpirun -np <ranks> <host args> <map-by args> <mpi_args> ./<binary> ...
+```
+
+The `<mpi_args>` portion is resolved from the `mpi_args` field, which can be
+specified at multiple levels. **Every `mpi_args` value may be either a string or
+a list of strings** (lists are joined with spaces), so both of these are
+equivalent:
+
+```json
+"mpi_args": "--bind-to none --oversubscribe"
+"mpi_args": ["--bind-to none", "--oversubscribe"]
+```
+
+### Resolution and Merge Order
+
+There are two categories of `mpi_args`:
+
+1. **Base arguments** — *replace* the built-in defaults. The base is chosen with
+   this priority:
+   1. Top-level `mpi_args` dict entry matching the active `--system`
+   2. Top-level `mpi_args` string/list (applies to all systems)
+   3. Built-in defaults (`--mca btl ^vader,openib --mca pml ucx --bind-to none`
+      for Open MPI, `-bind-to none` for MPICH)
+2. **Additive arguments** — *appended* on top of the base, regardless of
+   `--system`:
+   - Test-suite-level `mpi_args`
+   - Individual test-level `mpi_args`
+   - The `--mpi-args` CLI flag (applies to every MPI test in the run)
+   - The `RCCL_TEST_MPI_ARGS` environment variable (same effect as `--mpi-args`)
+
+Final command arguments are:
+
+```
+<base args>  <suite mpi_args>  <test mpi_args>  <--mpi-args>  <RCCL_TEST_MPI_ARGS>
+```
+
+The `--mpi-args` flag and `RCCL_TEST_MPI_ARGS` env var let you inject extra
+`mpirun`/MCA arguments without editing the config (both accept a single string;
+the CLI flag is appended before the env var). Example:
+
+```bash
+# via CLI flag
+./run_tests.py -c config.json --mpi-args "--mca btl_tcp_if_include eth0 --oversubscribe"
+
+# via environment variable
+RCCL_TEST_MPI_ARGS="--oversubscribe" ./run_tests.py -c config.json
+```
+
+> **Note:** Because base arguments *replace* the defaults, a top-level
+> `mpi_args` should include any default flags you still want (e.g.
+> `--bind-to none`). Suite- and test-level `mpi_args` are purely additive and do
+> not remove anything.
+
+### Per-System Arguments (top-level dict)
+
+Use a dict keyed by system name and select it with `--system`:
+
+```json
+{
+  "mpi_args": {
+    "mellanox": "--mca oob_tcp_if_include eth1 --mca btl ^vader,openib --bind-to none",
+    "thor2":    "--oversubscribe --mca plm_rsh_agent srun --mca btl ^openib --bind-to none"
+  }
+}
+```
+
+```bash
+python test_runner.py --config net_ib_transport.json --system mellanox
+```
+
+If `--system` is not given (or has no matching key), the built-in defaults are
+used as the base.
+
+### Global Arguments (top-level string/list)
+
+Apply the same base arguments to every MPI test:
+
+```json
+{
+  "mpi_args": ["--mca pml ucx", "--bind-to none", "--oversubscribe"]
+}
+```
+
+### Suite- and Test-Level Arguments (additive)
+
+These are appended to the base and work regardless of `--system`:
+
+```json
+{
+  "test_suites": [
+    {
+      "name": "Oversubscribed_Suite",
+      "config": "perf_tests",
+      "mpi_args": "--oversubscribe"
+    }
+  ],
+  "test_configurations": {
+    "perf_tests": {
+      "tests": [
+        {
+          "name": "AllReduce_Perf",
+          "is_gtest": false,
+          "binary": "all_reduce_perf",
+          "command_args": "-b 8 -e 128M -f 2",
+          "num_ranks": 2,
+          "mpi_args": "--mca btl_tcp_if_include eth0"
+        }
+      ]
+    }
+  }
+}
+```
+
+For the example above (no `--system`, no top-level `mpi_args`), the AllReduce
+test runs with:
+
+```
+mpirun -np 2 <host args> --mca btl ^vader,openib --mca pml ucx --bind-to none --oversubscribe --mca btl_tcp_if_include eth0 ./all_reduce_perf ...
+```
+
+(base defaults + suite `--oversubscribe` + test `--mca btl_tcp_if_include eth0`)
+
+### Inheritance
+
+When using the `extends` directive, list-form `mpi_args` are appended and
+de-duplicated across parent/child configurations (see
+[Configuration Inheritance](#configuration-inheritance)).
 
 ## Advanced Features
 
@@ -932,7 +1178,7 @@ The test runner invokes `install.sh` directly, so build options map to `install.
 ```json
 {
   "build_configuration": {
-    "install_flags": ["-t", "-l", "--disable-colltrace", "--no_clean"]
+    "install_flags": ["-t", "-l", "--no_clean"]
   }
 }
 ```
@@ -1210,6 +1456,7 @@ These override the paths specified in the JSON configuration file:
 |----------|-------------|---------|
 | `RCCL_TEST_MPI_HOSTFILE` | Path to MPI hostfile for multi-node tests | `export RCCL_TEST_MPI_HOSTFILE=~/.mpi_hostfile` |
 | `RCCL_MPI_LOG_ALL_RANKS` | Set to `1` to redirect each MPI rank's stdout/stderr to `rccl_test_rank_<N>.log` (rank 0 is also tee'd to the console). Useful when debugging failures on non-zero ranks or when tests read per-rank log files for assertions. | `export RCCL_MPI_LOG_ALL_RANKS=1` |
+| `RCCL_TEST_GPUS_PER_NODE` | Override the detected GPUs-per-node count used for `"auto"` rank/GPU sizing and for skipping tests that need more GPUs than the node has. See [GPU Count Detection](#gpu-count-detection-and-auto-sizing). | `export RCCL_TEST_GPUS_PER_NODE=4` |
 
 **Note**: `RCCL_TEST_MPI_HOSTFILE` falls back to `~/.mpi_hostfile` if not set. For SLURM environments, hostfile is auto-generated from `SLURM_NODELIST`.
 

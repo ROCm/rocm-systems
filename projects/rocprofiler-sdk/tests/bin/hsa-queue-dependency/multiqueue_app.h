@@ -250,9 +250,29 @@ public:
             hsa_amd_memory_pool_allocate(mem.pool, size, hsa_amd_memory_pool_executable_flag, &ret);
         RET_IF_HSA_ERR(err);
 
-        err = hsa_amd_agents_allow_access(
-            Device::all_devices.size(), Device::all_devices.data(), nullptr, ret);
-        RET_IF_HSA_ERR(err);
+        // Grant access only to the GPU agents that can actually access this pool.
+        // The CPU agent is excluded: the host already owns the kernarg pool and on
+        // APUs (for example, gfx1151) it is rejected with
+        // HSA_STATUS_ERROR_INVALID_AGENT. Agents for which the pool is never
+        // accessible are filtered out as well, so multi-GPU systems (where some
+        // agents cannot reach the pool) and systems with no GPU both work.
+        std::vector<hsa_agent_t> agents;
+        agents.reserve(gpu.size());
+        for(const auto& dev : gpu)
+        {
+            hsa_amd_memory_pool_access_t access = HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
+            if(hsa_amd_agent_memory_pool_get_info(
+                   dev.agent, mem.pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access) ==
+                   HSA_STATUS_SUCCESS &&
+               access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED)
+                agents.push_back(dev.agent);
+        }
+
+        if(!agents.empty())
+        {
+            err = hsa_amd_agents_allow_access(agents.size(), agents.data(), nullptr, ret);
+            RET_IF_HSA_ERR(err);
+        }
         return ret;
     }
 

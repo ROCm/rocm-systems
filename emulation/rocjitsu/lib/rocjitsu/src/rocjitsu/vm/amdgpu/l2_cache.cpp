@@ -6,6 +6,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cassert>
 #include <cstring>
@@ -17,9 +18,10 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
                            uint32_t vmid) {
   if (backing_memory_) {
     if (op == simdojo::MessageOp::WRITE) {
-      static uint64_t wb_count = 0;
-      if (++wb_count <= 3)
-        util::Logger::vm("L2 writeback(backing) #", wb_count, " addr=0x", std::hex, addr,
+      static std::atomic<uint64_t> wb_count{0};
+      const uint64_t count = wb_count.fetch_add(1, std::memory_order_relaxed) + 1;
+      if (count <= 3)
+        util::Logger::vm("L2 writeback(backing) #", count, " addr=0x", std::hex, addr,
                          " size=", std::dec, size);
       for (uint32_t i = 0; i < size; ++i)
         backing_memory_->write8(addr + i, data[i], vmid);
@@ -70,12 +72,21 @@ void L2Cache::ensure_line(uint64_t addr, uint32_t vmid) {
 }
 
 void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint32_t vmid) {
+  uint32_t copied = 0;
   if (mtype == Mtype::UC) {
-    send_backing(addr, dst, size, simdojo::MessageOp::READ, vmid);
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const uint32_t line_offset = CacheStore::line_offset(ea);
+      const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+
+      flush_line(ea, vmid);
+      send_backing(ea, dst + copied, chunk, simdojo::MessageOp::READ, vmid);
+      copied += chunk;
+    }
     return;
   }
 
-  uint32_t copied = 0;
+  copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
     const uint32_t line_offset = CacheStore::line_offset(ea);
@@ -95,12 +106,21 @@ void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint
 }
 
 void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, uint32_t vmid) {
+  uint32_t copied = 0;
   if (mtype == Mtype::UC) {
-    send_backing(addr, const_cast<uint8_t *>(src), size, simdojo::MessageOp::WRITE, vmid);
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const uint32_t line_offset = CacheStore::line_offset(ea);
+      const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+
+      flush_line(ea, vmid);
+      send_backing(ea, const_cast<uint8_t *>(src + copied), chunk, simdojo::MessageOp::WRITE, vmid);
+      copied += chunk;
+    }
     return;
   }
 
-  uint32_t copied = 0;
+  copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
     const uint32_t line_offset = CacheStore::line_offset(ea);

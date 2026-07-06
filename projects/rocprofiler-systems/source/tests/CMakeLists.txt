@@ -5,6 +5,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
+    $<TARGET_OBJECTS:output-format-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>
@@ -13,11 +14,13 @@ set(UNIT_TEST_OBJECTS
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
 )
 
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:amd-smi-backend-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-amd-smi-provider-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-gpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-cpu-collector-tests>)
-list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-driver-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-backend-tests>)
 if(
     (ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
     OR (
