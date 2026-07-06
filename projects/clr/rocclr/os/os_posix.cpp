@@ -894,7 +894,7 @@ bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
 
       *fname_ptr = uri_file_path;
       *foffset_ptr = offset + address - low_address;
-      
+
       // The mapping is file-backed, so its end address bounds how many bytes
       // can be safely read starting at `image`.
       if (mapped_size_ptr != nullptr) {
