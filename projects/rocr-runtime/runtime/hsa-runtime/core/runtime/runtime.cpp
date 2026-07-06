@@ -1891,8 +1891,15 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   // if ROCR can wake it up with hsaKmtSetEvent()
   auto WaitForInterrupt = [&]() {
     constexpr uint32_t wait_ms = 0xFFFFFFFEu;
-    HsaEvent** end = std::unique(&hsa_events[0], &hsa_events[0] + unique_evts);
-    unique_evts = uint32_t(end - &hsa_events[0]);
+    uint32_t out = 0;
+    for (uint32_t in = 0; in < unique_evts; ++in) {
+      if (in == 0 || hsa_events[in] != hsa_events[out - 1]) {
+        hsa_events[out] = hsa_events[in];
+        event_age[out] = event_age[in];
+        ++out;
+      }
+    }
+    unique_evts = out;
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
     // Persist the round-tripped ages keyed by event so a later reordering of
     // the async list restores the correct baseline instead of re-priming to 1.
