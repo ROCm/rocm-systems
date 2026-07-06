@@ -225,15 +225,16 @@ bool
 supports_queue_interposition();
 
 /**
- * @brief Increment/decrement the active inline-QI consumer count (hot-path bypass gate).
+ * @brief Increment/decrement the active queue-interposition consumer count (hot-path bypass
+ * gate).
  *
  * Called from context start/stop when a context uses kernel-dispatch or scratch-memory tracing.
  */
 void
-notify_inline_qi_consumer_context_started(const context::context* ctx);
+notify_queue_interposition_consumer_context_started(const context::context* ctx);
 
 void
-notify_inline_qi_consumer_context_stopped(const context::context* ctx);
+notify_queue_interposition_consumer_context_stopped(const context::context* ctx);
 
 /**
  * @brief Install interposition wrappers into the HSA core API table

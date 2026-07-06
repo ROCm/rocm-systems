@@ -569,13 +569,13 @@ enable_queue_intercept()
 }
 
 bool
-context_needs_inline_qi_tracing(const context::context* ctx)
+context_needs_queue_interposition_tracing(const context::context* ctx)
 {
     if(!ctx) return false;
-    return ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
-           ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
-           ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
-           ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+    return ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                  ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                  ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
+                                  ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 }
 
 void

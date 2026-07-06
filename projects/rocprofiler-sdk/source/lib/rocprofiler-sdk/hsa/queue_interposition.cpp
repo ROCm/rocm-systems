@@ -71,7 +71,7 @@ namespace queue_interposition
 {
 namespace
 {
-auto s_active_inline_qi_consumers = std::atomic<uint32_t>{0};
+auto s_active_queue_interposition_consumers = std::atomic<uint32_t>{0};
 
 // NOTE:
 //  - "installed" is for checking whether HSA functions have been passed
@@ -83,9 +83,9 @@ auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
 
 bool
-has_active_inline_qi_consumers()
+has_active_queue_interposition_consumers()
 {
-    return s_active_inline_qi_consumers.load(std::memory_order_acquire) > 0;
+    return s_active_queue_interposition_consumers.load(std::memory_order_relaxed) > 0;
 }
 
 bool
@@ -95,7 +95,7 @@ should_bypass_inline_intercept()
             !s_intercept_active.load(std::memory_order_acquire) ||
             registration::get_fini_status() != 0 ||
             // TODO: debug and enable queue interposition for attachment
-            registration::supports_attachment() || !has_active_inline_qi_consumers());
+            registration::supports_attachment() || !has_active_queue_interposition_consumers());
 }
 
 auto*&
@@ -154,28 +154,25 @@ read_queue_indices(const QueueState* state)
     indices.virtual_wptr    = state->virtual_wptr.load(std::memory_order_acquire);
     indices.next_scan_pos   = state->next_scan_pos;
     indices.next_submit_pos = state->next_submit_pos;
-    if(state->real_wdid)
-        indices.real_wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
-    if(state->real_rdid)
-        indices.real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
+    if(state->real_wdid) indices.real_wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
+    if(state->real_rdid) indices.real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
     indices.bypass    = should_bypass_inline_intercept();
-    indices.consumers = s_active_inline_qi_consumers.load(std::memory_order_acquire);
+    indices.consumers = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
     return indices;
 }
 
 template <typename... Args>
 void
-log(std::string_view                event,
-    uint64_t                        seq,
-    const QueueState*               state,
-    fmt::format_string<Args...>     detail_fmt,
-    Args&&...                       detail_args)
+log(std::string_view            event,
+    uint64_t                    seq,
+    const QueueState*           state,
+    fmt::format_string<Args...> detail_fmt,
+    Args&&... detail_args)
 {
     if(!enabled()) return;
 
     const auto indices = read_queue_indices(state);
-    const auto detail =
-        fmt::format(detail_fmt, std::forward<Args>(detail_args)...);
+    const auto detail  = fmt::format(detail_fmt, std::forward<Args>(detail_args)...);
     ROCP_INFO << fmt::format(
         "[qi-dispatch-trace] event={} seq={} queue={} virtual_wptr={} real_wdid={} real_rdid={} "
         "next_scan_pos={} next_submit_pos={} bypass={} consumers={} :: {}",
@@ -495,13 +492,12 @@ async_signal_handler(hsa_signal_t                            completion_signal,
 
     if(qi_dispatch_trace::enabled())
     {
-        ROCP_INFO << fmt::format(
-            "[qi-dispatch-trace] event=async_wait_begin signal={{.handle={}}} "
-            "starting_value={} queue={} dispatch_count={}",
-            completion_signal.handle,
-            starting_value,
-            session ? session->queue.get_id().handle : uint64_t{0},
-            session ? session->packet_data.size() : 0);
+        ROCP_INFO << fmt::format("[qi-dispatch-trace] event=async_wait_begin signal={{.handle={}}} "
+                                 "starting_value={} queue={} dispatch_count={}",
+                                 completion_signal.handle,
+                                 starting_value,
+                                 session ? session->queue.get_id().handle : uint64_t{0},
+                                 session ? session->packet_data.size() : 0);
     }
 
     // Stop only on completion or finalization; never run cleanup while the kernel is live.
@@ -889,14 +885,14 @@ write_interceptor(Queue*                                queue,
         {
             if(qi_dispatch_trace::enabled())
             {
-                ROCP_INFO << fmt::format(
-                    "[qi-dispatch-trace] event=async_arm doorbell_seq={} batch_signal={{.handle={}}} "
-                    "batch_signal_value={} packet_count={} queue={}",
-                    get_doorbell_tls().trace_doorbell_seq,
-                    last_completion_signal.handle,
-                    current_signal_value,
-                    _shared_info_session->packet_data.size(),
-                    queue->get_id().handle);
+                ROCP_INFO << fmt::format("[qi-dispatch-trace] event=async_arm doorbell_seq={} "
+                                         "batch_signal={{.handle={}}} "
+                                         "batch_signal_value={} packet_count={} queue={}",
+                                         get_doorbell_tls().trace_doorbell_seq,
+                                         last_completion_signal.handle,
+                                         current_signal_value,
+                                         _shared_info_session->packet_data.size(),
+                                         queue->get_id().handle);
             }
 
             auto _task = [_signal_v          = last_completion_signal,
@@ -928,8 +924,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 {
     if(!state) return;
 
-    auto* state_ptr            = state.get();
-    auto  deferred_async_tasks = async_signal_task_vector_t{};
+    auto*      state_ptr            = state.get();
+    auto       deferred_async_tasks = async_signal_task_vector_t{};
     const auto doorbell_seq =
         qi_dispatch_trace::enabled() ? qi_dispatch_trace::next_seq() : uint64_t{0};
 
@@ -975,8 +971,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     // heap buffer implicated in ROCM-27116; rare large batches spill to a local vector.
     using snapshot_pkt_t = std::array<char, 64>;
     common::container::static_vector<snapshot_pkt_t, kSnapshotMaxPkts> snapshot;
-    std::vector<char> overflow_snapshot;
-    char*              source_snapshot = nullptr;
+    std::vector<char>                                                  overflow_snapshot;
+    char*                                                              source_snapshot = nullptr;
 
     if(max_pkts > kSnapshotMaxPkts)
     {
@@ -988,9 +984,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     for(uint64_t pos = scan_pos; pos < wptr_end; ++pos)
     {
         const auto  ring_slot = pos & state_ptr->ring_mask;
-        char* const slot_base =
-            static_cast<char*>(state_ptr->ring_buf) + (ring_slot * pkt_size);
-        auto* const hdr_ptr = reinterpret_cast<volatile uint16_t*>(slot_base);
+        char* const slot_base = static_cast<char*>(state_ptr->ring_buf) + (ring_slot * pkt_size);
+        auto* const hdr_ptr   = reinterpret_cast<volatile uint16_t*>(slot_base);
 
         if((__atomic_load_n(hdr_ptr, __ATOMIC_ACQUIRE) & 0xFFu) ==
            static_cast<unsigned>(HSA_PACKET_TYPE_INVALID))
@@ -1320,11 +1315,8 @@ resync_queue_shadow_state(QueueState* state)
 
     if(qi_dispatch_trace::enabled())
     {
-        qi_dispatch_trace::log("shadow_resync",
-                               qi_dispatch_trace::next_seq(),
-                               state,
-                               "wdid={}",
-                               wdid);
+        qi_dispatch_trace::log(
+            "shadow_resync", qi_dispatch_trace::next_seq(), state, "wdid={}", wdid);
     }
 }
 
@@ -1339,33 +1331,32 @@ resync_all_queue_shadow_states()
 }  // namespace
 
 void
-notify_inline_qi_consumer_context_started(const context::context* ctx)
+notify_queue_interposition_consumer_context_started(const context::context* ctx)
 {
-    if(!context_needs_inline_qi_tracing(ctx)) return;
+    if(!context_needs_queue_interposition_tracing(ctx)) return;
 
-    const auto prev = s_active_inline_qi_consumers.load(std::memory_order_acquire);
+    const auto prev = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
     if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
         resync_all_queue_shadow_states();
 
     const auto consumers =
-        s_active_inline_qi_consumers.fetch_add(1, std::memory_order_release) + 1;
+        s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_release) + 1;
     if(qi_dispatch_trace::enabled())
     {
-        ROCP_INFO << fmt::format(
-            "[qi-dispatch-trace] event=consumer_start consumers={} bypass={}",
-            consumers,
-            should_bypass_inline_intercept());
+        ROCP_INFO << fmt::format("[qi-dispatch-trace] event=consumer_start consumers={} bypass={}",
+                                 consumers,
+                                 should_bypass_inline_intercept());
     }
 }
 
 void
-notify_inline_qi_consumer_context_stopped(const context::context* ctx)
+notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
 {
-    if(!context_needs_inline_qi_tracing(ctx)) return;
-    auto cur = s_active_inline_qi_consumers.load(std::memory_order_relaxed);
+    if(!context_needs_queue_interposition_tracing(ctx)) return;
+    auto cur = s_active_queue_interposition_consumers.load(std::memory_order_relaxed);
     while(cur > 0)
     {
-        if(s_active_inline_qi_consumers.compare_exchange_weak(
+        if(s_active_queue_interposition_consumers.compare_exchange_weak(
                cur, cur - 1, std::memory_order_release, std::memory_order_relaxed))
         {
             if(qi_dispatch_trace::enabled())
