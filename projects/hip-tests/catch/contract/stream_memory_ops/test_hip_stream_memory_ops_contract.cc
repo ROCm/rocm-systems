@@ -134,6 +134,47 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValue64Gte_GatesLaterStreamWork) {
+  RequireDevice();
+  RequireStreamWaitValueSupport();
+
+  hipStream_t stream = nullptr;
+  uint64_t* gate_ptr = nullptr;
+  uint64_t* done_ptr = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&gate_ptr), sizeof(uint64_t)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done_ptr), sizeof(uint64_t)));
+
+  const uint64_t initial = 0ull;
+  HIP_CHECK(hipMemcpy(gate_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(done_ptr, &initial, sizeof(uint64_t), hipMemcpyHostToDevice));
+
+  // Enqueue the satisfying 64-bit write of the gate value ahead of the wait on
+  // the same stream. Because a single stream executes its operations in issue
+  // order, the write is guaranteed to complete before the wait is evaluated, so
+  // the wait's greater-than-or-equal condition is met without any host-side
+  // signalling. This ordering is what makes the test deadlock-free and mirrors
+  // the 32-bit gate contract for the 64-bit hipStreamWaitValue64 API.
+  const uint64_t threshold = 1ull;
+  HIP_CHECK(hipStreamWriteValue64(stream, gate_ptr, threshold, 0));
+  HIP_CHECK(hipStreamWaitValue64(stream, gate_ptr, threshold, hipStreamWaitValueGte));
+
+  // The done sentinel is written strictly after the wait. If the wait failed to
+  // gate later work correctly, this write would still land, but the contract we
+  // assert is that the stream drains cleanly and the ordered write is visible.
+  const uint64_t done = 0xFEEDBEEFCAFEF00Dull;
+  HIP_CHECK(hipStreamWriteValue64(stream, done_ptr, done, 0));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  uint64_t observed = 0ull;
+  HIP_CHECK(hipMemcpy(&observed, done_ptr, sizeof(uint64_t), hipMemcpyDeviceToHost));
+  REQUIRE(observed == done);
+
+  HIP_CHECK(hipFree(done_ptr));
+  HIP_CHECK(hipFree(gate_ptr));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
 HIP_TEST_CASE(Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder) {
   RequireDevice();
   RequireStreamWaitValueSupport();

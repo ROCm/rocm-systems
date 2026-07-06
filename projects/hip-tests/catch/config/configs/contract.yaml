@@ -159,6 +159,9 @@ contract:
   Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork:
     <<: *level_0
     tags: [stream_memory_ops]
+  Contract_StreamMemoryOps_WaitValue64Gte_GatesLaterStreamWork:
+    <<: *level_0
+    tags: [stream_memory_ops]
   Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder:
     <<: *level_0
     tags: [stream_memory_ops]
