@@ -317,7 +317,7 @@ using unique_agent_t = ::rocprofiler::platform::unique_agent_t;
 // at runtime without touching the KFD path. File-local to this translation unit.
 // Internal-linkage storage for the file-local flag above; accessed only through
 // the named getter/setter below (no mutable-reference-to-static handed out).
-static bool s_wsl_platform_selected = false;
+bool s_wsl_platform_selected = false;
 
 bool
 is_wsl_platform_selected()
