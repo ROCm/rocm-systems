@@ -47,11 +47,11 @@ struct track_query_info_t
     reader_types::track_type_t type{};
     size_t                     nid{};
     size_t                     pid{};
-    std::optional<size_t>      tid;            // cpu_thread
-    std::optional<size_t>      agent_id;       // gpu_queue
-    std::optional<size_t>      queue_id;       // gpu_queue, dma
-    std::optional<size_t>      stream_id;      // dma
-    size_t                     real_track_id{};  // counter: rocpd_track id for sample.track_id
+    std::optional<size_t>      tid;        // cpu_thread
+    std::optional<size_t>      agent_id;   // gpu_queue
+    std::optional<size_t>      queue_id;   // gpu_queue, dma
+    std::optional<size_t>      stream_id;  // dma
+    size_t real_track_id{};                // counter: rocpd_track id for sample.track_id
 };
 
 struct reader_t::impl
@@ -82,10 +82,12 @@ struct reader_t::impl
 
     // Track-scoped event queries
     [[nodiscard]] reader_types::interval_event_list_t get_interval_track(
-        size_t track_id, const reader_types::event_filter_t& filter);
+        size_t                              track_id,
+        const reader_types::event_filter_t& filter);
 
     [[nodiscard]] reader_types::scalar_event_list_t get_scalar_track(
-        size_t track_id, const reader_types::event_filter_t& filter);
+        size_t                              track_id,
+        const reader_types::event_filter_t& filter);
 
     [[nodiscard]] reader_types::flow_list_t get_flows(
         const reader_types::event_filter_t& filter);

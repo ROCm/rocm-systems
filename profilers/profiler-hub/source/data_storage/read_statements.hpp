@@ -1606,10 +1606,9 @@ private:
                 fmt::format("SELECT DISTINCT track_id FROM rocpd_sample_{}", u),
                 &sample_track_id_result::track_id);
 
-        m_max_track_id =
-            m_backend->create_read_statement_executor<max_track_id_result>(
-                fmt::format("SELECT MAX(id) FROM rocpd_track_{}", u),
-                &max_track_id_result::max_id);
+        m_max_track_id = m_backend->create_read_statement_executor<max_track_id_result>(
+            fmt::format("SELECT MAX(id) FROM rocpd_track_{}", u),
+            &max_track_id_result::max_id);
 
         m_counter_track_names =
             m_backend->create_read_statement_executor<counter_track_name_result>(
@@ -1658,10 +1657,11 @@ private:
         auto make_mc_interval = [&](const char* qs_clause, auto bind_tag) {
             using bt = decltype(bind_tag);
             return m_backend->create_read_statement_executor<interval_row_result, bt>(
-                fmt::format("SELECT id, start, \"end\", name_id FROM rocpd_memory_copy_{} "
-                            "WHERE nid = ? AND pid = ? AND {} ORDER BY start",
-                            u,
-                            qs_clause),
+                fmt::format(
+                    "SELECT id, start, \"end\", name_id FROM rocpd_memory_copy_{} "
+                    "WHERE nid = ? AND pid = ? AND {} ORDER BY start",
+                    u,
+                    qs_clause),
                 &interval_row_result::id,
                 &interval_row_result::start,
                 &interval_row_result::end,
@@ -1671,31 +1671,29 @@ private:
         m_memory_copy_interval_qs =
             make_mc_interval("queue_id = ? AND stream_id = ?",
                              bind_types<size_t, size_t, size_t, size_t>{});
-        m_memory_copy_interval_q_only =
-            make_mc_interval("queue_id = ? AND stream_id IS NULL",
-                             bind_types<size_t, size_t, size_t>{});
-        m_memory_copy_interval_s_only =
-            make_mc_interval("queue_id IS NULL AND stream_id = ?",
-                             bind_types<size_t, size_t, size_t>{});
-        m_memory_copy_interval_neither =
-            make_mc_interval("queue_id IS NULL AND stream_id IS NULL",
-                             bind_types<size_t, size_t>{});
+        m_memory_copy_interval_q_only = make_mc_interval(
+            "queue_id = ? AND stream_id IS NULL", bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_interval_s_only = make_mc_interval(
+            "queue_id IS NULL AND stream_id = ?", bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_interval_neither = make_mc_interval(
+            "queue_id IS NULL AND stream_id IS NULL", bind_types<size_t, size_t>{});
     }
 
     void initialize_scalar_track_statements()
     {
         const auto& u = m_uuid;
 
-        m_scalar_track = m_backend->create_read_statement_executor<scalar_row_result,
-                                                                   bind_types<size_t>>(
-            fmt::format("SELECT s.id, s.timestamp, p.value "
-                        "FROM rocpd_sample_{u} s "
-                        "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id "
-                        "WHERE s.track_id = ? ORDER BY s.timestamp",
-                        fmt::arg("u", u)),
-            &scalar_row_result::id,
-            &scalar_row_result::timestamp,
-            &scalar_row_result::value);
+        m_scalar_track =
+            m_backend
+                ->create_read_statement_executor<scalar_row_result, bind_types<size_t>>(
+                    fmt::format("SELECT s.id, s.timestamp, p.value "
+                                "FROM rocpd_sample_{u} s "
+                                "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id "
+                                "WHERE s.track_id = ? ORDER BY s.timestamp",
+                                fmt::arg("u", u)),
+                    &scalar_row_result::id,
+                    &scalar_row_result::timestamp,
+                    &scalar_row_result::value);
     }
 
     void initialize_scalar_detail_statement()
@@ -1717,19 +1715,19 @@ private:
             &scalar_detail_result::event_id);
 
         // Keyed on rocpd_pmc_event.id.
-        m_pmc_event_detail = m_backend->create_read_statement_executor<
-            scalar_detail_result,
-            bind_types<size_t>>(
-            fmt::format("SELECT s.id, s.track_id, s.timestamp, p.value, s.event_id "
-                        "FROM rocpd_pmc_event_{u} p "
-                        "JOIN rocpd_sample_{u} s ON s.event_id = p.event_id "
-                        "WHERE p.id = ?",
-                        fmt::arg("u", u)),
-            &scalar_detail_result::id,
-            &scalar_detail_result::track_id,
-            &scalar_detail_result::timestamp,
-            &scalar_detail_result::value,
-            &scalar_detail_result::event_id);
+        m_pmc_event_detail =
+            m_backend->create_read_statement_executor<scalar_detail_result,
+                                                      bind_types<size_t>>(
+                fmt::format("SELECT s.id, s.track_id, s.timestamp, p.value, s.event_id "
+                            "FROM rocpd_pmc_event_{u} p "
+                            "JOIN rocpd_sample_{u} s ON s.event_id = p.event_id "
+                            "WHERE p.id = ?",
+                            fmt::arg("u", u)),
+                &scalar_detail_result::id,
+                &scalar_detail_result::track_id,
+                &scalar_detail_result::timestamp,
+                &scalar_detail_result::value,
+                &scalar_detail_result::event_id);
     }
 
     void initialize_flow_statements()
@@ -1765,11 +1763,9 @@ private:
             return out;
         };
 
-        m_region_to_kernel_dispatch_flows =
-            make_flow_set("rocpd_kernel_dispatch", "K");
-        m_region_to_memory_copy_flows  = make_flow_set("rocpd_memory_copy", "MC");
-        m_region_to_memory_allocate_flows =
-            make_flow_set("rocpd_memory_allocate", "MA");
+        m_region_to_kernel_dispatch_flows = make_flow_set("rocpd_kernel_dispatch", "K");
+        m_region_to_memory_copy_flows     = make_flow_set("rocpd_memory_copy", "MC");
+        m_region_to_memory_allocate_flows = make_flow_set("rocpd_memory_allocate", "MA");
     }
 
     std::shared_ptr<sqlite_backend> m_backend;

@@ -1459,18 +1459,16 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     switch(qi.type)
     {
         case reader_types::track_type_t::cpu_thread:
-            rows = m_read_statements->region_interval_track()(qi.nid,
-                                                              qi.pid,
-                                                              qi.tid.value_or(0))
+            rows = m_read_statements
+                       ->region_interval_track()(qi.nid, qi.pid, qi.tid.value_or(0))
                        .to_vector();
             break;
         case reader_types::track_type_t::gpu_queue:
-            rows = m_read_statements->kernel_dispatch_interval_track()(
-                                        qi.nid,
-                                        qi.pid,
-                                        qi.agent_id.value_or(0),
-                                        qi.queue_id.value_or(0))
-                       .to_vector();
+            rows =
+                m_read_statements
+                    ->kernel_dispatch_interval_track()(
+                        qi.nid, qi.pid, qi.agent_id.value_or(0), qi.queue_id.value_or(0))
+                    .to_vector();
             name_from_kernel_symbol = true;
             break;
         case reader_types::track_type_t::dma:
@@ -1479,22 +1477,23 @@ reader_t::impl::get_interval_track(size_t                              track_id,
             const bool has_s = qi.stream_id.has_value();
             if(has_q && has_s)
             {
-                rows = m_read_statements->memory_copy_interval_qs()(qi.nid,
-                                                                    qi.pid,
-                                                                    qi.queue_id.value(),
-                                                                    qi.stream_id.value())
+                rows = m_read_statements
+                           ->memory_copy_interval_qs()(
+                               qi.nid, qi.pid, qi.queue_id.value(), qi.stream_id.value())
                            .to_vector();
             }
             else if(has_q)
             {
-                rows = m_read_statements->memory_copy_interval_q_only()(
-                                            qi.nid, qi.pid, qi.queue_id.value())
+                rows = m_read_statements
+                           ->memory_copy_interval_q_only()(
+                               qi.nid, qi.pid, qi.queue_id.value())
                            .to_vector();
             }
             else if(has_s)
             {
-                rows = m_read_statements->memory_copy_interval_s_only()(
-                                            qi.nid, qi.pid, qi.stream_id.value())
+                rows = m_read_statements
+                           ->memory_copy_interval_s_only()(
+                               qi.nid, qi.pid, qi.stream_id.value())
                            .to_vector();
             }
             else
@@ -1546,11 +1545,12 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     // levels are stable regardless of any time-window filter applied afterwards.
     compute_interval_nesting(events);
 
-    // Optional time-window filter (containment: start >= window.start, end <= window.end).
+    // Optional time-window filter (containment: start >= window.start, end <=
+    // window.end).
     if(filter.time_window.start.has_value() || filter.time_window.end.has_value())
     {
-        const auto& lo = filter.time_window.start;
-        const auto& hi = filter.time_window.end;
+        const auto&                         lo = filter.time_window.start;
+        const auto&                         hi = filter.time_window.end;
         reader_types::interval_event_list_t filtered;
         filtered.reserve(events.size());
         for(auto& ev : events)
@@ -1607,19 +1607,18 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
     const bool has_window =
         filter.time_window.start.has_value() || filter.time_window.end.has_value();
     const size_t lo = filter.time_window.start.value_or(0);
-    const size_t hi =
-        filter.time_window.end.value_or(std::numeric_limits<size_t>::max());
+    const size_t hi = filter.time_window.end.value_or(std::numeric_limits<size_t>::max());
 
-    auto run = [&](const data_storage::schema_v3::read_statements::flow_statement_set&
-                       set) {
-        auto rows = has_window ? set.time_filtered(lo, hi).to_vector()
-                               : set.base().to_vector();
-        flows.reserve(flows.size() + rows.size());
-        for(const auto& r : rows)
-        {
-            flows.push_back(reader_types::flow_t{ r.source_id, r.dest_id });
-        }
-    };
+    auto run =
+        [&](const data_storage::schema_v3::read_statements::flow_statement_set& set) {
+            auto rows = has_window ? set.time_filtered(lo, hi).to_vector()
+                                   : set.base().to_vector();
+            flows.reserve(flows.size() + rows.size());
+            for(const auto& r : rows)
+            {
+                flows.push_back(reader_types::flow_t{ r.source_id, r.dest_id });
+            }
+        };
 
     run(m_read_statements->region_to_kernel_dispatch_flows());
     run(m_read_statements->region_to_memory_copy_flows());
@@ -1670,7 +1669,7 @@ reader_t::impl::get_sample_details(size_t opaque_id)
     auto rows = m_read_statements->scalar_detail()(opaque_id).to_vector();
     if(rows.empty()) return std::nullopt;
 
-    const auto& r = rows.front();
+    const auto&                 r = rows.front();
     reader_types::sample_data_t data;
     data.timestamp = r.timestamp;
 
