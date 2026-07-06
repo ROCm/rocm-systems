@@ -104,9 +104,6 @@ enable_sgpr_kernarg_segment_ptr = 1
 compute_pgm_rsrc1_sgprs = CopyAlignedRsrc1SGPRs
 compute_pgm_rsrc1_vgprs = CopyAlignedRsrc1VGPRs
 
-  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor == 5)
-    v_nop
-  .endif
 
   s_load_dwordx4  s[4:7], s[0:1], 0x0
   s_load_dwordx4  s[8:11], s[0:1], 0x10

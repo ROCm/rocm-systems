@@ -3463,212 +3463,6 @@ def test_is_workload_empty_pandas_import_dependency():
 
 
 # =============================================================================
-# TESTS FOR merge_counters_spatial_multiplex FUNCTION
-# =============================================================================
-
-
-def test_merge_counters_spatial_multiplex_basic_functionality():
-    """
-    Test merge_counters_spatial_multiplex with basic multi-index DataFrame.
-
-    Returns:
-        None: Asserts function correctly merges counter values for spatial multiplexing.
-    """
-    import pandas as pd
-
-    data = {
-        "Dispatch_ID": [1, 2, 3, 4, 5, 6],
-        "GPU_ID": [0, 0, 1, 1, 2, 2],
-        "Grid_Size": [64, 128, 256, 512, 1024, 2048],
-        "Workgroup_Size": [16, 32, 64, 32, 64, 128],
-        "LDS_Per_Workgroup": [1024, 2048, 4096, 2048, 4096, 8192],
-        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0],
-        "Arch_VGPR": [32, 64, 96, 64, 96, 128],
-        "Accum_VGPR": [0, 0, 0, 0, 0, 0],
-        "SGPR": [16, 32, 48, 32, 48, 64],
-        "Wave_Size": [64, 64, 64, 64, 64, 64],
-        "Correlation_ID": [1001, 1002, 1003, 2001, 2002, 2003],
-        "Kernel_ID": [501, 502, 503, 601, 602, 603],
-        "Kernel_Name": [
-            "kernel_a",
-            "kernel_a",
-            "kernel_b",
-            "kernel_c",
-            "kernel_c",
-            "kernel_d",
-        ],
-        "Start_Timestamp": [1000, 1100, 2000, 3000, 3100, 4000],
-        "End_Timestamp": [1200, 1300, 2500, 3400, 3500, 4800],
-        "Counter1": [100, 200, 300, 400, 500, 600],
-    }
-    df = pd.DataFrame(data)
-
-    result = utils_analysis.merge_counters_spatial_multiplex(df)
-
-    assert isinstance(result, pd.DataFrame)
-
-
-def test_merge_counters_spatial_multiplex_kernel_name_fallback():
-    """
-    Test merge_counters_spatial_multiplex when Kernel_Name is missing but Name exists.
-
-    Returns:
-        None: Asserts function uses Name column when Kernel_Name is not available.
-    """
-    import pandas as pd
-
-    data = {
-        "Dispatch_ID": [1, 2],
-        "GPU_ID": [0, 0],
-        "Grid_Size": [64, 128],
-        "Workgroup_Size": [16, 32],
-        "LDS_Per_Workgroup": [1024, 2048],
-        "Scratch_Per_Workitem": [0, 0],
-        "Arch_VGPR": [32, 64],
-        "Accum_VGPR": [0, 0],
-        "SGPR": [16, 32],
-        "Wave_Size": [64, 64],
-        "Correlation_ID": [1001, 1002],
-        "Kernel_ID": [501, 502],
-        "Name": ["kernel_a", "kernel_a"],
-        "Start_Timestamp": [1000, 1100],
-        "End_Timestamp": [1200, 1300],
-        "Counter1": [100, 200],
-    }
-    df = pd.DataFrame(data)
-
-    # The function currently has a bug where it doesn't properly check for 'Kernel_Name'
-    # existence before accessing it, even though it has fallback logic for 'Name'
-    try:
-        result = utils_analysis.merge_counters_spatial_multiplex(df)
-
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) > 0
-
-    except KeyError as e:
-        if "'Kernel_Name'" in str(e):
-            pytest.skip(
-                "Function doesn't properly check for Kernel_Name "
-                "existence before accessing - needs to validate column "
-                "presence in the check condition"
-            )
-        else:
-            raise
-
-
-def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
-    """
-    Test merge_counters_spatial_multiplex with kernels that appear only once.
-
-    Returns:
-        None: Asserts function handles single kernel occurrences correctly.
-    """
-    import pandas as pd
-
-    data = {
-        "Dispatch_ID": [1, 2, 3],
-        "GPU_ID": [0, 1, 2],
-        "Grid_Size": [64, 128, 256],
-        "Workgroup_Size": [16, 32, 64],
-        "LDS_Per_Workgroup": [1024, 2048, 4096],
-        "Scratch_Per_Workitem": [0, 0, 0],
-        "Arch_VGPR": [32, 64, 96],
-        "Accum_VGPR": [0, 0, 0],
-        "SGPR": [16, 32, 48],
-        "Wave_Size": [64, 64, 64],
-        "Correlation_ID": [1001, 1002, 1003],
-        "Kernel_ID": [501, 502, 503],
-        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
-        "Start_Timestamp": [1000, 2000, 3000],
-        "End_Timestamp": [1200, 2500, 3800],
-        "Counter1": [100, 200, 300],
-    }
-    df = pd.DataFrame(data)
-
-    result = utils_analysis.merge_counters_spatial_multiplex(df)
-
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3
-
-
-def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
-    """
-    Test merge_counters_spatial_multiplex with multiple kernels having duplicates.
-
-    Returns:
-        None: Asserts function correctly handles multiple kernel duplicates.
-    """
-    import pandas as pd
-
-    data = {
-        "Dispatch_ID": [1, 2, 3, 4, 5, 6],
-        "GPU_ID": [0, 0, 1, 1, 2, 2],
-        "Grid_Size": [64, 64, 128, 128, 256, 256],
-        "Workgroup_Size": [16, 16, 32, 32, 64, 64],
-        "LDS_Per_Workgroup": [1024, 1024, 2048, 2048, 4096, 4096],
-        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0],
-        "Arch_VGPR": [32, 32, 64, 64, 96, 96],
-        "Accum_VGPR": [0, 0, 0, 0, 0, 0],
-        "SGPR": [16, 16, 32, 32, 48, 48],
-        "Wave_Size": [64, 64, 64, 64, 64, 64],
-        "Correlation_ID": [1001, 1002, 1003, 1004, 1005, 1006],
-        "Kernel_ID": [501, 502, 503, 504, 505, 506],
-        "Kernel_Name": [
-            "kernel_a",
-            "kernel_a",
-            "kernel_b",
-            "kernel_b",
-            "kernel_c",
-            "kernel_c",
-        ],
-        "Start_Timestamp": [1000, 1100, 2000, 2100, 3000, 3100],
-        "End_Timestamp": [1200, 1300, 2500, 2600, 3800, 3900],
-        "Counter1": [100, 200, 300, 400, 500, 600],
-    }
-    df = pd.DataFrame(data)
-
-    result = utils_analysis.merge_counters_spatial_multiplex(df)
-
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3
-
-
-def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
-    """
-    Test merge_counters_spatial_multiplex timestamp median calculations.
-
-    Returns:
-        None: Asserts function correctly calculates median timestamps.
-    """
-    import pandas as pd
-
-    data = {
-        "Dispatch_ID": [1, 2, 3],
-        "GPU_ID": [0, 0, 0],
-        "Grid_Size": [64, 64, 64],
-        "Workgroup_Size": [16, 16, 16],
-        "LDS_Per_Workgroup": [1024, 1024, 1024],
-        "Scratch_Per_Workitem": [0, 0, 0],
-        "Arch_VGPR": [32, 32, 32],
-        "Accum_VGPR": [0, 0, 0],
-        "SGPR": [16, 16, 16],
-        "Wave_Size": [64, 64, 64],
-        "Correlation_ID": [1001, 1002, 1003],
-        "Kernel_ID": [501, 502, 503],
-        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
-        "Start_Timestamp": [1000, 1200, 1400],
-        "End_Timestamp": [1500, 1700, 1900],
-        "Counter1": [100, 200, 300],
-    }
-    df = pd.DataFrame(data)
-
-    result = utils_analysis.merge_counters_spatial_multiplex(df)
-
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 1
-
-
-# =============================================================================
 # Tests for convert_metric_id_to_panel_info function
 # ============================================================================
 
@@ -5284,6 +5078,7 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     import fcntl
 
     import roofline.benchmark.benchmark_base as benchmark_base
+    from utils import utils_profile
 
     # --- Setup: redirect lock directory to temp path ---
     lock_dir = tmp_path / "locks"
@@ -5333,7 +5128,7 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
         if call_count["count"] == 1 and (op & fcntl.LOCK_NB):
             raise BlockingIOError("Lock held by another process")
 
-    monkeypatch.setattr(benchmark_base.fcntl, "flock", mock_flock)
+    monkeypatch.setattr(utils_profile.fcntl, "flock", mock_flock)
 
     with testClass.gpu_benchmark_lock(deviceID):
         pass
@@ -5342,6 +5137,106 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     assert "Waiting for GPU 0" in output
     assert "another rocprof-compute benchmark is in progress" in output
     assert "Acquired lock for GPU 0" in output
+
+
+@pytest.mark.misc
+def test_file_lock_creates_world_rw_file(tmp_path):
+    """A freshly created lock file must be world-rw (0o666) regardless of umask."""
+    import os
+    import stat
+
+    from utils import utils_profile
+
+    lock_file = tmp_path / "shared.lock"
+
+    # Force a strict umask that would otherwise leave the file owner-only.
+    old_umask = os.umask(0o077)
+    try:
+        with utils_profile.file_lock(lock_file):
+            assert lock_file.exists()
+    finally:
+        os.umask(old_umask)
+
+    file_mode = stat.S_IMODE(os.stat(lock_file).st_mode)
+    assert file_mode == 0o666, (
+        f"Lock file must be world-rw so any user can acquire it; got "
+        f"{oct(file_mode)}. A non-0o666 lock file locks out other users."
+    )
+
+
+@pytest.mark.misc
+def test_file_lock_does_not_change_process_umask(tmp_path, monkeypatch):
+    """Lock creation must not change process-global umask."""
+    from utils import utils_profile
+
+    def fail_if_called(_mask):
+        raise AssertionError("file_lock must not call os.umask()")
+
+    monkeypatch.setattr(utils_profile.os, "umask", fail_if_called)
+
+    with utils_profile.file_lock(tmp_path / "shared.lock"):
+        pass
+
+
+@pytest.mark.misc
+def test_file_lock_existing_file_owned_by_other_user(tmp_path, monkeypatch):
+    """A lock file owned by another user (no write access) is still lockable."""
+    import os
+
+    from utils import utils_profile
+
+    lock_file = tmp_path / "shared.lock"
+    # Pre-create the lock file (as if another user created it first).
+    lock_file.touch()
+
+    real_os_open = os.open
+    opened_modes = []
+
+    def fake_os_open(path, flags, *args):
+        if flags & os.O_EXCL:
+            # Let the create-only attempt fail naturally (file exists).
+            return real_os_open(path, flags, *args)
+        if flags & os.O_RDWR:
+            opened_modes.append("rw")
+            raise PermissionError(13, "Permission denied")
+        opened_modes.append("ro")
+        return real_os_open(path, flags, *args)
+
+    monkeypatch.setattr(utils_profile.os, "open", fake_os_open)
+
+    acquired = False
+    with utils_profile.file_lock(lock_file):
+        acquired = True
+
+    assert acquired, "Lock must be acquired via read-only fallback"
+    assert opened_modes == ["rw", "ro"], (
+        "Should attempt read-write first, then fall back to read-only"
+    )
+
+
+@pytest.mark.misc
+def test_file_lock_unopenable_file_raises(tmp_path, monkeypatch):
+    """If the lock file cannot be opened at all, raise an actionable error."""
+    import os
+
+    from utils import utils_profile
+
+    lock_file = tmp_path / "shared.lock"
+    lock_file.touch()
+
+    real_os_open = os.open
+
+    def fake_os_open(path, flags, *args):
+        if flags & os.O_EXCL:
+            # Let the create-only attempt fail naturally (file exists).
+            return real_os_open(path, flags, *args)
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(utils_profile.os, "open", fake_os_open)
+
+    with pytest.raises(RuntimeError, match="Cannot open lock file"):
+        with utils_profile.file_lock(lock_file):
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -6235,7 +6130,7 @@ def test_display_empty_inputs():
     assert get_matched_torch_operators_for_display({"x": pd.DataFrame()}, []) == []
 
 
-# -- parse_torch_operator_patterns ------------------------------------------
+# -- parse_operator_patterns (torch_operator) -------------------------------
 
 
 @pytest.mark.torch_ops
@@ -6243,13 +6138,13 @@ def test_parse_patterns_basic():
     """Single and multiple patterns are parsed correctly."""
     from argparse import Namespace
 
-    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     args = Namespace(torch_operator=["relu"])
-    assert parse_torch_operator_patterns(args) == ["relu"]
+    assert parse_operator_patterns(args, "torch_operator") == ["relu"]
 
     args = Namespace(torch_operator=["relu", "conv2d"])
-    assert parse_torch_operator_patterns(args) == ["relu", "conv2d"]
+    assert parse_operator_patterns(args, "torch_operator") == ["relu", "conv2d"]
 
 
 @pytest.mark.torch_ops
@@ -6257,10 +6152,10 @@ def test_parse_patterns_comma_split():
     """Comma-separated patterns in a single arg are split."""
     from argparse import Namespace
 
-    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     args = Namespace(torch_operator=["relu,conv2d"])
-    assert parse_torch_operator_patterns(args) == ["relu", "conv2d"]
+    assert parse_operator_patterns(args, "torch_operator") == ["relu", "conv2d"]
 
 
 @pytest.mark.torch_ops
@@ -6268,10 +6163,11 @@ def test_parse_patterns_whitespace():
     """Leading/trailing whitespace is stripped."""
     from argparse import Namespace
 
-    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     args = Namespace(torch_operator=["  relu  ", " conv2d , linear "])
-    assert parse_torch_operator_patterns(args) == ["relu", "conv2d", "linear"]
+    result = parse_operator_patterns(args, "torch_operator")
+    assert result == ["relu", "conv2d", "linear"]
 
 
 @pytest.mark.torch_ops
@@ -6279,11 +6175,62 @@ def test_parse_patterns_empty():
     """Flag given with no args defaults to '**'; absent flag returns empty."""
     from argparse import Namespace
 
-    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
-    assert parse_torch_operator_patterns(Namespace(torch_operator=[])) == ["**"]
-    assert parse_torch_operator_patterns(Namespace(torch_operator=None)) == []
-    assert parse_torch_operator_patterns(Namespace()) == []
+    parse = parse_operator_patterns
+    assert parse(Namespace(torch_operator=[]), "torch_operator") == ["**"]
+    assert parse(Namespace(torch_operator=None), "torch_operator") == []
+    assert parse(Namespace(), "torch_operator") == []
+
+
+# -- parse_operator_patterns / triton backend selection ---------------------
+
+
+@pytest.mark.torch_ops
+def test_parse_operator_patterns_generic_attr():
+    """parse_operator_patterns reads the given dest attribute."""
+    from argparse import Namespace
+
+    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
+
+    args = Namespace(triton_operator=["*matmul*,*softmax*"], torch_operator=None)
+    assert parse_operator_patterns(args, "triton_operator") == [
+        "*matmul*",
+        "*softmax*",
+    ]
+    assert parse_operator_patterns(args, "triton_operator") != parse_operator_patterns(
+        args, "torch_operator"
+    )
+    assert parse_operator_patterns(
+        Namespace(triton_operator=[]), "triton_operator"
+    ) == ["**"]
+
+
+@pytest.mark.torch_ops
+def test_filter_by_backend_selects_only_requested_backend():
+    from rocprof_compute_analyze.analysis_cli import cli_analysis
+
+    df = pd.DataFrame({
+        "Operator_Name": ["aten::mm", "triton_matmul", "aten::relu"],
+        "Backend": ["torch", "triton", "torch"],
+    })
+
+    triton_df = cli_analysis._filter_by_backend(df, "triton")
+    assert triton_df["Operator_Name"].tolist() == ["triton_matmul"]
+
+    torch_df = cli_analysis._filter_by_backend(df, "torch")
+    assert torch_df["Operator_Name"].tolist() == ["aten::mm", "aten::relu"]
+
+
+@pytest.mark.torch_ops
+def test_filter_by_backend_without_column_defaults_to_torch():
+    from rocprof_compute_analyze.analysis_cli import cli_analysis
+
+    df = pd.DataFrame({"Operator_Name": ["aten::mm", "aten::relu"]})
+
+    # Without a Backend column, rows are treated as torch.
+    assert len(cli_analysis._filter_by_backend(df, "torch")) == 2
+    assert cli_analysis._filter_by_backend(df, "triton").empty
 
 
 # -- fnmatch_glob_matches ---------------------------------------------------
@@ -6512,13 +6459,13 @@ def test_parse_patterns_star():
     """'*' is passed through as-is by the pattern parser."""
     from argparse import Namespace
 
-    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     args = Namespace(torch_operator=["*"])
-    assert parse_torch_operator_patterns(args) == ["*"]
+    assert parse_operator_patterns(args, "torch_operator") == ["*"]
 
     args = Namespace(torch_operator=["*,torch.relu"])
-    assert parse_torch_operator_patterns(args) == ["*", "torch.relu"]
+    assert parse_operator_patterns(args, "torch_operator") == ["*", "torch.relu"]
 
 
 # =============================================================================
@@ -6622,31 +6569,22 @@ def test_reconfigure_stdio_utf8_end_to_end_makes_non_ascii_print_safe():
     assert raw.getvalue() == "│ box │\n".encode("utf-8")
 
 
-def test_set_cache_sizes_selects_vl1d_by_instance_count():
-    """vL1D is the level-1 data cache with the most instances; that count need
-    not equal the active CU count, which it does not on harvested parts."""
-    from utils.specs import set_cache_sizes
+##############################################################################
+# get_matrix_ops_type Tests
+##############################################################################
 
-    def l1(props, size, instances):
-        return {
-            "cache_properties": props,
-            "cache_size": size,
-            "cache_level": 1,
-            "max_num_cu_shared": 1,
-            "num_cache_instance": instances,
-        }
 
-    # Harvested: vL1D instances (112) exceed active CUs (104). It must still
-    # win over a smaller data cache and an instruction cache.
-    harvested = {
-        "cache": [
-            l1(["DATA_CACHE"], 16, 112),
-            l1(["DATA_CACHE"], 8, 16),
-            l1(["INST_CACHE"], 32, 112),
-        ]
-    }
-    assert set_cache_sizes(104, harvested, num_dies=1)["L1"] == 16 * 1024
+def test_get_matrix_ops_type():
+    """
+    CDNA2/3/4 GPU series should return MFMA.
+    Non-CDNA GPU series should return WMMA, including unknown series or empty str.
+    """
+    from utils.utils_analysis import get_matrix_ops_type
 
-    # Non-harvested: vL1D instances equal active CUs.
-    non_harvested = {"cache": [l1(["DATA_CACHE"], 32, 304), l1(["DATA_CACHE"], 16, 16)]}
-    assert set_cache_sizes(304, non_harvested, num_dies=1)["L1"] == 32 * 1024
+    assert get_matrix_ops_type("MI200") == "MFMA"
+    assert get_matrix_ops_type("MI300") == "MFMA"
+    assert get_matrix_ops_type("MI350") == "MFMA"
+
+    assert get_matrix_ops_type("navi3") == "WMMA"
+    assert get_matrix_ops_type("unknown_series") == "WMMA"
+    assert get_matrix_ops_type("") == "WMMA"

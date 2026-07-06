@@ -298,6 +298,10 @@ static HipCopyKindExt ToCopyKindExt(uint32_t cl_kind) {
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:   return HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT;
     case CL_COMMAND_FILL_BUFFER:            return HIP_COPY_KIND_FILL_EXT;
     case ROCCLR_COMMAND_BATCH_COPY_BUFFER:  return HIP_COPY_KIND_BATCH_EXT;
+    case ROCCLR_COMMAND_BATCH_WRITE_BUFFER:
+      return HIP_COPY_KIND_BATCH_EXT;
+    case ROCCLR_COMMAND_BATCH_READ_BUFFER:
+      return HIP_COPY_KIND_BATCH_EXT;
     default:                                return HIP_COPY_KIND_UNKNOWN_EXT;
   }
 }

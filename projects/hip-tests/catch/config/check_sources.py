@@ -7,7 +7,7 @@ import os
 import re
 import sys
 
-from common import NON_UNIT_GROUPS, iter_group_configs, WARNING, RESET
+from common import NON_UNIT_GROUPS, iter_group_configs, ERROR, WARNING, RESET
 
 CPP_EXTENSIONS = (".cc", ".cpp", ".cxx", ".c++", ".C", ".cp", ".CPP")
 
@@ -78,12 +78,17 @@ def main():
             missing.append(f"  {group}/{name}")
 
     if missing:
+        strict = os.environ.get("THEROCK_REQUIRE_HIP_YAML_ENTRIES", "").strip().lower() in ("1", "true", "yes", "on")
+        level = "ERROR" if strict else "WARNING"
+        color = ERROR if strict else WARNING
         print(
-            f"[check_sources] {WARNING}WARNING: The following Catch2 test cases have no entry in their YAML config:{RESET}",
+            f"[check_sources] {color}{level}: The following Catch2 test cases have no entry in their YAML config:{RESET}",
             file=sys.stderr,
         )
         for entry in missing:
-            print(f"[check_sources] {WARNING}{entry}{RESET}", file=sys.stderr)
+            print(f"[check_sources] {color}{entry}{RESET}", file=sys.stderr)
+        if strict:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -99,6 +99,7 @@
 /projects/rocminfo/**/*.rst                                           @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
 /projects/rocminfo/**/.readthedocs.yaml                               @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
 /projects/rocminfo/docs/                                              @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
+/projects/rocminfo/docs/sphinx                                        @ROCm/rocm-documentation
 
 /projects/rocprofiler-compute/**/*.md                                 @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
 /projects/rocprofiler-compute/**/*.rst                                @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd

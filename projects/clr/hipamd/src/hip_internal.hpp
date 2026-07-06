@@ -75,7 +75,8 @@ enum MemcpyType {
 
 struct Graph;
 struct GraphNode;
-struct GraphExec;
+class GraphExecBase;
+class GraphExecSegmented;
 struct UserObject;
 class Stream;
 
