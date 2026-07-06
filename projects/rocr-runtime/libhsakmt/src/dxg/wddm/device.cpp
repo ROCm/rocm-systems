@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <cinttypes>
+#include <algorithm>
 #include <bitset>
 
 #if defined(__linux__)
@@ -601,13 +602,46 @@ void WDDMDevice::InitCmdbufInfo(void) {
     sizeof(DispatchTemplate) +
     sizeof(AtomicTemplate) * 2;
 
-  // Add safety margin to account for alignment and future additions.
-  // WSL multi-counter PM4 frame headroom: multi-counter (multiple --pmc)
-  // collection makes VendorSpecificAqlToPm4 emit a larger PM4 stream
-  // (~616 bytes) than the base frame size (~544 bytes), overflowing
-  // cmdbuf_aql_frame_size_ ("used 616 bytes, limit 544 bytes"). Enlarge
-  // the margin so multi-counter PM4 fits comfortably with headroom.
-  cmdbuf_aql_frame_size_ += 8192;
+  // WSL multi-counter PM4 frame headroom (computed worst case).
+  //
+  // A vendor-specific (PMC) AQL packet is expanded in
+  // VendorSpecificAqlToPm4() by inlining the aqlprofile-built PM4 IB that
+  // programs and reads the hardware counters, followed by the fixed
+  // completion trailer already budgeted above. That inlined IB is what
+  // overflowed the previous small margin on multi-counter collection
+  // ("used 616 bytes, limit 544 bytes"). Its size grows with the number of
+  // counters in a pass and, per counter, with the number of block instances
+  // the counter is read from, so we size for the worst case here (device
+  // init runs before any --pmc set is known).
+  //
+  // Byte costs use the real gfx11 PM4 packet sizes (see gfx11_cmd_builder.h):
+  //   SET_UCONFIG_REG (GRBM index / control) = 3 dw = 12 B
+  //   COPY_DATA       (select / read)         = 6 dw = 24 B
+  // Per counter, worst case:
+  //   start: GRBM index (12) + select (24) + control (24)      = 60 B -> 64
+  //   read : per instance -> GRBM index (12) + 2x COPY_DATA(48) = 60 B -> 64
+  // The heaviest blocks (WGP-class on gfx11) are read once per WGP, so a
+  // single counter's worst-case read-instance count is the device WGP count
+  // (CU/2); that also upper-bounds the SE*SA fanout of other blocks. SQ (the
+  // largest block) exposes 16 counter slots and a pass may span several
+  // blocks, so we bound a pass at 32 counters. The original 128 B alignment
+  // slack is retained. This scales with device geometry instead of being a
+  // blunt over-allocation, and grows automatically if counter sets grow.
+  constexpr uint32_t kFrameAlignmentMargin    = 128;
+  constexpr uint32_t kPmcFixedOverheadBytes   = 512;  // perfmon ctrl + wait-idle barriers + cache flush + enable
+  constexpr uint32_t kPmcStartBytesPerCounter = 64;
+  constexpr uint32_t kPmcReadBytesPerInstance = 64;
+  constexpr uint32_t kMaxPmcCountersPerPass   = 32;
+
+  const uint32_t wgp_count = std::max<uint32_t>(1u, ComputeUnitCount() / 2);
+  const uint32_t sesa =
+    std::max<uint32_t>(1u, NumShaderEngine() * ShaderArrayPerShaderEngine());
+  const uint32_t max_counter_instances = std::max(wgp_count, sesa);
+  const uint32_t per_counter_bytes =
+    kPmcStartBytesPerCounter + max_counter_instances * kPmcReadBytesPerInstance;
+
+  cmdbuf_aql_frame_size_ += kFrameAlignmentMargin + kPmcFixedOverheadBytes +
+                            kMaxPmcCountersPerPass * per_counter_bytes;
 
   cmdbuf_aql_frame_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
 
