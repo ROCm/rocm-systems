@@ -1621,7 +1621,7 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"SPM_DISPATCH_COLLECTION", &spm_dispatch_collection_ctx},
     {"SPM_BUFFER_DISPATCH_COLLECTION", &spm_buffer_dispatch_collection_ctx}};
 
-auto buffers = std::array<rocprofiler_buffer_id_t*, 24>{&runtime_init_buffered_buffer,
+auto buffers = std::array<rocprofiler_buffer_id_t*, 25>{&runtime_init_buffered_buffer,
                                                         &hsa_api_buffered_buffer,
                                                         &hip_api_buffered_buffer,
                                                         &marker_api_buffered_buffer,
