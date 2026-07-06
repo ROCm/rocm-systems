@@ -178,7 +178,6 @@ runs:
         cmake -B build-hipfile \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/amdclang++ \
-          -DCMAKE_CXX_FLAGS="-DHIPFILE_ROCPROFILER_REGISTER=1 -DHIPFILE_ROCP_REG_VERSION_MAJOR=0 -DHIPFILE_ROCP_REG_VERSION_MINOR=2 -DHIPFILE_ROCP_REG_VERSION_PATCH=0" \
           -DCMAKE_HIP_PLATFORM=amd \
           -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
