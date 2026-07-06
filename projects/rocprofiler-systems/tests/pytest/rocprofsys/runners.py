@@ -253,13 +253,13 @@ class BaseRunner(ABC):
                 pass
 
         if self.launcher is type(self).Launcher.SHMEM and command:
-            # PRRTE-based oshrun (Open MPI >= 5.0) strips the first literal
-            # `--` from the program argv, breaking `rocprof-sys-run -- <binary>`.
-            # A second `--` survives, so insert a decoy right after the program
-            # name to absorb the strip. Older ORTE-based oshrun (4.x) preserves
-            # `--` and would forward the decoy verbatim, so gate on version.
-            oshrun_version = self.config.capabilities.oshrun_version
-            if oshrun_version is not None and oshrun_version[0] >= 5:
+            # Some PRRTE-based oshrun builds strip the first literal `--` from
+            # the application argv, breaking `rocprof-sys-run -- <binary>`.
+            # A second `--` survives the strip, so insert a decoy to absorb it.
+            # The condition is probed at runtime (see capabilities.oshrun_strips_double_dash)
+            # rather than checked by version number, because distro packages may
+            # bundle a different PRRTE than the upstream Open MPI tarball.
+            if self.config.capabilities.oshrun_strips_double_dash:
                 command = [command[0], "--"] + command[1:]
 
         return cmd + command
