@@ -434,74 +434,98 @@ get_bdf_info(const rocprofiler_agent_t* agent)
             .function = static_cast<uint8_t>(agent->location_id & 0x07)};
 }
 
+std::vector<aqlprofile_agent_handle_t>&
+get_aql_handles_storage()
+{
+    static auto*& _v =
+        common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct();
+    return *CHECK_NOTNULL(_v);
+}
+
+// (Re)registers every agent with aqlprofile and stores the returned handles.
+// aqlprofile's RegisterAgent caches cu_num/se_num/shader_arrays_per_se at
+// registration time and never updates an existing entry, so the registration
+// must observe the *final* agent topology. On WSL the topology is seeded with
+// placeholders at enumerate time and only refined from the HSA runtime in
+// construct_agent_cache(); the lazy registration below is triggered earlier
+// (during counter/dimension queries at tool init, before HSA is up), so it
+// captures the placeholder cu_count. construct_agent_cache() re-invokes this
+// after the HSA refine so aqlprofile's instance counts (e.g. SQ NumWGPs =
+// cu_num/2) use the real cu_count instead of the placeholder.
+void
+register_aql_handles()
+{
+    auto& agent_handles = get_aql_handles_storage();
+    agent_handles.clear();
+    agent_handles.reserve(get_agents().size());
+
+    for(auto& agent : get_agents())
+    {
+        aqlprofile_agent_handle_t handle = {.handle = 0};
+
+        const auto bdf = get_bdf_info(agent);
+        common::consume_args(bdf);
+
+#if ROCPROFILER_EXTERNAL_AQLPROFILE
+        ROCP_TRACE << fmt::format(
+            "Registering agent {} with external aqlprofile (libhsa-amd-aqlprofile64.so)",
+            agent->name);
+
+        aqlprofile_agent_info_t agent_info = {.agent_gfxip          = agent->name,
+                                              .xcc_num              = agent->num_xcc,
+                                              .se_num               = agent->num_shader_banks,
+                                              .cu_num               = agent->cu_count,
+                                              .shader_arrays_per_se = agent->simd_arrays_per_engine};
+
+        if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "Failed to register agent " << agent->name;
+        }
+#else
+
+        ROCP_TRACE << fmt::format(
+            "Registering agent {:04x}:{:02x}:{:02x}.{:x} :: {} with IP discovery",
+            bdf.domain,
+            bdf.bus,
+            bdf.device,
+            bdf.function,
+            agent->name);
+
+        aqlprofile_agent_info_v1_t agent_info = {
+            .agent_gfxip          = agent->name,
+            .xcc_num              = agent->num_xcc,
+            .se_num               = agent->num_shader_banks,
+            .cu_num               = agent->cu_count,
+            .shader_arrays_per_se = agent->simd_arrays_per_engine,
+            .domain               = agent->domain,
+            .location_id          = agent->location_id,
+        };
+
+        if(aqlprofile_register_agent_info(
+               &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << fmt::format("Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
+                                        bdf.domain,
+                                        bdf.bus,
+                                        bdf.device,
+                                        bdf.function,
+                                        agent->name);
+        }
+#endif
+        agent_handles.push_back(handle);
+    }
+}
+
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
 {
-    static auto*& _v =
-        common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct([]() {
-            std::vector<aqlprofile_agent_handle_t> agent_handles;
+    static const bool _once = []() {
+        register_aql_handles();
+        return true;
+    }();
+    common::consume_args(_once);
 
-            for(auto& agent : get_agents())
-            {
-                aqlprofile_agent_handle_t handle = {.handle = 0};
-
-                const auto bdf = get_bdf_info(agent);
-                common::consume_args(bdf);
-
-#if ROCPROFILER_EXTERNAL_AQLPROFILE
-                ROCP_TRACE << fmt::format(
-                    "Registering agent {} with external aqlprofile (libhsa-amd-aqlprofile64.so)",
-                    agent->name);
-
-                aqlprofile_agent_info_t agent_info = {
-                    .agent_gfxip          = agent->name,
-                    .xcc_num              = agent->num_xcc,
-                    .se_num               = agent->num_shader_banks,
-                    .cu_num               = agent->cu_count,
-                    .shader_arrays_per_se = agent->simd_arrays_per_engine};
-
-                if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
-                {
-                    ROCP_WARNING << "Failed to register agent " << agent->name;
-                }
-#else
-
-                ROCP_TRACE << fmt::format(
-                    "Registering agent {:04x}:{:02x}:{:02x}.{:x} :: {} with IP discovery",
-                    bdf.domain,
-                    bdf.bus,
-                    bdf.device,
-                    bdf.function,
-                    agent->name);
-
-                aqlprofile_agent_info_v1_t agent_info = {
-                    .agent_gfxip          = agent->name,
-                    .xcc_num              = agent->num_xcc,
-                    .se_num               = agent->num_shader_banks,
-                    .cu_num               = agent->cu_count,
-                    .shader_arrays_per_se = agent->simd_arrays_per_engine,
-                    .domain               = agent->domain,
-                    .location_id          = agent->location_id,
-                };
-
-                if(aqlprofile_register_agent_info(
-                       &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
-                {
-                    ROCP_WARNING << fmt::format(
-                        "Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
-                        bdf.domain,
-                        bdf.bus,
-                        bdf.device,
-                        bdf.function,
-                        agent->name);
-                }
-#endif
-                agent_handles.push_back(handle);
-            }
-            return agent_handles;
-        }());
-
-    return *CHECK_NOTNULL(_v);
+    return get_aql_handles_storage();
 }
 }  // namespace
 
@@ -935,6 +959,16 @@ construct_agent_cache(::HsaApiTable* table)
             }
         }
     }
+
+    // On WSL the agent topology above was refined from the HSA runtime, but the
+    // aqlprofile agent registration is built lazily and is triggered during
+    // counter/dimension queries at tool init (before HSA is initialized), so it
+    // cached the enumerate-time placeholder cu_count. aqlprofile never updates an
+    // existing registration, so re-register here with the now-refined topology;
+    // otherwise aqlprofile's instance counts (e.g. SQ NumWGPs = cu_num/2) stay
+    // derived from the placeholder. The KFD (bare-metal) path carries
+    // authoritative topology from enumeration and is left untouched.
+    if(is_wsl_platform_selected()) register_aql_handles();
 }
 
 std::optional<hsa_agent_t>
