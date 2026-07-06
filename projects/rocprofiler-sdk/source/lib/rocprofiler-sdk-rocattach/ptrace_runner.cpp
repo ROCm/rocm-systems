@@ -229,8 +229,8 @@ public:
                 return;
             }
 
-            // Plain read: wait_for_eq uses seq_cst load, which provides acquire semantics,
-            // so all result writes by the worker thread are already visible here.
+            // Plain read: wait_for_eq currently uses the default seq_cst load, which provides
+            // acquire semantics. If wait_for_eq changes to a relaxed load, this must be revisited.
             ptrace_data = runner_data.data;
 
             // If detaching, join the thread and remove its references
