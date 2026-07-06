@@ -119,6 +119,45 @@ public:
     VgprStorage *storage_ = nullptr;
   };
 
+  class OperandWrite64View {
+  public:
+    OperandWrite64View() = default;
+
+    bool has_storage() const { return storage_.lo != nullptr; }
+
+    template <typename T>
+    void store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
+      static_assert(sizeof(T) == sizeof(uint64_t), "store_native expects 64-bit lanes");
+      assert(op_ && wf_ && "OperandWrite64View is empty");
+      if (storage_.lo) {
+        storage_.lo->template simd_store64<T>(*storage_.hi, lane_base, value, lane_mask);
+        return;
+      }
+      constexpr std::size_t W = util::native_width64;
+      alignas(util::native<T>) uint64_t buf[W];
+      util::stdx::native_simd<uint64_t> bits = [&] {
+        if constexpr (std::is_same_v<T, uint64_t>)
+          return value;
+        else
+          return std::bit_cast<util::stdx::native_simd<uint64_t>>(value);
+      }();
+      bits.copy_to(buf, util::stdx::vector_aligned);
+      for (std::size_t i = 0; i < W; ++i)
+        if (lane_mask & (1ULL << i))
+          op_->write_lane64(*wf_, lane_base + static_cast<uint32_t>(i), buf[i]);
+    }
+
+  private:
+    friend class RegisterAccess;
+
+    OperandWrite64View(const Operand &op, Wavefront &wf, VgprStoragePair64 storage)
+        : op_(&op), wf_(&wf), storage_(storage) {}
+
+    const Operand *op_ = nullptr;
+    Wavefront *wf_ = nullptr;
+    VgprStoragePair64 storage_{};
+  };
+
   class OperandRead64View {
   public:
     OperandRead64View() = default;
@@ -279,6 +318,11 @@ public:
 
   OperandWriteView write_operand(const Operand &op, Wavefront &wf, uint64_t /*lane_mask*/) const {
     return OperandWriteView(op, wf, SimdAccess::vgpr_storage_mut(op, wf));
+  }
+
+  OperandWrite64View write_operand64(const Operand &op, Wavefront &wf,
+                                     uint64_t /*lane_mask*/) const {
+    return OperandWrite64View(op, wf, SimdAccess::vgpr_storage64_mut(op, wf));
   }
 
   uint32_t read_vgpr(uint32_t physical_reg, uint32_t lane, uint8_t byte_mask = 0xF) const {

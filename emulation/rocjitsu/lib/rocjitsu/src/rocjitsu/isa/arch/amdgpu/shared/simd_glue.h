@@ -515,14 +515,8 @@ template <typename T, typename Op>
 inline void write_simd(const Op &op, Wavefront &wf, uint32_t lane_base, util::native<T> v,
                        uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint32_t));
-  constexpr std::size_t W = util::native_width_v<T>;
-  if (VgprStorage *r = SimdAccess::vgpr_storage_mut(op, wf)) {
-    r->template simd_store<T>(lane_base, v, mask);
-    return;
-  }
-  alignas(util::native<T>) uint32_t buf[W];
-  util::blit_to_buffer<T>(buf, v);
-  op.write_lane_chunk(wf, lane_base, static_cast<uint32_t>(W), buf, mask);
+  RegisterAccess regs(wf.cu());
+  regs.write_operand(op, wf, mask).template store_native<T>(lane_base, v, mask);
 }
 
 /// Pre-resolved-register counterpart of write_simd, for the 32-bit fast paths
@@ -622,23 +616,8 @@ template <typename T, typename Op>
 inline void write_simd64(const Op &op, Wavefront &wf, uint32_t lane_base, util::native<T> v,
                          uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint64_t));
-  constexpr std::size_t W = util::native_width64;
-  VgprStoragePair64 p = simd_dst_reg64(op, wf);
-  if (p.lo) {
-    p.lo->template simd_store64<T>(*p.hi, lane_base, v, mask);
-    return;
-  }
-  alignas(util::native<T>) uint64_t buf[W];
-  util::stdx::native_simd<uint64_t> bits = [&] {
-    if constexpr (std::is_same_v<T, uint64_t>)
-      return v;
-    else
-      return std::bit_cast<util::stdx::native_simd<uint64_t>>(v);
-  }();
-  bits.copy_to(buf, util::stdx::vector_aligned);
-  for (std::size_t i = 0; i < W; ++i)
-    if (mask & (1ULL << i))
-      op.write_lane64(wf, lane_base + static_cast<uint32_t>(i), buf[i]);
+  RegisterAccess regs(wf.cu());
+  regs.write_operand64(op, wf, mask).template store_native<T>(lane_base, v, mask);
 }
 
 /// Pre-resolved-register counterpart of write_simd64, for the fast paths that
