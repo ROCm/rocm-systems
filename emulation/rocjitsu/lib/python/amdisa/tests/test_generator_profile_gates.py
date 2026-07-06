@@ -3,11 +3,20 @@
 
 from types import SimpleNamespace
 
+from amdisa.__main__ import (
+    _collect_shared_execute_body_variants,
+    _run_multi,
+    _unshared_execute_keys_from_variants,
+)
 from amdisa.codegen import CodeGenerator
 from amdisa.codegen.execute.vector_special import (
+    gen_cvt_fp8,
+    gen_vector_mad_64_32,
     gen_vector_div_scale,
     gen_vector_movrel,
+    gen_vector_cvt_pk,
 )
+from amdisa.codegen.execute.vector_alu import gen_vector_unary
 from amdisa.codegen.execute.matrix import gen_mfma
 from amdisa.codegen.execute.vector_cmp import (
     gen_vector_add_co,
@@ -16,15 +25,44 @@ from amdisa.codegen.execute.vector_cmp import (
     gen_vector_cmpx,
 )
 from amdisa.codegen.execute.simd_codegen import simd_probe_line
+from amdisa.cross_isa import CrossIsaAnalyzer
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import (
+    CdnaProfile,
     Gfx1250Profile,
     Rdna3_5Profile,
     Rdna3Profile,
     Rdna4Profile,
 )
 from amdisa.parser import Parser
-from amdisa.semantics import InstructionSemantics
+from amdisa.semantics import InstructionSemantics, derive_all_semantics
+
+
+def _repo_root():
+    import pathlib
+
+    return pathlib.Path(__file__).resolve().parents[6]
+
+
+def _mrisa_dir():
+    return _repo_root() / 'shared' / 'machine-readable-isa' / 'isa'
+
+
+def _parse_cdna_specs(*names: str):
+    specs = []
+    for name in names:
+        spec = Parser(
+            str(_mrisa_dir() / f'amdgpu_isa_{name}.xml'), CdnaProfile()
+        ).parse()
+        sem = derive_all_semantics(spec)
+        specs.append((name, spec, sem))
+    return specs
+
+
+def _execute_impl_body(source: str, signature: str, next_ctor: str) -> str:
+    start = source.index(signature)
+    end = source.index(next_ctor, start)
+    return source[start:end]
 
 
 def test_simm64_literals_require_operand_type():
@@ -306,6 +344,18 @@ def test_vop3_add_co_writes_explicit_sdst_mask_width_for_wave_size():
     assert 'wf.set_vcc(vcc)' not in body
 
 
+def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
+    body = gen_vector_mad_64_32(['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'u64')
+
+    assert 'uint64_t carry = 0;' in body
+    assert 'uint64_t product = s0 * s1;' in body
+    assert 'if (result < product)' in body
+    assert 'carry |= 1ULL << lane;' in body
+    assert 'sdst.write_scalar(wf, static_cast<uint32_t>(carry));' in body
+    assert 'sdst.write_scalar64(wf, carry);' in body
+    assert 'wf.set_vcc(carry)' not in body
+
+
 def test_vector_cmp_class_writes_explicit_sdst_mask():
     body = gen_vector_cmp_class(
         ['sdst'], ['src0', 'src1'], 'f32', is_cmpx=False, is_vop3=True
@@ -462,6 +512,118 @@ def test_gfx1250_wmma_i32_iu4_emits_executor():
 
     assert 'auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i4' in body
     assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 4, dst, src0_base,' in body
+
+
+def test_cdna3_fp8_mfma_uses_fnuz_helper_variant():
+    inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna3')
+
+    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' in body
+
+
+def test_cdna3_fp8_smfmac_uses_fnuz_readers():
+    inst = Instruction('V_SMFMAC_F32_16X16X64_FP8_BF8', 'ENC_VOP3P_MFMA', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna3')
+
+    assert 'amdgpu::smfmac_read_fp8_fnuz' in body
+    assert 'amdgpu::smfmac_read_bf8_fnuz' in body
+
+
+def test_cdna4_fp8_mfma_keeps_ocp_helper_variant():
+    inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna4')
+
+    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>(' in body
+    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' not in body
+
+
+def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():
+    ctx = SimpleNamespace(
+        dst_ops=['vdst'],
+        src_ops=['src0', 'src1'],
+        is_vop3=True,
+        arch_name='cdna3',
+        enc_field_names={'op_sel'},
+        enc_name='ENC_VOP3',
+        encoding_map=None,
+    )
+
+    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8'))
+    assert 'util::fp8_e4m3_fnuz_to_f32' in widen
+    assert 'util::fp8_e4m3_to_f32' not in widen
+
+    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32'))
+    assert 'util::f32_to_fp8_e4m3_fnuz_rne' in narrow
+    assert 'util::f32_to_fp8_e4m3_rne' not in narrow
+
+    packed = gen_vector_cvt_pk(
+        ['vdst'],
+        ['src0'],
+        'vector_cvt_pk',
+        'f32_bf8',
+        opsel='inst_.op_sel',
+        arch_name='cdna3',
+    )
+    assert 'util::bf8_e5m2_fnuz_to_f32' in packed
+    assert 'util::bf8_e5m2_to_f32' not in packed
+
+    unary = gen_vector_unary(
+        ['vdst'],
+        ['src0'],
+        'cvt_f32_fp8',
+        None,
+        arch_name='cdna3',
+    )
+    assert 'util::fp8_e4m3_fnuz_to_f32' in unary
+    assert 'util::fp8_e4m3_to_f32' not in unary
+
+
+def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
+    ctx = SimpleNamespace(
+        dst_ops=['vdst'],
+        src_ops=['src0', 'src1'],
+        is_vop3=True,
+        arch_name='cdna4',
+        enc_field_names={'op_sel'},
+        enc_name='ENC_VOP3',
+        encoding_map=None,
+    )
+
+    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8'))
+    assert 'util::fp8_e4m3_to_f32' in widen
+    assert 'util::fp8_e4m3_fnuz_to_f32' not in widen
+
+    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32'))
+    assert 'util::f32_to_fp8_e4m3_rne' in narrow
+    assert 'util::f32_to_fp8_e4m3_fnuz_rne' not in narrow
+
+    unary = gen_vector_unary(
+        ['vdst'],
+        ['src0'],
+        'cvt_f32_fp8',
+        None,
+        arch_name='cdna4',
+    )
+    assert 'util::fp8_e4m3_to_f32' in unary
+    assert 'util::fp8_e4m3_fnuz_to_f32' not in unary
+
+
+def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
+    operands = [
+        Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
+        Operand('src0', 64, 'OPR_SRC_VGPR', True, False, False, False, 1),
+        Operand('src1', 64, 'OPR_SRC_VGPR', True, False, False, False, 2),
+        Operand('src2', 256, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
+    ]
+    inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, operands)
+
+    for arch in ('cdna3', 'cdna4'):
+        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
+        assert 's2, const_acc, inst_.blgp);' in body
+
+    for arch in ('rdna3', 'rdna4', 'gfx1250'):
+        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
+        assert 's2, const_acc, 0u);' in body
 
 
 def test_div_scale_uses_signed_tiny_exponent_threshold():
@@ -733,6 +895,199 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp():
     assert 'src0.clear_delegate();' in body
 
 
+def test_cdna_generated_dpp_cleanup_uses_full_write_mask():
+    import pathlib
+
+    amdgpu_root = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+    )
+
+    for arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+        arch_root = amdgpu_root / arch
+        vop1 = (arch_root / 'vop1.cpp').read_text()
+        vopc = (arch_root / 'vopc.cpp').read_text()
+
+        start = vop1.index('void VMovB32Vop1::execute_impl')
+        end = vop1.index('VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1', start)
+        body = vop1[start:end]
+        assert 'amdgpu::dpp::dpp_write_mask(' in body
+        assert 'dpp_bound_ctrl_' in body
+
+        start = vopc.index('void VCmpEqU32Vopc::execute_impl')
+        end = vopc.index('VCmpLeU32Vopc::VCmpLeU32Vopc', start)
+        body = vopc[start:end]
+        assert 'amdgpu::dpp::dpp_write_mask(' in body
+        assert 'dpp_bound_ctrl_' in body
+
+
+def test_generated_cmpx_dpp_cleanup_preserves_exec():
+    import pathlib
+
+    amdgpu_root = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+    )
+
+    vopc_paths = {
+        'cdna1': amdgpu_root / 'cdna1' / 'vopc.cpp',
+        'cdna2': amdgpu_root / 'cdna2' / 'vopc.cpp',
+        'cdna3': amdgpu_root / 'cdna3' / 'vopc.cpp',
+        'cdna4': amdgpu_root / 'cdna4' / 'vopc.cpp',
+        'rdna1': amdgpu_root / 'rdna1' / 'vopc.cpp',
+        'rdna2': amdgpu_root / 'rdna2' / 'vopc.cpp',
+        'rdna3': amdgpu_root / 'rdna3' / 'vopc.cpp',
+        'rdna3_5': amdgpu_root / 'rdna3_5' / 'vopc.cpp',
+        'rdna4': amdgpu_root / 'rdna4' / 'vopc.cpp',
+        'gfx1250': amdgpu_root / 'gfx1250' / 'vopc_cmpx.cpp',
+    }
+
+    for arch, path in vopc_paths.items():
+        vopc = path.read_text()
+
+        start = vopc.index('void VCmpxEqU32Vopc::execute_impl')
+        end = vopc.index('VCmpxLeU32Vopc::VCmpxLeU32Vopc', start)
+        body = vopc[start:end]
+        assert 'uint64_t dpp_old_exec_ = wf.exec();' in body, arch
+        assert 'uint64_t new_exec = wf.exec();' in body, arch
+        assert 'dpp_old_exec_ & ~dpp_write_mask_' in body, arch
+        assert 'wf.set_exec(merged_exec);' in body, arch
+
+
+def test_shared_execute_preflight_detects_cdna3_fp8_cvt_divergence():
+    specs = _parse_cdna_specs('cdna3', 'cdna4')
+    plan = CrossIsaAnalyzer().analyze(specs)
+
+    variants = _collect_shared_execute_body_variants(specs, plan)
+    unshared = _unshared_execute_keys_from_variants(variants)
+
+    fp8_cvt_keys = {
+        ('v_cvt_f32_fp8', 'ENC_VOP1'),
+        ('v_cvt_f32_fp8', 'ENC_VOP3'),
+        ('v_cvt_f32_bf8', 'ENC_VOP1'),
+        ('v_cvt_f32_bf8', 'ENC_VOP3'),
+    }
+    assert fp8_cvt_keys <= unshared
+
+    vop1_fp8_variants = variants[('v_cvt_f32_fp8', 'ENC_VOP1')]
+    assert 'util::fp8_e4m3_fnuz_to_f32' in vop1_fp8_variants['cdna3'][2]
+    assert 'util::fp8_e4m3_to_f32' in vop1_fp8_variants['cdna4'][2]
+    assert 'util::fp8_e4m3_fnuz_to_f32' not in vop1_fp8_variants['cdna4'][2]
+
+
+def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
+    args = SimpleNamespace(
+        multi=[
+            f'cdna3:{_mrisa_dir() / "amdgpu_isa_cdna3.xml"}',
+            f'cdna4:{_mrisa_dir() / "amdgpu_isa_cdna4.xml"}',
+        ],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+
+    _run_multi(args)
+
+    shared = (tmp_path / 'shared' / 'execute_shared.h').read_text()
+    cdna3_vop1 = (tmp_path / 'cdna3' / 'vop1.cpp').read_text()
+    cdna4_vop1 = (tmp_path / 'cdna4' / 'vop1.cpp').read_text()
+
+    assert 'inline void execute_v_cvt_f32_fp8_vop1' not in shared
+    assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
+    assert 'util::fp8_e4m3_fnuz_to_f32' not in shared
+
+    cdna3_fp8_body = _execute_impl_body(
+        cdna3_vop1,
+        'void VCvtF32Fp8Vop1::execute_impl',
+        'VCvtF32Bf8Vop1::VCvtF32Bf8Vop1',
+    )
+    cdna4_fp8_body = _execute_impl_body(
+        cdna4_vop1,
+        'void VCvtF32Fp8Vop1::execute_impl',
+        'VCvtF32Bf8Vop1::VCvtF32Bf8Vop1',
+    )
+
+    assert 'util::fp8_e4m3_fnuz_to_f32' in cdna3_fp8_body
+    assert 'util::fp8_e4m3_to_f32' in cdna4_fp8_body
+    assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_fp8_body
+    assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna3_fp8_body
+    assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna4_fp8_body
+
+
+def test_cdna3_generated_cvt_and_mfma_use_same_fnuz_format():
+    import pathlib
+
+    amdgpu_root = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+    )
+    cdna3_vop1 = (amdgpu_root / 'cdna3' / 'vop1.cpp').read_text()
+    cdna3_vop3 = (amdgpu_root / 'cdna3' / 'vop3.cpp').read_text()
+    cdna3_vop3p = (amdgpu_root / 'cdna3' / 'vop3p.cpp').read_text()
+
+    assert 'util::fp8_e4m3_fnuz_to_f32' in cdna3_vop1
+    assert 'util::bf8_e5m2_fnuz_to_f32' in cdna3_vop1
+    assert 'util::fp8_e4m3_fnuz_to_f32' in cdna3_vop3
+    assert 'util::bf8_e5m2_fnuz_to_f32' in cdna3_vop3
+    assert 'util::f32_to_fp8_e4m3_fnuz_rne' in cdna3_vop3
+    assert 'util::f32_to_bf8_e5m2_fnuz_rne' in cdna3_vop3
+    assert 'util::f32_to_fp8_e4m3_fnuz_sr' in cdna3_vop3
+    assert 'util::f32_to_bf8_e5m2_fnuz_sr' in cdna3_vop3
+    assert 'amdgpu::smfmac_read_fp8_fnuz' in cdna3_vop3p
+    assert 'amdgpu::smfmac_read_bf8_fnuz' in cdna3_vop3p
+
+
+def test_cdna4_generated_cvt_keeps_ocp_format():
+    import pathlib
+
+    amdgpu_root = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+    )
+    shared = (amdgpu_root / 'shared' / 'execute_shared.h').read_text()
+    cdna4_vop1 = (amdgpu_root / 'cdna4' / 'vop1.cpp').read_text()
+    cdna4_vop3 = (amdgpu_root / 'cdna4' / 'vop3.cpp').read_text()
+
+    assert 'inline void execute_v_cvt_f32_fp8_vop1' not in shared
+    assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
+    assert 'inline void execute_v_cvt_f32_fp8_vop3' not in shared
+    assert 'inline void execute_v_cvt_f32_bf8_vop3' not in shared
+    assert 'util::fp8_e4m3_to_f32' in cdna4_vop1
+    assert 'util::bf8_e5m2_to_f32' in cdna4_vop1
+    assert 'util::fp8_e4m3_to_f32' in cdna4_vop3
+    assert 'util::bf8_e5m2_to_f32' in cdna4_vop3
+    assert 'util::f32_to_fp8_e4m3_rne' in cdna4_vop3
+    assert 'util::fp8_e4m3_fnuz_to_f32' not in shared
+    assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop1
+    assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop3
+    assert 'util::f32_to_fp8_e4m3_fnuz_rne' not in cdna4_vop3
+
+
 def test_generated_vop3_dot2_true16_uses_true16_helpers():
     import pathlib
 
@@ -902,7 +1257,7 @@ def test_rdna4_swmmac_uses_32_index_entries_for_wide_8bit_k():
     assert 'index_base, 32, index_key, amdgpu::extract_fp8, amdgpu::extract_fp8' in body
 
 
-def test_gfx1250_generated_fp8_vop3_shared_byte_select_uses_inst_member():
+def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member():
     import pathlib
 
     source_root = pathlib.Path(__file__).resolve().parents[4]
@@ -919,16 +1274,7 @@ def test_gfx1250_generated_fp8_vop3_shared_byte_select_uses_inst_member():
         / 'execute_shared.h'
     ).read_text()
 
-    start = execute_shared.index('inline void execute_v_cvt_f32_fp8_vop3')
-    end = execute_shared.index('inline void execute_v_cvt_f32_i32_vop1', start)
-    body = execute_shared[start:end]
-
-    assert 'amdgpu::vop3_opsel(inst.inst_)' in body
-    assert 'amdgpu::vop3_fp8_decode_e5m3(inst)' in body
-    assert 'util::fp8_e5m3_to_f32' in body
-    assert 'util::fp8_e4m3_to_f32' in body
-    assert 'amdgpu::vop3_opsel(inst_)' not in body
-    assert 'amdgpu::vop3_fp8_decode_e5m3(inst_)' not in body
+    assert 'inline void execute_v_cvt_f32_fp8_vop3' not in execute_shared
 
     gfx1250_vop3_cvt = (
         source_root
@@ -942,6 +1288,18 @@ def test_gfx1250_generated_fp8_vop3_shared_byte_select_uses_inst_member():
         / 'gfx1250'
         / 'vop3_cvt.cpp'
     ).read_text()
+
+    start = gfx1250_vop3_cvt.index('void VCvtF32Fp8Vop3::execute_impl')
+    end = gfx1250_vop3_cvt.index('VCvtF32Bf8Vop3::VCvtF32Bf8Vop3', start)
+    body = gfx1250_vop3_cvt[start:end]
+
+    assert 'amdgpu::vop3_opsel(inst_)' in body
+    assert 'amdgpu::vop3_fp8_decode_e5m3(*this)' in body
+    assert 'util::fp8_e5m3_to_f32' in body
+    assert 'util::fp8_e4m3_to_f32' in body
+    assert 'amdgpu::vop3_opsel(inst.inst_)' not in body
+    assert 'amdgpu::vop3_fp8_decode_e5m3(inst_)' not in body
+
     start = gfx1250_vop3_cvt.index('void VCvtF16Fp8Vop3::execute_impl')
     end = gfx1250_vop3_cvt.index('VCvtF16Bf8Vop3::VCvtF16Bf8Vop3', start)
     body = gfx1250_vop3_cvt[start:end]
@@ -949,6 +1307,44 @@ def test_gfx1250_generated_fp8_vop3_shared_byte_select_uses_inst_member():
 
     assert '>> (((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1) * 8u)' in body_words
     assert '((amdgpu::vop3_opsel(inst_) & 0x1u) << 1)' not in body
+
+
+def test_generated_execute_shared_calls_have_definitions():
+    import pathlib
+    import re
+
+    amdgpu_root = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+    )
+
+    definitions = set()
+    for path in (amdgpu_root / 'shared').glob('*.h'):
+        definitions.update(
+            re.findall(
+                r'(?:inline\s+)?void\s+(execute_[A-Za-z0-9_]+)\s*\(',
+                path.read_text(),
+            )
+        )
+
+    missing = []
+    for path in amdgpu_root.rglob('*.cpp'):
+        if 'shared' in path.parts:
+            continue
+        for call in re.findall(
+            r'amdgpu::(execute_[A-Za-z0-9_]+)\s*\(',
+            path.read_text(),
+        ):
+            if call not in definitions:
+                missing.append((path.relative_to(amdgpu_root).as_posix(), call))
+
+    assert not missing
 
 
 def test_gfx1250_helper_blocks_emit_hwreg_and_scaled_wmma_hooks():
