@@ -370,14 +370,14 @@ struct SwapCopyTest {
 TEST_CASE("Unit_hipMemcpyBatchAsync_Swap") {
   const size_t count = GENERATE(2, 3, 8);
   const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
-  const LinearAllocs allocTypeSrc =
+  const LinearAllocs allocTypeA =
       GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
-  const LinearAllocs allocTypeDst =
+  const LinearAllocs allocTypeB =
       GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
-  CAPTURE(count, size_in_bytes, allocTypeSrc, allocTypeDst);
+  CAPTURE(count, size_in_bytes, allocTypeA, allocTypeB);
 
-  hipError_t expectedError = getSwapExpectedReturn(allocTypeSrc, allocTypeDst);
-  SwapCopyTest test(count, size_in_bytes, allocTypeSrc, allocTypeDst, expectedError);
+  hipError_t expectedError = getSwapExpectedReturn(allocTypeA, allocTypeB);
+  SwapCopyTest test(count, size_in_bytes, allocTypeB, allocTypeA, expectedError);
   test.runTest();
 }
 

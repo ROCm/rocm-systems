@@ -27,30 +27,33 @@ template <typename TestType> constexpr std::pair<TestType, TestType> get_test_va
   }
 }
 
-inline hipError_t getSwapExpectedReturn(const LinearAllocs allocTypeSrc,
-                                        const LinearAllocs allocTypeDst, const int srcDevice = 0,
-                                        const int dstDevice = 0) {
+// A swap exchanges both endpoints, so the two sides are symmetric and named a/b rather than src/dst.
+inline hipError_t getSwapExpectedReturn(const LinearAllocs allocTypeA, const LinearAllocs allocTypeB,
+                                        const int deviceA = 0, const int deviceB = 0) {
   // The swap endpoints are peer-to-peer when they live on different devices.
-  const bool is_p2p = srcDevice != dstDevice;
+  const bool is_p2p = deviceA != deviceB;
 
   // Support for H2H will be implemented later.
-  if (allocTypeSrc == LinearAllocs::malloc || allocTypeDst == LinearAllocs::malloc) {
+  if (allocTypeA == LinearAllocs::malloc || allocTypeB == LinearAllocs::malloc) {
     return hipErrorNotSupported;
   }
 
-  if (allocTypeSrc == LinearAllocs::hipHostMalloc && allocTypeDst == LinearAllocs::hipHostMalloc) {
+  if (allocTypeA == LinearAllocs::hipHostMalloc && allocTypeB == LinearAllocs::hipHostMalloc) {
     return hipErrorNotSupported;
   }
 
   // Support for D2D will be implemented later.
-  if (allocTypeSrc == LinearAllocs::hipMalloc && allocTypeDst == LinearAllocs::hipMalloc &&
-      !is_p2p) {
+  if (allocTypeA == LinearAllocs::hipMalloc && allocTypeB == LinearAllocs::hipMalloc && !is_p2p) {
     return hipErrorNotSupported;
   }
 
-  int major, minor;
-  HIP_CHECK(hipDeviceComputeCapability(&major, &minor, 0));
-  if (major == 9 && minor >= 4) {
+  const auto supportsSwap = [](int device) {
+    int major, minor;
+    HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device));
+    return major == 9 && minor >= 4;
+  };
+
+  if (supportsSwap(deviceA) && supportsSwap(deviceB)) {
     return hipSuccess;
   }
 
