@@ -326,17 +326,6 @@ start_context(rocprofiler_context_id_t context_id)
         get_num_active_contexts().fetch_add(1, std::memory_order_release);
     }
 
-    // Notify queue interposition that this context is starting BEFORE publishing it into the
-    // active-context array below. stop_context()/deactivate_client_contexts() only ever
-    // learn about this context by observing it in that array (via an acquire-synchronized
-    // load paired with the release/seq_cst CAS that publishes it a few lines down), so
-    // incrementing first guarantees any concurrent stop-notify for this same context is
-    // ordered strictly after this increment. This closes a race where a concurrent
-    // stop_context() could observe the just-published context and decrement the counter
-    // (to 0) before this thread's own increment ran, leaving the counter permanently
-    // stuck positive after the context is already fully stopped. If the publish below
-    // fails (another thread concurrently claimed this slot), the increment is undone
-    // immediately below, mirroring the existing get_num_active_contexts() compensation.
     rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_started(cfg);
 
     // atomic swap the pointer into the "active" array used internally
@@ -459,13 +448,6 @@ stop_client_contexts(rocprofiler_client_id_t client_id)
 void
 deactivate_client_contexts(rocprofiler_client_id_t client_id)
 {
-    // Hold the same lock stop_context() uses, and claim each slot via CAS (rather than an
-    // unconditional store), so that a concurrent stop_context() (or a second, concurrent
-    // deactivate_client_contexts() call) cannot observe and process the same active-context
-    // slot at the same time. Without this, both could independently call
-    // notify_queue_interposition_consumer_context_stopped() for the same context,
-    // double-decrementing the queue-interposition active-consumer count below its correct
-    // value.
     auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
     for(auto& itr : get_active_contexts_impl())
     {

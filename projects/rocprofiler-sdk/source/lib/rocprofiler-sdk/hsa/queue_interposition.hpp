@@ -224,12 +224,6 @@ destroy_queue_state(const hsa_queue_t* queue);
 bool
 supports_queue_interposition();
 
-/**
- * @brief Increment/decrement the active queue-interposition consumer count (hot-path bypass
- * gate).
- *
- * Called from context start/stop when a context uses kernel-dispatch or scratch-memory tracing.
- */
 void
 notify_queue_interposition_consumer_context_started(const context::context* ctx);
 

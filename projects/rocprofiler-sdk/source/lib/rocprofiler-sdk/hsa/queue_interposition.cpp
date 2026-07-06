@@ -59,7 +59,6 @@
 #include <array>
 #include <atomic>
 #include <cstring>
-#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -115,80 +114,6 @@ get_next_table()
     return _v;
 }
 }  // namespace
-
-namespace qi_dispatch_trace
-{
-inline bool
-enabled()
-{
-    static const auto _enabled = common::get_env("ROCPROFILER_QI_DISPATCH_TRACE", 0) != 0;
-    return _enabled;
-}
-
-inline uint64_t
-next_seq()
-{
-    static auto _seq = std::atomic<uint64_t>{0};
-    return _seq.fetch_add(1, std::memory_order_relaxed) + 1;
-}
-
-struct queue_indices_t
-{
-    const void* queue           = nullptr;
-    uint64_t    virtual_wptr    = 0;
-    uint64_t    real_wdid       = 0;
-    uint64_t    real_rdid       = 0;
-    uint64_t    next_scan_pos   = 0;
-    uint64_t    next_submit_pos = 0;
-    bool        bypass          = false;
-    uint32_t    consumers       = 0;
-};
-
-inline queue_indices_t
-read_queue_indices(const QueueState* state)
-{
-    queue_indices_t indices{};
-    if(!state) return indices;
-
-    indices.queue           = static_cast<const void*>(state->hsa_queue);
-    indices.virtual_wptr    = state->virtual_wptr.load(std::memory_order_acquire);
-    indices.next_scan_pos   = state->next_scan_pos;
-    indices.next_submit_pos = state->next_submit_pos;
-    if(state->real_wdid) indices.real_wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
-    if(state->real_rdid) indices.real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
-    indices.bypass    = should_bypass_inline_intercept();
-    indices.consumers = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
-    return indices;
-}
-
-template <typename... Args>
-void
-log(std::string_view            event,
-    uint64_t                    seq,
-    const QueueState*           state,
-    fmt::format_string<Args...> detail_fmt,
-    Args&&... detail_args)
-{
-    if(!enabled()) return;
-
-    const auto indices = read_queue_indices(state);
-    const auto detail  = fmt::format(detail_fmt, std::forward<Args>(detail_args)...);
-    ROCP_INFO << fmt::format(
-        "[qi-dispatch-trace] event={} seq={} queue={} virtual_wptr={} real_wdid={} real_rdid={} "
-        "next_scan_pos={} next_submit_pos={} bypass={} consumers={} :: {}",
-        event,
-        seq,
-        indices.queue,
-        indices.virtual_wptr,
-        indices.real_wdid,
-        indices.real_rdid,
-        indices.next_scan_pos,
-        indices.next_submit_pos,
-        indices.bypass,
-        indices.consumers,
-        detail);
-}
-}  // namespace qi_dispatch_trace
 
 queue_registry_t&
 get_queue_registry()
@@ -283,7 +208,6 @@ struct doorbell_tls_t
     uint32_t             pkt_size                  = 64;
     const doorbell_fn_t* ring_doorbell             = nullptr;
     uint64_t             last_published_submit_pos = 0;
-    uint64_t             trace_doorbell_seq        = 0;
 };
 
 doorbell_tls_t&
@@ -311,18 +235,6 @@ publish_submitted_packets(QueueState* state, uint64_t submit_pos)
     const auto doorbell_idx = static_cast<hsa_signal_value_t>(submit_pos - 1);
     (*tls.ring_doorbell)(state->doorbell_signal, doorbell_idx);
     tls.last_published_submit_pos = submit_pos;
-
-    if(qi_dispatch_trace::enabled())
-    {
-        qi_dispatch_trace::log("publish",
-                               qi_dispatch_trace::next_seq(),
-                               state,
-                               "doorbell_idx={} submit_pos={} real_wdid_after={} real_rdid={}",
-                               static_cast<int64_t>(doorbell_idx),
-                               submit_pos,
-                               __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE),
-                               __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE));
-    }
 }
 
 // Ring the doorbell with the last index we have actually submitted (next_submit_pos - 1),
@@ -388,15 +300,6 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
             }
         }
         tls.submit_pos++;
-        if(qi_dispatch_trace::enabled())
-        {
-            qi_dispatch_trace::log("ring_write",
-                                   qi_dispatch_trace::next_seq(),
-                                   state,
-                                   "ring_slot={} submit_pos_after={}",
-                                   slot,
-                                   tls.submit_pos);
-        }
     }
 }
 
@@ -490,16 +393,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     auto signal_value = starting_value;
     auto niterations  = uint64_t{0};
 
-    if(qi_dispatch_trace::enabled())
-    {
-        ROCP_INFO << fmt::format("[qi-dispatch-trace] event=async_wait_begin signal={{.handle={}}} "
-                                 "starting_value={} queue={} dispatch_count={}",
-                                 completion_signal.handle,
-                                 starting_value,
-                                 session ? session->queue.get_id().handle : uint64_t{0},
-                                 session ? session->packet_data.size() : 0);
-    }
-
     // Stop only on completion or finalization; never run cleanup while the kernel is live.
     while(true)
     {
@@ -531,18 +424,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
                              signal_value,
                              starting_value,
                              niterations);
-
-    if(qi_dispatch_trace::enabled())
-    {
-        ROCP_INFO << fmt::format(
-            "[qi-dispatch-trace] event=async_wait_end signal={{.handle={}}} final_value={} "
-            "starting_value={} iterations={} completed={}",
-            completion_signal.handle,
-            signal_value,
-            starting_value,
-            niterations,
-            signal_value < starting_value);
-    }
 
     if(auto delay_us = common::get_env("ROCPROFILER_TEST_INLINE_ASYNC_DELAY_US", 0); delay_us > 0)
     {
@@ -607,14 +488,6 @@ write_interceptor(Queue*                                queue,
     // We have no packets or no one who needs to be notified, do nothing.
     if(pkt_count == 0 || _contexts.empty())
     {
-        if(qi_dispatch_trace::enabled())
-        {
-            ROCP_INFO << fmt::format(
-                "[qi-dispatch-trace] event=write_passthrough_no_contexts pkt_count={} "
-                "active_contexts=0 queue={}",
-                pkt_count,
-                queue->get_id().handle);
-        }
         writer(packets, pkt_count);
         return;
     }
@@ -836,23 +709,6 @@ write_interceptor(Queue*                                queue,
             }
 
             _info_session.packet_data.emplace_back(std::move(_packet_data));
-
-            if(qi_dispatch_trace::enabled())
-            {
-                const auto& armed_packet = _info_session.packet_data.back();
-                qi_dispatch_trace::log(
-                    "dispatch_arm",
-                    qi_dispatch_trace::next_seq(),
-                    get_doorbell_tls().state,
-                    "doorbell_seq={} dispatch_id={} kernel_id={} signal={{.handle={}}} "
-                    "pooled={} submit_pos={} signal_value_after_add=1",
-                    get_doorbell_tls().trace_doorbell_seq,
-                    armed_packet.callback_record.dispatch_info.dispatch_id,
-                    armed_packet.callback_record.dispatch_info.kernel_id,
-                    armed_packet.completion_signal.handle,
-                    armed_packet.pooled_signal != nullptr,
-                    get_doorbell_tls().submit_pos);
-            }
         }
 
         auto last_completion_signal = null_signal;
@@ -883,18 +739,6 @@ write_interceptor(Queue*                                queue,
 
         if(_shared_info_session)
         {
-            if(qi_dispatch_trace::enabled())
-            {
-                ROCP_INFO << fmt::format("[qi-dispatch-trace] event=async_arm doorbell_seq={} "
-                                         "batch_signal={{.handle={}}} "
-                                         "batch_signal_value={} packet_count={} queue={}",
-                                         get_doorbell_tls().trace_doorbell_seq,
-                                         last_completion_signal.handle,
-                                         current_signal_value,
-                                         _shared_info_session->packet_data.size(),
-                                         queue->get_id().handle);
-            }
-
             auto _task = [_signal_v          = last_completion_signal,
                           _expected_signal_v = current_signal_value,
                           _session_v         = std::move(_shared_info_session)]() mutable {
@@ -924,10 +768,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 {
     if(!state) return;
 
-    auto*      state_ptr            = state.get();
-    auto       deferred_async_tasks = async_signal_task_vector_t{};
-    const auto doorbell_seq =
-        qi_dispatch_trace::enabled() ? qi_dispatch_trace::next_seq() : uint64_t{0};
+    auto* state_ptr            = state.get();
+    auto  deferred_async_tasks = async_signal_task_vector_t{};
 
     // gate_lock serializes doorbell processing; producers never take it, so no deadlock.
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
@@ -936,29 +778,10 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     const uint64_t wptr_end = state_ptr->virtual_wptr.load(std::memory_order_acquire);
 
-    if(doorbell_seq != 0)
-    {
-        qi_dispatch_trace::log("doorbell",
-                               doorbell_seq,
-                               state_ptr,
-                               "doorbell_val={} scan_pos={} wptr_end={}",
-                               static_cast<int64_t>(value),
-                               scan_pos,
-                               wptr_end);
-    }
-
     if(scan_pos >= wptr_end)
     {
         // Already scanned through virtual_wptr, so `value` is <= what we have submitted and
         // cannot advertise unpublished slots; forward it (and never drop the doorbell).
-        if(doorbell_seq != 0)
-        {
-            qi_dispatch_trace::log("doorbell_forward",
-                                   doorbell_seq,
-                                   state_ptr,
-                                   "doorbell_val={} reason=scan_pos_ge_wptr_end",
-                                   static_cast<int64_t>(value));
-        }
         ring_doorbell(state_ptr->doorbell_signal, value);
         return;
     }
@@ -967,8 +790,6 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     const uint64_t   max_pkts         = wptr_end - scan_pos;
     const auto       pkt_size         = state_ptr->pkt_size;
 
-    // Fixed-capacity inline snapshot (16 packets). Avoids the persistent thread_local
-    // heap buffer implicated in ROCM-27116; rare large batches spill to a local vector.
     using snapshot_pkt_t = std::array<char, 64>;
     common::container::static_vector<snapshot_pkt_t, kSnapshotMaxPkts> snapshot;
     std::vector<char>                                                  overflow_snapshot;
@@ -1012,14 +833,6 @@ process_doorbell_impl(const queue_state_ptr_t& state,
         // The next slot is claimed but not yet written by its producer, so there is
         // nothing to publish now; that producer's own later doorbell will drain it.
         // Re-ring only the last published index, not the virtual value.
-        if(doorbell_seq != 0)
-        {
-            qi_dispatch_trace::log("doorbell_rering",
-                                   doorbell_seq,
-                                   state_ptr,
-                                   "doorbell_val={} reason=drained_zero",
-                                   static_cast<int64_t>(value));
-        }
         ring_published_doorbell(state_ptr, ring_doorbell);
         return;
     }
@@ -1039,7 +852,6 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     tls.pkt_size                  = state_ptr->pkt_size;
     tls.ring_doorbell             = &ring_doorbell;
     tls.last_published_submit_pos = state_ptr->next_submit_pos;
-    tls.trace_doorbell_seq        = doorbell_seq;
     uint64_t start_submit_pos     = tls.submit_pos;
 
     auto*        qc = get_queue_controller();
@@ -1081,34 +893,12 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                      << ", ring_size=" << state_ptr->ring_size << ", scan_pos=" << scan_pos
                      << ", scan_end=" << scan_end
                      << ", next_submit_pos=" << state_ptr->next_submit_pos;
-        if(doorbell_seq != 0)
-        {
-            qi_dispatch_trace::log("ring_corrupt",
-                                   doorbell_seq,
-                                   state_ptr,
-                                   "ring_used={} scan_end={} pkt_count={}",
-                                   ring_used,
-                                   scan_end,
-                                   pkt_count);
-        }
     }
 
     publish_submitted_packets(state_ptr, state_ptr->next_submit_pos);
 
-    if(doorbell_seq != 0)
-    {
-        qi_dispatch_trace::log("doorbell_done",
-                               doorbell_seq,
-                               state_ptr,
-                               "pkt_count={} scan_end={} submit_pos_after={}",
-                               pkt_count,
-                               scan_end,
-                               state_ptr->next_submit_pos);
-    }
-
     tls.ring_doorbell             = nullptr;
     tls.last_published_submit_pos = 0;
-    tls.trace_doorbell_seq        = 0;
     tls.state                     = nullptr;
 
     // Arm completion waiters only after the final doorbell is visible
@@ -1259,18 +1049,6 @@ ROCP_QUEUE_LOAD_WRITE_INDEX(scacquire, std::memory_order_acquire)
     {                                                                                              \
         if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
-            if(qi_dispatch_trace::enabled())                                                       \
-            {                                                                                      \
-                constexpr auto _create_if_missing = false;                                         \
-                if(auto _state = lookup_queue_state_by_doorbell(sig, _create_if_missing); _state)  \
-                {                                                                                  \
-                    qi_dispatch_trace::log("bypass_doorbell",                                      \
-                                           qi_dispatch_trace::next_seq(),                          \
-                                           _state.get(),                                           \
-                                           "doorbell_val={}",                                      \
-                                           static_cast<int64_t>(val));                             \
-                }                                                                                  \
-            }                                                                                      \
             get_next_table()->hsa_signal_##NAME##_fn(sig, val);                                    \
             return;                                                                                \
         }                                                                                          \
@@ -1312,12 +1090,6 @@ resync_queue_shadow_state(QueueState* state)
     state->virtual_wptr.store(wdid, std::memory_order_release);
     state->next_scan_pos   = wdid;
     state->next_submit_pos = wdid;
-
-    if(qi_dispatch_trace::enabled())
-    {
-        qi_dispatch_trace::log(
-            "shadow_resync", qi_dispatch_trace::next_seq(), state, "wdid={}", wdid);
-    }
 }
 
 void
@@ -1339,14 +1111,7 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
     if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
         resync_all_queue_shadow_states();
 
-    const auto consumers =
-        s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_release) + 1;
-    if(qi_dispatch_trace::enabled())
-    {
-        ROCP_INFO << fmt::format("[qi-dispatch-trace] event=consumer_start consumers={} bypass={}",
-                                 consumers,
-                                 should_bypass_inline_intercept());
-    }
+    s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_release);
 }
 
 void
@@ -1359,13 +1124,6 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
         if(s_active_queue_interposition_consumers.compare_exchange_weak(
                cur, cur - 1, std::memory_order_release, std::memory_order_relaxed))
         {
-            if(qi_dispatch_trace::enabled())
-            {
-                ROCP_INFO << fmt::format(
-                    "[qi-dispatch-trace] event=consumer_stop consumers={} bypass={}",
-                    cur - 1,
-                    should_bypass_inline_intercept());
-            }
             return;
         }
     }

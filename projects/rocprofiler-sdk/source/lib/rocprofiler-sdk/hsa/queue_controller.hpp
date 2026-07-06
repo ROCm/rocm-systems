@@ -129,7 +129,6 @@ get_queue_controller();
 bool
 enable_queue_intercept();
 
-/// True when this context uses queue interposition (kernel-dispatch or scratch-memory tracing).
 bool
 context_needs_queue_interposition_tracing(const context::context* ctx);
 
