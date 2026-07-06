@@ -32,7 +32,7 @@ namespace {
 void set_cpu_dispatch_threads(SoC *soc, uint32_t threads) {
   if (!soc)
     return;
-  soc->for_each_cp([threads](auto *cp) { cp->set_dispatch_threads(threads); });
+  soc->set_dispatch_threads(threads);
 }
 
 rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle) {
@@ -49,8 +49,8 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
         partition_xcds += extra_soc->num_xcds();
     }
   }
-  // Per-CP CU dispatch-pool thread count (functional mode), from config
-  // cpu_dispatch_threads. 0 = auto: all hardware threads, capped at
+  // Shared per-SoC CU dispatch-pool thread budget (functional mode), from
+  // config cpu_dispatch_threads. 0 = auto: all hardware threads, capped at
   // kDispatchThreadCap (parallel out of the box without oversubscribing small
   // hosts or paying SMT/turbo costs). Results are thread-count-invariant, so
   // this only affects speed, not output.

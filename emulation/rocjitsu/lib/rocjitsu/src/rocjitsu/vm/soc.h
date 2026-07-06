@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_VM_SOC_H_
 #define ROCJITSU_VM_SOC_H_
 
+#include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
@@ -173,6 +174,10 @@ public:
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
+  /// @brief Set the shared host-thread budget for CU dispatch across all CPs.
+  void set_dispatch_threads(uint32_t threads);
+  uint32_t dispatch_threads() const { return dispatch_threads_; }
+
   void run_to_idle();
 
   const std::vector<amdgpu::ComputeUnitCore *> &all_cus();
@@ -191,6 +196,8 @@ private:
   std::vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;
   std::unique_ptr<amdgpu::HbmController> hbm_standalone_; ///< Used when num_iods == 0.
+  std::unique_ptr<amdgpu::CpuDispatchPool> dispatch_pool_;
+  uint32_t dispatch_threads_ = 1;
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
   std::vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
 };

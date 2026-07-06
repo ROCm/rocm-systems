@@ -56,6 +56,8 @@ public:
     if (tasks.empty())
       return;
 
+    std::lock_guard<std::mutex> run_lock(run_mutex_);
+
     threads = std::clamp<uint32_t>(threads, 1, static_cast<uint32_t>(tasks.size()));
     uint32_t worker_goal =
         std::min<uint32_t>(threads > 1 ? threads - 1 : 0, static_cast<uint32_t>(workers_.size()));
@@ -132,6 +134,7 @@ private:
     }
   }
 
+  std::mutex run_mutex_;
   std::mutex mutex_;
   std::condition_variable work_cv_;
   std::condition_variable done_cv_;

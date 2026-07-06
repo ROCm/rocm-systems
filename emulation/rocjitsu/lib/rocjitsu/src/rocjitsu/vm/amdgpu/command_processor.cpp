@@ -161,6 +161,12 @@ CommandProcessor::CommandProcessor(std::string name) : simdojo::Component(std::m
 
 CommandProcessor::~CommandProcessor() { stop_doorbell_monitor(); }
 
+void CommandProcessor::set_shared_dispatch_pool(CpuDispatchPool *pool) {
+  shared_dispatch_pool_ = pool;
+  if (shared_dispatch_pool_)
+    local_dispatch_pool_.reset();
+}
+
 void CommandProcessor::set_dispatch_threads(uint32_t threads) {
   threads = std::max(threads, 1u);
   if (plugin_group_->requires_serial_execution())
@@ -168,8 +174,7 @@ void CommandProcessor::set_dispatch_threads(uint32_t threads) {
   if (dispatch_threads_ == threads)
     return;
   dispatch_threads_ = threads;
-  for (auto *spi : spis_)
-    spi->reset_dispatch_pool();
+  local_dispatch_pool_.reset();
 }
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
@@ -907,6 +912,37 @@ bool CommandProcessor::has_active_cus() const {
   return false;
 }
 
+bool CommandProcessor::run_active_cus_once() {
+  active_cu_scratch_.clear();
+  if (!spis_.empty()) {
+    for (auto *spi : spis_)
+      spi->append_active_cus(active_cu_scratch_);
+  } else {
+    for (auto *cu : cus_) {
+      if (cu->has_active_wfs())
+        active_cu_scratch_.push_back(cu);
+    }
+  }
+
+  if (active_cu_scratch_.empty())
+    return false;
+
+  uint32_t effective_threads =
+      std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cu_scratch_.size()));
+  if (shared_dispatch_pool_) {
+    shared_dispatch_pool_->run(active_cu_scratch_, effective_threads);
+  } else if (effective_threads > 1) {
+    if (!local_dispatch_pool_ || local_dispatch_pool_->thread_count() < effective_threads)
+      local_dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective_threads);
+    auto *pool = local_dispatch_pool_.get();
+    pool->run(active_cu_scratch_, effective_threads);
+  } else {
+    for (auto *cu : active_cu_scratch_)
+      cu->run_quantum();
+  }
+  return true;
+}
+
 rocr::llvm::amdhsa::kernel_descriptor_t
 CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid,
                                          [[maybe_unused]] bool host_accessible) {
@@ -1363,22 +1399,10 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick) {
     const auto *queue_state_data_before = new_queue_states_.data();
 #endif
     lock.unlock();
-    // Wavefront execution is driven by the SPIs, which own the worker pools;
-    // the CP only orchestrates queue fetch, dispatch, and completion. SPI-less
-    // topologies (direct add_compute_unit test harnesses) fall back to driving
-    // the CUs directly.
-    bool ran = false;
-    if (!spis_.empty()) {
-      for (auto *spi : spis_)
-        ran |= spi->run_active_cus_once(dispatch_threads_);
-    } else {
-      for (auto *cu : cus_) {
-        if (cu->has_active_wfs()) {
-          cu->run_quantum();
-          ran = true;
-        }
-      }
-    }
+    // Wavefront execution uses one shared pool/budget across all SPIs.
+    // SPI-less topologies (direct add_compute_unit test harnesses) fall back
+    // to the same CU list.
+    bool ran = run_active_cus_once();
     lock.lock();
 #ifndef NDEBUG
     assert(hw_queues_.size() == queue_count_before &&

@@ -6,6 +6,7 @@
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -108,7 +109,29 @@ void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
   for (auto *xcd : xcds_)
     xcd->set_plugin_group(plugin_group_);
   if (plugin_group_->requires_serial_execution())
-    for_each_cp([](auto *cp) { cp->set_dispatch_threads(1); });
+    set_dispatch_threads(1);
+  else
+    set_dispatch_threads(dispatch_threads_);
+}
+
+void SoC::set_dispatch_threads(uint32_t threads) {
+  threads = std::max(threads, 1u);
+  if (plugin_group_ && plugin_group_->requires_serial_execution())
+    threads = 1;
+
+  if (threads > 1) {
+    if (!dispatch_pool_ || dispatch_pool_->thread_count() < threads)
+      dispatch_pool_ = std::make_unique<amdgpu::CpuDispatchPool>(threads);
+  } else {
+    dispatch_pool_.reset();
+  }
+  dispatch_threads_ = threads;
+
+  auto *pool = dispatch_pool_.get();
+  for_each_cp([pool, threads](auto *cp) {
+    cp->set_shared_dispatch_pool(pool);
+    cp->set_dispatch_threads(threads);
+  });
 }
 
 void SoC::flush_all() {

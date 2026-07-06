@@ -75,8 +75,8 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t total_wgs, uint3
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
-  // Sweep the per-CP dispatch-pool thread count; one engine partition.
-  soc->for_each_cp([num_threads](auto *cp) { cp->set_dispatch_threads(num_threads); });
+  // Sweep the shared per-SoC dispatch-pool thread budget; one engine partition.
+  soc->set_dispatch_threads(num_threads);
   engine->build();
 
   co->load_to_memory(memory, KD_ADDR);
@@ -147,7 +147,7 @@ int main() {
 
   constexpr int RUNS = 1;
 
-  // Sweep the per-CP dispatch-pool thread count, one thread per XCD.
+  // Sweep the shared per-SoC dispatch-pool thread budget.
   for (uint32_t t = 1; t <= TOTAL_XCDS; ++t) {
     std::cout << t;
     for (auto &k : kernels) {

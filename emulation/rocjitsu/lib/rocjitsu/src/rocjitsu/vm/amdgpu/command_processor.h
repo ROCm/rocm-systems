@@ -23,6 +23,7 @@
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -100,6 +101,7 @@ public:
   bool packed_tid() const { return packed_tid_; }
   void set_sdma_packet_dialect(SdmaPacketDialect dialect) { sdma_packet_dialect_ = dialect; }
   SdmaPacketDialect sdma_packet_dialect() const { return sdma_packet_dialect_; }
+  void set_shared_dispatch_pool(CpuDispatchPool *pool);
   void set_dispatch_threads(uint32_t threads);
   uint32_t dispatch_threads() const { return dispatch_threads_; }
   /// @brief Update doorbell_base for all queues belonging to a process.
@@ -206,6 +208,7 @@ private:
   void process_queues();
 
   bool has_active_cus() const;
+  bool run_active_cus_once();
 
   /// @brief Called from CU on_idle callback. In functional mode with quantum>0,
   /// checks for stalled dispatches that can resume.
@@ -261,6 +264,9 @@ private:
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
   uint32_t dispatch_threads_ = 1;
+  CpuDispatchPool *shared_dispatch_pool_ = nullptr;
+  std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
+  std::vector<ComputeUnitCore *> active_cu_scratch_;
 
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;
