@@ -22,11 +22,7 @@ def load_gfx94x_linux_config(config_path: Path) -> dict[str, Any]:
         from ci_config_api import load_config_v1
 
         config = load_config_v1(config_path)
-        return (
-            config.get_gpu_families(["presubmit"])
-            .get("gfx94x", {})
-            .get("linux", {})
-        )
+        return config.get_gpu_families(["presubmit"]).get("gfx94x", {}).get("linux", {})
     except Exception as exc:
         warn(f"Failed to load CI config: {exc}. Using fallback runner labels.")
         return {}
