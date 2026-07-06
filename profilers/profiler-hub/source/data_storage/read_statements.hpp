@@ -723,7 +723,7 @@ private:
                                  "R.start",
                                  "R.end",
                                  "R.name_id",
-                                 "CS.value",
+                                 "CS.string",
                                  "R.nid",
                                  "R.pid",
                                  "R.tid",
@@ -744,7 +744,7 @@ private:
                                  "K.start",
                                  "K.end",
                                  "K.region_name_id",
-                                 "CS.value",
+                                 "CS.string",
                                  "K.nid",
                                  "K.pid",
                                  "K.tid",
@@ -765,7 +765,7 @@ private:
                                  "MA.start",
                                  "MA.end",
                                  "E.category_id",
-                                 "CS.value",
+                                 "CS.string",
                                  "MA.nid",
                                  "MA.pid",
                                  "MA.tid",
@@ -786,7 +786,7 @@ private:
                                  "MC.start",
                                  "MC.end",
                                  "MC.region_name_id",
-                                 "CS.value",
+                                 "CS.string",
                                  "MC.nid",
                                  "MC.pid",
                                  "MC.tid",
@@ -1061,7 +1061,7 @@ private:
                                         const std::string& alias,
                                         const std::string& display_name_col) {
             auto q =
-                fmt::format("SELECT {a}.id, {a}.start, {a}.end, {dn}, CS.value, "
+                fmt::format("SELECT {a}.id, {a}.start, {a}.end, {dn}, CS.string, "
                             "{a}.nid, {a}.pid, {a}.tid, S.track_id "
                             "FROM {t} {a} "
                             "INNER JOIN rocpd_event_{u} E ON {a}.event_id = E.id "
