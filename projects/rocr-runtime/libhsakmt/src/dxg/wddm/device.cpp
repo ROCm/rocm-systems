@@ -601,8 +601,13 @@ void WDDMDevice::InitCmdbufInfo(void) {
     sizeof(DispatchTemplate) +
     sizeof(AtomicTemplate) * 2;
 
-  // Add safety margin to account for alignment and future additions
-  cmdbuf_aql_frame_size_ += 128;
+  // Add safety margin to account for alignment and future additions.
+  // WSL multi-counter PM4 frame headroom: multi-counter (multiple --pmc)
+  // collection makes VendorSpecificAqlToPm4 emit a larger PM4 stream
+  // (~616 bytes) than the base frame size (~544 bytes), overflowing
+  // cmdbuf_aql_frame_size_ ("used 616 bytes, limit 544 bytes"). Enlarge
+  // the margin so multi-counter PM4 fits comfortably with headroom.
+  cmdbuf_aql_frame_size_ += 8192;
 
   cmdbuf_aql_frame_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
 
