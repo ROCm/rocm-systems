@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Reject instruction-code raw VGPR storage access.
+"""Reject instruction-code register access backdoors.
 
 Instruction emulators should acquire register values through the register access
 facade or operand APIs, not by pairing raw storage with manual plugin hooks. Raw
@@ -20,7 +20,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 INSTRUCTION_ROOT = (
     REPO_ROOT / "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu"
 )
-FORBIDDEN = re.compile(r"\braw_vgpr_(?:data|reg)\s*(?:\(|<)")
+SHARED_ROOT = INSTRUCTION_ROOT / "shared"
+RAW_STORAGE = re.compile(r"\braw_vgpr_(?:data|reg)\s*(?:\(|<)")
+SHARED_BACKDOOR = re.compile(
+    r"\b(?:cu|c)\.(?:read|write)_vgpr\s*\(|\bwf\.cu\(\)\.(?:read|write)_vgpr\s*\(|\bSimdAccess::"
+)
 
 
 def main() -> int:
@@ -30,14 +34,17 @@ def main() -> int:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for line_number, line in enumerate(text.splitlines(), start=1):
-            if FORBIDDEN.search(line):
+            if RAW_STORAGE.search(line):
                 rel = path.relative_to(REPO_ROOT)
-                failures.append(f"{rel}:{line_number}: {line.strip()}")
+                failures.append(f"{rel}:{line_number}: raw storage: {line.strip()}")
+            if path.is_relative_to(SHARED_ROOT) and SHARED_BACKDOOR.search(line):
+                rel = path.relative_to(REPO_ROOT)
+                failures.append(f"{rel}:{line_number}: shared backdoor: {line.strip()}")
 
     if failures:
         print(
-            "Instruction code must not call raw_vgpr_data/raw_vgpr_reg directly. "
-            "Use RegisterAccess or an operand API instead.",
+            "Instruction code must not call raw VGPR storage directly, and shared AMDGPU "
+            "instruction helpers must not bypass RegisterAccess for physical VGPR I/O.",
             file=sys.stderr,
         )
         for failure in failures:
