@@ -73,17 +73,8 @@ if(BUILD_PYTHON)
     endif()
 
     if(Python3_FOUND)
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_path('purelib'))"
-            RESULT_VARIABLE _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_RESULT
-            OUTPUT_VARIABLE _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
-        if(NOT _ROCPROF_TRACE_DECODER_PYTHON_INSTALL_RESULT EQUAL 0
-           OR "${_ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}" STREQUAL "")
-            message(FATAL_ERROR "Failed to determine Python site-packages install directory")
-        endif()
         set(ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
-            "${_ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}"
+            "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
             CACHE PATH "Install directory for the rocprof-trace-decoder Python API")
 
         install(

@@ -11,9 +11,9 @@ wrapped here.
 
 The API can be installed with Python packaging (`python3 -m pip install .`) or
 with CMake when `BUILD_PYTHON=ON`. The CMake install path defaults to the
-active interpreter's `sysconfig.get_path("purelib")` so scripts run by that
-same `python3` can import `rocprof_trace_decoder` without script-local path
-searching. Packagers can override `ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR`.
+ROCm-prefix-relative Python site-packages directory
+`lib/pythonX.Y/site-packages`, matching the Python version found at configure
+time. Packagers can override `ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR`.
 
 ## Module Overview
 

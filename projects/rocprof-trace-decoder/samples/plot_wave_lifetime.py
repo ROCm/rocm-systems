@@ -46,9 +46,10 @@ def wave_lifetime_rows(traces, artifacts) -> list[dict[str, int]]:
             for inst in wave.instructions:
                 is_valu = int(inst.category) == int(InstCategory.VALU)
                 text = instruction_text(artifacts, inst.pc).strip()
-                if text.startswith("s_wait"):
+                is_wait = text.startswith("s_wait")
+                if is_wait:
                     waitcnt_latency += inst.duration
-                if is_valu:
+                elif is_valu:
                     valu_latency += inst.duration
                 else:
                     non_valu_latency += inst.duration
