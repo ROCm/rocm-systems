@@ -14,6 +14,12 @@ choose.
 
 .. note::
 
+   Analyze mode requires Python 3.9 or newer; its dependencies (numpy, pandas,
+   dash, textual) drop support for older versions. Profile mode runs on Python
+   3.8+. See the Python version support table in :doc:`/install/quickstart`.
+
+.. note::
+
    Analyze mode merges separate counter collection files (pmc_perf_*.csv or results_*.csv) into a unified pmc_perf.csv for analysis.
 
 .. note::
