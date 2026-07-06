@@ -140,14 +140,26 @@ This runs panel-file hash validation only.
 
 ## Automated Testing
 
-### Pytest Hash Integrity Test
+### Pre-commit Hash Consistency Hook
 
-Located at:
+Hash integrity is enforced automatically by the pre-commit `hash-check` hook
+(`tools/config_management/hash_checker.py`). It runs on every commit touching
+the project and fails when panel YAMLs diverge from `.config_hashes.json`
+without the DB being refreshed.
+
+### Manual Hash Integrity Check
+
+A standalone tooling self-check is also available at:
 ```bash
-tests/test_autogen_config.py
+tools/test_autogen_config_manual.py
 ```
 
-This test:
+Run it from the project root:
+```bash
+python3 tools/test_autogen_config_manual.py
+```
+
+This check:
 
 - parses `.config_hashes.json`
 - verifies **byte-for-byte** integrity of panel YAMLs

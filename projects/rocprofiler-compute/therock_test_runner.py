@@ -25,7 +25,6 @@ EXCLUDED_TESTS = [
 ]
 
 QUICK_TESTS = [
-    "test_autogen_config",
     "test_utils",
     "test_num_xcds_cli_output",
     "test_num_xcds_spec_class",
