@@ -1398,10 +1398,14 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
     if (s->imageSize() > s->memSize()) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
+    const char* segment_data = s->data();
+    if (!segment_data) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
     void* ptr = context_->SegmentAlloc(segment, agent, s->memSize(), s->align(), true);
     if (!ptr) { return HSA_STATUS_ERROR_OUT_OF_RESOURCES; }
     new_seg = std::make_shared<Segment>(this, agent, segment, ptr, s->memSize(), s->vaddr(), s->offset());
-    new_seg->Copy(s->vaddr(), s->data(), s->imageSize());
+    new_seg->Copy(s->vaddr(), segment_data, s->imageSize());
     objects.push_back(new_seg);
 
     if (segment == AMDGPU_HSA_SEGMENT_GLOBAL_PROGRAM) {
@@ -1419,7 +1423,11 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   if (data_segment->imageSize() > data_segment->memSize()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
-  load_segment->Copy(data_segment->vaddr(), data_segment->data(),
+  const char* segment_data = data_segment->data();
+  if (!segment_data) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  load_segment->Copy(data_segment->vaddr(), segment_data,
                      data_segment->imageSize());
 
   return HSA_STATUS_SUCCESS;
