@@ -230,10 +230,12 @@ static int run_daemon_server(const char *config_path) {
   // them by explicit path from the directory the interposer library lives in,
   // where the build and install layouts co-locate librocjitsu_plugin_<name>.so.
   //
-  // rocjitsu_bin links librocjitsu.so rather than statically bundling the
-  // simulator object libraries, so a plugin loaded here resolves its
-  // librocjitsu.so dependency to the image the daemon already runs on: the
-  // simulator exists once in the process and the plugin shares its state.
+  // rocjitsu_bin links the split simulator libraries (librocjitsu_core.so +
+  // libsimdojo.so) rather than statically bundling the simulator object
+  // libraries, so a plugin loaded here resolves its own dependency on those
+  // same libraries to the image the daemon already runs on: the simulator
+  // exists once in the process and the plugin shares its state. Neither the
+  // daemon nor the plugin links librocjitsu.so (the LD_PRELOAD interposer).
   if (vm->soc) {
     std::ifstream cfg(config_path, std::ios::binary);
     std::string config_json((std::istreambuf_iterator<char>(cfg)),

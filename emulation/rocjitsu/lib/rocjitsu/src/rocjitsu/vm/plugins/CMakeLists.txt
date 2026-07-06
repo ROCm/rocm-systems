@@ -64,7 +64,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # link librocjitsu.so (the interposer), so loading it never pulls the
         # interposer into the host process.
         target_link_libraries(
-            ${target} PRIVATE ${object_lib} rocjitsu_core simdojo
+            ${target}
+            PRIVATE ${object_lib} rocjitsu_core simdojo
         )
         add_dependencies(${target} flatbuffers_schemas)
         # Hide everything except the ABI exports (which carry an explicit

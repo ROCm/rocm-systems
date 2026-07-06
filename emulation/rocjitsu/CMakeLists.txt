@@ -323,13 +323,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${GENERATED_DIR}
             ${DRM_INCLUDE_DIR}
     )
-    target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+    target_include_directories(
+        rocjitsu_shared
+        SYSTEM
+        PRIVATE ${HSA_INCLUDE_DIR}
+    )
     target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
     add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
     # Sibling libraries are installed side by side; resolve them via $ORIGIN.
     set_target_properties(
-        rocjitsu_core rocjitsu_shared
+        rocjitsu_core
+        rocjitsu_shared
         PROPERTIES INSTALL_RPATH "$ORIGIN"
     )
 else()
@@ -338,18 +343,17 @@ else()
     set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
     target_link_libraries(
         rocjitsu_shared
-        PRIVATE
-            ${RJ_SIM_OBJECT_LIBS}
-            simdojo
-            util
-            flatbuffers
-            Threads::Threads
+        PRIVATE ${RJ_SIM_OBJECT_LIBS} simdojo util flatbuffers Threads::Threads
     )
     target_include_directories(
         rocjitsu_shared
         PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
     )
-    target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+    target_include_directories(
+        rocjitsu_shared
+        SYSTEM
+        PRIVATE ${HSA_INCLUDE_DIR}
+    )
     add_dependencies(rocjitsu_shared flatbuffers_schemas)
 endif()
 
