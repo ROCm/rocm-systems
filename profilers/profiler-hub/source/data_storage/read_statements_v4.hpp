@@ -29,10 +29,12 @@ namespace profiler_hub::data_storage::schema_v4
 //     carry start_id/end_id FKs and rocpd_sample carries timestamp_id, so reading
 //     an actual time requires a JOIN onto rocpd_timestamp.value.
 //
-// The legacy timeline/detail/call-stack/correlated/count/time-range surface is
-// intentionally NOT implemented here (task 002C). Those accessors inherit the
-// default-empty stubs from read_statements_base; the reader guards every v4 path
-// so an empty stub is never invoked.
+// Task 002C ports the legacy reader surface to v4.0. The timeline-event and count
+// accessors are implemented here against the v4.0 schema (spine JOINs + rocpd_track
+// + rocpd_info_category). The remaining legacy detail/call-stack/correlated/
+// time-range surface is still pending in later 002C groups; those accessors inherit
+// the default-empty stubs from read_statements_base and the reader still guards
+// those paths.
 //
 // Table naming: this backend reuses the v3 reader convention `rocpd_<name>_<uuid>`
 // (underscore separator supplied by the reader). See the open question in
@@ -60,6 +62,9 @@ struct read_statements : public read_statements_base
         initialize_scalar_track_statements();
         initialize_scalar_detail_statement();
         initialize_flow_statements();
+
+        initialize_timeline_event_statements();
+        initialize_count_statements();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -168,6 +173,65 @@ struct read_statements : public read_statements_base
         const override
     {
         return m_memory_copy_interval_track_v4;
+    }
+
+    // ----- legacy timeline-event accessors (task 002C) -----
+    [[nodiscard]] const timeline_event_statement_set& region_statements() const override
+    {
+        return m_region_statements;
+    }
+    [[nodiscard]] const timeline_event_statement_set& kernel_dispatch_statements()
+        const override
+    {
+        return m_kernel_dispatch_statements;
+    }
+    [[nodiscard]] const timeline_event_statement_set& memory_allocate_statements()
+        const override
+    {
+        return m_memory_allocate_statements;
+    }
+    [[nodiscard]] const timeline_event_statement_set& memory_copy_statements()
+        const override
+    {
+        return m_memory_copy_statements;
+    }
+
+    // ----- legacy count accessors (task 002C) -----
+    [[nodiscard]] const count_func_t& region_count() const override
+    {
+        return m_region_count;
+    }
+    [[nodiscard]] const count_func_t& kernel_dispatch_count() const override
+    {
+        return m_kernel_dispatch_count;
+    }
+    [[nodiscard]] const count_func_t& memory_copy_count() const override
+    {
+        return m_memory_copy_count;
+    }
+    [[nodiscard]] const count_func_t& memory_alloc_count() const override
+    {
+        return m_memory_alloc_count;
+    }
+    [[nodiscard]] const count_time_filtered_func_t& region_count_time_filtered()
+        const override
+    {
+        return m_region_count_time_filtered;
+    }
+    [[nodiscard]] const count_time_filtered_func_t& kernel_dispatch_count_time_filtered()
+        const override
+    {
+        return m_kernel_dispatch_count_time_filtered;
+    }
+    [[nodiscard]] const count_time_filtered_func_t& memory_copy_count_time_filtered()
+        const override
+    {
+        return m_memory_copy_count_time_filtered;
+    }
+    [[nodiscard]] const count_time_filtered_func_t& memory_alloc_count_time_filtered()
+        const override
+    {
+        return m_memory_alloc_count_time_filtered;
     }
 
 private:
@@ -568,6 +632,152 @@ private:
         m_region_to_memory_allocate_flows = make_flow_set("rocpd_memory_allocate", "MA");
     }
 
+    void initialize_timeline_event_statements()
+    {
+        const auto& u = m_uuid;
+
+        // Build all four timeline variants for one interval table. v4.0 differs
+        // from v3 structurally:
+        //   * start/end resolved through the rocpd_timestamp spine (start_id/end_id).
+        //   * nid/pid/tid come from the rocpd_track identity anchor, not the event
+        //     table (v4 event tables carry only track_id).
+        //   * category resolved to its display string via rocpd_info_category
+        //     (v3 used rocpd_string), keeping the reader version-agnostic.
+        // The track-scoped variants filter on track_id alone (the universal v4
+        // anchor); the three leading nid/pid/tid binds are accepted for signature
+        // parity with v3 and consumed as always-true `? IS NOT NULL` no-ops so the
+        // anonymous-`?` count matches bind_types.
+        auto make_timeline_set =
+            [&](const std::string& table,
+                const std::string& alias,
+                const std::string& display_col) -> timeline_event_statement_set {
+            const auto a = alias;
+
+            const auto select_from = fmt::format(
+                "SELECT {a}.id, ts_s.value, ts_e.value, {dn}, IC.name, "
+                "TR.nid, TR.pid, TR.tid, {a}.track_id "
+                "FROM {tbl}_{u} {a} "
+                "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = {a}.start_id "
+                "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = {a}.end_id "
+                "JOIN rocpd_track_{u} TR ON TR.id = {a}.track_id "
+                "LEFT JOIN rocpd_event_{u} E ON E.id = {a}.event_id "
+                "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id",
+                fmt::arg("a", a),
+                fmt::arg("dn", display_col),
+                fmt::arg("tbl", table),
+                fmt::arg("u", u));
+
+            timeline_event_statement_set out;
+
+            out.base = m_backend->create_read_statement_executor<timeline_event_result>(
+                select_from,
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_name,
+                &timeline_event_result::nid,
+                &timeline_event_result::pid,
+                &timeline_event_result::tid,
+                &timeline_event_result::track_id);
+
+            out.time_filtered =
+                m_backend->create_read_statement_executor<timeline_event_result,
+                                                          bind_types<size_t, size_t>>(
+                    select_from + " WHERE ts_s.value <= ? AND ts_e.value >= ?",
+                    &timeline_event_result::id,
+                    &timeline_event_result::start_timestamp,
+                    &timeline_event_result::end_timestamp,
+                    &timeline_event_result::display_name_id,
+                    &timeline_event_result::category_name,
+                    &timeline_event_result::nid,
+                    &timeline_event_result::pid,
+                    &timeline_event_result::tid,
+                    &timeline_event_result::track_id);
+
+            const auto track_where =
+                " WHERE ? IS NOT NULL AND ? IS NOT NULL AND ? IS NOT NULL AND " + a +
+                ".track_id = ?";
+
+            out.track_filtered = m_backend->create_read_statement_executor<
+                timeline_event_result,
+                bind_types<size_t, size_t, size_t, size_t>>(
+                select_from + track_where,
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_name,
+                &timeline_event_result::nid,
+                &timeline_event_result::pid,
+                &timeline_event_result::tid,
+                &timeline_event_result::track_id);
+
+            out.track_and_time_filtered = m_backend->create_read_statement_executor<
+                timeline_event_result,
+                bind_types<size_t, size_t, size_t, size_t, size_t, size_t>>(
+                select_from + track_where + " AND ts_s.value <= ? AND ts_e.value >= ?",
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_name,
+                &timeline_event_result::nid,
+                &timeline_event_result::pid,
+                &timeline_event_result::tid,
+                &timeline_event_result::track_id);
+
+            return out;
+        };
+
+        m_region_statements = make_timeline_set("rocpd_region", "R", "R.name_id");
+        m_kernel_dispatch_statements =
+            make_timeline_set("rocpd_kernel_dispatch", "K", "K.region_name_id");
+        // v4.0 memory_allocate has a native NOT NULL name_id (v3 lacked one and
+        // reused category as the display string); use the v4-native name_id here.
+        m_memory_allocate_statements =
+            make_timeline_set("rocpd_memory_allocate", "MA", "MA.name_id");
+        m_memory_copy_statements =
+            make_timeline_set("rocpd_memory_copy", "MC", "MC.region_name_id");
+    }
+
+    void initialize_count_statements()
+    {
+        const auto& u = m_uuid;
+
+        auto make_count_stmt = [&](const std::string& table) {
+            return m_backend->create_read_statement_executor<count_result>(
+                fmt::format("SELECT COUNT(*) FROM {}_{}", table, u),
+                &count_result::count);
+        };
+        // v4.0 has no inline start/end column; the time window filters against the
+        // rocpd_timestamp spine reached through start_id/end_id.
+        auto make_count_time_filtered_stmt = [&](const std::string& table) {
+            return m_backend->create_read_statement_executor<count_result,
+                                                             bind_types<size_t, size_t>>(
+                fmt::format("SELECT COUNT(*) FROM {tbl}_{u} T "
+                            "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = T.start_id "
+                            "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = T.end_id "
+                            "WHERE ts_s.value <= ? AND ts_e.value >= ?",
+                            fmt::arg("tbl", table),
+                            fmt::arg("u", u)),
+                &count_result::count);
+        };
+
+        m_region_count          = make_count_stmt("rocpd_region");
+        m_kernel_dispatch_count = make_count_stmt("rocpd_kernel_dispatch");
+        m_memory_copy_count     = make_count_stmt("rocpd_memory_copy");
+        m_memory_alloc_count    = make_count_stmt("rocpd_memory_allocate");
+
+        m_region_count_time_filtered = make_count_time_filtered_stmt("rocpd_region");
+        m_kernel_dispatch_count_time_filtered =
+            make_count_time_filtered_stmt("rocpd_kernel_dispatch");
+        m_memory_copy_count_time_filtered =
+            make_count_time_filtered_stmt("rocpd_memory_copy");
+        m_memory_alloc_count_time_filtered =
+            make_count_time_filtered_stmt("rocpd_memory_allocate");
+    }
+
     std::shared_ptr<sqlite_backend> m_backend;
     std::string                     m_uuid;
 
@@ -597,6 +807,21 @@ private:
     flow_statement_set m_region_to_kernel_dispatch_flows;
     flow_statement_set m_region_to_memory_copy_flows;
     flow_statement_set m_region_to_memory_allocate_flows;
+
+    timeline_event_statement_set m_region_statements;
+    timeline_event_statement_set m_kernel_dispatch_statements;
+    timeline_event_statement_set m_memory_allocate_statements;
+    timeline_event_statement_set m_memory_copy_statements;
+
+    count_func_t m_region_count;
+    count_func_t m_kernel_dispatch_count;
+    count_func_t m_memory_copy_count;
+    count_func_t m_memory_alloc_count;
+
+    count_time_filtered_func_t m_region_count_time_filtered;
+    count_time_filtered_func_t m_kernel_dispatch_count_time_filtered;
+    count_time_filtered_func_t m_memory_copy_count_time_filtered;
+    count_time_filtered_func_t m_memory_alloc_count_time_filtered;
 };
 
 }  // namespace profiler_hub::data_storage::schema_v4

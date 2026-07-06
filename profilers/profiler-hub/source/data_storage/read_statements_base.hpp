@@ -185,7 +185,9 @@ struct timeline_event_result
     size_t end_timestamp{};
 
     std::optional<size_t> display_name_id;
-    std::optional<size_t> category_id;
+    // Category decoded to its display string by the backend (v3: rocpd_string,
+    // v4: rocpd_info_category), so the reader stays version-agnostic.
+    std::optional<std::string> category_name;
 
     size_t                nid{};
     std::optional<size_t> pid;

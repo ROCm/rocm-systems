@@ -899,13 +899,9 @@ reader_t::impl::build_timeline_events(
             }
         }
 
-        if(result.category_id.has_value())
+        if(result.category_name.has_value())
         {
-            auto it = m_string_info_utility.find(result.category_id.value());
-            if(it != m_string_info_utility.end())
-            {
-                event.category = it->second;
-            }
+            event.category = result.category_name.value();
         }
 
         // Track resolution: try sample-based track_id first, fall back to topology
@@ -964,11 +960,6 @@ reader_t::impl::apply_pagination(reader_types::timeline_event_list_t& events,
 reader_types::timeline_event_list_t
 reader_t::impl::get_events(const reader_types::event_filter_t& filter)
 {
-    // Legacy timeline surface is unsupported on v4.0 (deferred to task 002C); the v4
-    // backend inherits only default-empty stubs for these statements, so the reader
-    // guards every legacy path and returns an empty/nullopt result on a v4 database.
-    if(m_is_v4) return {};
-
     reader_types::timeline_event_list_t all_events;
 
     bool query_all    = filter.types.empty();
@@ -1034,7 +1025,6 @@ reader_types::timeline_event_list_t
 reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
                                      const reader_types::event_filter_t& filter)
 {
-    if(m_is_v4) return {};  // legacy timeline surface unsupported on v4.0 (task 002C)
     if(!track) return {};
 
     auto topo_it = m_track_ptr_to_topology.find(track);
@@ -1115,8 +1105,6 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
 size_t
 reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
 {
-    if(m_is_v4) return 0;  // legacy timeline surface unsupported on v4.0 (task 002C)
-
     const bool query_all    = filter.types.empty();
     auto       should_count = [&](reader_types::event_type_t t) {
         return query_all || std::find(filter.types.begin(), filter.types.end(), t) !=

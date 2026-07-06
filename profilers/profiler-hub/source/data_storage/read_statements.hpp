@@ -655,7 +655,7 @@ private:
             &timeline_event_result::start_timestamp,
             &timeline_event_result::end_timestamp,
             &timeline_event_result::display_name_id,
-            &timeline_event_result::category_id,
+            &timeline_event_result::category_name,
             &timeline_event_result::nid,
             &timeline_event_result::pid,
             &timeline_event_result::tid,
@@ -671,7 +671,7 @@ private:
                 &timeline_event_result::start_timestamp,
                 &timeline_event_result::end_timestamp,
                 &timeline_event_result::display_name_id,
-                &timeline_event_result::category_id,
+                &timeline_event_result::category_name,
                 &timeline_event_result::nid,
                 &timeline_event_result::pid,
                 &timeline_event_result::tid,
@@ -688,7 +688,7 @@ private:
             &timeline_event_result::start_timestamp,
             &timeline_event_result::end_timestamp,
             &timeline_event_result::display_name_id,
-            &timeline_event_result::category_id,
+            &timeline_event_result::category_name,
             &timeline_event_result::nid,
             &timeline_event_result::pid,
             &timeline_event_result::tid,
@@ -705,7 +705,7 @@ private:
             &timeline_event_result::start_timestamp,
             &timeline_event_result::end_timestamp,
             &timeline_event_result::display_name_id,
-            &timeline_event_result::category_id,
+            &timeline_event_result::category_name,
             &timeline_event_result::nid,
             &timeline_event_result::pid,
             &timeline_event_result::tid,
@@ -720,13 +720,14 @@ private:
                                  "R.start",
                                  "R.end",
                                  "R.name_id",
-                                 "E.category_id",
+                                 "CS.value",
                                  "R.nid",
                                  "R.pid",
                                  "R.tid",
                                  "S.track_id")
                          .from(fmt::format("rocpd_region_{}", m_uuid), "R")
                          .inner_join("rocpd_event", "E", "R.event_id = E.id")
+                         .left_join("rocpd_string", "CS", "CS.id = E.category_id")
                          .left_join("rocpd_sample", "S", "S.event_id = R.event_id");
 
         initialize_timeline_event_variants(base, "R", m_region_statements);
@@ -740,13 +741,14 @@ private:
                                  "K.start",
                                  "K.end",
                                  "K.region_name_id",
-                                 "E.category_id",
+                                 "CS.value",
                                  "K.nid",
                                  "K.pid",
                                  "K.tid",
                                  "S.track_id")
                          .from(fmt::format("rocpd_kernel_dispatch_{}", m_uuid), "K")
                          .inner_join("rocpd_event", "E", "E.id = K.event_id")
+                         .left_join("rocpd_string", "CS", "CS.id = E.category_id")
                          .left_join("rocpd_sample", "S", "S.event_id = K.event_id");
 
         initialize_timeline_event_variants(base, "K", m_kernel_dispatch_statements);
@@ -760,13 +762,14 @@ private:
                                  "MA.start",
                                  "MA.end",
                                  "E.category_id",
-                                 "E.category_id",
+                                 "CS.value",
                                  "MA.nid",
                                  "MA.pid",
                                  "MA.tid",
                                  "S.track_id")
                          .from(fmt::format("rocpd_memory_allocate_{}", m_uuid), "MA")
                          .inner_join("rocpd_event", "E", "E.id = MA.event_id")
+                         .left_join("rocpd_string", "CS", "CS.id = E.category_id")
                          .left_join("rocpd_sample", "S", "S.event_id = MA.event_id");
 
         initialize_timeline_event_variants(base, "MA", m_memory_allocate_statements);
@@ -780,13 +783,14 @@ private:
                                  "MC.start",
                                  "MC.end",
                                  "MC.region_name_id",
-                                 "E.category_id",
+                                 "CS.value",
                                  "MC.nid",
                                  "MC.pid",
                                  "MC.tid",
                                  "S.track_id")
                          .from(fmt::format("rocpd_memory_copy_{}", m_uuid), "MC")
                          .inner_join("rocpd_event", "E", "MC.event_id = E.id")
+                         .left_join("rocpd_string", "CS", "CS.id = E.category_id")
                          .left_join("rocpd_sample", "S", "S.event_id = MC.event_id");
 
         initialize_timeline_event_variants(base, "MC", m_memory_copy_statements);
@@ -1029,10 +1033,11 @@ private:
                                         const std::string& alias,
                                         const std::string& display_name_col) {
             auto q =
-                fmt::format("SELECT {a}.id, {a}.start, {a}.end, {dn}, E.category_id, "
+                fmt::format("SELECT {a}.id, {a}.start, {a}.end, {dn}, CS.value, "
                             "{a}.nid, {a}.pid, {a}.tid, S.track_id "
                             "FROM {t} {a} "
                             "INNER JOIN rocpd_event_{u} E ON {a}.event_id = E.id "
+                            "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
                             "LEFT JOIN rocpd_sample_{u} S ON S.event_id = {a}.event_id "
                             "WHERE E.stack_id = ? AND E.id != ?",
                             fmt::arg("a", alias),
@@ -1047,7 +1052,7 @@ private:
                 &timeline_event_result::start_timestamp,
                 &timeline_event_result::end_timestamp,
                 &timeline_event_result::display_name_id,
-                &timeline_event_result::category_id,
+                &timeline_event_result::category_name,
                 &timeline_event_result::nid,
                 &timeline_event_result::pid,
                 &timeline_event_result::tid,
