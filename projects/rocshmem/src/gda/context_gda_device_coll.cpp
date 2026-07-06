@@ -220,17 +220,17 @@ __device__ void GDAContext::sync_wg(rocshmem_team_t team) {
 
 __device__ void GDAContext::sync_all() {
   ActiveWFInfo wf_info(ctx_id_);
-  internal_sync(my_pe, 0, 1, num_pes, barrier_sync, wf_info);
+  internal_sync(constmem.my_pe, 0, 1, constmem.num_pes, barrier_sync, wf_info);
 }
 
 __device__ void GDAContext::sync_all_wave() {
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
-  internal_sync_wave(my_pe, 0, 1, num_pes, barrier_sync, wf_info);
+  internal_sync_wave(constmem.my_pe, 0, 1, constmem.num_pes, barrier_sync, wf_info);
 }
 
 __device__ void GDAContext::sync_all_wg() {
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  internal_sync_wg(my_pe, 0, 1, num_pes, barrier_sync, wf_info);
+  internal_sync_wg(constmem.my_pe, 0, 1, constmem.num_pes, barrier_sync, wf_info);
 }
 
 __device__ void GDAContext::barrier_all() {

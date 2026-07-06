@@ -121,20 +121,31 @@ void ExtensionEntryPoints::InitPcSamplingExtTable() {
 void ExtensionEntryPoints::InitAmdExtTable() {
   hsa_api_table().amd_ext_api.hsa_amd_image_create_fn = hsa_ext_null;
   hsa_internal_api_table().amd_ext_api.hsa_amd_image_create_fn = hsa_ext_null;
+  hsa_api_table().amd_ext_api.hsa_amd_image_create_v2_fn = hsa_ext_null;
+  hsa_internal_api_table().amd_ext_api.hsa_amd_image_create_v2_fn = hsa_ext_null;
 }
 
 // Update Amd Ext table for Api related to Images.
 // @note: Interface should be updated when Amd Ext table
 // begins hosting Api's from other extension libraries
-void ExtensionEntryPoints::UpdateAmdExtTable(decltype(::hsa_amd_image_create)* func_ptr) {
+void ExtensionEntryPoints::UpdateAmdExtTable(decltype(::hsa_amd_image_create)* func_ptr,
+                                             decltype(::hsa_amd_image_create_v2)* func_v2_ptr) {
   assert(hsa_api_table().amd_ext_api.hsa_amd_image_create_fn ==
              (decltype(hsa_amd_image_create)*)hsa_ext_null &&
              "Duplicate load of extension import.");
   assert(hsa_internal_api_table().amd_ext_api.hsa_amd_image_create_fn ==
              (decltype(hsa_amd_image_create)*)hsa_ext_null &&
              "Duplicate load of extension import.");
+  assert(hsa_api_table().amd_ext_api.hsa_amd_image_create_v2_fn ==
+             (decltype(hsa_amd_image_create_v2)*)hsa_ext_null &&
+             "Duplicate load of extension import.");
+  assert(hsa_internal_api_table().amd_ext_api.hsa_amd_image_create_v2_fn ==
+             (decltype(hsa_amd_image_create_v2)*)hsa_ext_null &&
+             "Duplicate load of extension import.");
   hsa_api_table().amd_ext_api.hsa_amd_image_create_fn = func_ptr;
   hsa_internal_api_table().amd_ext_api.hsa_amd_image_create_fn = func_ptr;
+  hsa_api_table().amd_ext_api.hsa_amd_image_create_v2_fn = func_v2_ptr;
+  hsa_internal_api_table().amd_ext_api.hsa_amd_image_create_v2_fn = func_v2_ptr;
 }
 
 void ExtensionEntryPoints::UnloadImage() {
@@ -185,7 +196,8 @@ bool ExtensionEntryPoints::LoadImage() {
 
   // Bind to Image implementation api's
   decltype(::hsa_amd_image_create)* func;
-  rocr::image::LoadImage(&image_api, &func);
+  decltype(::hsa_amd_image_create_v2)* func_v2;
+  rocr::image::LoadImage(&image_api, &func, &func_v2);
 
   // Initialize Version of Api Table
   image_api.version.major_id = HSA_IMAGE_API_TABLE_MAJOR_VERSION;
@@ -197,7 +209,7 @@ bool ExtensionEntryPoints::LoadImage() {
                                     core::HsaApiTable::HSA_EXT_IMAGE_API_TABLE_ID);
 
   // Update Amd Ext Api table Api that deals with Images
-  UpdateAmdExtTable(func);
+  UpdateAmdExtTable(func, func_v2);
 #endif
   return true;
 }

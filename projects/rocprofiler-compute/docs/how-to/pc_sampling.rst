@@ -40,7 +40,8 @@ Analysis options
 ================
 For using analysis options for PC sampling the configuration needed are:
 
-* ``--pc-sampling-sorting-type``: ``offset`` or ``count``. The default option is ``offset``. ``offset`` is an assembly instruction offset in the code object.
+* ``--pc-sampling-sorting-type``: ``offset`` or ``count``. The default option is ``count``, which surfaces the most-sampled instructions (hotspots) first. ``offset`` is an assembly instruction offset in the code object.
+* ``--pc-sampling-rows``: Maximum number of rows shown in the PC sampling table (DEFAULT: 10). Must be a non-negative integer; use ``0`` to show all rows.
 
 **Sample command:**
 
