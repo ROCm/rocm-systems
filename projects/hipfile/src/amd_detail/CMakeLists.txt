@@ -32,14 +32,6 @@ set(HIPFILE_SOURCES
     sys.cpp
 )
 
-set(HIPFILE_AMD_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH})
-foreach(_hipfile_sysdeps_prefix IN ITEMS "${ROCM_PATH}/lib/rocm_sysdeps" "/opt/rocm/lib/rocm_sysdeps")
-    if(EXISTS "${_hipfile_sysdeps_prefix}/include")
-        list(APPEND HIPFILE_AMD_SYSINCLS "${_hipfile_sysdeps_prefix}/include")
-    endif()
-endforeach()
-list(REMOVE_DUPLICATES HIPFILE_AMD_SYSINCLS)
-
 # Create hipfile target
 ais_add_libraries(
     NAME     hipfile
@@ -47,7 +39,7 @@ ais_add_libraries(
     LIBS     mount
     SRCS     ${HIPFILE_SOURCES}
     LIBINCL  ${HIPFILE_INCLUDE_PATH}
-    SYSINCLS ${HIPFILE_AMD_SYSINCLS}
+    SYSINCLS ${HIPFILE_AMD_SOURCE_PATH}
 )
 
 if(HIPFILE_ROCPROFILER_REGISTER)
