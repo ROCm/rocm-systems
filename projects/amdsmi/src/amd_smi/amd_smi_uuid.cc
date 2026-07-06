@@ -32,18 +32,9 @@ typedef struct uuid_s {
 } uuid_t;
 
 static void print_uuid(char* str, uuid_t* uuid) {
-  sprintf(str, "%08x", uuid->time_low);
-  sprintf(str + 8, "-");
-  sprintf(str + 9, "%04x", uuid->time_mid);
-  sprintf(str + 13, "-");
-  sprintf(str + 14, "%04x", (uuid->version << 12) | uuid->time_high);
-  sprintf(str + 18, "-");
-  sprintf(str + 14 + 5, "%02x", (uuid->variant << 6) | uuid->clk_seq_hi);
-  sprintf(str + 16 + 5, "%02x", uuid->clk_seq_low);
-  sprintf(str + 18 + 5, "-");
-  sprintf(str + 19 + 5, "%04x", uuid->asic_4);
-  sprintf(str + 23 + 5, "%08x", uuid->asic_0);
-  str[31 + 5] = 0;
+  snprintf(str, AMDSMI_GPU_UUID_SIZE, "%08x-%04x-%04x-%02x%02x-%04x%08x", uuid->time_low,
+           uuid->time_mid, (uuid->version << 12) | uuid->time_high,
+           (uuid->variant << 6) | uuid->clk_seq_hi, uuid->clk_seq_low, uuid->asic_4, uuid->asic_0);
 }
 
 static void insert_asic_serial(uuid_t* uuid, uint64_t serial) {

@@ -198,8 +198,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
 
   if (name.empty()) return AMDSMI_STATUS_API_FAILED;
 
-  strncpy(info.name, name.c_str(),
-          std::min((unsigned long)AMDSMI_MAX_STRING_LENGTH, name.length()));
+  snprintf(info.name, sizeof(info.name), "%s", name.c_str());
 
   for (int i = 0; i < AMDSMI_MAX_CONTAINER_TYPE; i++) {
     std::ifstream cgroup_info(cgroup_path.c_str());
@@ -208,7 +207,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
       if (line.find(container_type_name[i]) != std::string::npos) {
         container_id =
             line.substr(line.find(container_type_name[i]) + strlen(container_type_name[i]) + 1, 16);
-        strcpy(info.container_name, container_id.c_str());
+        snprintf(info.container_name, sizeof(info.container_name), "%s", container_id.c_str());
         break;
       }
     }
