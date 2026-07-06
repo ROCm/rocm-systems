@@ -172,9 +172,10 @@ jobs:
       fail-fast: false
       matrix:
         amdgpu_family: [gfx94X-dcgpu, gfx950-dcgpu]
-    uses: ./.github/workflows/therock-rccl-ci-linux.yml
+    uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
     with:
+      enable_rccl: true
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
       package_version: ${{ needs.setup.outputs.package_version }}
@@ -229,3 +230,4 @@ jobs:
             echo "The following jobs failed: ${FAILED_JOBS}"
             exit 1
           fi
+
