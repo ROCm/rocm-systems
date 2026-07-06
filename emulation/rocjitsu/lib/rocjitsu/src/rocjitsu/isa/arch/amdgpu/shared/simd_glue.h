@@ -1202,25 +1202,23 @@ template <typename Inst>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
   const uint64_t vcc = wf.vcc();
-  // Resolve operand base pointers once; see try_execute_binary_vop2_simd.
-  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
-  const VgprStorage *r1 = simd_src_reg(inst.vsrc1, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
-  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
-  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.vsrc1.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand(inst.src0, wf, exec);
+  auto src1 = regs.read_operand(inst.vsrc1, wf, exec);
+  auto dst = regs.write_operand(inst.vdst, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = simd_load_or<T>(r0, base, a_bcast);
-    const auto b = simd_load_or<T>(r1, base, b_bcast);
+    const auto a = src0.template load_native<T>(base);
+    const auto b = src1.template load_native<T>(base);
     const uint64_t sel_bits = (vcc >> base) & chunk_full;
     alignas(util::native<T>) uint32_t selbuf[W];
     for (std::size_t i = 0; i < W; ++i)
       selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
     util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
-    write_simd_at<T>(rd, inst.vdst, wf, base, r, chunk);
+    dst.template store_native<T>(base, r, chunk);
   }
   return true;
 }
@@ -1247,19 +1245,17 @@ template <typename Inst>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
   const uint64_t sel64 = inst.src2.read_scalar64(wf);
-  // Resolve operand base pointers once; see try_execute_binary_vop2_simd.
-  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
-  const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
-  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
-  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand(inst.src0, wf, exec);
+  auto src1 = regs.read_operand(inst.src1, wf, exec);
+  auto dst = regs.write_operand(inst.vdst, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = apply_vop3_b32_src_mod(simd_load_or<T>(r0, base, a_bcast), inst.inst_.abs,
+    const auto a = apply_vop3_b32_src_mod(src0.template load_native<T>(base), inst.inst_.abs,
                                           inst.inst_.neg, 0);
-    const auto b = apply_vop3_b32_src_mod(simd_load_or<T>(r1, base, b_bcast), inst.inst_.abs,
+    const auto b = apply_vop3_b32_src_mod(src1.template load_native<T>(base), inst.inst_.abs,
                                           inst.inst_.neg, 1);
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
     alignas(util::native<T>) uint32_t selbuf[W];
@@ -1267,7 +1263,7 @@ template <typename Inst>
       selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
     util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
-    write_simd_at<T>(rd, inst.vdst, wf, base, r, chunk);
+    dst.template store_native<T>(base, r, chunk);
   }
   return true;
 }
@@ -1293,18 +1289,16 @@ template <typename Inst>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
   const uint64_t sel64 = inst.src2.read_scalar64(wf);
-  // Resolve operand base pointers once; see try_execute_binary_vop2_simd.
-  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
-  const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
-  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
-  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand(inst.src0, wf, exec);
+  auto src1 = regs.read_operand(inst.src1, wf, exec);
+  auto dst = regs.write_operand(inst.vdst, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = simd_load_or<T>(r0, base, a_bcast);
-    const auto b = simd_load_or<T>(r1, base, b_bcast);
+    const auto a = src0.template load_native<T>(base);
+    const auto b = src1.template load_native<T>(base);
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
     alignas(util::native<T>) uint32_t selbuf[W];
     for (std::size_t i = 0; i < W; ++i)
@@ -1312,7 +1306,7 @@ template <typename Inst>
     auto r = a;
     util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
     r = r & util::native<T>(0xFFFFu);
-    write_simd_at<T>(rd, inst.vdst, wf, base, r, chunk);
+    dst.template store_native<T>(base, r, chunk);
   }
   return true;
 }
@@ -1344,18 +1338,15 @@ template <typename T, typename Inst, typename CmpOp>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
   uint64_t vcc = 0;
-  // Resolve source base pointers once; see try_execute_binary_vop2_simd. VOPC
-  // writes only the VCC mask, so there is no dst pointer to hoist.
-  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
-  const VgprStorage *r1 = simd_src_reg(inst.vsrc1, wf);
-  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
-  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.vsrc1.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand(inst.src0, wf, exec);
+  auto src1 = regs.read_operand(inst.vsrc1, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = simd_load_or<T>(r0, base, a_bcast);
-    const auto b = simd_load_or<T>(r1, base, b_bcast);
+    const auto a = src0.template load_native<T>(base);
+    const auto b = src1.template load_native<T>(base);
     const auto m = cmp_op(a, b);
     uint64_t cmp_bits = 0;
     for (std::size_t i = 0; i < W; ++i)
@@ -1386,20 +1377,15 @@ template <typename T, typename Inst, typename CmpOp>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
   uint64_t vcc = 0;
-  // Resolve source base pointers once; see try_execute_binary_vop2_simd. VOPC
-  // writes only the VCC mask, so there is no dst pointer to hoist.
-  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
-  const ConstVgprStoragePair64 rs1 = simd_src_reg64(inst.vsrc1, wf);
-  const auto a_bcast =
-      rs0.lo ? util::native<T>{} : util::broadcast64<T>(inst.src0.read_scalar64(wf));
-  const auto b_bcast =
-      rs1.lo ? util::native<T>{} : util::broadcast64<T>(inst.vsrc1.read_scalar64(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand64(inst.src0, wf, exec);
+  auto src1 = regs.read_operand64(inst.vsrc1, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = simd_load64_or<T>(rs0, base, a_bcast);
-    const auto b = simd_load64_or<T>(rs1, base, b_bcast);
+    const auto a = src0.template load_native<T>(base);
+    const auto b = src1.template load_native<T>(base);
     const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
@@ -1431,20 +1417,15 @@ template <typename Inst, typename CmpOp>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
   uint64_t vcc = 0;
-  // Resolve source base pointers once; see try_execute_binary_vop2_simd. VOPC
-  // writes only the VCC mask, so there is no dst pointer to hoist.
-  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
-  const VgprStorage *rm = simd_src_reg(inst.vsrc1, wf);
-  const auto s_bcast =
-      rs0.lo ? util::native<uint64_t>{} : util::broadcast64<uint64_t>(inst.src0.read_scalar64(wf));
-  const auto mask_bcast = rm ? util::narrow32<uint32_t>{}
-                             : util::broadcast_narrow<uint32_t>(inst.vsrc1.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand64(inst.src0, wf, exec);
+  auto mask_src = regs.read_operand(inst.vsrc1, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto s = simd_load64_or<uint64_t>(rs0, base, s_bcast);
-    const auto mask = simd_load_narrow_or<uint32_t>(rm, base, mask_bcast);
+    const auto s = src0.template load_native<uint64_t>(base);
+    const auto mask = mask_src.template load_narrow<uint32_t>(base);
     const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
@@ -1483,22 +1464,19 @@ template <typename Inst, typename CmpOp>
   const bool do_neg = (inst.inst_.neg & (1u << 0)) != 0;
   const auto sm = util::broadcast<T>(signmask);
   uint64_t vcc = 0;
-  // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
-  // class test writes only the SGPR-pair mask, so there is no dst pointer to hoist.
-  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
-  const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
-  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
-  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand(inst.src0, wf, exec);
+  auto src1 = regs.read_operand(inst.src1, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    auto a = simd_load_or<T>(r0, base, a_bcast);
+    auto a = src0.template load_native<T>(base);
     if (do_abs)
       a = a & ~sm;
     if (do_neg)
       a = a ^ sm;
-    const auto b = simd_load_or<T>(r1, base, b_bcast);
+    const auto b = src1.template load_native<T>(base);
     const auto m = cmp_op(a, b);
     uint64_t cmp_bits = 0;
     for (std::size_t i = 0; i < W; ++i)
@@ -1535,24 +1513,19 @@ template <typename Inst, typename CmpOp>
   const bool do_neg = (inst.inst_.neg & (1u << 0)) != 0;
   const auto sm = util::broadcast64<uint64_t>(signmask);
   uint64_t vcc = 0;
-  // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
-  // class test writes only the SGPR-pair mask, so there is no dst pointer to hoist.
-  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
-  const VgprStorage *rm = simd_src_reg(inst.src1, wf);
-  const auto s_bcast =
-      rs0.lo ? util::native<uint64_t>{} : util::broadcast64<uint64_t>(inst.src0.read_scalar64(wf));
-  const auto mask_bcast =
-      rm ? util::narrow32<uint32_t>{} : util::broadcast_narrow<uint32_t>(inst.src1.read_scalar(wf));
+  RegisterAccess regs(wf.cu());
+  auto src0 = regs.read_operand64(inst.src0, wf, exec);
+  auto mask_src = regs.read_operand(inst.src1, wf, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    auto s = simd_load64_or<uint64_t>(rs0, base, s_bcast);
+    auto s = src0.template load_native<uint64_t>(base);
     if (do_abs)
       s = s & ~sm;
     if (do_neg)
       s = s ^ sm;
-    const auto mask = simd_load_narrow_or<uint32_t>(rm, base, mask_bcast);
+    const auto mask = mask_src.template load_narrow<uint32_t>(base);
     const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
