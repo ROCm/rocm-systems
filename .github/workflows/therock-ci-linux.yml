@@ -31,7 +31,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2 # 2026-04-16
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
