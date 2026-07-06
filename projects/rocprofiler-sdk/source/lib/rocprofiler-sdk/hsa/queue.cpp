@@ -77,29 +77,6 @@ static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
                   offsetof(hsa_amd_ext_kernel_dispatch_packet_t, completion_signal),
               "unexpected ABI incompatibility");
 #endif
- 
-struct hip_event_api_record_t
-{
-    rocprofiler_hip_runtime_api_id_t operation;
-    hipEvent_t event;
-    uint64_t event_id;
-};
-
-thread_local hip_event_api_record_t* hip_event_record_tls = nullptr;
-
-extern "C" {
-
-ROCPROFILER_API void SetHipEventRecordTag(void* record)
-{
-    printf("SetHipEventRecordTag: %p\n", record);
-
-    if (record == nullptr)
-        delete hip_event_record_tls;
-    
-    hip_event_record_tls = (hip_event_api_record_t*)record;
-}
-
-}
 
 namespace rocprofiler
 {
@@ -353,11 +330,9 @@ WriteInterceptor(const void* packets,
                                        HSA_PACKET_HEADER_TYPE,
                                        HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
 
-        if ((hip_event_record_tls != nullptr) && (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC))
+        if (gpu_events::gpu_event_tracing() && (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC))
         {
             num_evt_sigl_packets++;
-            printf("HSA_PACKET_TYPE_VENDOR_SPECIFIC\n");
-            printf("\tcompletion_signal: %lu\n", packets_arr[i].ext_amd_aql_pm4.completion_signal.handle);
         }
 
         if(packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
@@ -376,15 +351,9 @@ WriteInterceptor(const void* packets,
 #endif
         else if (packet_type == HSA_PACKET_TYPE_BARRIER_AND)
         {
-            if (hip_event_record_tls != nullptr)
+            if (gpu_events::gpu_event_tracing())
             {
                 num_evt_bari_packets++;
-                printf("HSA_PACKET_TYPE_BARRIER_AND\n");
-
-                for (uint32_t j = 0; j < 5; j++)
-                    printf("\tdep_signal: %lu\n", packets_arr[i].barrier_and.dep_signal[j].handle);
-
-                printf("\tcompletion_signal: %lu\n", packets_arr[i].barrier_and.completion_signal.handle);
             }
         }
     }
@@ -489,8 +458,8 @@ WriteInterceptor(const void* packets,
                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
             bool is_kernel_dispatch     = (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
             bool is_ext_kernel_dispatch = false;
-            bool is_evt_sigl_packets = (num_evt_sigl_packets > 0) && (hip_event_record_tls != nullptr) && (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC);
-            bool is_evt_bari_packets = (num_evt_bari_packets > 0) && (hip_event_record_tls != nullptr) && (packet_type == HSA_PACKET_TYPE_BARRIER_AND);
+            bool is_evt_sigl_packets = (num_evt_sigl_packets > 0) && gpu_events::gpu_event_tracing() && (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC);
+            bool is_evt_bari_packets = (num_evt_bari_packets > 0) && gpu_events::gpu_event_tracing() && (packet_type == HSA_PACKET_TYPE_BARRIER_AND);
 
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
             if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
@@ -715,7 +684,7 @@ WriteInterceptor(const void* packets,
                                         .agent_id    = queue.get_agent().get_rocp_agent()->id,
                                         .queue_id    = queue.get_id(),
                                         .stream_id   = 0,
-                                        .event_id = hip_event_record_tls->event_id,
+                                        .event_id = gpu_events::get_gpu_event_id(),
                                         .type_id = op}};
  
                  {
