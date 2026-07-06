@@ -20,6 +20,8 @@
 #include <numaif.h>
 #include <sched.h>
 
+#include <vector>
+
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
 
@@ -47,6 +49,27 @@ hipMemAllocationProp makeHostNumaProp(hipMemLocationType locType, int id) {
   return prop;
 }
 
+// NUMA nodes this process is actually permitted to allocate on. Under a
+// cpuset-partitioned environment (e.g. Kubernetes/Docker CI slices) the process
+// may be restricted to a subset of the hardware nodes; allocating on an excluded
+// node yields memory the CPU cannot fault in (SIGBUS on direct access). Use the
+// allowed set rather than numa_max_node() so tests only exercise usable nodes.
+std::vector<int> allowedNumaNodes() {
+  std::vector<int> nodes;
+  struct bitmask* mask = numa_get_mems_allowed();
+  if (mask == nullptr) {
+    return nodes;
+  }
+  const int maxNode = numa_max_node();
+  for (int node = 0; node <= maxNode; ++node) {
+    if (numa_bitmask_isbitset(mask, node)) {
+      nodes.push_back(node);
+    }
+  }
+  numa_free_nodemask(mask);
+  return nodes;
+}
+
 }  // namespace
 
 /**
@@ -69,10 +92,13 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_Granularity) {
   if (numa_available() < 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
-  const int numNodes = numa_max_node() + 1;
+  const std::vector<int> nodes = allowedNumaNodes();
+  if (nodes.empty()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  }
 
   SECTION("hipMemLocationTypeHostNuma per node") {
-    for (int node = 0; node < numNodes; ++node) {
+    for (int node : nodes) {
       hipMemAllocationProp prop = makeHostNumaProp(hipMemLocationTypeHostNuma, node);
       size_t granularity = 0;
       HIP_CHECK(
@@ -112,17 +138,20 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_BasicAllocDealloc) {
   if (numa_available() < 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
-  const int numNodes = numa_max_node() + 1;
+  const std::vector<int> nodes = allowedNumaNodes();
+  if (nodes.empty()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  }
 
   hipMemLocationType locType = hipMemLocationTypeHostNuma;
   int locId = 0;
-  SECTION("hipMemLocationTypeHostNuma node 0") {
+  SECTION("hipMemLocationTypeHostNuma first allowed node") {
     locType = hipMemLocationTypeHostNuma;
-    locId = 0;
+    locId = nodes.front();
   }
-  SECTION("hipMemLocationTypeHostNuma last node") {
+  SECTION("hipMemLocationTypeHostNuma last allowed node") {
     locType = hipMemLocationTypeHostNuma;
-    locId = numNodes - 1;
+    locId = nodes.back();
   }
   SECTION("hipMemLocationTypeHostNumaCurrent") {
     locType = hipMemLocationTypeHostNumaCurrent;
@@ -166,17 +195,20 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_ChkDev2HstMemcpy) {
   if (numa_available() < 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
-  const int numNodes = numa_max_node() + 1;
+  const std::vector<int> nodes = allowedNumaNodes();
+  if (nodes.empty()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  }
 
   hipMemLocationType locType = hipMemLocationTypeHostNuma;
   int locId = 0;
-  SECTION("hipMemLocationTypeHostNuma node 0") {
+  SECTION("hipMemLocationTypeHostNuma first allowed node") {
     locType = hipMemLocationTypeHostNuma;
-    locId = 0;
+    locId = nodes.front();
   }
-  SECTION("hipMemLocationTypeHostNuma last node") {
+  SECTION("hipMemLocationTypeHostNuma last allowed node") {
     locType = hipMemLocationTypeHostNuma;
-    locId = numNodes - 1;
+    locId = nodes.back();
   }
   SECTION("hipMemLocationTypeHostNumaCurrent") {
     locType = hipMemLocationTypeHostNumaCurrent;
@@ -239,17 +271,20 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_ChkWithKerLaunch) {
   if (numa_available() < 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
-  const int numNodes = numa_max_node() + 1;
+  const std::vector<int> nodes = allowedNumaNodes();
+  if (nodes.empty()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  }
 
   hipMemLocationType locType = hipMemLocationTypeHostNuma;
   int locId = 0;
-  SECTION("hipMemLocationTypeHostNuma node 0") {
+  SECTION("hipMemLocationTypeHostNuma first allowed node") {
     locType = hipMemLocationTypeHostNuma;
-    locId = 0;
+    locId = nodes.front();
   }
-  SECTION("hipMemLocationTypeHostNuma last node") {
+  SECTION("hipMemLocationTypeHostNuma last allowed node") {
     locType = hipMemLocationTypeHostNuma;
-    locId = numNodes - 1;
+    locId = nodes.back();
   }
   SECTION("hipMemLocationTypeHostNumaCurrent") {
     locType = hipMemLocationTypeHostNumaCurrent;
@@ -325,17 +360,20 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_HostAndDeviceAccess) {
   if (numa_available() < 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
-  const int numNodes = numa_max_node() + 1;
+  const std::vector<int> nodes = allowedNumaNodes();
+  if (nodes.empty()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  }
 
   hipMemLocationType locType = hipMemLocationTypeHostNuma;
   int locId = 0;
-  SECTION("hipMemLocationTypeHostNuma node 0") {
+  SECTION("hipMemLocationTypeHostNuma first allowed node") {
     locType = hipMemLocationTypeHostNuma;
-    locId = 0;
+    locId = nodes.front();
   }
-  SECTION("hipMemLocationTypeHostNuma last node") {
+  SECTION("hipMemLocationTypeHostNuma last allowed node") {
     locType = hipMemLocationTypeHostNuma;
-    locId = numNodes - 1;
+    locId = nodes.back();
   }
   SECTION("hipMemLocationTypeHostNumaCurrent") {
     locType = hipMemLocationTypeHostNumaCurrent;
@@ -420,26 +458,29 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_NumaTypedAccess) {
   if (numa_available() < 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
-  const int numNodes = numa_max_node() + 1;
+  const std::vector<int> nodes = allowedNumaNodes();
+  if (nodes.empty()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  }
 
   // Vary the host-access descriptor's location type/id (the accessor), keeping the
-  // allocation itself on NUMA node 0.
+  // allocation itself on the first allowed NUMA node.
   hipMemLocationType accessType = hipMemLocationTypeHostNuma;
-  int accessId = 0;
-  SECTION("access via hipMemLocationTypeHostNuma node 0") {
+  int accessId = nodes.front();
+  SECTION("access via hipMemLocationTypeHostNuma first allowed node") {
     accessType = hipMemLocationTypeHostNuma;
-    accessId = 0;
+    accessId = nodes.front();
   }
-  SECTION("access via hipMemLocationTypeHostNuma last node") {
+  SECTION("access via hipMemLocationTypeHostNuma last allowed node") {
     accessType = hipMemLocationTypeHostNuma;
-    accessId = numNodes - 1;
+    accessId = nodes.back();
   }
   SECTION("access via hipMemLocationTypeHostNumaCurrent") {
     accessType = hipMemLocationTypeHostNumaCurrent;
     accessId = 0;
   }
 
-  hipMemAllocationProp prop = makeHostNumaProp(hipMemLocationTypeHostNuma, 0);
+  hipMemAllocationProp prop = makeHostNumaProp(hipMemLocationTypeHostNuma, nodes.front());
   size_t granularity = 0;
   HIP_CHECK(
       hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
