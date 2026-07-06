@@ -328,6 +328,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
+  HIP_CHECK(hipSetDevice(0));
 
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
