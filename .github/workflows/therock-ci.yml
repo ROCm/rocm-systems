@@ -157,6 +157,8 @@ jobs:
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
+      # Enable MI455 tests for gfx125X when HIP/CLR/ROCR changes detected
+      run_mi455_test: ${{ matrix.target_bundle.amdgpu_family == 'gfx125X-dcgpu' && needs.setup.outputs.run_mi455_test || 'false' }}
 
   therock-rccl-ci-linux:
     name: TheRock RCCL CI Linux
@@ -182,34 +184,6 @@ jobs:
         -DTHEROCK_ENABLE_COMM_LIBS=ON
         -DTHEROCK_ENABLE_ROCPROFV3=ON
         -DTHEROCK_ENABLE_MPI=ON
-
-  # =============================================================================
-  # TEMPORARY JOB - MI455 BRINGUP TEST
-  # =============================================================================
-  # This test job is temporary and will be removed once MI455 bringup is complete.
-  # After bringup, MI455 (gfx125X-dcgpu) will be onboarded into the standard
-  # multi-arch CI via therock-ci-config.
-  #
-  # Build: gfx125X is included in the regular therock-ci-linux build matrix
-  # Test: Only runs when HIP/CLR/hip-tests/ROCR changes (limited to 1 test node)
-  #
-  # TODO(geomin12): Delete this job once MI455 is fully enabled in
-  #                 therock-ci-config and the multi-arch CI.
-  # =============================================================================
-  therock-mi455-test-linux:
-    name: MI455 Linux Test (hip-tests, rocrtst | gfx125X-dcgpu)
-    needs: [setup, therock-ci-linux]
-    # Tests only run when HIP/CLR/hip-tests/ROCR files are modified
-    if: ${{ github.event_name == 'pull_request' && needs.setup.outputs.run_mi455_test == 'true' }}
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/therock-test-packages.yml
-    with:
-      projects_to_test: "hip-tests, rocrtst"
-      amdgpu_families: "gfx125X-dcgpu"
-      test_runs_on: "linux-mi455-gpu-rocm"
-      platform: "linux"
 
   therock-ci-windows:
     name: Windows (${{ matrix.projects.projects_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
