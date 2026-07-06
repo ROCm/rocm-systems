@@ -36,6 +36,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <regex>
 #include <set>
 #include <string>
 #include <vector>
@@ -326,24 +327,23 @@ TEST_F(InterposerExportsTest, AutoDetectedInterposerSurfaceLooksSane) {
 // The library's real ABI is entirely extern "C": the rj_* C API plus the
 // interposed libc entry points. Without a linker version script the dynamic
 // table cannot be made perfectly pristine -- libstdc++ marks namespace std as
-// _GLIBCXX_VISIBILITY(default), so std::/__gnu_cxx:: template instantiations
-// emitted into our own objects stay exported even under -fvisibility=hidden.
-// Those residuals are all Itanium-C++-mangled (_Z...) and never live in our own
-// namespace, so we tolerate them while still flagging any unmangled (extern
-// "C") leak or any accidentally exported rocjitsu:: C++ symbol.
+// _GLIBCXX_VISIBILITY(default), so std:: template instantiations emitted into
+// our own objects stay exported even under -fvisibility=hidden. Those residuals
+// are all std::-rooted Itanium C++ manglings, so we tolerate exactly that shape
+// (a positive std:: match) while still flagging any unmangled (extern "C") leak
+// or any other mangled C++ symbol (e.g. an accidentally exported rocjitsu:: one).
 TEST_F(InterposerExportsTest, ExportSurfaceIsNotOverExposed) {
+  const std::regex std_mangled("^_Z[A-Z]*St");
   std::vector<std::string> unexpected;
   for (const std::string &name : symbols_.exported()) {
     if (name.rfind("rj_", 0) == 0)
       continue; // public C API
     if (interposed_.count(name) != 0)
       continue; // interposed libc entry point
-    // Tolerate C++ standard-library runtime instantiations: they are mangled
-    // (_Z...) and never in our own namespace. Anything else -- an unmangled
-    // extern "C" symbol or a mangled rocjitsu:: symbol -- is a real leak.
-    const bool cxx_mangled = name.rfind("_Z", 0) == 0;
-    const bool ours = name.find("rocjitsu") != std::string::npos;
-    if (cxx_mangled && !ours)
+    // Tolerate C++ standard-library runtime instantiations only: their mangled
+    // names are std::-rooted (^_Z[A-Z]*St). Anything else -- an unmangled extern
+    // "C" symbol or a mangled non-std (e.g. rocjitsu::) symbol -- is a real leak.
+    if (std::regex_search(name, std_mangled))
       continue;
     unexpected.push_back(name);
   }
