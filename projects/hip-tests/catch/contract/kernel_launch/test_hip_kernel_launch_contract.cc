@@ -146,9 +146,14 @@ HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolSize_MatchesDeclaredSize) {
 
 HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_NullSymbol_IsRejected) {
   // Resolving a null symbol must not silently succeed. The exact error code is
-  // backend-specific, so only a non-success status is required.
+  // backend-specific, so only a non-success status is required. The null is
+  // typed as const void* so the non-template C API overload is selected;
+  // a bare nullptr would bind to the C++ template (T = std::nullptr_t), which
+  // passes the address of a non-null temporary and would not exercise the
+  // null-symbol contract.
   void* symbol_ptr = nullptr;
-  const hipError_t status = hipGetSymbolAddress(&symbol_ptr, nullptr);
+  const void* null_symbol = nullptr;
+  const hipError_t status = hipGetSymbolAddress(&symbol_ptr, null_symbol);
   REQUIRE(status != hipSuccess);
 }
 
