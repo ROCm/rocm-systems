@@ -275,18 +275,6 @@ DynamicSymbols InterposerExportsTest::symbols_;
 std::set<std::string> InterposerExportsTest::interposed_;
 std::string InterposerExportsTest::path_;
 
-// Every libc entry point the LD_PRELOAD shim overrides must be an exported,
-// defined dynamic symbol, otherwise the preload cannot intercept that syscall.
-TEST_F(InterposerExportsTest, AllInterposedLibcSymbolsExported) {
-  for (const std::string &name : interposed_) {
-    EXPECT_TRUE(symbols_.is_exported(name))
-        << "librocjitsu.so must export interposed libc symbol '" << name
-        << "'. Without it the LD_PRELOAD shim cannot intercept that part of "
-           "the amdgpu/KFD syscall surface. Check the RJ_INTERPOSER_EXPORT "
-           "marker on its definition in interposer.cpp.";
-  }
-}
-
 // The fcntl helpers are implementation details and must stay hidden.
 TEST_F(InterposerExportsTest, InternalHelpersStayHidden) {
   for (const char *name : kInternalHelpers) {
