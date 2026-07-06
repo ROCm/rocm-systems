@@ -31,6 +31,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <csignal>
+
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -48,9 +50,13 @@ constexpr const char* kEnvUid = "RCCL_ASYM_UID"; // hex-encoded ncclUniqueId
 
 constexpr int kNumRanks = 2;
 
+// Coordinator process exit code signalling "not enough GPUs"; the parent
+// translates it to a gtest skip. Kept outside the WorkerStatus range (2-8).
+constexpr int kCoordSkip = 10;
+
 // Worker process exit codes; distinct values so the orchestrator failure log
-// identifies which step failed. Values start at 2 to avoid colliding with the
-// exit code 1 that gtest itself returns on an assertion failure.
+// identifies which step failed. Non-zero codes start at 2 to avoid colliding
+// with the exit code 1 that gtest itself returns on an assertion failure.
 enum WorkerStatus {
   kOk = 0,
   kSetDeviceFailed = 2,
@@ -130,7 +136,9 @@ int runWorker(int rank, int localDev, const ncclUniqueId& id) {
   }
 
   const float value = static_cast<float>(rank + 1);
-  hipMemcpy(sendbuf, &value, sizeof(float), hipMemcpyHostToDevice);
+  if (hipMemcpy(sendbuf, &value, sizeof(float), hipMemcpyHostToDevice) !=
+        hipSuccess && !rc)
+    rc = kHipSetupFailed;
 
   nres = ncclAllReduce(sendbuf, recvbuf, 1, ncclFloat32, ncclSum, comm, stream);
   if (nres != ncclSuccess) {
@@ -139,27 +147,32 @@ int runWorker(int rank, int localDev, const ncclUniqueId& id) {
     if (!rc) rc = kAllReduceFailed;
   }
 
-  if (!rc && hipStreamSynchronize(stream) != hipSuccess) {
+  if (hipStreamSynchronize(stream) != hipSuccess && !rc) {
     fprintf(stderr, "[asym rank%d] hipStreamSynchronize failed\n", rank);
     rc = kSyncFailed;
   }
 
   if (!rc) {
     float result = 0.0f;
-    hipMemcpy(&result, recvbuf, sizeof(float), hipMemcpyDeviceToHost);
-    const float expected =
-      static_cast<float>(kNumRanks) * (kNumRanks + 1) / 2.0f;
-    if (result != expected) {
-      fprintf(stderr,
-              "[asym rank%d] wrong AllReduce result %.1f (expected %.1f)\n",
-              rank, result, expected);
-      rc = kWrongResult;
+    if (hipMemcpy(&result, recvbuf, sizeof(float), hipMemcpyDeviceToHost) !=
+        hipSuccess) {
+      fprintf(stderr, "[asym rank%d] result copy back to host failed\n", rank);
+      rc = kHipSetupFailed;
+    } else {
+      const float expected =
+        static_cast<float>(kNumRanks) * (kNumRanks + 1) / 2.0f;
+      if (result != expected) {
+        fprintf(stderr,
+                "[asym rank%d] wrong AllReduce result %.1f (expected %.1f)\n",
+                rank, result, expected);
+        rc = kWrongResult;
+      }
     }
   }
 
-  hipFree(sendbuf);
-  hipFree(recvbuf);
-  hipStreamDestroy(stream);
+  (void)hipFree(sendbuf);
+  (void)hipFree(recvbuf);
+  (void)hipStreamDestroy(stream);
   ncclCommDestroy(comm);
   return rc;
 }
@@ -189,6 +202,48 @@ pid_t spawnWorker(int rank, const char* visibleDevices, int localDev,
   _exit(127);
 }
 
+// Coordinator body. Runs in a process forked from the main gtest process so
+// that the main process never initializes the HIP/NCCL runtime: TestBed forks a
+// fresh child for every collective test, and HIP is not fork-safe once
+// initialized in the parent, so touching it here would crash later TestBed
+// children. Returns an exit code the parent maps to skip/pass/fail.
+int runCoordinator() {
+  int numDevices = 0;
+  if (hipGetDeviceCount(&numDevices) != hipSuccess) return kHipSetupFailed;
+  if (numDevices < 3) return kCoordSkip;
+
+  ncclUniqueId id;
+  if (ncclGetUniqueId(&id) != ncclSuccess) return kInitRankFailed;
+  const std::string uidHex = toHex(id);
+
+  // rank0: HIP_VISIBLE_DEVICES=0,1 -> bind ordinal 1; rank1: =2 -> bind ordinal 0.
+  const pid_t child0 = spawnWorker(0, "0,1", 1, uidHex);
+  const pid_t child1 = (child0 > 0) ? spawnWorker(1, "2", 0, uidHex) : -1;
+  if (child0 <= 0 || child1 <= 0) {
+    if (child0 > 0) { kill(child0, SIGKILL); waitpid(child0, nullptr, 0); }
+    if (child1 > 0) { kill(child1, SIGKILL); waitpid(child1, nullptr, 0); }
+    fprintf(stderr, "[asym] fork failed (child0=%d, child1=%d)\n", child0,
+            child1);
+    return kSetDeviceFailed;
+  }
+
+  int rc = kOk;
+  auto reap = [&rc](pid_t pid, int rank) {
+    int status = 0;
+    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) {
+      fprintf(stderr, "[asym] rank %d terminated abnormally\n", rank);
+      if (!rc) rc = kInitRankFailed;
+    } else if (WEXITSTATUS(status) != kOk) {
+      fprintf(stderr, "[asym] rank %d worker returned %d\n", rank,
+              WEXITSTATUS(status));
+      if (!rc) rc = WEXITSTATUS(status);
+    }
+  };
+  reap(child0, 0);
+  reap(child1, 1);
+  return rc;
+}
+
 } // namespace
 
 // Worker entry point: only active when re-exec'd by the orchestrator (i.e. when
@@ -208,39 +263,35 @@ TEST(AsymmetricVisibilityWorker, Run) {
   ncclUniqueId id;
   ASSERT_TRUE(fromHex(uidEnv, id)) << "malformed ncclUniqueId in environment";
 
-  ASSERT_EQ(runWorker(rank, atoi(devEnv), id), kOk)
-    << "asymmetric-visibility worker rank " << rank << " failed";
+  // Exit with the step-specific WorkerStatus so the orchestrator's WEXITSTATUS
+  // pinpoints the failing step instead of gtest's generic code.
+  const int rc = runWorker(rank, atoi(devEnv), id);
+  if (rc != kOk) _exit(rc);
 }
 
 // Orchestrator: reproduces the ROCM-27034 asymmetric topology with two workers,
 // rank0 seeing devices {0,1} and binding ordinal 1, rank1 seeing device {2} and
-// binding ordinal 0.
+// binding ordinal 0. All HIP/NCCL work happens in a forked coordinator so the
+// main gtest process stays HIP-clean for TestBed's per-test forks.
 TEST(AsymmetricVisibility, CommInitRankAllReduce) {
-  int numDevices = 0;
-  ASSERT_EQ(hipGetDeviceCount(&numDevices), hipSuccess);
-  if (numDevices < 3)
+  const char* cumemEnv = getenv("NCCL_CUMEM_ENABLE");
+  if (cumemEnv != nullptr && atoi(cumemEnv) == 0)
+    GTEST_SKIP() << "NCCL_CUMEM_ENABLE explicitly disabled; this test requires "
+                    "the cuMem path";
+
+  const pid_t coord = fork();
+  if (coord == 0) _exit(runCoordinator());
+  ASSERT_GT(coord, 0) << "fork of coordinator process failed";
+
+  int status = 0;
+  ASSERT_EQ(waitpid(coord, &status, 0), coord);
+  ASSERT_TRUE(WIFEXITED(status)) << "coordinator terminated abnormally";
+  const int code = WEXITSTATUS(status);
+  if (code == kCoordSkip)
     GTEST_SKIP() << "requires at least 3 GPUs for an asymmetric topology";
-
-  ncclUniqueId id;
-  ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
-  const std::string uidHex = toHex(id);
-
-  // rank0: HIP_VISIBLE_DEVICES=0,1 -> bind ordinal 1; rank1: =2 -> bind ordinal 0.
-  const pid_t child0 = spawnWorker(0, "0,1", 1, uidHex);
-  ASSERT_GT(child0, 0) << "fork failed for rank 0";
-  const pid_t child1 = spawnWorker(1, "2", 0, uidHex);
-  ASSERT_GT(child1, 0) << "fork failed for rank 1";
-
-  auto waitOk = [](pid_t pid, int rank) {
-    int status = 0;
-    ASSERT_EQ(waitpid(pid, &status, 0), pid);
-    ASSERT_TRUE(WIFEXITED(status))
-      << "rank " << rank << " terminated abnormally";
-    ASSERT_EQ(WEXITSTATUS(status), 0)
-      << "rank " << rank << " worker returned failure";
-  };
-  waitOk(child0, 0);
-  waitOk(child1, 1);
+  EXPECT_EQ(code, kOk)
+    << "asymmetric-visibility workers reported failure (exit code " << code
+    << "); see stderr for the failing rank";
 }
 
 } // namespace RcclUnitTesting
