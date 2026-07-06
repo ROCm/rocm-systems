@@ -1521,8 +1521,8 @@ class TestAmdSmiCli(unittest.TestCase):
         # Wait for all to finish
         worker_datas = []
         for p in processes:
-            worker_datas.append(q.get(timeout=max_time_out))
-            p.join(timeout=max_time_out)
+            worker_datas.append(q.get(timeout=max_timeout))
+            p.join(timeout=max_timeout)
 
         if self.Debug:
             for worker_data in worker_datas:
