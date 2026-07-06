@@ -41,6 +41,12 @@ cd "${workdir}"
 ci_dir="${workdir}/projects/rccl/tools/ci"
 amdgpu_targets="${RCCL_AMDGPU_TARGETS:-gfx950}"
 
+# Phase-split logs into build-%j and test-%j (SLURM_SUBMIT_DIR = the *-logs dir).
+logs_dir="${SLURM_SUBMIT_DIR:-$(pwd)}"
+jid="${SLURM_JOB_ID:-local}"
+build_out="${logs_dir}/build-${jid}.out"; build_err="${logs_dir}/build-${jid}.err"
+test_out="${logs_dir}/test-${jid}.out";   test_err="${logs_dir}/test-${jid}.err"
+
 # Cap parallelism: this node reports nproc=384, and -j384 OOM/thrashes RCCL's
 # heavy C++ compile. Default to <=32; export so build-ompi.sh inherits it too.
 if [[ -z "${RCCL_BUILD_JOBS:-}" ]]; then
@@ -50,6 +56,8 @@ fi
 export RCCL_BUILD_JOBS
 build_jobs="${RCCL_BUILD_JOBS}"
 
+# --- build phase -> build-%j.{out,err} ---
+{
 # 1) ROCm: provisioned on the head node; consume its shared tree via rocm.env.
 echo "==> [1/5] use ROCm (provisioned on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
@@ -127,10 +135,16 @@ rccl_tests_dir="${workdir}/projects/rccl-tests"
 ( cd "${rccl_tests_dir}" \
   && ENABLE_DEVICE_API=1 ./install.sh \
        --mpi --mpi_home="${MPI_HOME}" --rccl_home="${rccl_prefix}" )
+} > "${build_out}" 2> "${build_err}"
+echo "==> build phase logs: ${build_out} / ${build_err}"
 
+# --- test phase -> test-%j.{out,err} ---
+{
 # 5) Benchmarks.
 echo "==> [5/5] run benchmarks"
 # GIN/RoCE QP creation pins memory; a low memlock limit makes ibv_create_qp fail with ENOMEM. Raise it for the mpirun ranks and log it.
 ulimit -l unlimited 2>/dev/null || echo "WARN: could not raise RLIMIT_MEMLOCK (ulimit -l)"
 echo "==> RLIMIT_MEMLOCK (ulimit -l) = $(ulimit -l)"
 "${ci_dir}/run-device-api-ci.sh"
+} > "${test_out}" 2> "${test_err}"
+echo "==> test phase logs: ${test_out} / ${test_err}"

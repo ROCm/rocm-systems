@@ -37,6 +37,12 @@ cd "${workdir}"
 ci_dir="${workdir}/projects/rccl/tools/ci"
 gpu_targets="${RCCL_AMDGPU_TARGETS:-gfx950}"
 
+# Phase-split logs into build-%j and test-%j (SLURM_SUBMIT_DIR = the *-logs dir).
+logs_dir="${SLURM_SUBMIT_DIR:-$(pwd)}"
+jid="${SLURM_JOB_ID:-local}"
+build_out="${logs_dir}/build-${jid}.out"; build_err="${logs_dir}/build-${jid}.err"
+test_out="${logs_dir}/test-${jid}.out";   test_err="${logs_dir}/test-${jid}.err"
+
 # Cap parallelism (nodes report nproc=384; -j384 thrashes the C++ compile).
 if [[ -z "${RCCL_BUILD_JOBS:-}" ]]; then
   nproc_count="$(nproc)"
@@ -45,6 +51,8 @@ fi
 export RCCL_BUILD_JOBS
 build_jobs="${RCCL_BUILD_JOBS}"
 
+# --- build phase -> build-%j.{out,err} ---
+{
 # 1) ROCm: provisioned on the head node; consume its shared tree via rocm.env.
 echo "==> [1/6] use ROCm (provisioned on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
@@ -158,7 +166,13 @@ fi
   printf 'export RCCL_INSTALL_PREFIX=%q\n' "${rccl_prefix}"
   printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
 } > "${workdir}/.ci-out/rccl.env"
+} > "${build_out}" 2> "${build_err}"
+echo "==> build phase logs: ${build_out} / ${build_err}"
 
+# --- test phase -> test-%j.{out,err} ---
+{
 # 6) GIN/rocSHMEM tests (non-gating).
 echo "==> [6/6] run GIN tests"
 "${ci_dir}/run-gin-ci.sh"
+} > "${test_out}" 2> "${test_err}"
+echo "==> test phase logs: ${test_out} / ${test_err}"

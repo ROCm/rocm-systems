@@ -107,8 +107,16 @@ jobs:
         run: |
           logs_dir="${{ github.workspace }}/.ci-out/gin-logs"
           shopt -s nullglob
-          for f in "${logs_dir}"/rccl-gin-*.err "${logs_dir}"/rccl-gin-*.out; do
-            echo "::group::${f}"
-            cat "${f}" || true
-            echo "::endgroup::"
-          done
+          # One collapsible group per log; rccl-gin-* is SLURM's whole-job stream,
+          # kept last as a fallback for early/killed jobs.
+          dump() {
+            local title="$1"; shift
+            for f in "$@"; do
+              echo "::group::${title}: $(basename "${f}")"
+              cat "${f}" || true
+              echo "::endgroup::"
+            done
+          }
+          dump "build"     "${logs_dir}"/build-*.out "${logs_dir}"/build-*.err
+          dump "test"      "${logs_dir}"/test-*.out  "${logs_dir}"/test-*.err
+          dump "scheduler" "${logs_dir}"/rccl-gin-*.out "${logs_dir}"/rccl-gin-*.err
