@@ -739,7 +739,7 @@ rocprofiler_register_library_api_table(
 
     rocprofiler_register::logging::initialize();
 
-s    // rocprofiler-register is disabled via environment
+    // rocprofiler-register is disabled via environment
     if(!common::get_env("ROCPROFILER_REGISTER_ENABLED", true))
     {
         LOG(INFO) << "rocprofiler-register disabled via ROCPROFILER_REGISTER_ENABLED=0";
