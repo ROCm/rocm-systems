@@ -120,7 +120,7 @@ function(rocprofiler_sdk_sqtt_triple_buffer_disabled _VAR)
     rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
     list(GET rocprofiler-sdk-tests-gfx-info 0 gpu-0-gfx-info)
 
-    if("${gpu-0-gfx-info}" MATCHES "^gfx(9[4-5][0-9]|12[0-9][0-9])$")
+    if("${gpu-0-gfx-info}" MATCHES "^gfx(9[4-5][0-9]|115[0-9]|12[0-9][0-9])$")
         set(${_VAR}
             FALSE
             PARENT_SCOPE)

@@ -863,12 +863,15 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                 // Check if SQTT buffer was wrapped
                 for(size_t se_index = 0; se_index < se_number_total; se_index++)
                 {
+                    auto full_status = sqttbuilder->SupportsDoubleBuffer()
+                                           ? control_ptr[se_index].status2
+                                           : control_ptr[se_index].status;
                     if(control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask())
                     {
                         ERR_LOGGING("SQTT memory error received, SE({})", se_index);
                         status = HSA_STATUS_ERROR_EXCEPTION;
                     }
-                    else if(control_ptr[se_index].status & sqttbuilder->GetBufferFullMask())
+                    else if(full_status & sqttbuilder->GetBufferFullMask())
                     {
                         AQL_WARNING << "SQTT data buffer full, SE(" << se_index << ")";
                         if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;

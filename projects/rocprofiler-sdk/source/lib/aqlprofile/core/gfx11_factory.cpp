@@ -30,7 +30,7 @@ namespace aql_profile
 {
 // Gfx builders init
 void
-Gfx11Factory::Init(const AgentInfo* agent_info)
+Gfx11Factory::Init(const AgentInfo* agent_info, bool double_buffer)
 {
     Pm4Factory::cmd_builder_ = new pm4_builder::Gfx11CmdBuilder(nullptr);
     if(Pm4Factory::cmd_builder_ == NULL) throw aql_profile_exc_msg("CmdBuilder allocation failed");
@@ -55,7 +55,8 @@ Gfx11Factory::Init(const AgentInfo* agent_info)
     if(Pm4Factory::spm_builder_ == NULL) throw aql_profile_exc_msg("SpmBuilder allocation failed");
 
     Pm4Factory::sqtt_builder_ =
-        new pm4_builder::GpuSqttBuilder<pm4_builder::Gfx11CmdBuilder, gfx11_cntx_prim>(agent_info);
+        new pm4_builder::GpuSqttBuilder<pm4_builder::Gfx11CmdBuilder, gfx11_cntx_prim>(agent_info,
+                                                                                      double_buffer);
     if(Pm4Factory::sqtt_builder_ == NULL)
         throw aql_profile_exc_msg("SqttBuilder allocation failed");
 
