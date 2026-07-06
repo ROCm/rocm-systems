@@ -43,13 +43,13 @@ class Workload:
     filter_kernel_ids: list[int] = field(default_factory=list)
     filter_gpu_ids: list[int] = field(default_factory=list)
     filter_dispatch_ids: list[int] = field(default_factory=list)
-    filter_nodes: list[str] = field(default_factory=list)
     avail_ips: list[int] = field(default_factory=list)
     roofline_peaks: pd.DataFrame = field(default_factory=pd.DataFrame)
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     path: str = field(default_factory=str)
     filter_top_n: str = field(default_factory=str)
-    matched_torch_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Matched ML API trace rows keyed by backend, populated by operator filters.
+    matched_ml_api_trace_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
 # The prefix of raw pmc_perf.csv
