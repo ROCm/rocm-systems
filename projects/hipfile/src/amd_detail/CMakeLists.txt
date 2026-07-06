@@ -32,6 +32,14 @@ set(HIPFILE_SOURCES
     sys.cpp
 )
 
+set(HIPFILE_AMD_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH})
+foreach(_hipfile_sysdeps_prefix IN ITEMS "${ROCM_PATH}/lib/rocm_sysdeps" "/opt/rocm/lib/rocm_sysdeps")
+    if(EXISTS "${_hipfile_sysdeps_prefix}/include")
+        list(APPEND HIPFILE_AMD_SYSINCLS "${_hipfile_sysdeps_prefix}/include")
+    endif()
+endforeach()
+list(REMOVE_DUPLICATES HIPFILE_AMD_SYSINCLS)
+
 # Create hipfile target
 ais_add_libraries(
     NAME     hipfile
@@ -39,5 +47,17 @@ ais_add_libraries(
     LIBS     mount
     SRCS     ${HIPFILE_SOURCES}
     LIBINCL  ${HIPFILE_INCLUDE_PATH}
-    SYSINCLS ${HIPFILE_AMD_SOURCE_PATH}
+    SYSINCLS ${HIPFILE_AMD_SYSINCLS}
 )
+
+if(HIPFILE_ROCPROFILER_REGISTER)
+    target_compile_definitions(
+        hipfile
+        PRIVATE
+            HIPFILE_ROCPROFILER_REGISTER=1
+            HIPFILE_ROCP_REG_VERSION_MAJOR=${AIS_LIBRARY_MAJOR}
+            HIPFILE_ROCP_REG_VERSION_MINOR=${AIS_LIBRARY_MINOR}
+            HIPFILE_ROCP_REG_VERSION_PATCH=${AIS_LIBRARY_PATCH})
+    target_link_libraries(hipfile PRIVATE rocprofiler-register::rocprofiler-register)
+    set_target_properties(hipfile PROPERTIES INSTALL_RPATH "\$ORIGIN")
+endif()

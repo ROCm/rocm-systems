@@ -159,9 +159,11 @@ list(APPEND CMAKE_PREFIX_PATH
     ${ROCM_PATH}/llvm
     ${ROCM_PATH}
     ${ROCM_PATH}/hip
+    ${ROCM_PATH}/lib/rocm_sysdeps
     /opt/rocm/llvm
     /opt/rocm
     /opt/rocm/hip
+    /opt/rocm/lib/rocm_sysdeps
 )
 
 # Set hipFile Install Path to the ROCm directory
@@ -235,6 +237,12 @@ option(AIS_INSTALL_EXAMPLES "Install example programs" ON)
 option(AIS_INSTALL_TOOLS "Install tool programs" ON)
 
 #------------------
+# rocprofiler-register integration
+#------------------
+option(HIPFILE_ROCPROFILER_REGISTER "Enable rocprofiler-register API table registration" ON)
+
+
+#------------------
 # Test programs
 #------------------
 # Whether to install the relocatable unit-test assets (binaries + ctest files)
@@ -268,6 +276,15 @@ if(${hip_FOUND})
     message(STATUS "hip found @  ${hip_DIR} ")
 else()
     message(NOTICE "find_package did NOT find hip")
+endif()
+
+if(HIPFILE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register REQUIRED
+                 HINTS
+                     $ENV{rocprofiler_register_ROOT}
+                     $ENV{ROCPROFILER_REGISTER_ROOT}
+                     ${CMAKE_INSTALL_PREFIX}
+                 PATHS ${ROCM_PATH})
 endif()
 
 # Find the cuFile library and headers on NVIDIA
