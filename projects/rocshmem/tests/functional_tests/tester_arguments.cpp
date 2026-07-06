@@ -49,6 +49,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-s") {
       i++;
       max_msg_size = atoll(argv[i]);
+      max_msg_size_set = true;
     } else if (arg == "-a") {
       i++;
       std::string a_arg = argv[i];
