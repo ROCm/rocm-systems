@@ -14,6 +14,7 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/log.h"
 
@@ -65,11 +66,12 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   d.wf_id = wf.wf_id();
   d.cu_path = wf.cu().full_path();
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
+  RegisterAccess regs(cu);
+  auto addr_region = regs.read_vgpr_region(wf.vgpr_alloc().base + inst.addr, 1, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    d.per_lane_addr[lane] =
-        cu.read_vgpr(wf.vgpr_alloc().base + inst.addr, lane) + offset + wf.lds_base();
+    d.per_lane_addr[lane] = addr_region.lane(0, lane) + offset + wf.lds_base();
   }
   util::Logger::vm([&](auto &os) {
     static uint64_t ds_addr_count = 0;

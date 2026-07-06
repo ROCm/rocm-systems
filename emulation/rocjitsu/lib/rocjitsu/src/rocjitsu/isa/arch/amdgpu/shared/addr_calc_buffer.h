@@ -13,6 +13,7 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/log.h"
 
@@ -91,19 +92,25 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   //                              else    (voffset + inst_offset) >= num_records
   uint32_t stride = (srd1 >> 16) & 0x3FFF;
   bool oob_raw = (srd3 >> 31) & 1;
+  uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
+  RegisterAccess regs(cu);
+  RegisterAccess::VgprReadRegion vaddr_region;
+  if (inst.idxen || inst.offen) {
+    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
+    vaddr_region = regs.read_vgpr_region(vgpr_base, reg_count, exec);
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
     uint32_t index = 0;
     uint32_t voffset = 0;
     if (inst.idxen && inst.offen) {
-      index = cu.read_vgpr(vgpr_base, lane);
-      voffset = cu.read_vgpr(vgpr_base + 1, lane);
+      index = vaddr_region.lane(0, lane);
+      voffset = vaddr_region.lane(1, lane);
     } else if (inst.idxen) {
-      index = cu.read_vgpr(vgpr_base, lane);
+      index = vaddr_region.lane(0, lane);
     } else if (inst.offen) {
-      voffset = cu.read_vgpr(vgpr_base, lane);
+      voffset = vaddr_region.lane(0, lane);
     }
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
     uint64_t total_offset = buffer_total_offset(index, stride, offset_part, soffset_val);
@@ -167,19 +174,25 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   uint32_t num_records = srd2;
   uint32_t stride = (srd1 >> 16) & 0x3FFF;
   bool oob_raw = (srd3 >> 31) & 1;
+  uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
+  RegisterAccess regs(cu);
+  RegisterAccess::VgprReadRegion vaddr_region;
+  if (inst.idxen || inst.offen) {
+    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
+    vaddr_region = regs.read_vgpr_region(vgpr_base, reg_count, exec);
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
     uint32_t index = 0;
     uint32_t voffset = 0;
     if (inst.idxen && inst.offen) {
-      index = cu.read_vgpr(vgpr_base, lane);
-      voffset = cu.read_vgpr(vgpr_base + 1, lane);
+      index = vaddr_region.lane(0, lane);
+      voffset = vaddr_region.lane(1, lane);
     } else if (inst.idxen) {
-      index = cu.read_vgpr(vgpr_base, lane);
+      index = vaddr_region.lane(0, lane);
     } else if (inst.offen) {
-      voffset = cu.read_vgpr(vgpr_base, lane);
+      voffset = vaddr_region.lane(0, lane);
     }
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
     uint64_t total_offset = buffer_total_offset(index, stride, offset_part, soffset_val);

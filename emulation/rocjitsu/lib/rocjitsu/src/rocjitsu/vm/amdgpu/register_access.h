@@ -417,22 +417,10 @@ public:
     uint64_t lane_mask() const { return lane_mask_; }
     bool empty() const { return cu_ == nullptr || reg_count_ == 0; }
 
-    std::span<uint32_t> lanes(uint32_t relative_reg = 0) const {
-      assert(cu_ && "VgprWriteRegion is empty");
-      assert(relative_reg < reg_count_ && "relative VGPR outside write region");
-      return {reg_data(relative_reg), wf_size_};
-    }
-
-    uint32_t *reg_data(uint32_t relative_reg = 0) const {
-      assert(cu_ && "VgprWriteRegion is empty");
-      assert(relative_reg < reg_count_ && "relative VGPR outside write region");
-      return reinterpret_cast<uint32_t *>(cu_->raw_vgpr_data(base_ + relative_reg));
-    }
-
     void set_lane(uint32_t relative_reg, uint32_t lane, uint32_t value) const {
       assert(lane < wf_size_ && "lane outside wavefront");
       if ((lane_mask_ & (uint64_t{1} << lane)) != 0)
-        lanes(relative_reg)[lane] = value;
+        reg_data(relative_reg)[lane] = value;
     }
 
     void set_lane64(uint32_t relative_reg, uint32_t lane, uint64_t value) const {
@@ -441,12 +429,23 @@ public:
       set_lane(relative_reg + 1, lane, static_cast<uint32_t>(value >> 32));
     }
 
+    void set_linear_word(uint32_t linear_index, uint32_t value) const {
+      assert(wf_size_ != 0 && "VgprWriteRegion is empty");
+      set_lane(linear_index / wf_size_, linear_index % wf_size_, value);
+    }
+
   private:
     friend class RegisterAccess;
 
     VgprWriteRegion(ComputeUnitCore &cu, uint32_t base, uint32_t reg_count, uint64_t lane_mask)
         : cu_(&cu), base_(base), reg_count_(reg_count), wf_size_(cu.wf_size()),
           lane_mask_(lane_mask) {}
+
+    uint32_t *reg_data(uint32_t relative_reg = 0) const {
+      assert(cu_ && "VgprWriteRegion is empty");
+      assert(relative_reg < reg_count_ && "relative VGPR outside write region");
+      return reinterpret_cast<uint32_t *>(cu_->raw_vgpr_data(base_ + relative_reg));
+    }
 
     ComputeUnitCore *cu_ = nullptr;
     uint32_t base_ = 0;
@@ -465,8 +464,14 @@ public:
     std::span<const uint32_t> read_lanes(uint32_t relative_reg = 0) const {
       return read_.lanes(relative_reg);
     }
-    std::span<uint32_t> write_lanes(uint32_t relative_reg = 0) const {
-      return write_.lanes(relative_reg);
+
+    uint32_t linear_word(uint32_t linear_index) const {
+      assert(read_.wf_size() != 0 && "VgprReadWriteRegion is empty");
+      return read_.lane(linear_index / read_.wf_size(), linear_index % read_.wf_size());
+    }
+
+    void set_linear_word(uint32_t linear_index, uint32_t value) const {
+      write_.set_linear_word(linear_index, value);
     }
 
   private:

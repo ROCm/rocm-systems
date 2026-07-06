@@ -279,10 +279,12 @@ inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t la
     uint32_t off = reg->index + (wf.vgpr_msb_for_role(dst.vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    uint32_t old_dst = wf.cu().read_vgpr(idx, lane);
+    RegisterAccess regs(wf.cu());
+    auto dst_region = regs.readwrite_vgpr_region(idx, 1, uint64_t{1} << lane);
+    uint32_t old_dst = dst_region.read().lane(0, lane);
     uint32_t merged = (opsel & 0x8u) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
                                      : ((old_dst & 0xffff0000u) | src_half);
-    wf.cu().write_vgpr(idx, lane, merged);
+    dst_region.write().set_lane(0, lane, merged);
     return;
   }
   dst.write_lane(wf, lane, (opsel & 0x8u) ? (src_half << 16) : src_half);

@@ -3418,6 +3418,24 @@ class CodeGenerator:
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
             L.append(f'  uint32_t lane_group_width = wf.wf_size();')
             L.append(
+                f'  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{{0}} : ((uint64_t{{1}} << wf.wf_size()) - 1);'
+            )
+            L.append(f'  RegisterAccess regs(cu);')
+            L.append(
+                f'  auto data_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
+            )
+            if is_bpermute:
+                L.append(
+                    f'  auto addr_region = regs.read_vgpr_region(vb + inst_.addr, 1, full_lane_mask);'
+                )
+            else:
+                L.append(
+                    f'  auto addr_region = regs.read_vgpr_region(vb + inst_.addr, 1, exec);'
+                )
+            L.append(
+                f'  auto dst_region = regs.write_vgpr_region(vb + inst_.vdst, 1, exec);'
+            )
+            L.append(
                 f'  if (wf.wf_size() == 64 && (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 ||'
                 f' cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))'
             )
@@ -3425,7 +3443,7 @@ class CodeGenerator:
             L.append(f'  // Pre-read all data0 values from every lane.')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
-            L.append(f'    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);')
+            L.append(f'    src_data[i] = data_region.lane(0, i);')
             if is_bpermute:
                 # DS_BPERMUTE_B32 (ISA spec pseudocode, page 476):
                 #   tmp[i] = 0 for all lanes
@@ -3436,7 +3454,7 @@ class CodeGenerator:
                 #     if EXEC[i]: VGPR[i][VDST] = tmp[i]
                 L.append(f'  uint32_t tmp[64] = {{}};')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
-                L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
+                L.append(f'    uint32_t addr_val = addr_region.lane(0, i);')
                 L.append(
                     f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
                 )
@@ -3451,7 +3469,7 @@ class CodeGenerator:
                 L.append(f'  }}')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    if (exec & (1ULL << i))')
-                L.append(f'      cu.write_vgpr(vb + inst_.vdst, i, tmp[i]);')
+                L.append(f'      dst_region.set_lane(0, i, tmp[i]);')
                 L.append(f'  }}')
             else:
                 # DS_PERMUTE_B32 (ISA spec pseudocode, page 475):
@@ -3465,7 +3483,7 @@ class CodeGenerator:
                 L.append(f'  uint32_t tmp[64] = {{}};')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    if (!(exec & (1ULL << i))) continue;')
-                L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
+                L.append(f'    uint32_t addr_val = addr_region.lane(0, i);')
                 L.append(
                     f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
                 )
@@ -3476,7 +3494,7 @@ class CodeGenerator:
                 L.append(f'  }}')
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    if (exec & (1ULL << i))')
-                L.append(f'      cu.write_vgpr(vb + inst_.vdst, i, tmp[i]);')
+                L.append(f'      dst_region.set_lane(0, i, tmp[i]);')
                 L.append(f'  }}')
             return '\n'.join(L)
 
@@ -3489,9 +3507,19 @@ class CodeGenerator:
             L.append(f'  auto &cu = wf.cu();')
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
+            L.append(
+                f'  uint64_t full_lane_mask = wf.wf_size() >= 64 ? ~uint64_t{{0}} : ((uint64_t{{1}} << wf.wf_size()) - 1);'
+            )
+            L.append(f'  RegisterAccess regs(cu);')
+            L.append(
+                f'  auto src_region = regs.read_vgpr_region(vb + inst_.{src_field}, 1, full_lane_mask);'
+            )
+            L.append(
+                f'  auto dst_region = regs.write_vgpr_region(vb + inst_.vdst, 1, exec);'
+            )
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
-            L.append(f'    src_data[i] = cu.read_vgpr(vb + inst_.{src_field}, i);')
+            L.append(f'    src_data[i] = src_region.lane(0, i);')
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
             L.append(f'  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {{')
             L.append(f'    if (!(exec & (1ULL << lane))) continue;')
@@ -3513,7 +3541,7 @@ class CodeGenerator:
             )
             L.append(f'    }}')
             L.append(f'    if (src_lane < wf.wf_size())')
-            L.append(f'      cu.write_vgpr(vb + inst_.vdst, lane, src_data[src_lane]);')
+            L.append(f'      dst_region.set_lane(0, lane, src_data[src_lane]);')
             L.append(f'  }}')
             return '\n'.join(L)
 
@@ -6831,6 +6859,7 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/wavefront.h"',
             '#include "rocjitsu/vm/amdgpu/compute_unit.h"',
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
+            '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             *simd_extra_includes(),

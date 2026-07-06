@@ -114,9 +114,9 @@ TEST(RegisterAccessTest, WriteRegionDoesNotObserveReadsAndHonorsLaneMask) {
   region.set_lane(/*relative_reg=*/0, /*lane=*/2, 0x300u);
 
   EXPECT_TRUE(fx.plugin->reads.empty());
-  EXPECT_EQ(region.lanes(0)[0], 0x100u);
-  EXPECT_EQ(region.lanes(0)[1], 0xAAAA0001u);
-  EXPECT_EQ(region.lanes(0)[2], 0x300u);
+  EXPECT_EQ(fx.cu->read_vgpr(base + 7, 0), 0x100u);
+  EXPECT_EQ(fx.cu->read_vgpr(base + 7, 1), 0xAAAA0001u);
+  EXPECT_EQ(fx.cu->read_vgpr(base + 7, 2), 0x300u);
 }
 
 TEST(RegisterAccessTest, ReadWriteRegionObservesThenAllowsWrites) {

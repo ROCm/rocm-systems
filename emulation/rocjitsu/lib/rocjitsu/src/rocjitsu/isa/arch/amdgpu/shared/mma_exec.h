@@ -1079,6 +1079,14 @@ inline RegisterAccess::VgprWriteRegion write_wmma_output_region(amdgpu::ComputeU
   return regs.write_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size));
 }
 
+inline RegisterAccess::VgprReadWriteRegion
+readwrite_wmma_output_region(amdgpu::ComputeUnitCore &cu, uint32_t base, uint32_t M, uint32_t N,
+                             uint32_t output_bits, uint32_t wf_size) {
+  RegisterAccess regs(cu);
+  uint32_t reg_count = mfma_dense_reg_count(static_cast<uint64_t>(M) * N, output_bits, wf_size);
+  return regs.readwrite_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size));
+}
+
 /// Map f32 output position to packed 16-bit output position using GFX9 layout.
 /// Two consecutive f32 register positions pack into one 32-bit VGPR as two
 /// 16-bit sub-elements: reg/2 holds the VGPR offset, reg%2 the sub-element.
@@ -1827,11 +1835,11 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
     }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = writes.reg_data();
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+        writes.set_linear_word(out.reg * wf + out.lane,
+                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
       }
   }
 }
@@ -1906,11 +1914,11 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
     }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = writes.reg_data();
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+        writes.set_linear_word(out.reg * wf + out.lane,
+                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
       }
   }
 }
@@ -1980,7 +1988,6 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     const uint32_t *b_words = reads.b.reg_data();
     const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
-    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -2025,7 +2032,8 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+        writes.set_linear_word(out.reg * wf + out.lane,
+                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
       }
   }
 }
@@ -2061,7 +2069,6 @@ void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     const uint32_t *b_words = reads.b.reg_data();
     const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
-    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2098,7 +2105,8 @@ void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+        writes.set_linear_word(out.reg * wf + out.lane,
+                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
       }
   }
 }
@@ -2502,8 +2510,7 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
     const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
-    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
-    uint32_t *d_words = writes.reg_data();
+    auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2562,13 +2569,13 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
         uint32_t idx = reg * WMMA_WAVE32 + lane;
         uint32_t word = words[idx];
         if (masks[idx] != 0x3u) {
-          uint32_t old = d_words[reg * wf + lane];
+          uint32_t old = writes.linear_word(reg * wf + lane);
           if ((masks[idx] & 0x1u) == 0)
             word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
           if ((masks[idx] & 0x2u) == 0)
             word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
         }
-        d_words[reg * wf + lane] = word;
+        writes.set_linear_word(reg * wf + lane, word);
       }
   }
 }
@@ -2631,8 +2638,7 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
     const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
-    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
-    uint32_t *d_words = writes.reg_data();
+    auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2691,13 +2697,13 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
         uint32_t idx = reg * WMMA_WAVE32 + lane;
         uint32_t word = words[idx];
         if (masks[idx] != 0x3u) {
-          uint32_t old = d_words[reg * wf + lane];
+          uint32_t old = writes.linear_word(reg * wf + lane);
           if ((masks[idx] & 0x1u) == 0)
             word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
           if ((masks[idx] & 0x2u) == 0)
             word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
         }
-        d_words[reg * wf + lane] = word;
+        writes.set_linear_word(reg * wf + lane, word);
       }
   }
 }
@@ -2734,8 +2740,7 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
     const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
-    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
-    uint32_t *d_words = writes.reg_data();
+    auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2794,13 +2799,13 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
         uint32_t idx = reg * WMMA_WAVE32 + lane;
         uint32_t word = words[idx];
         if (masks[idx] != 0x3u) {
-          uint32_t old = d_words[reg * wf + lane];
+          uint32_t old = writes.linear_word(reg * wf + lane);
           if ((masks[idx] & 0x1u) == 0)
             word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
           if ((masks[idx] & 0x2u) == 0)
             word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
         }
-        d_words[reg * wf + lane] = word;
+        writes.set_linear_word(reg * wf + lane, word);
       }
   }
 }
@@ -3325,7 +3330,6 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
     // Add the accumulator in 64-bit and pack (saturating when clamp is set),
     // scattering directly back to VGPRs.
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
-    uint32_t *d_words = writes.reg_data();
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -3334,7 +3338,7 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
                 ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
                 : static_cast<int64_t>(static_cast<int32_t>(c_words[out.reg * wf + out.lane]));
         acc += static_cast<int64_t>(static_cast<int32_t>(S_buf[row * N + col]));
-        d_words[out.reg * wf + out.lane] = pack_i32_acc(acc, clamp);
+        writes.set_linear_word(out.reg * wf + out.lane, pack_i32_acc(acc, clamp));
       }
   }
 }
@@ -3985,7 +3989,6 @@ void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     const uint32_t *b_words = reads.b.reg_data();
     const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
     auto writes = write_mfma_acc32_region(cu, dst, M, N, BATCH, wf);
-    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -4024,7 +4027,7 @@ void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
           float fv = C_buf[row * N + col];
-          d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+          writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
@@ -4062,7 +4065,6 @@ void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     const uint32_t *b_words = reads.b.reg_data();
     const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
-    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
     alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
@@ -4111,7 +4113,7 @@ void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
           float fv = C_buf[row * N + col];
-          d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+          writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
@@ -4153,7 +4155,6 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
     const uint32_t *b_words = reads.b.reg_data();
     const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
-    uint32_t *d_words = writes.reg_data();
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
     alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
@@ -4200,7 +4201,7 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
           float fv = C_buf[row * N + col];
-          d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+          writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
@@ -4285,13 +4286,12 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
         c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
       }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = writes.reg_data();
     bool has_nan_or_inf = false;
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = output_loc_32(M, N, row, col, 0);
         float fv = C_buf[row * N + col];
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+        writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
         if (std::isnan(fv) || std::isinf(fv))
           has_nan_or_inf = true;
       }
@@ -4336,7 +4336,6 @@ void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     // Accumulate in unsigned 32-bit (wrap is well-defined and identical mod
     // 2^32 to the intended signed wrap), so the SIMD path has no signed-
     // overflow UB.
-    uint32_t *d_words = writes.reg_data();
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-extended bits, one batch block)
     alignas(64) uint32_t B_buf[K * N]; // B[k][col] (sign-extended bits, one batch block)
     alignas(64) uint32_t C_buf[M * N]; // C[row][col] (one batch block)
@@ -4381,7 +4380,7 @@ void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          d_words[out.reg * wf + out.lane] = C_buf[row * N + col];
+          writes.set_linear_word(out.reg * wf + out.lane, C_buf[row * N + col]);
         }
     }
   }
