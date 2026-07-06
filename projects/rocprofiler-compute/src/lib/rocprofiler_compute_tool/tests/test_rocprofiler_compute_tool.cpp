@@ -21,6 +21,22 @@ TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_UsesDefault)
                     std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
 }
 
+TEST_F(TestRocprofilerComputeTool, ProvidedPcSamplingMethod_EnablesPcSampling)
+{
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->pc_sampling.enabled());
+    EXPECT_EQ(tool_data->pc_sampling.mode(), PcSamplingMode::HostTrap);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedNoPcSamplingMethod_DoesNotEnablePcSampling)
+{
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_FALSE(tool_data->pc_sampling.enabled());
+}
+
 TEST_F(TestRocprofilerComputeTool, ProvidedNoRequestedCounters_Throws)
 {
     m_input_parameters->set_requested_counters("");

@@ -1454,7 +1454,7 @@ HSAKMTAPI
 hsaKmtMemoryGetCpuAddr(
   HsaAMDGPUDeviceHandle DeviceHandle,
   HsaMemoryObjectHandle MemoryHandle,
-  HSAuint64* cpu_addr // OUT
+  HSAuint64* cpu_addr // OUT for newer ROCr; legacy ROCr passes HSAint32* fd here
 );
 
 HSAKMT_STATUS

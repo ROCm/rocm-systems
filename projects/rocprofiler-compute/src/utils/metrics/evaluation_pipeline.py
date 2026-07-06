@@ -40,17 +40,25 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
             "FP16Flops",
             "FP32Flops",
             "FP64Flops",
+            "MFMAF6F4Flops",
             "MFMAF64Flops",
             "MFMAF32Flops",
             "MFMAF16Flops",
             "MFMABF16Flops",
             "MFMAF8Flops",
             "MFMAI8Ops",
+            "WMMAF6F4Flops",
+            "WMMAF64Flops",
+            "WMMAF32Flops",
+            "WMMAF16Flops",
+            "WMMABF16Flops",
+            "WMMAF8Flops",
+            "WMMAI8Ops",
             "HBMBw",
             "L2Bw",
             "L1Bw",
+            "L0Bw",
             "LDSBw",
-            "MFMAF6F4Flops",
         ]
         # initialize peaks to NaN
         for peak_name in peak_names:
@@ -62,44 +70,50 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
 def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
     """Create variables from sys.info."""
     sys_vars_collection = {}
+    sys_info_dict = sys_info.to_dict()
 
-    sys_vars_config = [
-        ("se_per_gpu", int, "se_per_gpu"),
-        ("pipes_per_gpu", int, "pipes_per_gpu"),
-        ("cu_per_gpu", int, "cu_per_gpu"),
-        ("simd_per_cu", int, "simd_per_cu"),
-        ("sqc_per_gpu", int, "sqc_per_gpu"),
-        ("lds_banks_per_cu", int, "lds_banks_per_cu"),
-        ("cur_sclk", float, "cur_sclk"),
-        ("cur_mclk", float, "cur_mclk"),
-        ("max_mclk", float, "max_mclk"),
-        ("max_sclk", float, "max_sclk"),
-        ("max_waves_per_cu", int, "max_waves_per_cu"),
-        ("num_hbm_channels", float, "num_hbm_channels"),
-        ("num_xcd", int, "num_xcd"),
-        ("wave_size", int, "wave_size"),
+    # Present for every arch; warn when missing or zero.
+    required_sys_vars = [
+        ("se_per_gpu", int),
+        ("pipes_per_gpu", int),
+        ("cu_per_gpu", int),
+        ("simd_per_cu", int),
+        ("sqc_per_gpu", int),
+        ("lds_banks_per_cu", int),
+        ("cur_sclk", float),
+        ("cur_mclk", float),
+        ("max_mclk", float),
+        ("max_sclk", float),
+        ("max_waves_per_cu", int),
+        ("wave_size", int),
+        ("total_l2_chan", int),
+    ]
+    # Arch-specific; silently skipped when the column is absent.
+    optional_sys_vars = [
+        ("num_memory_channels", float),
+        ("num_gl1c", int),
     ]
 
-    for var_name, var_type, attr_name in sys_vars_config:
-        variable_value = var_type(getattr(sys_info, attr_name))
-        if np.isnan(variable_value) or variable_value == 0:
+    for var_name, var_type in required_sys_vars:
+        raw_value = sys_info_dict.get(var_name)
+        if pd.isna(raw_value) or var_type(raw_value) == 0:
             console_warning(
-                f"{attr_name} is not available in sysinfo.csv, please provide the "
+                f"{var_name} is not available in sysinfo.csv, please provide the "
                 "correct value using --specs-correction"
             )
-        sys_vars_collection[f"ammolite__{var_name}"] = variable_value
+            raw_value = 0
+        sys_vars_collection[f"ammolite__{var_name}"] = var_type(raw_value)
 
-    # Special case for total_l2_chan
-    raw_total_l2_chan = sys_info.to_dict().get("total_l2_chan")
-    if pd.isna(raw_total_l2_chan) or raw_total_l2_chan == 0:
-        console_warning(
-            "total_l2_chan is not available in sysinfo.csv, please provide the correct "
-            "value using --specs-correction"
-        )
-        total_l2_channel_count = 0
-    else:
-        total_l2_channel_count = int(raw_total_l2_chan)
-    sys_vars_collection["ammolite__total_l2_chan"] = total_l2_channel_count
+    for var_name, var_type in optional_sys_vars:
+        raw_value = sys_info_dict.get(var_name)
+        if not pd.isna(raw_value):
+            sys_vars_collection[f"ammolite__{var_name}"] = var_type(raw_value)
+
+    # num_xcd is a CDNA-only concept; RDNA is single-die, so default to 1.
+    raw_num_xcd = sys_info_dict.get("num_xcd")
+    sys_vars_collection["ammolite__num_xcd"] = (
+        1 if pd.isna(raw_num_xcd) else int(raw_num_xcd)
+    )
 
     return sys_vars_collection
 
@@ -217,7 +231,7 @@ def eval_metric(
                 for expr in df.columns:
                     if expr in SUPPORTED_FIELD and expr.lower() not in {
                         "alias",
-                        "pct of peak",
+                        "percent of peak",
                     }:
                         if row[expr]:
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
@@ -255,7 +269,7 @@ def eval_metric(
     # Print aggregated summary of any noise clamping warnings
     print_noise_clamp_summary()
 
-    # Derive Pct of Peak from evaluated Value and Peak columns
+    # Derive Percent of Peak from evaluated Value and Peak columns
     compute_pct_of_peak(dfs, dfs_type)
 
     # Check for metrics exceeding theoretical peak due to dual-issue
@@ -263,12 +277,12 @@ def eval_metric(
 
 
 def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
-    """Compute and store 100 * value / peak for each row where pop is True."""
-    pop_col = "Pct of Peak"
+    """Compute and store 100 * value / peak for each row where pct_of_peak is True."""
+    pct_of_peak_col = "Percent of Peak"
     for df_id, df in dfs.items():
         if dfs_type[df_id] != "metric_table":
             continue
-        if pop_col not in df.columns:
+        if pct_of_peak_col not in df.columns:
             continue
 
         # Detect value and peak columns using canonical preference order
@@ -280,9 +294,9 @@ def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
             continue
 
         # astype(bool) handles both Python bool and numpy.bool_ from pandas dtypes
-        mask = df[pop_col].astype(bool)
-        df[pop_col] = ""
-        df.loc[mask, pop_col] = [
+        mask = df[pct_of_peak_col].astype(bool)
+        df[pct_of_peak_col] = ""
+        df.loc[mask, pct_of_peak_col] = [
             pct if (pct := calc_pct_of_peak(v, p)) is not None else ""
             for v, p in zip(df.loc[mask, value_col], df.loc[mask, peak_col])
         ]

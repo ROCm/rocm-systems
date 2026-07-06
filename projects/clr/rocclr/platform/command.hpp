@@ -1191,6 +1191,42 @@ struct BatchCopyOp {
         dstOffset(dstOff), size(sz), metadata(meta) {}
 };
 
+//! Structure to hold pageable host-to-device write operation info for batch
+//! writes
+struct BatchWriteMemoryOp {
+  const void* src_host;   //!< Source host pointer
+  Memory* dst_memory;     //!< Destination memory object
+  size_t dst_offset;      //!< Offset in destination buffer
+  size_t size;            //!< Size of the copy in bytes
+  CopyMetadata metadata;  //!< Copy metadata for this operation
+
+  BatchWriteMemoryOp(const void* src_host_arg, Memory* dst_memory_arg, size_t dst_offset_arg,
+                     size_t size_arg, CopyMetadata metadata_arg = CopyMetadata())
+      : src_host(src_host_arg),
+        dst_memory(dst_memory_arg),
+        dst_offset(dst_offset_arg),
+        size(size_arg),
+        metadata(metadata_arg) {}
+};
+
+//! Structure to hold device-to-pageable-host read operation info for batch
+//! reads
+struct BatchReadMemoryOp {
+  Memory* src_memory;     //!< Source memory object
+  void* dst_host;         //!< Destination host pointer
+  size_t src_offset;      //!< Offset in source buffer
+  size_t size;            //!< Size of the copy in bytes
+  CopyMetadata metadata;  //!< Copy metadata for this operation
+
+  BatchReadMemoryOp(Memory* src_memory_arg, void* dst_host_arg, size_t src_offset_arg,
+                    size_t size_arg, CopyMetadata metadata_arg = CopyMetadata())
+      : src_memory(src_memory_arg),
+        dst_host(dst_host_arg),
+        src_offset(src_offset_arg),
+        size(size_arg),
+        metadata(metadata_arg) {}
+};
+
 /*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
  *
  *  \details Executes multiple copy operations as a batch. Copies within
@@ -1231,6 +1267,86 @@ class BatchCopyMemoryCommand : public Command {
     }
     return true;
   }
+};
+
+/*! \brief  A batch write memory command for multiple pageable host-to-device
+ * writes
+ *
+ *  \details Copies pageable host sources through the backend's batch write path.
+ */
+class BatchWriteMemoryCommand : public Command {
+ public:
+  BatchWriteMemoryCommand(HostQueue& queue, cl_command_type cmd_type,
+                          const EventWaitList& event_wait_list,
+                          std::vector<BatchWriteMemoryOp>&& write_ops,
+                          std::vector<std::vector<char>>&& host_snapshots = {})
+      : Command(queue, cmd_type, event_wait_list),
+        write_ops_(std::move(write_ops)),
+        host_snapshots_(std::move(host_snapshots)) {}
+
+  void submit(device::VirtualDevice& device) override { device.SubmitBatchWriteMemory(*this); }
+
+  void ReleasePinnedMemory() override {
+    for (Memory* pinned_memory : pinned_memory_) {
+      pinned_memory->release();
+    }
+    pinned_memory_.clear();
+  }
+
+  bool IsMemoryPinned() const override { return !pinned_memory_.empty(); }
+
+  void AddPinnedMemory(Memory* pinned_memory) override { pinned_memory_.push_back(pinned_memory); }
+
+  std::vector<Memory*> TakePinnedMemory() {
+    std::vector<Memory*> pinned_memory;
+    pinned_memory.swap(pinned_memory_);
+    return pinned_memory;
+  }
+
+  const std::vector<BatchWriteMemoryOp>& WriteOps() const { return write_ops_; }
+
+ private:
+  std::vector<BatchWriteMemoryOp> write_ops_;      //!< Vector of write operations
+  std::vector<Memory*> pinned_memory_;             //!< Pinned memory used by the batch
+  std::vector<std::vector<char>> host_snapshots_;  //!< DuringApiCall source snapshots
+};
+
+/*! \brief  A batch read memory command for multiple device-to-pageable-host
+ * reads
+ *
+ *  \details Copies pageable host destinations through the backend's batch read path.
+ */
+class BatchReadMemoryCommand : public Command {
+ public:
+  BatchReadMemoryCommand(HostQueue& queue, cl_command_type cmd_type,
+                         const EventWaitList& event_wait_list,
+                         std::vector<BatchReadMemoryOp>&& read_ops)
+      : Command(queue, cmd_type, event_wait_list), read_ops_(std::move(read_ops)) {}
+
+  void submit(device::VirtualDevice& device) override { device.SubmitBatchReadMemory(*this); }
+
+  void ReleasePinnedMemory() override {
+    for (Memory* pinned_memory : pinned_memory_) {
+      pinned_memory->release();
+    }
+    pinned_memory_.clear();
+  }
+
+  bool IsMemoryPinned() const override { return !pinned_memory_.empty(); }
+
+  void AddPinnedMemory(Memory* pinned_memory) override { pinned_memory_.push_back(pinned_memory); }
+
+  std::vector<Memory*> TakePinnedMemory() {
+    std::vector<Memory*> pinned_memory;
+    pinned_memory.swap(pinned_memory_);
+    return pinned_memory;
+  }
+
+  const std::vector<BatchReadMemoryOp>& ReadOps() const { return read_ops_; }
+
+ private:
+  std::vector<BatchReadMemoryOp> read_ops_;  //!< Vector of read operations
+  std::vector<Memory*> pinned_memory_;       //!< Pinned memory used by the batch
 };
 
 /*! \brief  A generic map memory command. Makes a memory object accessible to the host.
