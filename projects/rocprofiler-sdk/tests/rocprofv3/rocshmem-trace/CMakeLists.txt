@@ -68,35 +68,41 @@ set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
 # Validation only inspects rank 0's trace; the API surface exercised by both ranks is
 # identical. All four output formats are requested so the validator can exercise the
 # perfetto + otf2 serializers end-to-end (mirrors rocdecode-trace).
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-rocshmem-tracing
-    COMMAND
-        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -np 2
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocshmem-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace/rank.%env{OMPI_COMM_WORLD_RANK}% -o out
-        --output-format json csv pftrace otf2 --log-level env --
-        $<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>
-    DEPENDS rocshmem-demo
-    TIMEOUT 60
-    LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-rocshmem-tracing
-    DISABLED "${IS_DISABLED}")
+#
+# Only register the tests when the rocshmem-demo target exists. When it is absent (e.g.
+# the code-coverage build, which has no MPI/rocSHMEM), skipping registration avoids
+# emitting an unlabeled disabled placeholder that would fail the test-label verification.
+if(TARGET rocshmem-demo)
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-rocshmem-tracing
+        COMMAND
+            ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -np 2
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocshmem-trace -d
+            ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace/rank.%env{OMPI_COMM_WORLD_RANK}% -o
+            out --output-format json csv pftrace otf2 --log-level env --
+            $<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>
+        DEPENDS rocshmem-demo
+        TIMEOUT 60
+        LABELS "integration-tests"
+        PRELOAD "${PRELOAD_ENV}"
+        FIXTURES_SETUP rocprofv3-test-rocshmem-tracing
+        DISABLED "${IS_DISABLED}")
 
-rocprofiler_add_integration_validate_test(
-    rocprofv3-test-rocshmem-tracing
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.json
-         --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.otf2
-         --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.pftrace
-         --csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_rocshmem_api_trace.csv
-    TIMEOUT 45
-    LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-rocshmem-tracing
-    DISABLED "${IS_DISABLED}")
+    rocprofiler_add_integration_validate_test(
+        rocprofv3-test-rocshmem-tracing
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        ARGS --json-input
+             ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.json
+             --otf2-input
+             ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.otf2
+             --pftrace-input
+             ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.pftrace
+             --csv-input
+             ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_rocshmem_api_trace.csv
+        TIMEOUT 45
+        LABELS "integration-tests"
+        FIXTURES_REQUIRED rocprofv3-test-rocshmem-tracing
+        DISABLED "${IS_DISABLED}")
+endif()
