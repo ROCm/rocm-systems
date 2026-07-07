@@ -263,6 +263,10 @@ struct read_statements : public read_statements_base
     {
         return m_distinct_dma_tracks;
     }
+    [[nodiscard]] const distinct_region_func_t& distinct_region_tracks() const override
+    {
+        return m_distinct_region_tracks;
+    }
     [[nodiscard]] const sample_track_id_func_t& distinct_sample_track_ids() const override
     {
         return m_distinct_sample_track_ids;
@@ -277,9 +281,15 @@ struct read_statements : public read_statements_base
     }
 
     // Interval-track accessors
-    [[nodiscard]] const interval_track_3_func_t& region_interval_track() const override
+    [[nodiscard]] const interval_track_3_func_t& region_interval_track_main()
+        const override
     {
-        return m_region_interval_track;
+        return m_region_interval_track_main;
+    }
+    [[nodiscard]] const interval_track_3_func_t& region_interval_track_sample()
+        const override
+    {
+        return m_region_interval_track_sample;
     }
     [[nodiscard]] const interval_track_4_func_t& kernel_dispatch_interval_track()
         const override
@@ -1166,6 +1176,24 @@ private:
                 &distinct_dma_result::queue_id,
                 &distinct_dma_result::stream_id);
 
+        // Region (cpu_thread) tracks are synthesized from rocpd_region rather than
+        // rocpd_track (v3 rocpd_track is not a reliable thread registry). Each distinct
+        // (nid, pid, tid, is_sample) is a track: is_sample separates region events that
+        // have a rocpd_sample (sample) from those that do not (main), matching
+        // roc-optiq's region-main / region-sample split.
+        m_distinct_region_tracks =
+            m_backend->create_read_statement_executor<distinct_region_result>(
+                fmt::format("SELECT r.nid, r.pid, r.tid, "
+                            "CASE WHEN s.event_id IS NULL THEN 0 ELSE 1 END AS is_sample "
+                            "FROM rocpd_region_{u} r "
+                            "LEFT JOIN rocpd_sample_{u} s ON s.event_id = r.event_id "
+                            "GROUP BY r.nid, r.pid, r.tid, is_sample",
+                            fmt::arg("u", u)),
+                &distinct_region_result::nid,
+                &distinct_region_result::pid,
+                &distinct_region_result::tid,
+                &distinct_region_result::is_sample);
+
         m_distinct_sample_track_ids =
             m_backend->create_read_statement_executor<sample_track_id_result>(
                 fmt::format("SELECT DISTINCT track_id FROM rocpd_sample_{}", u),
@@ -1191,13 +1219,33 @@ private:
     {
         const auto& u = m_uuid;
 
-        // cpu_thread: region events keyed on (nid, pid, tid)
-        m_region_interval_track =
+        // cpu_thread: region events keyed on (nid, pid, tid), split main vs. sample.
+        // main = regions whose event has no rocpd_sample; sample = regions whose event
+        // does. Together they partition the thread's regions, matching the two
+        // synthesized region tracks (region_track_kind_t main / sample).
+        m_region_interval_track_main =
             m_backend->create_read_statement_executor<interval_row_result,
                                                       bind_types<size_t, size_t, size_t>>(
-                fmt::format("SELECT id, start, \"end\", name_id FROM rocpd_region_{} "
-                            "WHERE nid = ? AND pid = ? AND tid = ? ORDER BY start",
-                            u),
+                fmt::format(
+                    "SELECT r.id, r.start, r.\"end\", r.name_id FROM rocpd_region_{u} r "
+                    "LEFT JOIN rocpd_sample_{u} s ON s.event_id = r.event_id "
+                    "WHERE r.nid = ? AND r.pid = ? AND r.tid = ? AND s.event_id IS NULL "
+                    "ORDER BY r.start",
+                    fmt::arg("u", u)),
+                &interval_row_result::id,
+                &interval_row_result::start,
+                &interval_row_result::end,
+                &interval_row_result::name_ref);
+
+        m_region_interval_track_sample =
+            m_backend->create_read_statement_executor<interval_row_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                fmt::format(
+                    "SELECT DISTINCT r.id, r.start, r.\"end\", r.name_id "
+                    "FROM rocpd_region_{u} r "
+                    "INNER JOIN rocpd_sample_{u} s ON s.event_id = r.event_id "
+                    "WHERE r.nid = ? AND r.pid = ? AND r.tid = ? ORDER BY r.start",
+                    fmt::arg("u", u)),
                 &interval_row_result::id,
                 &interval_row_result::start,
                 &interval_row_result::end,
@@ -1390,12 +1438,14 @@ private:
     // Track synthesis statements
     distinct_gpu_queue_func_t m_distinct_gpu_queue_tracks;
     distinct_dma_func_t       m_distinct_dma_tracks;
+    distinct_region_func_t    m_distinct_region_tracks;
     sample_track_id_func_t    m_distinct_sample_track_ids;
     max_track_id_func_t       m_max_track_id;
     counter_track_name_func_t m_counter_track_names;
 
     // Interval-track statements
-    interval_track_3_func_t m_region_interval_track;
+    interval_track_3_func_t m_region_interval_track_main;
+    interval_track_3_func_t m_region_interval_track_sample;
     interval_track_4_func_t m_kernel_dispatch_interval_track;
     interval_track_4_func_t m_memory_copy_interval_qs;
     interval_track_3_func_t m_memory_copy_interval_q_only;

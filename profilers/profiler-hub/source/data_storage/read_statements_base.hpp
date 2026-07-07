@@ -391,6 +391,17 @@ struct distinct_dma_result
     std::optional<size_t> stream_id;
 };
 
+/// Distinct region-track topology synthesized from rocpd_region (v3). One row per
+/// (nid, pid, tid, is_sample): a thread with both plain and sampled regions yields
+/// two rows (main + sample), mirroring roc-optiq's region-main / region-sample split.
+struct distinct_region_result
+{
+    size_t nid{};
+    size_t pid{};
+    size_t tid{};
+    size_t is_sample{};  ///< 0 => region events with no sample (main); 1 => with sample.
+};
+
 /// A track_id referenced by at least one rocpd_sample row (=> counter track).
 struct sample_track_id_result
 {
@@ -530,6 +541,8 @@ struct read_statements_base
         std::function<sqlite_backend::result_set<distinct_gpu_queue_result>()>;
     using distinct_dma_func_t =
         std::function<sqlite_backend::result_set<distinct_dma_result>()>;
+    using distinct_region_func_t =
+        std::function<sqlite_backend::result_set<distinct_region_result>()>;
     using sample_track_id_func_t =
         std::function<sqlite_backend::result_set<sample_track_id_result>()>;
     using max_track_id_func_t =
@@ -768,6 +781,11 @@ struct read_statements_base
         static const distinct_dma_func_t e{};
         return e;
     }
+    [[nodiscard]] virtual const distinct_region_func_t& distinct_region_tracks() const
+    {
+        static const distinct_region_func_t e{};
+        return e;
+    }
     [[nodiscard]] virtual const max_track_id_func_t& max_track_id() const
     {
         static const max_track_id_func_t e{};
@@ -775,7 +793,16 @@ struct read_statements_base
     }
 
     // Multi-column interval track statements (v3: keyed by identity tuples).
-    [[nodiscard]] virtual const interval_track_3_func_t& region_interval_track() const
+    // Region tracks split main (regions without a sample) vs. sample (regions with
+    // one), matching the region_track_kind_t of the synthesized track.
+    [[nodiscard]] virtual const interval_track_3_func_t& region_interval_track_main()
+        const
+    {
+        static const interval_track_3_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const interval_track_3_func_t& region_interval_track_sample()
+        const
     {
         static const interval_track_3_func_t e{};
         return e;

@@ -24,22 +24,30 @@
 --   names, and because there is NO rocpd_timestamp table it selects the v3
 --   backend (reader_impl.cpp version dispatch).
 --
--- TRACK MATRIX (what get_all_tracks() must return -- 9 tracks total):
---   From rocpd_track rows (5):
---     track 1 = cpu_thread, pid + tid set    -> process_info AND thread_info set
---     track 2 = counter,    pid set, tid NULL-> thread_info NULL, agent_info NULL
---     track 3 = counter,    pid + tid set    -> thread_info SET  (the edge #147
---                                               guards: a v3 counter CAN carry a
---                                               tid; agent_info still NULL in v3)
---     track 4 = cpu_thread, pid set, tid NULL-> process_info set, thread_info NULL
---     track 5 = cpu_thread, pid NULL, tid NULL-> process_info NULL, thread_info NULL
+-- TRACK MATRIX (what get_all_tracks() must return -- 8 tracks total):
+--   COUNTER tracks come from rocpd_track (a track is a counter iff a rocpd_sample
+--   references it -- reader_impl.cpp v3 classification). Non-counter rocpd_track
+--   rows are NOT tracks: cpu_thread/region tracks are synthesized from rocpd_region
+--   instead (v3 rocpd_track is an unreliable grab-bag). So tracks 1, 4, 5 below are
+--   deliberately IGNORED by discovery, proving the skip path.
+--   From rocpd_track rows -> counters (3):
+--     track 2 = counter, pid set, tid NULL    -> thread_info NULL, agent_info NULL
+--     track 3 = counter, pid + tid set        -> thread_info SET  (the edge #147
+--                                                guards: a v3 counter CAN carry a
+--                                                tid; agent_info still NULL in v3)
+--     track 6 = counter, pid NULL, tid NULL    -> process_info NULL, thread_info NULL
+--                                                (re-homes the NULL-pid/NULL-tid
+--                                                schema-branch coverage that used to
+--                                                live on a cpu_thread rocpd_track row)
+--   From rocpd_track rows -> IGNORED (non-counter, no sample ref):
+--     track 1 (pid+tid), track 4 (pid, no tid), track 5 (no pid) -- not returned.
+--   Synthesized from rocpd_region:
+--     1 cpu_thread track (the sole (nid,pid,tid)=(1,1,1) thread; all regions are
+--       "main" -- none of their events carry a sample -- so a single main track).
 --   Synthesized (not rocpd_track rows):
 --     2 gpu_queue tracks  (distinct nid,pid,agent_id,queue_id in kernel_dispatch)
 --     2 dma tracks        (distinct nid,pid,queue_id,stream_id in memory_copy)
---   => by type: cpu_thread=3, counter=2, gpu_queue=2, dma=2.
---
--- A track is a COUNTER iff a rocpd_sample references it (reader_impl.cpp v3
--- classification); tracks 2 and 3 are the only sampled tracks.
+--   => by type: cpu_thread=1, counter=3, gpu_queue=2, dma=2.
 -- =============================================================================
 
 -- Bare alias views ----------------------------------------------------------
@@ -86,10 +94,11 @@ INSERT INTO "rocpd_info_stream{{uuid}}" (id, nid, pid, name)
 VALUES (1, 1, 1, 'Stream-X'),
        (2, 1, 1, 'Stream-Y');
 
--- Two distinct PMCs so the two counter tracks get DIFFERENT display names (Q9).
+-- Three distinct PMCs so the three counter tracks get DIFFERENT display names (Q9).
 INSERT INTO "rocpd_info_pmc{{uuid}}" (id, nid, pid, agent_id, name, symbol)
 VALUES (1, 1, 1, 1, 'GRBM_COUNT', 'GRBM_COUNT'),
-       (2, 1, 1, 1, 'SQ_WAVES',   'SQ_WAVES');
+       (2, 1, 1, 1, 'SQ_WAVES',   'SQ_WAVES'),
+       (3, 1, 1, 1, 'CPU_CYCLES', 'CPU_CYCLES');
 
 -- Code object + kernel symbol (gpu_queue per-event label = kernel display name).
 INSERT INTO "rocpd_info_code_object{{uuid}}" (id, nid, pid, agent_id)
@@ -119,7 +128,9 @@ VALUES (3, 1, 1,    1,    NULL);   -- counter, WITH tid    -> thread_info set (#
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
 VALUES (4, 1, 1,    NULL, 1);      -- cpu_thread, no tid   -> thread_info NULL
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
-VALUES (5, 1, NULL, NULL, NULL);   -- cpu_thread, no pid   -> process_info NULL
+VALUES (5, 1, NULL, NULL, NULL);   -- non-counter, no pid -> IGNORED by discovery
+INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
+VALUES (6, 1, NULL, NULL, NULL);   -- counter, no pid/tid -> process/thread_info NULL
 
 -- Events --------------------------------------------------------------------
 -- Flows key on stack_id (Q4): a region flows to a GPU-side event sharing the
@@ -141,7 +152,8 @@ VALUES (1, 100),
        (9, NULL),
        (10, NULL),
        (11, NULL),
-       (12, NULL);
+       (12, NULL),
+       (13, NULL);   -- sample event for the NULL-pid counter (track 6)
 
 -- Regions (cpu_thread interval track for track 1, tid=1) ----------------------
 -- Row-id order deliberately != start order so ORDER BY start is proven:
@@ -199,16 +211,19 @@ VALUES (1, 1, 1, 1, 'ALLOC', 'REAL', 6100, 6200, 4096, 7);
 --   sample 4 -> ts 500  -> value 5.0
 --   sample 5 -> ts 1500 -> value 15.0
 --   => get_scalar_track(track 3) = [(4,500,5.0),(5,1500,15.0)]
+-- Track 6 (counter, NULL pid/tid) -- pmc 3 CPU_CYCLES, one sample (event 13).
 INSERT INTO "rocpd_pmc_event{{uuid}}" (id, event_id, pmc_id, value)
 VALUES (1, 8,  1, 30.5),
        (2, 9,  1, 10.5),
        (3, 10, 1, 20.5),
        (4, 11, 2, 5.0),
-       (5, 12, 2, 15.0);
+       (5, 12, 2, 15.0),
+       (6, 13, 3, 42.0);
 
 INSERT INTO "rocpd_sample{{uuid}}" (id, track_id, timestamp, event_id)
 VALUES (1, 2, 3000, 8),
        (2, 2, 1000, 9),
        (3, 2, 2000, 10),
        (4, 3, 500,  11),
-       (5, 3, 1500, 12);
+       (5, 3, 1500, 12),
+       (6, 6, 700,  13);

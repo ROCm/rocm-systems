@@ -278,6 +278,23 @@ enum class track_type_t
     counter  ///< thread_info + (optional) agent_info. Scalar track of counter samples.
 };
 
+/**
+ * @brief For v3 synthesized cpu_thread (region) tracks, distinguishes whether the
+ *        track carries region events that have an associated rocpd_sample.
+ *
+ * v3 region tracks are synthesized from rocpd_region (there is no reliable
+ * rocpd_track registry for them). A single (nid, pid, tid) thread can produce two
+ * tracks: one of regions with no sample (main) and one of regions that do have a
+ * sample (sample) — mirroring roc-optiq's region-main / region-sample split. All
+ * other track types (and every v4.0 track) are @ref region_track_kind_t::none.
+ */
+enum class region_track_kind_t
+{
+    none,    ///< Not a v3 synthesized region track.
+    main,    ///< Region events with no associated rocpd_sample row.
+    sample,  ///< Region events that have an associated rocpd_sample row.
+};
+
 struct track_info_t
 {
     size_t
@@ -285,6 +302,10 @@ struct track_info_t
                ///< Opaque and stable for the reader's lifetime; never a topology tuple.
     track_type_t type{};  ///< Determines which identity fields below are populated and
                           ///< which event-fetch / detail method applies.
+    region_track_kind_t region_kind{
+        region_track_kind_t::none
+    };  ///< v3 cpu_thread region tracks only: main vs.
+        ///< sample split. none for all other tracks.
     std::string name{};
     std::string extdata{};
 

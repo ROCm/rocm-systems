@@ -255,8 +255,12 @@ reader_t::impl::get_all_tracks()
             return m_track_info_list;
         }
 
-        // v3 rocpd_track holds cpu_thread and counter tracks. A track is a counter
-        // track iff at least one rocpd_sample references it. Classify up front.
+        // v3 rocpd_track is not a reliable cpu_thread registry (it is a grab-bag of
+        // activity rows), so cpu_thread/region tracks are NOT taken from it — they are
+        // synthesized from rocpd_region in synthesize_derived_tracks(). rocpd_track is
+        // used here ONLY to emit counter tracks: a track is a counter track iff at least
+        // one rocpd_sample references it (Q10 — v3 counters still key on rocpd_track via
+        // rocpd_sample.track_id). Classify up front.
         std::unordered_set<size_t> counter_track_ids;
         for(const auto& r : m_read_statements->distinct_sample_track_ids()().to_vector())
         {
@@ -275,6 +279,12 @@ reader_t::impl::get_all_tracks()
         m_track_info_list.reserve(track_info_list.size());
         for(const auto& track_info : track_info_list)
         {
+            // Only counter tracks are sourced from rocpd_track; cpu_thread/region tracks
+            // are synthesized from rocpd_region below. Skip every non-counter row.
+            const bool is_counter =
+                counter_track_ids.find(track_info.id) != counter_track_ids.end();
+            if(!is_counter) continue;
+
             const char* track_name = nullptr;
             if(track_info.name_id.has_value())
             {
@@ -297,14 +307,9 @@ reader_t::impl::get_all_tracks()
             track_info_ptr->id      = track_info.id;
             track_info_ptr->name    = track_name != nullptr ? track_name : "";
             track_info_ptr->extdata = track_info.extdata;
-
-            const bool is_counter =
-                counter_track_ids.find(track_info.id) != counter_track_ids.end();
-            track_info_ptr->type = is_counter ? reader_types::track_type_t::counter
-                                              : reader_types::track_type_t::cpu_thread;
+            track_info_ptr->type    = reader_types::track_type_t::counter;
 
             // counter track display name = PMC name (Q9); fall back to rocpd_track name.
-            if(is_counter)
             {
                 auto nit = counter_track_names.find(track_info.id);
                 if(nit != counter_track_names.end() && !nit->second.empty())
@@ -464,6 +469,74 @@ reader_t::impl::synthesize_derived_tracks()
         qi.pid       = d.pid;
         qi.queue_id  = d.queue_id;
         qi.stream_id = d.stream_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
+
+    // cpu_thread: one track per distinct (nid, pid, tid, is_sample) in rocpd_region.
+    // A thread with both plain and sampled regions yields two tracks (main + sample),
+    // mirroring roc-optiq's region-main / region-sample split.
+    for(const auto& r : m_read_statements->distinct_region_tracks()().to_vector())
+    {
+        const bool is_sample = r.is_sample != 0;
+
+        auto track_info_ptr         = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id          = next_id++;
+        track_info_ptr->type        = reader_types::track_type_t::cpu_thread;
+        track_info_ptr->region_kind = is_sample
+                                          ? reader_types::region_track_kind_t::sample
+                                          : reader_types::region_track_kind_t::main;
+
+        auto node_it = m_node_info_utility.find(r.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(r.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        auto thread_it = m_thread_info_utility.find(r.tid);
+        if(thread_it != m_thread_info_utility.end() && thread_it->second)
+        {
+            track_info_ptr->thread_info = thread_it->second;
+        }
+
+        // Display name = thread identity, with a suffix distinguishing the sample lane.
+        std::string base_name;
+        if(track_info_ptr->thread_info && !track_info_ptr->thread_info->name.empty())
+        {
+            base_name = track_info_ptr->thread_info->name;
+        }
+        else if(track_info_ptr->thread_info)
+        {
+            base_name =
+                "Thread " + std::to_string(track_info_ptr->thread_info->thread_id);
+        }
+        else
+        {
+            base_name = "Thread";
+        }
+        track_info_ptr->name = is_sample ? base_name + " (samples)" : base_name;
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        // Topology registration so get_events_for_track() resolves this thread's
+        // timeline events by (nid, pid, tid). db_id is the synthetic id: it can never
+        // equal a real rocpd_sample.track_id, so the statement's "OR S.track_id = ?"
+        // branch stays inert and only the topology match drives results.
+        topology_key_t topo{ r.nid, r.pid, r.tid };
+        m_track_ptr_to_topology.emplace(track_info_ptr, topo);
+        m_topology_to_track_ptr.emplace(topo, track_info_ptr);
+        m_track_ptr_to_db_id.emplace(track_info_ptr, track_info_ptr->id);
+
+        track_query_info_t qi;
+        qi.type             = reader_types::track_type_t::cpu_thread;
+        qi.nid              = r.nid;
+        qi.pid              = r.pid;
+        qi.tid              = r.tid;
+        qi.region_is_sample = is_sample;
         m_track_query_info.emplace(track_info_ptr->id, qi);
     }
 }
@@ -1671,8 +1744,10 @@ reader_t::impl::get_interval_track(size_t                              track_id,
         switch(qi.type)
         {
             case reader_types::track_type_t::cpu_thread:
-                rows = m_read_statements
-                           ->region_interval_track()(qi.nid, qi.pid, qi.tid.value_or(0))
+                rows = (qi.region_is_sample
+                            ? m_read_statements->region_interval_track_sample()
+                            : m_read_statements->region_interval_track_main())(
+                           qi.nid, qi.pid, qi.tid.value_or(0))
                            .to_vector();
                 break;
             case reader_types::track_type_t::gpu_queue:
