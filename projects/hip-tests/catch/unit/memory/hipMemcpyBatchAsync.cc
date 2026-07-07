@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -857,6 +858,96 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
   DisablePeerAccess(peer_pairs);
   HIP_CHECK(hipSetDevice(stream_device));
 }
+
+#if HT_AMD
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies H2D hipMemcpyBatchAsync with hipMemcpyFlagExtOpIndirectSrc copies
+ * from the host buffer referenced by a pinned pointer slot.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectSrc) {
+  constexpr size_t copy_size = kSmallCopySize;
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<int> src(LinearAllocs::hipHostMalloc, copy_size);
+  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, copy_size);
+  LinearAllocGuard<char> src_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
+
+  const size_t copy_elements = CopyElements(copy_size);
+  std::fill_n(src.host_ptr(), copy_elements, kPatternValue);
+
+  void* src_ptr = src.ptr();
+  std::memcpy(src_slot.ptr(), &src_ptr, sizeof(void*));
+
+  std::vector<void*> dst_ptrs{dst.ptr()};
+  std::vector<void*> src_ptrs{src_slot.ptr()};
+  std::vector<size_t> sizes{copy_size};
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpIndirectSrc};
+  size_t attrs_idx = 0;
+
+  hipError_t status = hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), 1, &attr,
+                                          &attrs_idx, 1, nullptr, stream_guard.stream());
+  if (status == hipErrorNotSupported) {
+    SUCCEED("hipMemcpyFlagExtOpIndirectSrc is not supported on this device");
+  } else {
+    HIP_CHECK(status);
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    VerifyDeviceBuffers(dst_ptrs, copy_size);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies D2H hipMemcpyBatchAsync with hipMemcpyFlagExtOpIndirectDst copies
+ * into the host buffer referenced by a pinned pointer slot.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectDst) {
+  constexpr size_t copy_size = kSmallCopySize;
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, copy_size);
+  LinearAllocGuard<int> dst(LinearAllocs::hipHostMalloc, copy_size);
+  LinearAllocGuard<char> dst_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
+
+  const size_t copy_elements = CopyElements(copy_size);
+  std::vector<int> host_pattern(copy_elements, kPatternValue);
+  HIP_CHECK(hipMemcpy(src.ptr(), host_pattern.data(), copy_size, hipMemcpyHostToDevice));
+  std::fill_n(dst.host_ptr(), copy_elements, 0);
+
+  void* dst_ptr = dst.ptr();
+  std::memcpy(dst_slot.ptr(), &dst_ptr, sizeof(void*));
+
+  std::vector<void*> src_ptrs{src.ptr()};
+  std::vector<void*> dst_ptrs{dst_slot.ptr()};
+  std::vector<size_t> sizes{copy_size};
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpIndirectDst};
+  size_t attrs_idx = 0;
+
+  hipError_t status = hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), 1, &attr,
+                                          &attrs_idx, 1, nullptr, stream_guard.stream());
+  if (status == hipErrorNotSupported) {
+    SUCCEED("hipMemcpyFlagExtOpIndirectDst is not supported on this device");
+  } else {
+    HIP_CHECK(status);
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    VerifyArrayFromBothEnds(dst.host_ptr(), copy_elements, kPatternValue, 0);
+  }
+}
+#endif
 
 /**
  * End doxygen group MemoryTest.
