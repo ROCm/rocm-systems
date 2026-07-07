@@ -63,6 +63,7 @@ struct read_statements : public read_statements_base
 
         initialize_track_synthesis_statements();
         initialize_interval_track_statements();
+        initialize_track_stats_statements();
         initialize_scalar_track_statements();
         initialize_scalar_detail_statement();
         initialize_flow_statements();
@@ -183,6 +184,25 @@ struct read_statements : public read_statements_base
         const override
     {
         return m_memory_copy_interval_track_v4;
+    }
+
+    // ----- track_id-anchored stats accessors (v4.0-specific) -----
+    [[nodiscard]] const stats_track_1_func_t& region_stats_track_v4() const override
+    {
+        return m_region_stats_track_v4;
+    }
+    [[nodiscard]] const stats_track_1_func_t& kernel_dispatch_stats_track_v4()
+        const override
+    {
+        return m_kernel_dispatch_stats_track_v4;
+    }
+    [[nodiscard]] const stats_track_1_func_t& memory_copy_stats_track_v4() const override
+    {
+        return m_memory_copy_stats_track_v4;
+    }
+    [[nodiscard]] const stats_track_1_func_t& scalar_stats() const override
+    {
+        return m_scalar_stats;
     }
 
     // ----- legacy timeline-event accessors (task 002C) -----
@@ -598,6 +618,68 @@ private:
                     &interval_row_result::start,
                     &interval_row_result::end,
                     &interval_row_result::name_ref);
+    }
+
+    void initialize_track_stats_statements()
+    {
+        const auto& u = m_uuid;
+
+        // MIN(start)/MAX(end)/COUNT over exactly the rows the matching interval-track
+        // query returns, so per-track bounds/count agree with a full slice load. Bounds
+        // are resolved through the timestamp spine, mirroring the interval queries.
+
+        m_region_stats_track_v4 =
+            m_backend
+                ->create_read_statement_executor<track_stats_result, bind_types<size_t>>(
+                    fmt::format("SELECT MIN(ts_s.value), MAX(ts_e.value), COUNT(*) "
+                                "FROM rocpd_region_{u} r "
+                                "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = r.start_id "
+                                "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = r.end_id "
+                                "WHERE r.track_id = ?",
+                                fmt::arg("u", u)),
+                    &track_stats_result::min_ts,
+                    &track_stats_result::max_ts,
+                    &track_stats_result::count);
+
+        m_kernel_dispatch_stats_track_v4 =
+            m_backend
+                ->create_read_statement_executor<track_stats_result, bind_types<size_t>>(
+                    fmt::format("SELECT MIN(ts_s.value), MAX(ts_e.value), COUNT(*) "
+                                "FROM rocpd_kernel_dispatch_{u} k "
+                                "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = k.start_id "
+                                "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = k.end_id "
+                                "WHERE k.track_id = ?",
+                                fmt::arg("u", u)),
+                    &track_stats_result::min_ts,
+                    &track_stats_result::max_ts,
+                    &track_stats_result::count);
+
+        m_memory_copy_stats_track_v4 =
+            m_backend
+                ->create_read_statement_executor<track_stats_result, bind_types<size_t>>(
+                    fmt::format("SELECT MIN(ts_s.value), MAX(ts_e.value), COUNT(*) "
+                                "FROM rocpd_memory_copy_{u} mc "
+                                "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = mc.start_id "
+                                "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = mc.end_id "
+                                "WHERE mc.track_id = ?",
+                                fmt::arg("u", u)),
+                    &track_stats_result::min_ts,
+                    &track_stats_result::max_ts,
+                    &track_stats_result::count);
+
+        // counter: samples on track_id joined to their pmc value (matches scalar_track).
+        m_scalar_stats =
+            m_backend
+                ->create_read_statement_executor<track_stats_result, bind_types<size_t>>(
+                    fmt::format("SELECT MIN(ts.value), MAX(ts.value), COUNT(*) "
+                                "FROM rocpd_sample_{u} s "
+                                "JOIN rocpd_timestamp_{u} ts ON ts.id = s.timestamp_id "
+                                "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id "
+                                "WHERE s.track_id = ?",
+                                fmt::arg("u", u)),
+                    &track_stats_result::min_ts,
+                    &track_stats_result::max_ts,
+                    &track_stats_result::count);
     }
 
     void initialize_scalar_track_statements()
@@ -1300,6 +1382,11 @@ private:
     interval_track_1_func_t m_region_interval_track_v4;
     interval_track_1_func_t m_kernel_dispatch_interval_track_v4;
     interval_track_1_func_t m_memory_copy_interval_track_v4;
+
+    stats_track_1_func_t m_region_stats_track_v4;
+    stats_track_1_func_t m_kernel_dispatch_stats_track_v4;
+    stats_track_1_func_t m_memory_copy_stats_track_v4;
+    stats_track_1_func_t m_scalar_stats;
 
     scalar_track_func_t  m_scalar_track;
     scalar_detail_func_t m_scalar_detail;

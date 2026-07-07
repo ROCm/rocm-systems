@@ -91,6 +91,8 @@ struct reader_t::impl
         size_t                              track_id,
         const reader_types::event_filter_t& filter);
 
+    [[nodiscard]] reader_types::track_stats_t get_track_stats(size_t track_id);
+
     [[nodiscard]] reader_types::flow_list_t get_flows(
         const reader_types::event_filter_t& filter);
 

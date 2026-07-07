@@ -57,6 +57,7 @@ struct read_statements : public read_statements_base
 
         initialize_track_synthesis_statements();
         initialize_interval_track_statements();
+        initialize_track_stats_statements();
         initialize_scalar_track_statements();
         initialize_scalar_detail_statement();
         initialize_flow_statements();
@@ -314,6 +315,40 @@ struct read_statements : public read_statements_base
         const override
     {
         return m_memory_copy_interval_neither;
+    }
+
+    // Track-stats accessors (aggregates matching the interval-track scoping above)
+    [[nodiscard]] const stats_track_3_func_t& region_stats_track_main() const override
+    {
+        return m_region_stats_track_main;
+    }
+    [[nodiscard]] const stats_track_3_func_t& region_stats_track_sample() const override
+    {
+        return m_region_stats_track_sample;
+    }
+    [[nodiscard]] const stats_track_4_func_t& kernel_dispatch_stats_track() const override
+    {
+        return m_kernel_dispatch_stats_track;
+    }
+    [[nodiscard]] const stats_track_4_func_t& memory_copy_stats_qs() const override
+    {
+        return m_memory_copy_stats_qs;
+    }
+    [[nodiscard]] const stats_track_3_func_t& memory_copy_stats_q_only() const override
+    {
+        return m_memory_copy_stats_q_only;
+    }
+    [[nodiscard]] const stats_track_3_func_t& memory_copy_stats_s_only() const override
+    {
+        return m_memory_copy_stats_s_only;
+    }
+    [[nodiscard]] const stats_track_2_func_t& memory_copy_stats_neither() const override
+    {
+        return m_memory_copy_stats_neither;
+    }
+    [[nodiscard]] const stats_track_1_func_t& scalar_stats() const override
+    {
+        return m_scalar_stats;
     }
 
     // Scalar-track accessors
@@ -1292,6 +1327,91 @@ private:
             "queue_id IS NULL AND stream_id IS NULL", bind_types<size_t, size_t>{});
     }
 
+    void initialize_track_stats_statements()
+    {
+        const auto& u = m_uuid;
+
+        // MIN(start)/MAX(end)/COUNT over exactly the rows the matching interval-track
+        // query returns, so per-track bounds/count agree with a full slice load.
+
+        // cpu_thread region main: regions on (nid,pid,tid) whose event has no sample.
+        m_region_stats_track_main = m_backend->create_read_statement_executor<
+            track_stats_result,
+            bind_types<size_t, size_t, size_t>>(
+            fmt::format(
+                "SELECT MIN(r.start), MAX(r.\"end\"), COUNT(*) FROM rocpd_region_{u} r "
+                "LEFT JOIN rocpd_sample_{u} s ON s.event_id = r.event_id "
+                "WHERE r.nid = ? AND r.pid = ? AND r.tid = ? AND s.event_id IS NULL",
+                fmt::arg("u", u)),
+            &track_stats_result::min_ts,
+            &track_stats_result::max_ts,
+            &track_stats_result::count);
+
+        // cpu_thread region sample: regions on (nid,pid,tid) whose event has a sample.
+        // COUNT(DISTINCT r.id) matches the interval query's SELECT DISTINCT r.id (a
+        // region event may have multiple samples).
+        m_region_stats_track_sample =
+            m_backend->create_read_statement_executor<track_stats_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                fmt::format("SELECT MIN(r.start), MAX(r.\"end\"), COUNT(DISTINCT r.id) "
+                            "FROM rocpd_region_{u} r "
+                            "INNER JOIN rocpd_sample_{u} s ON s.event_id = r.event_id "
+                            "WHERE r.nid = ? AND r.pid = ? AND r.tid = ?",
+                            fmt::arg("u", u)),
+                &track_stats_result::min_ts,
+                &track_stats_result::max_ts,
+                &track_stats_result::count);
+
+        // gpu_queue: kernel dispatches on (nid,pid,agent_id,queue_id).
+        m_kernel_dispatch_stats_track = m_backend->create_read_statement_executor<
+            track_stats_result,
+            bind_types<size_t, size_t, size_t, size_t>>(
+            fmt::format("SELECT MIN(start), MAX(\"end\"), COUNT(*) "
+                        "FROM rocpd_kernel_dispatch_{} "
+                        "WHERE nid = ? AND pid = ? AND agent_id = ? AND queue_id = ?",
+                        u),
+            &track_stats_result::min_ts,
+            &track_stats_result::max_ts,
+            &track_stats_result::count);
+
+        // dma: memory copies on (nid,pid,queue_id,stream_id), one variant per NULL
+        // pattern.
+        auto make_mc_stats = [&](const char* qs_clause, auto bind_tag) {
+            using bt = decltype(bind_tag);
+            return m_backend->create_read_statement_executor<track_stats_result, bt>(
+                fmt::format("SELECT MIN(start), MAX(\"end\"), COUNT(*) "
+                            "FROM rocpd_memory_copy_{} WHERE nid = ? AND pid = ? AND {}",
+                            u,
+                            qs_clause),
+                &track_stats_result::min_ts,
+                &track_stats_result::max_ts,
+                &track_stats_result::count);
+        };
+
+        m_memory_copy_stats_qs =
+            make_mc_stats("queue_id = ? AND stream_id = ?",
+                          bind_types<size_t, size_t, size_t, size_t>{});
+        m_memory_copy_stats_q_only  = make_mc_stats("queue_id = ? AND stream_id IS NULL",
+                                                   bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_stats_s_only  = make_mc_stats("queue_id IS NULL AND stream_id = ?",
+                                                   bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_stats_neither = make_mc_stats(
+            "queue_id IS NULL AND stream_id IS NULL", bind_types<size_t, size_t>{});
+
+        // counter: samples on track_id joined to their pmc value (matches scalar_track).
+        m_scalar_stats =
+            m_backend
+                ->create_read_statement_executor<track_stats_result, bind_types<size_t>>(
+                    fmt::format("SELECT MIN(s.timestamp), MAX(s.timestamp), COUNT(*) "
+                                "FROM rocpd_sample_{u} s "
+                                "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id "
+                                "WHERE s.track_id = ?",
+                                fmt::arg("u", u)),
+                    &track_stats_result::min_ts,
+                    &track_stats_result::max_ts,
+                    &track_stats_result::count);
+    }
+
     void initialize_scalar_track_statements()
     {
         const auto& u = m_uuid;
@@ -1451,6 +1571,16 @@ private:
     interval_track_3_func_t m_memory_copy_interval_q_only;
     interval_track_3_func_t m_memory_copy_interval_s_only;
     interval_track_2_func_t m_memory_copy_interval_neither;
+
+    // Track-stats statements
+    stats_track_3_func_t m_region_stats_track_main;
+    stats_track_3_func_t m_region_stats_track_sample;
+    stats_track_4_func_t m_kernel_dispatch_stats_track;
+    stats_track_4_func_t m_memory_copy_stats_qs;
+    stats_track_3_func_t m_memory_copy_stats_q_only;
+    stats_track_3_func_t m_memory_copy_stats_s_only;
+    stats_track_2_func_t m_memory_copy_stats_neither;
+    stats_track_1_func_t m_scalar_stats;
 
     // Scalar-track statements
     scalar_track_func_t  m_scalar_track;

@@ -173,6 +173,17 @@ struct reader_t
         const reader_types::event_filter_t& filter = {}) const;
 
     /**
+     * @brief Get bounds/count for a track without loading its events
+     * @param track_id Track identifier from track_info_t::id (any track type)
+     * @return {min_ts, max_ts, count} computed via cheap SQL aggregates over the same
+     *         events get_interval_track / get_scalar_track would return for this track.
+     *         min_ts/max_ts are nullopt and count is 0 when track_id is unknown or the
+     *         track has no events.
+     * @note Cheap enough to call per-track at discovery; does not materialize event rows.
+     */
+    [[nodiscard]] reader_types::track_stats_t get_track_stats(size_t track_id) const;
+
+    /**
      * @brief Get all causal links between events across all tracks (post-hoc pass)
      * @param filter Optional time-window filter applied to the SOURCE event's start.
      *               pagination/sort/types are ignored.

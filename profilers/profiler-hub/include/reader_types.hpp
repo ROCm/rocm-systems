@@ -581,4 +581,13 @@ struct flow_t
 
 using flow_list_t = std::vector<flow_t>;
 
+struct track_stats_t
+{
+    std::optional<timestamp_ns_t>
+        min_ts;  ///< Earliest start on the track; nullopt if empty.
+    std::optional<timestamp_ns_t> max_ts;  ///< Latest end (samples: latest timestamp) on
+                                           ///< the track; nullopt if empty.
+    size_t count{};  ///< Number of events (or samples) on the track.
+};
+
 }  // namespace profiler_hub::reader_types

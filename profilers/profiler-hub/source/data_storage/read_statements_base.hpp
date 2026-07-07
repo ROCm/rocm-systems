@@ -365,6 +365,16 @@ struct scalar_row_result
     double value{};
 };
 
+/// Bounds/count for a single track, computed via MIN/MAX/COUNT aggregates over the
+/// same events the matching interval/scalar track query would return. min_ts/max_ts
+/// are nullopt when the track has no events (aggregate over empty set is NULL).
+struct track_stats_result
+{
+    std::optional<size_t> min_ts;
+    std::optional<size_t> max_ts;
+    size_t                count{};
+};
+
 /// A single causal link (source event id -> destination event id).
 struct flow_row_result
 {
@@ -532,6 +542,17 @@ struct read_statements_base
 
     using scalar_track_func_t =
         std::function<sqlite_backend::result_set<scalar_row_result>(size_t)>;
+
+    // Track-stats func types: MIN/MAX/COUNT aggregates, one arity per identity-tuple
+    // shape (v4 track_id-anchored + scalar use the 1-arg form).
+    using stats_track_1_func_t =
+        std::function<sqlite_backend::result_set<track_stats_result>(size_t)>;
+    using stats_track_2_func_t =
+        std::function<sqlite_backend::result_set<track_stats_result>(size_t, size_t)>;
+    using stats_track_3_func_t = std::function<
+        sqlite_backend::result_set<track_stats_result>(size_t, size_t, size_t)>;
+    using stats_track_4_func_t = std::function<
+        sqlite_backend::result_set<track_stats_result>(size_t, size_t, size_t, size_t)>;
 
     using flow_func_t = std::function<sqlite_backend::result_set<flow_row_result>()>;
     using flow_time_filtered_func_t =
@@ -853,6 +874,72 @@ struct read_statements_base
         const
     {
         static const interval_track_1_func_t e{};
+        return e;
+    }
+
+    // ----- Track-stats aggregates (MIN/MAX/COUNT) -----
+    // Shape-matched to the interval/scalar track statements above so the aggregate
+    // scopes to exactly the events that track would return. v3 overrides the
+    // multi-column variants; v4.0 overrides the track_id-anchored *_v4 variants; both
+    // override scalar_stats. Unimplemented variants inherit these empty stubs (the
+    // reader routes only to the ones its backend implements).
+    [[nodiscard]] virtual const stats_track_3_func_t& region_stats_track_main() const
+    {
+        static const stats_track_3_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_3_func_t& region_stats_track_sample() const
+    {
+        static const stats_track_3_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_4_func_t& kernel_dispatch_stats_track() const
+    {
+        static const stats_track_4_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_4_func_t& memory_copy_stats_qs() const
+    {
+        static const stats_track_4_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_3_func_t& memory_copy_stats_q_only() const
+    {
+        static const stats_track_3_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_3_func_t& memory_copy_stats_s_only() const
+    {
+        static const stats_track_3_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_2_func_t& memory_copy_stats_neither() const
+    {
+        static const stats_track_2_func_t e{};
+        return e;
+    }
+
+    [[nodiscard]] virtual const stats_track_1_func_t& region_stats_track_v4() const
+    {
+        static const stats_track_1_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_1_func_t& kernel_dispatch_stats_track_v4()
+        const
+    {
+        static const stats_track_1_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_1_func_t& memory_copy_stats_track_v4() const
+    {
+        static const stats_track_1_func_t e{};
+        return e;
+    }
+
+    // Counter (scalar) track stats over rocpd_sample; implemented by both backends.
+    [[nodiscard]] virtual const stats_track_1_func_t& scalar_stats() const
+    {
+        static const stats_track_1_func_t e{};
         return e;
     }
 };

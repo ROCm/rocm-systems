@@ -110,6 +110,12 @@ reader_t::get_scalar_track(size_t                              track_id,
     return m_impl->get_scalar_track(track_id, filter);
 }
 
+reader_types::track_stats_t
+reader_t::get_track_stats(size_t track_id) const
+{
+    return m_impl->get_track_stats(track_id);
+}
+
 reader_types::flow_list_t
 reader_t::get_flows(const reader_types::event_filter_t& filter) const
 {

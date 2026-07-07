@@ -1890,6 +1890,112 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
     return events;
 }
 
+reader_types::track_stats_t
+reader_t::impl::get_track_stats(size_t track_id)
+{
+    auto qit = m_track_query_info.find(track_id);
+    if(qit == m_track_query_info.end()) return {};
+    const auto& qi = qit->second;
+
+    // Cheap MIN/MAX/COUNT aggregates over exactly the rows get_interval_track /
+    // get_scalar_track would return for this track. Routing mirrors those methods so
+    // bounds/count agree with a full slice load without materializing event rows.
+    std::vector<data_storage::track_stats_result> rows;
+
+    if(m_is_v4)
+    {
+        switch(qi.type)
+        {
+            case reader_types::track_type_t::cpu_thread:
+                rows = m_read_statements->region_stats_track_v4()(qi.real_track_id)
+                           .to_vector();
+                break;
+            case reader_types::track_type_t::gpu_queue:
+                rows =
+                    m_read_statements->kernel_dispatch_stats_track_v4()(qi.real_track_id)
+                        .to_vector();
+                break;
+            case reader_types::track_type_t::dma:
+                rows = m_read_statements->memory_copy_stats_track_v4()(qi.real_track_id)
+                           .to_vector();
+                break;
+            case reader_types::track_type_t::counter:
+                rows = m_read_statements->scalar_stats()(qi.real_track_id).to_vector();
+                break;
+            default: return {};
+        }
+    }
+    else
+    {
+        switch(qi.type)
+        {
+            case reader_types::track_type_t::cpu_thread:
+                rows =
+                    (qi.region_is_sample ? m_read_statements->region_stats_track_sample()
+                                         : m_read_statements->region_stats_track_main())(
+                        qi.nid, qi.pid, qi.tid.value_or(0))
+                        .to_vector();
+                break;
+            case reader_types::track_type_t::gpu_queue:
+                rows = m_read_statements
+                           ->kernel_dispatch_stats_track()(qi.nid,
+                                                           qi.pid,
+                                                           qi.agent_id.value_or(0),
+                                                           qi.queue_id.value_or(0))
+                           .to_vector();
+                break;
+            case reader_types::track_type_t::dma:
+            {
+                const bool has_q = qi.queue_id.has_value();
+                const bool has_s = qi.stream_id.has_value();
+                if(has_q && has_s)
+                {
+                    rows =
+                        m_read_statements
+                            ->memory_copy_stats_qs()(
+                                qi.nid, qi.pid, qi.queue_id.value(), qi.stream_id.value())
+                            .to_vector();
+                }
+                else if(has_q)
+                {
+                    rows = m_read_statements
+                               ->memory_copy_stats_q_only()(
+                                   qi.nid, qi.pid, qi.queue_id.value())
+                               .to_vector();
+                }
+                else if(has_s)
+                {
+                    rows = m_read_statements
+                               ->memory_copy_stats_s_only()(
+                                   qi.nid, qi.pid, qi.stream_id.value())
+                               .to_vector();
+                }
+                else
+                {
+                    rows = m_read_statements->memory_copy_stats_neither()(qi.nid, qi.pid)
+                               .to_vector();
+                }
+                break;
+            }
+            case reader_types::track_type_t::counter:
+                rows = m_read_statements->scalar_stats()(qi.real_track_id).to_vector();
+                break;
+            default: return {};
+        }
+    }
+
+    reader_types::track_stats_t stats;
+    if(!rows.empty())
+    {
+        // Aggregate query yields exactly one row. min_ts/max_ts are nullopt when the
+        // track has no events (SQL MIN/MAX over an empty set), matching count == 0.
+        stats.min_ts = rows.front().min_ts;
+        stats.max_ts = rows.front().max_ts;
+        stats.count  = rows.front().count;
+    }
+    return stats;
+}
+
 reader_types::flow_list_t
 reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
 {
