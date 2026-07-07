@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 278
+- Contract tests: 284
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 494
-- Declared HIP runtime APIs directly exercised by contract tests: 229
-- Approximate declared API-name coverage: 46.4%
+- Declared HIP runtime APIs directly exercised by contract tests: 233
+- Approximate declared API-name coverage: 47.2%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcGetProgramLogSize`, `hiprtcGetProgramLog`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -70,6 +70,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `module_exec` | 8 |
 | `module_load_ex` | 4 |
 | `library` | 17 |
+| `symbol_copy` | 6 |
 
 ## Coverage by API category
 
@@ -82,7 +83,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Stream | 20 | 23 | 87.0% |
 | Runtime / device | 28 | 45 | 62.2% |
 | Kernel launch / function attrs | 12 | 19 | 63.2% |
-| Memory / copy / memset | 45 | 137 | 32.8% |
+| Memory / copy / memset | 49 | 137 | 35.8% |
 | Other runtime APIs | 1 | 56 | 1.8% |
 | Module / library loading | 17 | 29 | 58.6% |
 | Texture / surface | 7 | 44 | 15.9% |
@@ -132,6 +133,10 @@ hipMemPoolTrimTo
 hipMallocFromPoolAsync
 hipMemPoolSetAccess
 hipMemPoolGetAccess
+hipMemcpyToSymbol
+hipMemcpyFromSymbol
+hipMemcpyToSymbolAsync
+hipMemcpyFromSymbolAsync
 ```
 
 ### Virtual memory management
@@ -389,7 +394,7 @@ hipIpcOpenEventHandle
 
 ## Largest remaining gaps
 
-1. Memory surface beyond current basics: peer copies, advanced VMM operations (multi-device access descriptors, export/import handles, and protection-mode matrices), and remaining advanced memory-pool operations (pool export/import handles and multi-device access descriptors). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, 3D pitched allocation with host-device 3D copies, 3D array allocation with 3D copy-to/from-array, managed allocation with prefetch, default memory pools with stream-ordered allocation, basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access), explicit memory-pool lifecycle (create/destroy, release-threshold, trim, and pool-specific async allocation), and current-device memory-pool access control are now covered.
+1. Memory surface beyond current basics: peer copies, advanced VMM operations (multi-device access descriptors, export/import handles, and protection-mode matrices), and remaining advanced memory-pool operations (pool export/import handles and multi-device access descriptors). Host allocation/registration, pitched allocation with 2D copies, basic array allocation with 2D array copies, 3D pitched allocation with host-device 3D copies, 3D array allocation with 3D copy-to/from-array, managed allocation with prefetch, default memory pools with stream-ordered allocation, basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access), explicit memory-pool lifecycle (create/destroy, release-threshold, trim, and pool-specific async allocation), current-device memory-pool access control, and device-global symbol copies (synchronous and stream-ordered copy-to/from-symbol with byte-offset placement and invalid/out-of-bounds rejection: `hipMemcpyToSymbol`, `hipMemcpyFromSymbol`, `hipMemcpyToSymbolAsync`, `hipMemcpyFromSymbolAsync`) are now covered. Remaining symbol-copy gaps are the driver-style/2D memcpy families and peer copy variants.
 2. Texture and surface APIs beyond current basics: texture/surface object create/destroy with resource and texture descriptor round-trips and channel-descriptor queries are now covered; texture reference APIs, mipmapped arrays, and bound/linear texture variants remain.
 3. Module, library, and code-loading APIs: HIPRTC-backed module load-from-data, load-from-data-with-options (`hipModuleLoadDataEx`, including JIT option handling), unload, function and global lookup, module kernel launch (with `hipFuncGetAttribute`), function-count queries, cooperative module launch, and module occupancy helpers (max potential block size and max active blocks per multiprocessor, including both with-flags variants) are now covered; the HIPRTC-backed library-loading family is now covered too (library load-from-data, unload, kernel lookup, kernel count, kernel enumeration, global lookup, and the `hipKernel*` accessors for function/library/name). Module load from file/fat-binary, tex-ref queries, and multi-device cooperative module launch remain.
 4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; driver-style context lifecycle and current-context mutation are now covered too (context create/destroy, set-current, push/pop-current, context synchronize, and API-version query). Driver-style context configuration and peer access are now covered as well: per-context cache-config get/set (`hipCtxGetCacheConfig`, `hipCtxSetCacheConfig`), shared-memory-config get/set (`hipCtxGetSharedMemConfig`, `hipCtxSetSharedMemConfig`), the context flag query (`hipCtxGetFlags`), and context peer access enable/disable (`hipCtxEnablePeerAccess`, `hipCtxDisablePeerAccess`). This brings the driver-style context (`hipCtx*`) API family to full name coverage. Remaining driver-style device-management gaps are the primary-context reset/set-flags helpers and the peer-attribute/link-type queries outside the `hipCtx*` family.
