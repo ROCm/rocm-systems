@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
 
 namespace rocprofiler_compute_tool
@@ -31,8 +32,9 @@ public:
                   const std::filesystem::path&           destination_root) override;
 
 private:
-    std::filesystem::path get_destination_path(const std::filesystem::path& absolute_source_path,
-                                               const std::filesystem::path& destination_root) const;
+    std::optional<std::filesystem::path> get_destination_path(
+        const std::filesystem::path& absolute_source_path,
+        const std::filesystem::path& destination_root) const;
 
     bool is_copyable(const std::filesystem::path& source_path,
                      std::filesystem::path&       absolute_source_path);

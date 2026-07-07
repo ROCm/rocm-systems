@@ -12,14 +12,18 @@ source_snapshotter_t::ptr source_snapshotter_t::create()
     return std::make_shared<source_snapshotter_impl_t>();
 }
 
-std::filesystem::path source_snapshotter_impl_t::get_destination_path(
+std::optional<std::filesystem::path> source_snapshotter_impl_t::get_destination_path(
     const std::filesystem::path& absolute_source_path,
     const std::filesystem::path& destination_root) const
 {
     std::error_code error;
     const auto canonical_source_path = m_filesystem->weakly_canonical(absolute_source_path, error);
     if (error)
-        throw std::runtime_error("Failed to get canonical source path: " + absolute_source_path.string());
+    {
+        std::clog << "[rocprofiler-compute] [source_snapshotter] Skipping file: " << absolute_source_path
+                  << ": failed to get canonical source path: " << error.message() << '\n';
+        return std::nullopt;
+    }
 
     return destination_root / m_filesystem->relative_path(canonical_source_path);
 }
@@ -44,7 +48,10 @@ void source_snapshotter_impl_t::snapshot(const std::set<std::filesystem::path>& 
             continue;
 
         const auto destination_path = get_destination_path(absolute_source_path, destination_root);
-        copy_source(source_path, destination_path);
+        if (!destination_path)
+            continue;
+
+        copy_source(source_path, *destination_path);
     }
 }
 
