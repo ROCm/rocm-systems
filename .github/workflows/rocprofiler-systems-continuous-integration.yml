@@ -160,6 +160,7 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-systems
         run: |
+          python3 -m pip --version
           python3 -m pip install --break-system-packages -r requirements.txt
 
       - name: Configure, Build, and Test
