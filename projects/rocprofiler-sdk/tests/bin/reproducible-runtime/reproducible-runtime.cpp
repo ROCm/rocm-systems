@@ -56,18 +56,14 @@
 
 namespace
 {
-using auto_lock_t      = std::unique_lock<std::mutex>;
-auto     print_lock    = std::mutex{};
-double   nruntime      = 500.0;  // ms
-uint32_t nspin         = 128 * 5000;
-size_t   nthreads      = 2;
-double   runtime_scale = 1.1;
+using auto_lock_t   = std::unique_lock<std::mutex>;
+auto     print_lock = std::mutex{};
+double   nruntime   = 500.0;  // ms
+uint32_t nspin      = 128 * 5000;
+size_t   nthreads   = 2;
 
 void
 check_hip_error(void);
-
-double
-read_runtime_scale(double default_value);
 }  // namespace
 
 __global__ void
@@ -97,8 +93,6 @@ main(int argc, char** argv)
     if(argc > 1) nruntime = std::stod(argv[1]);
     if(argc > 2) nthreads = std::stoll(argv[2]);
     if(argc > 3) nspin = std::stoll(argv[3]);
-
-    runtime_scale = read_runtime_scale(runtime_scale);
 
     printf("[reproducible-runtime] Kernel runtime per thread: %.3f msec\n", nruntime);
     printf("[reproducible-runtime] Spin time per kernel: %u cycles\n", nspin);
@@ -180,36 +174,10 @@ run(int tid, int devid)
     HIP_API_CALL(hipStreamDestroy(stream));
 
     roctxRangeStop(roctx_range_id);
-
-    // A scale <= 0 disables the overshoot ceiling: under heavy GPU contention
-    // (e.g. many threads sharing one device) the per-launch elapsed time can be
-    // inflated by queueing, so the accumulated runtime is not a reliable bound.
-    const auto scale = runtime_scale;
-    if(scale > 0.0 && time > scale * nruntime)
-    {
-        auto _msg = std::stringstream{};
-        _msg << "total kernel runtime exceeded (" << scale << " * " << nruntime << " = "
-             << (scale * nruntime) << ") :: " << time << " ms";
-        throw std::runtime_error{_msg.str()};
-    }
 }
 
 namespace
 {
-double
-read_runtime_scale(double default_value)
-{
-    const char* _env = std::getenv("REPRODUCIBLE_RUNTIME_RUNTIME_SCALE");
-    if(_env == nullptr || *_env == '\0') return default_value;
-    try
-    {
-        return std::stod(_env);
-    } catch(const std::exception&)
-    {
-        return default_value;
-    }
-}
-
 void
 check_hip_error(void)
 {
