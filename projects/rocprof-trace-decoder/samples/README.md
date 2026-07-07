@@ -10,8 +10,10 @@ Install the Python package first, or run from the source tree with
 The plotting samples write their PNG output to the current directory by
 default. Use `-d DIR` to choose a different output directory.
 
-Code-object IDs are inferred from filenames containing `_code_object_id_N`.
-If exactly one code object has no ID in its filename, these samples use ID `0`.
+The public API does not infer code-object IDs from filenames. These sample
+scripts are command-line wrappers, so their input parser derives IDs from common
+rocprofiler capture filenames before constructing explicit `CodeObject` values.
+If exactly one code object has no inferred ID, these samples use ID `0`.
 Multiple unnamed code objects are rejected because their IDs are ambiguous.
 
 ## ISA Hotspots

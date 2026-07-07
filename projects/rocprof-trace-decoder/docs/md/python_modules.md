@@ -270,10 +270,8 @@ The script is not part of the installable API and is not required by
 `rocprof_trace_decoder.codegen`.
 
 When code objects are not provided explicitly, the command scans the current
-directory for `.hsaco`, `.out`, `.co`, and `.o` ELF files. Multiple inputs need a
-code object id in the file stem because trace records are keyed by
-`(code_object_id, address)`. The accepted filename forms are
-`*_code_object_id_N.*` and `*_N.*`; a single untagged input defaults to id 0.
+directory for `.hsaco`, `.out`, `.co`, and `.o` ELF files. The script maps those
+files to explicit `CodeObject` values before calling the reusable API.
 
 The reusable codegen implementation normalizes branch operands printed by
 `llvm-objdump` as symbolic labels back to the raw SOPP immediate form expected
@@ -321,9 +319,8 @@ The one-command ATT path is:
 2. `att_tool.py` calls `rocprof_trace_decoder.codegen` when code objects are
    available and a new `CodeIndex` is needed. If there are no ATT traces, the
    command writes only RCV static code files.
-3. `att_tool.py` turns trace paths into explicit `AttTrace` objects, using
-   conventional filename metadata when present and deterministic defaults
-   otherwise.
+3. `att_tool.py` turns ATT trace paths into explicit `AttTrace` objects, using
+   trace filename metadata when present and deterministic defaults otherwise.
 4. When code metadata is available, `CodeIndex` becomes the decoder ISA
    provider.
 5. `Decoder` parses each `.att` file and returns `TraceRecords`.
