@@ -327,10 +327,10 @@ class Decoder:
         if self._closed:
             return
         status = self._lib.rocprof_trace_decoder_destroy_handle(self._handle)
+        self._check(status)
         self._closed = True
         self._isa_cb = None
         self._trace_cb = None
-        self._check(status)
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -409,7 +409,11 @@ class Decoder:
         load_size: int,
         data: BytesLike,
     ) -> None:
-        """Compatibility wrapper for the original data-loading argument order."""
+        """Compatibility wrapper for the original data-loading argument order.
+
+        *load_size* is the loaded memory range size, not the code-object byte
+        length.
+        """
         self._load_code_object_bytes(
             data,
             load_id=load_id,
@@ -428,6 +432,8 @@ class Decoder:
 
         *data* may be a bytes-like object or a filesystem path. New code that
         wants to be explicit about paths can use `load_code_object_file()`.
+        *load_size* is the size of the loaded memory range and is intentionally
+        separate from the code-object byte length passed to the native API.
         """
         if _is_bytes_like(data):
             self._load_code_object_bytes(
@@ -451,6 +457,10 @@ class Decoder:
         load_addr: int,
         load_size: int,
     ) -> None:
+        """Load a code object from a file path.
+
+        *load_size* is the loaded memory range size, not the file length.
+        """
         self._load_code_object_bytes(
             Path(path).read_bytes(),
             load_id=load_id,

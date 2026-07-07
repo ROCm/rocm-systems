@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import glob
-import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from _code_object_paths import code_objects_from_paths
 from rocprof_trace_decoder import (
     CodeArtifacts,
     CodeObject,
@@ -16,7 +16,6 @@ from rocprof_trace_decoder import (
 )
 
 CODE_SUFFIXES = {".out", ".co", ".hsaco"}
-CODE_OBJECT_ID_RE = re.compile(r"(?:^|_)code_object_id_(\d+)(?:_|$)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -77,7 +76,10 @@ def expand_input_paths(patterns: list[str]) -> SampleInputs:
             else:
                 raise SystemExit(f"Unsupported input type: {path}")
 
-    code_objects = _code_objects_from_paths(code_paths)
+    try:
+        code_objects = code_objects_from_paths(code_paths)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     return SampleInputs(att_paths=att_paths, code_objects=code_objects)
 
 
@@ -114,35 +116,3 @@ def wave_idle_time(wave) -> int:
         idle += max(inst.time - prev_time, 0)
         prev_time = max(prev_time, inst.time + inst.duration)
     return idle
-
-
-def _code_objects_from_paths(paths: list[Path]) -> list[CodeObject]:
-    parsed = [(path, _code_object_id_from_path(path)) for path in paths]
-    untagged = [str(path) for path, code_object_id in parsed if code_object_id is None]
-    parsed_ids = {code_object_id for _path, code_object_id in parsed if code_object_id is not None}
-    if len(untagged) > 1:
-        raise SystemExit(
-            "Cannot infer code object ids for multiple unnamed inputs: " + ", ".join(untagged)
-        )
-    if untagged and 0 in parsed_ids:
-        raise SystemExit(
-            f"Cannot assign code object id 0 to {untagged[0]}: another input already uses id 0."
-        )
-    return [
-        CodeObject(path=path, code_object_id=code_object_id if code_object_id is not None else 0)
-        for path, code_object_id in parsed
-    ]
-
-
-def _code_object_id_from_path(path: Path) -> int | None:
-    match = CODE_OBJECT_ID_RE.search(path.stem)
-    if match:
-        return int(match.group(1))
-
-    pos = path.stem.rfind("_")
-    if pos == -1:
-        return None
-    try:
-        return int(path.stem[pos + 1:])
-    except ValueError:
-        return None

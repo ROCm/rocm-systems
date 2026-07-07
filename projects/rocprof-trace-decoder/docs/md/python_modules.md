@@ -122,7 +122,9 @@ The main public class is `Decoder`. It manages a handle created with
 - `parse_chunks(chunks, isa=...)`, for callers that intentionally decode each
   chunk as a separate trace buffer.
 - `load_code_object(data, load_id=..., load_addr=..., load_size=...)`, where
-  `data` is code-object bytes or a path.
+  `data` is code-object bytes or a path. `load_size` is the loaded memory range
+  size and is intentionally distinct from the code-object byte length, which is
+  inferred from `data`.
 - `load_code_object_file(path, load_id=..., load_addr=..., load_size=...)`.
 - `load_code_object_data(load_id, load_addr, load_size, data)`, retained for
   compatibility with the original wrapper spelling.
@@ -268,9 +270,10 @@ The script is not part of the installable API and is not required by
 `rocprof_trace_decoder.codegen`.
 
 When code objects are not provided explicitly, the command scans the current
-directory for `.hsaco`, `.out`, `.co`, and `.o` ELF files. Non-`.hsaco` inputs
-still need a code object id in the file stem because trace records are keyed by
-`(code_object_id, address)`.
+directory for `.hsaco`, `.out`, `.co`, and `.o` ELF files. Multiple inputs need a
+code object id in the file stem because trace records are keyed by
+`(code_object_id, address)`. The accepted filename forms are
+`*_code_object_id_N.*` and `*_N.*`; a single untagged input defaults to id 0.
 
 The reusable codegen implementation normalizes branch operands printed by
 `llvm-objdump` as symbolic labels back to the raw SOPP immediate form expected

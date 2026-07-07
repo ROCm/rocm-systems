@@ -12,9 +12,10 @@ from pathlib import Path
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _code_object_paths import code_objects_from_paths
 from rocprof_trace_decoder.att import AttTrace, generate_att_outputs
 from rocprof_trace_decoder.code_index import CodeIndex
-from rocprof_trace_decoder.codegen import CodeObject, generate_code_artifacts
+from rocprof_trace_decoder.codegen import generate_code_artifacts
 from rocprof_trace_decoder.rcv import (
     copy_source_snapshots,
     write_code_json,
@@ -57,7 +58,11 @@ def generate_outputs_from_files(
     code_dir = Path(output_dir).expanduser().resolve() if output_dir else _code_dir(inputs)
     generated_code = False
     if inputs.code_objects:
-        artifacts = generate_code_artifacts(_code_objects_from_paths(inputs.code_objects))
+        try:
+            code_objects = code_objects_from_paths(inputs.code_objects)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        artifacts = generate_code_artifacts(code_objects)
         code_index = artifacts.code_index
         source_paths = artifacts.source_paths
         code_json = None
@@ -182,35 +187,6 @@ def _next_available_shader_engine(used: set[int], start: int) -> int:
     while shader_engine in used:
         shader_engine += 1
     return shader_engine
-
-
-def _code_objects_from_paths(paths: list[Path]) -> list[CodeObject]:
-    parsed = [(path, _code_object_id_from_path(path)) for path in paths]
-    untagged = [str(path) for path, codeobj_id in parsed if codeobj_id is None]
-    parsed_ids = {codeobj_id for _path, codeobj_id in parsed if codeobj_id is not None}
-    if len(untagged) > 1:
-        raise SystemExit(
-            "Cannot infer code object IDs for multiple unnamed inputs: " + ", ".join(untagged)
-        )
-    if untagged and 0 in parsed_ids:
-        raise SystemExit(
-            f"Cannot assign code object id 0 to {untagged[0]}: another input already uses id 0."
-        )
-    return [
-        CodeObject(path=path, code_object_id=codeobj_id if codeobj_id is not None else 0)
-        for path, codeobj_id in parsed
-    ]
-
-
-def _code_object_id_from_path(path: Path) -> int | None:
-    stem = path.stem
-    pos = stem.rfind("_")
-    if pos == -1:
-        return None
-    try:
-        return int(stem[pos + 1:])
-    except ValueError:
-        return None
 
 
 def build_argparser() -> argparse.ArgumentParser:
