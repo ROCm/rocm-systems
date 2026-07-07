@@ -571,10 +571,10 @@ enable_queue_intercept()
 bool
 context_needs_queue_interposition_tracing(const context::context* ctx)
 {
-    return ctx && ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                                         ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                                         ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
-                                         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+    return ctx != nullptr && ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                                    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                                    ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
+                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 }
 
 void
