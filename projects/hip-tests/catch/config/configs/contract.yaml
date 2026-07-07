@@ -636,6 +636,24 @@ contract:
   Contract_ContextMutation_GetApiVersion_ReportsVersionOrNotSupported:
     <<: *level_0
     tags: [context_mutation]
+  Contract_ContextConfig_GetCacheConfig_ReturnsEnumOrNotSupported:
+    <<: *level_0
+    tags: [context_config]
+  Contract_ContextConfig_SetCacheConfig_IsAcceptedOrUnsupported_RejectsInvalid:
+    <<: *level_0
+    tags: [context_config]
+  Contract_ContextConfig_GetSharedMemConfig_ReturnsEnumOrNotSupported:
+    <<: *level_0
+    tags: [context_config]
+  Contract_ContextConfig_SetSharedMemConfig_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [context_config]
+  Contract_ContextConfig_GetFlags_ReturnsScheduleOrNotSupported:
+    <<: *level_0
+    tags: [context_config]
+  Contract_ContextConfig_PeerAccessSelf_IsRejectedOrUnsupportedOrNoOp:
+    <<: *level_0
+    tags: [context_config]
   Contract_DeviceConfig_GetCacheConfig_ReturnsEnumValue:
     <<: *level_0
     tags: [device_config]

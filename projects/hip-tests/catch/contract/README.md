@@ -49,6 +49,7 @@ The first domains are:
 - `texture`: texture and surface object creation and descriptor-introspection contracts
 - `context`: driver-style device and context query contracts
 - `context_mutation`: driver-style context create, set-current, push/pop, synchronize, and API-version contracts
+- `context_config`: driver-style context cache/shared-memory config, flags, and peer-access contracts
 - `device_config`: device configuration query, limit, flag, and stream-priority contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
 - `memory_pool_access`: current-device memory pool access-control contracts
